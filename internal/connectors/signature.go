@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -72,25 +71,10 @@ var (
 
 // deliverRoute keeps route validation/auth ahead of credential access and
 // provider calls for both the declared address and the legacy alias.
-func (r Relay) deliverRoute(ctx context.Context, target Target, connector Connector, receiver Receiver, route *apiRoute, path string, req Relayed) (RelayAnswer, error) {
+func (r Relay) deliverRoute(ctx context.Context, target Target, connector Connector, receiver Receiver, route *apiRoute, path string, req Relayed) (answer RelayAnswer, err error) {
+	defer func() { answer.DeclaredAPI = true }()
 	deliver := func() (RelayAnswer, error) {
-		body := json.RawMessage(req.Body)
-		if len(body) == 0 && req.Method == "GET" {
-			body = json.RawMessage(`null`)
-		}
-		if !json.Valid(body) {
-			return RelayAnswer{}, ErrInvalidAPIBody
-		}
-		if route.schema != nil {
-			if err := validateJSON(route.schema, body); err != nil {
-				return RelayAnswer{}, ErrInvalidAPIRequest
-			}
-		}
-		delete(req.Headers, "authorization")
-		req.Path = path
-		answer, err := r.deliver(ctx, target, connector, receiver, req, route.Name, body)
-		answer.DeclaredAPI = true
-		return answer, err
+		return r.deliverProtectedRoute(ctx, target, connector, receiver, route, path, req)
 	}
 	if route.Auth != "signature" || req.Method == "GET" {
 		return deliver()
@@ -132,7 +116,7 @@ func (r Relay) deliverRoute(ctx context.Context, target Target, connector Connec
 	if !reserved {
 		return RelayAnswer{}, ErrReplay
 	}
-	answer, err := deliver()
+	answer, err = deliver()
 	if err != nil || answer.Receipts == nil {
 		// Client cancellation may detach cleanup, but the original delivery
 		// deadline still bounds it. Unreleased reservations expire safely.

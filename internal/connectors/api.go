@@ -2,12 +2,15 @@ package connectors
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -169,9 +172,10 @@ func resolveRoute(routes []apiRoute, method, path string) (*apiRoute, string) {
 }
 
 var (
-	ErrInvalidAPIBody    = errors.New("invalid connector API JSON body")
-	ErrInvalidAPIRequest = errors.New("invalid connector API request")
-	ErrPushItemRejected  = errors.New("connector push item rejected")
+	ErrInvalidIdempotencyKey = errors.New("invalid connector API idempotency key")
+	ErrInvalidAPIBody        = errors.New("invalid connector API JSON body")
+	ErrInvalidAPIRequest     = errors.New("invalid connector API request")
+	ErrPushItemRejected      = errors.New("connector push item rejected")
 )
 
 // DeliverAPI resolves a declared route and authorizes it before opening any
@@ -251,4 +255,70 @@ func (r Relay) DeliverAPIWithAuth(ctx context.Context, auth APIAuth, id, path st
 		return RelayAnswer{}, corpus.ErrForbidden
 	}
 	return r.deliverRoute(ctx, target, entry.connector, receiver, route, path, req)
+}
+
+// deliverProtectedRoute follows mode-specific authentication and replay guards.
+func (r Relay) deliverProtectedRoute(ctx context.Context, target Target, connector Connector, receiver Receiver, route *apiRoute, path string, req Relayed) (RelayAnswer, error) {
+	// Validate replay metadata only after definitive route authentication.
+	rawKey := ""
+	if len(req.IdempotencyKeys) > 1 {
+		return RelayAnswer{}, ErrInvalidIdempotencyKey
+	}
+	if len(req.IdempotencyKeys) == 1 {
+		rawKey = req.IdempotencyKeys[0]
+		if len(rawKey) > 256 || strings.TrimSpace(rawKey) == "" || strings.ContainsAny(rawKey, "\r\n") {
+			return RelayAnswer{}, ErrInvalidIdempotencyKey
+		}
+	}
+	body := json.RawMessage(req.Body)
+	if len(body) == 0 && req.Method == "GET" {
+		body = json.RawMessage(`null`)
+	}
+	if !json.Valid(body) {
+		return RelayAnswer{}, ErrInvalidAPIBody
+	}
+	if route.schema != nil {
+		if err := validateJSON(route.schema, body); err != nil {
+			return RelayAnswer{}, ErrInvalidAPIRequest
+		}
+	}
+	delete(req.Headers, "authorization")
+	req.Path = path
+	invoke := func() (RelayAnswer, error) {
+		return r.deliver(ctx, target, connector, receiver, req, route.Name, body)
+	}
+	if r.Protection == nil {
+		return invoke()
+	}
+	cfg, err := r.PushConfig.Resolve()
+	if err != nil {
+		return unavailable("connectors_unavailable"), nil
+	}
+	policy := PushPolicy{RatePerSecond: cfg.RatePerSecond, Burst: cfg.Burst}
+	if target.PushPolicy != nil {
+		if err := target.PushPolicy.Validate(); err != nil {
+			return unavailable("connectors_unavailable"), nil
+		}
+		policy.AllowedCIDRs = target.PushPolicy.AllowedCIDRs
+		if target.PushPolicy.RatePerSecond != 0 {
+			policy.RatePerSecond = target.PushPolicy.RatePerSecond
+		}
+		if target.PushPolicy.Burst != 0 {
+			policy.Burst = target.PushPolicy.Burst
+		}
+	}
+	if !policy.allowsIP(req.ClientIP) {
+		return RelayAnswer{Status: 403, ErrorCode: "ip_not_allowed"}, nil
+	}
+	ttl, _ := time.ParseDuration(cfg.IdempotencyTTL)
+	key := ""
+	// Signature authentication belongs to the provider. Replaying a cached
+	// answer could skip verification after the signature window or key rotation.
+	// Its dedicated replay guard owns duplicates; every admitted call reaches
+	// the provider, including synchronous challenges.
+	if rawKey != "" && route.Auth != "signature" {
+		digest := sha256.Sum256([]byte(rawKey))
+		key = hex.EncodeToString(digest[:])
+	}
+	return r.Protection.ProtectPush(ctx, PushAttempt{Organization: target.Organization, InstanceID: target.ID, KeyHash: key, RatePerSecond: policy.RatePerSecond, Burst: policy.Burst, TTL: ttl}, invoke)
 }

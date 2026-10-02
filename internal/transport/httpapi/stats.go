@@ -29,7 +29,7 @@ func (a *API) statsRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 	}
 	name := strings.TrimPrefix(r.URL.Path, statsPrefix)
 	series := map[string]string{"plugins": observability.SeriesPluginCall, "searches": observability.SeriesSearch, "steps": observability.SeriesStep,
-		"received": observability.SeriesReceived, "matches": observability.SeriesMatch, "top-queries": observability.SeriesSearchQuery}[name]
+		"received": observability.SeriesReceived, "matches": observability.SeriesMatch, "top-queries": observability.SeriesSearchQuery, "connector-pushes": observability.SeriesConnectorPush}[name]
 	switch {
 	case series == "":
 		failure(w, 404, "not_found")
@@ -49,13 +49,13 @@ func (a *API) statsRoutes(w http.ResponseWriter, r *http.Request, scope corpus.S
 // countedLimits are the default and largest limit of the counted reads: the
 // keys of received and top-queries come from clients, so a read lists the
 // largest only. Matches are keyed by evaluator plugin, a deployment set.
-var countedLimits = map[string][2]int{observability.SeriesReceived: {10, 100}, observability.SeriesSearchQuery: {20, 100}, observability.SeriesMatch: {100, 100}}
+var countedLimits = map[string][2]int{observability.SeriesReceived: {10, 100}, observability.SeriesSearchQuery: {20, 100}, observability.SeriesMatch: {100, 100}, observability.SeriesConnectorPush: {100, 100}}
 
 func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) {
 	q := r.URL.Query()
 	limits, counted := countedLimits[series]
 	for k, v := range q {
-		if (k != "window" && (k != "limit" || series == observability.SeriesMatch || !counted)) || len(v) != 1 {
+		if (k != "window" && (k != "limit" || series == observability.SeriesMatch || !counted) && (k != "connector_id" || series != observability.SeriesConnectorPush)) || len(v) != 1 {
 			failure(w, 422, "invalid_query")
 			return
 		}
@@ -66,6 +66,30 @@ func (a *API) stats(w http.ResponseWriter, r *http.Request, org, series string) 
 		return
 	}
 	name := transport.StatsWindowName(window.Name)
+	if series == observability.SeriesConnectorPush && q.Has("connector_id") {
+		id := q.Get("connector_id")
+		if id == "" || len(id) > 256 || q.Has("limit") {
+			failure(w, 422, "invalid_query")
+			return
+		}
+		report, err := a.Stats.Report(r.Context(), org, series, window, observability.Key(id, "received"), observability.Key(id, "refused"))
+		if err != nil {
+			failure(w, 503, "storage_unavailable")
+			return
+		}
+		out := transport.ConnectorPushStatsList{Window: name, ResolutionSeconds: int(window.Tier.Resolution / time.Second), From: report.From, To: report.To, Items: []transport.ConnectorPushStats{}}
+		for _, s := range report.Series {
+			key := observability.KeyParts(s.Key, 2)
+			points := make([]transport.CountPoint, 0, len(s.Points))
+			for _, p := range s.Points {
+				points = append(points, transport.CountPoint{Start: p.Start, Count: int(p.Count)})
+			}
+			out.Total += int(s.Summary.Count)
+			out.Items = append(out.Items, transport.ConnectorPushStats{ConnectorId: key[0], Outcome: transport.ConnectorPushStatsOutcome(key[1]), Count: int(s.Summary.Count), Points: points})
+		}
+		send(w, 200, out)
+		return
+	}
 	if counted {
 		limit, ok := pageLimit(w, q, limits[0], limits[1])
 		if !ok {
@@ -121,6 +145,13 @@ func (a *API) counts(w http.ResponseWriter, r *http.Request, org, series string,
 	name := transport.StatsWindowName(window.Name)
 	resolution := int(counts.Resolution / time.Second)
 	switch series {
+	case observability.SeriesConnectorPush:
+		out := transport.ConnectorPushStatsList{Window: name, ResolutionSeconds: resolution, From: counts.From, To: counts.To, Total: int(counts.Total), Items: []transport.ConnectorPushStats{}}
+		for _, s := range counts.Series {
+			key := observability.KeyParts(s.Key, 2)
+			out.Items = append(out.Items, transport.ConnectorPushStats{ConnectorId: key[0], Outcome: transport.ConnectorPushStatsOutcome(key[1]), Count: int(s.Count), Points: countPoints(s.Points)})
+		}
+		send(w, 200, out)
 	case observability.SeriesSearchQuery:
 		out := transport.TopQueryList{Window: name, ResolutionSeconds: resolution, Recording: a.Stats.RecordQueryText, Items: make([]transport.TopQuery, 0, len(counts.Series))}
 		for _, s := range counts.Series {

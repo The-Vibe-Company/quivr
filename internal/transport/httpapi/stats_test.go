@@ -77,7 +77,7 @@ func TestStatsReadsAreScopedAndNeedObservabilityRead(t *testing.T) {
 	server := httptest.NewServer(checkedAPI(t, handler))
 	t.Cleanup(server.Close)
 
-	for _, path := range []string{"/v0/admin/stats/plugins", "/v0/admin/stats/searches", "/v0/admin/stats/steps", "/v0/admin/stats/received", "/v0/admin/stats/matches", "/v0/admin/stats/top-queries"} {
+	for _, path := range []string{"/v0/admin/stats/plugins", "/v0/admin/stats/searches", "/v0/admin/stats/steps", "/v0/admin/stats/received", "/v0/admin/stats/matches", "/v0/admin/stats/top-queries", "/v0/admin/stats/connector-pushes"} {
 		for _, token := range []string{reader, fenced} {
 			if res, body := operationCall(t, server, "GET", path, token, "", ""); res.StatusCode != 403 || body["code"] != "forbidden" {
 				t.Fatalf("GET %s without observability:read on every Corpus: %d %v, want 403 forbidden", path, res.StatusCode, body)

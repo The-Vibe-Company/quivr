@@ -216,6 +216,24 @@ func (e ConnectorPushErrorClass) Valid() bool {
 	}
 }
 
+// Defines values for ConnectorPushStatsOutcome.
+const (
+	ConnectorPushStatsOutcomeReceived ConnectorPushStatsOutcome = "received"
+	ConnectorPushStatsOutcomeRefused  ConnectorPushStatsOutcome = "refused"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorPushStatsOutcome enum.
+func (e ConnectorPushStatsOutcome) Valid() bool {
+	switch e {
+	case ConnectorPushStatsOutcomeReceived:
+		return true
+	case ConnectorPushStatsOutcomeRefused:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeliveryState.
 const (
 	DeliveryStateDelivered  DeliveryState = "delivered"
@@ -1017,6 +1035,27 @@ func (e WebhookEventType) Valid() bool {
 	}
 }
 
+// Defines values for ListConnectorPushStatsParamsWindow.
+const (
+	ListConnectorPushStatsParamsWindowN1h  ListConnectorPushStatsParamsWindow = "1h"
+	ListConnectorPushStatsParamsWindowN24h ListConnectorPushStatsParamsWindow = "24h"
+	ListConnectorPushStatsParamsWindowN7d  ListConnectorPushStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the ListConnectorPushStatsParamsWindow enum.
+func (e ListConnectorPushStatsParamsWindow) Valid() bool {
+	switch e {
+	case ListConnectorPushStatsParamsWindowN1h:
+		return true
+	case ListConnectorPushStatsParamsWindowN24h:
+		return true
+	case ListConnectorPushStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetMatchStatsParamsWindow.
 const (
 	GetMatchStatsParamsWindowN1h  GetMatchStatsParamsWindow = "1h"
@@ -1341,8 +1380,11 @@ type Connector struct {
 	} `json:"health_policy"`
 
 	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
-	Kind     ConnectorKind `json:"kind"`
-	Schedule struct {
+	Kind ConnectorKind `json:"kind"`
+
+	// PushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
+	PushPolicy *ConnectorPushPolicy `json:"push_policy,omitempty"`
+	Schedule   struct {
 		IntervalSeconds int `json:"interval_seconds"`
 	} `json:"schedule"`
 	SourceNamespace string `json:"source_namespace"`
@@ -1361,9 +1403,12 @@ type ConnectorCreate struct {
 	IdempotencyKey string                 `json:"idempotency_key"`
 
 	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
-	Kind            ConnectorKind      `json:"kind"`
-	Schedule        *ConnectorSchedule `json:"schedule,omitempty"`
-	SourceNamespace string             `json:"source_namespace"`
+	Kind ConnectorKind `json:"kind"`
+
+	// PushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
+	PushPolicy      *ConnectorPushPolicy `json:"push_policy,omitempty"`
+	Schedule        *ConnectorSchedule   `json:"schedule,omitempty"`
+	SourceNamespace string               `json:"source_namespace"`
 }
 
 // ConnectorError defines model for ConnectorError.
@@ -1477,9 +1522,42 @@ type ConnectorPushError struct {
 // ConnectorPushErrorClass defines model for ConnectorPushError.Class.
 type ConnectorPushErrorClass string
 
+// ConnectorPushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
+type ConnectorPushPolicy struct {
+	// AllowedCidrs Allowed IPv4/IPv6 CIDRs; absent or empty permits every address.
+	AllowedCidrs *[]string `json:"allowed_cidrs,omitempty"`
+
+	// Burst Token bucket capacity (deployment default 100).
+	Burst *int `json:"burst,omitempty"`
+
+	// RatePerSecond Token refill rate per second (deployment default 10).
+	RatePerSecond *float64 `json:"rate_per_second,omitempty"`
+}
+
 // ConnectorPushReceipts defines model for ConnectorPushReceipts.
 type ConnectorPushReceipts struct {
 	Receipts []Receipt `json:"receipts"`
+}
+
+// ConnectorPushStats defines model for ConnectorPushStats.
+type ConnectorPushStats struct {
+	ConnectorId string                    `json:"connector_id"`
+	Count       int                       `json:"count"`
+	Outcome     ConnectorPushStatsOutcome `json:"outcome"`
+	Points      []CountPoint              `json:"points"`
+}
+
+// ConnectorPushStatsOutcome defines model for ConnectorPushStats.Outcome.
+type ConnectorPushStatsOutcome string
+
+// ConnectorPushStatsList defines model for ConnectorPushStatsList.
+type ConnectorPushStatsList struct {
+	From              time.Time            `json:"from"`
+	Items             []ConnectorPushStats `json:"items"`
+	ResolutionSeconds int                  `json:"resolution_seconds"`
+	To                time.Time            `json:"to"`
+	Total             int                  `json:"total"`
+	Window            StatsWindowName      `json:"window"`
 }
 
 // ConnectorRunRequest defines model for ConnectorRunRequest.
@@ -3080,6 +3158,20 @@ type ListQuarantinedVersionsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListConnectorPushStatsParams defines parameters for ListConnectorPushStats.
+type ListConnectorPushStatsParams struct {
+	Window *ListConnectorPushStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+
+	// Limit Largest instance/outcome pairs to list; cannot be combined with connector_id.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// ConnectorId Read both outcomes of this instance; cannot be combined with limit.
+	ConnectorId *string `form:"connector_id,omitempty" json:"connector_id,omitempty"`
+}
+
+// ListConnectorPushStatsParamsWindow defines parameters for ListConnectorPushStats.
+type ListConnectorPushStatsParamsWindow string
+
 // GetMatchStatsParams defines parameters for GetMatchStats.
 type GetMatchStatsParams struct {
 	Window *GetMatchStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -3168,8 +3260,20 @@ type ListConnectorsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ChallengeConnectorAPIParams defines parameters for ChallengeConnectorAPI.
+type ChallengeConnectorAPIParams struct {
+	// IdempotencyKey Optional opaque key of 1–256 bytes, scoped to the instance. Authorized requests replay the first completed plugin/ingestion answer within the deployment TTL for quivr_key and instance_token routes (default 24h), without calling the plugin or charging another rate token. Authentication, route/body validation, IP and rate refusals do not reserve keys. Reusing a key on another declared route still replays its original answer.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 // PushConnectorAPIJSONBody defines parameters for PushConnectorAPI.
 type PushConnectorAPIJSONBody = interface{}
+
+// PushConnectorAPIParams defines parameters for PushConnectorAPI.
+type PushConnectorAPIParams struct {
+	// IdempotencyKey Optional opaque key of 1–256 bytes, scoped to the instance. Authorized requests replay the first completed plugin/ingestion answer within the deployment TTL for quivr_key and instance_token routes (default 24h), without calling the plugin or charging another rate token. Authentication, route/body validation, IP and rate refusals do not reserve keys. Reusing a key on another declared route still replays its original answer.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
 
 // ListConnectorTokensParams defines parameters for ListConnectorTokens.
 type ListConnectorTokensParams struct {
@@ -3712,6 +3816,13 @@ type ClientInterface interface {
 	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
 	PromoteVectorSpace(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListConnectorPushStats Count accepted and refused pushes per source instance
+	//
+	// Per-instance attempts to declared source API routes, split into received (2xx, including cached answers and GET challenges) and refused (all other answers). Includes authentication, scope, body, rate and IP refusals for existing instances. No payload, credentials, client IP or raw idempotency key is stored. Audit events and counters commit together. Requires observability:read on all Corpora; returns only the key's Organization. Uses the Spec 16 rollup windows and retention. By default lists the largest 100 instance/outcome pairs, with a total across every pair. Use connector_id to read both outcomes of one instance; its total then covers that instance only.
+	//
+	// Corresponds with GET /v0/admin/stats/connector-pushes (the `ListConnectorPushStats` operationId).
+	ListConnectorPushStats(ctx context.Context, params *ListConnectorPushStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetMatchStats performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
 	//
 	// Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts too. Requires observability:read on a key that grants every Corpus.
@@ -3830,28 +3941,28 @@ type ClientInterface interface {
 
 	// ChallengeConnectorAPI Answer a declared source challenge
 	//
-	// Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
+	// Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. The same IP allowlist, token bucket, idempotency and audit rules as POST apply. Signature routes bypass the response cache so every admitted call reaches provider verification. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
 	//
 	// Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
-	ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, params *ChallengeConnectorAPIParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PushConnectorAPIWithBody Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. Per-instance token buckets use the deployment default unless push_policy overrides it. Excess requests return 429 with Retry-After (integer seconds) before plugin invocation; callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an existing instance commits connector.push.received (2xx) or connector.push.refused and per-instance admin counters before the response is sent. Audit storage failure returns 503. Legacy routes without declared signature ingress keep their existing behavior. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature routes bypass the response cache: once replay reservations expire, the plugin verifies every new admitted request, including one reusing an old Idempotency-Key. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
 	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
-	PushConnectorAPIWithBody(ctx context.Context, connectorId string, path string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PushConnectorAPIWithBody(ctx context.Context, connectorId string, path string, params *PushConnectorAPIParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PushConnectorAPI Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. Per-instance token buckets use the deployment default unless push_policy overrides it. Excess requests return 429 with Retry-After (integer seconds) before plugin invocation; callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an existing instance commits connector.push.received (2xx) or connector.push.refused and per-instance admin counters before the response is sent. Audit storage failure returns 503. Legacy routes without declared signature ingress keep their existing behavior. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature routes bypass the response cache: once replay reservations expire, the plugin verifies every new admitted request, including one reusing an old Idempotency-Key. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
 	//
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
-	PushConnectorAPI(ctx context.Context, connectorId string, path string, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PushConnectorAPI(ctx context.Context, connectorId string, path string, params *PushConnectorAPIParams, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ReplaceConnectorCredentialWithBody performs a PUT /v0/connectors/{connector_id}/credential (the `ReplaceConnectorCredential` operationId) request,
 	// with any type of body and a specified content type.
@@ -4616,6 +4727,23 @@ func (c *Client) PromoteVectorSpace(ctx context.Context, vectorSpaceId string, b
 	return c.Client.Do(req)
 }
 
+// ListConnectorPushStats Count accepted and refused pushes per source instance
+//
+// Per-instance attempts to declared source API routes, split into received (2xx, including cached answers and GET challenges) and refused (all other answers). Includes authentication, scope, body, rate and IP refusals for existing instances. No payload, credentials, client IP or raw idempotency key is stored. Audit events and counters commit together. Requires observability:read on all Corpora; returns only the key's Organization. Uses the Spec 16 rollup windows and retention. By default lists the largest 100 instance/outcome pairs, with a total across every pair. Use connector_id to read both outcomes of one instance; its total then covers that instance only.
+//
+// Corresponds with GET /v0/admin/stats/connector-pushes (the `ListConnectorPushStats` operationId).
+func (c *Client) ListConnectorPushStats(ctx context.Context, params *ListConnectorPushStatsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListConnectorPushStatsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetMatchStats performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
 //
 // Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts too. Requires observability:read on a key that grants every Corpus.
@@ -4954,11 +5082,11 @@ func (c *Client) GetConnector(ctx context.Context, connectorId string, reqEditor
 
 // ChallengeConnectorAPI Answer a declared source challenge
 //
-// Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
+// Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. The same IP allowlist, token bucket, idempotency and audit rules as POST apply. Signature routes bypass the response cache so every admitted call reaches provider verification. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
 //
 // Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
-func (c *Client) ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewChallengeConnectorAPIRequest(c.Server, connectorId, path)
+func (c *Client) ChallengeConnectorAPI(ctx context.Context, connectorId string, path string, params *ChallengeConnectorAPIParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewChallengeConnectorAPIRequest(c.Server, connectorId, path, params)
 	if err != nil {
 		return nil, err
 	}
@@ -4971,13 +5099,13 @@ func (c *Client) ChallengeConnectorAPI(ctx context.Context, connectorId string, 
 
 // PushConnectorAPIWithBody Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. Per-instance token buckets use the deployment default unless push_policy overrides it. Excess requests return 429 with Retry-After (integer seconds) before plugin invocation; callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an existing instance commits connector.push.received (2xx) or connector.push.refused and per-instance admin counters before the response is sent. Audit storage failure returns 503. Legacy routes without declared signature ingress keep their existing behavior. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature routes bypass the response cache: once replay reservations expire, the plugin verifies every new admitted request, including one reusing an old Idempotency-Key. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
 //
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
-func (c *Client) PushConnectorAPIWithBody(ctx context.Context, connectorId string, path string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPushConnectorAPIRequestWithBody(c.Server, connectorId, path, contentType, body)
+func (c *Client) PushConnectorAPIWithBody(ctx context.Context, connectorId string, path string, params *PushConnectorAPIParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPushConnectorAPIRequestWithBody(c.Server, connectorId, path, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4990,13 +5118,13 @@ func (c *Client) PushConnectorAPIWithBody(ctx context.Context, connectorId strin
 
 // PushConnectorAPI Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. Per-instance token buckets use the deployment default unless push_policy overrides it. Excess requests return 429 with Retry-After (integer seconds) before plugin invocation; callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an existing instance commits connector.push.received (2xx) or connector.push.refused and per-instance admin counters before the response is sent. Audit storage failure returns 503. Legacy routes without declared signature ingress keep their existing behavior. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature routes bypass the response cache: once replay reservations expire, the plugin verifies every new admitted request, including one reusing an old Idempotency-Key. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
 //
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
-func (c *Client) PushConnectorAPI(ctx context.Context, connectorId string, path string, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPushConnectorAPIRequest(c.Server, connectorId, path, body)
+func (c *Client) PushConnectorAPI(ctx context.Context, connectorId string, path string, params *PushConnectorAPIParams, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPushConnectorAPIRequest(c.Server, connectorId, path, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6909,6 +7037,84 @@ func NewPromoteVectorSpaceRequestWithBody(server string, vectorSpaceId string, c
 	return req, nil
 }
 
+// NewListConnectorPushStatsRequest constructs an http.Request for the ListConnectorPushStats method
+func NewListConnectorPushStatsRequest(server string, params *ListConnectorPushStatsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/stats/connector-pushes")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Window != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "window", *params.Window, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ConnectorId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "connector_id", *params.ConnectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetMatchStatsRequest constructs an http.Request for the GetMatchStats method
 func NewGetMatchStatsRequest(server string, params *GetMatchStatsParams) (*http.Request, error) {
 	var err error
@@ -7870,7 +8076,7 @@ func NewGetConnectorRequest(server string, connectorId string) (*http.Request, e
 }
 
 // NewChallengeConnectorAPIRequest constructs an http.Request for the ChallengeConnectorAPI method
-func NewChallengeConnectorAPIRequest(server string, connectorId string, path string) (*http.Request, error) {
+func NewChallengeConnectorAPIRequest(server string, connectorId string, path string, params *ChallengeConnectorAPIParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -7907,22 +8113,37 @@ func NewChallengeConnectorAPIRequest(server string, connectorId string, path str
 		return nil, err
 	}
 
+	if params != nil {
+
+		if params.IdempotencyKey != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", *params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("Idempotency-Key", headerParam0)
+		}
+
+	}
+
 	return req, nil
 }
 
 // NewPushConnectorAPIRequest calls the generic PushConnectorAPI builder with application/json body
-func NewPushConnectorAPIRequest(server string, connectorId string, path string, body PushConnectorAPIJSONRequestBody) (*http.Request, error) {
+func NewPushConnectorAPIRequest(server string, connectorId string, path string, params *PushConnectorAPIParams, body PushConnectorAPIJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPushConnectorAPIRequestWithBody(server, connectorId, path, "application/json", bodyReader)
+	return NewPushConnectorAPIRequestWithBody(server, connectorId, path, params, "application/json", bodyReader)
 }
 
 // NewPushConnectorAPIRequestWithBody constructs an http.Request for the PushConnectorAPI method, with any body, and a specified content type
-func NewPushConnectorAPIRequestWithBody(server string, connectorId string, path string, contentType string, body io.Reader) (*http.Request, error) {
+func NewPushConnectorAPIRequestWithBody(server string, connectorId string, path string, params *PushConnectorAPIParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -7960,6 +8181,21 @@ func NewPushConnectorAPIRequestWithBody(server string, connectorId string, path 
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.IdempotencyKey != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", *params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("Idempotency-Key", headerParam0)
+		}
+
+	}
 
 	return req, nil
 }
@@ -10428,6 +10664,15 @@ type ClientWithResponsesInterface interface {
 	// Make a registered evaluation space the one search uses, in one call, for the whole deployment. Coverage must be complete, that is every Corpus's routed generation carries the space with a vector for every current segment. Otherwise the answer is 409 coverage_incomplete, with the Corpora and segments it misses in the message, unless force is true. Every generation that carries the space and served the previous one serves it from then on, the default one included, so new Corpora start on it. The previous served space becomes an evaluation space and keeps its vectors, so promoting it again restores it. The choice survives restarts, activations and rollbacks while the ingestion plugin still enables both spaces. Promoting the served space changes nothing. Requires plugins:admin.
 	PromoteVectorSpaceWithResponse(ctx context.Context, vectorSpaceId string, body PromoteVectorSpaceJSONRequestBody, reqEditors ...RequestEditorFn) (*PromoteVectorSpaceResponse, error)
 
+	// ListConnectorPushStatsWithResponse Count accepted and refused pushes per source instance
+	//
+	// Per-instance attempts to declared source API routes, split into received (2xx, including cached answers and GET challenges) and refused (all other answers). Includes authentication, scope, body, rate and IP refusals for existing instances. No payload, credentials, client IP or raw idempotency key is stored. Audit events and counters commit together. Requires observability:read on all Corpora; returns only the key's Organization. Uses the Spec 16 rollup windows and retention. By default lists the largest 100 instance/outcome pairs, with a total across every pair. Use connector_id to read both outcomes of one instance; its total then covers that instance only.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v0/admin/stats/connector-pushes (the `ListConnectorPushStats` operationId).
+	ListConnectorPushStatsWithResponse(ctx context.Context, params *ListConnectorPushStatsParams, reqEditors ...RequestEditorFn) (*ListConnectorPushStatsResponse, error)
+
 	// GetMatchStatsWithResponse performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
 	//
 	// Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts too. Requires observability:read on a key that grants every Corpus.
@@ -10584,30 +10829,30 @@ type ClientWithResponsesInterface interface {
 
 	// ChallengeConnectorAPIWithResponse Answer a declared source challenge
 	//
-	// Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
+	// Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. The same IP allowlist, token bucket, idempotency and audit rules as POST apply. Signature routes bypass the response cache so every admitted call reaches provider verification. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
-	ChallengeConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*ChallengeConnectorAPIResponse, error)
+	ChallengeConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, params *ChallengeConnectorAPIParams, reqEditors ...RequestEditorFn) (*ChallengeConnectorAPIResponse, error)
 
 	// PushConnectorAPIWithBodyWithResponse Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. Per-instance token buckets use the deployment default unless push_policy overrides it. Excess requests return 429 with Retry-After (integer seconds) before plugin invocation; callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an existing instance commits connector.push.received (2xx) or connector.push.refused and per-instance admin counters before the response is sent. Audit storage failure returns 503. Legacy routes without declared signature ingress keep their existing behavior. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature routes bypass the response cache: once replay reservations expire, the plugin verifies every new admitted request, including one reusing an old Idempotency-Key. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
-	PushConnectorAPIWithBodyWithResponse(ctx context.Context, connectorId string, path string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error)
+	PushConnectorAPIWithBodyWithResponse(ctx context.Context, connectorId string, path string, params *PushConnectorAPIParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error)
 
 	// PushConnectorAPIWithResponse Push data to a declared source route
 	//
-	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+	// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. Per-instance token buckets use the deployment default unless push_policy overrides it. Excess requests return 429 with Retry-After (integer seconds) before plugin invocation; callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an existing instance commits connector.push.received (2xx) or connector.push.refused and per-instance admin counters before the response is sent. Audit storage failure returns 503. Legacy routes without declared signature ingress keep their existing behavior. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature routes bypass the response cache: once replay reservations expire, the plugin verifies every new admitted request, including one reusing an old Idempotency-Key. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
-	PushConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error)
+	PushConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, params *PushConnectorAPIParams, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error)
 
 	// ReplaceConnectorCredentialWithBodyWithResponse performs a PUT /v0/connectors/{connector_id}/credential (the `ReplaceConnectorCredential` operationId) request,
 	// with any type of body and a specified content type.
@@ -11919,6 +12164,54 @@ func (r PromoteVectorSpaceResponse) ContentType() string {
 	return ""
 }
 
+type ListConnectorPushStatsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ConnectorPushStatsList
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListConnectorPushStatsResponse) GetJSON200() *ConnectorPushStatsList {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListConnectorPushStatsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListConnectorPushStatsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListConnectorPushStatsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListConnectorPushStatsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListConnectorPushStatsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetMatchStatsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12808,6 +13101,11 @@ type ChallengeConnectorAPIResponse200Headers struct {
 	QuivrResponseOrigin *string
 }
 
+// ChallengeConnectorAPIResponse429Headers the declared response headers of an HTTP 429 response for ChallengeConnectorAPI
+type ChallengeConnectorAPIResponse429Headers struct {
+	RetryAfter *int
+}
+
 // ChallengeConnectorAPIResponseDefaultHeaders the declared response headers of an HTTP default response for ChallengeConnectorAPI
 type ChallengeConnectorAPIResponseDefaultHeaders struct {
 	QuivrResponseOrigin *string
@@ -12816,10 +13114,19 @@ type ChallengeConnectorAPIResponseDefaultHeaders struct {
 type ChallengeConnectorAPIResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *Error
 	// Headers200 the parsed response headers for an HTTP 200 response
 	Headers200 *ChallengeConnectorAPIResponse200Headers
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *ChallengeConnectorAPIResponse429Headers
 	// HeadersDefault the parsed response headers for an HTTP default response
 	HeadersDefault *ChallengeConnectorAPIResponseDefaultHeaders
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r ChallengeConnectorAPIResponse) GetJSON429() *Error {
+	return r.JSON429
 }
 
 // GetBody returns the raw response body bytes
@@ -12851,6 +13158,11 @@ func (r ChallengeConnectorAPIResponse) ContentType() string {
 	return ""
 }
 
+// PushConnectorAPIResponse429Headers the declared response headers of an HTTP 429 response for PushConnectorAPI
+type PushConnectorAPIResponse429Headers struct {
+	RetryAfter *int
+}
+
 // PushConnectorAPIResponseDefaultHeaders the declared response headers of an HTTP default response for PushConnectorAPI
 type PushConnectorAPIResponseDefaultHeaders struct {
 	QuivrResponseOrigin *string
@@ -12861,6 +13173,10 @@ type PushConnectorAPIResponse struct {
 	HTTPResponse *http.Response
 	// JSON202 the response for an HTTP 202 `application/json` response
 	JSON202 *ConnectorPushReceipts
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *Error
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *PushConnectorAPIResponse429Headers
 	// HeadersDefault the parsed response headers for an HTTP default response
 	HeadersDefault *PushConnectorAPIResponseDefaultHeaders
 }
@@ -12868,6 +13184,11 @@ type PushConnectorAPIResponse struct {
 // GetJSON202 returns the response for an HTTP 202 `application/json` response
 func (r PushConnectorAPIResponse) GetJSON202() *ConnectorPushReceipts {
 	return r.JSON202
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r PushConnectorAPIResponse) GetJSON429() *Error {
+	return r.JSON429
 }
 
 // GetBody returns the raw response body bytes
@@ -15628,6 +15949,21 @@ func (c *ClientWithResponses) PromoteVectorSpaceWithResponse(ctx context.Context
 	return ParsePromoteVectorSpaceResponse(rsp)
 }
 
+// ListConnectorPushStatsWithResponse Count accepted and refused pushes per source instance
+//
+// Per-instance attempts to declared source API routes, split into received (2xx, including cached answers and GET challenges) and refused (all other answers). Includes authentication, scope, body, rate and IP refusals for existing instances. No payload, credentials, client IP or raw idempotency key is stored. Audit events and counters commit together. Requires observability:read on all Corpora; returns only the key's Organization. Uses the Spec 16 rollup windows and retention. By default lists the largest 100 instance/outcome pairs, with a total across every pair. Use connector_id to read both outcomes of one instance; its total then covers that instance only.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v0/admin/stats/connector-pushes (the `ListConnectorPushStats` operationId).
+func (c *ClientWithResponses) ListConnectorPushStatsWithResponse(ctx context.Context, params *ListConnectorPushStatsParams, reqEditors ...RequestEditorFn) (*ListConnectorPushStatsResponse, error) {
+	rsp, err := c.ListConnectorPushStats(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListConnectorPushStatsResponse(rsp)
+}
+
 // GetMatchStatsWithResponse performs a GET /v0/admin/stats/matches (the `GetMatchStats` operationId) request.
 //
 // Matches the Subscriptions of the key's Organization committed over the window, per evaluator plugin, in the buckets of getPluginCallStats. A Match that corrects an earlier one on a new Version of the same Record counts too. Requires observability:read on a key that grants every Corpus.
@@ -15916,13 +16252,13 @@ func (c *ClientWithResponses) GetConnectorWithResponse(ctx context.Context, conn
 
 // ChallengeConnectorAPIWithResponse Answer a declared source challenge
 //
-// Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
+// Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. The same IP allowlist, token bucket, idempotency and audit rules as POST apply. Signature routes bypass the response cache so every admitted call reaches provider verification. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
 //
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /v0/connectors/{connector_id}/api/{path} (the `ChallengeConnectorAPI` operationId).
-func (c *ClientWithResponses) ChallengeConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, reqEditors ...RequestEditorFn) (*ChallengeConnectorAPIResponse, error) {
-	rsp, err := c.ChallengeConnectorAPI(ctx, connectorId, path, reqEditors...)
+func (c *ClientWithResponses) ChallengeConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, params *ChallengeConnectorAPIParams, reqEditors ...RequestEditorFn) (*ChallengeConnectorAPIResponse, error) {
+	rsp, err := c.ChallengeConnectorAPI(ctx, connectorId, path, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -15931,13 +16267,13 @@ func (c *ClientWithResponses) ChallengeConnectorAPIWithResponse(ctx context.Cont
 
 // PushConnectorAPIWithBodyWithResponse Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. Per-instance token buckets use the deployment default unless push_policy overrides it. Excess requests return 429 with Retry-After (integer seconds) before plugin invocation; callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an existing instance commits connector.push.received (2xx) or connector.push.refused and per-instance admin counters before the response is sent. Audit storage failure returns 503. Legacy routes without declared signature ingress keep their existing behavior. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature routes bypass the response cache: once replay reservations expire, the plugin verifies every new admitted request, including one reusing an old Idempotency-Key. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
-func (c *ClientWithResponses) PushConnectorAPIWithBodyWithResponse(ctx context.Context, connectorId string, path string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error) {
-	rsp, err := c.PushConnectorAPIWithBody(ctx, connectorId, path, contentType, body, reqEditors...)
+func (c *ClientWithResponses) PushConnectorAPIWithBodyWithResponse(ctx context.Context, connectorId string, path string, params *PushConnectorAPIParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error) {
+	rsp, err := c.PushConnectorAPIWithBody(ctx, connectorId, path, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -15946,13 +16282,13 @@ func (c *ClientWithResponses) PushConnectorAPIWithBodyWithResponse(ctx context.C
 
 // PushConnectorAPIWithResponse Push data to a declared source route
 //
-// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+// Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. Per-instance token buckets use the deployment default unless push_policy overrides it. Excess requests return 429 with Retry-After (integer seconds) before plugin invocation; callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an existing instance commits connector.push.received (2xx) or connector.push.refused and per-instance admin counters before the response is sent. Audit storage failure returns 503. Legacy routes without declared signature ingress keep their existing behavior. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature routes bypass the response cache: once replay reservations expire, the plugin verifies every new admitted request, including one reusing an old Idempotency-Key. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /v0/connectors/{connector_id}/api/{path} (the `PushConnectorAPI` operationId).
-func (c *ClientWithResponses) PushConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error) {
-	rsp, err := c.PushConnectorAPI(ctx, connectorId, path, body, reqEditors...)
+func (c *ClientWithResponses) PushConnectorAPIWithResponse(ctx context.Context, connectorId string, path string, params *PushConnectorAPIParams, body PushConnectorAPIJSONRequestBody, reqEditors ...RequestEditorFn) (*PushConnectorAPIResponse, error) {
+	rsp, err := c.PushConnectorAPI(ctx, connectorId, path, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -17529,6 +17865,39 @@ func ParsePromoteVectorSpaceResponse(rsp *http.Response) (*PromoteVectorSpaceRes
 	return response, nil
 }
 
+// ParseListConnectorPushStatsResponse parses an HTTP response from a ListConnectorPushStatsWithResponse call
+func ParseListConnectorPushStatsResponse(rsp *http.Response) (*ListConnectorPushStatsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListConnectorPushStatsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ConnectorPushStatsList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetMatchStatsResponse parses an HTTP response from a GetMatchStatsWithResponse call
 func ParseGetMatchStatsResponse(rsp *http.Response) (*GetMatchStatsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -18142,6 +18511,16 @@ func ParseChallengeConnectorAPIResponse(rsp *http.Response) (*ChallengeConnector
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	}
+
+	switch {
 	case rsp.StatusCode == 200:
 		var headers ChallengeConnectorAPIResponse200Headers
 		if values := rsp.Header.Values("Quivr-Response-Origin"); len(values) > 0 {
@@ -18152,6 +18531,16 @@ func ParseChallengeConnectorAPIResponse(rsp *http.Response) (*ChallengeConnector
 			headers.QuivrResponseOrigin = &value
 		}
 		response.Headers200 = &headers
+	case rsp.StatusCode == 429:
+		var headers ChallengeConnectorAPIResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
 	case true:
 		var headers ChallengeConnectorAPIResponseDefaultHeaders
 		if values := rsp.Header.Values("Quivr-Response-Origin"); len(values) > 0 {
@@ -18188,9 +18577,26 @@ func ParsePushConnectorAPIResponse(rsp *http.Response) (*PushConnectorAPIRespons
 		}
 		response.JSON202 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
 	}
 
 	switch {
+	case rsp.StatusCode == 429:
+		var headers PushConnectorAPIResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
 	case true:
 		var headers PushConnectorAPIResponseDefaultHeaders
 		if values := rsp.Header.Values("Quivr-Response-Origin"); len(values) > 0 {

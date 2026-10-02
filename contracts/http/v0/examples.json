@@ -970,6 +970,11 @@
       "config": {
         "script": []
       },
+      "push_policy": {
+        "rate_per_second": 2.5,
+        "burst": 10,
+        "allowed_cidrs": ["192.0.2.0/24"]
+      },
       "schedule": {
         "interval_seconds": 300
       },
@@ -995,6 +1000,11 @@
       "kind": "fixture",
       "config": {
         "script": []
+      },
+      "push_policy": {
+        "rate_per_second": 2.5,
+        "burst": 10,
+        "allowed_cidrs": ["192.0.2.0/24"]
       },
       "schedule": {
         "interval_seconds": 300

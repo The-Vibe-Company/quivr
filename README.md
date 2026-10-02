@@ -266,6 +266,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   a Go Plugin SDK ([`sdks/go`](sdks/go/README.md)) that redacts credentials, and
   `quivr plugin test` checks that pages resume from their checkpoint and that no
   credential leaks. The core does not call connector plugins yet.
+- **Protected source pushes**: per-instance token buckets, TTL replay of
+  `Idempotency-Key` answers, optional CIDR allowlists with trusted proxy resolution,
+  and accepted/refused audit events with per-instance admin statistics.
 - **Segmentation and embedding as a plugin** (Plugin API 0.6, the `ingestion`
   Contribution): a pinned plugin declares the vector spaces it owns, one served and
   others for evaluation, cuts each article into segments with a vector per space and an

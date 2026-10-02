@@ -57,7 +57,7 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 	delete(headers, "authorization")
 	ctx, cancel := context.WithTimeout(r.Context(), relayTimeout)
 	defer cancel()
-	answer, err := a.Relay.DeliverAPIWithAuth(ctx, auth, parts[0], parts[2], connectors.Relayed{Method: r.Method, Query: r.URL.RawQuery, Headers: headers, Body: body})
+	answer, err := a.Relay.DeliverAPIWithAuth(ctx, auth, parts[0], parts[2], connectors.Relayed{ClientIP: a.pushClientIP(r), IdempotencyKeys: r.Header.Values("Idempotency-Key"), Method: r.Method, Query: r.URL.RawQuery, Headers: headers, Body: body})
 	switch {
 	case errors.Is(err, connectors.ErrInvalidInstanceToken):
 		failure(w, 401, "invalid_instance_token")
@@ -71,6 +71,8 @@ func (a *API) connectorAPIRoute(w http.ResponseWriter, r *http.Request) bool {
 		failure(w, 403, "forbidden")
 	case errors.Is(err, corpus.ErrNotFound):
 		failure(w, 404, "not_found")
+	case errors.Is(err, connectors.ErrInvalidIdempotencyKey):
+		failure(w, 400, "invalid_idempotency_key")
 	case errors.Is(err, connectors.ErrInvalidAPIBody):
 		failure(w, 400, "invalid_json")
 	case errors.Is(err, connectors.ErrInvalidAPIRequest):

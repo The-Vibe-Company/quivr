@@ -68,7 +68,8 @@ type Config struct {
 	// ConnectorFixtures enables the deterministic fixture connector kind (local/CI only).
 	ConnectorFixtures bool `json:"connector_fixtures"`
 	// ConnectorMinInterval is the polling-interval floor (Go duration, default 30s).
-	ConnectorMinInterval string `json:"connector_min_interval"`
+	ConnectorMinInterval string                `json:"connector_min_interval"`
+	ConnectorPush        connectors.PushConfig `json:"connector_push"`
 	// PublicURL is the base URL where sources reach this deployment's API
 	// (https://quivr.example.com). Instances of a kind that declares the push
 	// mode get their webhook address from it; without it they only poll.
@@ -228,6 +229,10 @@ func Run(command string) error {
 		if minInterval, err = time.ParseDuration(cfg.ConnectorMinInterval); err != nil || minInterval <= 0 {
 			return errors.New("connector_min_interval must be a positive duration")
 		}
+	}
+	pushConfig, err := cfg.ConnectorPush.Resolve()
+	if err != nil {
+		return fmt.Errorf("connector_push: %w", err)
 	}
 	var builtinKinds []connectors.Connector
 	if cfg.ConnectorFixtures {
@@ -508,6 +513,22 @@ func Run(command string) error {
 	pluginhttp.Observe(func(c pluginhttp.Call) {
 		recorder.PluginCall(observability.PluginCall{Organization: c.Organization, Plugin: c.PluginID, Version: c.Version, Operation: c.Operation, Duration: c.Duration, ErrorCode: c.ErrorCode})
 	})
+	go func() {
+		tick := time.NewTicker(time.Minute)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				pruneCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				if err := connectorStore.PrunePushAnswers(pruneCtx); err != nil && ctx.Err() == nil {
+					logger.Warn("connector push replay cleanup failed")
+				}
+				cancel()
+			}
+		}
+	}()
 	recorderDone := make(chan struct{})
 	go func() {
 		defer close(recorderDone)
@@ -624,11 +645,12 @@ func Run(command string) error {
 			// Searches are counted, and the rollups read back (observability:read).
 			httpapi.WithObservability(recorder, observability.Reader{Store: rollups, RecordQueryText: cfg.Observability.RecordQueryText}),
 			// Push deliveries are relayed by the API, which the source reaches.
-			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Tokens: connectors.Service{Tokens: connectorStore}, Replays: connectorStore}))
+			httpapi.WithTrustedPushProxies(pushConfig.TrustedProxyCIDRs),
+			httpapi.WithRelay(connectors.Relay{Store: connectorStore, Tokens: connectors.Service{Tokens: connectorStore}, Registry: registry, Sealer: sealer, Ingest: contents, Protection: connectorStore, PushConfig: pushConfig, Replays: connectorStore}))
 		if err != nil {
 			return fmt.Errorf("compile public request schema: %w", err)
 		}
-		servers = append(servers, &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384})
+		servers = append(servers, &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384})
 	} else {
 		workerDone := make(chan struct{})
 		defer func() {

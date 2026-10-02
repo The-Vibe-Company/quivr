@@ -1666,6 +1666,16 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
   /v0/connectors/{connector_id}/api/{path}:
     parameters:
+    - name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Optional opaque key of 1–256 bytes, scoped to the instance. Authorized requests
+        replay the first completed plugin/ingestion answer within the deployment TTL for quivr_key and instance_token routes
+        (default 24h), without calling the plugin or charging another rate token.
+        Authentication, route/body validation, IP and rate refusals do not reserve keys.
+        Reusing a key on another declared route still replays its original answer.
+      schema: {type: string, minLength: 1, maxLength: 256}
     - name: connector_id
       in: path
       required: true
@@ -1689,7 +1699,7 @@ paths:
         out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405
         with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is
         400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without
-        Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds.
+        Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds.
         Accepted items use normal ingestion idempotency and return 202 with receipts in item order,
         including withdrawals; the accepted plugin answer is replaced. An empty delivery returns
         an empty receipts array. A rejected item returns 422 item_rejected; other items may already
@@ -1700,13 +1710,22 @@ paths:
         marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response
         variant (x-quivr-plugin-response), even when its status overlaps an engine response;
         the engine response schemas below apply to responses without that header.
+        Per-instance token buckets use the deployment default unless push_policy overrides it.
+        Excess requests return 429 with Retry-After (integer seconds) before plugin invocation;
+        callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly
+        trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an
+        existing instance commits connector.push.received (2xx) or connector.push.refused
+        and per-instance admin counters before the response is sent. Audit storage failure
+        returns 503. Legacy routes without declared signature ingress keep their existing behavior.
         For auth signature, the plugin verifies the provider signature; the engine checks one nonempty
         signature header and optional signed Unix-seconds timestamp within the declared window
         (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per
         instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed.
+        Signature routes bypass the response cache: once replay reservations expire, the plugin verifies
+        every new admitted request, including one reusing an old Idempotency-Key.
         Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards.
         X declares receive at api/receive with a 300-second signature cache and no timestamp.
-        Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+        Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
       x-required-permissions: [connector:push]
       requestBody:
         required: true
@@ -1719,6 +1738,15 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ConnectorPushReceipts'}
+        '429':
+          description: Instance token bucket exhausted; no plugin call or idempotency reservation.
+          headers:
+            Retry-After:
+              schema: {type: integer, minimum: 1}
+              description: Seconds until the next rate token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         default:
           description: Structured engine error, or the plugin's refusal answer.
           content:
@@ -1748,6 +1776,8 @@ paths:
         instance_token; credentials for one mode cannot authenticate the other.
         A 204 challenge must have an empty response body; a plugin answer
         combining 204 with a nonempty body returns 500 plugin_invalid_response.
+        The same IP allowlist, token bucket, idempotency and audit rules as POST apply.
+        Signature routes bypass the response cache so every admitted call reaches provider verification.
         Signature GET routes need no bearer key and bypass POST signature and replay checks;
         the provider challenge is still verified and answered by the plugin.
       x-required-permissions: [connector:push]
@@ -1761,6 +1791,15 @@ paths:
             Quivr-Response-Origin:
               description: Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged.
               schema: {type: string, enum: [plugin]}
+        '429':
+          description: Instance token bucket exhausted; no plugin call or idempotency reservation.
+          headers:
+            Retry-After:
+              schema: {type: integer, minimum: 1}
+              description: Seconds until the next rate token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         default:
           description: Structured engine error, or the plugin's refusal answer.
           content:
@@ -2746,6 +2785,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v0/admin/stats/connector-pushes:
+    get:
+      operationId: listConnectorPushStats
+      summary: Count accepted and refused pushes per source instance
+      description: >-
+        Per-instance attempts to declared source API routes, split into received (2xx,
+        including cached answers and GET challenges) and refused (all other answers).
+        Includes authentication, scope, body, rate and IP refusals for existing instances.
+        No payload, credentials, client IP or raw idempotency key is stored. Audit events
+        and counters commit together. Requires observability:read on all Corpora;
+        returns only the key's Organization. Uses the Spec 16 rollup windows and retention.
+        By default lists the largest 100 instance/outcome pairs, with a total across
+        every pair. Use connector_id to read both outcomes of one instance; its
+        total then covers that instance only.
+      parameters:
+      - name: window
+        in: query
+        schema: {type: string, enum: [1h, 24h, 7d], default: 1h}
+      - name: limit
+        in: query
+        description: Largest instance/outcome pairs to list; cannot be combined with connector_id.
+        schema: {type: integer, minimum: 1, maximum: 100, default: 100}
+      - name: connector_id
+        in: query
+        description: Read both outcomes of this instance; cannot be combined with limit.
+        schema: {type: string, minLength: 1, maxLength: 256}
+      x-required-permissions: [observability:read]
+      responses:
+        '200':
+          description: Per-instance counters and time buckets.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConnectorPushStatsList'}
+        default:
+          description: Structured error.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /v0/admin/stats/plugins:
     get:
       operationId: getPluginCallStats
@@ -5246,6 +5323,53 @@ components:
           minimum: 0
           maximum: 31536000
           description: A credential expiring within this window is credential_expiring. Default 1209600.
+    ConnectorPushStats:
+      type: object
+      additionalProperties: false
+      properties:
+        connector_id: {type: string}
+        outcome: {type: string, enum: [received, refused]}
+        count: {type: integer, minimum: 0}
+        points:
+          type: array
+          items: {$ref: '#/components/schemas/CountPoint'}
+      required: [connector_id, outcome, count, points]
+    ConnectorPushStatsList:
+      type: object
+      additionalProperties: false
+      properties:
+        window: {$ref: '#/components/schemas/StatsWindowName'}
+        resolution_seconds: {type: integer, minimum: 1}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        total: {type: integer, minimum: 0}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ConnectorPushStats'}
+      required: [window, resolution_seconds, from, to, total, items]
+    ConnectorPushPolicy:
+      type: object
+      additionalProperties: false
+      description: >-
+        Engine-owned protection of declared source API routes, separate from plugin config.
+        Missing fields inherit deployment defaults; configure at instance creation.
+      properties:
+        rate_per_second:
+          type: number
+          format: double
+          minimum: 0.001
+          maximum: 100000
+          description: Token refill rate per second (deployment default 10).
+        burst:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: Token bucket capacity (deployment default 100).
+        allowed_cidrs:
+          type: array
+          maxItems: 256
+          items: {type: string, minLength: 1}
+          description: Allowed IPv4/IPv6 CIDRs; absent or empty permits every address.
     ConnectorCreate:
       type: object
       additionalProperties: false
@@ -5262,6 +5386,8 @@ components:
           maxLength: 200
         kind:
           $ref: '#/components/schemas/ConnectorKind'
+        push_policy:
+          $ref: '#/components/schemas/ConnectorPushPolicy'
         config:
           type: object
           description: Kind-specific configuration validated by the kind's JSON Schema. Holds no secret.
@@ -5432,6 +5558,8 @@ components:
           minLength: 1
         kind:
           $ref: '#/components/schemas/ConnectorKind'
+        push_policy:
+          $ref: '#/components/schemas/ConnectorPushPolicy'
         config:
           type: object
         schedule:

@@ -173,13 +173,18 @@ func TestConnectorCreationValidatesAndNeverEchoesTheSecret(t *testing.T) {
 	handler := connectorAPI(t)
 	valid := func() map[string]any {
 		return map[string]any{"idempotency_key": "c1", "corpus_id": "corpus_news", "source_namespace": "wire", "kind": "fixture", "config": map[string]any{"script": []any{}},
-			"credential": map[string]any{"secret": map[string]any{"token": "fixture-test-secret-handler"}, "expires_at": "2027-01-01T00:00:00Z"}}
+			"push_policy": map[string]any{"rate_per_second": 2.5, "burst": 10, "allowed_cidrs": []any{"192.0.2.0/24"}},
+			"credential":  map[string]any{"secret": map[string]any{"token": "fixture-test-secret-handler"}, "expires_at": "2027-01-01T00:00:00Z"}}
 	}
 	status, body := postJSON(t, handler, "/v0/connectors", connectorKey, valid())
 	if status != 201 {
 		t.Fatalf("create: %d %v", status, body)
 	}
 	conforms(t, "Connector", body)
+	policy := body["push_policy"].(map[string]any)
+	if policy["rate_per_second"] != 2.5 || policy["burst"] != float64(10) || policy["allowed_cidrs"].([]any)[0] != "192.0.2.0/24" {
+		t.Fatalf("push policy lost: %v", policy)
+	}
 	raw, _ := json.Marshal(body)
 	if strings.Contains(string(raw), "fixture-test-secret") {
 		t.Fatalf("secret echoed: %s", raw)

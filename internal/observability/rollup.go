@@ -31,6 +31,8 @@ const (
 	// SeriesMatch is one Match committed by an alert; its key is the
 	// evaluator plugin id (THE-798).
 	SeriesMatch = "match"
+	// SeriesConnectorPush counts every declared-route attempt by instance and outcome.
+	SeriesConnectorPush = "connector_push"
 )
 
 // BoundsMS are the upper bounds, in milliseconds, of the fixed latency

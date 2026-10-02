@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"time"
@@ -29,7 +30,7 @@ CASE WHEN c.usage_day IS NULL THEN NULL ELSE ` + utcToday + ` END,
 CASE WHEN c.usage_day=` + utcToday + ` THEN c.usage_items ELSE 0 END,
 CASE WHEN c.usage_day=` + utcToday + ` THEN c.usage_previous_items WHEN c.usage_day=` + utcToday + `-1 THEN c.usage_items ELSE 0 END,
 c.diagnostics,
-c.push_state,c.push_setup_class,c.push_setup_code,c.push_setup_at,c.push_poll_interval_seconds,c.push_error_class,c.push_error_code,c.push_error_at,c.push_last_delivery_at`
+c.push_state,c.push_setup_class,c.push_setup_code,c.push_setup_at,c.push_poll_interval_seconds,c.push_error_class,c.push_error_code,c.push_error_at,c.push_last_delivery_at,c.push_policy`
 
 // utcToday is the current UTC calendar day, the window of usage counters.
 const utcToday = `(now() AT TIME ZONE 'UTC')::date`
@@ -46,19 +47,24 @@ func scanConnector(row pgx.Row) (connectors.Instance, error) {
 	var version *int
 	var deposited, expires, usageDay *time.Time
 	var usageToday, usagePrevious int64
-	var diagnostics []byte
+	var diagnostics, pushPolicy []byte
 	var pushState, setupClass, setupCode, pushClass, pushCode *string
 	var setupAt, pushAt, lastDelivery *time.Time
 	var pollInterval *int64
 	err := row.Scan(&in.Organization, &in.ID, &in.CorpusID, &in.Namespace, &in.Kind, &in.Config, &interval, &silent, &warning, &in.Enabled, &in.CreatedAt, &in.DisabledAt,
 		&in.Health.State, &in.Health.EvaluatedAt, &in.Health.LastSuccessAt, &in.Health.LastItemAt, &code, &class, &errorAt, &in.Health.AccessErrorAt, &version, &deposited, &expires,
 		&usageDay, &usageToday, &usagePrevious, &diagnostics,
-		&pushState, &setupClass, &setupCode, &setupAt, &pollInterval, &pushClass, &pushCode, &pushAt, &lastDelivery)
+		&pushState, &setupClass, &setupCode, &setupAt, &pollInterval, &pushClass, &pushCode, &pushAt, &lastDelivery, &pushPolicy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return in, corpus.ErrNotFound
 	}
 	if err != nil {
 		return in, err
+	}
+	if len(pushPolicy) > 0 {
+		if err := json.Unmarshal(pushPolicy, &in.PushPolicy); err != nil {
+			return in, err
+		}
 	}
 	in.Interval, in.SilentAfter, in.CredentialWarning = time.Duration(interval)*time.Second, time.Duration(silent)*time.Second, time.Duration(warning)*time.Second
 	if code != nil && errorAt != nil {
@@ -180,8 +186,8 @@ func (s ConnectorStore) CreateConnector(ctx context.Context, n connectors.NewIns
 	if inUse {
 		return connectors.Instance{}, connectors.ErrNamespaceInUse
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO connector_instances(organization,id,corpus_id,source_namespace,kind,config,interval_seconds,silent_after_seconds,credential_warning_seconds,request_key,request_digest,health_state)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active')`, n.Organization, n.ID, n.CorpusID, n.Namespace, n.Kind, []byte(n.Config), int64(n.Interval/time.Second), int64(n.SilentAfter/time.Second), int64(n.CredentialWarning/time.Second), n.RequestKey, n.RequestDigest)
+	_, err = tx.Exec(ctx, `INSERT INTO connector_instances(organization,id,corpus_id,source_namespace,kind,config,interval_seconds,silent_after_seconds,credential_warning_seconds,request_key,request_digest,health_state,push_policy)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12)`, n.Organization, n.ID, n.CorpusID, n.Namespace, n.Kind, []byte(n.Config), int64(n.Interval/time.Second), int64(n.SilentAfter/time.Second), int64(n.CredentialWarning/time.Second), n.RequestKey, n.RequestDigest, n.PushPolicy)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "connector_instances_enabled_namespace" {
 		return connectors.Instance{}, connectors.ErrNamespaceInUse

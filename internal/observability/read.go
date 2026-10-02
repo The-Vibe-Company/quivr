@@ -47,13 +47,13 @@ type Report struct {
 	Series   []Series
 }
 
-// Report reads every key of series for org over the window, from the tier
-// that serves it.
-func (r Reader) Report(ctx context.Context, org, series string, w Window) (Report, error) {
+// Report reads the requested keys of series for org over the window, from
+// the tier that serves it. With no keys it reads every key.
+func (r Reader) Report(ctx context.Context, org, series string, w Window, keys ...string) (Report, error) {
 	to := time.Now().UTC()
 	from := to.Add(-w.Span).Truncate(w.Tier.Resolution)
 	out := Report{Window: w, From: from, To: to, Series: []Series{}}
-	rows, err := r.Store.ReadRollups(ctx, org, series, w.Tier.Resolution, from)
+	rows, err := r.Store.ReadRollups(ctx, org, series, w.Tier.Resolution, from, keys...)
 	if err != nil {
 		return Report{}, err
 	}

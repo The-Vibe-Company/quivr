@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -129,11 +130,13 @@ func (p PushHealth) AccessRefused() bool {
 // Relayed is a request a source sent to an instance's public webhook route,
 // bounded by the transport: lowercase header names, the exact body.
 type Relayed struct {
-	Method  string
-	Path    string
-	Query   string
-	Headers map[string][]string
-	Body    []byte
+	ClientIP        netip.Addr
+	IdempotencyKeys []string
+	Method          string
+	Path            string
+	Query           string
+	Headers         map[string][]string
+	Body            []byte
 }
 
 // ReceiveRequest relays one delivery to a push kind.
@@ -225,12 +228,14 @@ const RetryDelivery = 30 * time.Second
 // item seen by both paths converges on the same Receipt), and answers the
 // source according to the kind's verdict.
 type Relay struct {
-	Store    PushStore
-	Tokens   TokenAuthenticator
-	Registry *Registry
-	Sealer   Sealer
-	Ingest   Ingestor
-	Replays  ReplayStore
+	Store      PushStore
+	Tokens     TokenAuthenticator
+	Registry   *Registry
+	Sealer     Sealer
+	Ingest     Ingestor
+	Protection PushProtection
+	PushConfig PushConfig
+	Replays    ReplayStore
 }
 
 func unavailable(code string) RelayAnswer {

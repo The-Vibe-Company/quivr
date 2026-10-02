@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -42,8 +43,9 @@ import (
 )
 
 type API struct {
-	Content   content.Service
-	Retrieval retrieval.Service
+	pushProxyCIDRs []string
+	Content        content.Service
+	Retrieval      retrieval.Service
 	// Spaces lists a Corpus's vector spaces; nil answers 404.
 	Spaces         SpaceRegistry
 	Uploads        uploads.Service
@@ -184,7 +186,12 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	for _, option := range options {
 		option(a)
 	}
-	return http.HandlerFunc(a.serve), nil
+	for _, raw := range a.pushProxyCIDRs {
+		if _, err := netip.ParsePrefix(raw); err != nil {
+			return nil, errors.New("trusted push proxies require CIDRs")
+		}
+	}
+	return http.HandlerFunc(a.servePushAudited), nil
 }
 
 const (
@@ -194,7 +201,7 @@ const (
 	maxBatchBytes   = 10 << 20
 	maxBatchEntries = 100
 	requestTimeout  = 5 * time.Second
-	// Leave response headroom within the server's 10-second write timeout.
+	// Leave response headroom within the server write timeout.
 	batchTimeout = 8 * time.Second
 )
 
@@ -204,7 +211,7 @@ func send(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func apiError(status int, code string) transport.Error {
-	return transport.Error{Code: code, Message: strings.ReplaceAll(code, "_", " "), Retryable: status == 503}
+	return transport.Error{Code: code, Message: strings.ReplaceAll(code, "_", " "), Retryable: status == 503 || status == 429}
 }
 func failure(w http.ResponseWriter, status int, code string) {
 	send(w, status, apiError(status, code))

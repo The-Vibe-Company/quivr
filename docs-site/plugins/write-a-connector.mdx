@@ -241,6 +241,28 @@ wrong method is `405` with `Allow`. Bodies are limited to 1 MiB. Rejected items
 return `422 item_rejected`; retrying unchanged revisions replays items that
 were already accepted. Transient failures return `503` with `Retry-After`.
 
+Set the engine-owned `push_policy` when you create an instance to override its
+request rate and burst capacity or restrict callers with `allowed_cidrs`.
+Keep these fields separate from your kind's `config`. Defaults and trusted proxy
+networks are set in [deployment configuration](/reference/configuration).
+A rate refusal returns `429` with `Retry-After` before your plugin is called.
+An address outside the allowlist returns `403 ip_not_allowed`.
+
+Send an `Idempotency-Key` to replay the first completed answer for that instance
+within the configured TTL, including its Receipts, without another plugin call.
+Use a new key for a new delivery. Authentication, schema, IP and rate refusals
+do not reserve a key. A completed plugin or ingestion failure is cached too;
+after correcting its cause, retry with a new key and stable item revisions.
+
+Every attempt on an existing instance records `connector.push.received` for a
+2xx answer or `connector.push.refused` for another status. Cached replies and
+GET challenges count as attempts. Events and per-instance counters commit
+together; audit storage failure returns `503`. Read counters at
+`GET /v0/admin/stats/connector-pushes` with `observability:read` on all collections.
+The listing returns the largest 100 instance/outcome pairs and a total across all
+pairs; use `limit` (1–100) to shorten it, or `connector_id` to read both outcomes
+of one instance. Those two filters cannot be combined.
+
 Quivr strips the bearer key and cookies before relaying the request. The existing public webhook address stays
 available with its existing plugin-owned authentication.
 
@@ -248,8 +270,8 @@ available with its existing plugin-owned authentication.
 
 For a third-party sender, declare `auth: instance_token` on the route and use a
 Plugin API range admitting `0.12.0`. The same `Receiver.Receive` handler and
-route/body fields apply. Quivr authenticates the token before calling your
-plugin; do not pass it to the handler or store it in the plugin configuration.
+route/body fields apply. Quivr authenticates the token before applying the same push protection policy
+and calling your plugin; do not pass it to the handler or store it in the plugin configuration.
 
 An operator issues and manages tokens under `/v0/connectors/<instance_id>/tokens`
 with `connectors:admin`. Each token works only on that instance's token routes.
@@ -270,6 +292,13 @@ If the provider signs a timestamp, name its Unix-seconds header; Quivr rejects
 calls outside the window before invoking your plugin. Your handler still
 verifies the cryptographic signature over the raw request before accepting
 items. Preserve `request.body_base64` for that check.
+
+The engine runs the signature freshness and replay guard before the instance's
+IP allowlist and token bucket. A signature replay returns `409 push_replayed`.
+Signature routes bypass the response cache: after the replay window expires,
+every admitted POST or GET challenge reaches provider verification, even with
+an earlier idempotency key. These protections and audit
+counters also apply at a declared signature route's legacy receive alias.
 
 Quivr reserves signature and `Idempotency-Key` fingerprints per instance in
 PostgreSQL before calling your handler. A replay returns `409 push_replayed`;

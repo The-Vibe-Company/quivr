@@ -216,6 +216,24 @@ func (e ConnectorPushErrorClass) Valid() bool {
 	}
 }
 
+// Defines values for ConnectorPushStatsOutcome.
+const (
+	ConnectorPushStatsOutcomeReceived ConnectorPushStatsOutcome = "received"
+	ConnectorPushStatsOutcomeRefused  ConnectorPushStatsOutcome = "refused"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorPushStatsOutcome enum.
+func (e ConnectorPushStatsOutcome) Valid() bool {
+	switch e {
+	case ConnectorPushStatsOutcomeReceived:
+		return true
+	case ConnectorPushStatsOutcomeRefused:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeliveryState.
 const (
 	DeliveryStateDelivered  DeliveryState = "delivered"
@@ -1017,6 +1035,27 @@ func (e WebhookEventType) Valid() bool {
 	}
 }
 
+// Defines values for ListConnectorPushStatsParamsWindow.
+const (
+	ListConnectorPushStatsParamsWindowN1h  ListConnectorPushStatsParamsWindow = "1h"
+	ListConnectorPushStatsParamsWindowN24h ListConnectorPushStatsParamsWindow = "24h"
+	ListConnectorPushStatsParamsWindowN7d  ListConnectorPushStatsParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the ListConnectorPushStatsParamsWindow enum.
+func (e ListConnectorPushStatsParamsWindow) Valid() bool {
+	switch e {
+	case ListConnectorPushStatsParamsWindowN1h:
+		return true
+	case ListConnectorPushStatsParamsWindowN24h:
+		return true
+	case ListConnectorPushStatsParamsWindowN7d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetMatchStatsParamsWindow.
 const (
 	GetMatchStatsParamsWindowN1h  GetMatchStatsParamsWindow = "1h"
@@ -1341,8 +1380,11 @@ type Connector struct {
 	} `json:"health_policy"`
 
 	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
-	Kind     ConnectorKind `json:"kind"`
-	Schedule struct {
+	Kind ConnectorKind `json:"kind"`
+
+	// PushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
+	PushPolicy *ConnectorPushPolicy `json:"push_policy,omitempty"`
+	Schedule   struct {
 		IntervalSeconds int `json:"interval_seconds"`
 	} `json:"schedule"`
 	SourceNamespace string `json:"source_namespace"`
@@ -1361,9 +1403,12 @@ type ConnectorCreate struct {
 	IdempotencyKey string                 `json:"idempotency_key"`
 
 	// Kind Connector kind, provided by the engine or by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. Built-in kinds are fixture (a deterministic test connector available only when the deployment enables it). First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
-	Kind            ConnectorKind      `json:"kind"`
-	Schedule        *ConnectorSchedule `json:"schedule,omitempty"`
-	SourceNamespace string             `json:"source_namespace"`
+	Kind ConnectorKind `json:"kind"`
+
+	// PushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
+	PushPolicy      *ConnectorPushPolicy `json:"push_policy,omitempty"`
+	Schedule        *ConnectorSchedule   `json:"schedule,omitempty"`
+	SourceNamespace string               `json:"source_namespace"`
 }
 
 // ConnectorError defines model for ConnectorError.
@@ -1477,9 +1522,42 @@ type ConnectorPushError struct {
 // ConnectorPushErrorClass defines model for ConnectorPushError.Class.
 type ConnectorPushErrorClass string
 
+// ConnectorPushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
+type ConnectorPushPolicy struct {
+	// AllowedCidrs Allowed IPv4/IPv6 CIDRs; absent or empty permits every address.
+	AllowedCidrs *[]string `json:"allowed_cidrs,omitempty"`
+
+	// Burst Token bucket capacity (deployment default 100).
+	Burst *int `json:"burst,omitempty"`
+
+	// RatePerSecond Token refill rate per second (deployment default 10).
+	RatePerSecond *float64 `json:"rate_per_second,omitempty"`
+}
+
 // ConnectorPushReceipts defines model for ConnectorPushReceipts.
 type ConnectorPushReceipts struct {
 	Receipts []Receipt `json:"receipts"`
+}
+
+// ConnectorPushStats defines model for ConnectorPushStats.
+type ConnectorPushStats struct {
+	ConnectorId string                    `json:"connector_id"`
+	Count       int                       `json:"count"`
+	Outcome     ConnectorPushStatsOutcome `json:"outcome"`
+	Points      []CountPoint              `json:"points"`
+}
+
+// ConnectorPushStatsOutcome defines model for ConnectorPushStats.Outcome.
+type ConnectorPushStatsOutcome string
+
+// ConnectorPushStatsList defines model for ConnectorPushStatsList.
+type ConnectorPushStatsList struct {
+	From              time.Time            `json:"from"`
+	Items             []ConnectorPushStats `json:"items"`
+	ResolutionSeconds int                  `json:"resolution_seconds"`
+	To                time.Time            `json:"to"`
+	Total             int                  `json:"total"`
+	Window            StatsWindowName      `json:"window"`
 }
 
 // ConnectorRunRequest defines model for ConnectorRunRequest.
@@ -3080,6 +3158,20 @@ type ListQuarantinedVersionsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListConnectorPushStatsParams defines parameters for ListConnectorPushStats.
+type ListConnectorPushStatsParams struct {
+	Window *ListConnectorPushStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+
+	// Limit Largest instance/outcome pairs to list; cannot be combined with connector_id.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// ConnectorId Read both outcomes of this instance; cannot be combined with limit.
+	ConnectorId *string `form:"connector_id,omitempty" json:"connector_id,omitempty"`
+}
+
+// ListConnectorPushStatsParamsWindow defines parameters for ListConnectorPushStats.
+type ListConnectorPushStatsParamsWindow string
+
 // GetMatchStatsParams defines parameters for GetMatchStats.
 type GetMatchStatsParams struct {
 	Window *GetMatchStatsParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -3168,8 +3260,20 @@ type ListConnectorsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ChallengeConnectorAPIParams defines parameters for ChallengeConnectorAPI.
+type ChallengeConnectorAPIParams struct {
+	// IdempotencyKey Optional opaque key of 1–256 bytes, scoped to the instance. Authorized requests replay the first completed plugin/ingestion answer within the deployment TTL for quivr_key and instance_token routes (default 24h), without calling the plugin or charging another rate token. Authentication, route/body validation, IP and rate refusals do not reserve keys. Reusing a key on another declared route still replays its original answer.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 // PushConnectorAPIJSONBody defines parameters for PushConnectorAPI.
 type PushConnectorAPIJSONBody = interface{}
+
+// PushConnectorAPIParams defines parameters for PushConnectorAPI.
+type PushConnectorAPIParams struct {
+	// IdempotencyKey Optional opaque key of 1–256 bytes, scoped to the instance. Authorized requests replay the first completed plugin/ingestion answer within the deployment TTL for quivr_key and instance_token routes (default 24h), without calling the plugin or charging another rate token. Authentication, route/body validation, IP and rate refusals do not reserve keys. Reusing a key on another declared route still replays its original answer.
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
 
 // ListConnectorTokensParams defines parameters for ListConnectorTokens.
 type ListConnectorTokensParams struct {
@@ -3575,6 +3679,9 @@ type ServerInterface interface {
 
 	// (POST /v0/admin/spaces/{vector_space_id}/promote)
 	PromoteVectorSpace(w http.ResponseWriter, r *http.Request, vectorSpaceId string)
+	// ListConnectorPushStats Count accepted and refused pushes per source instance
+	// (GET /v0/admin/stats/connector-pushes)
+	ListConnectorPushStats(w http.ResponseWriter, r *http.Request, params ListConnectorPushStatsParams)
 
 	// (GET /v0/admin/stats/matches)
 	GetMatchStats(w http.ResponseWriter, r *http.Request, params GetMatchStatsParams)
@@ -3634,10 +3741,10 @@ type ServerInterface interface {
 	GetConnector(w http.ResponseWriter, r *http.Request, connectorId string)
 	// ChallengeConnectorAPI Answer a declared source challenge
 	// (GET /v0/connectors/{connector_id}/api/{path})
-	ChallengeConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string)
+	ChallengeConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string, params ChallengeConnectorAPIParams)
 	// PushConnectorAPI Push data to a declared source route
 	// (POST /v0/connectors/{connector_id}/api/{path})
-	PushConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string)
+	PushConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string, params PushConnectorAPIParams)
 
 	// (PUT /v0/connectors/{connector_id}/credential)
 	ReplaceConnectorCredential(w http.ResponseWriter, r *http.Request, connectorId string)
@@ -4211,6 +4318,65 @@ func (siw *ServerInterfaceWrapper) PromoteVectorSpace(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PromoteVectorSpace(w, r, vectorSpaceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListConnectorPushStats operation middleware
+func (siw *ServerInterfaceWrapper) ListConnectorPushStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListConnectorPushStatsParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "connector_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "connector_id", r.URL.Query(), &params.ConnectorId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "connector_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connector_id", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConnectorPushStats(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4885,8 +5051,32 @@ func (siw *ServerInterfaceWrapper) ChallengeConnectorAPI(w http.ResponseWriter, 
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ChallengeConnectorAPIParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ChallengeConnectorAPI(w, r, connectorId, path)
+		siw.Handler.ChallengeConnectorAPI(w, r, connectorId, path, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4920,8 +5110,32 @@ func (siw *ServerInterfaceWrapper) PushConnectorAPI(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PushConnectorAPIParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PushConnectorAPI(w, r, connectorId, path)
+		siw.Handler.PushConnectorAPI(w, r, connectorId, path, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -6556,6 +6770,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/active-plugins", wrapper.ListActivePlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents", wrapper.ListAdminDocuments)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/documents/{version_id}/timeline", wrapper.GetDocumentTimeline)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/connector-pushes", wrapper.ListConnectorPushStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/plugins", wrapper.GetPluginCallStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/searches", wrapper.GetSearchStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/stats/steps", wrapper.GetStepStats)
@@ -7196,6 +7411,45 @@ type PromoteVectorSpacedefaultJSONResponse struct {
 }
 
 func (response PromoteVectorSpacedefaultJSONResponse) VisitPromoteVectorSpaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectorPushStatsRequestObject struct {
+	Params ListConnectorPushStatsParams
+}
+
+type ListConnectorPushStatsResponseObject interface {
+	VisitListConnectorPushStatsResponse(w http.ResponseWriter) error
+}
+
+type ListConnectorPushStats200JSONResponse ConnectorPushStatsList
+
+func (response ListConnectorPushStats200JSONResponse) VisitListConnectorPushStatsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectorPushStatsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListConnectorPushStatsdefaultJSONResponse) VisitListConnectorPushStatsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -7995,6 +8249,7 @@ func (response GetConnectordefaultJSONResponse) VisitGetConnectorResponse(w http
 type ChallengeConnectorAPIRequestObject struct {
 	ConnectorId string `json:"connector_id"`
 	Path        string `json:"path"`
+	Params      ChallengeConnectorAPIParams
 }
 
 type ChallengeConnectorAPIResponseObject interface {
@@ -8019,6 +8274,30 @@ func (response ChallengeConnectorAPI200TextResponse) VisitChallengeConnectorAPIR
 	w.WriteHeader(200)
 
 	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type ChallengeConnectorAPI429ResponseHeaders struct {
+	RetryAfter *int
+}
+
+type ChallengeConnectorAPI429JSONResponse struct {
+	Body    Error
+	Headers ChallengeConnectorAPI429ResponseHeaders
+}
+
+func (response ChallengeConnectorAPI429JSONResponse) VisitChallengeConnectorAPIResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
 	return err
 }
 
@@ -8050,6 +8329,7 @@ func (response ChallengeConnectorAPIdefaultJSONResponse) VisitChallengeConnector
 type PushConnectorAPIRequestObject struct {
 	ConnectorId string `json:"connector_id"`
 	Path        string `json:"path"`
+	Params      PushConnectorAPIParams
 	Body        *PushConnectorAPIJSONRequestBody
 }
 
@@ -8067,6 +8347,30 @@ func (response PushConnectorAPI202JSONResponse) VisitPushConnectorAPIResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PushConnectorAPI429ResponseHeaders struct {
+	RetryAfter *int
+}
+
+type PushConnectorAPI429JSONResponse struct {
+	Body    Error
+	Headers PushConnectorAPI429ResponseHeaders
+}
+
+func (response PushConnectorAPI429JSONResponse) VisitPushConnectorAPIResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -10186,6 +10490,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/admin/spaces/{vector_space_id}/promote)
 	PromoteVectorSpace(ctx context.Context, request PromoteVectorSpaceRequestObject) (PromoteVectorSpaceResponseObject, error)
+	// ListConnectorPushStats Count accepted and refused pushes per source instance
+	// (GET /v0/admin/stats/connector-pushes)
+	ListConnectorPushStats(ctx context.Context, request ListConnectorPushStatsRequestObject) (ListConnectorPushStatsResponseObject, error)
 
 	// (GET /v0/admin/stats/matches)
 	GetMatchStats(ctx context.Context, request GetMatchStatsRequestObject) (GetMatchStatsResponseObject, error)
@@ -10854,6 +11161,32 @@ func (sh *strictHandler) PromoteVectorSpace(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// ListConnectorPushStats operation middleware
+func (sh *strictHandler) ListConnectorPushStats(w http.ResponseWriter, r *http.Request, params ListConnectorPushStatsParams) {
+	var request ListConnectorPushStatsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConnectorPushStats(ctx, request.(ListConnectorPushStatsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConnectorPushStats")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConnectorPushStatsResponseObject); ok {
+		if err := validResponse.VisitListConnectorPushStatsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetMatchStats operation middleware
 func (sh *strictHandler) GetMatchStats(w http.ResponseWriter, r *http.Request, params GetMatchStatsParams) {
 	var request GetMatchStatsRequestObject
@@ -11362,11 +11695,12 @@ func (sh *strictHandler) GetConnector(w http.ResponseWriter, r *http.Request, co
 }
 
 // ChallengeConnectorAPI operation middleware
-func (sh *strictHandler) ChallengeConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string) {
+func (sh *strictHandler) ChallengeConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string, params ChallengeConnectorAPIParams) {
 	var request ChallengeConnectorAPIRequestObject
 
 	request.ConnectorId = connectorId
 	request.Path = path
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ChallengeConnectorAPI(ctx, request.(ChallengeConnectorAPIRequestObject))
@@ -11389,11 +11723,12 @@ func (sh *strictHandler) ChallengeConnectorAPI(w http.ResponseWriter, r *http.Re
 }
 
 // PushConnectorAPI operation middleware
-func (sh *strictHandler) PushConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string) {
+func (sh *strictHandler) PushConnectorAPI(w http.ResponseWriter, r *http.Request, connectorId string, path string, params PushConnectorAPIParams) {
 	var request PushConnectorAPIRequestObject
 
 	request.ConnectorId = connectorId
 	request.Path = path
+	request.Params = params
 
 	var body PushConnectorAPIJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

@@ -44,6 +44,21 @@ func connectorFailure(w http.ResponseWriter, err error) {
 func (a *API) connectorToTransport(in connectors.Instance) transport.Connector {
 	out := transport.Connector{ConnectorId: in.ID, CorpusId: in.CorpusID, SourceNamespace: in.Namespace, Kind: transport.ConnectorKind(in.Kind), Enabled: in.Enabled, CreatedAt: in.CreatedAt.UTC(), Config: map[string]any{}}
 	_ = json.Unmarshal(in.Config, &out.Config)
+	if in.PushPolicy != nil {
+		out.PushPolicy = &transport.ConnectorPushPolicy{}
+		if in.PushPolicy.RatePerSecond != 0 {
+			v := in.PushPolicy.RatePerSecond
+			out.PushPolicy.RatePerSecond = &v
+		}
+		if in.PushPolicy.Burst != 0 {
+			v := in.PushPolicy.Burst
+			out.PushPolicy.Burst = &v
+		}
+		if in.PushPolicy.AllowedCIDRs != nil {
+			v := in.PushPolicy.AllowedCIDRs
+			out.PushPolicy.AllowedCidrs = &v
+		}
+	}
 	out.Schedule.IntervalSeconds = int(in.Interval.Seconds())
 	out.HealthPolicy.SilentAfterSeconds = int(in.SilentAfter.Seconds())
 	out.HealthPolicy.CredentialWarningSeconds = int(in.CredentialWarning.Seconds())
@@ -184,6 +199,18 @@ func (a *API) connectorRoutes(w http.ResponseWriter, r *http.Request, scope corp
 			return true
 		}
 		in := connectors.CreateInput{Key: body.IdempotencyKey, CorpusID: body.CorpusId, Namespace: body.SourceNamespace, Kind: string(body.Kind), Config: rawJSON(&body.Config)}
+		if body.PushPolicy != nil {
+			in.PushPolicy = &connectors.PushPolicy{}
+			if body.PushPolicy.RatePerSecond != nil {
+				in.PushPolicy.RatePerSecond = *body.PushPolicy.RatePerSecond
+			}
+			if body.PushPolicy.Burst != nil {
+				in.PushPolicy.Burst = *body.PushPolicy.Burst
+			}
+			if body.PushPolicy.AllowedCidrs != nil {
+				in.PushPolicy.AllowedCIDRs = *body.PushPolicy.AllowedCidrs
+			}
+		}
 		if body.Schedule != nil {
 			in.IntervalSeconds = body.Schedule.IntervalSeconds
 		}

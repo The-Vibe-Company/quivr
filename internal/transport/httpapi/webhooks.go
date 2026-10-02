@@ -58,7 +58,7 @@ func (a *API) relayDelivery(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), relayTimeout)
 	defer cancel()
-	answer, err := a.Relay.Deliver(ctx, id, connectors.Relayed{Method: r.Method, Query: r.URL.RawQuery, Headers: relayedHeaders(r.Header), Body: body})
+	answer, err := a.Relay.Deliver(ctx, id, connectors.Relayed{ClientIP: a.pushClientIP(r), IdempotencyKeys: r.Header.Values("Idempotency-Key"), Method: r.Method, Query: r.URL.RawQuery, Headers: relayedHeaders(r.Header), Body: body})
 	if errors.Is(err, connectors.ErrNoWebhook) {
 		failure(w, 404, "not_found")
 		return
@@ -69,6 +69,8 @@ func (a *API) relayDelivery(w http.ResponseWriter, r *http.Request) {
 			failure(w, 401, "invalid_signature")
 		case errors.Is(err, connectors.ErrReplay):
 			failure(w, 409, "push_replayed")
+		case errors.Is(err, connectors.ErrInvalidIdempotencyKey):
+			failure(w, 400, "invalid_idempotency_key")
 		case errors.Is(err, connectors.ErrInvalidAPIBody):
 			failure(w, 400, "invalid_json")
 		case errors.Is(err, connectors.ErrInvalidAPIRequest):

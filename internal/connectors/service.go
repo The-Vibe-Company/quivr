@@ -39,6 +39,7 @@ type Instance struct {
 	Namespace         string
 	Kind              string
 	Config            json.RawMessage
+	PushPolicy        *PushPolicy
 	Interval          time.Duration
 	SilentAfter       time.Duration
 	CredentialWarning time.Duration
@@ -142,6 +143,7 @@ type CreateInput struct {
 	Namespace                string          `json:"source_namespace"`
 	Kind                     string          `json:"kind"`
 	Config                   json.RawMessage `json:"config"`
+	PushPolicy               *PushPolicy     `json:"push_policy,omitempty"`
 	IntervalSeconds          *int            `json:"interval_seconds,omitempty"`
 	SilentAfterSeconds       *int            `json:"silent_after_seconds,omitempty"`
 	CredentialWarningSeconds *int            `json:"credential_warning_seconds,omitempty"`
@@ -178,6 +180,9 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput)
 	if !ok {
 		return Instance{}, ErrUnsupportedKind
 	}
+	if in.PushPolicy != nil && in.PushPolicy.Validate() != nil {
+		return Instance{}, WithField(ErrInvalidConfig, "/push_policy")
+	}
 	if err := s.Registry.validate(in.Kind, in.Config, in.Secret, "/credential/secret"); err != nil {
 		return Instance{}, err
 	}
@@ -213,7 +218,7 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput)
 	if _, err = rand.Read(id[:]); err != nil {
 		return Instance{}, err
 	}
-	n := NewInstance{Instance: Instance{Organization: scope.Organization, ID: "connector_" + hex.EncodeToString(id[:]), CorpusID: in.CorpusID, Namespace: in.Namespace, Kind: in.Kind, Config: in.Config, Interval: interval, SilentAfter: silent, CredentialWarning: warning, Enabled: true}, RequestKey: in.Key, RequestDigest: digest}
+	n := NewInstance{Instance: Instance{Organization: scope.Organization, ID: "connector_" + hex.EncodeToString(id[:]), CorpusID: in.CorpusID, Namespace: in.Namespace, Kind: in.Kind, Config: in.Config, PushPolicy: in.PushPolicy, Interval: interval, SilentAfter: silent, CredentialWarning: warning, Enabled: true}, RequestKey: in.Key, RequestDigest: digest}
 	if in.Secret != nil {
 		sealed, err := s.Sealer.Seal(scope.Organization, n.ID, in.Secret)
 		if err != nil {

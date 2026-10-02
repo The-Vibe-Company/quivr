@@ -100,6 +100,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/active-plugins`](#get-v0adminactive-plugins) | `listActivePlugins` | `observability:read` |
 | [`GET /v0/admin/documents`](#get-v0admindocuments) | `listAdminDocuments` | `observability:read` |
 | [`GET /v0/admin/documents/{version_id}/timeline`](#get-v0admindocumentsversion_idtimeline) | `getDocumentTimeline` | `observability:read` |
+| [`GET /v0/admin/stats/connector-pushes`](#get-v0adminstatsconnector-pushes) | `listConnectorPushStats` | `observability:read` |
 | [`GET /v0/admin/stats/plugins`](#get-v0adminstatsplugins) | `getPluginCallStats` | `observability:read` |
 | [`GET /v0/admin/stats/searches`](#get-v0adminstatssearches) | `getSearchStats` | `observability:read` |
 | [`GET /v0/admin/stats/steps`](#get-v0adminstatssteps) | `getStepStats` | `observability:read` |
@@ -1121,12 +1122,13 @@ Operation `pushConnectorAPI`. API-key calls require `connector:push`. Authentica
 
 Push data to a declared source route
 
-Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The whole delivery is bounded to 9 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard and receipts until engine 1.0.0.
+Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; instance tokens and signatures since 0.12). For auth quivr_key, requires a Quivr bearer key with connector:push on the instance's Corpus and Organization, checked before any plugin call. For auth instance_token, requires this instance’s bearer token; Quivr keys and other instances’ tokens are refused with 401 invalid_instance_token. Missing or invalid key is 401; missing action 403; out-of-scope, disabled or unknown instance and undeclared path 404; undeclared method 405 with Allow. JSON body is bounded to 1 MiB and the query to 8192 bytes. Malformed JSON is 400; a request_schema mismatch is 422. Up to 64 bounded headers are relayed without Authorization, Cookie or hop-by-hop headers. The plugin and ingestion stage is bounded to 9 seconds; audit persistence adds at most 2 seconds. Accepted items use normal ingestion idempotency and return 202 with receipts in item order, including withdrawals; the accepted plugin answer is replaced. An empty delivery returns an empty receipts array. A rejected item returns 422 item_rejected; other items may already be accepted, so retrying their stable revisions replays the same receipts. Transient failures return 503 with Retry-After. Engine-generated failures return the JSON Error envelope with the engine's error code and no Quivr-Response-Origin header. A refused plugin verdict returns the plugin's 4xx status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), even when its status overlaps an engine response; the engine response schemas below apply to responses without that header. Per-instance token buckets use the deployment default unless push_policy overrides it. Excess requests return 429 with Retry-After (integer seconds) before plugin invocation; callers outside push_policy.allowed_cidrs return 403 ip_not_allowed. Only explicitly trusted proxy networks may supply X-Forwarded-For addresses. Every attempt for an existing instance commits connector.push.received (2xx) or connector.push.refused and per-instance admin counters before the response is sent. Audit storage failure returns 503. Legacy routes without declared signature ingress keep their existing behavior. For auth signature, the plugin verifies the provider signature; the engine checks one nonempty signature header and optional signed Unix-seconds timestamp within the declared window (401 invalid_signature). PostgreSQL reserves signature and Idempotency-Key fingerprints per instance for window_seconds before the plugin call; duplicate keys return 409 push_replayed. Signature routes bypass the response cache: once replay reservations expire, the plugin verifies every new admitted request, including one reusing an old Idempotency-Key. Signature storage failures return JSON Error 503. GET challenges bypass POST signature guards. X declares receive at api/receive with a 300-second signature cache and no timestamp. Its legacy connector-webhooks address shares the same guard, push policy, audit counters and receipts until engine 1.0.0.
 
 **Parameters**
 
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
+| `Idempotency-Key` | header | string |  | Optional opaque key of 1–256 bytes, scoped to the instance. Authorized requests replay the first completed plugin/ingestion answer within the deployment TTL for quivr_key and instance_token routes (default 24h), without calling the plugin or charging another rate token. Authentication, route/body validation, IP and rate refusals do not reserve keys. Reusing a key on another declared route still replays its original answer. Minimum length `1`. Maximum length `256`. |
 | `connector_id` | path | string | yes |  |
 | `path` | path | string | yes | The declared relative route path, including any nested segments and filled template values. Maximum length `8192`. |
 
@@ -1137,6 +1139,7 @@ Resolve a named POST route from the instance kind's manifest (Plugin API 0.11; i
 | Status | Body | Description |
 | --- | --- | --- |
 | `202` | `application/json` [`ConnectorPushReceipts`](#connectorpushreceipts) | Items accepted for ingestion; poll each Receipt through the normal API. |
+| `429` | `application/json` [`Error`](#error)<br><br>Header `Retry-After`: integer. Seconds until the next rate token. | Instance token bucket exhausted; no plugin call or idempotency reservation. |
 | `default` | `application/json` [`Error`](#error)<br><br>Header `Quivr-Response-Origin`: string. Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged. | Structured engine error, or the plugin's refusal answer. |
 
 #### `GET /v0/connectors/{connector_id}/api/{path}`
@@ -1145,12 +1148,13 @@ Operation `challengeConnectorAPI`. API-key calls require `connector:push`. Authe
 
 Answer a declared source challenge
 
-Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
+Resolve a declared GET route with the same request limits and deadline as POST. Routes with auth: quivr_key require connector:push authorization and instance scope. Only synchronous provider challenges are supported; a GET answer carrying ingestion items is rejected before ingestion. Reads and management stay on the normal API. Plugin challenge (2xx) and refusal (4xx) replies carry the plugin's status, content type and body unchanged, marked with Quivr-Response-Origin: plugin. That header selects the plugin-defined response variant (x-quivr-plugin-response), including provider JSON or text challenges and statuses that overlap engine errors. Engine-generated failures have no Quivr-Response-Origin header and follow the JSON Error schema below. A bodyless challenge is relayed with parsed body null. Unknown paths return 404; undeclared methods return 405 with Allow. Authentication follows the declared auth mode: quivr_key or instance_token; credentials for one mode cannot authenticate the other. A 204 challenge must have an empty response body; a plugin answer combining 204 with a nonempty body returns 500 plugin_invalid_response. The same IP allowlist, token bucket, idempotency and audit rules as POST apply. Signature routes bypass the response cache so every admitted call reaches provider verification. Signature GET routes need no bearer key and bypass POST signature and replay checks; the provider challenge is still verified and answered by the plugin.
 
 **Parameters**
 
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
+| `Idempotency-Key` | header | string |  | Optional opaque key of 1–256 bytes, scoped to the instance. Authorized requests replay the first completed plugin/ingestion answer within the deployment TTL for quivr_key and instance_token routes (default 24h), without calling the plugin or charging another rate token. Authentication, route/body validation, IP and rate refusals do not reserve keys. Reusing a key on another declared route still replays its original answer. Minimum length `1`. Maximum length `256`. |
 | `connector_id` | path | string | yes |  |
 | `path` | path | string | yes | The declared relative route path, including any nested segments and filled template values. Maximum length `8192`. |
 
@@ -1159,6 +1163,7 @@ Resolve a declared GET route with the same request limits and deadline as POST. 
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `text/plain` string<br><br>Header `Quivr-Response-Origin`: string. Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged. | The plugin's synchronous challenge answer. |
+| `429` | `application/json` [`Error`](#error)<br><br>Header `Retry-After`: integer. Seconds until the next rate token. | Instance token bucket exhausted; no plugin call or idempotency reservation. |
 | `default` | `application/json` [`Error`](#error)<br><br>Header `Quivr-Response-Origin`: string. Present with value plugin only for a plugin-defined reply, whose status, content type and body are forwarded unchanged. | Structured engine error, or the plugin's refusal answer. |
 
 #### `GET /v0/connectors/{connector_id}`
@@ -1655,6 +1660,29 @@ One Record Version's finished steps in time order, each with how long it took si
 | --- | --- | --- |
 | `200` | `application/json` [`DocumentTimeline`](#documenttimeline) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without observability:read, 404 not found, 503 storage unavailable. |
+
+#### `GET /v0/admin/stats/connector-pushes`
+
+Operation `listConnectorPushStats`. Requires `observability:read`.
+
+Count accepted and refused pushes per source instance
+
+Per-instance attempts to declared source API routes, split into received (2xx, including cached answers and GET challenges) and refused (all other answers). Includes authentication, scope, body, rate and IP refusals for existing instances. No payload, credentials, client IP or raw idempotency key is stored. Audit events and counters commit together. Requires observability:read on all Corpora; returns only the key's Organization. Uses the Spec 16 rollup windows and retention. By default lists the largest 100 instance/outcome pairs, with a total across every pair. Use connector_id to read both outcomes of one instance; its total then covers that instance only.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `window` | query | string |  | One of `1h`, `24h`, `7d`. Default `1h`. |
+| `limit` | query | integer |  | Largest instance/outcome pairs to list; cannot be combined with connector_id. Default `100`. Minimum `1`. Maximum `100`. |
+| `connector_id` | query | string |  | Read both outcomes of this instance; cannot be combined with limit. Minimum length `1`. Maximum length `256`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`ConnectorPushStatsList`](#connectorpushstatslist) | Per-instance counters and time buckets. |
+| `default` | `application/json` [`Error`](#error) | Structured error. |
 
 #### `GET /v0/admin/stats/plugins`
 
@@ -6587,6 +6615,103 @@ properties:
 
 </details>
 
+### `ConnectorPushStats`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `connector_id` | string | yes |  |
+| `outcome` | string | yes | One of `received`, `refused`. |
+| `count` | integer | yes | Minimum `0`. |
+| `points` | array of [`CountPoint`](#countpoint) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  connector_id: {type: string}
+  outcome: {type: string, enum: [received, refused]}
+  count: {type: integer, minimum: 0}
+  points:
+    type: array
+    items: {$ref: '#/components/schemas/CountPoint'}
+required: [connector_id, outcome, count, points]
+```
+
+</details>
+
+### `ConnectorPushStatsList`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `window` | [`StatsWindowName`](#statswindowname) | yes |  |
+| `resolution_seconds` | integer | yes | Minimum `1`. |
+| `from` | string (date-time) | yes |  |
+| `to` | string (date-time) | yes |  |
+| `total` | integer | yes | Minimum `0`. |
+| `items` | array of [`ConnectorPushStats`](#connectorpushstats) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  window: {$ref: '#/components/schemas/StatsWindowName'}
+  resolution_seconds: {type: integer, minimum: 1}
+  from: {type: string, format: date-time}
+  to: {type: string, format: date-time}
+  total: {type: integer, minimum: 0}
+  items:
+    type: array
+    items: {$ref: '#/components/schemas/ConnectorPushStats'}
+required: [window, resolution_seconds, from, to, total, items]
+```
+
+</details>
+
+### `ConnectorPushPolicy`
+
+Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rate_per_second` | number (double) |  | Token refill rate per second (deployment default 10). Minimum `0.001`. Maximum `100000`. |
+| `burst` | integer |  | Token bucket capacity (deployment default 100). Minimum `1`. Maximum `100000`. |
+| `allowed_cidrs` | array of string |  | Allowed IPv4/IPv6 CIDRs; absent or empty permits every address. At most `256` items. Each item: Minimum length `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+description: >-
+  Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
+properties:
+  rate_per_second:
+    type: number
+    format: double
+    minimum: 0.001
+    maximum: 100000
+    description: Token refill rate per second (deployment default 10).
+  burst:
+    type: integer
+    minimum: 1
+    maximum: 100000
+    description: Token bucket capacity (deployment default 100).
+  allowed_cidrs:
+    type: array
+    maxItems: 256
+    items: {type: string, minLength: 1}
+    description: Allowed IPv4/IPv6 CIDRs; absent or empty permits every address.
+```
+
+</details>
+
 ### `ConnectorCreate`
 
 | Field | Type | Required | Description |
@@ -6595,6 +6720,7 @@ properties:
 | `corpus_id` | string | yes | Minimum length `1`. |
 | `source_namespace` | string | yes | Minimum length `1`. Maximum length `200`. |
 | `kind` | [`ConnectorKind`](#connectorkind) | yes |  |
+| `push_policy` | [`ConnectorPushPolicy`](#connectorpushpolicy) |  |  |
 | `config` | object | yes | Kind-specific configuration validated by the kind's JSON Schema. Holds no secret. |
 | `schedule` | [`ConnectorSchedule`](#connectorschedule) |  |  |
 | `health_policy` | [`ConnectorHealthPolicy`](#connectorhealthpolicy) |  |  |
@@ -6610,6 +6736,13 @@ Example `connector_create`:
   "kind": "fixture",
   "config": {
     "script": []
+  },
+  "push_policy": {
+    "rate_per_second": 2.5,
+    "burst": 10,
+    "allowed_cidrs": [
+      "192.0.2.0/24"
+    ]
   },
   "schedule": {
     "interval_seconds": 300
@@ -6646,6 +6779,8 @@ properties:
     maxLength: 200
   kind:
     $ref: '#/components/schemas/ConnectorKind'
+  push_policy:
+    $ref: '#/components/schemas/ConnectorPushPolicy'
   config:
     type: object
     description: Kind-specific configuration validated by the kind's JSON Schema. Holds no secret.
@@ -6905,6 +7040,7 @@ required:
 | `corpus_id` | string | yes | Minimum length `1`. |
 | `source_namespace` | string | yes | Minimum length `1`. |
 | `kind` | [`ConnectorKind`](#connectorkind) | yes |  |
+| `push_policy` | [`ConnectorPushPolicy`](#connectorpushpolicy) |  |  |
 | `config` | object | yes |  |
 | `schedule` | object | yes |  |
 | `schedule.interval_seconds` | integer | yes | Minimum `1`. |
@@ -6928,6 +7064,13 @@ Example `connector`:
   "kind": "fixture",
   "config": {
     "script": []
+  },
+  "push_policy": {
+    "rate_per_second": 2.5,
+    "burst": 10,
+    "allowed_cidrs": [
+      "192.0.2.0/24"
+    ]
   },
   "schedule": {
     "interval_seconds": 300
@@ -7025,6 +7168,8 @@ properties:
     minLength: 1
   kind:
     $ref: '#/components/schemas/ConnectorKind'
+  push_policy:
+    $ref: '#/components/schemas/ConnectorPushPolicy'
   config:
     type: object
   schedule:
