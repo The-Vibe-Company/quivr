@@ -36,9 +36,8 @@ func probeStatus(t *testing.T, url string) int {
 }
 
 // TestNormalizerOutageKeepsThePlatformHealthy runs while the pinned plugin is
-// stopped: a routed Blob waits (retrying, never quarantined) for longer than
-// the workflow's longest retry interval, while the API, text ingestion and
-// search keep working.
+// stopped: a routed Blob reports the outage while the API, text ingestion and
+// search keep working. Temporal's workflow test owns the retry lifetime.
 func TestNormalizerOutageKeepsThePlatformHealthy(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_NORMALIZER_OUTAGE") == "" {
 		t.Skip("scripts/normalizer_plugin.py runs it with the plugin stopped")
@@ -65,24 +64,31 @@ func TestNormalizerOutageKeepsThePlatformHealthy(t *testing.T) {
 		t.Fatalf("search during the outage: %v", hits)
 	}
 
-	// Longer than the 30 s maximum retry interval of external normalization.
-	deadline := time.Now().Add(40 * time.Second)
-	for time.Now().Before(deadline) {
+	// Wait for the public outage diagnostic, then let the harness restart the
+	// plugin immediately rather than holding it down for a retry interval.
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(100 * time.Millisecond)
+	defer poll.Stop()
+	for {
 		r := request(t, "GET", "/v0/ingestion-receipts/"+routed, admin, nil, 200)
 		if r["state"] != "pending" {
 			t.Fatalf("an unavailable plugin resolved the receipt: %v", r)
 		}
-		for _, probe := range []string{"QUIVR_TEST_API_PROBE_URL", "QUIVR_TEST_WORKER_PROBE_URL"} {
-			if status := probeStatus(t, os.Getenv(probe)+"/healthz"); status != 204 {
-				t.Fatalf("%s /healthz answered %d during the plugin outage", probe, status)
-			}
+		diagnostics, _ := r["diagnostics"].([]any)
+		if len(diagnostics) == 1 && diagnostics[0].(map[string]any)["code"] == "plugin_unavailable" && diagnostics[0].(map[string]any)["retryable"] == true {
+			break
 		}
-		time.Sleep(2 * time.Second)
+		select {
+		case <-deadline.C:
+			t.Fatalf("receipt never reported the plugin outage: %v", r)
+		case <-poll.C:
+		}
 	}
-	r := request(t, "GET", "/v0/ingestion-receipts/"+routed, admin, nil, 200)
-	diagnostics, _ := r["diagnostics"].([]any)
-	if r["state"] != "pending" || len(diagnostics) != 1 || diagnostics[0].(map[string]any)["code"] != "plugin_unavailable" || diagnostics[0].(map[string]any)["retryable"] != true {
-		t.Fatalf("receipt during the outage: %v", r)
+	for _, probe := range []string{"QUIVR_TEST_API_PROBE_URL", "QUIVR_TEST_WORKER_PROBE_URL"} {
+		if status := probeStatus(t, os.Getenv(probe)+"/healthz"); status != 204 {
+			t.Fatalf("%s /healthz answered %d during the plugin outage", probe, status)
+		}
 	}
 	state, _ := json.Marshal(outageState{Corpus: corpusID, Receipt: routed})
 	if err := os.WriteFile(outageStatePath(), state, 0o600); err != nil {

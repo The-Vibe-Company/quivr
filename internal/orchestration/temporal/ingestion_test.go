@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/converter"
+	sdktemporal "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 )
@@ -22,6 +24,7 @@ type fakeSteps struct {
 	runs, normalized, enriched int
 	heard                      func(ctx context.Context) bool
 	unheard                    []string
+	normalizeErr               error
 }
 
 func (f *fakeSteps) step(ctx context.Context) {
@@ -43,7 +46,7 @@ func (f *fakeSteps) Run(ctx context.Context, _, _ string) error {
 func (f *fakeSteps) Normalize(ctx context.Context, _, _ string) error {
 	f.step(ctx)
 	f.normalized++
-	return nil
+	return f.normalizeErr
 }
 
 func (f *fakeSteps) Enrich(ctx context.Context, _, _ string) error {
@@ -52,9 +55,9 @@ func (f *fakeSteps) Enrich(ctx context.Context, _, _ string) error {
 	return nil
 }
 
-// ingestionRun executes the ingestion workflow with the real activities over
-// fake steps, and returns the heartbeat timeout each step was scheduled with.
-func ingestionRun(t *testing.T, process ...bool) (*fakeSteps, map[string]time.Duration, error) {
+// ingestionEnvironment registers the real workflow and activities over fake
+// steps, and records the heartbeat timeout each step was scheduled with.
+func ingestionEnvironment(t *testing.T, process ...bool) (*testsuite.TestWorkflowEnvironment, *fakeSteps, map[string]time.Duration) {
 	t.Helper()
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
@@ -89,11 +92,40 @@ func ingestionRun(t *testing.T, process ...bool) (*fakeSteps, map[string]time.Du
 	}}
 	env.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-e5-v3"})
 	registerIngestion(env, steps, unpinned{})
+	return env, steps, timeouts
+}
+
+func ingestionRun(t *testing.T, process ...bool) (*fakeSteps, map[string]time.Duration, error) {
+	t.Helper()
+	env, steps, timeouts := ingestionEnvironment(t, process...)
 	env.ExecuteWorkflow("process-e5-v3", Input{Organization: "org_a", ReceiptID: "receipt_1"})
 	if !env.IsWorkflowCompleted() {
 		t.Fatal("workflow did not complete")
 	}
 	return steps, timeouts, env.GetWorkflowError()
+}
+
+// Normalization owns the no-failed-outcome contract in
+// TestUnavailablePluginNeverQuarantines. Here the real workflow must keep
+// retrying that error without advancing to publication or enrichment.
+func TestUnavailableNormalizerKeepsWorkflowPendingBeyondRetryInterval(t *testing.T) {
+	env, steps, _ := ingestionEnvironment(t, true, false)
+	steps.normalizeErr = errors.New("plugin_unavailable: connection refused")
+	observed := false
+	env.RegisterDelayedCallback(func() {
+		observed = true
+		if env.IsWorkflowCompleted() || steps.normalized <= 5 || steps.runs != 1 || steps.enriched != 0 {
+			t.Errorf("after two simulated minutes: completed %t, normalization attempts %d, publication runs %d, enrichments %d", env.IsWorkflowCompleted(), steps.normalized, steps.runs, steps.enriched)
+		}
+		env.CancelWorkflow()
+	}, 2*time.Minute)
+	env.ExecuteWorkflow("process-e5-v3", Input{Organization: "org_a", ReceiptID: "receipt_1"})
+	if !observed {
+		t.Fatal("workflow stopped before the simulated outage exceeded the 30s retry interval")
+	}
+	if err := env.GetWorkflowError(); !sdktemporal.IsCanceledError(err) {
+		t.Fatalf("workflow ended with %v, want cancellation after observing the pending outage", err)
+	}
 }
 
 func TestContentWithoutNormalizationRunsNoNormalizationActivity(t *testing.T) {
