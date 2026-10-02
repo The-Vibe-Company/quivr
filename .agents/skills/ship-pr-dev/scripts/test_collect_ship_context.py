@@ -3,6 +3,9 @@
 import importlib.util
 import sys
 import unittest
+import tempfile
+import subprocess
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -17,6 +20,22 @@ spec.loader.exec_module(collector)
 
 
 class CollectShipContextTests(unittest.TestCase):
+    # Armada additions: fail closed on missing bases and inventory all CI files.
+    def test_unknown_or_stale_base_requires_explicit_ref(self):
+        with patch.object(collector, "git", return_value=subprocess.CompletedProcess([], 1, "", "")):
+            with self.assertRaisesRegex(SystemExit, "--base"):
+                collector.detect_base(Path("/synthetic"))
+        with patch.object(collector, "git", return_value=subprocess.CompletedProcess([], 1, "", "bad ref")):
+            with self.assertRaisesRegex(SystemExit, "bad ref"):
+                collector.required_git(Path("/synthetic"), ["diff", "missing...HEAD"])
+
+    def test_circleci_inventory_includes_its_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".circleci").mkdir()
+            (root / ".circleci/config.yml").write_text("version: 2.1\n")
+            self.assertEqual(collector.find_project_files(root)[1], [".circleci/config.yml"])
+
     def test_agent_skill_paths_do_not_trigger_application_risk(self):
         impact = collector.classify_impact(
             [

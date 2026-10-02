@@ -10,6 +10,7 @@ Armada never calls a runtime. This guide tells a coordinator running inside Clau
 - A worker is one background subagent. Its Armada handle is its name: the ticket id in lowercase (`abc-12` for ABC-12), which the brief's claim line already uses. The worker's claim comment carries it, so `armada status` and the ticket lead back to the subagent.
 - **It shares your machine and environment**: your `gh` sign-in for its pushes, your installed `armada`, and every environment variable of your session. A worker needs no key: the prompt of `armada brief` carries a one-time launch token, and its first command exchanges it for a session limited to its ticket, kept in the machine's credentials file next to your own sign-in. Because it inherits your environment, an `ARMADA_TICKET` of yours is not its ticket: the brief tells it to pass `--ticket` to every command.
 - Run `armada watch` in the background while a worker is in flight, as the coordinator skill says: a worker's question, plan or hand-back reaches your inbox, not your conversation. The task notification Claude Code sends when a subagent stops is a hint to look, not the record.
+- `armada inbox` and `armada status` run fine while a watch runs: never stop it to read the inbox or the fleet. To stop this project's watch, use `armada watch --stop`, never `pkill` or `killall` patterns: those can kill other projects' watches on the same machine.
 
 ## Launch
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Collect deterministic branch context for ship-pr-dev."""
+# Modified by Armada: fail closed on invalid Git bases; include CI directories.
 
 from __future__ import annotations
 
@@ -56,19 +57,27 @@ def git(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
     return run(cwd, ["git", *args])
 
 
+def required_git(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    result = git(cwd, args)
+    if result.returncode != 0:
+        raise SystemExit(f"git {args[0]} failed: {result.stderr.strip() or 'no valid branch context'}")
+    return result
+
+
 def lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if line.strip()]
 
 
 def detect_base(repo_root: Path) -> str:
     origin_head = git(repo_root, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
-    if origin_head.returncode == 0 and origin_head.stdout.strip():
+    if (origin_head.returncode == 0 and origin_head.stdout.strip()
+            and git(repo_root, ["rev-parse", "--verify", "--quiet", origin_head.stdout.strip()]).returncode == 0):
         return origin_head.stdout.strip()
 
     for candidate in ("origin/main", "origin/master", "main", "master"):
         if git(repo_root, ["rev-parse", "--verify", "--quiet", candidate]).returncode == 0:
             return candidate
-    return "origin/main"
+    raise SystemExit("Cannot detect a shipping base; rerun with --base <PR-target-ref>.")
 
 
 def parse_name_status(output: str) -> list[dict[str, str]]:
@@ -147,8 +156,7 @@ def find_project_files(repo_root: Path) -> tuple[list[str], list[str]]:
         if path.is_file() and path.name in MANIFEST_NAMES:
             manifests.append(rel)
         if path.is_file() and (
-            any(rel.startswith(part) for part in CI_PARTS if "/" in part)
-            or rel in CI_PARTS
+            any(rel == part or rel.startswith(f"{part}/") for part in CI_PARTS)
         ):
             ci_files.append(rel)
     return sorted(manifests), sorted(ci_files)
@@ -169,16 +177,16 @@ def main() -> None:
 
     branch = git(repo_root, ["branch", "--show-current"]).stdout.strip() or "DETACHED"
     base = args.base or detect_base(repo_root)
-    merge_base_result = git(repo_root, ["merge-base", base, "HEAD"])
-    merge_base = merge_base_result.stdout.strip() if merge_base_result.returncode == 0 else None
+    merge_base_result = required_git(repo_root, ["merge-base", base, "HEAD"])
+    merge_base = merge_base_result.stdout.strip()
     diff_range = f"{base}...HEAD"
 
-    name_status = git(repo_root, ["diff", "--name-status", diff_range])
-    staged_status = git(repo_root, ["diff", "--cached", "--name-status"])
-    unstaged_status = git(repo_root, ["diff", "--name-status"])
-    branch_stat = git(repo_root, ["diff", "--stat", diff_range])
-    local_stat = git(repo_root, ["diff", "--stat", "HEAD"])
-    status = git(repo_root, ["status", "--short"])
+    name_status = required_git(repo_root, ["diff", "--name-status", diff_range])
+    staged_status = required_git(repo_root, ["diff", "--cached", "--name-status"])
+    unstaged_status = required_git(repo_root, ["diff", "--name-status"])
+    branch_stat = required_git(repo_root, ["diff", "--stat", diff_range])
+    local_stat = required_git(repo_root, ["diff", "--stat", "HEAD"])
+    status = required_git(repo_root, ["status", "--short"])
     untracked_files = parse_untracked_status(status.stdout)
     changed_files = merge_changed_files(
         parse_name_status(name_status.stdout),

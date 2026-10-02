@@ -48,6 +48,7 @@ Repeat from step 1.
 
 You only learn of something new when a command you run ends. So while a worker is in flight, always have exactly one `armada watch` running, in the background (in Claude Code, a Bash command with `run_in_background`; in another runtime, its own way of running a command in the background). It waits until something needs you (a question, a plan, a request, a hand-back, a silent worker or one that never started, you have not been shown yet), prints it and exits, and you are woken. Armada being down or a command time limit does not end it, and it tells the dashboard you are at work.
 
+- `armada inbox` and `armada status` run fine while a watch runs: never stop it to read the inbox or the fleet. To stop this project's watch, use `armada watch --stop`, never `pkill` or `killall` patterns: those can kill other projects' watches on the same machine.
 - Start it as soon as a worker is in flight, and start it again right after acting on what it returned. Never end your turn with a worker in flight and no watch running: that is how a hand-back sits unmerged.
 - The last line of `armada inbox`, `armada watch`, `armada merge` and `armada brief` says whether to: `2 workers in flight (ABC-1, ABC-2) — keep watching: armada watch`, `armada watch is already running (pid …)`, or `nothing to watch`. Follow it. A second `armada watch` on the same project only says the first one is running.
 - `armada watch` exits with "nothing to watch" when no worker is in flight and nothing is open: the round is over.

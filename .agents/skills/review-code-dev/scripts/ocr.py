@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run pinned OCR delegation on macOS/Linux; bootstrap without Node or LLM config."""
+# Modified by Armada: read-only setup diagnostics for armada doctor.
 from __future__ import annotations
 
 import hashlib
@@ -64,9 +65,32 @@ def ensure_binary() -> Path:
     return binary
 
 
+def check_setup() -> int:
+    """Inspect the cache without writing, downloading or executing a binary."""
+    key = target(platform.system(), platform.machine())
+    root = Path(os.environ.get("REVIEW_CODE_OCR_HOME", str(Path.home() / ".local/share/review-code-dev/ocr"))).expanduser().resolve()
+    binary = root / VERSION / key / "ocr"
+    if binary.exists():
+        if digest(binary) != CHECKSUMS[key]:
+            raise RuntimeError("OCR checksum mismatch; inspect the cache before running review.")
+        if not os.access(binary, os.X_OK):
+            raise RuntimeError("Verified OCR cache is not executable; restore its execute permission.")
+        print(f"OCR {VERSION} ({key}) cached binary verified; no execution performed.")
+        return 0
+    parent = binary.parent
+    while not parent.exists() and parent != parent.parent:
+        parent = parent.parent
+    if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
+        raise RuntimeError("OCR cache is not writable; choose a writable REVIEW_CODE_OCR_HOME.")
+    print(f"OCR {VERSION} ({key}) not cached; first review needs HTTPS access to github.com/alibaba/open-code-review/releases and its release asset host. No API key or LLM endpoint is required.")
+    return 2
+
+
 def main(args: list[str]) -> int:
+    if args == ["check"]:
+        return check_setup()
     if args == ["--help"] or not args:
-        print("Usage: python3 ocr.py version | delegate preview [flags] | delegate rule [flags] -- <paths>\n"
+        print("Usage: python3 ocr.py check | version | delegate preview [flags] | delegate rule [flags] -- <paths>\n"
               "First call downloads checksum-pinned OCR. No API key, Node, sudo, or PATH change.\n"
               "Optional REVIEW_CODE_OCR_HOME overrides the user cache directory.")
         return 0

@@ -52,6 +52,22 @@ A skill for performing AI code review where OCR provides deterministic engineeri
 
 ## Distribution setup (local adaptation)
 
+<!-- Modified by Armada: setup diagnostics and precise runtime requirements. -->
+
+`armada doctor` checks Python 3.9+, Git 2.41+ and the OCR cache without
+downloading or executing OCR. You can also run
+`python3 "$SKILL_DIR/scripts/ocr.py" check`: exit 0 means the cached binary
+matches its pinned checksum, exit 2 means a first download is needed, and
+exit 1 reports an unsupported platform, bad checksum or unusable cache.
+The cache defaults to `~/.local/share/review-code-dev/ocr`; the optional
+`REVIEW_CODE_OCR_HOME` overrides it. A first download needs HTTPS access to
+`github.com/alibaba/open-code-review/releases` and GitHub's release asset host,
+plus a writable cache. Supported platforms are macOS/Linux on x86_64/ARM64.
+Delegation needs an isolated host reviewer with normal model access; it does
+not need an Alibaba service account, API key, Node, sudo or OCR LLM endpoint.
+Skillpack activation reporting is optional and is skipped with
+`SKILLPACK_TELEMETRY=0`; its availability never gates a review.
+
 This is Alibaba's `open-code-review-delegate` skill from release v1.12.1,
 distributed under the existing `review-code-dev` name. The upstream workflow below
 is preserved. See `UPSTREAM.md` for attribution and the local changes.

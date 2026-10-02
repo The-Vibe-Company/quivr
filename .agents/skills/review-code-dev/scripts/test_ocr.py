@@ -16,6 +16,30 @@ spec.loader.exec_module(ocr)
 
 
 class BootstrapTests(unittest.TestCase):
+    # Armada addition: doctor must never install or execute OCR.
+    def test_check_is_read_only_and_verifies_cached_content(self):
+        data = b"synthetic binary"
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict(os.environ, {"REVIEW_CODE_OCR_HOME": tmp}), \
+             patch.object(ocr.platform, "system", return_value="Linux"), \
+             patch.object(ocr.platform, "machine", return_value="x86_64"), \
+             patch.dict(ocr.CHECKSUMS, {"linux-amd64": hashlib.sha256(data).hexdigest()}), \
+             patch.object(ocr.urllib.request, "urlopen") as download, \
+             patch.object(ocr.subprocess, "run") as execute, \
+             patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(ocr.main(["check"]), 2)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+            binary = Path(tmp) / ocr.VERSION / "linux-amd64" / "ocr"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(data)
+            binary.chmod(0o755)
+            self.assertEqual(ocr.main(["check"]), 0)
+            binary.write_bytes(b"corrupt")
+            with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                ocr.main(["check"])
+            download.assert_not_called()
+            execute.assert_not_called()
+
     def test_platforms(self):
         for system, machine, expected in [
             ("Darwin", "arm64", "darwin-arm64"), ("Darwin", "x86_64", "darwin-amd64"),
