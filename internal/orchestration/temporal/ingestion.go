@@ -299,6 +299,10 @@ func (r *Runtime) Close() {
 	}
 	r.Client.Close()
 }
+
+// ingestionDispatchBatch bounds outstanding leases and work per polling tick.
+const ingestionDispatchBatch = 32
+
 func (r *Runtime) dispatch(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
@@ -310,28 +314,41 @@ func (r *Runtime) dispatch(ctx context.Context) {
 		}
 		attempt, cancel := context.WithTimeout(ctx, 3*time.Second)
 		r.dispatchOperation(attempt)
-		d, err := r.Store.Claim(attempt)
-		if err == nil {
-			_, err = r.Client.ExecuteWorkflow(attempt, client.StartWorkflowOptions{ID: content.StableID("ingestion-e5-v4", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "process-e5-v3", Input{Organization: d.Organization, ReceiptID: d.ReceiptID})
-			var already *serviceerror.WorkflowExecutionAlreadyStarted
-			if err == nil || errors.As(err, &already) {
-				err = r.Store.Dispatched(attempt, d)
-			}
-			if err != nil {
-				feedback, finish := context.WithTimeout(ctx, time.Second)
-				_ = r.Store.Progress(feedback, d.Organization, d.ReceiptID, "retrying", "dispatch_unavailable")
-				finish()
-				slog.Warn("ingestion dispatch pending", "receipt_id", d.ReceiptID)
-			}
-		} else if !errors.Is(err, content.ErrNoDispatch) {
-			slog.Warn("outbox temporarily unavailable")
-		}
+		cancel()
+		// Give ingestion its own bounded attempt, so a slow operation start cannot
+		// consume the batch's time. This stays below the store's five-second lease.
+		attempt, cancel = context.WithTimeout(ctx, 3*time.Second)
+		r.dispatchIngestion(attempt)
 		cancel()
 	}
 }
 
+func (r *Runtime) dispatchIngestion(ctx context.Context) {
+	batch, err := r.Store.Claim(ctx, ingestionDispatchBatch)
+	if err != nil {
+		slog.Warn("outbox temporarily unavailable")
+		return
+	}
+	for _, d := range batch {
+		if ctx.Err() != nil {
+			return
+		}
+		_, err = r.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: content.StableID("ingestion-e5-v4", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "process-e5-v3", Input{Organization: d.Organization, ReceiptID: d.ReceiptID})
+		var already *serviceerror.WorkflowExecutionAlreadyStarted
+		if err == nil || errors.As(err, &already) {
+			err = r.Store.Dispatched(ctx, d)
+		}
+		if err != nil {
+			// Feedback shares the batch deadline; unavailable dependencies must not
+			// extend dispatch beyond its lease or hold the next polling tick forever.
+			_ = r.Store.Progress(ctx, d.Organization, d.ReceiptID, "retrying", "dispatch_unavailable")
+			slog.Warn("ingestion dispatch pending", "receipt_id", d.ReceiptID)
+		}
+	}
+}
+
 type DispatchStore interface {
-	Claim(context.Context) (content.Dispatch, error)
+	Claim(context.Context, int) ([]content.Dispatch, error)
 	Dispatched(context.Context, content.Dispatch) error
 	ClaimOperation(context.Context) (operations.Dispatch, error)
 	OperationDispatched(context.Context, operations.Dispatch) error

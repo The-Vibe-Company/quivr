@@ -557,15 +557,37 @@ func (s ContentStore) Resolve(ctx context.Context, scope corpus.Scope, relations
 	return resolved, nil
 }
 
-func (s ContentStore) Claim(ctx context.Context) (content.Dispatch, error) {
-	var d content.Dispatch
-	err := s.Pool.QueryRow(ctx, `UPDATE ingestion_outbox SET lease_until=now()+interval '5 seconds' WHERE (organization,receipt_id)=(SELECT organization,receipt_id FROM ingestion_outbox WHERE NOT dispatched AND lease_until<now() ORDER BY receipt_id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING organization,receipt_id`).Scan(&d.Organization, &d.ReceiptID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		err = content.ErrNoDispatch
+// Claim leases a bounded batch in queue arrival order. A lease survives process
+// restarts; a lost acknowledgement may retry the same durable workflow identity.
+func (s ContentStore) Claim(ctx context.Context, limit int) ([]content.Dispatch, error) {
+	rows, err := s.Pool.Query(ctx, `WITH pending AS (
+ SELECT organization,receipt_id FROM ingestion_outbox
+ WHERE NOT dispatched AND lease_until<now()
+ ORDER BY enqueued_at,organization,receipt_id
+ FOR UPDATE SKIP LOCKED LIMIT $1
+ ), claimed AS (
+ UPDATE ingestion_outbox o SET lease_until=now()+interval '5 seconds'
+ FROM pending p WHERE (o.organization,o.receipt_id)=(p.organization,p.receipt_id)
+ RETURNING o.organization,o.receipt_id,o.enqueued_at
+ ) SELECT organization,receipt_id FROM claimed ORDER BY enqueued_at,organization,receipt_id`, limit)
+	if err != nil {
+		return nil, err
 	}
-	return d, err
+	defer rows.Close()
+	var batch []content.Dispatch
+	for rows.Next() {
+		var d content.Dispatch
+		if err := rows.Scan(&d.Organization, &d.ReceiptID); err != nil {
+			return nil, err
+		}
+		batch = append(batch, d)
+	}
+	return batch, rows.Err()
 }
+
 func (s ContentStore) Dispatched(ctx context.Context, d content.Dispatch) error {
-	_, err := s.Pool.Exec(ctx, "UPDATE ingestion_outbox SET dispatched=true WHERE organization=$1 AND receipt_id=$2", d.Organization, d.ReceiptID)
+	// Receipts and the change journal hold audit facts; delivery intents can go
+	// once Temporal has durably accepted their stable workflow identity.
+	_, err := s.Pool.Exec(ctx, "DELETE FROM ingestion_outbox WHERE organization=$1 AND receipt_id=$2", d.Organization, d.ReceiptID)
 	return err
 }
