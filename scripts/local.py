@@ -521,6 +521,13 @@ def contract_python():
 def validate_captures(stack):
     run([contract_python(),'scripts/validate_captures.py',str(stack.directory)])
 
+def lifecycle_required():
+    """Only CI with a known unchanged local.py may omit the expensive lifecycle proof."""
+    base=os.environ.get('QUIVR_VERIFY_BASE')
+    if not base:return True
+    changed=subprocess.run(['git','diff','--quiet',base,'HEAD','--','scripts/local.py'],cwd=ROOT)
+    return changed.returncode!=0  # A missing/invalid base is uncertainty: run the proof.
+
 def parts():
     """The full verification in parts (THE-755). Each part starts its own isolated stack and runs its
     steps in order, so a step sees only the state its own part built. CI runs the parts in parallel
@@ -544,7 +551,7 @@ def parts():
             # A cold query encoder and a fresh api answer the first semantic and hybrid searches (THE-813).
             step('first_search_after_start',verify_first_search),
             step('adapter_integration',adapters),
-            # The core.ingest plugin reproduces the engine's former segments and vectors, and is certified.
+            # Tokenizer-only golden parity and certification; full vectors run in ingest-parity nightly.
             step('core_ingest_plugin',core_ingest_plugin.verify),
             step('ingestion_outages',Stack.ingestion_outages),
             step('embedding_outage',verify_embedding_outage),
@@ -608,7 +615,7 @@ def parts():
             step('keyless_core',Stack.verify_keyless),
             step('validate_captures',validate_captures),
             # Last: stop/migrate/reset semantics on this isolated project.
-            step('lifecycle',verify_lifecycle)],
+            *([step('lifecycle',verify_lifecycle)] if lifecycle_required() else [])],
         # Connector acquisition keeps polling on its schedule, in its own Organization; then restart resumption.
         'connectors':setup+[
             # Connectors ingest PDF attachments; they run on the make dev default, the pdf-text pin.
@@ -629,9 +636,15 @@ def parts():
 # The browser demo (scripts/demo.py) runs on its own stack; it is the last part of `make verify`.
 DEMO='demo'
 
+def extra_parts():
+    """Explicit stack proofs outside the default PR lane."""
+    from lifecycle import verify as verify_lifecycle
+    return {'ingest-parity':[step('core_ingest_vector_parity',core_ingest_plugin.parity)],
+            'lifecycle':[step('lifecycle',verify_lifecycle)]}
+
 def verify(stack,steps,part):
     """Every step of one part, in order; each feature keeps its own tests."""
-    for entry in parts()[part]:entry(stack,steps)
+    for entry in (parts()|extra_parts())[part]:entry(stack,steps)
 
 def preparation(stack,steps):
     """Cold preparation (model/tokenizer download) is reported apart from the warm stack start."""
@@ -724,8 +737,9 @@ def main():
     except RuntimeError as error:sys.exit(str(error))
     if args.command!='verify':return run_stack(args.command)
     if MACOS:sys.exit('make verify runs on Linux x86_64 only, as in CI; on macOS, make dev and make check work.')
-    known=list(parts())+[DEMO]
-    chosen=[p for p in args.part.replace(' ',',').split(',') if p] or known
+    default=list(parts())+[DEMO]
+    known=default+list(extra_parts())
+    chosen=[p for p in args.part.replace(' ',',').split(',') if p] or default
     unknown=[p for p in chosen if p not in known]
     if unknown:parser.error(f"unknown part {', '.join(unknown)}; parts: {', '.join(known)}")
     # One part after another, each on a fresh stack; the first failed part stops the run.

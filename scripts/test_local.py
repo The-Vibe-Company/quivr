@@ -193,6 +193,43 @@ class StepsAndReport(unittest.TestCase):
             self.assertIn(want, text)
 
 
+class LifecycleRouting(unittest.TestCase):
+    """Exercise the plugins lane against real Git changes, including uncertain CI bases."""
+
+    def test_only_a_known_unchanged_harness_omits_lifecycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            def git(*args):
+                return subprocess.run(['git', *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+            git('init')
+            git('config', 'user.email', 'test@example.org')
+            git('config', 'user.name', 'Test')
+            (root / 'scripts').mkdir()
+            harness = root / 'scripts/local.py'
+            harness.write_text('initial\n')
+            git('add', 'scripts/local.py')
+            git('commit', '-m', 'initial')
+            base = git('rev-parse', 'HEAD')
+            (root / 'other.txt').write_text('unrelated\n')
+            git('add', 'other.txt')
+            git('commit', '-m', 'unrelated')
+            def selected(base):
+                names = []
+                steps = mock.Mock()
+                steps.run.side_effect = lambda name, *_: names.append(name)
+                with mock.patch.object(local, 'ROOT', root), mock.patch.dict(os.environ, {'QUIVR_VERIFY_BASE': base}):
+                    local.verify(mock.Mock(), steps, 'plugins')
+                return 'lifecycle' in names
+            self.assertFalse(selected(base), 'unrelated edits must omit the expensive lifecycle proof')
+            for uncertain in ['', '0' * 40, 'missing-base']:
+                with self.subTest(base=uncertain):
+                    self.assertTrue(selected(uncertain), 'uncertain metadata must retain lifecycle')
+            harness.write_text('changed\n')
+            git('add', 'scripts/local.py')
+            git('commit', '-m', 'change harness')
+            self.assertTrue(selected(base), 'a harness change must execute lifecycle')
+
+
 class FailureDrill(unittest.TestCase):
     def test_samples_and_correlated_log_lines(self):
         import failure_drill as fd

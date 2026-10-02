@@ -45,11 +45,11 @@ vectors, but a search waits behind bigger requests.
 
 `testdata/golden.json` holds what the engine produced before the move, for
 `testdata/parity-input.json`: segments, offsets, derivations, refusals and the
-SHA-256 of every float32 vector. `parity_test.go` holds the plugin to it bit
-for bit, with one window per TEI request and with 8. On another processor
-family than the capture's, where TEI rounds differently, it compares with the
-engine's former request to the same TEI. The verify stack runs it and certifies
-the plugin (`scripts/core_ingest_plugin.py`); `make check` only unit-tests it.
+SHA-256 of every float32 vector. `parity_test.go` compares single and 8-window
+TEI requests; on a different processor family it uses the engine's former
+request to the same TEI. PRs keep tokenizer-only parity and certification;
+`make check` only unit-tests it. Full vector parity runs nightly, on dispatch
+(`verify-nightly.yml`), or with `make verify part=ingest-parity`; failures publish the report.
 
 ## Moving an existing deployment
 

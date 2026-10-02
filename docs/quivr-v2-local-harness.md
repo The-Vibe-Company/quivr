@@ -316,7 +316,7 @@ locally and in CI; locally in this order, in CI as parallel jobs (below):
   the change feed and the CLI;
 - `monitoring`: monitoring, delivery across a worker restart and the journey;
 - `plugins`: normalizer and alert plugins, the runnable guides, the keyless core
-  and the lifecycle;
+  and, when the harness changes or change metadata is uncertain, the lifecycle;
 - `connectors`: connector acquisition and restart resumption;
 - `demo`: `scripts/demo.py verify`.
 
@@ -428,14 +428,20 @@ Each phase writes `journey-<phase>.json` with per-step timings. Each feature kee
 its own detailed tests. See [tests/acceptance/README.md](../tests/acceptance/README.md)
 for ordering rules, including waiting for enrichment before any search assertion.
 
-**Lifecycle.** The last step, `scripts/lifecycle.py`, proves on the verification
-project that:
+**Lifecycle.** The last step, `scripts/lifecycle.py`, runs in CI when
+`scripts/local.py` changes. Without a known base, it runs by default. You can
+run it directly with `make verify part=lifecycle`. It proves that:
 - `migrate` is idempotent while the project runs, and refused with guidance once
   it is stopped;
 - `down` then `dev` keeps a Corpus;
 - `reset` then `dev` starts with no Corpora.
 
 It writes `lifecycle.json`.
+
+**Ingestion parity.** PRs retain tokenizer-only golden comparisons and plugin
+certification. Full document and query vector parity runs nightly or on
+dispatch in `verify-nightly.yml`, and locally with `make verify part=ingest-parity`.
+Failures fail the job and publish the verification report and parity log.
 
 **Metrics and the failure drill.** Each process serves Prometheus text on its
 private probe listener at `GET /metrics`. There is no client library, and labels
@@ -578,8 +584,9 @@ Described alerts are offered (the pin's `kinds`) only when the plugin has a clas
 - `make verify` starts the fake System One server `alerts.fake_system_one` (log
   `.scratch/<project>/fake-system-one.log`), gives the plugin a test key and the
   fake's URL, and never calls TypeSafe. The `described_alerts` step checks that
-  rephrased and translated articles alert, that an unrelated one does not, and that
-  each article costs one classifier call. The keyless restart pins
+  a fitting article creates a public Match with classifier evidence. Plugin unit
+  tests own negative decisions, thresholds and classifier-call deduplication.
+  The keyless restart pins
   `"kinds": ["keywords"]` and checks that a described alert is refused with 422.
 - `make dev` offers them when `TYPESAFE_API_KEY` is set in its environment; the
   plugin then sends article text to TypeSafe. Otherwise it pins

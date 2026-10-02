@@ -238,17 +238,12 @@ func TestMonitoringSupersededNotice(t *testing.T) {
 	}
 	deliveredAsPolled(t, receiver, corrected)
 	superseded := awaitDelivery(t, admin, stale, func(d map[string]any) bool {
-		return d["state"] == "pending" && reflect.DeepEqual(d["admission"], map[string]any{"allowed": false, "reason": "superseded"})
+		return d["state"] == "pending" && d["next_attempt_at"] == nil && reflect.DeepEqual(d["admission"], map[string]any{"allowed": false, "reason": "superseded"})
 	})
 	if superseded["state"] != "pending" || superseded["next_attempt_at"] != nil {
 		t.Fatal("superseded Delivery", superseded)
 	}
-	// No attempt after it is superseded, beyond the harness's longest retry wait.
-	attempts := len(attemptOutcomes(t, stale))
-	time.Sleep(quietPeriod)
-	if now := request(t, "GET", "/v0/deliveries/"+stale, admin, nil, 200); now["attempt_count"] != float64(attempts) || len(receiver.capturesOf(created["event_id"].(string))) != attempts {
-		t.Fatal("superseded notice was attempted again", now)
-	}
+	// The adapter owner exercises refusal and proves no attempt is created.
 	// Nothing is lost: the undelivered Match stays readable by id.
 	request(t, "GET", "/v0/matches/"+refsOf(created)["match_id"].(string), admin, nil, 200)
 }

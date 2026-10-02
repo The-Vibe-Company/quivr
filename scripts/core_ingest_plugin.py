@@ -3,9 +3,8 @@
 core.ingest (plugins/core-ingest) needs the stack's TEI and the pinned
 tokenizer, so `make check` only vets and unit-tests it; here, on the stack:
 
-1. its parity test reproduces testdata/golden.json, captured from the engine's
-   own segmentation and TEI embedding before they moved into the plugin: the
-   same segments, offsets and derivations, and the same float32 vectors;
+1. PR parity checks the engine's segments, offsets, derivations and refusals
+   with the pinned tokenizer; the nightly lane also compares TEI vectors;
 2. `quivr plugin test` certifies it with a fixture carrying the stack's pin
    configuration (report: core-ingest-contract-report.json).
 """
@@ -35,11 +34,19 @@ def fixture(stack):
     return path
 
 
+def parity(stack, vectors=True):
+    """Use the existing golden test's tokenizer-only mode on PRs, full TEI mode nightly."""
+    config = stack.directory / 'core-ingest-parity.json'
+    configuration = pin_configuration(stack)
+    if not vectors:
+        configuration['tei_url'] = ''
+    config.write_text(json.dumps(configuration))
+    stack.go_test(['-count=1', '-run', '^TestReproducesTheEngineGoldens$', '-v', '.'], {**os.environ, 'QUIVR_CORE_INGEST_CONFIG': str(config)}, 'core-ingest-parity', cwd=PLUGIN)
+
+
 def verify(stack):
     started = time.monotonic()
-    config = stack.directory / 'core-ingest-parity.json'
-    config.write_text(json.dumps(pin_configuration(stack)))
-    stack.go_test(['-count=1', '-run', '^TestReproducesTheEngineGoldens$', '-v', '.'], {**os.environ, 'QUIVR_CORE_INGEST_CONFIG': str(config)}, 'core-ingest-parity', cwd=PLUGIN)
+    parity(stack, vectors=False)
     report = stack.directory / 'core-ingest-contract-report.json'
     log = stack.directory / 'core-ingest-contract.log'
     with log.open('w') as out:
@@ -47,4 +54,4 @@ def verify(stack):
                               cwd=PLUGIN, stdout=out, stderr=subprocess.STDOUT).returncode
     text = log.read_text()
     assert code == 0 and '\nCERTIFIED' in '\n' + text and 'PASS  segments_only' in text, f'quivr plugin test did not certify core.ingest; inspect {log}'
-    (stack.directory / 'core-ingest.json').write_text(json.dumps({'parity': 'passed', 'certified': True, 'seconds': round(time.monotonic() - started, 1)}))
+    (stack.directory / 'core-ingest.json').write_text(json.dumps({'parity': 'tokenizer-only', 'certified': True, 'seconds': round(time.monotonic() - started, 1)}))

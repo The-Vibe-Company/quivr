@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -172,9 +174,11 @@ func TestReproducesTheEngineGoldens(t *testing.T) {
 	if err = json.Unmarshal(config, &pinned); err != nil {
 		t.Fatal(err)
 	}
-	// Without a TEI (a tokenizer-only check), segments are compared and vectors skipped.
+	// Without a TEI, compare segments and query normalization with the real
+	// pinned tokenizer; only vector comparisons need the full nightly lane.
 	vectors := pinned.TEIURL != ""
 	if !vectors {
+		// The pin schema requires an HTTP endpoint even for segments-only calls.
 		pinned.TEIURL = "http://127.0.0.1:9"
 		config, _ = json.Marshal(pinned)
 	}
@@ -300,12 +304,29 @@ func TestReproducesTheEngineGoldens(t *testing.T) {
 		}
 	}
 	queries := 0
+	var queryWindows TokenWindows
+	if !vectors {
+		tokenizer := &Server{Config: pinned.Tokenizer}
+		defer tokenizer.Close()
+		queryWindows = TokenWindows{Tokenizer: tokenizer}
+	}
 	for n, q := range input.Queries {
 		g := want.Queries[n]
 		normalized, ok := engineQuery(q.value)
 		if !ok {
 			if !g.Refused {
 				t.Errorf("query %d: the engine accepted it", n)
+			}
+			continue
+		}
+		if !vectors {
+			got, err := queryWindows.NormalizeQuery(context.Background(), normalized)
+			if g.Refused {
+				if !errors.Is(err, errInvalidQuery) {
+					t.Errorf("query %d: the engine refused it; tokenizer answered %q, %v", n, got, err)
+				}
+			} else if err != nil || got != g.Normalized {
+				t.Errorf("query %d: normalized %q, %v; the engine %q", n, got, err, g.Normalized)
 			}
 			continue
 		}
@@ -320,9 +341,6 @@ func TestReproducesTheEngineGoldens(t *testing.T) {
 		}
 		if normalized != g.Normalized {
 			t.Errorf("query %d: normalized %q, the engine %q", n, normalized, g.Normalized)
-		}
-		if !vectors {
-			continue
 		}
 		var answer struct {
 			Vector []float64 `json:"vector"`

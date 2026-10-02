@@ -193,7 +193,7 @@ func awaitDelivery(t *testing.T, token, id string, done func(map[string]any) boo
 // through a real receiver: an acknowledged, authentic, reference-only notice
 // with the poll/SSE identity; tampering and staleness rejection; an unfollowed
 // redirect that ends exhausted after one attempt; bounded attempt history
-// without secrets; and no webhook for feed-only delivery.updated.
+// without secrets; and public delivery.updated transitions.
 func TestMonitoringDeliverySignedNotifications(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
@@ -319,9 +319,12 @@ func TestMonitoringDeliverySignedNotifications(t *testing.T) {
 		t.Fatal("SSE notice differs from the webhook", s, body)
 	}
 
-	// delivery.updated is feed-only: after a settle window the receiver saw
-	// exactly the two match.created notices once each, never the redirect target.
-	time.Sleep(3 * time.Second)
+	// Both attempts completed, so their admission and outcome transitions are
+	// committed. Wait for the public feed to expose those transitions.
+	// The PostgreSQL adapter test owns the feed-only/no-outbox invariant.
+	for _, id := range []string{ackedID, deliveryOf(redirected)} {
+		awaitChange(t, admin, c, start, "delivery.updated", id)
+	}
 	feed, _ := drain(t, admin, c, start, 0)
 	updates := 0
 	for _, item := range feed {

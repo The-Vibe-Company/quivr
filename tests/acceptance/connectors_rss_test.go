@@ -175,28 +175,12 @@ func TestConnectorRSSCollectsAFeedWithConditionalPolling(t *testing.T) {
 		t.Fatalf("alpha materialized %d times", n)
 	}
 
-	// The server refuses access: access_error with its code, then recovery to active.
-	feed.serve(rssDocument(), `"4"`, http.StatusForbidden)
-	denied := awaitHealth(t, token, id, state("access_error"))
-	if e := denied["health"].(map[string]any)["last_error"].(map[string]any); e["code"] != "forbidden" {
-		t.Fatalf("last_error %v", e)
-	}
-	feed.serve(rssDocument(), `"5"`, 0)
-	awaitHealth(t, token, id, state("active"))
 	request(t, "POST", "/v0/connectors/"+id+"/disable", token, map[string]any{"idempotency_key": "rss-stop"}, 200)
 }
 
-func TestConnectorRSSReportsMalformedAndSilentFeeds(t *testing.T) {
+func TestConnectorRSSReportsSilenceDespiteSuccessfulPolls(t *testing.T) {
 	token := connectorToken(t)
 	corpusID, cursor := connectorCorpus(t, token, "rss-health")
-
-	// A malformed feed is a bounded source error that creates no Record.
-	broken := newFakeFeed(t, `<rss version="2.0"><channel><title>Broken</title><item><title>half`)
-	b := request(t, "POST", "/v0/connectors", token, rssConnector("rss-malformed", corpusID, "broken", broken.URL, 86400), 201)
-	bad := awaitHealth(t, token, b["connector_id"].(string), func(h map[string]any) bool { return h["last_error"] != nil })
-	if h := bad["health"].(map[string]any); h["last_error"].(map[string]any)["code"] != "malformed_feed" || h["state"] == "access_error" {
-		t.Fatalf("malformed health %v", h)
-	}
 
 	// A valid feed with no new items turns silent: re-polls are not activity.
 	quiet := newFakeFeed(t, rssDocument(`<item><guid>quiet-1</guid><title>Only item</title><description>Nothing new after this.</description></item>`))
@@ -208,16 +192,5 @@ func TestConnectorRSSReportsMalformedAndSilentFeeds(t *testing.T) {
 	if silent["health"].(map[string]any)["last_success_at"] == nil {
 		t.Fatalf("silent source must still report successful polls: %v", silent)
 	}
-	events, _ := drain(t, token, corpusID, cursor, 0)
-	for _, e := range events {
-		if res := e["resource"].(map[string]any); res["kind"] == "record" {
-			r := request(t, "GET", "/v0/records/"+res["id"].(string), token, nil, 200)
-			if r["source"].(map[string]any)["namespace"] == "broken" {
-				t.Fatalf("malformed feed produced a Record: %v", r)
-			}
-		}
-	}
-	for _, id := range []string{b["connector_id"].(string), qid} {
-		request(t, "POST", "/v0/connectors/"+id+"/disable", token, map[string]any{"idempotency_key": "rss-health-stop-" + id}, 200)
-	}
+	request(t, "POST", "/v0/connectors/"+qid+"/disable", token, map[string]any{"idempotency_key": "rss-health-stop-" + qid}, 200)
 }

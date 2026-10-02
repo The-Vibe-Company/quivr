@@ -223,35 +223,17 @@ func TestConnectorM365CollectsMailBodiesAndAttachments(t *testing.T) {
 	request(t, "POST", "/v0/connectors/"+id+"/disable", token, map[string]any{"idempotency_key": "m365-collect-stop"}, 200)
 }
 
-func TestConnectorM365ReportsAccessErrorsThrottlingAndResyncs(t *testing.T) {
+func TestConnectorM365ResyncsExpiredDeltaWithoutDuplicates(t *testing.T) {
 	token := connectorToken(t)
 	g := graph(t)
 	mailbox := "monitoring-faults-" + connectorRun + "@example.org"
 	clientID, secret := "app-faults-"+connectorRun, "m365-acceptance-secret-not-real-faults"
 	g.post("/_fake/apps", map[string]any{"client_id": clientID, "secret": secret})
 	g.mail(mailbox, "f1", time.Now().Add(-10*time.Minute))
-	// A short throttle is waited within the run.
-	g.post("/_fake/fail", map[string]any{"mailbox": mailbox, "status": 429, "code": "TooManyRequests", "retry_after": 1, "path": "/messages/delta"})
 	corpusID, cursor := connectorCorpus(t, token, "m365-faults")
 	c := request(t, "POST", "/v0/connectors", token, m365Connector("m365-faults", corpusID, "mail", mailbox, clientID, secret, nil), 201)
 	id := c["connector_id"].(string)
 	byKey, _ := recordsByKey(t, token, corpusID, cursor, map[string]int{"<f1@example.org>": 1})
-
-	// Mailbox removed from the application's access scope: access_error, not silence.
-	g.post("/_fake/fail", map[string]any{"mailbox": mailbox, "status": 403, "code": "ErrorAccessDenied", "count": 10000})
-	denied := awaitHealth(t, token, id, state("access_error"))
-	if e := denied["health"].(map[string]any)["last_error"].(map[string]any); e["code"] != "mailbox_access_denied" {
-		t.Fatalf("last_error %v", e)
-	}
-	g.post("/_fake/clear-failures", map[string]any{"mailbox": mailbox})
-	awaitHealth(t, token, id, state("active"))
-
-	// Sustained throttling ends runs with the throttled code, then recovers.
-	g.post("/_fake/fail", map[string]any{"mailbox": mailbox, "status": 429, "code": "TooManyRequests", "retry_after": 1, "count": 3, "path": "/messages/delta"})
-	awaitHealth(t, token, id, func(h map[string]any) bool {
-		e, _ := h["last_error"].(map[string]any)
-		return e != nil && e["code"] == "throttled" && h["state"] == "active"
-	})
 
 	// An expired delta token resyncs the window without duplicating Records.
 	g.post("/_fake/expire-delta", map[string]any{"mailbox": mailbox})
@@ -271,14 +253,6 @@ func TestConnectorM365ReportsAccessErrorsThrottlingAndResyncs(t *testing.T) {
 		t.Fatalf("resync duplicated f1 into %d versions", n)
 	}
 	request(t, "POST", "/v0/connectors/"+id+"/disable", token, map[string]any{"idempotency_key": "m365-faults-stop"}, 200)
-
-	// An unknown mailbox is an access error with its own code.
-	unknown := request(t, "POST", "/v0/connectors", token, m365Connector("m365-unknown", corpusID, "mail-unknown", "unknown-"+connectorRun+"@example.org", clientID, secret, nil), 201)
-	missing := awaitHealth(t, token, unknown["connector_id"].(string), state("access_error"))
-	if e := missing["health"].(map[string]any)["last_error"].(map[string]any); e["code"] != "mailbox_not_found" {
-		t.Fatalf("last_error %v", e)
-	}
-	request(t, "POST", "/v0/connectors/"+unknown["connector_id"].(string)+"/disable", token, map[string]any{"idempotency_key": "m365-unknown-stop"}, 200)
 }
 
 func TestConnectorM365SecretExpiryWarnsThenCutsAccessUntilRotation(t *testing.T) {

@@ -255,10 +255,9 @@ def vectors(stack):
 
 
 def described(stack):
-    """Described alerts through plugins/alerts and the fake System One server: rephrased and
-    translated articles alert, an unrelated one does not, and one call serves every described alert.
-    A Subscription preview judges recent articles through the same plugin and saves nothing."""
-    stack.tests('^(TestDescribedAlerts|TestSubscriptionPreview)', environment(stack))
+    """A described alert exposes classifier evidence through the public Match.
+    Preview judges recent articles through the same plugin and saves nothing."""
+    stack.tests('^(TestDescribedAlertEvidenceReachesTheAPI|TestSubscriptionPreview)', environment(stack))
 
 
 def upgrade(stack):

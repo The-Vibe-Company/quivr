@@ -4,18 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"testing"
-	"time"
 )
 
 // Descriptions the fake System One server (alerts.fake_system_one) judges by
 // topic, in English and French.
-const (
-	strikeDescription = "Dock workers going on strike at a harbour"
-	visaDescription   = "Diplomatic tensions over visas"
-)
+const strikeDescription = "Dock workers going on strike at a harbour"
 
 // fakeSystemOne is the fake System One server scripts/subscription_plugin.py
 // starts for described alerts in make verify. The tests skip without it.
@@ -75,107 +70,29 @@ func described(text string) map[string]any {
 	return map[string]any{"kind": "described", "description": text}
 }
 
-// TestDescribedAlertsJudgedInOneCall saves plain-language alerts for two end
-// users and one global alert, next to a keyword alert. A rephrased English
-// article and a translated French one alert every Subscription whose
-// description they fit, an unrelated article alerts none, and a stricter
-// per-alert threshold holds back. The Match evidence carries the classifier's
-// score. Each article costs exactly one classifier call, which asks every
-// distinct description once, whatever the number of Subscriptions or owners.
-func TestDescribedAlertsJudgedInOneCall(t *testing.T) {
-	fake := fakeSystemOne(t)
+// TestDescribedAlertEvidenceReachesTheAPI proves a described alert is evaluated
+// through the configured classifier and its evidence reaches the public Match.
+// Plugin route tests own thresholds, negative decisions and call deduplication;
+// the engine batch tests own subscription fan-out and already-decided intents.
+func TestDescribedAlertEvidenceReachesTheAPI(t *testing.T) {
+	fakeSystemOne(t)
 	id, _ := keywordEvaluator(t)
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	run := monitoringRun()
 	c := changeCorpus(t, "described-alerts-"+run)
 	start := request(t, "GET", changesPath(c, "", 0), admin, nil, 200)["next_cursor"].(string)
-
-	alice := ownedSubscription(t, admin, "alice-"+run, c, described(strikeDescription), nil, "user-a-"+run, destinationA, 201)
-	bob := ownedSubscription(t, admin, "bob-"+run, c, described(strikeDescription), nil, "user-b-"+run, destinationA, 201)
-	strict := ownedSubscription(t, admin, "strict-"+run, c, described(strikeDescription), map[string]any{"threshold": 0.95}, "user-b-"+run, destinationA, 201)
-	visas := ownedSubscription(t, admin, "visas-"+run, c, described(visaDescription), nil, "", destinationA, 201)
-	keywords := ownedSubscription(t, admin, "keywords-"+run, c, map[string]any{"kind": "keywords", "match": term("grève")}, nil, "", destinationA, 201)
-
-	english := awaitReady(t, ingest(t, c, "described-en-"+run, "Harbour staff walk out ("+run+"). Dockers at the northern harbour began a walkout on Tuesday."))
-	french := awaitReady(t, ingest(t, c, "described-fr-"+run, "Les dockers votent la grève au port ("+run+"). Au port de Portval, les dockers ont voté une grève de 48 heures."))
-	unrelated := awaitReady(t, ingest(t, c, "described-other-"+run, "League final ends in a draw ("+run+"). The football final ended without a goal."))
-	// alice and bob on both fitting articles, and the keyword alert on the French one.
-	awaitMatches(t, admin, c, start, 5)
-	// Let any late decision surface.
-	time.Sleep(quietPeriod)
-	seen, _ := drain(t, admin, c, start, 0)
-
-	records := func(sub map[string]any) []string {
-		var out []string
-		for _, notice := range matchCreatedFor(seen, sub["subscription_id"].(string)) {
-			out = append(out, notice["monitoring"].(map[string]any)["record_id"].(string))
-		}
-		sort.Strings(out)
-		return out
+	sub := ownedSubscription(t, admin, "described-"+run, c, described(strikeDescription), nil, "user-"+run, destinationA, 201)
+	article := awaitReady(t, ingest(t, c, "described-"+run, "Harbour staff walk out ("+run+"). Dockers at the northern harbour began a walkout on Tuesday."))
+	_, created := awaitMatches(t, admin, c, start, 1)
+	notice := matchCreatedFor(created, sub["subscription_id"].(string))[0]
+	if notice["monitoring"].(map[string]any)["record_id"] != article["record_id"] {
+		t.Fatal("described Match must name the evaluated Record", notice, article)
 	}
-	fitting := []string{english["record_id"].(string), french["record_id"].(string)}
-	sort.Strings(fitting)
-	for name, tc := range map[string]struct {
-		sub  map[string]any
-		want []string
-	}{
-		"alice": {alice, fitting}, "bob": {bob, fitting}, "strict": {strict, nil}, "visas": {visas, nil},
-		"keywords": {keywords, []string{french["record_id"].(string)}},
-	} {
-		if got := records(tc.sub); strings.Join(got, ",") != strings.Join(tc.want, ",") {
-			t.Errorf("%s: want Matches for %v, got %v (unrelated record %v)", name, tc.want, got, unrelated["record_id"])
-		}
-	}
-
-	notice := matchCreatedFor(seen, alice["subscription_id"].(string))[0]
 	evidence := request(t, "GET", "/v0/matches/"+notice["monitoring"].(map[string]any)["match_id"].(string), admin, nil, 200)["evidence"].(map[string]any)
 	details, _ := evidence["details"].(map[string]any)
 	if evidence["evaluator"].(map[string]any)["plugin_id"] != id || details["kind"] != "described" || details["model"] != "jev-1.13.0" || details["score"] != 0.92 ||
 		!strings.Contains(evidence["explanation"].(string), "score 0.92") || len(evidence["part_keys"].([]any)) == 0 {
 		t.Fatal("the evidence must name the classifier, its score and the Parts it saw", evidence)
-	}
-
-	// The unrelated article has no Match to wait for: wait until the classifier saw
-	// every article, then let any second call surface.
-	articles := []string{"Harbour staff", "Les dockers", "League final"}
-	seenAll := func(calls []map[string]any) bool {
-		for _, word := range articles {
-			found := false
-			for _, call := range calls {
-				found = found || strings.Contains(call["article"].(string), word)
-			}
-			if !found {
-				return false
-			}
-		}
-		return true
-	}
-	for deadline := time.Now().Add(monitoringWait); !seenAll(fakeRequests(t, fake, run)); time.Sleep(200 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("the classifier never saw every article: %v", fakeRequests(t, fake, run))
-		}
-	}
-	time.Sleep(quietPeriod)
-	calls := fakeRequests(t, fake, run)
-	perArticle := map[string]int{}
-	for _, call := range calls {
-		article := call["article"].(string)
-		for _, word := range articles {
-			if strings.Contains(article, word) {
-				perArticle[word]++
-			}
-		}
-		var asked []string
-		for _, d := range call["descriptions"].([]any) {
-			asked = append(asked, d.(string))
-		}
-		sort.Strings(asked)
-		if strings.Join(asked, "|") != strings.Join(sortedCopy([]string{strikeDescription, visaDescription}), "|") {
-			t.Errorf("each call must ask every distinct description once, got %v", asked)
-		}
-	}
-	if len(calls) != 3 || perArticle["Harbour staff"] != 1 || perArticle["Les dockers"] != 1 || perArticle["League final"] != 1 {
-		t.Fatalf("want exactly one classifier call per article, got %d calls: %v", len(calls), perArticle)
 	}
 }
 
@@ -198,10 +115,4 @@ func TestKeylessRefusesDescribedAlerts(t *testing.T) {
 	}
 	ownedSubscription(t, token, "keyless-keywords-"+run, c, map[string]any{"kind": "keywords", "match": term("strike")}, nil, "", "local-receiver-org-k", 201)
 	ownedSubscription(t, token, "keyless-vectors-"+run, c, map[string]any{"kind": "meaning", "meaning_check": "vectors", "description": strikeDescription}, nil, "", "local-receiver-org-k", 201)
-}
-
-func sortedCopy(values []string) []string {
-	out := append([]string(nil), values...)
-	sort.Strings(out)
-	return out
 }

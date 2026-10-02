@@ -166,6 +166,8 @@ jobs:
         part: [core, monitoring, plugins, connectors, demo]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -200,6 +202,9 @@ jobs:
       # toolchains this job never uses (about 17 GB, a few seconds).
       - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia* && df -h /
       - run: make verify part=${{ matrix.part }}
+        env:
+          # A missing base (including a first push) runs lifecycle by default.
+          QUIVR_VERIFY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       - uses: actions/upload-artifact@v4
         id: verification-artifact
         if: always()

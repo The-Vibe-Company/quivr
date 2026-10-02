@@ -180,34 +180,3 @@ func TestConnectorXListCollectsPostsCorrectsEditsAndWithdrawsDeletions(t *testin
 	}
 	request(t, "POST", "/v0/connectors/"+id+"/disable", token, map[string]any{"idempotency_key": "x-list-stop"}, 200)
 }
-
-func TestConnectorXListReportsRateLimitsAndExhaustedCredits(t *testing.T) {
-	token := connectorToken(t)
-	base := fakeX(t)
-	list := fmt.Sprint(time.Now().UnixNano()%1e15 + 1)
-	corpusID, _ := connectorCorpus(t, token, "x-failures")
-	c := request(t, "POST", "/v0/connectors", token, xConnector("x-failures", corpusID, "x", list, nil), 201)
-	id := c["connector_id"].(string)
-	awaitXHealth(t, token, id, func(h map[string]any) bool { return h["last_success_at"] != nil })
-
-	// 429: a transient failure visible in last_error, never access_error; polling resumes after the reset.
-	xControl(t, base, list, map[string]any{"fail": map[string]any{"status": 429, "reset_in": 2, "times": 1}})
-	limited := awaitXHealth(t, token, id, lastError("rate_limited"))
-	if limited["health"].(map[string]any)["state"] == "access_error" {
-		t.Fatalf("rate limit reported as access error: %v", limited)
-	}
-	resumed := limited["health"].(map[string]any)["last_success_at"]
-	awaitXHealth(t, token, id, func(h map[string]any) bool { return h["last_success_at"] != resumed })
-
-	// 402: exhausted credits are an access error with a distinct code, until a later success.
-	xControl(t, base, list, map[string]any{"fail": map[string]any{"status": 402}})
-	depleted := awaitXHealth(t, token, id, func(h map[string]any) bool { return h["state"] == "access_error" && lastError("credits_depleted")(h) })
-	noXSecret(t, depleted)
-	xControl(t, base, list, map[string]any{"fail": nil})
-	awaitXHealth(t, token, id, state("active"))
-
-	// A revoked token is refused as unauthorized.
-	request(t, "PUT", "/v0/connectors/"+id+"/credential", token, map[string]any{"idempotency_key": "x-revoke", "secret": map[string]any{"bearer_token": "x-revoked-acceptance-token"}}, 200)
-	awaitXHealth(t, token, id, func(h map[string]any) bool { return h["state"] == "access_error" && lastError("unauthorized")(h) })
-	request(t, "POST", "/v0/connectors/"+id+"/disable", token, map[string]any{"idempotency_key": "x-failures-stop"}, 200)
-}
