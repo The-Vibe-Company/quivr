@@ -128,7 +128,8 @@ run on `main`. `-f compare_to=main -f sets=miracl-fr` compares in one job instea
 The coordinator dispatches `Embedding quality` (`.github/workflows/measure-embeddings.yml`)
 after the harness merges. It never runs on PRs or schedules. The bakeoff measures
 Cohere-Embed-V5-Pro/Fast (2048 dimensions) and text-embedding-3-large (3072), paired
-against core.ingest on all three public sets, in semantic and hybrid modes. Fusion stays
+against core.ingest on all three public sets, in semantic and hybrid modes. Each set is
+submitted once to one Corpus carrying all hosted owners beside core.ingest. Fusion stays
 at core.retrieve's default. Prepare it offline with no key or provider request:
 
 ```sh
@@ -145,13 +146,22 @@ failed or timed-out calls remain reserved. A token or USD cap stops forwarding a
 status `capped` with completed cuts, unfinished indexing and spend. Missing cuts have no scores.
 
 Then dispatch `campaign=winner`, `winner=<measured deployment>`, `prior_run_id=<bakeoff run>`,
-`max_input_tokens=5000000`, `max_usd=2`. The completed bakeoff's upper-bound spend is
+`max_input_tokens=5000000`, `max_usd=2`. A winner requires all three sets. Earlier upper-bound spend is
 subtracted from $10; admission refuses a per-run USD cap above the remainder.
 The smaller SciFact matrix measures segment limits 512/2048 with full/1024 dimensions.
 The token sizes are conservative byte estimates, as described in the
 [hosted plugin reference](../../plugins/hosted-embed/README.md).
 The `embedding-quality` artifact holds report JSON/Markdown: deployment, dimensions,
-segment limit, paired quality, query p50/p95, paired indexing time, confirmed/reserved
+segment limit, paired quality, query p50/p95, per-owner indexing time, confirmed/reserved
 input tokens, indexing USD per 1,000 documents and total USD. Reports link the dated list
 price sources; estimates are not Azure billing receipts. Secrets AZURE_FOUNDRY_KEY and
 AZURE_FOUNDRY_ENDPOINT enter only the measurement step. Private sets are excluded.
+
+For a six-hour runner, split the bakeoff with workflow input `sets=miracl-fr`, then
+`sets=mldr-fr`, then `sets=scifact`. Set `prior_run_id` on each later dispatch to the
+previous run, including a failed run: the runner debits all prior spend from $10 and
+carries completed scores and costs forward. The final report combines the three sets.
+A set reports each owner's first complete coverage from first submission, sampled every
+five seconds, independently of the slowest owner. Ingestion, coverage and receipt polls
+retry only explicit retryable 429/503 responses, with backoff capped at ten seconds and
+the owning wait's deadline. Non-retryable errors stop immediately.

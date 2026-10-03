@@ -99,7 +99,10 @@ installation beside your existing ingestion plugin, keep this owner's single
 space role `served` and list `hosted.embed` under `ingestion.evaluation` for the
 source media types you want to measure. Leave your existing served routing in
 place. Evaluation is the additional owner's role; each owner still declares a
-primary served space. See
+primary served space. To run several configurations together, give each a distinct
+`plugin_id`, such as `hosted.embed.pro` and `hosted.embed.fast`, before generating
+its manifest. Pin every package and list those IDs in `ingestion.evaluation`.
+The generated space belongs to that ID. See
 [ingestion routing](https://docs.quivr.thevibecompany.co/reference/configuration#ingestion-routing)
 and [backfill](https://docs.quivr.thevibecompany.co/plugins/backfill-a-vector-space).
 
@@ -116,6 +119,7 @@ Corpora need a rebuild or backfill before they carry a newly configured space.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| `plugin_id` | `hosted.embed` | Independent owner ID, lowercase plugin identifier, at most 40 characters |
 | `metric` | `cosine` | `cosine`, `dot`, or `l2` |
 | `model_revision` | `"1"` | Space version, 1–32 letters, numbers, dots, underscores or hyphens |
 | `query_prefix`, `document_prefix` | empty | Text prepended before embedding |

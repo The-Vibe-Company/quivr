@@ -9,6 +9,11 @@ on:
         type: choice
         options: [bakeoff, winner]
         required: true
+      sets:
+        description: Bakeoff set, or all; chain prior_run_id across split dispatches
+        type: choice
+        options: [all, miracl-fr, mldr-fr, scifact]
+        default: all
       max_input_tokens:
         description: Explicit run-wide input-token cap (bakeoff estimate 15000000; winner 5000000)
         required: true
@@ -20,7 +25,7 @@ on:
         type: choice
         options: [none, Cohere-Embed-V5-Pro, Cohere-Embed-V5-Fast, text-embedding-3-large]
       prior_run_id:
-        description: Completed bakeoff workflow run ID, required for winner; debits prior spend from campaign 10 USD
+        description: Prior bakeoff run ID to debit earlier spend; completed run required for winner
         default: ''
 permissions:
   contents: read
@@ -50,8 +55,8 @@ jobs:
       - run: python3 -m pip install -q -r scripts/eval/requirements.txt -r contracts/http/v0/checks/requirements.txt
       - name: Offline harness checks
         run: python3 -m unittest discover -s scripts/eval -p 'test_*.py'
-      - name: Download the completed bakeoff for winner admission
-        if: inputs.campaign == 'winner'
+      - name: Download prior spend for campaign admission
+        if: inputs.prior_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PRIOR_RUN_ID: ${{ inputs.prior_run_id }}
@@ -63,14 +68,19 @@ jobs:
           AZURE_FOUNDRY_KEY: ${{ secrets.AZURE_FOUNDRY_KEY }}
           AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
           CAMPAIGN: ${{ inputs.campaign }}
+          SETS: ${{ inputs.sets }}
           WINNER: ${{ inputs.winner }}
           TOKEN_CAP: ${{ inputs.max_input_tokens }}
           USD_CAP: ${{ inputs.max_usd }}
+          PRIOR_RUN_ID: ${{ inputs.prior_run_id }}
         shell: bash
         run: |
-          args=(--campaign "$CAMPAIGN" --max-input-tokens "$TOKEN_CAP" --max-usd "$USD_CAP" --out .scratch/eval/embedding-out --allow-paid)
+          args=(--sets "$SETS" --campaign "$CAMPAIGN" --max-input-tokens "$TOKEN_CAP" --max-usd "$USD_CAP" --out .scratch/eval/embedding-out --allow-paid)
           if [ "$CAMPAIGN" = winner ]; then
-            args+=(--winner "$WINNER" --prior-report .scratch/eval/prior/report.json)
+            args+=(--winner "$WINNER")
+          fi
+          if [ -n "$PRIOR_RUN_ID" ]; then
+            args+=(--prior-report .scratch/eval/prior/report.json)
           fi
           python3 scripts/eval/campaign.py "${args[@]}"
       # Artifacts deliberately exclude configuration/state and raw stack logs:

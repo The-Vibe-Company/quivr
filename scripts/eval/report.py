@@ -137,6 +137,8 @@ def embedding_budget(r):
              'Missing or invalid usage retains the reservation; cap exhaustion stops new calls and preserves completed cuts. '
              'Unattempted cuts carry no scores. Prices are dated provider list prices, estimates rather than Azure billing receipts. '
              'Hybrid fusion uses the unchanged default configuration.', '']
+    if 'completed_sets' in campaign:
+        lines += [f"Completed sets: {', '.join(campaign['completed_sets']) or 'none'}. Full campaign complete: {campaign['complete']}.", '']
     for candidate in campaign['candidates']:
         p = candidate['price']
         lines.append(f"Price for `{candidate['model']}`: ${p['usd_per_million_tokens']:.2f}/million input tokens, "
@@ -149,10 +151,10 @@ def embedding_table(sets):
     if not rows:
         return []
     lines = ['## Embedding indexing and cost', '',
-             'Indexing time runs from first submission until both core.ingest and the evaluation owner cover the Corpus; '
+             'Indexing time runs from first submission until that owner first reports complete vector coverage; '
              'unfinished indexing shows elapsed time only. Indexing USD / 1,000 documents excludes query calls; '
              'total USD includes queries and failed attempts. ≤ includes unconfirmed reservations. '
-             'The local core.ingest baseline has no provider charge. Each variant uses a new Corpus with the same sample.', '',
+             'The local core.ingest baseline has no provider charge. Each set is submitted once to a shared Corpus carrying all evaluation owners. Coverage is sampled every five seconds.', '',
              '| Set | Deployment | Dimensions | Segment limit | State | Indexing s | Index input tokens | Reserved tokens | Index USD / 1,000 documents | Total USD |',
              '| --- ' * 10 + '|']
     for name, s in rows:
@@ -161,7 +163,7 @@ def embedding_table(sets):
         total = s.get('embedding_total', index)
         cost = index.get('cost_upper_bound_usd')
         normalized = cost * 1000 / s['documents'] if cost is not None and s['documents'] and s.get('status') != 'indexing' else None
-        elapsed = s['ingestion'].get('paired_vectors_seconds', s['ingestion'].get('partial_seconds'))
+        elapsed = s['ingestion'].get('owner_vectors_seconds', s['ingestion'].get('paired_vectors_seconds', s['ingestion'].get('partial_seconds')))
         lines.append(f"| {name} | {c['model']} | {c['dimensions']} | {c['segment_tokens']} | {s.get('status', 'completed')} | "
                      f"{number(elapsed, 1)} | {index.get('confirmed_input_tokens', '—')} | {index.get('reserved_input_tokens', '—')} | "
                      f"≤ {number(normalized, 6)} | ≤ {number(total.get('cost_upper_bound_usd'), 6)} |")

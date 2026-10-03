@@ -62,20 +62,20 @@ class Client:
         self.jev_log = None
         self.stack = None
         self.budget = None
-        self.embedding_gate = None
+        self.embedding_gates = []
         self.deep_enabled = bool(os.environ.get('TYPESAFE_API_KEY'))
         self.deep_skip_reason = 'TYPESAFE_API_KEY absent; paid deep evaluation skipped'
 
-    def call(self, method, path, body=None, expected=(200,), attempts=5):
-        if self.embedding_gate is not None:
-            self.embedding_gate.budget.check()
+    def call(self, method, path, body=None, expected=(200,), attempts=5, deadline=None):
+        for gate in self.embedding_gates:
+            gate.budget.check()
         paid = method == 'POST' and path == '/v0/search' and body is not None and is_deep(body.get('profile', 'default'))
         if not paid:
             try:
-                return self._call(method, path, body, expected, attempts)
+                return self._call(method, path, body, expected, attempts, deadline)
             finally:
-                if self.embedding_gate is not None:
-                    self.embedding_gate.budget.check()
+                for gate in self.embedding_gates:
+                    gate.budget.check()
         if self.budget is None:
             raise RuntimeError('paid deep evaluation requires a run input token budget')
         with self.budget.request_lock:
@@ -86,14 +86,25 @@ class Client:
             finally:
                 self.budget.settle(self.jev_log, begin)
 
-    def _call(self, method, path, body, expected, attempts):
-        """JSON response of an expected status; 429 and 503 are retried with a bounded backoff."""
+    def gate_for(self, selection):
+        return next((gate for gate in self.embedding_gates if gate.plugin == evaluation_selection(selection)['evaluation_plugin']), None) if selection else None
+
+    def poll(self, path, deadline):
+        """Retry transient dependency responses within the owning wait's deadline."""
+        return self.call('GET', path, attempts=None, deadline=deadline)
+
+    def _call(self, method, path, body, expected, attempts, deadline=None):
+        """Retry only explicit retryable 429/503 errors, with capped backoff."""
         data = json.dumps(body).encode() if body is not None else None
-        for attempt in range(attempts):
+        attempt = 0
+        while True:
+            remaining = deadline - time.monotonic() if deadline is not None else self.timeout
+            if remaining <= 0:
+                raise RuntimeError(f'{method} {path} polling deadline exceeded')
             request = urllib.request.Request(self.base + path, data=data, method=method,
                                              headers={'Authorization': 'Bearer ' + self.key, 'Content-Type': 'application/json'})
             try:
-                response = urllib.request.urlopen(request, timeout=self.timeout)
+                response = urllib.request.urlopen(request, timeout=min(self.timeout, remaining))
             except urllib.error.HTTPError as error:
                 response = error
             with response:
@@ -101,9 +112,14 @@ class Client:
             result = json.loads(raw) if raw else {}
             if response.status in expected:
                 return response.status, result
-            if response.status not in (429, 503) or attempt == attempts - 1:
+            if (response.status not in (429, 503) or result.get('retryable') is not True
+                    or (attempts is not None and attempt >= attempts - 1)):
                 raise RuntimeError(f'{method} {path} returned {response.status}: {str(result)[:300]}')
-            time.sleep(min(2 ** attempt, 10))
+            delay = min(2 ** min(attempt, 4), 10)
+            if deadline is not None:
+                delay = min(delay, max(0, deadline - time.monotonic()))
+            time.sleep(delay)
+            attempt += 1
 
 
 def advertised_profiles(client):
@@ -149,10 +165,10 @@ def measurements(sides, evaluation=None):
                 yield profile, label, configuration
         else:
             yield profile, profile, None
-    if evaluation is not None:
+    for selection in evaluation_selections(evaluation):
         # Evaluation always uses the served profile's default configuration;
         # it is a separate cut from the optional paid matrix above.
-        yield 'default', evaluation_label(evaluation), None
+        yield 'default', evaluation_label(selection), None
 
 
 def deep_warmups(queries, run_id):
@@ -165,13 +181,21 @@ def deep_warmups(queries, run_id):
     return result
 
 
-def wait_evaluation_space(client, corpus, evaluation, records, timeout):
-    """Wait until the selected evaluation space covers every ingested Record."""
-    fields = evaluation_selection(evaluation)
-    started = time.monotonic()
-    path = f'/v0/corpora/{urllib.parse.quote(corpus)}/vector-spaces'
-    while True:
-        _, result = client.call('GET', path)
+def evaluation_selections(selection):
+    return selection if isinstance(selection, list) else [selection] if selection is not None else []
+
+
+def observe_evaluation_spaces(client, corpus, evaluations, records, deadline, started, timings):
+    """One coverage snapshot for every owner; preserve its first complete observation."""
+    if len(timings) == len(evaluations):
+        return
+    _, result = client.poll(f'/v0/corpora/{urllib.parse.quote(corpus)}/vector-spaces', deadline=deadline)
+    elapsed = round(time.monotonic() - started, 3)
+    for selection in evaluations:
+        label = evaluation_label(selection)
+        if label in timings:
+            continue
+        fields = evaluation_selection(selection)
         for item in result.get('items', []):
             owner = item.get('owner') or {}
             owner_plugin = owner.get('plugin_id') or item.get('owner_plugin_id')
@@ -179,12 +203,20 @@ def wait_evaluation_space(client, corpus, evaluation, records, timeout):
             coverage = item.get('coverage') or {}
             if (owner_plugin == fields['evaluation_plugin'] and fields['evaluation_space'] in item_spaces
                     and coverage.get('versions_covered') == records):
-                return
-        elapsed = time.monotonic() - started
-        if elapsed >= timeout:
-            raise RuntimeError(f"evaluation space {fields['evaluation_plugin']}/{fields['evaluation_space']} "
-                               f"covers fewer than {records} Records after {round(elapsed)} s")
-        time.sleep(min(1, timeout - elapsed))
+                timings[label] = {'owner_vectors_seconds': elapsed}
+                print(f'[eval] {label}: {records} versions covered after {elapsed} s', flush=True)
+                break
+
+
+def wait_evaluation_spaces(client, corpus, evaluations, records, deadline, started, timings):
+    while len(timings) < len(evaluations):
+        if time.monotonic() >= deadline:
+            missing = [evaluation_label(e) for e in evaluations if evaluation_label(e) not in timings]
+            raise RuntimeError(f'evaluation coverage deadline exceeded: {missing}')
+        observe_evaluation_spaces(client, corpus, evaluations, records, deadline, started, timings)
+        if len(timings) < len(evaluations):
+            time.sleep(min(5, max(0, deadline - time.monotonic())))
+
 
 
 def batches(commands):
@@ -207,15 +239,16 @@ def command(corpus, namespace, key, doc):
             'content': {'kind': 'manifest', 'parts': parts}}
 
 
-def ingest(client, corpus, namespace, corpus_docs, timeout, stall):
+def ingest(client, corpus, namespace, corpus_docs, timeout, stall, progress=None):
     """Submit every document, then wait on the change feed until each Record has its vectors.
 
     Returns {record_id: doc_id} and timings. Waiting reads record.enrichment_available events
     from a cursor taken before the first submission, so no Record is missed and nothing sleeps
     for a fixed time; a feed that stops moving for `stall` seconds fails with receipt details."""
-    _, page = client.call('GET', f'/v0/changes?corpus_id={urllib.parse.quote(corpus)}')
+    _, page = client.poll(f'/v0/changes?corpus_id={urllib.parse.quote(corpus)}', deadline=time.monotonic() + timeout)
     start = time.monotonic()
     receipts = []
+    next_observation = start
     for batch in batches(command(corpus, namespace, key, doc) for key, doc in corpus_docs.items()):
         _, result = client.call('POST', '/v0/records/batch', {'items': batch})
         for outcome in result['items']:
@@ -225,31 +258,34 @@ def ingest(client, corpus, namespace, corpus_docs, timeout, stall):
     accepted = time.monotonic() - start
     enriched, moved = set(), time.monotonic()
     while len(enriched) < len(corpus_docs):
-        _, page = client.call('GET', f'/v0/changes?corpus_id={urllib.parse.quote(corpus)}&cursor={urllib.parse.quote(page["next_cursor"])}&limit=100')
+        _, page = client.poll(f'/v0/changes?corpus_id={urllib.parse.quote(corpus)}&cursor={urllib.parse.quote(page["next_cursor"])}&limit=100', deadline=min(start + timeout, moved + stall))
         new = {e['resource']['id'] for e in page['items'] if e['type'] == 'record.enrichment_available'} - enriched
         if new:
             enriched |= new
             moved = time.monotonic()
         now = time.monotonic()
+        if progress is not None and now >= next_observation:
+            progress(min(start + timeout, moved + stall))
+            next_observation = time.monotonic() + 5
         if now - moved > stall or now - start > timeout:
             raise RuntimeError(f'{namespace}: {len(enriched)}/{len(corpus_docs)} Records have vectors after {round(now - start)} s; '
                                f'first receipts not done: {stuck(client, receipts)}')
         if not page['has_more'] and not new:
             time.sleep(1)  # poll interval of the change feed, not a wait for a result
     records = {}
-    _, page = client.call('GET', f'/v0/records?corpus_id={urllib.parse.quote(corpus)}&limit=100')
+    _, page = client.poll(f'/v0/records?corpus_id={urllib.parse.quote(corpus)}&limit=100', deadline=start + timeout)
     while True:
         records.update({r['record_id']: r['source']['record_key'] for r in page['items']})
         if not page.get('next_page_cursor'):
             break
-        _, page = client.call('GET', f"/v0/records?corpus_id={urllib.parse.quote(corpus)}&limit=100&page_cursor={urllib.parse.quote(page['next_page_cursor'])}")
+        _, page = client.poll(f"/v0/records?corpus_id={urllib.parse.quote(corpus)}&limit=100&page_cursor={urllib.parse.quote(page['next_page_cursor'])}", deadline=start + timeout)
     return records, {'records': len(records), 'accepted_seconds': round(accepted, 3), 'searchable_with_vectors_seconds': round(time.monotonic() - start, 3)}
 
 
 def stuck(client, receipts, show=3):
     out = []
     for rid in receipts:
-        _, r = client.call('GET', '/v0/ingestion-receipts/' + rid)
+        _, r = client.poll('/v0/ingestion-receipts/' + rid, deadline=time.monotonic() + 15)
         if r.get('availability', {}).get('state') != 'retrieval_ready' or r.get('processing', {}).get('state') != 'idle':
             out.append({k: r.get(k) for k in ['receipt_id', 'state', 'outcome', 'availability', 'processing', 'diagnostics']})
             if len(out) == show:
@@ -341,8 +377,8 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
     deep_queries = deep_warmups(set(data['queries'].values()), run_id)
     sides = []
     for client in clients:
-        gate = getattr(client, 'embedding_gate', None)
-        if gate is not None:
+        gates = client.embedding_gates
+        for gate in gates:
             gate.set_name, gate.phase = name, 'indexing'
         _, created = client.call('POST', '/v0/corpora', {'name': f'Evaluation {name}', 'idempotency_key': f'eval-{name}-{run_id}'}, expected=(201,))
         corpus = created['corpus_id']
@@ -354,17 +390,32 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
             publish(name, result)
         print(f'[eval] {name}: ingesting {len(data["corpus"])} documents', flush=True)
         index_started = time.monotonic()
+        evaluations = evaluation_selections(evaluation)
+        observed = result['evaluation_ingestion'] = {}
+        def progress(deadline):
+            observe_evaluation_spaces(client, corpus, evaluations, len(data['corpus']), deadline, index_started, observed)
+            if publish:
+                publish(name, result)
         try:
-            records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall)
-            if evaluation is not None:
-                wait_evaluation_space(client, corpus, evaluation, len(records), options.ingest_timeout)
-            result['ingestion'] = {**ingestion, 'paired_vectors_seconds': round(time.monotonic() - index_started, 3)}
+            # Observe optional owners while the core baseline is still ingesting,
+            # so a fast owner is not timed by the slowest owner's completion.
+            records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall,
+                                        **({'progress': progress} if evaluations else {}))
+            result['ingestion'] = ingestion
+            wait_evaluation_spaces(client, corpus, evaluations, len(records), index_started + options.ingest_timeout,
+                                   index_started, observed)
+            result['ingestion']['paired_vectors_seconds'] = round(time.monotonic() - index_started, 3)
             result['status'] = 'searching'
         finally:
-            if gate is not None:
+            result['ingestion'].setdefault('partial_seconds', round(time.monotonic() - index_started, 3))
+            if len(gates) == 1:
+                gate = gates[0]
                 result['embedding_indexing'] = gate.budget.summary(gate.label, name, 'indexing')
-                result['ingestion'].setdefault('partial_seconds', round(time.monotonic() - index_started, 3))
-                gate.phase = 'query'
+            if result['status'] == 'searching':
+                for gate in gates:
+                    gate.phase = 'query'
+            if publish:
+                publish(name, result)
         advertised = advertised_profiles(client)
         served, refused = serving_profiles(client, corpus, advertised, deep_queries[0], allow_paid=allow_paid)
         result['profiles'] = {'advertised': advertised, 'served': served, 'refused': refused}
@@ -372,7 +423,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
     queries = sorted(data['queries'])
     reranking = any('deep' in side['served'] for side in sides)
     for profile, label, configuration in measurements(sides, evaluation):
-        selected_evaluation = evaluation if evaluation is not None and label == evaluation_label(evaluation) else None
+        selected_evaluation = next((e for e in evaluation_selections(evaluation) if label == evaluation_label(e)), None)
         deep = is_deep(profile)
         scored_limit = DEEP_LIMIT if deep or reranking else LIMIT
         limits = [scored_limit] if deep else [scored_limit] + [limit for limit in TIMING_LIMITS if limit != scored_limit]
@@ -394,7 +445,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
             for side in serving:
                 side.update(ranking={}, errors=[], timings={limit: [] for limit in limits}, failed={limit: 0 for limit in limits},
                             attempts=[], log_begin=jev.offset(side['client'].jev_log))
-                gate = getattr(side['client'], 'embedding_gate', None)
+                gate = side['client'].gate_for(selected_evaluation)
                 if gate is not None and selected_evaluation is not None:
                     side['embedding_begin'] = gate.budget.summary(gate.label, name, 'query')
             # The other limits are timed only, after the scored pass, so they never change what it measures.
@@ -415,7 +466,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                 if limit == scored_limit:
                     for side in serving:
                         side['log_end'] = jev.offset(side['client'].jev_log)
-                        gate = getattr(side['client'], 'embedding_gate', None)
+                        gate = side['client'].gate_for(selected_evaluation)
                         if gate is not None and selected_evaluation is not None:
                             after = gate.budget.summary(gate.label, name, 'query')
                             side['embedding_scored'] = {key: after[key] - side['embedding_begin'][key]
@@ -444,6 +495,10 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                     # Engine retrieval usage does not include an unmanaged
                     # ingestion owner's provider attempts. Unknown is not zero.
                     side['out']['systems'][system]['paid_calls_per_query'] = None
+            publish = getattr(options, 'publish_partial', None)
+            if publish:
+                for side in serving:
+                    publish(name, side['out'])
             if deep and not getattr(options, 'live_paid', False):
                 for side in serving:
                     side.update(warm_timings=[], warm_attempts=[], warm_failures=0, warm_begin=jev.offset(side['client'].jev_log))
@@ -464,6 +519,8 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
     for side in sides:
         side['out']['status'] = 'completed'
         compare_within(side['out'])
+        if getattr(options, 'publish_partial', None):
+            options.publish_partial(name, side['out'])
     return [side['out'] for side in sides]
 
 
@@ -533,7 +590,8 @@ def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key='', ingesti
             super().config()
             jev.configure(self)
             if ingestion is not None:
-                embeddings.install(self.directory, ingestion)
+                for selection in evaluation_selections(ingestion):
+                    embeddings.install(self.directory, selection)
 
     stack = EvalStack('quivr-eval-' + uuid.uuid4().hex[:10] + suffix, source)
     stacks.append(stack)

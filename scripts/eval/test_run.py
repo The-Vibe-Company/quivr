@@ -39,6 +39,43 @@ class TimeSummary(unittest.TestCase):
         self.assertEqual(s['hydration_ms'], {'p50': None, 'p95': None})
 
 
+class Polling(unittest.TestCase):
+    def test_dependency_polls_retry_until_deadline_but_terminal_errors_fail_once(self):
+        # Network-only fake: drive the real Client from each polling endpoint.
+        paths = ['/v0/corpora/corpus/vector-spaces', '/v0/changes?corpus_id=corpus',
+                 '/v0/records?corpus_id=corpus', '/v0/ingestion-receipts/receipt']
+        clock = [0.0]
+        def sleep(seconds):
+            clock[0] += seconds
+        def response(status, body):
+            return run.urllib.error.HTTPError('http://localhost', status, '', {},
+                                              io.BytesIO(json.dumps(body).encode()))
+        for path in paths:
+            with self.subTest(path=path), mock.patch.object(run.time, 'monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch.object(run.time, 'sleep', side_effect=sleep):
+                client = run.Client('http://localhost', 'fixture')
+                clock[0] = 0
+                answers = [response(503, {'code': 'dependency_unavailable', 'retryable': True}) for _ in range(6)]
+                answers.append(response(200, {'items': []}))
+                with mock.patch.object(run.urllib.request, 'urlopen', side_effect=answers) as transport:
+                    self.assertEqual(client.poll(path, deadline=60), (200, {'items': []}))
+                    self.assertEqual(transport.call_count, 7)
+                for status, retryable in [(503, False), (400, True), (503, None)]:
+                    with mock.patch.object(run.urllib.request, 'urlopen',
+                                           return_value=response(status, {'retryable': retryable})) as transport:
+                        with self.assertRaisesRegex(RuntimeError, str(status)):
+                            client.poll(path, deadline=clock[0] + 60)
+                        self.assertEqual(transport.call_count, 1)
+                clock[0] = 0
+                with mock.patch.object(run.urllib.request, 'urlopen',
+                                       side_effect=lambda *a, **k: response(503, {'retryable': True})) as transport:
+                    with self.assertRaisesRegex(RuntimeError, 'deadline'):
+                        client.poll(path, deadline=3)
+                    self.assertEqual(clock[0], 3)
+                    self.assertEqual(transport.call_count, 2)
+                    self.assertLessEqual(transport.call_args.kwargs['timeout'], 2)
+
+
 class EvaluationSelection(unittest.TestCase):
     def test_evaluation_search_contract_selects_owner_and_collapses_offsets(self):
         class Client:
@@ -66,7 +103,8 @@ class EvaluationSelection(unittest.TestCase):
                                     'evaluation_plugin': 'plugin.eval', 'evaluation_space': 'model@1'})
         ])
 
-    def test_evaluation_cut_reuses_corpus_and_marks_only_selected_default_searches(self):
+    def test_evaluation_cuts_share_ingestion_and_measure_each_owners_coverage(self):
+        clock = [0.]
         class Client(run.Client):
             def __init__(self):
                 super().__init__('http://127.0.0.1', 'test-key')
@@ -80,11 +118,13 @@ class EvaluationSelection(unittest.TestCase):
                     self.corpora += 1
                     return 201, {'corpus_id': 'corpus', 'name': 'Evaluation', 'effective_retrieval': {}}
                 if path == '/v0/corpora/corpus/vector-spaces':
-                    return 200, {'projection_generation_id': 'generation', 'segments': 1, 'items': [{'name': 'model', 'vector_space_id': 'model@1', 'version': '1',
-                                           'owner': {'kind': 'plugin', 'plugin_id': 'plugin.eval', 'plugin_version': '1'},
-                                           'model': 'model', 'dimensions': 2, 'metric': 'cosine', 'indexes': ['text'],
-                                           'query_modalities': ['text'], 'role': 'evaluation',
-                                           'coverage': {'segments': 1, 'versions_covered': 1}}]}
+                    return 200, {'projection_generation_id': 'generation', 'segments': 1, 'items': [
+                        {'name': 'model', 'vector_space_id': 'model@1', 'version': '1',
+                         'owner': {'kind': 'plugin', 'plugin_id': owner, 'plugin_version': '1'},
+                         'model': 'model', 'dimensions': 2, 'metric': 'cosine', 'indexes': ['text'],
+                         'query_modalities': ['text'], 'role': 'evaluation',
+                         'coverage': {'segments': int(clock[0] >= ready), 'versions_covered': int(clock[0] >= ready)}}
+                        for owner, ready in [('plugin.eval', 2), ('plugin.other', 10)]]}
                 if path == '/v0/search/profiles':
                     return 200, {'items': [{'name': 'default', 'full_name': 'core.retrieve/default', 'aliases': ['default'],
                                             'provider': {'kind': 'plugin', 'plugin_id': 'core.retrieve', 'plugin_version': '0.1.0'}}]}
@@ -105,14 +145,24 @@ class EvaluationSelection(unittest.TestCase):
             directory = pathlib.Path(directory)
             trec.write(directory, {'d1': {'title': '', 'text': 'a record. More record content'}}, {'q1': 'find a record'}, {'q1': {'d1': 1}})
             client = Client()
-            options = types.SimpleNamespace(ingest_timeout=1, stall=1, paid_calls=0, live_paid=False,
-                                            evaluation={'plugin': 'plugin.eval', 'space': 'model@1'})
-            with mock.patch.object(run, 'ingest', return_value=({'r1': 'd1'}, {})), \
+            options = types.SimpleNamespace(ingest_timeout=60, stall=60, paid_calls=0, live_paid=False,
+                                            evaluation=[{'plugin': owner, 'space': 'model@1'} for owner in ['plugin.eval', 'plugin.other']])
+            def ingested(*args, progress):
+                clock[0] = 2
+                progress(60)
+                clock[0] = 10
+                return {'r1': 'd1'}, {'searchable_with_vectors_seconds': 10}
+            with mock.patch.object(run, 'ingest', side_effect=ingested) as ingestion, \
+                 mock.patch.object(run.time, 'monotonic', side_effect=lambda: clock[0]), \
                  mock.patch.object(scoring, 'score', return_value={'mean': {}, 'per_query': {}}), \
                  mock.patch.object(run, 'compare_within'), contextlib.redirect_stdout(io.StringIO()):
                 result, = run.measure_set([client], 'tiny', directory, 'run', options)
 
         self.assertEqual(client.corpora, 1)
+        self.assertEqual(ingestion.call_count, 1)
+        self.assertEqual(result['evaluation_ingestion'], {
+            'evaluation/plugin.eval/model@1': {'owner_vectors_seconds': 2},
+            'evaluation/plugin.other/model@1': {'owner_vectors_seconds': 10}})
         self.assertTrue(all(value['paid_calls_per_query'] is None
                             for system, value in result['systems'].items() if '/evaluation/' in system))
         self.assertEqual(set(result['systems']), {
@@ -120,6 +170,9 @@ class EvaluationSelection(unittest.TestCase):
             'lexical/evaluation/plugin.eval/model@1',
             'semantic/evaluation/plugin.eval/model@1',
             'hybrid/evaluation/plugin.eval/model@1',
+            'lexical/evaluation/plugin.other/model@1',
+            'semantic/evaluation/plugin.other/model@1',
+            'hybrid/evaluation/plugin.other/model@1',
         })
         searches = [body for method, path, body in client.requests
                     if method == 'POST' and path == '/v0/search' and body.get('query') == 'find a record']
@@ -129,7 +182,7 @@ class EvaluationSelection(unittest.TestCase):
         self.assertTrue(served)
         self.assertTrue(evaluation)
         self.assertTrue(all('evaluation_space' not in body for body in served))
-        self.assertTrue(all(body['evaluation_plugin'] == 'plugin.eval' and body['evaluation_space'] == 'model@1'
+        self.assertTrue(all(body['evaluation_plugin'] in {'plugin.eval', 'plugin.other'} and body['evaluation_space'] == 'model@1'
                             for body in evaluation))
         self.assertEqual({body['mode'] for body in evaluation}, set(run.MODES))
 

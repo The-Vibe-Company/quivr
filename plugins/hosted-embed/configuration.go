@@ -15,6 +15,7 @@ import (
 const pluginID = "hosted.embed"
 
 type configuration struct {
+	PluginID          string   `json:"plugin_id"`
 	Format            string   `json:"format"`
 	BaseURL           string   `json:"base_url"`
 	Auth              string   `json:"auth"`
@@ -39,7 +40,7 @@ type configuration struct {
 }
 
 func parseConfiguration(raw []byte) (configuration, error) {
-	c := configuration{SendDimensions: true, Metric: "cosine", Revision: "1", PluginVersion: "1.0.0", QueryInputType: "search_query", DocumentInputType: "search_document", MaxTokens: 512, Overlap: 48, BatchSize: 16, BatchTokens: 8192, RequestTimeoutMS: 4000, CallBudgetMS: 30000, MaxRetries: 2}
+	c := configuration{PluginID: pluginID, SendDimensions: true, Metric: "cosine", Revision: "1", PluginVersion: "1.0.0", QueryInputType: "search_query", DocumentInputType: "search_document", MaxTokens: 512, Overlap: 48, BatchSize: 16, BatchTokens: 8192, RequestTimeoutMS: 4000, CallBudgetMS: 30000, MaxRetries: 2}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
@@ -47,6 +48,9 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	}
 	if dec.Decode(new(any)) != io.EOF {
 		return c, fmt.Errorf("configuration must be one JSON object")
+	}
+	if len(c.PluginID) > 40 || !regexp.MustCompile(`^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$`).MatchString(c.PluginID) {
+		return c, fmt.Errorf("plugin_id must be a plugin identifier of at most 40 characters")
 	}
 	u, err := url.Parse(c.BaseURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -104,10 +108,16 @@ func (c configuration) spaceID() string {
 	if slug[0] < 'a' || slug[0] > 'z' {
 		slug = "m-" + slug
 	}
-	if len(slug) > 28 {
-		slug = slug[:28]
+	owner := c.PluginID
+	if owner == "" {
+		owner = pluginID
 	}
-	return fmt.Sprintf("%s.%s-%d-%s", pluginID, slug, c.Dimensions, hex.EncodeToString(sum[:8]))
+	suffix := fmt.Sprintf("-%d-%s", c.Dimensions, hex.EncodeToString(sum[:8]))
+	limit := min(28, 64-len(owner)-1-len(suffix))
+	if len(slug) > limit {
+		slug = slug[:limit]
+	}
+	return owner + "." + slug + suffix
 }
 
 func (c configuration) manifest(command []string) ([]byte, error) {
@@ -124,6 +134,6 @@ func (c configuration) manifest(command []string) ([]byte, error) {
 	if c.InputPrice != nil {
 		space["input_price"] = map[string]any{"usd_per_million_tokens": *c.InputPrice}
 	}
-	m := map[string]any{"id": pluginID, "version": c.PluginVersion, "description": "Text windows embedded with a configured hosted or OpenAI-compatible model.", "compatibility": map[string]string{"engine": ">=0.1.0 <0.3.0", "plugin_api": ">=0.13.0 <0.14.0"}, "contributions": map[string]any{"ingestion": map[string]any{"spaces": map[string]any{c.spaceID(): space}, "timeout_ms": 120000, "query_timeout_ms": 10000, "limits": map[string]int{"max_segments": 256}}}, "configuration": map[string]any{"schema": schema}, "secrets": []any{map[string]any{"name": "AZURE_FOUNDRY_KEY", "required": c.Auth != "none", "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration."}}, "run": map[string]any{"command": command}}
+	m := map[string]any{"id": c.PluginID, "version": c.PluginVersion, "description": "Text windows embedded with a configured hosted or OpenAI-compatible model.", "compatibility": map[string]string{"engine": ">=0.1.0 <0.3.0", "plugin_api": ">=0.13.0 <0.14.0"}, "contributions": map[string]any{"ingestion": map[string]any{"spaces": map[string]any{c.spaceID(): space}, "timeout_ms": 120000, "query_timeout_ms": 10000, "limits": map[string]int{"max_segments": 256}}}, "configuration": map[string]any{"schema": schema}, "secrets": []any{map[string]any{"name": "AZURE_FOUNDRY_KEY", "required": c.Auth != "none", "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration."}}, "run": map[string]any{"command": command}}
 	return json.MarshalIndent(m, "", "  ")
 }

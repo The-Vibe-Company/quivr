@@ -156,6 +156,7 @@ class Gate:
         self.budget, self.model, self.format = budget, model, format
         self.price, self.dimensions = price, dimensions
         self.label = label or model
+        self.plugin = 'hosted.embed'
         self.set_name, self.phase = 'startup', 'indexing'
         target = urllib.parse.urlsplit(endpoint)
         if (format not in ('openai', 'cohere') or target.scheme not in ('http', 'https')

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -132,6 +133,38 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 	handler.ServeHTTP(result, httptest.NewRequest(http.MethodPost, "/v0/contributions/ingestion/segment_and_embed", bytes.NewReader(body)))
 	if result.Code != 400 || !strings.Contains(result.Body.String(), "invalid_configuration") {
 		t.Fatalf("drift accepted: %d %s", result.Code, result.Body.String())
+	}
+}
+
+// Independently configured owners must coexist in one ingestion routing plan.
+func TestConfiguredOwnersHaveIndependentManifestAndSpaceNamespaces(t *testing.T) {
+	for _, id := range []string{"hosted.embed.pro", "hosted.embed.fast"} {
+		raw := fmt.Sprintf(`{"plugin_id":%q,"format":"openai","base_url":"http://127.0.0.1:9","auth":"none","model":"example","dimensions":8}`, id)
+		c, err := parseConfiguration([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := c.manifest([]string{"hosted-embed"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := t.TempDir() + "/quivr-plugin.yaml"
+		if err = os.WriteFile(path, manifest, 0600); err != nil {
+			t.Fatal(err)
+		}
+		p, err := quivrplugin.New(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Manifest().ID != id || !strings.HasPrefix(c.spaceID(), id+".") {
+			t.Fatalf("owner namespace: %s %s", p.Manifest().ID, c.spaceID())
+		}
+	}
+	for _, id := range []string{"", "Core.Owner", "has spaces", strings.Repeat("a", 41)} {
+		raw := fmt.Sprintf(`{"plugin_id":%q,"format":"openai","base_url":"http://127.0.0.1:9","auth":"none","model":"example","dimensions":8}`, id)
+		if _, err := parseConfiguration([]byte(raw)); err == nil {
+			t.Fatalf("invalid owner accepted: %q", id)
+		}
 	}
 }
 
