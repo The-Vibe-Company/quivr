@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -364,5 +366,86 @@ func TestManifestRequiresCredentialOnlyForAuthenticatedProviders(t *testing.T) {
 		if len(manifest.Secrets) != 1 || manifest.Secrets[0].Required != (auth != "none") {
 			t.Fatalf("auth %s has wrong required credential: %s", auth, body)
 		}
+	}
+}
+
+// Document and query calls share one provider cap, including outstanding
+// retries. Cancellation must release admission without leaking a request.
+func TestProviderCapsConcurrentCalls(t *testing.T) {
+	fake := embedding.New()
+	entered := make(chan struct{}, 8)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseAll := func() { releaseOnce.Do(func() { close(release) }) }
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { entered <- struct{}{}; <-release; fake.ServeHTTP(w, r) }))
+	defer func() { releaseAll(); server.Close() }()
+	c := testConfig("openai", server.URL)
+	c.MaxConcurrentRequests = 2
+	i := newIngester(c, "fake-key", slog.New(slog.DiscardHandler))
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	var group sync.WaitGroup
+	errs := make(chan error, 6)
+	for n := 0; n < 6; n++ {
+		group.Add(1)
+		go func(n int) {
+			defer group.Done()
+			_, err := i.EmbedQuery(ctx, queryRequest(c, fmt.Sprint("query ", n)))
+			errs <- err
+		}(n)
+	}
+	for n := 0; n < 2; n++ {
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			t.Fatal("configured provider slots did not overlap")
+		}
+	}
+	waiter, stop := context.WithTimeout(ctx, time.Millisecond)
+	_, waitErr := i.EmbedQuery(waiter, queryRequest(c, "cancelled waiter"))
+	stop()
+	if waitErr == nil {
+		t.Fatal("waiter unexpectedly succeeded")
+	}
+	select {
+	case <-entered:
+		t.Fatal("provider cap exceeded")
+	default:
+	}
+	releaseAll()
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(fake.Calls()) != 6 {
+		t.Fatalf("completed calls %d, want 6", len(fake.Calls()))
+	}
+}
+
+// A Retry-After discovered by one call also fences subsequent calls. A
+// cancelled waiter makes no provider attempt; no wall-clock sleep is needed.
+func TestProviderSharesThrottleAcrossCalls(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(429)
+	}))
+	defer server.Close()
+	c := testConfig("openai", server.URL)
+	c.MaxRetries = 0
+	i := newIngester(c, "fake-key", slog.New(slog.DiscardHandler))
+	_, err := i.EmbedQuery(t.Context(), queryRequest(c, "first"))
+	if err == nil {
+		t.Fatal("429 succeeded")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+	defer cancel()
+	_, err = i.EmbedQuery(ctx, queryRequest(c, "second"))
+	if err == nil || calls.Load() != 1 {
+		t.Fatalf("throttled waiter made a provider call: calls=%d error=%v", calls.Load(), err)
 	}
 }

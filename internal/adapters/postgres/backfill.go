@@ -711,6 +711,9 @@ func (s BackfillStore) CompleteBackfill(ctx context.Context, org, id, generation
 	if err != nil {
 		return err
 	}
+	if op.State == operations.StatePaused || op.State == operations.StateCancelRequested {
+		return operations.ErrNotRunning
+	}
 	if op.State != operations.StateRunning {
 		return tx.Commit(ctx)
 	}
@@ -723,7 +726,30 @@ func (s BackfillStore) CompleteBackfill(ctx context.Context, org, id, generation
 
 // FailBackfill records a terminal failure of a queued or running backfill.
 func (s BackfillStore) FailBackfill(ctx context.Context, org, id string, failure operations.Error) error {
-	return (RebuildStore{Pool: s.Pool}).FailRebuild(ctx, org, id, failure)
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return err
+	}
+	op, err := lockOperation(ctx, tx, org, id)
+	if err != nil {
+		return err
+	}
+	// Keep the existing workflow and pin alive when an operator won the
+	// lifecycle race. A later step waits for resume or confirms cancellation.
+	if op.State == operations.StatePaused || op.State == operations.StateCancelRequested {
+		return operations.ErrNotRunning
+	}
+	if op.State != operations.StateQueued && op.State != operations.StateRunning {
+		return tx.Commit(ctx)
+	}
+	if err = failOperation(ctx, tx, op, failure); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // backfillOf decodes the backfill columns of an Operation row.

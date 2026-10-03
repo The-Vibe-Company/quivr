@@ -19,6 +19,7 @@ type provider struct {
 	config configuration
 	key    string
 	log    *slog.Logger
+	gate   *providerGate
 }
 
 func (p provider) embed(ctx context.Context, inputs []string, mode, invocation string) ([][]float32, error) {
@@ -53,8 +54,12 @@ func (p provider) embed(ctx context.Context, inputs []string, mode, invocation s
 	}
 	client := &http.Client{Timeout: time.Duration(c.RequestTimeoutMS) * time.Millisecond, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for attempt := 0; attempt <= c.MaxRetries; attempt++ {
+		if err := p.gate.acquire(ctx); err != nil {
+			return nil, quivrplugin.RetryableIngestError("provider_unavailable", "provider admission cancelled")
+		}
 		req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(c.BaseURL, "/")+path, bytes.NewReader(encoded))
 		if err != nil {
+			p.gate.release()
 			return nil, quivrplugin.TerminalIngestError("invalid_configuration", "invalid provider URL")
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -65,11 +70,20 @@ func (p provider) embed(ctx context.Context, inputs []string, mode, invocation s
 		}
 		res, err := client.Do(req)
 		if err != nil {
+			p.gate.release()
 			p.usage(invocation, mode, attempt, 0, estimate, true)
 			return nil, quivrplugin.RetryableIngestError("provider_unavailable", "provider request failed or timed out")
 		}
 		data, readErr := io.ReadAll(io.LimitReader(res.Body, 16<<20+1))
 		_ = res.Body.Close()
+		delay := time.Duration(100*(1<<attempt)) * time.Millisecond
+		if v, ok := retryAfter(res.Header.Get("Retry-After"), time.Now()); ok {
+			delay = v
+		}
+		if res.StatusCode == 429 {
+			p.gate.throttle(delay)
+		}
+		p.gate.release()
 		if res.StatusCode == 200 && readErr == nil && len(data) <= 16<<20 {
 			vectors, tokens, known, err := decodeVectors(data, c, len(inputs))
 			if !known {
@@ -88,10 +102,6 @@ func (p provider) embed(ctx context.Context, inputs []string, mode, invocation s
 		}
 		if attempt == c.MaxRetries {
 			break
-		}
-		delay := time.Duration(100*(1<<attempt)) * time.Millisecond
-		if v, ok := retryAfter(res.Header.Get("Retry-After"), time.Now()); ok {
-			delay = v
 		}
 		// Never retry earlier than Retry-After. An excessive wait returns control
 		// to the engine rather than holding its invocation indefinitely.

@@ -89,6 +89,9 @@ type Config struct {
 	Plugins []plugins.PinConfig `json:"plugins"`
 	// Ingestion routes accepted source media types to pinned ingestion owners.
 	Ingestion plugins.IngestionRouting `json:"ingestion"`
+	// IngestionEvaluationConcurrency bounds optional activity slots per worker.
+	// Zero selects four; one restores serial evaluation. Served slots are separate.
+	IngestionEvaluationConcurrency int `json:"ingestion_evaluation_concurrency"`
 	// Retrieval maps deployment short names to installed plugin/profile names.
 	Retrieval RetrievalConfig `json:"retrieval"`
 
@@ -251,6 +254,9 @@ func Run(command string) error {
 	backfillSettings, err := cfg.Backfill.settings()
 	if err != nil {
 		return err
+	}
+	if cfg.IngestionEvaluationConcurrency < 0 || cfg.IngestionEvaluationConcurrency > 32 {
+		return errors.New("ingestion_evaluation_concurrency must be between 1 and 32 (or 0 for the default 4)")
 	}
 	pinnedAttempts := 10
 	switch {
@@ -744,7 +750,7 @@ func Run(command string) error {
 				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, struct {
 					orchestration.ReceiptDispatchStore
 					orchestration.OperationDispatchStore
-				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner)
+				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner, cfg.IngestionEvaluationConcurrency)
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()

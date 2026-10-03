@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"golang.org/x/sync/errgroup"
 )
 
 // Target is a backfill Operation and the Corpus's routed generation, which
@@ -94,8 +95,8 @@ type Pinned interface {
 	Ingestion(ctx context.Context, registrationID string) (plan, registration string, err error)
 }
 
-// Steps records how long each backfilled Version took (observability), which
-// the next dry runs read as throughput.
+// Steps records effective time per completed Version from batch wall time
+// (observability), which the next dry runs read as throughput.
 type Steps interface {
 	Step(org, step string, d time.Duration, errorCode string)
 }
@@ -188,25 +189,69 @@ func (b Backfiller) Step(ctx context.Context, org, id string) (Progress, error) 
 		return Progress{}, err
 	}
 	if len(candidates) == 0 {
-		return Progress{Done: true}, b.Store.CompleteBackfill(ctx, org, id, t.Generation.ID)
+		err := b.Store.CompleteBackfill(ctx, org, id, t.Generation.ID)
+		if errors.Is(err, operations.ErrNotRunning) {
+			return Progress{}, nil
+		}
+		return Progress{Done: true}, err
 	}
 	started := time.Now()
+	group, work := errgroup.WithContext(ctx)
+	group.SetLimit(settings.Concurrency)
+	completed := 0
+	previous := make(chan struct{})
+	close(previous)
 	for _, c := range candidates {
-		began := time.Now()
-		err = b.fill(ctx, org, t, c)
-		var failure terminal
-		switch {
-		case errors.As(err, &failure):
-			return b.fail(ctx, org, id, failure.failure)
-		case errors.Is(err, operations.ErrNotRunning):
-			// Paused or stopped meanwhile: the next step reads which.
-			return Progress{}, nil
-		case err != nil:
-			return Progress{}, err
+		if work.Err() != nil {
+			break
 		}
-		if b.Steps != nil {
-			b.Steps.Step(org, StepName, time.Since(began), "")
+		turn, next := previous, make(chan struct{})
+		previous = next
+		group.Go(func() error {
+			if err := work.Err(); err != nil {
+				return err
+			}
+			commit, err := b.prepare(work, org, t, c)
+			if err != nil {
+				return err
+			}
+			// Preparation may finish out of order, but the checkpoint is a
+			// high-water mark. Commit only after every preceding Version.
+			select {
+			case <-work.Done():
+				return work.Err()
+			case <-turn:
+			}
+			if err := commit(work); err != nil {
+				return err
+			}
+			// The turn chain serializes this counter as well as checkpoints.
+			completed++
+			close(next)
+			return nil
+		})
+	}
+	// Join all effects before retrying, failing or returning a pause. The
+	// store's running-state fences and ordered checkpoints remain final.
+	err = group.Wait()
+	if b.Steps != nil && completed > 0 {
+		// A duration per concurrent task counts ordered waiting repeatedly.
+		// Batch wall time / completions is the effective throughput dry
+		// runs need, including a successfully committed prefix on failure.
+		perVersion := time.Since(started) / time.Duration(completed)
+		for i := 0; i < completed; i++ {
+			b.Steps.Step(org, StepName, perVersion, "")
 		}
+	}
+	var failure terminal
+	switch {
+	case errors.As(err, &failure):
+		return b.fail(ctx, org, id, failure.failure)
+	case errors.Is(err, operations.ErrNotRunning):
+		// Paused or stopped meanwhile: the next step reads which.
+		return Progress{}, nil
+	case err != nil:
+		return Progress{}, err
 	}
 	// Pace the next batch so the backfill never exceeds the rate.
 	wait := time.Duration(float64(len(candidates))/settings.Rate*float64(time.Second)) - time.Since(started)
@@ -234,24 +279,28 @@ func (b Backfiller) check(ctx context.Context, t Target, registration string) *o
 }
 
 func (b Backfiller) fail(ctx context.Context, org, id string, failure operations.Error) (Progress, error) {
-	if err := b.Store.FailBackfill(ctx, org, id, failure); err != nil {
+	if err := b.Store.FailBackfill(ctx, org, id, failure); errors.Is(err, operations.ErrNotRunning) {
+		return Progress{}, nil
+	} else if err != nil {
 		return Progress{}, err
 	}
 	return Progress{Done: true}, nil
 }
 
-// fill gives one Version its target vectors, or skips it with a counted
-// reason. Only the segments the generation projects are filled: a plugin
+// prepare derives and publishes one Version, returning its ordered coverage
+// or skip commit. Only the segments the generation projects are filled: a plugin
 // whose segments differ would need a rebuild.
-func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate) error {
+func (b Backfiller) prepare(ctx context.Context, org string, t Target, c Candidate) (func(context.Context) error, error) {
 	op, g := t.Operation, t.Generation
-	skip := func(code string) error { return b.Store.SkipBackfill(ctx, org, op.ID, c.VersionID, code) }
+	skip := func(code string) (func(context.Context) error, error) {
+		return func(ctx context.Context) error { return b.Store.SkipBackfill(ctx, org, op.ID, c.VersionID, code) }, nil
+	}
 	v, err := b.Content.TrustedVersion(ctx, org, op.CorpusID, c.RecordID, c.VersionID)
 	if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrArtifactMissing) || errors.Is(err, content.ErrArtifactCorrupt) {
 		return skip(SkipUnavailable)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var seg content.Segmentation
 	var data []content.EmbeddingData
@@ -260,10 +309,10 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 		if err != nil {
 			reason, goneErr := b.Plugin.Gone(ctx, err)
 			if goneErr != nil {
-				return goneErr
+				return nil, goneErr
 			}
 			if reason != nil {
-				return terminal{failure: operations.Error{Code: reason.Code, Message: reason.Message}}
+				return nil, terminal{failure: operations.Error{Code: reason.Code, Message: reason.Message}}
 			}
 			switch {
 			case errors.Is(err, processing.ErrSegmentsDiffer):
@@ -275,7 +324,7 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 			case errors.Is(err, processing.ErrPluginDeadline):
 				return skip(SkipPluginDeadline)
 			default:
-				return err
+				return nil, err
 			}
 		}
 	} else {
@@ -284,7 +333,7 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 			return skip(SkipUnavailable)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 		counter, _ := b.Content.(processing.DeadlineCounter)
 		out := processing.Derive(ctx, org, b.Plugin, counter, processing.DerivationRequest{CorpusID: op.CorpusID, Version: v, Target: g, Kind: processing.FillVectors, Segmentation: seg, Spaces: op.Backfill.Spaces})
@@ -299,11 +348,11 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 			case "plugin_deadline":
 				return skip(SkipPluginDeadline)
 			default:
-				return terminal{failure: operations.Error{Code: out.Terminal.Code, Message: out.Terminal.Message}}
+				return nil, terminal{failure: operations.Error{Code: out.Terminal.Code, Message: out.Terminal.Message}}
 			}
 		}
 		if out.Retry != nil {
-			return out.Retry
+			return nil, out.Retry
 		}
 		data = out.Data
 	}
@@ -314,7 +363,7 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 
 	covered, err := b.Store.CoveredEmbeddings(ctx, org, g.ID, seg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	all := make([]content.EmbeddingData, 0, len(covered)+len(data))
 	for _, e := range covered {
@@ -327,7 +376,7 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 			return skip(SkipArtifactUnavailable)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 		all = append(all, content.EmbeddingData{Artifact: e, Vector: vector})
 	}
@@ -336,21 +385,25 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 		if err = b.Projection.Publish(ctx, g, org, op.CorpusID, c.Namespace, v, seg); errors.Is(err, retrieval.ErrProjectionMissing) {
 			return skip(SkipUnavailable)
 		} else if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err = b.Projection.PublishEmbeddings(ctx, g, org, all); errors.Is(err, retrieval.ErrProjectionMissing) {
 		// Withdrawn or superseded meanwhile: its objects are gone.
 		return skip(SkipUnavailable)
 	} else if err != nil {
-		return err
+		return nil, err
 	}
 	artifacts := make([]content.Embedding, len(data))
 	for i, d := range data {
 		artifacts[i] = d.Artifact
 	}
 	if c.Independent {
-		return b.Store.CoverBackfillEvaluation(ctx, org, op.ID, g, c.VersionID, seg, artifacts)
+		return func(ctx context.Context) error {
+			return b.Store.CoverBackfillEvaluation(ctx, org, op.ID, g, c.VersionID, seg, artifacts)
+		}, nil
 	}
-	return b.Store.CoverBackfill(ctx, org, op.ID, g, c.VersionID, artifacts)
+	return func(ctx context.Context) error {
+		return b.Store.CoverBackfill(ctx, org, op.ID, g, c.VersionID, artifacts)
+	}, nil
 }

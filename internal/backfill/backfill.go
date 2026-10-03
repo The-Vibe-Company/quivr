@@ -70,6 +70,8 @@ type Request struct {
 type Settings struct {
 	// Rate is how many Versions per second a backfill processes at most.
 	Rate float64
+	// Concurrency bounds Versions in flight inside a checkpointed step.
+	Concurrency int
 	// Poll is how often a paused backfill checks whether it was resumed or
 	// canceled.
 	Poll time.Duration
@@ -80,12 +82,16 @@ type Settings struct {
 
 // Default backfill settings.
 const (
-	DefaultRate = 2.0
-	DefaultPoll = 5 * time.Second
+	DefaultRate        = 2.0
+	DefaultConcurrency = 4
+	DefaultPoll        = 5 * time.Second
 )
 
 // WithDefaults fills unset settings.
 func (s Settings) WithDefaults() Settings {
+	if s.Concurrency <= 0 {
+		s.Concurrency = DefaultConcurrency
+	}
 	if s.Rate <= 0 {
 		s.Rate = DefaultRate
 	}

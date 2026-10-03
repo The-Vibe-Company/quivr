@@ -28,7 +28,7 @@ type cachedVector struct {
 }
 
 func newIngester(c configuration, key string, log *slog.Logger) *ingester {
-	return &ingester{config: c, provider: provider{config: c, key: key, log: log}, cache: map[[32]byte]*list.Element{}, order: list.New()}
+	return &ingester{config: c, provider: provider{config: c, key: key, log: log, gate: &providerGate{slots: make(chan struct{}, c.MaxConcurrentRequests)}}, cache: map[[32]byte]*list.Element{}, order: list.New()}
 }
 func (i *ingester) get(key [32]byte) []float32 {
 	i.mu.Lock()

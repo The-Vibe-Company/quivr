@@ -117,32 +117,46 @@ func (s SpaceStore) VectorSpaces(ctx context.Context, org, corpusID string) (con
 	if err != nil {
 		return g, nil, 0, notFound(err)
 	}
-	// Count each Version's independent cuts once, then aggregate all carried
-	// spaces in one snapshot. Correlated missing-segment checks per space can
-	// exhaust the serving query budget during an evaluation backfill.
+	// Bound cut lookup by each eligible Version even when freshly indexed
+	// data has stale statistics. Aggregate coverage by owner/space before
+	// joining totals so an underestimated Version count cannot cause a
+	// quadratic join. Every count still comes from one database snapshot.
 	rows, err := s.Pool.Query(ctx, `WITH current AS MATERIALIZED (
- SELECT sg.id AS segment_id,sg.version_id,pc.plugin_id,pc.role
- FROM segments sg JOIN records r ON (r.organization,r.current_version_id)=(sg.organization,sg.version_id)
- JOIN record_versions v ON (v.organization,v.id)=(sg.organization,sg.version_id)
- JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.segmentation_id,pc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3)
- WHERE sg.organization=$1 AND r.corpus_id=$2 AND `+eligibleVersionSQL+`
+ SELECT cut.segment_id,v.id AS version_id,cut.plugin_id,cut.role,
+ count(*) OVER (PARTITION BY cut.plugin_id,v.id) AS version_segments
+ FROM records r JOIN record_versions v ON (v.organization,v.id,v.record_id)=(r.organization,r.current_version_id,r.id)
+ JOIN LATERAL (
+  SELECT sg.id AS segment_id,pc.plugin_id,pc.role FROM projection_coverage pc
+  JOIN segments sg ON (sg.organization,sg.version_id,sg.segmentation_id)=(pc.organization,pc.version_id,pc.segmentation_id)
+  WHERE pc.organization=r.organization AND pc.version_id=v.id AND pc.generation_id=$3
+  OFFSET 0
+ ) cut ON true
+ WHERE r.organization=$1 AND r.corpus_id=$2 AND `+eligibleVersionSQL+`
 ), carried AS (
  SELECT sp.id,COALESCE(vs.owner_plugin_id,'') AS owner FROM unnest($4::text[]) sp(id) LEFT JOIN vector_spaces vs ON vs.id=sp.id
 ), per_version AS (
  SELECT plugin_id,version_id,role,count(*) AS segments FROM current GROUP BY plugin_id,version_id,role
-), vectors AS MATERIALIZED (
- SELECT cur.plugin_id,cur.version_id,ec.space_id,count(*) AS covered
- FROM current cur JOIN embedding_coverage ec ON ec.organization=$1 AND ec.segment_id=cur.segment_id AND ec.generation_id=$3
- WHERE ec.space_id=ANY($4::text[])
+), owners AS (
+ SELECT plugin_id,sum(segments)::bigint AS total,
+ COALESCE(sum(segments) FILTER(WHERE role='served'),0)::bigint AS serving
+ FROM per_version GROUP BY plugin_id
+), vectors AS (
+ SELECT cur.plugin_id,cur.version_id,ec.space_id,count(*) AS covered,max(cur.version_segments) AS total
+ FROM current cur JOIN LATERAL (
+  SELECT space_id FROM embedding_coverage ec
+  WHERE ec.organization=$1 AND ec.segment_id=cur.segment_id AND ec.generation_id=$3 AND ec.space_id=ANY($4::text[])
+  OFFSET 0
+ ) ec ON true
  GROUP BY cur.plugin_id,cur.version_id,ec.space_id
+), coverage AS (
+ SELECT plugin_id,space_id,sum(covered)::bigint AS covered,
+ count(*) FILTER(WHERE covered=total) AS versions FROM vectors GROUP BY plugin_id,space_id
 )
-SELECT sp.id,COALESCE(sum(vec.covered),0)::bigint,COALESCE(sum(p.segments),0)::bigint,
- COALESCE(sum(p.segments) FILTER(WHERE p.role='served'),0)::bigint,
- count(p.version_id) FILTER(WHERE vec.covered=p.segments),
+SELECT sp.id,COALESCE(vec.covered,0)::bigint,COALESCE(p.total,0)::bigint,
+ COALESCE(p.serving,0)::bigint,COALESCE(vec.versions,0)::bigint,
  (SELECT COALESCE(sum(segments),0)::bigint FROM per_version WHERE role='served')
-FROM carried sp LEFT JOIN per_version p ON p.plugin_id=sp.owner
- LEFT JOIN vectors vec ON vec.plugin_id=p.plugin_id AND vec.version_id=p.version_id AND vec.space_id=sp.id
-GROUP BY sp.id`, org, corpusID, g.ID, g.VectorSpaces())
+FROM carried sp LEFT JOIN owners p ON p.plugin_id=sp.owner
+ LEFT JOIN coverage vec ON vec.plugin_id=sp.owner AND vec.space_id=sp.id`, org, corpusID, g.ID, g.VectorSpaces())
 	if err != nil {
 		return g, nil, 0, err
 	}

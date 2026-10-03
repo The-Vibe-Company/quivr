@@ -105,7 +105,7 @@ Promote the former space the same way. It stayed an evaluation space and kept it
 
 ## How a backfill runs
 
-- It runs on its own worker queue, one article at a time, at most `backfill.rate` articles per second (see [Configuration](/reference/configuration#backfill)), so live ingestion keeps its capacity.
+- It runs on its own worker queue, with at most `backfill.concurrency` Versions in flight per step (default four), paced at `backfill.rate` Versions per second (see [Configuration](/reference/configuration#backfill)), so live ingestion keeps its capacity.
 - It is pinned to the Pipeline Plan active when it started, like other work, and fails with `pinned_plugin_unavailable` or `pinned_plan_stopped` rather than moving to another plugin version.
 - On its first step, the Corpus's search index starts carrying the new space, so articles ingested from then on get their vectors from live ingestion. The backfill fills only the articles that already had theirs.
 - It creates no new Version and no content event in the change feed. Articles outside its window are not touched.

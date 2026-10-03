@@ -423,6 +423,14 @@ func TestBackfillScopeCheckpointAndControl(t *testing.T) {
 	if err = f.fill(ctx, t, op.ID, g, next[1].VersionID); !errors.Is(err, operations.ErrNotRunning) {
 		t.Fatalf("fill while paused: %v", err)
 	}
+	// A terminal sibling or empty batch must not retire the worker while
+	// paused: resume needs that same workflow to keep its plan pin.
+	if err = store.FailBackfill(ctx, f.org, op.ID, operations.Error{Code: "pinned_plugin_unavailable"}); !errors.Is(err, operations.ErrNotRunning) {
+		t.Fatalf("terminal failure while paused: %v", err)
+	}
+	if err = store.CompleteBackfill(ctx, f.org, op.ID, g.ID); !errors.Is(err, operations.ErrNotRunning) {
+		t.Fatalf("complete while paused: %v", err)
+	}
 	if held, err := store.BeginBackfill(ctx, f.org, op.ID, f.plan); err != nil || held.Operation.State != operations.StatePaused {
 		t.Fatalf("a step while paused %+v %v", held.Operation, err)
 	}
@@ -482,6 +490,12 @@ func TestBackfillScopeCheckpointAndControl(t *testing.T) {
 	}
 	if canceled, err := store.CancelOperation(ctx, f.org, other.ID); err != nil || canceled.State != operations.StateCancelRequested {
 		t.Fatalf("cancel a paused backfill %+v %v", canceled, err)
+	}
+	if err = store.FailBackfill(ctx, f.org, other.ID, operations.Error{Code: "pinned_plugin_unavailable"}); !errors.Is(err, operations.ErrNotRunning) {
+		t.Fatalf("terminal failure while cancellation is pending: %v", err)
+	}
+	if err = store.CompleteBackfill(ctx, f.org, other.ID, g.ID); !errors.Is(err, operations.ErrNotRunning) {
+		t.Fatalf("complete while cancellation is pending: %v", err)
 	}
 	if err = store.ConfirmCancel(ctx, f.org, other.ID); err != nil {
 		t.Fatal(err)

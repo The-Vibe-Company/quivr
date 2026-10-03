@@ -131,8 +131,16 @@ Corpora need a rebuild or backfill before they carry a newly configured space.
 | `max_batch_tokens` | `8192` | Maximum summed input estimate per request; at least the segment limit |
 | `request_timeout_ms` | `4000` | Per-request timeout, 100–10000 ms |
 | `call_budget_ms` | `30000` | Document invocation budget, 100–90000 ms |
+| `max_concurrent_requests` | `4` | Provider requests in flight per plugin process, shared by document and query calls, 1–32 |
 | `max_retries` | `2` | Retries after the first attempt on 429 or 5xx, 0–5 |
 | `usd_per_million_tokens` | absent | Optional operator-supplied price for backfill estimates |
+
+A 429 response shares its `Retry-After` delay across subsequent calls in the
+plugin process, including calls from other documents and query encoding.
+Already outstanding requests may finish. Without `Retry-After`, the bounded
+retry backoff supplies the shared delay. This cap and the engine's evaluation
+and backfill concurrency limits apply per process; tune all of them to your
+provider's allowance.
 
 Windows prefer paragraph, line and sentence endings in their latter half.
 Offsets refer to Unicode code points in the original body Part; if there is no

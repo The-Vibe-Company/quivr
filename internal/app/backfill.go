@@ -21,6 +21,8 @@ type BackfillConfig struct {
 	MaxCostWithoutConfirmation float64 `json:"max_cost_without_confirmation"`
 	// Rate is the most Versions per second a backfill processes (default 2).
 	Rate float64 `json:"rate"`
+	// Concurrency bounds Versions in flight (default 4; 1 restores serial work).
+	Concurrency int `json:"concurrency"`
 	// Poll is how often a paused backfill checks whether it was resumed or
 	// canceled (Go duration, default 5s).
 	Poll string `json:"poll"`
@@ -28,10 +30,12 @@ type BackfillConfig struct {
 
 // settings validates the configuration.
 func (c BackfillConfig) settings() (backfill.Settings, error) {
-	s := backfill.Settings{Rate: c.Rate, MaxCostWithoutConfirmation: c.MaxCostWithoutConfirmation}
+	s := backfill.Settings{Rate: c.Rate, Concurrency: c.Concurrency, MaxCostWithoutConfirmation: c.MaxCostWithoutConfirmation}
 	switch {
 	case c.Rate < 0:
 		return s, errors.New("backfill.rate must be a positive number of Versions per second")
+	case c.Concurrency < 0 || c.Concurrency > 32:
+		return s, errors.New("backfill.concurrency must be between 1 and 32 (or 0 for the default 4)")
 	case c.MaxCostWithoutConfirmation < 0:
 		return s, errors.New("backfill.max_cost_without_confirmation must not be negative")
 	}

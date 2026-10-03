@@ -271,6 +271,43 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	if err != nil || !status.Searchable || processing.Phase != "enrichment" || code != "" {
 		t.Fatalf("evaluation changed served state: %+v %+v %s %v", status, processing, code, err)
 	}
+
+	// Fresh bulk indexing can leave planner statistics far behind actual rows.
+	// Clone this valid independent-owner fixture without ANALYZE, then check
+	// real coverage at its serving budget rather than a wall-clock sleep.
+	const copies = 2000
+	for _, table := range []struct {
+		name   string
+		patch  string
+		filter string
+	}{
+		{"records", "jsonb_build_object('id',r.id||'-'||n,'record_key',r.record_key||'-'||n,'current_version_id',r.current_version_id||'-'||n)", "r.id=$2"},
+		{"record_versions", "jsonb_build_object('id',r.id||'-'||n,'record_id',r.record_id||'-'||n,'provenance','{}'::jsonb)", "r.id=$3"},
+		{"version_parts", "jsonb_build_object('version_id',r.version_id||'-'||n)", "r.version_id=$3"},
+		{"segmentations", "jsonb_build_object('id',r.id||'-'||n,'version_id',r.version_id||'-'||n)", "r.version_id=$3"},
+		{"segments", "jsonb_build_object('id',r.id||'-'||n,'version_id',r.version_id||'-'||n,'segmentation_id',r.segmentation_id||'-'||n)", "r.version_id=$3"},
+		{"projection_coverage", "jsonb_build_object('version_id',r.version_id||'-'||n,'segmentation_id',r.segmentation_id||'-'||n)", "r.version_id=$3"},
+		{"embedding_artifacts", "jsonb_build_object('id',r.id||'-'||n,'segment_id',r.segment_id||'-'||n,'derivation_id',r.derivation_id||'-'||n)", "r.segment_id=ANY($4::text[])"},
+		{"embedding_coverage", "jsonb_build_object('segment_id',r.segment_id||'-'||n,'artifact_id',r.artifact_id||'-'||n)", "r.segment_id=ANY($4::text[])"},
+	} {
+		query := "INSERT INTO " + table.name + " SELECT (jsonb_populate_record(NULL::" + table.name + ",to_jsonb(r)||" + table.patch + ")).* FROM " + table.name + " r CROSS JOIN generate_series(1,$5::int) n WHERE r.organization=$1 AND " + table.filter
+		// Explicit casts keep all shared fixture parameters typed even when unused.
+		query += " AND $2::text IS NOT NULL AND $3::text IS NOT NULL AND $4::text[] IS NOT NULL"
+		if _, err = pool.Exec(ctx, query, org, v.RecordID, v.ID, []string{evaluation.Segments[0].ID, evaluation.Segments[1].ID}, copies); err != nil {
+			t.Fatal(table.name, err)
+		}
+	}
+	budget, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	_, coverage, total, err := store.VectorSpaces(budget, org, c.ID)
+	if err != nil || total != copies+1 {
+		t.Fatalf("coverage after fresh indexing: served cuts %d, error %v", total, err)
+	}
+	for _, covered := range coverage {
+		if covered.OwnerPluginID == "example.evaluation" && (covered.Segments != 2*(copies+1) || covered.VersionsCovered != copies+1 || *covered.TotalSegments != 2*(copies+1)) {
+			t.Fatalf("coverage after fresh indexing: %+v", covered)
+		}
+	}
 	if _, err = pool.Exec(ctx, `INSERT INTO tombstones(organization,record_id) VALUES($1,$2)`, org, v.RecordID); err != nil {
 		t.Fatal(err)
 	}

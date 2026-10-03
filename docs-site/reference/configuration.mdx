@@ -21,6 +21,7 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `log_directory` | no | Write JSON logs to rotating files in this folder instead of stderr |
 | `retrieval` | no | Search profile aliases. See [Search profiles](#search-profiles). |
 | `plugins` | no | The plugins this deployment calls. See [Plugin pins](#plugin-pins). |
+| `ingestion_evaluation_concurrency` | no | Evaluation activities in flight per worker. Default `4`, range `1`–`32`; `0` selects the default. Served ingestion has separate capacity. |
 | `ingestion` | no | Source media routing and the default ingestion plugin. See [Ingestion routing](#ingestion-routing). |
 | `plugin` | no | One pin, shorthand for a one-item `plugins` list; both may be combined |
 | `destinations` | no | Webhook destinations for alerts. See [Webhook destinations](#webhook-destinations). |
@@ -190,8 +191,11 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `rate` | `2` | The most Versions per second one backfill processes. Worker only. |
+| `concurrency` | `4` | Versions in flight inside a backfill step, range `1`–`32`; `0` selects the default. `1` restores serial work. Worker only. |
 | `poll` | `5s` | How often a paused backfill checks whether it was resumed or canceled. Worker only. |
 | `max_cost_without_confirmation` | `0` | The estimated cost, in US dollars, above which starting a backfill needs `confirm_cost`. With `0`, any backfill into a priced space needs it. Api only. |
+
+Backfill concurrency controls overlap; `rate` still paces each batch. These limits apply per worker process. For hosted embeddings, also configure the plugin's `max_concurrent_requests`; provider `Retry-After` delays apply across that plugin process. Lower the limits for constrained providers or databases. Restart the worker after changing these engine limits.
 
 ## Observability
 

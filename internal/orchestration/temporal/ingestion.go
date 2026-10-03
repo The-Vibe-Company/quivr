@@ -147,7 +147,13 @@ type Runtime struct {
 // queue. pins pins the processing of each receipt, each Operation and each
 // connector run to the plan it started on; nil leaves them on the active
 // plan.
-func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, backfiller *backfill.Backfiller, reprocessor *quarantine.Reprocessor, pins Pinner) (*Runtime, error) {
+func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, backfiller *backfill.Backfiller, reprocessor *quarantine.Reprocessor, pins Pinner, evaluationConcurrency int) (*Runtime, error) {
+	if evaluationConcurrency == 0 {
+		evaluationConcurrency = 4
+	}
+	if evaluationConcurrency < 1 || evaluationConcurrency > 32 {
+		return nil, errors.New("evaluation concurrency must be between 1 and 32")
+	}
 	if pins == nil {
 		pins = unpinned{}
 	}
@@ -193,7 +199,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		if service.Evaluation.Serving != nil {
 			registerServingProjection(w, *service.Evaluation, pins)
 		}
-		ew = worker.New(c, ingestionEvaluationQueue, worker.Options{MaxConcurrentActivityExecutionSize: 1})
+		ew = worker.New(c, ingestionEvaluationQueue, worker.Options{MaxConcurrentActivityExecutionSize: evaluationConcurrency})
 		registerIngestionEvaluation(ew, *service.Evaluation, pins)
 		if err = ew.Start(); err != nil {
 			if cw != nil {
