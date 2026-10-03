@@ -22,7 +22,7 @@ With several workers in flight, main often moves between a green hand-back and i
 
 ## No ticket: `--no-ticket`
 
-`armada merge <pr> --no-ticket` merges a pull request no ticket owns: the `armada init` pull request (its output names the command) or the release pull request below. There is no hand-back and nothing is written to Linear; every other check is unchanged, and the merge is pinned to the head it checked. It refuses a branch that names a ticket of the program: that one is merged on its worker's hand-back.
+`armada merge <pr> --no-ticket` merges a pull request no ticket owns: the `armada init` pull request (its output names the command) or the release pull request below. There is no hand-back and nothing is written to Linear; every other check is unchanged, and the merge is pinned to the head it checked. A branch that names a ticket of the program is refused unless you add `--reason "<why the ticket stays open>"`. Use that override for partial or configuration work that must land before the ticket is done: it requires the configured CI checks, posts the reason on the PR before merging, and leaves the ticket and its worker unchanged. A failed reason comment refuses the merge; `--dry-run` posts nothing.
 
 When none of the required checks ran on the head (a release pull request opened with the workflow's own token gets no CI run), it passes with a note, on GitHub's own state (`UNSTABLE` included, when nothing failed) and the checks that did run, once the head is a minute old; a younger head, or a head this run updated (its update starts CI), is waited for (`--wait`) or refused.
 
