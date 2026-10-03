@@ -129,7 +129,7 @@ A subscription can carry `owner`, a reference from your application that Quivr e
 
 An Organization owns its collections, documents and alerts. Normal API calls carry a key that determines the organization, allowed actions and reachable collections. The operator creates these keys.
 
-A configured collector (a Connector Instance) adds content to one collection and namespace. It can fetch on a schedule or receive updates from a push source. Collected documents follow the same path as documents you send. Your application follows changes by [polling `GET /v0/changes`](https://docs.quivr.thevibecompany.co/api-reference/changes/poll-changes) or using the [live stream at `GET /v0/changes/stream`](https://docs.quivr.thevibecompany.co/api-reference/changes/stream-changes), resuming from a cursor that marks its position.
+A configured collector (a Connector Instance) adds content to one collection and namespace. It can fetch on a schedule or receive updates from a push source. Collected documents follow the same path as documents you send. Your application follows changes by [polling `GET /v0/changes`](https://docs.quivr.thevibecompany.co/api-reference/changes/poll-changes) or using the [live stream at `GET /v0/changes/stream`](https://docs.quivr.thevibecompany.co/api-reference/changes/stream-changes), resuming from a cursor that marks its position; [Follow changes](/guides/follow-changes) shows how.
 
 Source push routes declare their own authentication: a Quivr API key, a token for one collector or a provider signature. Quivr or the connector plugin verifies the request for the chosen mode. Webhooks authenticated by a provider signature need no Quivr API key. See [Collect from sources](/guides/connectors) for the choices.
 

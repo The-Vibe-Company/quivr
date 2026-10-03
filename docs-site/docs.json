@@ -82,6 +82,7 @@
                   "guides/described-alerts"
                 ]
               },
+              "guides/follow-changes",
               {
                 "group": "Collect from sources",
                 "pages": [
