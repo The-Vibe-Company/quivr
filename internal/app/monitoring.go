@@ -96,6 +96,9 @@ func (cfg Config) planEvaluators(ctx context.Context, store registry.Store, set 
 	named, err := store.EvaluatorRegistrations(read)
 	cancel()
 	for _, r := range named {
+		if _, ok := served[plugins.EvaluatorKey(r.PluginID, r.Version)]; ok {
+			continue
+		}
 		pin, err := r.Pin()
 		if err != nil || pin.Manifest.Contributions.Subscription == nil {
 			if r.Subscriptions > 0 || r.PinnedWork > 0 {
