@@ -28,7 +28,7 @@ A keyword alert's Saved Query expression:
 {
   "kind": "keywords",
   "match": {"all": [
-    {"term": "Airbus"},
+    {"term": "Acme"},
     {"any": [{"term": "grève"}, {"term": "strike"}]},
     {"not": {"term": "sport"}}
   ]}
@@ -39,7 +39,7 @@ A keyword alert's Saved Query expression:
 
 | Node | Satisfied when |
 | --- | --- |
-| `{"term": "Airbus"}` | The word, or the exact phrase (`{"term": "Marine Le Pen"}`), appears in a searched Part |
+| `{"term": "Acme"}` | The word, or the exact phrase (`{"term": "city book fair"}`), appears in a searched Part |
 | `{"field": "author", "equals": "Jane Doe"}` | The article's metadata field has this value ([fields](#field-filters)) |
 | `{"all": [nodes]}` | Every node is satisfied |
 | `{"any": [nodes]}` | At least one node is satisfied |
@@ -58,7 +58,7 @@ The core validates every Saved Query pinned to this plugin against the declared
 
 The Plugin API lets the core validate an expression only against the plugin's
 JSON Schema, when the Subscription is created. A query string such as
-`"Airbus" AND (grève OR strike)` cannot be checked by a schema: a typo would be
+`"Acme" AND (grève OR strike)` cannot be checked by a schema: a typo would be
 accepted, and the saved search would then either never alert or fail at every
 article. The structured tree is checked in full at creation, so a mistake is a 422
 that the user sees at once. It is also unambiguous: it has no operator precedence to
@@ -80,9 +80,9 @@ translates to the tree, and the plugin ships its reference parser.
   So `greve` finds "Grève", and `oeuvre` finds "Œuvre".
 - **Whole words.** A word is a run of Unicode letters and digits. Everything else
   separates words: spaces, punctuation, apostrophes and hyphens. So:
-  - `bus` does not match "Airbus";
+  - `me` does not match "Acme";
   - `salarié` does not match "salariés", because there is no stemming;
-  - `Airbus` matches "l'Airbus".
+  - `Acme` matches "l'Acme".
 - **Phrases.** A term of several words matches them consecutively and in order, so
   `Saint-Denis` also finds "Saint Denis". A term without any letter or digit never
   matches.
@@ -232,11 +232,11 @@ share the existing described batch call; local evaluations never join it.
 
 ```json
 {
-  "explanation": "Matched \"Airbus\" in title, body; \"grève\" in body.",
+  "explanation": "Matched \"Acme\" in title, body; \"grève\" in body.",
   "part_keys": ["title", "body"],
   "details": {
     "kind": "keywords",
-    "terms": [{"term": "Airbus", "part_keys": ["title", "body"]}, {"term": "grève", "part_keys": ["body"]}],
+    "terms": [{"term": "Acme", "part_keys": ["title", "body"]}, {"term": "grève", "part_keys": ["body"]}],
     "fields": []
   }
 }
@@ -340,7 +340,7 @@ when described alerts cannot be decided.
 `alerts.notation` translates the query text people write into the expression:
 
 ```text
-"Airbus" AND (grève OR strike) NOT sport
+"Acme" AND (grève OR strike) NOT sport
 author:"Jane Doe" OR source:wire
 ```
 
@@ -357,8 +357,8 @@ FIELD   := name ":" ( WORD | PHRASE )      name is [a-z][a-z0-9_]*
 The notation follows these rules:
 - `NOT` binds tighter than `AND`, which binds tighter than `OR`.
 - Operators are upper case; `and`, `or` and `not` in lower case are ordinary words.
-- `Marine Le Pen` without quotes requires the three words anywhere, and
-  `"Marine Le Pen"` requires the phrase.
+- `city book fair` without quotes requires the three words anywhere, and
+  `"city book fair"` requires the phrase.
 - A leading `-` is refused: write `NOT`.
 - A word shaped `name:value` is a field filter, unless the value starts with `/`
   (a URL). Quote it to search it as text: `"re:Invent"`.
@@ -366,7 +366,7 @@ The notation follows these rules:
   no level.
 
 ```bash
-python3 -m alerts.notation '"Airbus" AND (grève OR strike) NOT sport'   # prints the expression
+python3 -m alerts.notation '"Acme" AND (grève OR strike) NOT sport'   # prints the expression
 ```
 
 It exits 1 and explains the mistake for an invalid query. From Python, use

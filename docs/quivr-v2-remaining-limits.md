@@ -105,11 +105,11 @@ stay visible. The Spec 1 obligation map is in
   workflows. This is a documented deviation from the blueprint.
 - Match criteria come from pinned `subscription` plugins. This repository ships
   the alerts plugin `plugins/alerts`: keyword alerts (boolean keyword queries and
-  metadata filters, without stemming or wildcards), and described alerts judged by
-  TypeSafe's Jev, off without a TypeSafe key. It also ships the
-  `quivr plugin init --kind subscription` template. Matching by meaning with
-  Quivr's own vectors, without an external classifier, is a later slice of Spec 3.
-- Described alerts send article text to TypeSafe. A TypeSafe outage delays the
+  metadata filters, without stemming or wildcards), local meaning alerts using
+  stored vectors without an external classifier, and Jev meaning checks that
+  need a TypeSafe key. Keyword and meaning checks can be combined. It also ships
+  the `quivr plugin init --kind subscription` template.
+- Jev meaning checks send article text to TypeSafe. A TypeSafe outage delays the
   keyword alerts of the same articles too, because the core retries a plugin's
   batch as one.
 - One article's due alerts are decided in one plugin call: one worker at a time

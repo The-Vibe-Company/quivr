@@ -103,7 +103,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   new Version.
 - **Keyword alerts** through the first-party plugin [`plugins/alerts`](plugins/alerts/README.md),
   pinned by default in the local stack:
-  - queries such as `"Airbus" AND (grève OR strike) NOT sport`, with exact phrases,
+  - queries such as `"Acme" AND (grève OR strike) NOT sport`, with exact phrases,
     "any of", "none of" and grouping;
   - case, accents and punctuation are ignored, and words match whole;
   - metadata filters such as `source:wire` or `author:"Jane Doe"` (names mapped in the
@@ -123,6 +123,12 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   - the browser demo's **Alertes** tab offers them next to keyword alerts when the
     deployment has a classifier, and shows each caught article's score
     ([`quivr-search/`](quivr-search/README.md#alertes)).
+- **Local meaning alerts** through the same plugin: the `meaning` kind with
+  `meaning_check: vectors` compares
+  a description with stored embeddings to catch rephrased or translated articles
+  without an external classifier. `keywords_or_meaning` and `keywords_and_meaning`
+  combine keyword and meaning checks
+  ([guide](https://docs.quivr.thevibecompany.co/guides/described-alerts#keep-the-meaning-check-inside-the-installation)).
 - **Subscription previews** (`POST /v0/subscription-previews`): before saving an alert,
   see which of the most recent articles it would have caught, judged by the same plugin
   with the same rules. A preview saves nothing and sends nothing, and it judges at most
@@ -224,6 +230,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   API or other ingestion. A plugin error, invalid output or exhausted retries quarantine
   the Version with a structured diagnostic, and an `optional` text route falls back to
   the built-in text path ([guide](https://docs.quivr.thevibecompany.co/plugins/pin)).
+- **Reprocessing quarantined Versions**: after a plugin fix or rollback, an operator
+  lists quarantined Versions, runs a dry run, then reprocesses them with the active
+  plan. The Operation is paced, resumable and keeps each Version's identity
+  ([guide](https://docs.quivr.thevibecompany.co/plugins/reprocess-quarantined-versions)).
 - **Plugin-owned extension namespaces**: the pinned plugin's declared namespaces are
   registered at startup beside the built-in ones. Its normalizer's extensions are
   validated against their schemas and published on the Version, clients cannot write
@@ -265,7 +275,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   (`fetch` a page after an opaque checkpoint, `check_credential`, classified errors),
   a Go Plugin SDK ([`sdks/go`](sdks/go/README.md)) that redacts credentials, and
   `quivr plugin test` checks that pages resume from their checkpoint and that no
-  credential leaks. The core does not call connector plugins yet.
+  credential leaks. The core calls these plugins for scheduled and on-demand collection.
 - **Protected source pushes**: per-instance token buckets, TTL replay of
   `Idempotency-Key` answers, optional CIDR allowlists with trusted proxy resolution,
   and accepted/refused audit events with per-instance admin statistics.
@@ -291,12 +301,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What comes next
 
-- Alerts that catch rephrased or translated articles with Quivr's own vectors, without an external classifier.
 - Filtering on typed field mappings (filter roles are validated and stored today).
-- Reprocessing quarantined Versions.
-
-The contract already describes some of these routes; the ones not implemented yet are
-listed here, not in "What works today".
 
 ## Documentation
 

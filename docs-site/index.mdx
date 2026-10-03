@@ -34,7 +34,7 @@ Send articles one by one or in batches, as text or files such as PDFs. Or let Qu
 Search by keywords, by meaning, or both. Each result names the article, the version and the exact passage it comes from.
 </Card>
 <Card title="Follow a topic" icon="bell">
-Save a keyword query or a plain-language description as an alert. Each new article that matches triggers a signed webhook that says why.
+Save a keyword query or a plain-language description as an alert. Quivr can check the meaning itself, or call an external classifier. Each new article that matches triggers a signed webhook that says why.
 </Card>
 <Card title="Extend it with plugins" icon="puzzle">
 Add a file format, a source, a way to embed or rank text, or an alert rule, in any language that serves HTTP.
@@ -45,7 +45,7 @@ Whatever the source, Quivr confirms an article only once it is stored, so an out
 
 ## What it does not do yet
 
-Quivr is at the evaluation stage: the API is `v0` and may change, so do not run it in production. The local stack runs on Linux x86_64 and on Apple Silicon Macs. Scanned documents are not read (there is no OCR), and alerts that match by meaning rely on an external classifier.
+Quivr is at the evaluation stage: the API is `v0` and may change, so do not run it in production. The local stack runs on Linux x86_64 and on Apple Silicon Macs. Scanned documents are not read (there is no OCR).
 
 ## Next steps
 

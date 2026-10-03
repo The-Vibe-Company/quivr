@@ -167,8 +167,8 @@ A durable, trackable execution of a long-running administrative command such as 
 _Avoid_: Workflow, ingestion receipt
 
 **Backfill**:
-An operation that reprocesses a corpus's past record versions with the active ingestion plugin to fill vector spaces of its routed projection generation, paced below live ingestion, after a dry run of its volume, duration and cost. It never creates a record version or a content change event.
-_Avoid_: Re-ingestion, reindex
+An operation that processes a corpus's current record versions with one selected active ingestion plugin to fill its projection and the vector spaces it owns, paced below live ingestion, after a dry run of its volume, duration and cost. It preserves record and version identities and never creates a record version or a content change event.
+_Avoid_: Re-ingestion, reindex, real-time ingestion, transport replay
 
 **Change Event**:
 An immutable, uniquely identified public fact describing a committed domain change, ordered within its organization for clients that consume the resumable change feed.
@@ -211,10 +211,6 @@ _Avoid_: Fully processed record
 **Progressive Enrichment**:
 The availability model in which a record version becomes searchable as soon as its mandatory retrieval baseline is ready, then gains optional text, image, audio, or video derivations without changing its identity.
 _Avoid_: Waiting for full processing, creating a new record version for derived output
-
-**Backfill**:
-The controlled processing or reprocessing of an existing historical range without changing the identity of its records.
-_Avoid_: Real-time ingestion, replay when referring only to transport redelivery
 
 ## Extensibility
 

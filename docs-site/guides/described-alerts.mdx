@@ -78,7 +78,7 @@ These steps are for the operator who runs Quivr.
 
 3. Restart the plugin and Quivr. The plugin logs at startup whether described alerts are enabled.
 
-Without a key, pin `"kinds": ["keywords"]`: a described alert is then refused at creation with `422 invalid_expression`. With the local stack, `make dev` offers described alerts only when `TYPESAFE_API_KEY` is set in its environment.
+Without a key, pin `"kinds": ["keywords", "meaning", "keywords_or_meaning", "keywords_and_meaning"]` for keyword and local meaning checks. Use `kind: meaning` for a local description and explicitly select `meaning_check: vectors` for every meaning check. This pin excludes `described`: it is refused at creation with `422 invalid_expression`, even with `meaning_check: vectors`. The kind list alone does not prevent a mixed expression from selecting Jev. The local stack uses this list by default; `make dev` adds `described` only when `TYPESAFE_API_KEY` is set in its environment.
 
 ## Keep the meaning check inside the installation
 

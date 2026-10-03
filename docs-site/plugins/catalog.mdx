@@ -1,7 +1,7 @@
 ---
 title: "First-party plugins"
 description: "The plugins that ship with Quivr: what each provides, its configuration, and where it runs."
-keywords: ["pdf-text", "alerts", "core-ingest", "core-retrieve", "rss", "m365-mail", "x-list", "catalog"]
+keywords: ["pdf-text", "alerts", "core-ingest", "hosted-embed", "core-retrieve", "jev-rerank", "rss", "m365-mail", "x-list", "push-source", "catalog"]
 ---
 
 These plugins live in the `plugins/` folder of the repository. They use the same public protocol as your own plugins, and none is compiled into the engine. `make dev` runs the default set; optional plugins are pinned explicitly.
@@ -9,13 +9,15 @@ These plugins live in the `plugins/` folder of the repository. They use the same
 | Plugin | Id | Type | Provides |
 | --- | --- | --- | --- |
 | `pdf-text` | `pdf-text` 0.1.0 | Normalizer | `application/pdf`: one Part per page |
-| `alerts` | `alerts` 0.2.0 | Alert rule | keyword alerts and described alerts |
+| `alerts` | `alerts` 0.3.0 | Alert rule | keyword and meaning alerts, alone or combined |
 | `core-ingest` | `core.ingest` 1.0.0 | Ingestion | token windows embedded with `multilingual-e5-small` |
 | `hosted-embed` | `hosted.embed` 1.0.0 | Ingestion | a configured hosted or OpenAI-compatible text model |
-| `core-retrieve` | `core.retrieve` 1.0.0 | Retrieval | keyword, vector or hybrid search, as the index ranks it |
+| `core-retrieve` | `core.retrieve` 1.1.0 | Retrieval | `default` and `deep`: keyword, vector or hybrid search, as the index ranks it |
+| `jev-rerank` | `jev.rerank` 1.0.0 | Retrieval | `deep`: Jev re-ranking of a hybrid shortlist, with an unpaid hybrid fallback |
 | `rss` | `connector.rss` 1.0.0 | Connector | kind `rss`: RSS, Atom and JSON Feed |
 | `m365-mail` | `connector.m365_mail` 1.0.0 | Connector | kind `m365_mail`: a Microsoft 365 mailbox folder |
-| `x-list` | `connector.x_list` 1.0.0 | Connector | kind `x_list`: the posts of an X list |
+| `x-list` | `connector.x_list` 1.1.0 | Connector | kind `x_list`: the posts of an X list |
+| `push-source` | `push-source` 0.1.0 | Connector | kind `events`: versioned text records received through an instance-token route |
 
 ## pdf-text
 
@@ -31,15 +33,25 @@ Pin it with a route for `application/pdf`. See [Add content](/guides/add-content
 
 ## alerts
 
-Two kinds of alert. `keywords` is a boolean query over an article's title and body, with metadata filters. `described` is a plain-language description that TypeSafe's Jev classifier judges each article against; it sends article text to TypeSafe and is off without a `TYPESAFE_API_KEY` in the plugin's environment.
+Keyword and local-vector checks need no classifier key. Jev checks need a `TYPESAFE_API_KEY` in the plugin's environment.
+
+| Kind | Checks | Sends text out? |
+| --- | --- | --- |
+| `keywords` | Boolean query and metadata filters | No |
+| `meaning` | Local stored vectors; requires `meaning_check: vectors` | No |
+| `described` | Jev by default, local vectors with `meaning_check: vectors` | With Jev |
+| `keywords_or_meaning` / `keywords_and_meaning` | Keyword and meaning checks, with an explicit `meaning_check` | With Jev |
+
+The pin's `kinds` lists the alert kinds the deployment accepts. For keyword and local meaning checks without a TypeSafe key, pin `"kinds": ["keywords", "meaning", "keywords_or_meaning", "keywords_and_meaning"]`, as `make dev` does. Use `kind: meaning` for a local description, and `meaning_check: vectors` for every meaning check. This pin excludes `described`, so that kind is refused with `422 invalid_expression` even when it selects vectors. The kind list alone does not prevent a mixed expression from selecting Jev.
 
 | Configuration | Default | Meaning |
 | --- | --- | --- |
 | `fields` | `{}` | Filter names mapped to JSON Pointers into article metadata, such as `{"author": "/extensions/example.news/data/author"}` |
-| `text_roles` | `["title", "body"]` | Part roles that keyword terms search and described alerts send |
-| `described.threshold` | `0.5` | Default score at or above which a described alert matches, 0.2 to 0.95 |
+| `text_roles` | `["title", "body"]` | Part roles that keyword terms search and Jev checks; local meaning checks use all supplied vectors |
+| `described.threshold` | `0.5` | Default Jev probability threshold, 0.2 to 0.95 |
+| `vectors.threshold` | `0.8` | Default local-vector cosine similarity threshold, 0.2 to 0.95 |
 
-The pin's `kinds` lists the alert kinds the deployment accepts; pin `["keywords"]` when there is no TypeSafe key. See [Keyword alerts](/guides/keyword-alerts) and [Described alerts](/guides/described-alerts).
+See [Keyword alerts](/guides/keyword-alerts) and [Described alerts](/guides/described-alerts).
 
 ## core-ingest
 
@@ -58,11 +70,11 @@ Generate an immutable manifest from the configuration before installing it. Each
 
 ## core-retrieve
 
-The default retrieval plugin: the search Quivr ran itself before it moved into a plugin, with the same rankings. It asks for one candidate list that follows the search mode, `bm25` on the title and body for `lexical`, `near_vector` in the served space for `semantic`, `hybrid` in the served space with alpha 0.5 and relative score fusion for `hybrid`, and returns it as the ranking. Candidates of exactly equal score rank by segment id. It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent), which ranks the same way until re-ranking is added. It has no configuration. The api refuses to start without a retrieval plugin.
+The default retrieval plugin: the search Quivr ran itself before it moved into a plugin, with the same rankings. It asks for one candidate list that follows the search mode, `bm25` on the title and body for `lexical`, `near_vector` in the served space for `semantic`, `hybrid` in the served space with alpha 0.5 and relative score fusion for `hybrid`, and returns it as the ranking. Candidates of exactly equal score rank by segment id. It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent). Its `deep` ranks like `default`; to re-rank, install `jev.rerank` and map the short name `deep` to `jev.rerank/deep` in `retrieval.profiles`. See [Re-rank with Jev](/guides/rerank-with-jev) for that configuration. It has no plugin configuration. The api refuses to start without a retrieval plugin.
 
 ## jev-rerank
 
-The optional `jev.rerank` retrieval plugin uses a pinned Jev model to score a hybrid shortlist in one batch for `deep`. Each hit explains its probability; usage reports paid calls and cost. Its `default` profile stays unpaid. Errors and deadlines return the original hybrid order without a Jev score. It supports token trimming, overlap suppression, bounded pair caching and Noul/hybrid RRF fusion. See [Re-rank with Jev](/guides/rerank-with-jev) for configuration and the measurement caveats.
+The optional `jev.rerank` retrieval plugin declares only `deep`. It asks `core.retrieve/default` for a hybrid shortlist, then scores it in one batch with Jev, TypeSafe's paid model. A `deep` search can make paid calls; usage reports the calls and cost, and each re-ranked hit explains its probability. Without a TypeSafe key, or on errors and deadlines, it returns the original hybrid order without a Jev score. It can shorten passages, drop overlapping hits and cache scores. See [Re-rank with Jev](/guides/rerank-with-jev) for configuration, tuning and measurement caveats.
 
 ## rss
 
