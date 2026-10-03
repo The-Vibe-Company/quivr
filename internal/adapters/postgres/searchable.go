@@ -279,7 +279,14 @@ func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Se
 	if err != nil {
 		return err
 	}
-	if withdrawn || quarantined {
+	if quarantined {
+		return tx.Commit(ctx)
+	}
+	if withdrawn {
+		// Indexing has finished, but withdrawal prevents publishing its baseline.
+		if _, err = tx.Exec(ctx, `UPDATE record_versions SET processing='idle',error_code='' WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
+			return err
+		}
 		return tx.Commit(ctx)
 	}
 	if err = tx.QueryRow(ctx, `SELECT $3=`+routedGenerationSQL("$1", "$2"), org, corpusID, g.ID).Scan(&active); err != nil {

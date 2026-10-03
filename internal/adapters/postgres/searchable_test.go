@@ -144,6 +144,52 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 	if _, err = hydrateOne(ctx, store, scope, candidate); !errors.Is(err, corpus.ErrNotFound) {
 		t.Fatal("late promotion resurrected withdrawn content", err)
 	}
+	// Withdrawal while the baseline is running keeps that work observable until
+	// late promotion settles it, without publishing a retrieval-ready Version.
+	cmd.Key = "withdraw-running"
+	cmd.Source.RecordKey = "withdraw-running"
+	wr, err := service.Accept(ctx, scope, cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ww, _, err := store.Work(ctx, scope.Organization, wr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Publish(ctx, ww, publication(content.Blob{Key: "fixture/text", SHA256: "guard-text", Size: 15}, content.Blob{Key: "fixture/manifest", SHA256: "guard-manifest", Size: 2})); err != nil {
+		t.Fatal(err)
+	}
+	wv := content.Version{ID: ww.VersionID, RecordID: ww.RecordID, Manifest: content.ManifestFor(cmd)}
+	wseg, err := wholeParts(scope.Organization, wv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SaveSegmentation(ctx, scope.Organization, wv, wseg); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.BaselineProgress(ctx, scope.Organization, wv.ID, "running", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Withdraw(ctx, scope, content.Withdrawal{Key: "withdraw-running", Source: cmd.Source}); err != nil {
+		t.Fatal(err)
+	}
+	a, p, code, err := store.VersionStatus(ctx, scope.Organization, wv.ID)
+	if err != nil || p.State != "running" || p.Phase != "baseline" || a.Searchable {
+		t.Fatalf("withdrawn Version %s before completion: availability=%+v processing=%+v error=%v", wv.ID, a, p, err)
+	}
+	// A retry's diagnostic must also disappear once indexing completes.
+	if err = service.BaselineProgress(ctx, scope.Organization, wv.ID, "retrying", "baseline_unavailable", false); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err = service.Promote(ctx, scope.Organization, wseg, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, p, code, err = store.VersionStatus(ctx, scope.Organization, wv.ID)
+	if err != nil || p.State != "idle" || p.Phase != "" || code != "" || a.State != "materialized" || a.Current || a.Searchable {
+		t.Fatalf("withdrawn Version %s after completion: availability=%+v processing=%+v code=%q error=%v; want idle without phase or diagnostic and no retrieval readiness", wv.ID, a, p, code, err)
+	}
 	// A terminal unsupported result must invalidate synchronized Record views atomically.
 	cmd.Key = "quarantine"
 	cmd.Source.RecordKey = "quarantine"
@@ -166,7 +212,7 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 	if err = service.BaselineProgress(ctx, scope.Organization, qw.VersionID, "blocked", "short_text_limit", true); err == nil {
 		t.Fatal("quarantine event failure not atomic")
 	}
-	a, _, _, err := store.VersionStatus(ctx, scope.Organization, qw.VersionID)
+	a, _, _, err = store.VersionStatus(ctx, scope.Organization, qw.VersionID)
 	if err != nil || a.State == "quarantined" {
 		t.Fatal("quarantine committed without invalidation", a, err)
 	}

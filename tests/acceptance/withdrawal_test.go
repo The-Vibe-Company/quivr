@@ -185,13 +185,24 @@ func TestWithdrawalRacesLateIndexingWithoutResurrection(t *testing.T) {
 	if ingestion["outcome"] == "created" && ingestion["availability"].(map[string]any)["searchable"] != false {
 		t.Fatal("withdrawn Version became searchable", ingestion)
 	}
-	query := map[string]any{"query": "éclair", "corpus_ids": []string{c}, "mode": "lexical"}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(request(t, "POST", "/v0/search", admin, query, 200)["items"].([]any)) != 0 {
-			t.Fatal("withdrawn Record resurrected in search")
+	if ingestion["outcome"] == "created" {
+		// A withdrawn Version becomes idle when late indexing has settled.
+		path := "/v0/records/" + ingestion["record_id"].(string) + "/versions/" + ingestion["version_id"].(string)
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			version := request(t, "GET", path, admin, nil, 200)
+			if version["processing"].(map[string]any)["state"] == "idle" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("withdrawn Version never finished processing", version)
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		time.Sleep(100 * time.Millisecond)
+	}
+	query := map[string]any{"query": "éclair", "corpus_ids": []string{c}, "mode": "lexical"}
+	if items := request(t, "POST", "/v0/search", admin, query, 200)["items"].([]any); len(items) != 0 {
+		t.Fatal("withdrawn Record resurrected in search", items)
 	}
 	record := request(t, "GET", "/v0/records/"+ingestion["record_id"].(string), admin, nil, 200)
 	if record["withdrawn"] != true {

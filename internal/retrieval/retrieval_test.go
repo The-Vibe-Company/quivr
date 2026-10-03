@@ -121,6 +121,9 @@ func (f *fakeEmbeddings) CommitEnrichment(context.Context, string, content.Segme
 	f.commits++
 	return nil
 }
+func (f *fakeEmbeddings) EnrichmentProgress(context.Context, string, string, string, string) error {
+	return nil
+}
 
 // service answers searches through a retrieval plugin that asks, like
 // core.retrieve, for the candidates of the search's mode and ranks them as

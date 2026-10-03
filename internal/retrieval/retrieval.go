@@ -298,8 +298,11 @@ func normalizeQuery(q string) (string, error) {
 // projected.
 func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Version, seg content.Segmentation, data []content.EmbeddingData) error {
 	eligible, err := s.Content.EnrichmentEligible(ctx, org, v.ID)
-	if err != nil || !eligible {
+	if err != nil {
 		return err
+	}
+	if !eligible {
+		return s.Content.EnrichmentProgress(ctx, org, v.ID, "idle", "")
 	}
 	_, g, err := processing.VersionRoute(ctx, org, v, s.Content, s.Routing)
 	if err != nil {
@@ -313,7 +316,7 @@ func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Vers
 		if errors.Is(err, ErrProjectionMissing) {
 			// Withdrawn or superseded since the check above: end, else retry.
 			if eligible, recheck := s.Content.EnrichmentEligible(ctx, org, v.ID); recheck == nil && !eligible {
-				return nil
+				return s.Content.EnrichmentProgress(ctx, org, v.ID, "idle", "")
 			}
 		}
 		return err

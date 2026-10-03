@@ -57,7 +57,28 @@ func (s EmbeddingStore) SaveEmbedding(ctx context.Context, e content.Embedding, 
 	}
 	return tx.Commit(ctx)
 }
+
+// Only withdrawn work can settle without publishing its enrichment. The
+// quarantine guard preserves its terminal diagnostics.
+var settleWithdrawnEnrichmentSQL = `UPDATE record_versions v SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL
+FROM records r WHERE (r.organization,r.id)=(v.organization,v.record_id) AND v.organization=$1 AND v.id=$2 AND v.baseline_ready AND NOT v.quarantined AND ` + recordGoneSQL
+
 func (s EmbeddingStore) EnrichmentProgress(ctx context.Context, org, id, state, code string) error {
+	if state == "idle" {
+		// Withdrawn work settles even if its pinned owner stopped serving.
+		tx, err := s.Pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		if err = lockJournal(ctx, tx, org); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, settleWithdrawnEnrichmentSQL, org, id); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
 	return updatePinnedVersion(ctx, s.Pool, org, id, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4,enrichment_reason=NULL WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, state, code)
 }
 
@@ -118,6 +139,9 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 		return err
 	}
 	if !eligible {
+		if _, err = tx.Exec(ctx, settleWithdrawnEnrichmentSQL, org, seg.VersionID); err != nil {
+			return err
+		}
 		return tx.Commit(ctx)
 	}
 	if err = loadGenerationIngestion(ctx, tx, &g); err != nil {

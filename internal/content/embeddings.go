@@ -213,7 +213,7 @@ func (s Service) EnrichmentProgress(ctx context.Context, org, versionID, state, 
 	if org == "" || versionID == "" {
 		return ErrInvalid
 	}
-	if (state != "running" || code != "") && (state != "retrying" || code != "enrichment_unavailable") && (state != "blocked" || (code != "derivation_conflict" && code != CodeEnrichmentTimeout)) {
+	if (state != "idle" || code != "") && (state != "running" || code != "") && (state != "retrying" || code != "enrichment_unavailable") && (state != "blocked" || (code != "derivation_conflict" && code != CodeEnrichmentTimeout)) {
 		return ErrInvalid
 	}
 	return s.Embeddings.EnrichmentProgress(ctx, org, versionID, state, code)
