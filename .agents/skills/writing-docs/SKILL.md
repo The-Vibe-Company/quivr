@@ -31,7 +31,7 @@ The navigation lives in `docs-site/docs.json`. This table mirrors it; a pull req
 | --- | --- | --- |
 | Documentation › **Get started** | Introduction, Quickstart, Core concepts | Someone deciding whether Quivr fits, then trying it |
 | Documentation › **Plugins** | How plugins work, Plugin types, Build your first plugin, and _Write a plugin_ with one how-to per type (push sources included) | Plugin authors |
-| Documentation › **Run Quivr** | First-party plugins, pin, upgrade or switch, migrate alert rules, retire evaluations, configure alert fields, backfill a vector space, reprocess quarantine, search profiles, re-rank with Jev | Operators |
+| Documentation › **Run Quivr** | First-party plugins, pin, upgrade or switch, migrate alert rules, retire evaluations, configure alert fields, try and switch vector models, backfill a vector space, reprocess quarantine, search profiles, re-rank with Jev | Operators |
 | Documentation › **Guides** | One task per page: add content, search, _Alerts_ (how alerts work, keyword and meaning alerts), follow changes, _Collect from sources_ (connectors, RSS, Microsoft 365, X), connect an AI agent | Integrators calling the API |
 | **Reference** tab | HTTP API overview and endpoints, CLI, MCP tools, plugin manifest and protocol, configuration | Anyone looking up an exact fact |
 

@@ -224,22 +224,7 @@ A saved rollback plan may name the replaced build, even as an evaluation member.
 
 ## Promote an evaluation plugin
 
-A plugin already active in `ingestion.evaluation` can become the served owner, the plugin used for that source format, with the same activation request above. The coverage check uses these terms:
-
-| Term | Meaning |
-| --- | --- |
-| Corpus | A collection of documents. |
-| Version | One stored revision of a document. |
-| Canonical Parts | The normalized pieces of a document. |
-| Projection | The segments and vectors a plugin produces from those Parts. |
-| Primary space | The vector space used for that plugin's semantic searches. |
-| Routed generation | The search index currently serving that Corpus. |
-
-Before activating it, [backfill its primary space](/run-quivr/backfill-a-vector-space#fill-and-promote-another-plugin) for every affected Corpus. It can segment the canonical Parts differently from the served plugin. Search-quality evaluations compare document results, so offsets need not match.
-
-Activation switches all source formats that name this plugin as an evaluation owner. It checks that the plugin still answers and that every current Version has its complete target projection and primary vectors in the routed generation. Missing coverage returns `409 plugin_conflict` and leaves the plan unchanged. An empty Corpus still needs its generation to carry the incoming primary space; an empty backfill prepares it. Calling activation again returns the same plan.
-
-The previous owner becomes an evaluation owner for those formats, retaining its segments and vectors. Keep it running to fill new Versions for a later rollback. An owner that serves another format still receives ordinary queries only for Corpora where it has served projections.
+For a plugin already active in `ingestion.evaluation`, follow [Try a vector model and switch to it](/run-quivr/switch-a-vector-model). It covers filling every Corpus across the deployment, comparing search results, activating the evaluation registration, migrating meaning alerts and rolling back. Activation moves the previous owner into evaluation, so keep it running to fill new documents while rollback remains necessary.
 
 Pending Versions retain their original work pins. A separate job, pinned to the new plan, produces the new owner's projection before publishing the Version. Until then, the previous current Version remains searchable. Late results and refusals from the old owner cannot advance currentness or quarantine the new served path.
 
@@ -249,7 +234,7 @@ Pending Versions retain their original work pins. A separate job, pinned to the 
 
 ## Fill a new vector space
 
-[Fill and promote a new model](/run-quivr/backfill-a-vector-space) before using it for semantic search; that page owns the dry run, backfill and promotion steps.
+For another space of the same ingestion owner, [Fill a new vector space](/run-quivr/backfill-a-vector-space) owns the dry run, backfill and space promotion. For another ingestion owner, [Try a vector model and switch to it](/run-quivr/switch-a-vector-model) owns the complete comparison and switch procedure.
 
 ## Work finishes on the version it started with
 

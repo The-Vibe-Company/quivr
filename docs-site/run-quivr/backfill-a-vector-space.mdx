@@ -95,9 +95,7 @@ The new space is `served` and covers every segment produced by its owner. Semant
 
 ## Fill and promote another plugin
 
-Select the evaluation plugin's `registration_id` and name its primary space in `spaces` in both the dry run and the start request. Backfill every affected Corpus. Different segment offsets are allowed when this owner has no projection yet; the current served projection stays searchable throughout.
-
-When coverage is complete, activate that same registration once. This switches its configured evaluation formats to served together. It keeps the previous owner's segments and vectors for rollback. Follow [Promote an evaluation plugin](/run-quivr/upgrade-a-plugin#promote-an-evaluation-plugin) for the activation and rollback checks. The space promotion above changes models within one owner; it does not select a different plugin for a format.
+To change the plugin that produces segments and vectors, follow [Try a vector model and switch to it](/run-quivr/switch-a-vector-model). That guide owns the second-plugin setup, deployment-wide fill, comparison, registration activation, alert migration and rollback. The space promotion above changes models within one owner; it does not select a different plugin for a format.
 
 ## Go back to the previous model
 
