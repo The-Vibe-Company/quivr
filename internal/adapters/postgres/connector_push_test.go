@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
@@ -27,7 +28,7 @@ func TestPushHealthComesFromPullReportsAndDeliveriesAndRelaxesPull(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
+	store := postgres.ConnectorStore{Pool: pool}
 	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}

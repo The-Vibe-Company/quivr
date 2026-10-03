@@ -31,19 +31,19 @@ func BootstrapDatabase(ctx context.Context, pool *pgxpool.Pool, spaces []content
 		return fmt.Errorf("pipeline plan: %w", err)
 	}
 	if plan == "" {
-		if err := (postgres.ContentStore{Pool: pool}).RegisterSpaces(ctx, spaces); err != nil {
+		if err := (postgres.SpaceStore{Pool: pool}).RegisterSpaces(ctx, spaces); err != nil {
 			return fmt.Errorf("vector space registry: %w", err)
 		}
 	}
-	if err := (postgres.ContentStore{Pool: pool}).BootstrapGeneration(ctx, weaviate.InitialCollection, tei.Space().ID); err != nil {
+	if err := (postgres.ProjectionStore{Pool: pool}).BootstrapGeneration(ctx, weaviate.InitialCollection, tei.Space().ID); err != nil {
 		return fmt.Errorf("default projection generation: %w", err)
 	}
-	return alignDefaultGeneration(ctx, postgres.ContentStore{Pool: pool})
+	return alignDefaultGeneration(ctx, postgres.ProjectionStore{Pool: pool})
 }
 
 // alignDefaultGeneration moves new Corpora onto the registered spaces once
 // they changed, keeping every existing Corpus on the generation serving it.
-func alignDefaultGeneration(ctx context.Context, store postgres.ContentStore) error {
+func alignDefaultGeneration(ctx context.Context, store postgres.ProjectionStore) error {
 	move, err := store.AlignDefaultGeneration(ctx)
 	if err != nil {
 		return fmt.Errorf("default projection generation: %w", err)

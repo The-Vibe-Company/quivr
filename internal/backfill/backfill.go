@@ -129,8 +129,6 @@ type Size struct {
 
 // Store keeps backfill requests and reads their scope.
 type Store interface {
-	// RegisteredSpaces lists the vector space registry.
-	RegisteredSpaces(ctx context.Context) ([]content.RegisteredSpace, error)
 	// BackfillSize measures a scope in the Corpus's routed generation; it is
 	// ErrRebuildRequired when that generation predates named spaces.
 	BackfillSize(ctx context.Context, org string, spec operations.Backfill, corpusID string) (Size, error)
@@ -168,8 +166,14 @@ const (
 	BasisRate      = "rate"
 )
 
+// SpaceRegistry reads the deployment's registered vector spaces.
+type SpaceRegistry interface {
+	RegisteredSpaces(context.Context) ([]content.RegisteredSpace, error)
+}
+
 // Service validates backfill requests, estimates them and accepts them.
 type Service struct {
+	Registry   SpaceRegistry
 	Store      Store
 	Plans      Plans
 	Throughput Throughput
@@ -272,7 +276,7 @@ func (s Service) resolve(ctx context.Context, r Request) (operations.Backfill, I
 	if r.RegistrationID != "" && r.RegistrationID != ingestion.RegistrationID {
 		return operations.Backfill{}, ingestion, ErrRegistrationNotActive
 	}
-	registered, err := s.Store.RegisteredSpaces(ctx)
+	registered, err := s.Registry.RegisteredSpaces(ctx)
 	if err != nil {
 		return operations.Backfill{}, ingestion, err
 	}

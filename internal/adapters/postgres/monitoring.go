@@ -11,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // claimRequest records a monitoring command under its idempotency key. It
@@ -36,7 +37,7 @@ func claimRequest(ctx context.Context, tx pgx.Tx, org, family, key string, canon
 // monitoringCommand runs one idempotent monitoring command under the
 // Organization journal lock. apply runs only for a new command; any error
 // rolls the claim back with it. It returns the claimed resource ID.
-func (s ContentStore) monitoringCommand(ctx context.Context, org, family, key string, canonical any, resourceID string, apply func(pgx.Tx) error) (string, error) {
+func (s MonitoringStore) monitoringCommand(ctx context.Context, org, family, key string, canonical any, resourceID string, apply func(pgx.Tx) error) (string, error) {
 	request, err := json.Marshal(canonical)
 	if err != nil {
 		return "", err
@@ -85,7 +86,7 @@ func union(a, b []string) []string {
 	return slices.Compact(out)
 }
 
-func (s ContentStore) CreateSavedQuery(ctx context.Context, org string, in monitoring.SavedQueryInput) (monitoring.SavedQuery, error) {
+func (s MonitoringStore) CreateSavedQuery(ctx context.Context, org string, in monitoring.SavedQueryInput) (monitoring.SavedQuery, error) {
 	definition, err := json.Marshal(in.Definition)
 	if err != nil {
 		return monitoring.SavedQuery{}, err
@@ -112,7 +113,7 @@ func (s ContentStore) CreateSavedQuery(ctx context.Context, org string, in monit
 	return s.SavedQuery(ctx, org, existing)
 }
 
-func (s ContentStore) SavedQuery(ctx context.Context, org, id string) (monitoring.SavedQuery, error) {
+func (s MonitoringStore) SavedQuery(ctx context.Context, org, id string) (monitoring.SavedQuery, error) {
 	q := monitoring.SavedQuery{}
 	var definition, vectors []byte
 	err := s.Pool.QueryRow(ctx, `SELECT q.id,q.name,q.deleted,v.id,v.definition,v.query_vectors FROM saved_queries q JOIN saved_query_versions v ON v.organization=q.organization AND v.id=q.current_version_id WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&q.ID, &q.Name, &q.Deleted, &q.Current.VersionID, &definition, &vectors)
@@ -130,7 +131,7 @@ func (s ContentStore) SavedQuery(ctx context.Context, org, id string) (monitorin
 	return q, err
 }
 
-func (s ContentStore) SavedQueryVersion(ctx context.Context, org, id, versionID string) (monitoring.SavedQueryVersion, error) {
+func (s MonitoringStore) SavedQueryVersion(ctx context.Context, org, id, versionID string) (monitoring.SavedQueryVersion, error) {
 	v := monitoring.SavedQueryVersion{SavedQueryID: id, VersionID: versionID}
 	var definition, vectors []byte
 	err := s.Pool.QueryRow(ctx, `SELECT definition,query_vectors FROM saved_query_versions WHERE organization=$1 AND saved_query_id=$2 AND id=$3`, org, id, versionID).Scan(&definition, &vectors)
@@ -149,7 +150,7 @@ func (s ContentStore) SavedQueryVersion(ctx context.Context, org, id, versionID 
 // CreateSavedQueryVersion commits a new immutable Version, makes it current
 // and announces saved_query.updated in every Corpus of the previous and new
 // scope. Subscriptions keep the Version they pin.
-func (s ContentStore) CreateSavedQueryVersion(ctx context.Context, org, id string, in monitoring.SavedQueryVersionInput) (monitoring.SavedQueryVersion, error) {
+func (s MonitoringStore) CreateSavedQueryVersion(ctx context.Context, org, id string, in monitoring.SavedQueryVersionInput) (monitoring.SavedQueryVersion, error) {
 	definition, err := json.Marshal(in.Definition)
 	if err != nil {
 		return monitoring.SavedQueryVersion{}, err
@@ -191,7 +192,7 @@ func (s ContentStore) CreateSavedQueryVersion(ctx context.Context, org, id strin
 	return s.SavedQueryVersion(ctx, org, id, existing)
 }
 
-func (s ContentStore) prepareQueryVectors(ctx context.Context, org, family, key string, canonical any, vectors []monitoring.QueryVector, prepare func(context.Context) ([]monitoring.QueryVector, error)) ([]byte, error) {
+func (s MonitoringStore) prepareQueryVectors(ctx context.Context, org, family, key string, canonical any, vectors []monitoring.QueryVector, prepare func(context.Context) ([]monitoring.QueryVector, error)) ([]byte, error) {
 	if prepare != nil {
 		request, err := json.Marshal(canonical)
 		if err != nil {
@@ -222,7 +223,7 @@ func (s ContentStore) prepareQueryVectors(ctx context.Context, org, family, key 
 // DeleteSavedQuery logically deletes a Saved Query once, when no Subscription
 // that is not deleted belongs to it. Subscription creation and editing take
 // the same journal lock, so none can pin it concurrently.
-func (s ContentStore) DeleteSavedQuery(ctx context.Context, org, key, id string) (monitoring.SavedQuery, error) {
+func (s MonitoringStore) DeleteSavedQuery(ctx context.Context, org, key, id string) (monitoring.SavedQuery, error) {
 	existing, err := s.monitoringCommand(ctx, org, "saved_query_delete", key, map[string]string{"saved_query_id": id}, id, func(tx pgx.Tx) error {
 		var deleted, used bool
 		var corpora []string
@@ -253,7 +254,7 @@ FROM saved_queries q JOIN saved_query_versions v ON (v.organization,v.id)=(q.org
 // RenameSavedQuery changes a Saved Query's display name once per key. A new
 // name commits saved_query.renamed per Corpus of the current Version, whose
 // identity names the request; the same name commits nothing.
-func (s ContentStore) RenameSavedQuery(ctx context.Context, org, key, id, name string) (monitoring.SavedQuery, error) {
+func (s MonitoringStore) RenameSavedQuery(ctx context.Context, org, key, id, name string) (monitoring.SavedQuery, error) {
 	existing, err := s.monitoringCommand(ctx, org, "saved_query_rename", key, map[string]string{"saved_query_id": id, "name": name}, id, func(tx pgx.Tx) error {
 		var deleted bool
 		var current string
@@ -318,7 +319,7 @@ func nullable(v string) any {
 
 // CreateSubscription commits a new enabled Subscription with its fixed owner
 // (NULL when global).
-func (s ContentStore) CreateSubscription(ctx context.Context, org string, in monitoring.SubscriptionInput, query monitoring.SavedQueryVersion) (monitoring.Subscription, error) {
+func (s MonitoringStore) CreateSubscription(ctx context.Context, org string, in monitoring.SubscriptionInput, query monitoring.SavedQueryVersion) (monitoring.Subscription, error) {
 	evaluator, err := json.Marshal(in.Evaluator)
 	if err != nil {
 		return monitoring.Subscription{}, err
@@ -377,7 +378,7 @@ func scanSubscription(row pgx.Row) (monitoring.Subscription, error) {
 	return sub, unmarshalNumbers(evaluator, &v.Evaluator)
 }
 
-func (s ContentStore) Subscription(ctx context.Context, org, id string) (monitoring.Subscription, error) {
+func (s MonitoringStore) Subscription(ctx context.Context, org, id string) (monitoring.Subscription, error) {
 	sub, err := scanSubscription(s.Pool.QueryRow(ctx, subscriptionSelect+`WHERE s.organization=$1 AND s.id=$2`, org, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sub, monitoring.ErrNotFound
@@ -385,7 +386,7 @@ func (s ContentStore) Subscription(ctx context.Context, org, id string) (monitor
 	return sub, err
 }
 
-func (s ContentStore) SubscriptionVersion(ctx context.Context, org, id, versionID string) (monitoring.SubscriptionVersion, error) {
+func (s MonitoringStore) SubscriptionVersion(ctx context.Context, org, id, versionID string) (monitoring.SubscriptionVersion, error) {
 	v := monitoring.SubscriptionVersion{SubscriptionID: id}
 	var evaluator []byte
 	err := s.Pool.QueryRow(ctx, `SELECT `+subscriptionVersionColumns+`
@@ -408,7 +409,7 @@ WHERE v.organization=$1 AND v.subscription_id=$2 AND v.id=$3`, org, id, versionI
 // commit as its activation: every later change is judged by it, every earlier
 // one by the Version effective before. Nothing is backfilled and Matches keep
 // the Version that produced them. Enabled state is unchanged.
-func (s ContentStore) CreateSubscriptionVersion(ctx context.Context, org, id string, in monitoring.SubscriptionVersionInput, query monitoring.SavedQueryVersion) (monitoring.SubscriptionVersion, error) {
+func (s MonitoringStore) CreateSubscriptionVersion(ctx context.Context, org, id string, in monitoring.SubscriptionVersionInput, query monitoring.SavedQueryVersion) (monitoring.SubscriptionVersion, error) {
 	evaluator, err := json.Marshal(in.Evaluator)
 	if err != nil {
 		return monitoring.SubscriptionVersion{}, err
@@ -466,7 +467,7 @@ WHERE s.organization=$1 AND s.id=$2 FOR UPDATE OF s`, org, id).Scan(&deleted, &c
 
 // DisableSubscription commits the enabled-state change and its public event
 // once. The row update serializes with later Match and Delivery admission.
-func (s ContentStore) DisableSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
+func (s MonitoringStore) DisableSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
 	_, err := s.monitoringCommand(ctx, org, "subscription_disable", key, map[string]string{"subscription_id": id}, id, func(tx pgx.Tx) error {
 		changed, err := tx.Exec(ctx, "UPDATE subscriptions SET enabled=false WHERE organization=$1 AND id=$2 AND enabled", org, id)
 		if err != nil || changed.RowsAffected() != 1 {
@@ -499,7 +500,7 @@ func (s ContentStore) DisableSubscription(ctx context.Context, org, key, id stri
 // through the unchanged canonical checks and delivery window, so refused work
 // (superseded, withdrawn Record) parks again and elapsed work ends exhausted.
 // A deleted Subscription is never re-enabled.
-func (s ContentStore) EnableSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
+func (s MonitoringStore) EnableSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
 	_, err := s.monitoringCommand(ctx, org, "subscription_enable", key, map[string]string{"subscription_id": id}, id, func(tx pgx.Tx) error {
 		deleted, _, err := subscriptionScope(ctx, tx, org, id)
 		if err != nil {
@@ -548,7 +549,7 @@ WHERE o.organization=$1 AND o.available_at='infinity' AND (d.organization,d.id)=
 // committed per Corpus of its current Version. A withdrawal notice for one of
 // its Matches is still committed, as for a disabled Subscription (THE-696),
 // but admission never attempts it. Versions, Matches and Deliveries remain.
-func (s ContentStore) DeleteSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
+func (s MonitoringStore) DeleteSubscription(ctx context.Context, org, key, id string) (monitoring.Subscription, error) {
 	_, err := s.monitoringCommand(ctx, org, "subscription_delete", key, map[string]string{"subscription_id": id}, id, func(tx pgx.Tx) error {
 		deleted, corpora, err := subscriptionScope(ctx, tx, org, id)
 		if err != nil || deleted {
@@ -572,7 +573,7 @@ func (s ContentStore) DeleteSubscription(ctx context.Context, org, key, id strin
 // untouched. A new name commits subscription.renamed per Corpus of the
 // current Version, whose identity names the request; the same name commits
 // nothing.
-func (s ContentStore) RenameSubscription(ctx context.Context, org, key, id, name string) (monitoring.Subscription, error) {
+func (s MonitoringStore) RenameSubscription(ctx context.Context, org, key, id, name string) (monitoring.Subscription, error) {
 	_, err := s.monitoringCommand(ctx, org, "subscription_rename", key, map[string]string{"subscription_id": id, "name": name}, id, func(tx pgx.Tx) error {
 		deleted, corpora, err := subscriptionScope(ctx, tx, org, id)
 		if err != nil {
@@ -598,7 +599,7 @@ func (s ContentStore) RenameSubscription(ctx context.Context, org, key, id, name
 // ones, by ID, in one statement so filters and rows share a snapshot. A
 // non-nil corpora keeps those whose every pinned Corpus, of any Version, it
 // contains: the rule every Subscription read applies.
-func (s ContentStore) Subscriptions(ctx context.Context, org string, owner monitoring.OwnerFilter, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
+func (s MonitoringStore) Subscriptions(ctx context.Context, org string, owner monitoring.OwnerFilter, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
 	rows, err := s.Pool.Query(ctx, subscriptionSelect+`WHERE s.organization=$1 AND s.enabled AND NOT s.deleted AND s.id>$2
   AND (CASE WHEN $3 THEN s.owner IS NULL ELSE s.owner=$4 END)
   AND ($5::text[] IS NULL OR NOT EXISTS(SELECT 1 FROM subscription_corpora sc WHERE sc.organization=s.organization AND sc.subscription_id=s.id AND NOT sc.corpus_id=ANY($5::text[])))
@@ -618,11 +619,11 @@ ORDER BY s.id LIMIT $6`, org, after, owner.Global, owner.Owner, corpora, limit)
 	return out, rows.Err()
 }
 
-var _ monitoring.EvaluatorMoves = ContentStore{}
+var _ monitoring.EvaluatorMoves = MonitoringStore{}
 
 // PinningSubscriptions lists the Subscriptions of org that are not deleted,
 // enabled or not, whose current Version pins pluginID@version (THE-805).
-func (s ContentStore) PinningSubscriptions(ctx context.Context, org, pluginID, version string, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
+func (s MonitoringStore) PinningSubscriptions(ctx context.Context, org, pluginID, version string, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
 	rows, err := s.Pool.Query(ctx, subscriptionSelect+`WHERE s.organization=$1 AND NOT s.deleted AND s.id>$2
   AND v.evaluator->>'plugin_id'=$3 AND v.evaluator->>'version'=$4
   AND ($5::text[] IS NULL OR NOT EXISTS(SELECT 1 FROM subscription_corpora sc WHERE sc.organization=s.organization AND sc.subscription_id=s.id AND NOT sc.corpus_id=ANY($5::text[])))
@@ -640,7 +641,7 @@ ORDER BY s.id LIMIT $6`, org, after, pluginID, version, corpora, limit)
 // changes are judged by it, earlier ones by from, and Matches keep the
 // Version that produced them. Its id derives from from and evaluator, so a
 // replay converges; from must still be current.
-func (s ContentStore) MoveEvaluator(ctx context.Context, org string, from monitoring.SubscriptionVersion, evaluator monitoring.Evaluator) (monitoring.SubscriptionVersion, error) {
+func (s MonitoringStore) MoveEvaluator(ctx context.Context, org string, from monitoring.SubscriptionVersion, evaluator monitoring.Evaluator) (monitoring.SubscriptionVersion, error) {
 	pinned, err := json.Marshal(evaluator)
 	if err != nil {
 		return monitoring.SubscriptionVersion{}, err
@@ -710,3 +711,6 @@ func unmarshalNumbers(data []byte, v any) error {
 	decoder.UseNumber()
 	return decoder.Decode(v)
 }
+
+// MonitoringStore persists monitoring state.
+type MonitoringStore struct{ Pool *pgxpool.Pool }

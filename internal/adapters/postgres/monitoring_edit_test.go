@@ -3,9 +3,10 @@ package postgres_test
 import (
 	"context"
 	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -22,7 +23,7 @@ type editFixture struct {
 
 func newEditFixture(t *testing.T, ctx context.Context, prefix string) editFixture {
 	f := newCorrectionFixture(t, ctx, prefix)
-	return editFixture{f, postgres.EvaluationStore{ContentStore: f.store.ContentStore}, postgres.DeliveryStore{ContentStore: f.store.ContentStore, Organization: f.org}}
+	return editFixture{f, postgres.EvaluationStore{Pool: f.store.Pool}, postgres.DeliveryStore{Pool: f.store.Pool, Organization: f.org}}
 }
 
 // drain runs dispatch until it settles.

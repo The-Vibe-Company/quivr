@@ -3,11 +3,12 @@ package postgres_test
 import (
 	"context"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"sort"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
@@ -98,7 +99,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	otherRecord, otherVersion := publish(content.Command{Key: "other-" + run, Source: content.Source{CorpusID: a.ID, Namespace: "wire", RecordKey: "other-" + run}, Content: content.Text{Kind: "text", Text: "Other"}})
 	trigger(a.ID, record, version)
 	trigger(a.ID, otherRecord, otherVersion)
-	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore}
+	evaluation := postgres.EvaluationStore{Pool: store.Pool}
 	for i := 0; i < 20; i++ {
 		n, err := evaluation.FanOut(ctx)
 		if err != nil {
@@ -213,7 +214,7 @@ func TestConcurrentClaimsTakeOneArticleOnce(t *testing.T) {
 SELECT $1,v.id,1,v.subscription_id,$2,$3,$4,'evaluation' FROM subscription_versions v WHERE v.organization=$1`, org, a.ID, work.RecordID, work.VersionID); err != nil {
 		t.Fatal(err)
 	}
-	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore}
+	evaluation := postgres.EvaluationStore{Pool: store.Pool}
 	const workers, rounds = 8, 40
 	for round := 0; round < rounds; round++ {
 		// Due before any other test's work, so the claims race for this Version.

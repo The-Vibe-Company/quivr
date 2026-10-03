@@ -87,7 +87,7 @@ func (s VersionStore) versionDiagnostics(ctx context.Context, org, id string, qu
 			out = append(out, d)
 		}
 	}
-	n, found, err := (ContentStore{Pool: s.Pool}).Normalized(ctx, org, id)
+	n, found, err := (NormalizationStore{Pool: s.Pool}).Normalized(ctx, org, id)
 	if err != nil || !found || n.Failed() {
 		return out, err
 	}
@@ -117,7 +117,7 @@ func (s VersionStore) VersionStatus(ctx context.Context, org, id string) (conten
 	var p content.Processing
 	var code string
 	var baseline, quarantine, withdrawn bool
-	err := s.Pool.QueryRow(ctx, `SELECT v.baseline_ready,v.quarantined,` + recordGoneSQL + `,coalesce(r.current_version_id=v.id,false),v.processing,v.error_code FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2`, org, id).Scan(&baseline, &quarantine, &withdrawn, &a.Current, &p.State, &code)
+	err := s.Pool.QueryRow(ctx, `SELECT v.baseline_ready,v.quarantined,`+recordGoneSQL+`,coalesce(r.current_version_id=v.id,false),v.processing,v.error_code FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2`, org, id).Scan(&baseline, &quarantine, &withdrawn, &a.Current, &p.State, &code)
 	a.State = "materialized"
 	if p.State == "running" || p.State == "retrying" {
 		a.State = "building_baseline"

@@ -92,7 +92,6 @@ type RunStore interface {
 	AbandonItem(ctx context.Context, org, id string, item Item) error
 	// CompleteReprocess records success once no pending item is left.
 	CompleteReprocess(ctx context.Context, org, id string) error
-	ConfirmCancel(ctx context.Context, org, id string) error
 }
 
 // Normalizer records a new normalization outcome for a Version published
@@ -150,14 +149,20 @@ type Progress struct {
 	Wait time.Duration
 }
 
+// Cancellation settles a stopped worker's cancellation request.
+type Cancellation interface {
+	ConfirmCancel(context.Context, string, string) error
+}
+
 // Reprocessor runs quarantine reprocess Operations one bounded step at a
 // time. Every call it makes resolves plugins in the plan ctx is pinned to.
 type Reprocessor struct {
-	Store      RunStore
-	Normalizer Normalizer
-	Publisher  Publisher
-	Processor  Processor
-	Settings   Settings
+	Cancellation Cancellation
+	Store        RunStore
+	Normalizer   Normalizer
+	Publisher    Publisher
+	Processor    Processor
+	Settings     Settings
 }
 
 // Step reprocesses at most one batch of Versions. Transient failures return
@@ -175,7 +180,7 @@ func (r Reprocessor) Step(ctx context.Context, org, id string) (Progress, error)
 				return Progress{}, err
 			}
 		}
-		return Progress{Done: true}, r.Store.ConfirmCancel(ctx, org, id)
+		return Progress{Done: true}, r.Cancellation.ConfirmCancel(ctx, org, id)
 	case operations.StatePaused:
 		// A pause holds the next Versions, never one half reprocessed.
 		if started != nil {

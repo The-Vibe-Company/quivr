@@ -11,7 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type ContentStore struct{ Pool *pgxpool.Pool }
+// MaterializationStore persists receipt work and canonical publication.
+type MaterializationStore struct{ Pool *pgxpool.Pool }
 
 func lockJournal(ctx context.Context, tx pgx.Tx, org string) error {
 	if err := lockProjectionRouting(ctx, tx); err != nil {
@@ -60,7 +61,7 @@ func notFound(err error) error {
 	return err
 }
 
-func (s ContentStore) Work(ctx context.Context, org, id string) (content.Work, bool, error) {
+func (s MaterializationStore) Work(ctx context.Context, org, id string) (content.Work, bool, error) {
 	w := content.Work{Organization: org, ReceiptID: id}
 	var command []byte
 	var state string
@@ -71,11 +72,11 @@ func (s ContentStore) Work(ctx context.Context, org, id string) (content.Work, b
 	err = json.Unmarshal(command, &w.Command)
 	return w, state == "resolved", err
 }
-func (s ContentStore) Progress(ctx context.Context, org, id, state, code string) error {
+func (s MaterializationStore) Progress(ctx context.Context, org, id, state, code string) error {
 	_, err := s.Pool.Exec(ctx, "UPDATE ingestion_receipts SET processing=$3,error_code=$4 WHERE organization=$1 AND id=$2 AND state='pending'", org, id, state, code)
 	return err
 }
-func (s ContentStore) Publish(ctx context.Context, w content.Work, publication content.Publication) error {
+func (s MaterializationStore) Publish(ctx context.Context, w content.Work, publication content.Publication) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -190,7 +191,7 @@ func (s ContentStore) Publish(ctx context.Context, w content.Work, publication c
 
 // Claim leases a bounded batch in queue arrival order. A lease survives process
 // restarts; a lost acknowledgement may retry the same durable workflow identity.
-func (s ContentStore) Claim(ctx context.Context, limit int) ([]content.Dispatch, error) {
+func (s MaterializationStore) Claim(ctx context.Context, limit int) ([]content.Dispatch, error) {
 	rows, err := s.Pool.Query(ctx, `WITH pending AS (
  SELECT organization,receipt_id FROM ingestion_outbox
  WHERE NOT dispatched AND lease_until<now()
@@ -216,7 +217,7 @@ func (s ContentStore) Claim(ctx context.Context, limit int) ([]content.Dispatch,
 	return batch, rows.Err()
 }
 
-func (s ContentStore) Dispatched(ctx context.Context, d content.Dispatch) error {
+func (s MaterializationStore) Dispatched(ctx context.Context, d content.Dispatch) error {
 	// Receipts and the change journal hold audit facts; delivery intents can go
 	// once Temporal has durably accepted their stable workflow identity.
 	_, err := s.Pool.Exec(ctx, "DELETE FROM ingestion_outbox WHERE organization=$1 AND receipt_id=$2", d.Organization, d.ReceiptID)

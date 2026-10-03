@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -88,7 +89,7 @@ func newDeliveryFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 	if err = contents.Promote(ctx, org, seg, generation); err != nil {
 		t.Fatal(err)
 	}
-	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore}
+	evaluation := postgres.EvaluationStore{Pool: store.Pool}
 	deliveries := make([]string, len(subs))
 	for i, s := range subs {
 		in := monitoring.Intent{Organization: org, SubscriptionID: s.ID, SubscriptionVersionID: s.Current.VersionID, Sequence: int64(1000 + i), CorpusID: a.ID, RecordID: work.RecordID, VersionID: work.VersionID}
@@ -98,7 +99,7 @@ func newDeliveryFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 		deliveries[i] = content.StableID("delivery", org, content.StableID("match", org, s.Current.VersionID, work.VersionID), "dest", "match.created")
 	}
 	return &deliveryFixture{t: t, ctx: ctx, pool: pool, org: org, scope: scope, corpusID: a.ID, store: store, contents: contents, service: service, subs: subs, deliveries: deliveries,
-		ds: postgres.DeliveryStore{ContentStore: store.ContentStore, Organization: org}}
+		ds: postgres.DeliveryStore{Pool: store.Pool, Organization: org}}
 }
 
 func (f *deliveryFixture) configured(o, dest string) bool { return o == f.org && dest == "dest" }

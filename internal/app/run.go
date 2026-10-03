@@ -6,6 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"time"
+
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
@@ -30,18 +43,6 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"io"
-	"log/slog"
-	"net"
-	"net/http"
-	"net/url"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"strings"
-	"sync/atomic"
-	"syscall"
-	"time"
 )
 
 type Config struct {
@@ -340,7 +341,23 @@ func Run(command string) error {
 		return errors.New("Temporal and S3 configuration required")
 	}
 	blobs := s3store.New(cfg.S3)
-	store := postgres.ContentStore{Pool: pool}
+	materialization := postgres.MaterializationStore{Pool: pool}
+	normalizations := postgres.NormalizationStore{Pool: pool}
+	baseline := postgres.ProjectionStore{Pool: pool}
+	embeddings := postgres.EmbeddingStore{Pool: pool}
+	spaces := postgres.SpaceStore{Pool: pool}
+	backfills := postgres.BackfillStore{Pool: pool}
+	operationStore := postgres.OperationStore{Pool: pool}
+	rebuilds := postgres.RebuildStore{Pool: pool}
+	quarantines := postgres.QuarantineStore{Pool: pool}
+	journal := postgres.ChangeStore{Pool: pool}
+	activity := postgres.ActivityStore{Pool: pool}
+	uploadStore := postgres.UploadStore{Pool: pool}
+	monitor := postgres.MonitoringStore{Pool: pool}
+	matches := postgres.MatchStore{Pool: pool}
+	purges := postgres.PurgeStore{Pool: pool}
+	ingestionEvaluations := postgres.IngestionEvaluationStore{Pool: pool}
+	servingProjections := postgres.ServingProjectionStore{Pool: pool}
 	// Plugin calls, searches, processing steps, documents received and
 	// Matches are counted in memory and flushed as rollups; only the worker
 	// deletes expired ones. The recorder runs once the plan is resolved.
@@ -351,9 +368,9 @@ func Run(command string) error {
 	receipts := postgres.ReceiptStore{Pool: pool}
 	records := postgres.RecordStore{Pool: pool}
 	versions := postgres.VersionStore{Pool: pool}
-	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: store, Catalog: records, Blobs: blobs, Baseline: store, Embeddings: store, BlobSource: store, Relations: records, Extensions: live, Normalizations: store, Supersession: store, Routes: live,
+	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: materialization, Catalog: records, Blobs: blobs, Baseline: baseline, Embeddings: embeddings, BlobSource: uploadStore, Relations: records, Extensions: live, Normalizations: normalizations, Supersession: normalizations, Routes: live,
 		Received: recorder.Received}
-	uploadService := uploads.Service{Store: store, Transfer: blobs}
+	uploadService := uploads.Service{Store: uploadStore, Transfer: blobs}
 	projection := weaviate.New(cfg.WeaviateURL)
 	projection.LegacySpace = tei.Space().ID
 	if command == "migrate" {
@@ -390,7 +407,7 @@ func Run(command string) error {
 		slog.Info("migrations complete")
 		return nil
 	}
-	connectorStore := postgres.ConnectorStore{ContentStore: store}
+	connectorStore := postgres.ConnectorStore{Pool: pool}
 	acquisition := &orchestration.Connectors{Scheduler: connectorStore, Acquirer: connectors.Acquirer{PublicURL: cfg.PublicURL, Store: connectorStore, Registry: registry, Sealer: sealer, Ingest: contents, Blobs: uploadService, Receipts: receipts}}
 	var runtime atomic.Pointer[orchestration.Runtime]
 	schemaReady := func(ctx context.Context) error { return postgres.SchemaReady(ctx, pool) }
@@ -505,9 +522,9 @@ func Run(command string) error {
 	// space claimed by another owner, or changed under the same version,
 	// refuses startup. New Corpora then start on the registered spaces.
 	register, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err = store.RegisterSpaces(register, DeploymentSpaces(resolved))
+	err = spaces.RegisterSpaces(register, DeploymentSpaces(resolved))
 	if err == nil {
-		err = alignDefaultGeneration(register, store)
+		err = alignDefaultGeneration(register, baseline)
 	}
 	cancel()
 	if err != nil {
@@ -549,11 +566,11 @@ func Run(command string) error {
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
 	// Coverage counts read every current segment of a Corpus; a search sees
 	// them at most 10 s old.
-	search := retrieval.Service{Embedder: embedding, Routing: store, Registry: store, Coverage: &retrieval.CoverageCache{TTL: 10 * time.Second}, Projection: projection, Content: contents}
+	search := retrieval.Service{Embedder: embedding, Routing: baseline, Registry: spaces, Coverage: &retrieval.CoverageCache{TTL: 10 * time.Second}, Projection: projection, Content: contents}
 	// External normalization runs in the worker only, before publication.
-	normalizer := normalization.Service{Content: contents, Store: store, Signer: blobs, Pin: live, Plugin: pluginhttp.Normalizer{}}
-	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: store, LegacySpace: tei.Space().ID}
-	rebuilder := retrieval.Rebuilder{Store: store, Content: contents, Projection: projection, Routing: store}
+	normalizer := normalization.Service{Content: contents, Store: normalizations, Signer: blobs, Pin: live, Plugin: pluginhttp.Normalizer{}}
+	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: baseline, LegacySpace: tei.Space().ID}
+	rebuilder := retrieval.Rebuilder{Store: rebuilds, Cancellation: operationStore, Content: contents, Projection: projection, Routing: baseline}
 	// The plan's ingestion plugin segments and embeds every Version, encodes
 	// the queries of its spaces and derives rebuild targets; each call
 	// resolves the plugin the plan names at that moment.
@@ -562,18 +579,18 @@ func Run(command string) error {
 	search.Spaces = ingestor
 	processor.Retrieval, processor.Enrichment = search, search
 	processor.Plugin = deriver
-	processor.Evaluation = &processing.Evaluator{Store: store, Serving: store, Content: contents, Plugin: deriver, Projection: projection}
+	processor.Evaluation = &processing.Evaluator{Store: ingestionEvaluations, Serving: servingProjections, Content: contents, Plugin: deriver, Projection: projection}
 	rebuilder.Plugin = deriver
 	// Backfills fill spaces through the plan each one is pinned to, paced
 	// below live ingestion on their own task queue.
 	pinnedIngestion := planIngestion{store: planStore, live: live}
-	backfiller := &backfill.Backfiller{Store: store, Content: contents, Plugin: deriver, Projection: projection, Pinned: pinnedIngestion, Steps: recorder, Settings: backfillSettings}
+	backfiller := &backfill.Backfiller{Store: backfills, Cancellation: operationStore, Content: contents, Plugin: deriver, Projection: projection, Pinned: pinnedIngestion, Steps: recorder, Settings: backfillSettings}
 	// Quarantine reprocesses rerun normalization and processing through the
 	// plan each one is pinned to, paced like backfills on their queue. The
 	// processor is copied before the worker gives it its observer: a
 	// reprocessed Version must not count as days from acceptance to
 	// searchable.
-	reprocessor := &quarantine.Reprocessor{Store: store, Normalizer: normalizer, Publisher: contents, Processor: processor,
+	reprocessor := &quarantine.Reprocessor{Store: quarantines, Cancellation: operationStore, Normalizer: normalizer, Publisher: contents, Processor: processor,
 		Settings: quarantine.Settings{Rate: backfillSettings.Rate, Poll: backfillSettings.Poll}}
 	// The retrieval plugin, normally core.retrieve, answers every search: it
 	// requests candidates, which search serves after authorization and
@@ -585,7 +602,7 @@ func Run(command string) error {
 	// start on the spaces it registered.
 	pluginRegistry.Activated = func(ctx context.Context) {
 		follower.Refresh(ctx)
-		if err := alignDefaultGeneration(ctx, store); err != nil {
+		if err := alignDefaultGeneration(ctx, baseline); err != nil {
 			slog.Error("new Corpora stay on the previous vector spaces until the next start", "error", err)
 		}
 	}
@@ -604,7 +621,7 @@ func Run(command string) error {
 		}
 		w.WriteHeader(204)
 	})
-	deliveryStore := postgres.DeliveryStore{ContentStore: store}
+	deliveryStore := postgres.DeliveryStore{Pool: pool}
 	deliveryMetrics := &monitoring.DeliveryMetrics{}
 	commands := telemetry.NewCommands()
 	pruneMetrics := &telemetry.ChangePrune{}
@@ -614,7 +631,7 @@ func Run(command string) error {
 		// Delivery attempt outcomes and admissible backlog, processing outcomes and
 		// acceptance-to-searchable durations, in Prometheus text format.
 		processingMetrics := telemetry.NewProcessing()
-		processor.Observer = processingObserver{metrics: processingMetrics, store: store, steps: recorder}
+		processor.Observer = processingObserver{metrics: processingMetrics, store: materialization, steps: recorder}
 		deliveryMetrics.Extra = func(w io.Writer) {
 			processingMetrics.Write(w)
 			pruneMetrics.Write(w)
@@ -627,7 +644,7 @@ func Run(command string) error {
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
-		probes.Handle("GET /metrics", apiMetrics(commands, store.IngestionBacklog, recorder.WriteMetrics))
+		probes.Handle("GET /metrics", apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics))
 	}
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
@@ -635,17 +652,17 @@ func Run(command string) error {
 		// process; a check a restart interrupted runs again after its lease.
 		go pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute)
 		// Subscription previews call the subscription plugins from the API.
-		previews := postgres.EvaluationStore{ContentStore: store}
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: store, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: store, Corpora: store, Destinations: cfg.Destinations, Profiles: search, MatchStore: store, Evaluators: evaluators, Moves: store, Evaluations: store, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: store}}), httpapi.WithOperations(operations.Service{Store: store}),
-			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(store),
+		previews := postgres.EvaluationStore{Pool: pool}
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}),
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(spaces),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators backfill past Versions and promote vector spaces (plugins:admin).
-			httpapi.WithBackfills(backfill.Service{Store: store, Plans: pinnedIngestion, Throughput: backfillThroughput{reader: observability.Reader{Store: rollups}}, Settings: backfillSettings}, backfill.Promotions{Store: store}),
+			httpapi.WithBackfills(backfill.Service{Store: backfills, Registry: spaces, Plans: pinnedIngestion, Throughput: backfillThroughput{reader: observability.Reader{Store: rollups}}, Settings: backfillSettings}, backfill.Promotions{Store: backfills}),
 			// Operators list the Versions stuck in quarantine and reprocess them (plugins:admin).
-			httpapi.WithQuarantine(quarantine.Service{Store: store}),
+			httpapi.WithQuarantine(quarantine.Service{Store: quarantines}),
 			// Operators follow documents through their steps (observability:read).
-			httpapi.WithActivity(content.Activities{Store: store}),
+			httpapi.WithActivity(content.Activities{Store: activity}),
 			// Searches are counted, and the rollups read back (observability:read).
 			httpapi.WithObservability(recorder, observability.Reader{Store: rollups, RecordQueryText: cfg.Observability.RecordQueryText}),
 			// Push deliveries are relayed by the API, which the source reaches.
@@ -676,8 +693,8 @@ func Run(command string) error {
 		// independently of Temporal availability.
 		go func() {
 			defer close(evaluationDone)
-			evaluation := postgres.EvaluationStore{ContentStore: store}
-			monitoring.Engine{Store: evaluation, Versions: versionParts{content: contents, metadata: evaluation, vectors: store}, Evaluators: evaluators, Workers: 4, Lease: time.Minute, Metrics: evaluationMetrics, Matched: recorder.Matched}.Run(ctx)
+			evaluation := postgres.EvaluationStore{Pool: pool}
+			monitoring.Engine{Store: evaluation, Versions: versionParts{content: contents, metadata: evaluation, vectors: baseline}, Evaluators: evaluators, Workers: 4, Lease: time.Minute, Metrics: evaluationMetrics, Matched: recorder.Matched}.Run(ctx)
 		}()
 		deliveryDone := make(chan struct{})
 		defer func() {
@@ -705,7 +722,7 @@ func Run(command string) error {
 		// evaluation and delivery; its watermark keeps cursor expiry exact.
 		go func() {
 			defer close(pruneDone)
-			changes.Pruner{Store: store, Retention: prune.Retention, Interval: prune.Interval, Organizations: prune.Organizations, Metrics: pruneMetrics}.Run(ctx)
+			changes.Pruner{Store: journal, Retention: prune.Retention, Interval: prune.Interval, Organizations: prune.Organizations, Metrics: pruneMetrics}.Run(ctx)
 		}()
 		// Projection purge (THE-698): a bounded PostgreSQL-leased sweep that
 		// deletes objects no route or current Version can serve again.
@@ -719,12 +736,15 @@ func Run(command string) error {
 		}()
 		go func() {
 			defer close(purgeDone)
-			retrieval.Purger{Store: store, Projection: projection, Grace: purgeGrace, Interval: time.Minute, Batch: 100, Metrics: purgeMetrics}.Run(ctx)
+			retrieval.Purger{Store: purges, Projection: projection, Grace: purgeGrace, Interval: time.Minute, Batch: 100, Metrics: purgeMetrics}.Run(ctx)
 		}()
 		go func() {
 			defer close(workerDone)
 			for ctx.Err() == nil {
-				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, store, acquisition, backfiller, reprocessor, workPinner)
+				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, struct {
+					orchestration.ReceiptDispatchStore
+					orchestration.OperationDispatchStore
+				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner)
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()

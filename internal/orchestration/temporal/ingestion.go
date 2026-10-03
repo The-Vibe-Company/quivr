@@ -319,10 +319,20 @@ func (r *Runtime) Close() {
 	r.Client.Close()
 }
 
-type DispatchStore interface {
+// ReceiptDispatchStore owns receipt dispatch and failed-start progress.
+type ReceiptDispatchStore interface {
 	Claim(context.Context, int) ([]content.Dispatch, error)
 	Dispatched(context.Context, content.Dispatch) error
+	Progress(context.Context, string, string, string, string) error
+}
+
+// OperationDispatchStore owns operation dispatch acknowledgement.
+type OperationDispatchStore interface {
 	ClaimOperations(context.Context, int) ([]operations.Dispatch, error)
 	OperationDispatched(context.Context, operations.Dispatch) error
-	Progress(context.Context, string, string, string, string) error
+}
+
+type DispatchStore interface {
+	ReceiptDispatchStore
+	OperationDispatchStore
 }

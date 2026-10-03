@@ -11,7 +11,7 @@ import (
 )
 
 // SpaceRegistry lists the vector spaces of a Corpus's routed generation with
-// their coverage (postgres.ContentStore).
+// their coverage (postgres.SpaceStore).
 type SpaceRegistry interface {
 	VectorSpaces(ctx context.Context, org, corpusID string) (content.Generation, []content.SpaceCoverage, int64, error)
 }

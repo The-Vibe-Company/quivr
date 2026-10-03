@@ -7,6 +7,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // changeScanBudget bounds how many journal positions one read may traverse,
@@ -19,7 +20,7 @@ const changeScanBudget = 1000
 // expiry check and the events come from a single statement snapshot, and
 // writers allocate positions under the Organization journal lock held until
 // commit, so every position at or below the head is committed and scanned.
-func (s ContentStore) ReadChanges(ctx context.Context, org, corpusID string, after int64, limit int, retention time.Duration) (changes.Window, error) {
+func (s ChangeStore) ReadChanges(ctx context.Context, org, corpusID string, after int64, limit int, retention time.Duration) (changes.Window, error) {
 	rows, err := s.Pool.Query(ctx, `
 WITH head AS (
   SELECT COALESCE((SELECT last_sequence FROM organization_journals WHERE organization=$1), 0) AS h
@@ -85,7 +86,7 @@ ORDER BY e.sequence`, org, corpusID, after, max(limit, 0)+1, changeScanBudget, r
 // Organizations (all when organizations is empty). Each batch is its own
 // transaction over a contiguous prefix of at most batch positions; at most
 // batches run per Organization. It returns the number of deleted events.
-func (s ContentStore) PruneChanges(ctx context.Context, retention time.Duration, organizations []string, batch, batches int) (int, error) {
+func (s ChangeStore) PruneChanges(ctx context.Context, retention time.Duration, organizations []string, batch, batches int) (int, error) {
 	// pgx sends a nil slice as NULL: coalesce keeps "no list" meaning every Organization.
 	rows, err := s.Pool.Query(ctx, `SELECT organization FROM organization_journals WHERE coalesce(cardinality($1::text[]),0)=0 OR organization=ANY($1) ORDER BY organization`, organizations)
 	if err != nil {
@@ -116,7 +117,7 @@ func (s ContentStore) PruneChanges(ctx context.Context, retention time.Duration,
 // dispatch starts, the earliest activation boundary), nor the first event
 // still inside retention. It holds only the Organization's prune row, never
 // the journal lock, and skips an Organization another prune holds.
-func (s ContentStore) pruneBatch(ctx context.Context, org string, retention time.Duration, batch int) (int, error) {
+func (s ChangeStore) pruneBatch(ctx context.Context, org string, retention time.Duration, batch int) (int, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -160,3 +161,6 @@ FROM bound b`, org, pruned, batch, retention.Seconds()).Scan(&upper); err != nil
 	}
 	return int(tag.RowsAffected()), tx.Commit(ctx)
 }
+
+// ChangeStore persists changes state.
+type ChangeStore struct{ Pool *pgxpool.Pool }

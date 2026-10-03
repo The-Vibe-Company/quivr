@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // DeliveryStore owns delivery work claims and append-only attempt facts.
 // Admission and outcome commit under the Organization journal lock, which
 // disable and withdrawal also take, and never span network I/O.
 type DeliveryStore struct {
-	ContentStore
+	Pool *pgxpool.Pool
 	// Organization restricts claims to one Organization (tests); empty claims any.
 	Organization string
 }
@@ -235,26 +235,6 @@ FROM delivery_outbox o JOIN deliveries d ON (d.organization,d.id)=(o.organizatio
 WHERE o.available_at<'infinity' AND d.state IN ('pending','delivering') AND d.window_start IS DISTINCT FROM 'infinity'`).Scan(&b.Pending, &age)
 	b.OldestAge = time.Duration(age * float64(time.Second))
 	return b, err
-}
-
-// Attempts reads a Delivery's attempt facts in number order.
-func (s ContentStore) Attempts(ctx context.Context, org, deliveryID string, after, limit int) ([]monitoring.Attempt, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT a.id,a.number,coalesce(o.outcome,'in_flight'),coalesce(o.http_status,0),coalesce(o.error_code,''),coalesce(o.error_message,'')
-FROM delivery_attempts a LEFT JOIN delivery_attempt_outcomes o ON (o.organization,o.attempt_id)=(a.organization,a.id)
-WHERE a.organization=$1 AND a.delivery_id=$2 AND a.number>$3 ORDER BY a.number LIMIT $4`, org, deliveryID, after, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []monitoring.Attempt{}
-	for rows.Next() {
-		a := monitoring.Attempt{DeliveryID: deliveryID}
-		if err = rows.Scan(&a.ID, &a.Number, &a.Outcome, &a.HTTPStatus, &a.ErrorCode, &a.ErrorMessage); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
 }
 
 var _ monitoring.DeliveryStore = DeliveryStore{}

@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
@@ -29,7 +30,7 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
+	store := postgres.ConnectorStore{Pool: pool}
 	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
@@ -131,7 +132,7 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if rolled, _ := store.ReadConnector(ctx, scope.Organization, created.ID); rolled.Health.Usage.ItemsRead != 5 || rolled.Health.Usage.PreviousDayItemsRead != 42 {
 		t.Fatalf("rollover on commit %+v", rolled.Health.Usage)
 	}
-	feed := changes.Service{Journal: store.ContentStore, Key: []byte("adapter-cursor-key-0123456789abcdef")}
+	feed := changes.Service{Journal: postgres.ChangeStore{Pool: store.Pool}, Key: []byte("adapter-cursor-key-0123456789abcdef")}
 	start, err := feed.Start(ctx, scope, c.ID, "")
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +256,7 @@ func TestScheduleChangesCommitOnlyActualChangesAndPullShorterRunsIn(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
+	store := postgres.ConnectorStore{Pool: pool}
 	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
@@ -268,7 +269,7 @@ func TestScheduleChangesCommitOnlyActualChangesAndPullShorterRunsIn(t *testing.T
 	if _, err = pool.Exec(ctx, "UPDATE connector_instances SET next_run_at=now()+interval '1 hour' WHERE organization=$1 AND id=$2", scope.Organization, created.ID); err != nil {
 		t.Fatal(err)
 	}
-	feed := changes.Service{Journal: store.ContentStore, Key: []byte("adapter-cursor-key-0123456789abcdef")}
+	feed := changes.Service{Journal: postgres.ChangeStore{Pool: store.Pool}, Key: []byte("adapter-cursor-key-0123456789abcdef")}
 	start, err := feed.Start(ctx, scope, c.ID, "")
 	if err != nil {
 		t.Fatal(err)
@@ -333,7 +334,7 @@ func TestRunRequestsPullTheNextRunInWithinTheFloorAndRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
+	store := postgres.ConnectorStore{Pool: pool}
 	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Minute}

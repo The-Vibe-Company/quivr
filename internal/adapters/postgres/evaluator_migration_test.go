@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/app"
@@ -175,7 +176,7 @@ func TestAlertRuleVersionDrainsUntilItsSubscriptionsMove(t *testing.T) {
 	if got, want := usage(old), "draining subscriptions=0 pinned_work=4"; got != want {
 		t.Fatalf("0.2.0 once every Subscription moved: %s, want %s (the pending evaluation and three earlier Versions)", got, want)
 	}
-	for evaluation := (postgres.EvaluationStore{ContentStore: store.ContentStore}); ; {
+	for evaluation := (postgres.EvaluationStore{Pool: store.Pool}); ; {
 		n, err := evaluation.FanOut(ctx)
 		if err != nil {
 			t.Fatal(err)

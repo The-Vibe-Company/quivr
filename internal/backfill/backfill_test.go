@@ -113,7 +113,7 @@ func TestRequestNeedsADryRunAndCostConfirmation(t *testing.T) {
 		{VectorSpace: content.VectorSpace{ID: "other.space@1"}, Role: content.SpaceEvaluation},
 	}}
 	ingestion := backfill.Ingestion{RegistrationID: "reg", PluginID: "p", Version: "1.0.0", Prices: map[string]*float64{"p.small@1": nil, "p.large@1": price(0.02), "p.old@1": nil}}
-	service := backfill.Service{Store: store, Plans: fakePlans{ingestion}, Settings: backfill.Settings{MaxCostWithoutConfirmation: 1}}
+	service := backfill.Service{Store: store, Registry: store, Plans: fakePlans{ingestion}, Settings: backfill.Settings{MaxCostWithoutConfirmation: 1}}
 	ctx := context.Background()
 	operator := corpus.Scope{Organization: "org", Actions: []string{operations.BackfillPermission}, Corpora: []string{"*"}}
 	after := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)

@@ -29,7 +29,7 @@ func TestRecentListsCurrentEligibleVersionsNewestFirst(t *testing.T) {
 	if _, err := f.pool.Exec(ctx, `UPDATE records SET withdrawn=true WHERE organization=$1 AND id=$2`, f.org, withdrawn); err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.EvaluationStore{ContentStore: f.store.ContentStore}
+	store := postgres.EvaluationStore{Pool: f.store.Pool}
 	list := func(after time.Time, limit int) []string {
 		t.Helper()
 		got, err := store.Recent(ctx, f.org, []string{f.corpusID}, after, limit)

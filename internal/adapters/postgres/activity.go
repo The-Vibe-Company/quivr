@@ -8,9 +8,10 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var _ content.ActivityStore = ContentStore{}
+var _ content.ActivityStore = ActivityStore{}
 
 // activityColumns reads one document's activity. accepted_revisions is the
 // spine: a Version id exists there from acceptance, before the Version is
@@ -62,7 +63,7 @@ func scanActivity(row pgx.Row) (content.Activity, error) {
 // accepted Versions, newest first, in a single statement over
 // accepted_revisions_latest. Versions accepted before step times were
 // recorded have no acceptance time here and are not listed.
-func (s ContentStore) LatestActivity(ctx context.Context, org string, after *content.ActivityCursor, limit int) ([]content.Activity, error) {
+func (s ActivityStore) LatestActivity(ctx context.Context, org string, after *content.ActivityCursor, limit int) ([]content.Activity, error) {
 	query := activityColumns + ` WHERE a.organization=$1 AND a.accepted_at IS NOT NULL`
 	args := []any{org, limit}
 	if after != nil {
@@ -79,7 +80,7 @@ func (s ContentStore) LatestActivity(ctx context.Context, org string, after *con
 // VersionActivity reads one Version's activity with the plugins that ran
 // its steps: the normalizer whose output was published, and the ingestion
 // plugin whose segmentation the Corpus's routed generation serves.
-func (s ContentStore) VersionActivity(ctx context.Context, org, versionID string) (content.Activity, error) {
+func (s ActivityStore) VersionActivity(ctx context.Context, org, versionID string) (content.Activity, error) {
 	// A revision accepted since step times were recorded is found by its
 	// Version id; an earlier one only once materialized, through its Version.
 	a, err := scanActivity(s.Pool.QueryRow(ctx, activityColumns+` WHERE a.organization=$1 AND a.version_id=$2 AND a.accepted_at IS NOT NULL`, org, versionID))
@@ -128,3 +129,6 @@ func utcSteps(s content.Steps) content.Steps {
 func firstStep(column string) string {
 	return `CASE WHEN materialized_at IS NULL THEN NULL ELSE coalesce(` + column + `,clock_timestamp()) END`
 }
+
+// ActivityStore persists activity state.
+type ActivityStore struct{ Pool *pgxpool.Pool }

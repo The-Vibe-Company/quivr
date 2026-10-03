@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func (s ContentStore) Embedding(ctx context.Context, org, derivation string) (content.Embedding, error) {
+func (s EmbeddingStore) Embedding(ctx context.Context, org, derivation string) (content.Embedding, error) {
 	var e content.Embedding
 	var b []byte
 	err := s.Pool.QueryRow(ctx, `SELECT metadata FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2`, org, derivation).Scan(&b)
@@ -18,7 +20,7 @@ func (s ContentStore) Embedding(ctx context.Context, org, derivation string) (co
 	}
 	return e, notFound(err)
 }
-func (s ContentStore) SaveEmbedding(ctx context.Context, e content.Embedding, space content.VectorSpace) error {
+func (s EmbeddingStore) SaveEmbedding(ctx context.Context, e content.Embedding, space content.VectorSpace) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -55,20 +57,20 @@ func (s ContentStore) SaveEmbedding(ctx context.Context, e content.Embedding, sp
 	}
 	return tx.Commit(ctx)
 }
-func (s ContentStore) EnrichmentProgress(ctx context.Context, org, id, state, code string) error {
-	return s.updatePinnedVersion(ctx, org, id, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4,enrichment_reason=NULL WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, state, code)
+func (s EmbeddingStore) EnrichmentProgress(ctx context.Context, org, id, state, code string) error {
+	return updatePinnedVersion(ctx, s.Pool, org, id, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4,enrichment_reason=NULL WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, state, code)
 }
 
 // BlockEnrichment stops an enrichment with its reason, under the guards of
 // EnrichmentProgress: a searchable Version whose enrichment is not done.
-func (s ContentStore) BlockEnrichment(ctx context.Context, org, id string, reason content.Diagnostic) error {
+func (s EmbeddingStore) BlockEnrichment(ctx context.Context, org, id string, reason content.Diagnostic) error {
 	raw, err := json.Marshal(reason)
 	if err != nil {
 		return err
 	}
-	return s.updatePinnedVersion(ctx, org, id, `UPDATE record_versions SET enrichment_state='blocked',enrichment_error=$3,enrichment_reason=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, reason.Code, raw)
+	return updatePinnedVersion(ctx, s.Pool, org, id, `UPDATE record_versions SET enrichment_state='blocked',enrichment_error=$3,enrichment_reason=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, reason.Code, raw)
 }
-func (s ContentStore) CountEnrichmentTimeout(ctx context.Context, org, id string) (int, error) {
+func (s EmbeddingStore) CountEnrichmentTimeout(ctx context.Context, org, id string) (int, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -92,7 +94,7 @@ ON CONFLICT(organization,version_id) DO UPDATE SET timeouts=enrichment_timeouts.
 	}
 	return timeouts, tx.Commit(ctx)
 }
-func (s ContentStore) EnrichmentEligible(ctx context.Context, org, id string) (bool, error) {
+func (s EmbeddingStore) EnrichmentEligible(ctx context.Context, org, id string) (bool, error) {
 	var eligible bool
 	err := s.Pool.QueryRow(ctx, `SELECT coalesce(r.current_version_id=v.id,false) AND `+eligibleVersionSQL+` FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2`, org, id).Scan(&eligible)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -100,7 +102,7 @@ func (s ContentStore) EnrichmentEligible(ctx context.Context, org, id string) (b
 	}
 	return eligible, err
 }
-func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg content.Segmentation, g content.Generation, artifacts []content.Embedding) error {
+func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg content.Segmentation, g content.Generation, artifacts []content.Embedding) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -203,4 +205,7 @@ func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg cont
 	return tx.Commit(ctx)
 }
 
-var _ content.EmbeddingRepository = ContentStore{}
+var _ content.EmbeddingRepository = EmbeddingStore{}
+
+// EmbeddingStore persists embeddings state.
+type EmbeddingStore struct{ Pool *pgxpool.Pool }

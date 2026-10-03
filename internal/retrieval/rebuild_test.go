@@ -154,7 +154,7 @@ func (r routedTo) Generation(context.Context, string, string) (content.Generatio
 }
 
 func rebuilder(store *fakeRebuildStore, c *fakeRebuildContent, p *fakeRebuildProjection) retrieval.Rebuilder {
-	return retrieval.Rebuilder{Store: store, Content: c, Projection: p, Plugin: &fakeDeriver{}, Routing: routedTo("space")}
+	return retrieval.Rebuilder{Store: store, Cancellation: store, Content: c, Projection: p, Plugin: &fakeDeriver{}, Routing: routedTo("space")}
 }
 
 func run(t *testing.T, r retrieval.Rebuilder) {
@@ -315,7 +315,7 @@ func TestRebuildStopsAfterTheSharedVectorDeadlineBudget(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
 	canonical := &fakeRebuildContent{}
 	plugin := &fakeDeriver{}
-	rebuilder := retrieval.Rebuilder{Store: store, Content: canonical, Projection: &fakeRebuildProjection{}, Plugin: plugin, Routing: routedTo("space")}
+	rebuilder := retrieval.Rebuilder{Store: store, Cancellation: store, Content: canonical, Projection: &fakeRebuildProjection{}, Plugin: plugin, Routing: routedTo("space")}
 	for _, cause := range []error{processing.ErrPluginDeadline, errors.New("connection refused"), processing.ErrPluginDeadline} {
 		plugin.err = cause
 		if done, err := rebuilder.Step(context.Background(), "org", "op"); err == nil || done {

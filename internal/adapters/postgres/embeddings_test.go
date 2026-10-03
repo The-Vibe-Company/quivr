@@ -4,17 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"slices"
+	"strconv"
+	"testing"
+	"time"
+
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	s3store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"os"
-	"slices"
-	"strconv"
-	"testing"
-	"time"
 )
 
 func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {

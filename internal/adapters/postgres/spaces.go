@@ -9,6 +9,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // spacesLock serializes registrations of concurrent api, worker and migrate
@@ -20,7 +21,7 @@ const spacesLock = 7760001
 // content.ErrSpaceOwner, and another model, dimensions or metric under the
 // same id is content.ErrSpaceChanged. The owner's version and the role follow
 // the deployment.
-func (s ContentStore) RegisterSpaces(ctx context.Context, spaces []content.RegisteredSpace) error {
+func (s SpaceStore) RegisterSpaces(ctx context.Context, spaces []content.RegisteredSpace) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -111,8 +112,8 @@ func scanSpaces(raw []byte) ([]content.GenerationSpace, error) {
 // VectorSpaces lists the spaces the Corpus's routed generation carries, as
 // the registry describes them, with the current segments that hold a vector
 // in each, and the total of current segments the generation projects.
-func (s ContentStore) VectorSpaces(ctx context.Context, org, corpusID string) (content.Generation, []content.SpaceCoverage, int64, error) {
-	g, err := s.Generation(ctx, org, corpusID)
+func (s SpaceStore) VectorSpaces(ctx context.Context, org, corpusID string) (content.Generation, []content.SpaceCoverage, int64, error) {
+	g, err := (ProjectionStore{Pool: s.Pool}).Generation(ctx, org, corpusID)
 	if err != nil {
 		return g, nil, 0, notFound(err)
 	}
@@ -194,3 +195,24 @@ GROUP BY sp.id`, org, corpusID, g.ID, g.VectorSpaces())
 	})
 	return g, out, total, nil
 }
+
+// RegisteredSpaces lists the vector space registry.
+func (s SpaceStore) RegisteredSpaces(ctx context.Context) ([]content.RegisteredSpace, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT id,manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role FROM vector_spaces ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []content.RegisteredSpace{}
+	for rows.Next() {
+		var sp content.RegisteredSpace
+		if err = rows.Scan(&sp.ID, &sp.Manifest, &sp.Name, &sp.Version, &sp.OwnerPluginID, &sp.OwnerPluginVersion, &sp.Model, &sp.Dimensions, &sp.Metric, &sp.Indexes, &sp.QueryModalities, &sp.Role); err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}
+
+// SpaceStore persists vector space registrations and coverage.
+type SpaceStore struct{ Pool *pgxpool.Pool }

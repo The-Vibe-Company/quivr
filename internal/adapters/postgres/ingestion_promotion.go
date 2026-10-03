@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Readers take this shared fence before journal, operation and generation
@@ -171,8 +172,8 @@ func pinnedOwnerServes(ctx context.Context, tx pgx.Tx, org, versionID string) (b
 	return serves, err
 }
 
-func (s ContentStore) updatePinnedVersion(ctx context.Context, org, id, sql string, values ...any) error {
-	tx, err := s.Pool.Begin(ctx)
+func updatePinnedVersion(ctx context.Context, pool *pgxpool.Pool, org, id, sql string, values ...any) error {
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
 	}

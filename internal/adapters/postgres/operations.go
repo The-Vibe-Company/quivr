@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // operationEvent records one Operation state transition in the shared journal.
@@ -47,20 +48,20 @@ func scanOperation(row pgx.Row) (operations.Operation, error) {
 	return op, err
 }
 
-func (s ContentStore) AcceptRebuild(ctx context.Context, org, corpusID, key string, canonical []byte) (operations.Operation, error) {
+func (s OperationStore) AcceptRebuild(ctx context.Context, org, corpusID, key string, canonical []byte) (operations.Operation, error) {
 	return s.acceptCommand(ctx, org, operations.KindProjectionRebuild, corpusID, key, canonical, nil)
 }
 
 // AcceptRetrievalConfiguration pins the next configuration version of the
 // Corpus on a new target generation. The latest accepted configuration wins:
 // older pending configuration Operations are canceled in the same commit.
-func (s ContentStore) AcceptRetrievalConfiguration(ctx context.Context, org, corpusID, key string, canonical, resolved []byte) (operations.Operation, error) {
+func (s OperationStore) AcceptRetrievalConfiguration(ctx context.Context, org, corpusID, key string, canonical, resolved []byte) (operations.Operation, error) {
 	return s.acceptCommand(ctx, org, operations.KindRetrievalConfiguration, corpusID, key, canonical, resolved)
 }
 
 // acceptCommand commits an originating Operation command, or returns the one
 // already accepted for Organization + kind + Corpus + key + canonical request.
-func (s ContentStore) acceptCommand(ctx context.Context, org, kind, corpusID, key string, canonical, resolved []byte) (operations.Operation, error) {
+func (s OperationStore) acceptCommand(ctx context.Context, org, kind, corpusID, key string, canonical, resolved []byte) (operations.Operation, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -192,7 +193,7 @@ WHERE d.active AND c.organization=$2 AND c.id=$3 AND r.id=`+routedGenerationSQL(
 
 // CancelOperation applies an operator cancellation under the journal lock and
 // Operation row lock that every effect-committing transition also holds.
-func (s ContentStore) CancelOperation(ctx context.Context, org, id string) (operations.Operation, error) {
+func (s OperationStore) CancelOperation(ctx context.Context, org, id string) (operations.Operation, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -230,7 +231,7 @@ func (s ContentStore) CancelOperation(ctx context.Context, org, id string) (oper
 }
 
 // ConfirmCancel settles a cancellation request once the worker has stopped.
-func (s ContentStore) ConfirmCancel(ctx context.Context, org, id string) error {
+func (s OperationStore) ConfirmCancel(ctx context.Context, org, id string) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -260,7 +261,7 @@ func transition(ctx context.Context, tx pgx.Tx, op operations.Operation, state s
 
 // AcceptRerun links a new Operation to a terminal source. Replays are resolved
 // before the terminal check, so they return the same rerun forever.
-func (s ContentStore) AcceptRerun(ctx context.Context, org, sourceID, key string, canonical []byte) (operations.Operation, error) {
+func (s OperationStore) AcceptRerun(ctx context.Context, org, sourceID, key string, canonical []byte) (operations.Operation, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -328,13 +329,13 @@ func (s ContentStore) AcceptRerun(ctx context.Context, org, sourceID, key string
 	return op, tx.Commit(ctx)
 }
 
-func (s ContentStore) Operation(ctx context.Context, org, id string) (operations.Operation, error) {
+func (s OperationStore) Operation(ctx context.Context, org, id string) (operations.Operation, error) {
 	return scanOperation(s.Pool.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2`, org, id))
 }
 
 // ClaimOperations leases a bounded batch of undispatched Operations. Locked
 // claims are skipped so concurrent dispatchers take disjoint work.
-func (s ContentStore) ClaimOperations(ctx context.Context, limit int) ([]operations.Dispatch, error) {
+func (s OperationStore) ClaimOperations(ctx context.Context, limit int) ([]operations.Dispatch, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -359,9 +360,48 @@ func (s ContentStore) ClaimOperations(ctx context.Context, limit int) ([]operati
 	return batch, rows.Err()
 }
 
-func (s ContentStore) OperationDispatched(ctx context.Context, d operations.Dispatch) error {
+func (s OperationStore) OperationDispatched(ctx context.Context, d operations.Dispatch) error {
 	_, err := s.Pool.Exec(ctx, `UPDATE operation_outbox SET dispatched=true WHERE organization=$1 AND operation_id=$2`, d.Organization, d.OperationID)
 	return err
 }
 
-var _ operations.Store = ContentStore{}
+var _ operations.Store = OperationStore{}
+
+// PauseOperation pauses a queued or running Operation.
+func (s OperationStore) PauseOperation(ctx context.Context, org, id string) (operations.Operation, error) {
+	return s.control(ctx, org, id, map[string]string{operations.StateQueued: operations.StatePaused, operations.StateRunning: operations.StatePaused})
+}
+
+// ResumeOperation resumes a paused Operation. One that never started runs
+// its first step when the worker next reads it.
+func (s OperationStore) ResumeOperation(ctx context.Context, org, id string) (operations.Operation, error) {
+	return s.control(ctx, org, id, map[string]string{operations.StatePaused: operations.StateRunning})
+}
+
+// control applies an operator transition under the journal lock and the
+// Operation row lock that every effect also takes; other states are
+// returned unchanged.
+func (s OperationStore) control(ctx context.Context, org, id string, next map[string]string) (operations.Operation, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return operations.Operation{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return operations.Operation{}, err
+	}
+	op, err := lockOperation(ctx, tx, org, id)
+	if err != nil {
+		return op, err
+	}
+	if state, ok := next[op.State]; ok {
+		if err = transition(ctx, tx, op, state); err != nil {
+			return operations.Operation{}, err
+		}
+		op.State = state
+	}
+	return op, tx.Commit(ctx)
+}
+
+// OperationStore persists operation commands and lifecycle control.
+type OperationStore struct{ Pool *pgxpool.Pool }

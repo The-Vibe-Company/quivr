@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // queueServingProjection is called only after canonical Parts exist. The
@@ -107,7 +108,7 @@ func queuePendingServingProjections(ctx context.Context, tx pgx.Tx, previous reg
 	return nil
 }
 
-func (s ContentStore) ClaimServingProjections(ctx context.Context, limit int) ([]content.IngestionEvaluation, error) {
+func (s ServingProjectionStore) ClaimServingProjections(ctx context.Context, limit int) ([]content.IngestionEvaluation, error) {
 	rows, err := s.Pool.Query(ctx, `UPDATE serving_projections SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM serving_projections WHERE NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state`, limit)
 	if err != nil {
 		return nil, err
@@ -115,12 +116,12 @@ func (s ContentStore) ClaimServingProjections(ctx context.Context, limit int) ([
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (content.IngestionEvaluation, error) { return scanIngestionEvaluation(r) })
 }
 
-func (s ContentStore) ServingProjection(ctx context.Context, org, id string) (content.IngestionEvaluation, error) {
+func (s ServingProjectionStore) ServingProjection(ctx context.Context, org, id string) (content.IngestionEvaluation, error) {
 	j, err := scanIngestionEvaluation(s.Pool.QueryRow(ctx, `SELECT organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state FROM serving_projections WHERE organization=$1 AND id=$2`, org, id))
 	return j, notFound(err)
 }
 
-func (s ContentStore) ServingProjectionDispatched(ctx context.Context, j content.IngestionEvaluation) error {
+func (s ServingProjectionStore) ServingProjectionDispatched(ctx context.Context, j content.IngestionEvaluation) error {
 	_, err := s.Pool.Exec(ctx, `UPDATE serving_projections SET dispatched=true WHERE organization=$1 AND id=$2`, j.Organization, j.ID)
 	return err
 }
@@ -138,11 +139,11 @@ func servingProjectionEligible(ctx context.Context, q querier, j content.Ingesti
 	return eligible, err
 }
 
-func (s ContentStore) ServingProjectionEligible(ctx context.Context, j content.IngestionEvaluation) (bool, error) {
+func (s ServingProjectionStore) ServingProjectionEligible(ctx context.Context, j content.IngestionEvaluation) (bool, error) {
 	return servingProjectionEligible(ctx, s.Pool, j)
 }
 
-func (s ContentStore) CountServingProjectionTimeout(ctx context.Context, j content.IngestionEvaluation) (int, error) {
+func (s ServingProjectionStore) CountServingProjectionTimeout(ctx context.Context, j content.IngestionEvaluation) (int, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -165,7 +166,7 @@ func (s ContentStore) CountServingProjectionTimeout(ctx context.Context, j conte
 	return count, tx.Commit(ctx)
 }
 
-func (s ContentStore) CompleteServingProjection(ctx context.Context, j content.IngestionEvaluation, state string, reason *content.Diagnostic) error {
+func (s ServingProjectionStore) CompleteServingProjection(ctx context.Context, j content.IngestionEvaluation, state string, reason *content.Diagnostic) error {
 	if state != "succeeded" && state != "failed" && state != "skipped" {
 		return content.ErrInvalid
 	}
@@ -222,7 +223,7 @@ func (s ContentStore) CompleteServingProjection(ctx context.Context, j content.I
 
 // CoverServingProjection publishes readiness and currentness only after the
 // current routed owner has its own complete projection and primary vectors.
-func (s ContentStore) CoverServingProjection(ctx context.Context, j content.IngestionEvaluation, g content.Generation, seg content.Segmentation, artifacts []content.Embedding) error {
+func (s ServingProjectionStore) CoverServingProjection(ctx context.Context, j content.IngestionEvaluation, g content.Generation, seg content.Segmentation, artifacts []content.Embedding) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -294,3 +295,6 @@ func (s ContentStore) CoverServingProjection(ctx context.Context, j content.Inge
 	}
 	return tx.Commit(ctx)
 }
+
+// ServingProjectionStore persists serving-owner projection jobs.
+type ServingProjectionStore struct{ Pool *pgxpool.Pool }

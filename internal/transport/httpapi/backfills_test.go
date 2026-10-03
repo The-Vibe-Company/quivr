@@ -80,7 +80,7 @@ func TestBackfillAndPromotionRoutes(t *testing.T) {
 	}
 	store := backfillStore{estimates: map[string][]byte{}}
 	handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"),
-		httpapi.WithBackfills(backfill.Service{Store: store, Plans: backfillPlans{}}, backfill.Promotions{Store: promotionStore{}}))
+		httpapi.WithBackfills(backfill.Service{Store: store, Registry: store, Plans: backfillPlans{}}, backfill.Promotions{Store: promotionStore{}}))
 	if err != nil {
 		t.Fatal(err)
 	}

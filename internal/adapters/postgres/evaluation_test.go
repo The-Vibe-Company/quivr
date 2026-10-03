@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -112,7 +113,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	_, otherVersion := searchable(b.ID, "other-corpus")
 	trigger("record.retrieval_ready", a.ID, hitRecord, nil) // pre-migration shape: no Version
 
-	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore, Page: 2}
+	evaluation := postgres.EvaluationStore{Pool: store.Pool, Page: 2}
 	drain := func() {
 		t.Helper()
 		for i := 0; i < 20; i++ {

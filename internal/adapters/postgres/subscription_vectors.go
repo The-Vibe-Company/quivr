@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s ContentStore) SubscriptionEmbeddings(ctx context.Context, org, corpusID, versionID string) (content.Generation, []string, int, error) {
+func (s ProjectionStore) SubscriptionEmbeddings(ctx context.Context, org, corpusID, versionID string) (content.Generation, []string, int, error) {
 	generation, err := s.Generation(ctx, org, corpusID)
 	if err != nil {
 		return generation, nil, 0, err

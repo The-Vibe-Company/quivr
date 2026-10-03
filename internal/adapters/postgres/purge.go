@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // abandonedGenerationsSQL selects (Organization, Corpus, generation) triples
@@ -29,7 +30,7 @@ const deadVersionSQL = `(` + recordGoneSQL + `
  OR (v.id IS DISTINCT FROM r.current_version_id AND v.id IS DISTINCT FROM r.desired_version_id))`
 
 // NoticePurges records up to limit newly dead items; their grace period starts now.
-func (s ContentStore) NoticePurges(ctx context.Context, limit int) (int, error) {
+func (s PurgeStore) NoticePurges(ctx context.Context, limit int) (int, error) {
 	tag, err := s.Pool.Exec(ctx, `INSERT INTO projection_purges(organization,kind,corpus_id,generation_id)
 SELECT d.organization,'generation',d.corpus_id,d.target_generation_id FROM (`+abandonedGenerationsSQL+`) d
 WHERE NOT EXISTS(SELECT 1 FROM projection_purges p WHERE p.organization=d.organization AND p.kind='generation' AND p.corpus_id=d.corpus_id AND p.generation_id=d.target_generation_id AND p.version_id='')
@@ -54,7 +55,7 @@ LIMIT $1 ON CONFLICT DO NOTHING`, limit)
 // ClaimPurges leases up to limit unpurged items noticed before now-grace. The
 // claim rechecks that each item is still dead; permanence makes that a guard,
 // not a race.
-func (s ContentStore) ClaimPurges(ctx context.Context, grace, lease time.Duration, limit int) ([]retrieval.PurgeItem, error) {
+func (s PurgeStore) ClaimPurges(ctx context.Context, grace, lease time.Duration, limit int) ([]retrieval.PurgeItem, error) {
 	rows, err := s.Pool.Query(ctx, `WITH due AS (
  SELECT p.organization,p.kind,p.corpus_id,p.generation_id,p.version_id FROM projection_purges p
  WHERE p.purged_at IS NULL AND p.lease_until<now() AND p.noticed_at<now()-make_interval(secs=>$1::double precision)
@@ -114,10 +115,13 @@ RETURNING p.organization,p.kind,p.corpus_id,p.generation_id,p.version_id`, grace
 
 // RecordPurge adds deleted objects to the item and releases its lease; a
 // complete purge is stamped and never claimed again.
-func (s ContentStore) RecordPurge(ctx context.Context, it retrieval.PurgeItem, deleted int, complete bool) error {
+func (s PurgeStore) RecordPurge(ctx context.Context, it retrieval.PurgeItem, deleted int, complete bool) error {
 	_, err := s.Pool.Exec(ctx, `UPDATE projection_purges SET objects_deleted=objects_deleted+$6,lease_until='-infinity',purged_at=CASE WHEN $7 THEN now() END
 WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND generation_id=$4 AND version_id=$5 AND purged_at IS NULL`, it.Organization, it.Kind, it.CorpusID, it.GenerationID, it.VersionID, deleted, complete)
 	return err
 }
 
-var _ retrieval.PurgeStore = ContentStore{}
+var _ retrieval.PurgeStore = PurgeStore{}
+
+// PurgeStore persists purge state.
+type PurgeStore struct{ Pool *pgxpool.Pool }

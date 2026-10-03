@@ -63,7 +63,6 @@ type RunStore interface {
 	// CompleteBackfill records success once no candidate remains.
 	CompleteBackfill(ctx context.Context, org, id, generationID string) error
 	FailBackfill(ctx context.Context, org, id string, failure operations.Error) error
-	ConfirmCancel(ctx context.Context, org, id string) error
 }
 
 // Content reads canonical Versions, their segmentations and their stored
@@ -117,15 +116,21 @@ const (
 	SkipPluginDeadline      = "plugin_deadline"
 )
 
+// Cancellation settles a stopped worker's cancellation request.
+type Cancellation interface {
+	ConfirmCancel(context.Context, string, string) error
+}
+
 // Backfiller runs backfill Operations one bounded step at a time.
 type Backfiller struct {
-	Store      RunStore
-	Content    Content
-	Plugin     Deriver
-	Projection Projection
-	Pinned     Pinned
-	Steps      Steps
-	Settings   Settings
+	Cancellation Cancellation
+	Store        RunStore
+	Content      Content
+	Plugin       Deriver
+	Projection   Projection
+	Pinned       Pinned
+	Steps        Steps
+	Settings     Settings
 }
 
 // Progress says whether the Operation needs no further step, and otherwise
@@ -164,7 +169,7 @@ func (b Backfiller) Step(ctx context.Context, org, id string) (Progress, error) 
 	case operations.StatePaused:
 		return Progress{Wait: settings.Poll}, nil
 	case operations.StateCancelRequested:
-		return Progress{Done: true}, b.Store.ConfirmCancel(ctx, org, id)
+		return Progress{Done: true}, b.Cancellation.ConfirmCancel(ctx, org, id)
 	case operations.StateRunning:
 	default:
 		return Progress{Done: true}, nil

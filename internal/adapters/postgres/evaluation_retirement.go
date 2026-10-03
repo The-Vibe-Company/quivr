@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s ContentStore) EvaluationBacklog(ctx context.Context, org string, corpora []string, after string, limit int) ([]monitoring.EvaluationCounts, error) {
+func (s MonitoringStore) EvaluationBacklog(ctx context.Context, org string, corpora []string, after string, limit int) ([]monitoring.EvaluationCounts, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT v.evaluator->>'plugin_id',v.evaluator->>'version',
 count(*) FILTER (WHERE i.state='pending'),
 count(*) FILTER (WHERE i.state='pending' AND i.error_code<>''),
@@ -50,7 +50,7 @@ type retirementRequest struct {
 	Corpora []string                             `json:"corpora"`
 }
 
-func (s ContentStore) RetireEvaluations(ctx context.Context, org string, corpora []string, in monitoring.EvaluationRetirementInput) (monitoring.EvaluationRetirement, error) {
+func (s MonitoringStore) RetireEvaluations(ctx context.Context, org string, corpora []string, in monitoring.EvaluationRetirementInput) (monitoring.EvaluationRetirement, error) {
 	out := monitoring.EvaluationRetirement{EvaluationRetirementInput: in, ID: content.StableID("evaluation_retirement", org, in.Key), Outcome: monitoring.OutcomeEvaluatorRetired, Items: []monitoring.RetiredEvaluation{}}
 	canonical, err := json.Marshal(retirementRequest{Input: in, Corpora: corpora})
 	if err != nil {
@@ -137,7 +137,7 @@ AND i.lease_until<now() ORDER BY i.sequence,i.subscription_version_id LIMIT $5 F
 	return out, tx.Commit(ctx)
 }
 
-func (s ContentStore) EvaluationRetirement(ctx context.Context, org string, corpora []string, id string) (monitoring.EvaluationRetirement, error) {
+func (s MonitoringStore) EvaluationRetirement(ctx context.Context, org string, corpora []string, id string) (monitoring.EvaluationRetirement, error) {
 	var out monitoring.EvaluationRetirement
 	var canonical, result []byte
 	err := s.Pool.QueryRow(ctx, `SELECT canonical_request,result FROM evaluation_retirements WHERE organization=$1 AND id=$2`, org, id).Scan(&canonical, &result)

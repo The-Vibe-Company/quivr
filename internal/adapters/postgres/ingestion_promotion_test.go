@@ -506,7 +506,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	defer promotionPool.Close()
 	promotedModel := make(chan error, 1)
 	go func() {
-		_, err := (postgres.ContentStore{Pool: promotionPool}).PromoteSpace(ctx, "example.hash_embedder.small@1", false)
+		_, err := (postgres.BackfillStore{Pool: promotionPool}).PromoteSpace(ctx, "example.hash_embedder.small@1", false)
 		promotedModel <- err
 	}()
 	var promotionErr error

@@ -34,7 +34,7 @@ func TestConnectorTokensStayScopedAndRotateWithoutExtendingOldSecrets(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
+	store := postgres.ConnectorStore{Pool: pool}
 	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-token-test-key-012345678901234")
 	service := connectors.Service{Store: store, Tokens: store, Registry: registry, Sealer: sealer}
@@ -216,7 +216,7 @@ func TestConnectorTokenHTTPShowsSecretsOnceAndAuthenticatesBeforeReceiving(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.ConnectorStore{ContentStore: contentStores(pool).ContentStore}
+	store := postgres.ConnectorStore{Pool: pool}
 	source := &tokenPushSource{}
 	registry, err := connectors.NewRegistry(source)
 	if err != nil {

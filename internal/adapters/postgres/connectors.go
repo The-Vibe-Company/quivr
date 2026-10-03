@@ -15,13 +15,14 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ConnectorStore persists Connector Instances, their Deposited Credentials,
 // schedule leases and Acquisition Checkpoints. Mutations that change public
 // state lock the Organization journal first, then the instance row, and
 // commit their change events in the same transaction.
-type ConnectorStore struct{ ContentStore }
+type ConnectorStore struct{ Pool *pgxpool.Pool }
 
 const connectorColumns = `c.organization,c.id,c.corpus_id,c.source_namespace,c.kind,c.config,c.interval_seconds,c.silent_after_seconds,c.credential_warning_seconds,c.enabled,c.created_at,c.disabled_at,
 c.health_state,c.health_evaluated_at,c.last_success_at,c.last_item_at,c.last_error_code,c.last_error_class,c.last_error_at,c.access_error_at,

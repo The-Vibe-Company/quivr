@@ -3,9 +3,10 @@ package postgres_test
 import (
 	"context"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -193,7 +194,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	if count, first := f.retained(); f.watermark() != activation || first != activation+1 || count != head-activation {
 		t.Fatal("prune passed the activation boundary before dispatch started", activation, f.watermark(), first, count)
 	}
-	evaluation := postgres.EvaluationStore{ContentStore: f.store.ContentStore}
+	evaluation := postgres.EvaluationStore{Pool: f.store.Pool}
 	if _, err = evaluation.FanOut(ctx); err != nil {
 		t.Fatal(err)
 	}

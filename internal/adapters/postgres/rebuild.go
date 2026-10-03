@@ -10,6 +10,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // rebuildGapSQL selects current eligible Versions of Corpus $2 that target
@@ -33,7 +34,7 @@ func lockOperation(ctx context.Context, tx pgx.Tx, org, id string) (operations.O
 	return scanOperation(tx.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2 FOR UPDATE`, org, id))
 }
 
-func (s ContentStore) BeginRebuild(ctx context.Context, org, id string) (retrieval.RebuildTarget, error) {
+func (s RebuildStore) BeginRebuild(ctx context.Context, org, id string) (retrieval.RebuildTarget, error) {
 	var out retrieval.RebuildTarget
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -100,8 +101,8 @@ func (s ContentStore) BeginRebuild(ctx context.Context, org, id string) (retriev
 	return out, tx.Commit(ctx)
 }
 
-func (s ContentStore) RebuildCandidates(ctx context.Context, org, id string, limit int) ([]retrieval.RebuildCandidate, error) {
-	op, err := s.Operation(ctx, org, id)
+func (s RebuildStore) RebuildCandidates(ctx context.Context, org, id string, limit int) ([]retrieval.RebuildCandidate, error) {
+	op, err := (OperationStore{Pool: s.Pool}).Operation(ctx, org, id)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +125,7 @@ FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+` ORDER BY v.id LIMIT $4`, org
 	return out, rows.Err()
 }
 
-func (s ContentStore) CoverRebuild(ctx context.Context, org, id string, seg content.Segmentation, artifacts []content.Embedding) (bool, error) {
+func (s RebuildStore) CoverRebuild(ctx context.Context, org, id string, seg content.Segmentation, artifacts []content.Embedding) (bool, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -202,7 +203,7 @@ func (s ContentStore) CoverRebuild(ctx context.Context, org, id string, seg cont
 	return true, tx.Commit(ctx)
 }
 
-func (s ContentStore) ActivateRebuild(ctx context.Context, org, id string) (bool, error) {
+func (s RebuildStore) ActivateRebuild(ctx context.Context, org, id string) (bool, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -225,7 +226,7 @@ func (s ContentStore) ActivateRebuild(ctx context.Context, org, id string) (bool
 	if rank.routed == op.TargetGenerationID {
 		// Recovery after activation: record the same target's outcome once.
 		if op.State != operations.StateSucceeded {
-			if err = s.succeed(ctx, tx, op, result); err != nil {
+			if err = succeed(ctx, tx, op, result); err != nil {
 				return false, err
 			}
 		}
@@ -298,7 +299,7 @@ ON CONFLICT(organization,corpus_id) DO UPDATE SET generation_id=EXCLUDED.generat
 	if tag.RowsAffected() != 1 {
 		return false, errRouteChanged
 	}
-	if err = s.succeed(ctx, tx, op, result); err != nil {
+	if err = succeed(ctx, tx, op, result); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)
@@ -339,14 +340,14 @@ WHERE o.organization=$1 AND o.id=$2`, op.Organization, op.ID).Scan(&rank.routed,
 	return rank, nil
 }
 
-func (s ContentStore) succeed(ctx context.Context, tx pgx.Tx, op operations.Operation, result []byte) error {
+func succeed(ctx context.Context, tx pgx.Tx, op operations.Operation, result []byte) error {
 	if _, err := tx.Exec(ctx, `UPDATE operations SET state='succeeded',result=$3,updated_at=now() WHERE organization=$1 AND id=$2`, op.Organization, op.ID, result); err != nil {
 		return err
 	}
 	return operationEvent(ctx, tx, op.Organization, op.CorpusID, op.ID, operations.StateSucceeded)
 }
 
-func (s ContentStore) FailRebuild(ctx context.Context, org, id string, failure operations.Error) error {
+func (s RebuildStore) FailRebuild(ctx context.Context, org, id string, failure operations.Error) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -376,4 +377,7 @@ func failOperation(ctx context.Context, tx pgx.Tx, op operations.Operation, fail
 	return operationEvent(ctx, tx, op.Organization, op.CorpusID, op.ID, operations.StateFailed)
 }
 
-var _ retrieval.RebuildStore = ContentStore{}
+var _ retrieval.RebuildStore = RebuildStore{}
+
+// RebuildStore persists rebuild state.
+type RebuildStore struct{ Pool *pgxpool.Pool }

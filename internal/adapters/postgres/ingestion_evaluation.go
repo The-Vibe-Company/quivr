@@ -7,11 +7,12 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // CoverEvaluation publishes coverage for another owner's independent segments.
 // It never changes Version readiness, the current Version or enrichment state.
-func (s ContentStore) CoverEvaluation(ctx context.Context, org string, g content.Generation, seg content.Segmentation, artifacts []content.Embedding) error {
+func (s IngestionEvaluationStore) CoverEvaluation(ctx context.Context, org string, g content.Generation, seg content.Segmentation, artifacts []content.Embedding) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -89,7 +90,7 @@ func coverOwnerProjection(ctx context.Context, tx pgx.Tx, org string, g content.
 
 // PrepareEvaluation adds an owner's spaces to the routed generation before
 // publication. The serving route is recorded without changing existing coverage.
-func (s ContentStore) PrepareEvaluation(ctx context.Context, org, corpusID string, spaces []string) (content.Generation, error) {
+func (s IngestionEvaluationStore) PrepareEvaluation(ctx context.Context, org, corpusID string, spaces []string) (content.Generation, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return content.Generation{}, err
@@ -115,7 +116,7 @@ func (s ContentStore) PrepareEvaluation(ctx context.Context, org, corpusID strin
 	if err = tx.Commit(ctx); err != nil {
 		return g, err
 	}
-	return s.Generation(ctx, org, corpusID)
+	return (ProjectionStore{Pool: s.Pool}).Generation(ctx, org, corpusID)
 }
 
 // recordGenerationIngestion captures the served work's pinned source routing.
@@ -215,7 +216,7 @@ func queueIngestionEvaluations(ctx context.Context, tx pgx.Tx, org, recordID, ve
 	return nil
 }
 
-func (s ContentStore) ClaimIngestionEvaluations(ctx context.Context, limit int) ([]content.IngestionEvaluation, error) {
+func (s IngestionEvaluationStore) ClaimIngestionEvaluations(ctx context.Context, limit int) ([]content.IngestionEvaluation, error) {
 	rows, err := s.Pool.Query(ctx, `UPDATE ingestion_evaluations SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM ingestion_evaluations WHERE NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state`, limit)
 	if err != nil {
 		return nil, err
@@ -235,15 +236,15 @@ func scanIngestionEvaluation(row interface{ Scan(...any) error }) (j content.Ing
 	err = row.Scan(&j.Organization, &j.ID, &j.RecordID, &j.VersionID, &j.GenerationID, &j.PluginID, &j.RegistrationID, &j.PlanID, &j.Spaces, &j.State)
 	return
 }
-func (s ContentStore) IngestionEvaluation(ctx context.Context, org, id string) (content.IngestionEvaluation, error) {
+func (s IngestionEvaluationStore) IngestionEvaluation(ctx context.Context, org, id string) (content.IngestionEvaluation, error) {
 	j, err := scanIngestionEvaluation(s.Pool.QueryRow(ctx, `SELECT organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state FROM ingestion_evaluations WHERE organization=$1 AND id=$2`, org, id))
 	return j, notFound(err)
 }
-func (s ContentStore) IngestionEvaluationDispatched(ctx context.Context, j content.IngestionEvaluation) error {
+func (s IngestionEvaluationStore) IngestionEvaluationDispatched(ctx context.Context, j content.IngestionEvaluation) error {
 	_, err := s.Pool.Exec(ctx, `UPDATE ingestion_evaluations SET dispatched=true WHERE organization=$1 AND id=$2`, j.Organization, j.ID)
 	return err
 }
-func (s ContentStore) CompleteIngestionEvaluation(ctx context.Context, org, id, state string, reason *content.Diagnostic) error {
+func (s IngestionEvaluationStore) CompleteIngestionEvaluation(ctx context.Context, org, id, state string, reason *content.Diagnostic) error {
 	if state != "succeeded" && state != "failed" && state != "skipped" {
 		return content.ErrInvalid
 	}
@@ -258,3 +259,6 @@ func (s ContentStore) CompleteIngestionEvaluation(ctx context.Context, org, id, 
 	_, err = s.Pool.Exec(ctx, `UPDATE ingestion_evaluations SET state=$3,diagnostic=$4,completed_at=now() WHERE organization=$1 AND id=$2 AND state='queued'`, org, id, state, raw)
 	return err
 }
+
+// IngestionEvaluationStore persists evaluation-owner ingestion jobs.
+type IngestionEvaluationStore struct{ Pool *pgxpool.Pool }

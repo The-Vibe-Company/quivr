@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -38,7 +39,7 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 	for i := range subs {
 		subs[i] = f.subscribe(fmt.Sprint("s", i))
 	}
-	evaluation := postgres.EvaluationStore{ContentStore: store.ContentStore, Page: 3} // four withdrawal candidates span two pages
+	evaluation := postgres.EvaluationStore{Pool: store.Pool, Page: 3} // four withdrawal candidates span two pages
 	intent := func(i int, recordID, versionID string) monitoring.Intent {
 		return f.intent(subs[i], recordID, versionID)
 	}
@@ -127,7 +128,7 @@ func TestCorrectionAndWithdrawalNotices(t *testing.T) {
 
 	// Worker admission: superseded work is parked without an attempt; a
 	// correction notice is admitted.
-	ds := postgres.DeliveryStore{ContentStore: store.ContentStore, Organization: org}
+	ds := postgres.DeliveryStore{Pool: store.Pool, Organization: org}
 	configured := func(string, string) bool { return true }
 	// s2 and s3 keep their match.created pending for the withdrawal checks.
 	for i := 2; i < 4; i++ {
@@ -274,8 +275,8 @@ func TestNoLongerMatchesSupersededByLaterCorrection(t *testing.T) {
 	defer cancel()
 	f := newCorrectionFixture(t, ctx, "adapter-rematch-")
 	sub := f.subscribe("s")
-	evaluation := postgres.EvaluationStore{ContentStore: f.store.ContentStore}
-	ds := postgres.DeliveryStore{ContentStore: f.store.ContentStore, Organization: f.org}
+	evaluation := postgres.EvaluationStore{Pool: f.store.Pool}
+	ds := postgres.DeliveryStore{Pool: f.store.Pool, Organization: f.org}
 	configured := func(string, string) bool { return true }
 	evidence := f.evidence(sub)
 	match := func(record, version string) {
@@ -362,7 +363,7 @@ func TestRevertNotices(t *testing.T) {
 	defer cancel()
 	f := newCorrectionFixture(t, ctx, "adapter-revert-")
 	onA, onB := f.subscribe("a"), f.subscribe("b")
-	evaluation := postgres.EvaluationStore{ContentStore: f.store.ContentStore}
+	evaluation := postgres.EvaluationStore{Pool: f.store.Pool}
 	decide := func(sub monitoring.Subscription, record, version string, matches bool, want string) {
 		t.Helper()
 		f.commit(want, func() (string, error) {

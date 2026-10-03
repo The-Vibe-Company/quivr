@@ -187,7 +187,7 @@ func TestStepFillsSkipsAndStops(t *testing.T) {
 			"v2": {{SpaceID: served, DerivationID: "d2"}},
 		}}
 		projection := &runProjection{}
-		b := backfill.Backfiller{Store: store, Content: runContent{}, Plugin: runPlugin{errs: tc.errs, gone: tc.gone}, Projection: projection, Pinned: pinnedPlan{tc.registration}, Settings: backfill.Settings{Rate: 100, Poll: 3 * time.Second}}
+		b := backfill.Backfiller{Store: store, Cancellation: store, Content: runContent{}, Plugin: runPlugin{errs: tc.errs, gone: tc.gone}, Projection: projection, Pinned: pinnedPlan{tc.registration}, Settings: backfill.Settings{Rate: 100, Poll: 3 * time.Second}}
 		progress, err := b.Step(context.Background(), "org", "op")
 		if err != nil || progress.Done != tc.done {
 			t.Errorf("%s: progress %+v %v", tc.name, progress, err)
@@ -217,7 +217,7 @@ func equal(a, b []string) bool {
 // time the batch's Versions are allowed.
 func TestStepPacesTheNextBatch(t *testing.T) {
 	store := &runStore{state: operations.StateRunning, registered: "reg", candidates: []backfill.Candidate{{RecordID: "r1", VersionID: "v1"}, {RecordID: "r2", VersionID: "v2"}}, covered: map[string][]content.Embedding{}}
-	b := backfill.Backfiller{Store: store, Content: runContent{}, Plugin: runPlugin{}, Projection: &runProjection{}, Pinned: pinnedPlan{"reg"}, Settings: backfill.Settings{Rate: 0.5}}
+	b := backfill.Backfiller{Store: store, Cancellation: store, Content: runContent{}, Plugin: runPlugin{}, Projection: &runProjection{}, Pinned: pinnedPlan{"reg"}, Settings: backfill.Settings{Rate: 0.5}}
 	progress, err := b.Step(context.Background(), "org", "op")
 	// One Version per step at 0.5 per second: up to two seconds before the next.
 	if err != nil || progress.Done || progress.Wait < time.Second || progress.Wait > 2*time.Second {
@@ -236,7 +236,7 @@ func TestStepFillsIndependentOwnerInPublicationOrder(t *testing.T) {
 	}
 	projection := &runProjection{}
 	b := backfill.Backfiller{
-		Store:      store,
+		Store: store, Cancellation: store,
 		Content:    runContent{},
 		Plugin:     runPlugin{},
 		Projection: projection,

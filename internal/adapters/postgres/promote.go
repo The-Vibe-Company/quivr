@@ -32,7 +32,7 @@ SELECT count(DISTINCT (organization,corpus_id)),count(*) FROM gaps`
 
 // PromoteSpace makes a registered evaluation space the deployment's served
 // space: see backfill.PromotionStore.
-func (s ContentStore) PromoteSpace(ctx context.Context, space string, force bool) (backfill.Promotion, error) {
+func (s BackfillStore) PromoteSpace(ctx context.Context, space string, force bool) (backfill.Promotion, error) {
 	out := backfill.Promotion{Served: space}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -143,4 +143,4 @@ func keepPromotion(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredSp
 	return out, nil
 }
 
-var _ backfill.PromotionStore = ContentStore{}
+var _ backfill.PromotionStore = BackfillStore{}

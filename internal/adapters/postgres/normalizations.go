@@ -7,6 +7,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const normalizationColumns = `outcome,idempotency_key,invocation_id,plugin_id,plugin_version,plugin_api,contribution,input_sha256,input_blob_id,coalesce(manifest_key,''),coalesce(manifest_sha256,''),coalesce(manifest_size,0),failure_code,failure_message,failure_retryable,coalesce(failure_plan,''),coalesce(conflict_invocation_id,''),coalesce(conflict_manifest_sha256,''),extensions`
@@ -39,7 +40,7 @@ func scanNormalization(row pgx.Row) (content.Normalized, error) {
 }
 
 // Normalized reads the recorded normalization outcome of a Record Version.
-func (s ContentStore) Normalized(ctx context.Context, org, versionID string) (content.Normalized, bool, error) {
+func (s NormalizationStore) Normalized(ctx context.Context, org, versionID string) (content.Normalized, bool, error) {
 	n, err := scanNormalization(s.Pool.QueryRow(ctx, `SELECT `+normalizationColumns+` FROM normalizations WHERE organization=$1 AND version_id=$2`, org, versionID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return content.Normalized{}, false, nil
@@ -50,7 +51,7 @@ func (s ContentStore) Normalized(ctx context.Context, org, versionID string) (co
 // SaveNormalized records the first normalization outcome of a Record Version
 // and returns the recorded one: a concurrent or repeated attempt never
 // overwrites it.
-func (s ContentStore) SaveNormalized(ctx context.Context, org, versionID string, n content.Normalized) (content.Normalized, error) {
+func (s NormalizationStore) SaveNormalized(ctx context.Context, org, versionID string, n content.Normalized) (content.Normalized, error) {
 	p := n.Provenance
 	outcome := n.Outcome
 	if outcome == "" {
@@ -87,13 +88,13 @@ func (s ContentStore) SaveNormalized(ctx context.Context, org, versionID string,
 
 // RecordConflict records the first divergent output of a recorded
 // normalization. The recorded outcome and Manifest never change.
-func (s ContentStore) RecordConflict(ctx context.Context, org, versionID string, c content.NormalizationConflict) error {
+func (s NormalizationStore) RecordConflict(ctx context.Context, org, versionID string, c content.NormalizationConflict) error {
 	_, err := s.Pool.Exec(ctx, `UPDATE normalizations SET conflict_invocation_id=$3,conflict_manifest_sha256=$4 WHERE organization=$1 AND version_id=$2 AND conflict_invocation_id IS NULL`, org, versionID, c.InvocationID, c.ManifestSHA256)
 	return err
 }
 
 // CountAttempt counts one budgeted normalization failure of a Version.
-func (s ContentStore) CountAttempt(ctx context.Context, org, versionID, code, invocationID string) (int, error) {
+func (s NormalizationStore) CountAttempt(ctx context.Context, org, versionID, code, invocationID string) (int, error) {
 	var attempts int
 	err := s.Pool.QueryRow(ctx, `INSERT INTO normalization_attempts(organization,version_id,attempts,last_code,last_invocation_id) VALUES($1,$2,1,$3,$4)
 ON CONFLICT(organization,version_id) DO UPDATE SET attempts=normalization_attempts.attempts+1,last_code=excluded.last_code,last_invocation_id=excluded.last_invocation_id,updated_at=now() RETURNING attempts`, org, versionID, code, invocationID).Scan(&attempts)
@@ -103,7 +104,7 @@ ON CONFLICT(organization,version_id) DO UPDATE SET attempts=normalization_attemp
 // Superseded reports whether a Record is withdrawn, or whether it desires
 // another accepted revision than versionID: such a Version never becomes
 // current, so it is not worth an external normalization.
-func (s ContentStore) Superseded(ctx context.Context, org, recordID, versionID string) (bool, bool, error) {
+func (s NormalizationStore) Superseded(ctx context.Context, org, recordID, versionID string) (bool, bool, error) {
 	var withdrawn bool
 	var desired string
 	err := s.Pool.QueryRow(ctx, `SELECT `+recordGoneSQL+`,coalesce(r.desired_version_id,'') FROM records r WHERE r.organization=$1 AND r.id=$2`, org, recordID).Scan(&withdrawn, &desired)
@@ -112,3 +113,6 @@ func (s ContentStore) Superseded(ctx context.Context, org, recordID, versionID s
 	}
 	return withdrawn, desired != "" && desired != versionID, nil
 }
+
+// NormalizationStore persists normalizations state.
+type NormalizationStore struct{ Pool *pgxpool.Pool }

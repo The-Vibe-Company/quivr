@@ -43,9 +43,6 @@ type RebuildStore interface {
 	ActivateRebuild(ctx context.Context, org, operationID string) (bool, error)
 	// FailRebuild records a terminal failure for a queued or running Operation.
 	FailRebuild(ctx context.Context, org, operationID string, failure operations.Error) error
-	// ConfirmCancel settles a cancel_requested Operation as canceled once this
-	// worker stops; it leaves every other state unchanged.
-	ConfirmCancel(ctx context.Context, org, operationID string) error
 }
 
 // RebuildContent reads canonical Versions.
@@ -80,12 +77,18 @@ type GenerationRouter interface {
 // heartbeats stay frequent.
 const rebuildBatch = 25
 
+// Cancellation settles a stopped worker's cancellation request.
+type Cancellation interface {
+	ConfirmCancel(context.Context, string, string) error
+}
+
 // Rebuilder reconstructs a Corpus projection from canonical text and stored
 // vectors, then activates it through canonical PostgreSQL routing.
 type Rebuilder struct {
-	Store      RebuildStore
-	Content    RebuildContent
-	Projection Projection
+	Cancellation Cancellation
+	Store        RebuildStore
+	Content      RebuildContent
+	Projection   Projection
 	// Plugin segments and embeds through the pinned ingestion plugin, which
 	// must own the target's served space.
 	Plugin SpaceDeriver
@@ -143,7 +146,7 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 // stop ends work on an Operation that left the running state. Every canonical
 // effect is fenced on running, so a pending cancellation is now safe to settle.
 func (r Rebuilder) stop(ctx context.Context, org, operationID string) (bool, error) {
-	if err := r.Store.ConfirmCancel(ctx, org, operationID); err != nil {
+	if err := r.Cancellation.ConfirmCancel(ctx, org, operationID); err != nil {
 		return false, err
 	}
 	return true, nil

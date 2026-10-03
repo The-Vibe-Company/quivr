@@ -3,10 +3,11 @@ package postgres_test
 import (
 	"context"
 	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr-v2/internal/app"
@@ -76,7 +77,7 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 	if err = contents.Promote(ctx, scope.Organization, segmentation, generation); err != nil {
 		t.Fatal(err)
 	}
-	evaluations := postgres.EvaluationStore{ContentStore: store.ContentStore}
+	evaluations := postgres.EvaluationStore{Pool: store.Pool}
 	if _, err = evaluations.FanOut(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 func TestRetireEvaluationsAfterEvaluatorMigration(t *testing.T) {
 	fixture := newRetirementFixture(t)
 	ctx, pool, scope, live, service, subscription := fixture.ctx, fixture.pool, fixture.scope, fixture.live, fixture.service, fixture.subscription
-	evaluations := postgres.EvaluationStore{ContentStore: fixture.store.ContentStore}
+	evaluations := postgres.EvaluationStore{Pool: fixture.store.Pool}
 	live.Store(monitoring.PlanEvaluators{Served: monitoring.Evaluators{"alert-rules@0.2.0": fakeplugin.Fixture{}}})
 	migration, err := service.MigrateEvaluator(ctx, scope, monitoring.EvaluatorMigrationInput{PluginID: "alert-rules", FromVersion: "0.1.0"})
 	if err != nil || len(migration.Moved) != 1 {

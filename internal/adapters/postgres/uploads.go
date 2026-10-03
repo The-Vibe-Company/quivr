@@ -10,10 +10,11 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Create stores the session or converges on the same request identity.
-func (s ContentStore) Create(ctx context.Context, org, id string, req uploads.Request, objectKey string, expires time.Time) (uploads.Meta, bool, error) {
+func (s UploadStore) Create(ctx context.Context, org, id string, req uploads.Request, objectKey string, expires time.Time) (uploads.Meta, bool, error) {
 	canonical, err := json.Marshal(req)
 	if err != nil {
 		return uploads.Meta{}, false, err
@@ -43,15 +44,15 @@ func (s ContentStore) Create(ctx context.Context, org, id string, req uploads.Re
 	return existing, true, nil
 }
 
-func (s ContentStore) getByRequestKey(ctx context.Context, org, key string) (uploads.Meta, error) {
+func (s UploadStore) getByRequestKey(ctx context.Context, org, key string) (uploads.Meta, error) {
 	return s.scanUpload(s.Pool.QueryRow(ctx, `SELECT id,state,sha256,byte_length,media_type,object_key,coalesce(blob_id,''),error_code,expires_at FROM uploads WHERE organization=$1 AND request_key=$2`, org, key))
 }
 
-func (s ContentStore) Get(ctx context.Context, org, id string) (uploads.Meta, error) {
+func (s UploadStore) Get(ctx context.Context, org, id string) (uploads.Meta, error) {
 	return s.scanUpload(s.Pool.QueryRow(ctx, `SELECT id,state,sha256,byte_length,media_type,object_key,coalesce(blob_id,''),error_code,expires_at FROM uploads WHERE organization=$1 AND id=$2`, org, id))
 }
 
-func (s ContentStore) scanUpload(row pgx.Row) (uploads.Meta, error) {
+func (s UploadStore) scanUpload(row pgx.Row) (uploads.Meta, error) {
 	var m uploads.Meta
 	err := row.Scan(&m.ID, &m.State, &m.SHA256, &m.SizeBytes, &m.MediaType, &m.ObjectKey, &m.BlobID, &m.ErrorCode, &m.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -60,17 +61,17 @@ func (s ContentStore) scanUpload(row pgx.Row) (uploads.Meta, error) {
 	return m, err
 }
 
-func (s ContentStore) SetState(ctx context.Context, org, id, state, blobID, code string) error {
+func (s UploadStore) SetState(ctx context.Context, org, id, state, blobID, code string) error {
 	_, err := s.Pool.Exec(ctx, `UPDATE uploads SET state=$3,blob_id=nullif($4,''),error_code=$5 WHERE organization=$1 AND id=$2`, org, id, state, blobID, code)
 	return err
 }
 
-func (s ContentStore) SaveBlob(ctx context.Context, org, id, objectKey, sha256 string, size int64, mediaType string) error {
+func (s UploadStore) SaveBlob(ctx context.Context, org, id, objectKey, sha256 string, size int64, mediaType string) error {
 	_, err := s.Pool.Exec(ctx, `INSERT INTO verified_blobs(organization,blob_id,object_key,sha256,byte_length,media_type) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, org, id, objectKey, sha256, size, mediaType)
 	return err
 }
 
-func (s ContentStore) Blob(ctx context.Context, org, id string) (uploads.Meta, error) {
+func (s UploadStore) Blob(ctx context.Context, org, id string) (uploads.Meta, error) {
 	var m uploads.Meta
 	err := s.Pool.QueryRow(ctx, `SELECT blob_id,object_key,sha256,byte_length,media_type FROM verified_blobs WHERE organization=$1 AND blob_id=$2`, org, id).Scan(&m.BlobID, &m.ObjectKey, &m.SHA256, &m.SizeBytes, &m.MediaType)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -82,7 +83,7 @@ func (s ContentStore) Blob(ctx context.Context, org, id string) (uploads.Meta, e
 }
 
 // VerifiedBlob resolves an Organization-scoped Blob reference for ingestion.
-func (s ContentStore) VerifiedBlob(ctx context.Context, org, id string) (content.VerifiedBlob, error) {
+func (s UploadStore) VerifiedBlob(ctx context.Context, org, id string) (content.VerifiedBlob, error) {
 	var b content.VerifiedBlob
 	err := s.Pool.QueryRow(ctx, `SELECT blob_id,object_key,sha256,byte_length,media_type FROM verified_blobs WHERE organization=$1 AND blob_id=$2`, org, id).Scan(&b.ID, &b.Blob.Key, &b.Blob.SHA256, &b.Blob.Size, &b.MediaType)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -90,3 +91,6 @@ func (s ContentStore) VerifiedBlob(ctx context.Context, org, id string) (content
 	}
 	return b, err
 }
+
+// UploadStore persists uploads state.
+type UploadStore struct{ Pool *pgxpool.Pool }

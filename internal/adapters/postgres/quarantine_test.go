@@ -96,7 +96,7 @@ func newReprocessWorld(t *testing.T, ctx context.Context, name string) *reproces
 	return &reprocessWorld{pluginWorld: w, baseline: b,
 		admin:       corpus.Scope{Organization: w.org, Actions: []string{operations.BackfillPermission}, Corpora: []string{"*"}},
 		reprocesses: quarantine.Service{Store: w.store},
-		reprocessor: quarantine.Reprocessor{Store: w.store, Normalizer: w.service, Publisher: w.contents, Processor: b, Settings: quarantine.Settings{Rate: 25}}}
+		reprocessor: quarantine.Reprocessor{Store: w.store, Cancellation: w.store, Normalizer: w.service, Publisher: w.contents, Processor: b, Settings: quarantine.Settings{Rate: 25}}}
 }
 
 // list reads every stuck Version f keeps, by Version id.

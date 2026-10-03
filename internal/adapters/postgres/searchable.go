@@ -9,6 +9,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // BootstrapGeneration creates the default generation of a fresh install with
@@ -16,7 +17,7 @@ import (
 // registered). It is source-namespace and space projected. An install that
 // already has an active default keeps it; AlignDefaultGeneration moves it
 // onto the registry's spaces.
-func (s ContentStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
+func (s ProjectionStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
 	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected)
 SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true
 WHERE NOT EXISTS(SELECT 1 FROM projection_generations WHERE active) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
@@ -43,7 +44,7 @@ type DefaultMove struct {
 // read. A default that already matches, or a database with no default or no
 // served space yet, is left as it is. It runs after RegisterSpaces, in
 // migrate and at api and worker startup.
-func (s ContentStore) AlignDefaultGeneration(ctx context.Context) (DefaultMove, error) {
+func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMove, error) {
 	var move DefaultMove
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -91,7 +92,7 @@ SELECT $1,$2,$3,true,`+servedSpaceSQL+`,true,`+deploymentSpacesSQL+`,true`, move
 }
 
 // Generation returns the logical generation PostgreSQL routes the Corpus to.
-func (s ContentStore) Generation(ctx context.Context, org, corpusID string) (content.Generation, error) {
+func (s ProjectionStore) Generation(ctx context.Context, org, corpusID string) (content.Generation, error) {
 	var g content.Generation
 	var cfg []byte
 	var spaces []byte
@@ -108,7 +109,7 @@ func (s ContentStore) Generation(ctx context.Context, org, corpusID string) (con
 	}
 	return g, err
 }
-func (s ContentStore) Authorize(ctx context.Context, scope corpus.Scope, ids []string) error {
+func (s ProjectionStore) Authorize(ctx context.Context, scope corpus.Scope, ids []string) error {
 	var count int
 	err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM corpora WHERE organization=$1 AND id=ANY($2)`, scope.Organization, ids).Scan(&count)
 	if err != nil {
@@ -124,7 +125,7 @@ func (s ContentStore) Authorize(ctx context.Context, scope corpus.Scope, ids []s
 // generation; the caller retries against the current route.
 var ErrGenerationChanged = errors.New("projection generation changed")
 
-func (s ContentStore) SaveSegmentation(ctx context.Context, org string, result content.Segmentation) error {
+func (s ProjectionStore) SaveSegmentation(ctx context.Context, org string, result content.Segmentation) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -166,7 +167,7 @@ func (s ContentStore) SaveSegmentation(ctx context.Context, org string, result c
 
 // StoredSegmentation reads a Version's segmentation of one recipe, its
 // segments in order.
-func (s ContentStore) StoredSegmentation(ctx context.Context, org, versionID, recipe string) (content.StoredSegmentation, error) {
+func (s ProjectionStore) StoredSegmentation(ctx context.Context, org, versionID, recipe string) (content.StoredSegmentation, error) {
 	var out content.StoredSegmentation
 	err := s.Pool.QueryRow(ctx, `SELECT id,digest,provenance FROM segmentations WHERE organization=$1 AND version_id=$2 AND recipe=$3`, org, versionID, recipe).Scan(&out.ID, &out.Digest, &out.Provenance)
 	if err != nil {
@@ -194,24 +195,24 @@ func (s ContentStore) StoredSegmentation(ctx context.Context, org, versionID, re
 	return out, rows.Err()
 }
 
-var _ content.SegmentationStore = ContentStore{}
+var _ content.SegmentationStore = ProjectionStore{}
 
-func (s ContentStore) BaselineProgress(ctx context.Context, org, id, state, code string, quarantined bool) error {
+func (s ProjectionStore) BaselineProgress(ctx context.Context, org, id, state, code string, quarantined bool) error {
 	if !quarantined {
-		return s.updatePinnedVersion(ctx, org, id, `UPDATE record_versions SET processing=$3,error_code=$4 WHERE organization=$1 AND id=$2 AND NOT baseline_ready AND NOT quarantined`, state, code)
+		return updatePinnedVersion(ctx, s.Pool, org, id, `UPDATE record_versions SET processing=$3,error_code=$4 WHERE organization=$1 AND id=$2 AND NOT baseline_ready AND NOT quarantined`, state, code)
 	}
 	return s.quarantine(ctx, org, id, state, code, nil)
 }
 
 // QuarantineVersion quarantines a Version that is not searchable yet, with
 // its structured reason.
-func (s ContentStore) QuarantineVersion(ctx context.Context, org, id string, reason content.Diagnostic) error {
+func (s ProjectionStore) QuarantineVersion(ctx context.Context, org, id string, reason content.Diagnostic) error {
 	return s.quarantine(ctx, org, id, "blocked", reason.Code, &reason)
 }
 
 // quarantine holds a Version that is not searchable yet, announced by
 // record.quarantined; a reason is listed in its diagnostics.
-func (s ContentStore) quarantine(ctx context.Context, org, id, state, code string, reason *content.Diagnostic) error {
+func (s ProjectionStore) quarantine(ctx context.Context, org, id, state, code string, reason *content.Diagnostic) error {
 	var raw []byte
 	if reason != nil {
 		var err error
@@ -263,7 +264,7 @@ func quarantinedEvent(ctx context.Context, tx pgx.Tx, org, corpusID, recordID, v
 	}
 	return appendEvent(ctx, tx, event)
 }
-func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segmentation, g content.Generation) error {
+func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Segmentation, g content.Generation) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -358,7 +359,7 @@ WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") +
 
 // Hydrate looks a batch of candidates up in one query (hydrateSQL). A
 // candidate outside the caller's Corpora is absent, as if it did not exist.
-func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []content.Candidate) (map[int]content.Located, error) {
+func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []content.Candidate) (map[int]content.Located, error) {
 	out := map[int]content.Located{}
 	if len(cs) == 0 {
 		return out, nil
@@ -391,3 +392,6 @@ func (s ContentStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []cont
 	}
 	return out, rows.Err()
 }
+
+// ProjectionStore persists baseline projection artifacts and Corpus routing.
+type ProjectionStore struct{ Pool *pgxpool.Pool }
