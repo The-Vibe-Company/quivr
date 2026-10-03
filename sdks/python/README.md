@@ -2,7 +2,7 @@
 
 `quivr-plugin-sdk` (import `quivr_plugin`) implements the Plugin Protocol v0
 ([contract](../../contracts/plugins/v0/README.md)) for
-Python normalizers, alert rules, retrieval rounds and pull collectors. It has no Temporal, Weaviate or database clients, and its
+all five Contributions: normalizers, alert rules, connectors, ingestion and retrieval. It has no Temporal, Weaviate or database clients, and its
 only runtime dependencies are PyYAML and jsonschema (both MIT). Python 3.12 or
 later.
 
@@ -51,23 +51,10 @@ Version's text Parts and a batch of distinct evaluations (a Saved Query
 the manifest's `expression_schema` and `configuration_schema`), and returns one
 decision per evaluation:
 
-```python
-from quivr_plugin import Plugin, SubscriptionInvocation, match, no_match
-
-plugin = Plugin(Path(__file__).parent.parent / "quivr-plugin.yaml")
-
-@plugin.subscription
-def evaluate(invocation: SubscriptionInvocation):
-    decisions = []
-    for evaluation in invocation.evaluations:
-        needle = evaluation.expression["text"].casefold()
-        keys = [p.key for p in invocation.parts if needle in p.text.casefold()]
-        if keys:
-            decisions.append(match(evaluation, "The phrase appears.", part_keys=keys))
-        else:
-            decisions.append(no_match(evaluation))
-    return decisions
-```
+Register `@plugin.subscription` with a `SubscriptionInvocation` handler. Return
+`match(evaluation, explanation, part_keys=keys)` or `no_match(evaluation)` per
+evaluation; [the starter](../../internal/plugins/scaffold/templates/subscription/__PLUGIN_MODULE__/rule.py)
+shows phrase matching.
 
 `not_ready(evaluation)` defers a decision, for example until
 `invocation.enriched`. A decision must depend only on the record, the
@@ -80,7 +67,9 @@ Register a class with `@plugin.connector("static")`: `fetch(request: FetchReques
 The requests extend the generated models: read `request.connector.config`, `request.credential["token"]`, `request.checkpoint` and the engine clock `request.now`; return the next checkpoint with each page. The core alone persists progress.
 Raise `AccessError(code, message)` for refused access, `TransientError(code, message, retry_after_seconds=60)` for retryable failures, or `SourceError(code, message)` for unusable source data. Raise `NotDue()` from fetch to skip without moving the checkpoint.
 Use `request.logger` for redacted messages, structured extras and tracebacks. Credential repr and request model serialization hide secrets; `credential.decode()` explicitly returns raw values for a source client. String secrets shorter than four characters are not scrubbed from messages, matching the Go kit.
-The adapter validates kind config/credentials and page item, response, checkpoint and diagnostic bounds. Push kinds and attachment declarations are not supported; use the Go kit for those.
+The adapter validates kind config/credentials and page item, response, checkpoint and diagnostic bounds. For push kinds implement `receive(ReceiveRequest)` and return `ConnectorReceiveResponse`.
+Attachment declarations require `describe_attachment` and `upload_attachment`;
+requests include a redacting logger. The upload handler writes to the grant itself.
 See the runnable [static-source example](examples/static-source/static_source/connector.py) and its [manifest](examples/static-source/quivr-plugin.yaml).
 
 ## What the SDK does
@@ -88,7 +77,7 @@ See the runnable [static-source example](examples/static-source/static_source/co
 | Concern | Behavior |
 | --- | --- |
 | Models | Dataclasses generated from the contract schemas (`quivr_plugin.models`), with `from_dict` and `to_dict` |
-| Routes | `GET /v0/discovery` (identity, Contributions, highest admitted Plugin API from the feature history, exact manifest `sha256:` digest), `GET /v0/health`, `POST /v0/contributions/normalizer`, `POST /v0/contributions/subscription`, `POST /v0/contributions/connector/{fetch,check_credential}`, `POST /v0/contributions/retrieval/search` |
+| Routes | `GET /v0/discovery` (identity, Contributions, highest admitted Plugin API from the feature history, exact manifest `sha256:` digest), `GET /v0/health`, `POST /v0/contributions/normalizer`, `POST /v0/contributions/subscription`, `POST /v0/contributions/connector/{fetch,check_credential,receive,describe_attachment,upload_attachment}`, `POST /v0/contributions/retrieval/search`, ingestion `segment_and_embed` and `embed_query` |
 | Request checks | Request schema → 400 `invalid_request`; media type not declared → 400 `unsupported_media_type`; configuration against the manifest configuration schema → 400 `invalid_configuration`; a subscription expression or evaluation configuration against the declared schemas → 400 `invalid_expression` or `invalid_subscription_configuration` |
 | Errors | `RetryableError` → 503, `retryable: true`. `TerminalError` → 422, `retryable: false`. Unexpected exception → 500 `internal_error`, `retryable: false`. Always the protocol error envelope |
 | Response checks | Before sending: response schema (500 `invalid_response`) and the declared `max_response_bytes` (500 `response_too_large`). The engine still applies its own Manifest validation. For a subscription, also one decision per evaluation, evidence for every match, Part keys that exist and details of at most 16 KiB (500 `invalid_response`) |
@@ -123,7 +112,15 @@ Return a `SearchResponse` or JSON: candidate `requests` or a final `ranking`,
 with optional paid-call `usage`. The adapter validates profiles, configuration
 and schemas; the engine validates candidates, authorization and budgets.
 See [Jev reranking](../../plugins/jev-rerank/README.md) for an example and fixtures.
-Retrieval is available since Plugin API 0.7; ingestion handlers are not implemented.
+Register `@plugin.segment_and_embed` and `@plugin.embed_query` for ingestion.
+They receive generated `SegmentAndEmbedRequest` and `EmbedQueryRequest` models;
+return the corresponding response model or JSON. The adapter checks declared
+spaces, offsets, dimensions, finite vectors, configuration and response bounds.
+Use `TerminalError` or `RetryableError` for classified failures.
+
+`quivr plugin init` omits Go starters and Python ingestion/retrieval starters;
+see [scaffold coverage and version ownership](../go/README.md#scaffold-and-version-ownership).
+The Plugin API change author updates and versions both kits in that PR.
 
 ## Maintaining the SDK
 

@@ -19,6 +19,14 @@ from .schema import protocol_errors, schema_errors
 MANIFEST_FILE = "quivr-plugin.yaml"
 DEFAULT_MAX_RESPONSE_BYTES = 4 << 20
 DEFAULT_MAX_BATCH_SIZE = 32
+DEFAULT_MAX_INGESTION_RESPONSE_BYTES = 16 << 20
+DEFAULT_MAX_INGESTION_SEGMENTS = 256
+DEFAULT_MAX_CONNECTOR_ITEMS = 100
+DEFAULT_MAX_CHECKPOINT_BYTES = 64 << 10
+MAX_DECLARED_CHECKPOINT_BYTES = 1 << 20
+MAX_ENGINE_RESPONSE_BYTES = 16 << 20
+MAX_ATTACHMENT_BYTES = 25 << 20
+DEFAULT_ATTACHMENT_TIMEOUT_MS = 120000
 
 _COMPARATOR = re.compile(r"^(>=|<=|>|<|=)?(\d+)\.(\d+)\.(\d+)$")
 
@@ -65,7 +73,7 @@ class LoadedManifest:
     def contributions(self) -> list[str]:
         """Declared Contributions in protocol order, as discovery lists them."""
         declared = self.model.contributions
-        return [name for name in ("normalizer", "subscription", "connector", "retrieval") if getattr(declared, name) is not None]
+        return [name for name in ("normalizer", "subscription", "connector", "ingestion", "retrieval") if getattr(declared, name) is not None]
 
     @property
     def plugin_api(self) -> str:
@@ -94,6 +102,61 @@ class LoadedManifest:
     def max_batch_size(self) -> int:
         subscription = self.model.contributions.subscription
         return (subscription and subscription.max_batch_size) or DEFAULT_MAX_BATCH_SIZE
+
+    @property
+    def ingestion_max_response_bytes(self) -> int:
+        """Effective ``segment_and_embed`` response bound."""
+        ingestion = self.model.contributions.ingestion
+        limits = ingestion and ingestion.limits
+        return min((limits and limits.max_response_bytes) or DEFAULT_MAX_INGESTION_RESPONSE_BYTES,
+                   MAX_ENGINE_RESPONSE_BYTES)
+
+    @property
+    def ingestion_max_segments(self) -> int:
+        """Effective maximum number of segments in one answer."""
+        ingestion = self.model.contributions.ingestion
+        limits = ingestion and ingestion.limits
+        return (limits and limits.max_segments) or DEFAULT_MAX_INGESTION_SEGMENTS
+
+    @property
+    def connector_max_response_bytes(self) -> int:
+        """Effective connector response bound."""
+        connector = self.model.contributions.connector
+        limits = connector and connector.limits
+        return min((limits and limits.max_response_bytes) or DEFAULT_MAX_RESPONSE_BYTES,
+                   MAX_ENGINE_RESPONSE_BYTES)
+
+    @property
+    def connector_max_items(self) -> int:
+        """Effective maximum number of items in a connector answer."""
+        connector = self.model.contributions.connector
+        limits = connector and connector.limits
+        return (limits and limits.max_items) or DEFAULT_MAX_CONNECTOR_ITEMS
+
+    @property
+    def connector_max_checkpoint_bytes(self) -> int:
+        """Effective serialized checkpoint bound."""
+        connector = self.model.contributions.connector
+        limits = connector and connector.limits
+        return min((limits and limits.max_checkpoint_bytes) or DEFAULT_MAX_CHECKPOINT_BYTES,
+                   MAX_DECLARED_CHECKPOINT_BYTES)
+
+    @property
+    def attachment_max_bytes(self) -> int:
+        """Effective attachment size bound, or zero when attachments are absent."""
+        connector = self.model.contributions.connector
+        attachments = connector and connector.attachments
+        if attachments is None:
+            return 0
+        return min(attachments.max_bytes or MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_BYTES)
+
+    @property
+    def attachment_timeout_ms(self) -> int:
+        """Effective attachment invocation timeout."""
+        connector = self.model.contributions.connector
+        attachments = connector and connector.attachments
+        return min((attachments and attachments.timeout_ms) or DEFAULT_ATTACHMENT_TIMEOUT_MS,
+                   DEFAULT_ATTACHMENT_TIMEOUT_MS)
 
     def validate_expression(self, expression: Any) -> list[str]:
         """Problems of a Saved Query expression against the declared expression_schema."""
@@ -147,8 +210,6 @@ def load_manifest(path: str | Path) -> LoadedManifest:
         raise ManifestError(f"{path} does not match the plugin manifest schema: " + "; ".join(problems))
     connector = (document.get("contributions") or {}).get("connector")
     if connector:
-        if connector.get("attachments") is not None or any("push" in kind.get("modes", []) for kind in connector["kinds"].values()):
-            raise ManifestError(f"{path}: the Python connector adapter supports pull kinds without attachments only")
         for kind in connector["kinds"].values():
             for name in ("config_schema", "credential_schema"):
                 if kind.get(name) is not None:

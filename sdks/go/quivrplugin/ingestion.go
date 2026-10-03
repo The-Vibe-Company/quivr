@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -37,6 +38,7 @@ type IngestPart struct {
 // IngestRequest is a validated segment_and_embed request.
 type IngestRequest struct {
 	InvocationID   string          `json:"invocation_id"`
+	Contribution   string          `json:"contribution"`
 	IdempotencyKey string          `json:"idempotency_key"`
 	OrganizationID string          `json:"organization_id"`
 	Configuration  json.RawMessage `json:"configuration"`
@@ -72,6 +74,7 @@ type Segment struct {
 // QueryRequest is a validated embed_query request.
 type QueryRequest struct {
 	InvocationID   string          `json:"invocation_id"`
+	Contribution   string          `json:"contribution"`
 	OrganizationID string          `json:"organization_id"`
 	Configuration  json.RawMessage `json:"configuration"`
 	Space          string          `json:"space"`
@@ -212,9 +215,12 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		return nil, fmt.Sprintf("%d segments exceed max_segments %d", len(segments), in.Limits.MaxSegments)
 	}
 	lengths := map[string]int{}
+	hasTitle := false
 	for _, part := range req.Parts {
 		lengths[part.Key] = utf8.RuneCountInString(part.Text)
+		hasTitle = hasTitle || part.Role == "title"
 	}
+	seen := map[string]bool{}
 	for i := range segments {
 		if segments[i].Vectors == nil {
 			segments[i].Vectors = map[string][]float32{}
@@ -224,19 +230,31 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		if !ok || s.Start < 0 || s.Start > s.End || s.End > n {
 			return nil, fmt.Sprintf("segment %d: [%d, %d) is not inside Part %q", i, s.Start, s.End, s.PartKey)
 		}
+		if s.Start == s.End && !hasTitle {
+			return nil, fmt.Sprintf("segment %d is empty without a title Part", i)
+		}
+		identity := fmt.Sprintf("%s\x00%d\x00%d", s.PartKey, s.Start, s.End)
+		if seen[identity] {
+			return nil, fmt.Sprintf("segment %d repeats the same Part and offsets", i)
+		}
+		seen[identity] = true
 		if len(s.Vectors) != len(req.Spaces) {
 			return nil, fmt.Sprintf("segment %d: %d vectors for %d requested spaces", i, len(s.Vectors), len(req.Spaces))
 		}
 		for _, id := range req.Spaces {
 			v, ok := s.Vectors[id]
-			if !ok || len(v) != in.Spaces[id].Dimensions {
+			if !ok {
 				return nil, fmt.Sprintf("segment %d: space %s needs a vector of %d dimensions", i, id, in.Spaces[id].Dimensions)
 			}
-			for _, x := range v {
-				if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
-					return nil, fmt.Sprintf("segment %d: space %s has a non-finite value", i, id)
-				}
+			if problem := vectorProblem(v, in.Spaces[id]); problem != "" {
+				return nil, fmt.Sprintf("segment %d: space %s: %s", i, id, problem)
 			}
+		}
+		if !utf8.ValidString(s.LexicalText) || strings.ContainsRune(s.LexicalText, 0) || utf8.RuneCountInString(s.LexicalText) > 16384 {
+			return nil, fmt.Sprintf("segment %d: lexical text must be valid UTF-8 without NUL and at most 16384 code points", i)
+		}
+		if problem := jsonValueProblem(s.Provenance, 4<<10); problem != "" {
+			return nil, fmt.Sprintf("segment %d: provenance: %s", i, problem)
 		}
 	}
 	var buf bytes.Buffer
@@ -269,10 +287,73 @@ func (p *Plugin) serveEmbedQuery(w http.ResponseWriter, r *http.Request) {
 		p.ingestFail(w, req.logger, err)
 		return
 	}
-	if want := p.m.Ingestion.Spaces[req.Space].Dimensions; len(vector) != want {
-		req.logger.Error("the ingester returned a query vector of the wrong size", "dimensions", len(vector), "declared", want)
-		writeJSON(w, 500, envelope{Code: "invalid_response", Message: fmt.Sprintf("a vector of %d dimensions; space %s declares %d", len(vector), req.Space, want), Retryable: false})
+	if problem := vectorProblem(vector, p.m.Ingestion.Spaces[req.Space]); problem != "" {
+		req.logger.Error("the ingester returned an invalid query vector", "problem", problem)
+		writeJSON(w, 500, envelope{Code: "invalid_response", Message: problem, Retryable: false})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"vector": vector})
+	p.contributionResponse(w, map[string]any{"vector": vector}, "ingestion-embed-query-response.schema.json", 1<<20)
+}
+
+func vectorProblem(vector []float32, space Space) string {
+	if len(vector) != space.Dimensions {
+		return fmt.Sprintf("a vector of %d dimensions; the space declares %d", len(vector), space.Dimensions)
+	}
+	zero := true
+	for _, x := range vector {
+		if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
+			return "a vector contains a non-finite value"
+		}
+		zero = zero && x == 0
+	}
+	if zero && space.Metric == "cosine" {
+		return "an all-zero vector has no direction in a cosine space"
+	}
+	return ""
+}
+
+// jsonValueProblem checks stored JSON using the engine's compact encoding.
+// Decoding also covers nested typed maps/slices returned by Go implementations.
+func jsonValueProblem(value any, maxBytes int) string {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return "the value is not JSON-encodable"
+	}
+	var doc any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return "the value is not JSON-decodable"
+	}
+	// The engine decodes JSON numbers as float64 before storing this value.
+	// Rounding a Go integer can change the persisted length across a bound.
+	compact, err := json.Marshal(doc)
+	if err != nil {
+		return "the stored value is not JSON-encodable"
+	}
+	if maxBytes > 0 && len(compact) > maxBytes {
+		return fmt.Sprintf("JSON exceeds %d bytes", maxBytes)
+	}
+	if containsNUL(doc) {
+		return "JSON contains NUL"
+	}
+	return ""
+}
+
+func containsNUL(value any) bool {
+	switch v := value.(type) {
+	case string:
+		return strings.ContainsRune(v, 0)
+	case map[string]any:
+		for key, child := range v {
+			if strings.ContainsRune(key, 0) || containsNUL(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if containsNUL(child) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -16,7 +16,7 @@ import (
 )
 
 // Manifest is what the SDK reads from quivr-plugin.yaml: identity, the
-// Plugin API range and the connector, ingestion and retrieval Contributions. The engine validates the
+// Plugin API range and all five Contributions. The engine validates the
 // whole manifest with `quivr plugin inspect`.
 type Manifest struct {
 	ID            string `json:"id"`
@@ -38,7 +38,9 @@ type Manifest struct {
 	Ingestion *IngestionContribution `json:"-"`
 	// Retrieval is the decoded retrieval Contribution (Plugin API 0.7), with
 	// defaults; nil when the manifest declares none.
-	Retrieval *RetrievalContribution `json:"-"`
+	Retrieval    *RetrievalContribution    `json:"-"`
+	Normalizer   *NormalizerContribution   `json:"-"`
+	Subscription *SubscriptionContribution `json:"-"`
 }
 
 // Requirement declares another retrieval plugin's version range and local profiles.
@@ -206,8 +208,8 @@ func loadManifest(path string) (*loadedManifest, error) {
 		return nil, err
 	}
 	for name := range m.Contributions {
-		if name != "connector" && name != "ingestion" && name != "retrieval" {
-			return nil, fmt.Errorf("%s declares the %s Contribution; this SDK serves connector, ingestion and retrieval Contributions only", path, name)
+		if name != "connector" && name != "ingestion" && name != "retrieval" && name != "normalizer" && name != "subscription" {
+			return nil, fmt.Errorf("%s declares the %s Contribution; this SDK does not serve that Contribution", path, name)
 		}
 	}
 	api, ok, err := negotiate(m.Compatibility.PluginAPI)
@@ -221,6 +223,59 @@ func loadManifest(path string) (*loadedManifest, error) {
 	features := resolveAPIFeatures(api)
 	if len(m.Requires) > 0 && !features.speaks("profile_candidates") {
 		return nil, fmt.Errorf("requires needs Plugin API %s", FeatureSince["profile_candidates"])
+	}
+	if raw, ok := m.Contributions["normalizer"]; ok {
+		n := &NormalizerContribution{}
+		if err := json.Unmarshal(raw, n); err != nil {
+			return nil, err
+		}
+		if n.TimeoutMS == 0 {
+			n.TimeoutMS = 30000
+		}
+		if n.Limits.MaxResponseBytes == 0 {
+			n.Limits.MaxResponseBytes = DefaultMaxResponseBytes
+		}
+		n.Limits.MaxResponseBytes = min(n.Limits.MaxResponseBytes, EngineMaxResponseBytes)
+		if n.Limits.MaxParts == 0 {
+			n.Limits.MaxParts = 256
+		}
+		m.Normalizer = n
+	}
+	if raw, ok := m.Contributions["subscription"]; ok {
+		if !features.speaks("subscription") {
+			return nil, fmt.Errorf("subscription requires Plugin API %s", FeatureSince["subscription"])
+		}
+		n := &SubscriptionContribution{}
+		if err := json.Unmarshal(raw, n); err != nil {
+			return nil, err
+		}
+		if n.TimeoutMS == 0 {
+			n.TimeoutMS = 30000
+		}
+		if n.MaxBatchSize == 0 {
+			n.MaxBatchSize = 32
+		}
+		if n.Limits.MaxResponseBytes == 0 {
+			n.Limits.MaxResponseBytes = DefaultMaxResponseBytes
+		}
+		n.Limits.MaxResponseBytes = min(n.Limits.MaxResponseBytes, EngineMaxResponseBytes)
+		if _, err := compileDeclared(n.ExpressionSchema); err != nil {
+			return nil, fmt.Errorf("expression_schema: %w", err)
+		}
+		if len(n.ConfigurationSchema) > 0 {
+			if _, err := compileDeclared(n.ConfigurationSchema); err != nil {
+				return nil, fmt.Errorf("subscription configuration_schema: %w", err)
+			}
+		}
+		if n.Vectors != nil && !features.speaks("subscription_vectors") {
+			return nil, fmt.Errorf("subscription vectors require Plugin API %s", FeatureSince["subscription_vectors"])
+		}
+		if n.Vectors != nil && len(n.Vectors.QueryExpressionSchema) > 0 {
+			if _, err := compileDeclared(n.Vectors.QueryExpressionSchema); err != nil {
+				return nil, fmt.Errorf("subscription query_expression_schema: %w", err)
+			}
+		}
+		m.Subscription = n
 	}
 	if raw, ok := m.Contributions["ingestion"]; ok {
 		if !features.speaks("ingestion") {
@@ -268,8 +323,8 @@ func loadManifest(path string) (*loadedManifest, error) {
 	}
 	raw0, ok := m.Contributions["connector"]
 	if !ok {
-		if m.Ingestion == nil && m.Retrieval == nil {
-			return nil, fmt.Errorf("%s declares no connector, ingestion or retrieval Contribution", path)
+		if len(m.Contributions) == 0 {
+			return nil, fmt.Errorf("%s declares no Contribution", path)
 		}
 		return m, nil
 	}

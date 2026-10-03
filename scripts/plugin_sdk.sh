@@ -35,6 +35,7 @@ test -x "$work/venv/bin/python" || "$PYTHON" -m venv "$work/venv"
 
 "$GO" build -o "$work/quivr" ./cmd/quivr
 quivr="$work/quivr"
+"$work/venv/bin/python" "$root/scripts/plugin_sdk_conformance.py" python "$quivr" "$work/venv/bin/python"
 e2e="$work/e2e"
 rm -rf "$e2e"
 mkdir -p "$e2e"

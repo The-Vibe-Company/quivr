@@ -33,7 +33,7 @@ Every type is served over HTTP under `/v0/contributions/<type>`, and every manif
 | What it does | Turns one file (a Blob) into the text Parts of a Record Version, with optional structured data. |
 | When Quivr calls it | In the worker, when a file of a media type routed to it is ingested, before the Version is published. |
 | Operation | `POST /v0/contributions/normalizer` |
-| SDK | Python |
+| SDK | Go or Python |
 | First-party | `pdf-text`: one Part per PDF page |
 
 ```yaml quivr-plugin.yaml
@@ -58,7 +58,7 @@ Quivr never sends the file inline: the request carries a short-lived signed URL,
 | What it does | Adds a kind of Connector Instance: fetches pages of new or changed items from a source after an opaque checkpoint. |
 | When Quivr calls it | In the worker, on each instance's schedule. A push kind is also called when the source sends a webhook. |
 | Operations | `fetch`, `check_credential`; `describe_attachment` and `upload_attachment` for attachments; `receive` for webhooks |
-| SDK | Go |
+| SDK | Go or Python |
 | First-party | `rss` (RSS, Atom, JSON Feed), `m365-mail` (Microsoft 365 mailboxes), `x-list` (X lists) |
 
 ```yaml quivr-plugin.yaml
@@ -86,7 +86,7 @@ Quivr keeps the instances, schedules, checkpoints, encrypted credentials and hea
 | What it does | Cuts a Version's text into passages (segments), embeds each one in the vector spaces the plugin owns, and encodes search queries into the same spaces. |
 | When Quivr calls it | In the worker for every new Version, and during rebuilds; in the API for every semantic or hybrid search (`embed_query`), and once per space when the API starts, so the first search does not wait for the plugin to load. |
 | Operations | `segment_and_embed`, `embed_query` |
-| SDK | Go |
+| SDK | Go or Python |
 | First-party | `core-ingest`: token windows embedded with `multilingual-e5-small` |
 
 ```yaml quivr-plugin.yaml
@@ -118,7 +118,7 @@ A deployment can pin several ingestion plugins and [route source media types](/r
 | What it does | Decides how a search finds and ranks results: asks Quivr for keyword, vector or hybrid candidates, then ranks the ones Quivr served. |
 | When Quivr calls it | In the API, for every search, in up to three rounds. |
 | Operation | `search` |
-| SDK | Go |
+| SDK | Go or Python |
 | First-party | `core-retrieve`: keyword, vector or hybrid search, as the index ranks it |
 
 ```yaml quivr-plugin.yaml
@@ -144,7 +144,7 @@ The plugin never queries the index and never sees a candidate the caller may not
 | What it does | Decides, for one Record Version, whether each alert of a batch is a match, no match, or not ready yet, with evidence for a match. It is the `subscription` Contribution. |
 | When Quivr calls it | In the worker, when a Version becomes searchable and again once it is enriched; in the API, to preview an alert. |
 | Operation | `POST /v0/contributions/subscription` |
-| SDK | Python |
+| SDK | Go or Python |
 | First-party | `alerts`: keyword queries and plain-language descriptions |
 
 ```yaml quivr-plugin.yaml

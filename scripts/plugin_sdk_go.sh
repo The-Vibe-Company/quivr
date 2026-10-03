@@ -21,11 +21,15 @@ GO=${GO:-go}
 work="$PWD/.scratch/plugin-sdk"
 mkdir -p "$work"
 
+test -x "$work/venv/bin/python" || python3 -m venv "$work/venv"
+"$work/venv/bin/pip" install -q --disable-pip-version-check -c contracts/http/v0/checks/requirements.txt PyYAML
 python3 sdks/go/scripts/sync_schemas.py --check
 (cd sdks/go && "$GO" vet ./... && "$GO" test ./...)
 
 "$GO" build -o "$work/quivr" ./cmd/quivr
 quivr="$work/quivr"
+(cd "$root/sdks/go" && "$GO" build -o "$work/go-conformance-peer" ./quivrplugin/testdata/conformance)
+"$work/venv/bin/python" "$root/scripts/plugin_sdk_conformance.py" go "$quivr" "$work/go-conformance-peer"
 cd "$root/sdks/go/examples/static-source"
 # Compile once so the runner's startup wait covers only the start.
 "$GO" build -o /dev/null .

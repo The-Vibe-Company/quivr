@@ -12,7 +12,7 @@ import (
 const fixtures = "../../../contracts/plugins/v0/fixtures"
 
 // TestModelsCarryEveryContractField decodes every valid normative
-// connector request and response into the SDK's types, rejecting unknown
+// Contribution request and response into the SDK's types, rejecting unknown
 // fields, and re-encodes it: a field the contract adds or renames without the
 // SDK following fails here.
 func TestModelsCarryEveryContractField(t *testing.T) {
@@ -32,6 +32,23 @@ func TestModelsCarryEveryContractField(t *testing.T) {
 		t.Fatal(err)
 	}
 	models := map[string]func() any{
+		"normalizer-request.schema.json":                  func() any { return &NormalizerRequest{} },
+		"normalizer-response.schema.json":                 func() any { return &NormalizerResponse{} },
+		"subscription-request.schema.json":                func() any { return &SubscriptionRequest{} },
+		"subscription-response.schema.json":               func() any { return &SubscriptionResponse{} },
+		"ingestion-segment-and-embed-request.schema.json": func() any { return &IngestRequest{} },
+		"ingestion-segment-and-embed-response.schema.json": func() any {
+			return &struct {
+				Segments []Segment `json:"segments"`
+			}{}
+		},
+		"ingestion-embed-query-request.schema.json": func() any { return &QueryRequest{} },
+		"ingestion-embed-query-response.schema.json": func() any {
+			return &struct {
+				Vector []float32 `json:"vector"`
+			}{}
+		},
+		"retrieval-search-request.schema.json":               func() any { return &SearchRequest{} },
 		"connector-fetch-request.schema.json":                func() any { return &FetchRequest{} },
 		"connector-check-credential-request.schema.json":     func() any { return &CredentialRequest{} },
 		"connector-fetch-response.schema.json":               func() any { return &pageJSON{} },

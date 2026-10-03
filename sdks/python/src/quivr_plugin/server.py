@@ -29,8 +29,18 @@ from pathlib import Path
 from typing import Any
 
 from .blob import read_input
-from .connector import CREDENTIAL_PATH, FETCH_PATH, MAX_CONNECTOR_REQUEST_BYTES, Connector, invoke_connector
+from .connector import (
+    CREDENTIAL_PATH,
+    DESCRIBE_ATTACHMENT_PATH,
+    FETCH_PATH,
+    MAX_CONNECTOR_REQUEST_BYTES,
+    RECEIVE_PATH,
+    UPLOAD_ATTACHMENT_PATH,
+    Connector,
+    invoke_connector,
+)
 from .errors import PluginError, TerminalError
+from .ingestion import EMBED_QUERY_PATH, MAX_INGESTION_REQUEST_BYTES, SEGMENT_AND_EMBED_PATH, invoke_ingestion
 from .logs import configure_logging, invocation_context
 from .manifest import LoadedManifest, load_manifest
 from .models import Discovery, Health, NormalizerRequest, NormalizerResponse, PluginIdentity, SearchRequest, SearchResponse, SubscriptionRequest
@@ -53,6 +63,10 @@ def max_request_bytes(path: str) -> int:
     route = path.split("?", 1)[0]
     if route in (FETCH_PATH, CREDENTIAL_PATH):
         return MAX_CONNECTOR_REQUEST_BYTES
+    if route in (RECEIVE_PATH, DESCRIBE_ATTACHMENT_PATH, UPLOAD_ATTACHMENT_PATH):
+        return MAX_CONNECTOR_REQUEST_BYTES
+    if route in (SEGMENT_AND_EMBED_PATH, EMBED_QUERY_PATH):
+        return MAX_INGESTION_REQUEST_BYTES
     if route == SUBSCRIPTION_PATH:
         return MAX_SUBSCRIPTION_REQUEST_BYTES
     if route == RETRIEVAL_PATH:
@@ -60,6 +74,13 @@ def max_request_bytes(path: str) -> int:
     return MAX_REQUEST_BYTES
 
 log = logging.getLogger("quivr_plugin.server")
+
+
+def _server_version() -> str:
+    """Read the package version lazily so importing server stays acyclic."""
+    from . import __version__
+
+    return f"quivr-plugin-sdk/{__version__}"
 
 
 @dataclass
@@ -118,6 +139,8 @@ class Plugin:
         self._normalizer: Normalizer | None = None
         self._subscription: SubscriptionHandler | None = None
         self._retrieval: RetrievalHandler | None = None
+        self._segment_and_embed = None
+        self._embed_query = None
         self._connectors: dict[str, Connector] = {}
         self._health: HealthCheck | None = None
 
@@ -145,8 +168,18 @@ class Plugin:
         self._retrieval = fn
         return fn
 
+    def segment_and_embed(self, fn):
+        """Decorator registering the ingestion ``segment_and_embed`` handler."""
+        self._segment_and_embed = fn
+        return fn
+
+    def embed_query(self, fn):
+        """Decorator registering the ingestion ``embed_query`` handler."""
+        self._embed_query = fn
+        return fn
+
     def connector(self, kind: str):
-        """Register a class or instance implementing fetch and check_credential for a pull kind."""
+        """Register a class or instance implementing one declared connector kind."""
         contribution = self.manifest.model.contributions.connector
         if contribution is None or kind not in contribution.kinds:
             raise ValueError(f"connector kind {kind!r} is not declared in the manifest")
@@ -159,6 +192,36 @@ class Plugin:
             return implementation
 
         return register
+
+    def check_registered(self) -> None:
+        """Raise when a declared Contribution or connector operation is unregistered."""
+        declared = self.manifest.model.contributions
+        if declared.normalizer is not None and self._normalizer is None:
+            raise ValueError("the manifest declares normalizer; register it with Plugin.normalizer")
+        if declared.subscription is not None and self._subscription is None:
+            raise ValueError("the manifest declares subscription; register it with Plugin.subscription")
+        if declared.ingestion is not None:
+            missing = [name for name, handler in (("segment_and_embed", self._segment_and_embed),
+                                                   ("embed_query", self._embed_query)) if handler is None]
+            if missing:
+                raise ValueError("the manifest declares ingestion; register " + ", ".join(missing))
+        if declared.retrieval is not None and self._retrieval is None:
+            raise ValueError("the manifest declares retrieval; register it with Plugin.retrieval")
+        connector = declared.connector
+        if connector is None:
+            return
+        missing_kinds = [kind for kind in connector.kinds if kind not in self._connectors]
+        if missing_kinds:
+            raise ValueError(f"no implementation registered for connector kinds {sorted(missing_kinds)!r}")
+        for kind_name, implementation in self._connectors.items():
+            kind = connector.kinds[kind_name]
+            if "push" in (kind.modes or []) and not callable(getattr(implementation, "receive", None)):
+                raise ValueError(f"connector kind {kind_name!r} declares push; register receive")
+            if connector.attachments is not None:
+                missing = [name for name in ("describe_attachment", "upload_attachment")
+                           if not callable(getattr(implementation, name, None))]
+                if missing:
+                    raise ValueError(f"connector kind {kind_name!r} declares attachments; register {', '.join(missing)}")
 
     def discovery(self) -> Discovery:
         m = self.manifest.model
@@ -173,8 +236,20 @@ class Plugin:
 
     def handle(self, method: str, path: str, body: bytes = b"") -> Reply:
         """Answer one protocol request; used by the HTTP server and by quivr_plugin.testing."""
-        routes = {DISCOVERY_PATH: "GET", HEALTH_PATH: "GET", NORMALIZER_PATH: "POST", SUBSCRIPTION_PATH: "POST",
-                  FETCH_PATH: "POST", CREDENTIAL_PATH: "POST", RETRIEVAL_PATH: "POST"}
+        routes = {
+            DISCOVERY_PATH: "GET",
+            HEALTH_PATH: "GET",
+            NORMALIZER_PATH: "POST",
+            SUBSCRIPTION_PATH: "POST",
+            FETCH_PATH: "POST",
+            CREDENTIAL_PATH: "POST",
+            RECEIVE_PATH: "POST",
+            DESCRIBE_ATTACHMENT_PATH: "POST",
+            UPLOAD_ATTACHMENT_PATH: "POST",
+            SEGMENT_AND_EMBED_PATH: "POST",
+            EMBED_QUERY_PATH: "POST",
+            RETRIEVAL_PATH: "POST",
+        }
         path = path.split("?", 1)[0]
         if path not in routes:
             return _error(404, "not_found", f"no Plugin Protocol v0 route {path}")
@@ -182,8 +257,16 @@ class Plugin:
             return _error(405, "method_not_allowed", f"{path} accepts {routes[path]} only")
         if path == DISCOVERY_PATH:
             return Reply(200, self.discovery().to_dict())
-        if path in (FETCH_PATH, CREDENTIAL_PATH):
+        if path in (FETCH_PATH, CREDENTIAL_PATH, RECEIVE_PATH, DESCRIBE_ATTACHMENT_PATH, UPLOAD_ATTACHMENT_PATH):
             status, document = invoke_connector(self.manifest, self._connectors, path, body)
+            return Reply(status, document)
+        if path in (SEGMENT_AND_EMBED_PATH, EMBED_QUERY_PATH):
+            status, document = invoke_ingestion(
+                self.manifest,
+                {"segment_and_embed": self._segment_and_embed, "embed_query": self._embed_query},
+                path,
+                body,
+            )
             return Reply(status, document)
         if path == HEALTH_PATH:
             try:
@@ -368,11 +451,12 @@ class Plugin:
 
     def make_server(self, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
         """Build (but do not start) a threaded HTTP server bound to host:port."""
+        self.check_registered()
         plugin = self
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
-            server_version = "quivr-plugin-sdk/0.4"
+            server_version = _server_version()
 
             def _serve(self, method: str) -> None:
                 raw_length = self.headers.get("Content-Length") or "0"

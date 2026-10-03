@@ -5,7 +5,20 @@ See sdks/python/README.md and contracts/plugins/v0/README.md.
 import logging as _logging
 
 from .blob import read_input
-from .connector import AccessError, Connector, CredentialRequest, FetchRequest, NotDue, SourceError, TransientError
+from .connector import (
+    AccessError,
+    AttachmentSource,
+    Connector,
+    CredentialRequest,
+    DescribeAttachmentRequest,
+    FetchRequest,
+    NotDue,
+    ReceiveRequest,
+    Receiver,
+    SourceError,
+    TransientError,
+    UploadAttachmentRequest,
+)
 from .credential import Credential
 from .errors import ConfigurationError, PluginError, RetryableError, TerminalError
 from .logs import configure_logging, current_invocation_id, invocation_context
@@ -23,7 +36,7 @@ from .models import __all__ as _models
 from .server import Invocation, Plugin, Reply
 from .subscription import SubscriptionInvocation, match, no_match, not_ready, record_field
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 # Library logging stays silent unless the plugin configures handlers (Plugin.serve does).
 _logging.getLogger("quivr_plugin").addHandler(_logging.NullHandler())
@@ -31,11 +44,15 @@ _logging.getLogger("quivr_plugin").addHandler(_logging.NullHandler())
 __all__ = [
     *_models,
     "AccessError",
+    "AttachmentSource",
     "Connector",
     "Credential",
     "CredentialRequest",
+    "DescribeAttachmentRequest",
     "FetchRequest",
     "NotDue",
+    "ReceiveRequest",
+    "Receiver",
     "SourceError",
     "TransientError",
     "ConfigurationError",
@@ -50,6 +67,7 @@ __all__ = [
     "SUPPORTED_PLUGIN_API_VERSIONS",
     "SubscriptionInvocation",
     "TerminalError",
+    "UploadAttachmentRequest",
     "configure_logging",
     "current_invocation_id",
     "invocation_context",

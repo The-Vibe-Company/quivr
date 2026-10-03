@@ -7,7 +7,7 @@ name = "__PLUGIN_ID__"
 version = "0.1.0"
 description = "A Quivr static-source connector plugin."
 requires-python = ">=3.12"
-dependencies = ["quivr-plugin-sdk>=0.3,<0.5"]
+dependencies = ["quivr-plugin-sdk>=0.3,<0.6"]
 
 [tool.setuptools]
 packages = ["__PLUGIN_MODULE__"]

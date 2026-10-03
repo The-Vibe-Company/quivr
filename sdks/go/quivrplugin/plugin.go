@@ -1,8 +1,4 @@
-// Package quivrplugin implements the Quivr Plugin Protocol v0 connector
-// Contribution (Plugin API 0.3) so that a source collector is one Go type,
-// the ingestion Contribution (Plugin API 0.6) so that a segmenter and
-// embedder is one Go type, and the retrieval Contribution (Plugin API 0.7)
-// so that a search strategy is one Go type.
+// Package quivrplugin serves all five Contributions of the Quivr Plugin Protocol v0.
 // See the contract in contracts/plugins/v0/README.md and the guide in
 // sdks/go/README.md.
 package quivrplugin
@@ -38,13 +34,15 @@ const maxRequestBytes = 16 << 20
 
 // Plugin serves one quivr-plugin.yaml.
 type Plugin struct {
-	m         *loadedManifest
-	kinds     map[string]*kind
-	logger    *slog.Logger
-	configSch *jsonschema.Schema
-	spool     spool
-	ingester  Ingester
-	retriever Retriever
+	m          *loadedManifest
+	kinds      map[string]*kind
+	logger     *slog.Logger
+	configSch  *jsonschema.Schema
+	spool      spool
+	ingester   Ingester
+	retriever  Retriever
+	normalizer Normalizer
+	subscriber Subscriber
 }
 
 type kind struct {
@@ -124,6 +122,12 @@ func (p *Plugin) MustConnector(kindName string, impl Connector) *Plugin {
 }
 
 func (p *Plugin) checkRegistered() error {
+	if p.m.Normalizer != nil && p.normalizer == nil {
+		return fmt.Errorf("register the declared normalizer with Plugin.Normalizer")
+	}
+	if p.m.Subscription != nil && p.subscriber == nil {
+		return fmt.Errorf("register the declared subscription with Plugin.Subscription")
+	}
 	if p.m.Ingestion != nil && p.ingester == nil {
 		return fmt.Errorf("the manifest declares the ingestion Contribution; register an Ingester with Plugin.Ingestion")
 	}
@@ -176,6 +180,12 @@ func (p *Plugin) Handler() (http.Handler, error) {
 			"contributions":   p.contributions(),
 		})
 	})
+	if p.m.Normalizer != nil {
+		mux.HandleFunc("POST /v0/contributions/normalizer", p.serveNormalize)
+	}
+	if p.m.Subscription != nil {
+		mux.HandleFunc("POST /v0/contributions/subscription", p.serveSubscription)
+	}
 	if p.m.Ingestion != nil {
 		mux.HandleFunc("POST /v0/contributions/ingestion/segment_and_embed", p.serveSegmentAndEmbed)
 		mux.HandleFunc("POST /v0/contributions/ingestion/embed_query", p.serveEmbedQuery)
@@ -201,6 +211,12 @@ func (p *Plugin) Handler() (http.Handler, error) {
 // contributions lists the declared Contributions for discovery.
 func (p *Plugin) contributions() []string {
 	names := []string{}
+	if p.m.Normalizer != nil {
+		names = append(names, "normalizer")
+	}
+	if p.m.Subscription != nil {
+		names = append(names, "subscription")
+	}
 	if p.m.Connector != nil {
 		names = append(names, "connector")
 	}

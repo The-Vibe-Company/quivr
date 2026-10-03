@@ -219,15 +219,185 @@ class Connectors(unittest.TestCase):
                         self.assertNotIn("secret-token", json.dumps(request.to_dict()))
                         request.logger.info("public helper invocation")
 
-    def test_unsupported_capabilities_are_refused_at_manifest_load(self):
-        from quivr_plugin import ManifestError
+    def test_push_and_attachment_manifests_dispatch_their_routes(self):
+        manifests = [
+            ("connector-push.yaml", "/v0/contributions/connector/receive"),
+            ("connector-attachments.yaml", "/v0/contributions/connector/describe_attachment"),
+        ]
+        for fixture, route in manifests:
+            with self.subTest(fixture=fixture):
+                manifest = yaml.safe_load((REPO / "contracts/plugins/v0/fixtures/manifests/valid" / fixture).read_text())
+                path = Path(self.directory.name) / fixture
+                path.write_text(yaml.safe_dump(manifest))
+                plugin = Plugin(path)
+                self.assertIn("connector", plugin.discovery().to_dict()["contributions"])
+                reply = plugin.handle("POST", route, b"{}")
+                self.assertNotEqual(reply.status, 404, reply.body)
 
-        for declaration in ({"attachments": {}}, {"attachments": {"max_bytes": 1}},
-                            {"kinds": {"feed": {"config_schema": {"type": "object"},
-                                               "default_interval_seconds": 60, "modes": ["pull", "push"]}}}):
-            with self.subTest(declaration=declaration):
-                manifest = yaml.safe_load(self.path.read_text())
-                manifest["contributions"]["connector"].update(declaration)
-                self.path.write_text(yaml.safe_dump(manifest))
-                with self.assertRaisesRegex(ManifestError, "pull kinds without attachments"):
-                    Plugin(self.path)
+
+class ExtendedConnectors(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+
+    def write_manifest(self, fixture):
+        manifest = yaml.safe_load((REPO / "contracts/plugins/v0/fixtures/manifests/valid" / fixture).read_text())
+        path = Path(self.directory.name) / fixture
+        path.write_text(yaml.safe_dump(manifest))
+        return Plugin(path)
+
+    def receive_request(self):
+        return {
+            "invocation_id": "receive-1", "contribution": "connector", "organization_id": "org",
+            "configuration": {},
+            "connector": {"instance_id": "alerts-1", "kind": "alerts", "corpus_id": "corpus",
+                           "source_namespace": "alerts", "config": {"account": "demo"}},
+            "credential": {"token": "secret-token", "signing_secret": "secret-signing"},
+            "checkpoint": None, "now": "2026-01-01T00:00:00Z", "reads_today": 0,
+            "request": {"method": "POST", "query": "challenge=1", "headers": {"x-signature": ["sig"]},
+                        "body_base64": "", "path": "/events"},
+            "route": "events", "body": {"event": "ok"},
+        }
+
+    def test_receive_dispatches_custom_route_and_rejects_incoherent_verdict(self):
+        plugin = self.write_manifest("connector-push.yaml")
+
+        class Source:
+            def fetch(self, request):
+                return {"items": [], "checkpoint": request.checkpoint, "more": False}
+
+            def check_credential(self, request):
+                return {"status": "ok"}
+
+            def receive(self, request):
+                self.seen = request
+                return {"verdict": "accepted", "response": {"status": 202}, "items": [
+                    {"record_key": "event-1", "content": {"kind": "text", "text": "hello"}}
+                ]}
+
+        source = Source()
+        plugin.connector("alerts")(source)
+        reply = plugin.handle("POST", "/v0/contributions/connector/receive", json.dumps(self.receive_request()).encode())
+        self.assertEqual(reply.status, 200, reply.body)
+        self.assertEqual(reply.body["items"][0]["record_key"], "event-1")
+        self.assertEqual(source.seen.route, "events")
+        self.assertEqual(source.seen.body, {"event": "ok"})
+        self.assertEqual(source.seen.credential["token"], "secret-token")
+
+        class Invalid(Source):
+            def receive(self, request):
+                return {"verdict": "refused", "response": {"status": 401}, "items": [
+                    {"record_key": "event-1", "content": {"kind": "text", "text": "hello"}}
+                ]}
+
+        plugin.connector("alerts")(Invalid)
+        invalid = plugin.handle("POST", "/v0/contributions/connector/receive", json.dumps(self.receive_request()).encode())
+        self.assertEqual((invalid.status, invalid.body["code"]), (500, "invalid_response"), invalid.body)
+
+    def attachment_request(self, *, upload=False):
+        request = {
+            "invocation_id": "attachment-1", "contribution": "connector", "organization_id": "org",
+            "configuration": {},
+            "connector": {"instance_id": "mail-1", "kind": "mailbox", "config": {"mailbox": "demo"}},
+            "credential": {"token": "secret-token"}, "now": "2026-01-01T00:00:00Z",
+            "item": {"record_key": "message-1", "revision": "r1"},
+            "attachment": {"key": "file-1", "role": "attachment", "media_type": "text/plain", "ref": "opaque-ref"},
+        }
+        if upload:
+            request["grant"] = {"url": "http://127.0.0.1:1/grant", "method": "PUT", "headers": {"x-grant": "grant-secret"},
+                                  "size_bytes": 5, "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                                  "media_type": "text/plain", "expires_at": "2027-01-01T00:00:00Z"}
+        return request
+
+    def test_attachment_handlers_dispatch_and_enforce_declared_size(self):
+        plugin = self.write_manifest("connector-attachments.yaml")
+
+        class Source:
+            def fetch(self, request):
+                return {"items": [], "checkpoint": request.checkpoint, "more": False}
+
+            def check_credential(self, request):
+                return {"status": "ok"}
+
+            def describe_attachment(self, request):
+                self.described = request
+                size = 2 * 1024 * 1024 if getattr(self, "oversize", False) else 5
+                return {"size_bytes": size, "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}
+
+            def upload_attachment(self, request):
+                self.uploaded = request
+                return {"status": "uploaded"}
+
+        source = Source()
+        plugin.connector("mailbox")(source)
+        described = plugin.handle("POST", "/v0/contributions/connector/describe_attachment",
+                                  json.dumps(self.attachment_request()).encode())
+        uploaded = plugin.handle("POST", "/v0/contributions/connector/upload_attachment",
+                                 json.dumps(self.attachment_request(upload=True)).encode())
+        self.assertEqual(described.body["size_bytes"], 5)
+        self.assertEqual(uploaded.body, {"status": "uploaded"})
+        self.assertNotIn("secret-token", repr(source.described))
+        self.assertNotIn("grant-secret", repr(source.uploaded))
+
+        too_large = self.attachment_request()
+        too_large["attachment"]["size_bytes"] = 2 * 1024 * 1024
+        too_large["attachment"]["sha256"] = "0" * 64
+        source.oversize = True
+        rejected = plugin.handle("POST", "/v0/contributions/connector/describe_attachment", json.dumps(too_large).encode())
+        self.assertEqual((rejected.status, rejected.body["code"]), (500, "invalid_response"), rejected.body)
+
+    def test_fetch_output_rejects_extension_and_manifest_storage_bounds(self):
+        plugin = self.write_manifest("connector.yaml")
+        request = {
+            "invocation_id": "fetch-bounds", "contribution": "connector", "organization_id": "org",
+            "configuration": {},
+            "connector": {"instance_id": "source-1", "kind": "feed",
+                           "config": {"feed_url": "https://example.org/feed"}},
+            "credential": {"token": "secret-token"}, "checkpoint": None,
+            "now": "2026-01-01T00:00:00Z", "page_in_run": 0, "reads_today": 0,
+        }
+        cases = [
+            ("extension data key contains NUL", {
+                "example-feeds": {"schema_version": "1", "data": {"bad\x00key": "value"}},
+            }, None),
+            ("extension data value contains NUL", {
+                "example-feeds": {"schema_version": "1", "data": {"nested": {"bad": "va\x00lue"}}},
+            }, None),
+            ("extension data exceeds 64 KiB", {
+                "example-feeds": {"schema_version": "1", "data": {"payload": "x" * (64 << 10)}},
+            }, None),
+            ("HTML-heavy extension data exceeds stored 64 KiB", {
+                "example-feeds": {"schema_version": "1", "data": {"payload": "<&" * 6000}},
+            }, None),
+            ("Go fixed-float extension data exceeds stored 64 KiB", {
+                "example-feeds": {"schema_version": "1", "data": {"values": [1e-6] * 10000}},
+            }, None),
+            ("Go float64 integer normalization exceeds stored 64 KiB", {
+                "example-feeds": {"schema_version": "1", "data": {"values": [999999999999999999] * 3400}},
+            }, None),
+            ("non-text Manifest structure exceeds 64 KiB", None, "r" * (64 << 10)),
+            ("HTML-heavy Manifest metadata exceeds stored 64 KiB", None, "<&" * 6000),
+        ]
+        for description, extensions, manifest_role in cases:
+            with self.subTest(description=description):
+                item = {"record_key": "item-1", "content": {"kind": "text", "text": "body"}}
+                if extensions is not None:
+                    item["extensions"] = extensions
+                else:
+                    item["content"] = {"kind": "manifest", "parts": [{
+                        "key": "body", "role": manifest_role,
+                        "content": {"kind": "text", "text": "body"},
+                    }]}
+                response = {"items": [item], "checkpoint": None, "more": False}
+
+                class Source:
+                    def fetch(self, _request):
+                        return response
+
+                    def check_credential(self, _request):
+                        return {"status": "ok"}
+
+                plugin.connector("feed")(Source)
+                reply = plugin.handle("POST", FETCH, json.dumps(request).encode())
+                self.assertEqual(reply.status, 500, reply.body)
+                self.assertEqual(reply.body.get("code"), "invalid_response", reply.body)

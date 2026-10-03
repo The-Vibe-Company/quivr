@@ -8,13 +8,32 @@ from typing import Any, Protocol
 
 from .credential import Credential, CredentialLogger
 from .errors import ConfigurationError, PluginError
+from ._json import storage_encoded
 from .manifest import LoadedManifest
-from .models import ConnectorCredentialRequest, ConnectorCredentialResponse, ConnectorFetchRequest, ConnectorFetchResponse, ErrorEnvelope
+from .models import (
+    ConnectorCredentialRequest,
+    ConnectorCredentialResponse,
+    ConnectorDescribeAttachmentRequest,
+    ConnectorDescribeAttachmentResponse,
+    ConnectorFetchRequest,
+    ConnectorFetchResponse,
+    ConnectorReceiveRequest,
+    ConnectorReceiveResponse,
+    ConnectorUploadAttachmentRequest,
+    ConnectorUploadAttachmentResponse,
+    ErrorEnvelope,
+)
 from .schema import protocol_errors, schema_errors
 
 FETCH_PATH = "/v0/contributions/connector/fetch"
 CREDENTIAL_PATH = "/v0/contributions/connector/check_credential"
+RECEIVE_PATH = "/v0/contributions/connector/receive"
+DESCRIBE_ATTACHMENT_PATH = "/v0/contributions/connector/describe_attachment"
+UPLOAD_ATTACHMENT_PATH = "/v0/contributions/connector/upload_attachment"
 MAX_CONNECTOR_REQUEST_BYTES = 16 << 20
+MAX_RECEIVE_RESPONSE_BODY_BYTES = 64 << 10
+MAX_ATTACHMENT_RESPONSE_BYTES = 16 << 20
+MAX_GENERIC_JSON_BYTES = 64 << 10
 
 
 @dataclass(kw_only=True)
@@ -43,11 +62,75 @@ class CredentialRequest(ConnectorCredentialRequest):
         return CredentialLogger(self.credential, self.invocation_id)
 
 
+@dataclass(kw_only=True)
+class ReceiveRequest(ConnectorReceiveRequest):
+    """Generated receive model with a redacting invocation logger."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.credential, Credential):
+            self.credential = Credential(self.credential)
+
+    @property
+    def logger(self) -> CredentialLogger:
+        return CredentialLogger(self.credential, self.invocation_id)
+
+
+@dataclass(kw_only=True)
+class DescribeAttachmentRequest(ConnectorDescribeAttachmentRequest):
+    """Generated attachment-description model with a redacting logger."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.credential, Credential):
+            self.credential = Credential(self.credential)
+
+    @property
+    def logger(self) -> CredentialLogger:
+        return CredentialLogger(self.credential, self.invocation_id)
+
+
+@dataclass(kw_only=True)
+class UploadAttachmentRequest(ConnectorUploadAttachmentRequest):
+    """Generated attachment-upload model with credential and grant redaction."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.credential, Credential):
+            self.credential = Credential(self.credential)
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(invocation_id={self.invocation_id!r}, credential={self.credential!r}, grant=[redacted])"
+
+    @property
+    def logger(self) -> CredentialLogger:
+        grant = self.grant.to_dict()
+        values = [grant.get("url", ""), *(grant.get("headers") or {}).values()]
+        raw = {"credential": self.credential.decode(), "grant": values}
+        return CredentialLogger(Credential(raw), self.invocation_id)
+
+
 class Connector(Protocol):
-    """One stateless pull kind; register its class or instance with Plugin.connector."""
+    """Pull operations for one stateless connector kind.
+
+    ``receive`` and the attachment methods are optional capabilities.  A
+    pull-only connector therefore only needs to implement this protocol;
+    :class:`Receiver` and :class:`AttachmentSource` describe the additional
+    methods when a manifest declares those capabilities.
+    """
 
     def fetch(self, request: FetchRequest) -> ConnectorFetchResponse | dict[str, Any]: ...
     def check_credential(self, request: CredentialRequest) -> ConnectorCredentialResponse | dict[str, Any]: ...
+
+
+class Receiver(Protocol):
+    """Optional push delivery capability for a connector kind."""
+
+    def receive(self, request: ReceiveRequest) -> ConnectorReceiveResponse | dict[str, Any]: ...
+
+
+class AttachmentSource(Protocol):
+    """Optional attachment description and upload capability."""
+
+    def describe_attachment(self, request: DescribeAttachmentRequest) -> ConnectorDescribeAttachmentResponse | dict[str, Any]: ...
+    def upload_attachment(self, request: UploadAttachmentRequest) -> ConnectorUploadAttachmentResponse | dict[str, Any]: ...
 
 
 class ConnectorError(PluginError):
@@ -107,26 +190,307 @@ def _encoded(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
 
 
-def _response_problems(manifest: LoadedManifest, document: dict[str, Any], fetch: bool) -> list[str]:
-    schema = "connector-fetch-response.schema.json" if fetch else "connector-check-credential-response.schema.json"
-    problems = protocol_errors(schema, document)
-    contribution = manifest.model.contributions.connector
-    limits = contribution.limits
-    if len(_encoded(document)) > min((limits and limits.max_response_bytes) or (4 << 20), 16 << 20):
-        problems.append("the response exceeds max_response_bytes")
-    if not fetch:
-        return problems
-    if len(document.get("items", [])) > ((limits and limits.max_items) or 100):
-        problems.append("the page exceeds max_items")
-    if len(_encoded(document.get("checkpoint"))) > min((limits and limits.max_checkpoint_bytes) or (64 << 10), 1 << 20):
-        problems.append("the checkpoint exceeds max_checkpoint_bytes")
-    if len(_encoded(document.get("diagnostics"))) > (16 << 10):
-        problems.append("the diagnostics exceed 16 KiB")
-    if any(item.get("attachments") for item in document.get("items", [])):
-        problems.append("this Python connector adapter does not serve attachments")
-    if document.get("push") is not None:
-        problems.append("this Python connector adapter does not serve push kinds")
+def _contains_nul(value: Any) -> bool:
+    """Return whether a JSON value contains NUL in a string or object key."""
+    if isinstance(value, str):
+        return "\x00" in value
+    if isinstance(value, dict):
+        return any(_contains_nul(key) or _contains_nul(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_nul(item) for item in value)
+    return False
+
+
+def _extensions_problems(manifest: LoadedManifest, extensions: Any, prefix: str) -> list[str]:
+    if extensions is None:
+        return []
+    declared = manifest.model.extensions or {}
+    problems: list[str] = []
+    try:
+        if len(storage_encoded(extensions)) > MAX_GENERIC_JSON_BYTES:
+            problems.append(f"{prefix}: extensions exceed {MAX_GENERIC_JSON_BYTES} bytes of JSON")
+    except (TypeError, ValueError):
+        problems.append(f"{prefix}: extensions are not JSON-encodable")
+    for namespace, entry in extensions.items():
+        versions = declared.get(namespace)
+        if versions is None:
+            problems.append(f"{prefix}/{namespace}: extension namespace is not declared")
+            continue
+        version = entry.get("schema_version")
+        schema = versions.get(version)
+        if schema is None:
+            problems.append(f"{prefix}/{namespace}: extension schema version {version!r} is not declared")
+            continue
+        data = entry.get("data")
+        try:
+            if len(storage_encoded(data)) > MAX_GENERIC_JSON_BYTES:
+                problems.append(f"{prefix}/{namespace}/data: extension data exceeds {MAX_GENERIC_JSON_BYTES} bytes of JSON")
+        except (TypeError, ValueError):
+            problems.append(f"{prefix}/{namespace}/data: extension data is not JSON-encodable")
+        if _contains_nul(data):
+            problems.append(f"{prefix}/{namespace}/data: extension data contains NUL")
+        for problem in schema_errors(schema, data):
+            problems.append(f"{prefix}/{namespace}/data{problem}")
     return problems
+
+
+def _manifest_problems(manifest: LoadedManifest, content: dict[str, Any], prefix: str,
+                       attachments: list[dict[str, Any]]) -> list[str]:
+    """Apply the engine's structural Manifest checks to a connector item.
+
+    The protocol schema describes each Part and attachment, but it cannot
+    express the combined key and parent hierarchy after attachment
+    descriptors become Blob Parts.  Keeping this check here prevents a
+    connector from returning a page that the engine would reject later.
+    """
+    problems: list[str] = []
+    parts = list(content.get("parts") or [])
+    if len(parts) + len(attachments) > 256:
+        problems.append(f"{prefix}/parts: the Manifest has more than 256 Parts")
+
+    keys: dict[str, str] = {}
+    for index, part in enumerate(parts):
+        part_prefix = f"{prefix}/parts/{index}"
+        key = part.get("key")
+        if key in keys:
+            problems.append(f"{part_prefix}/key: Part key is duplicated")
+        else:
+            keys[key] = part_prefix
+        part_content = part.get("content") or {}
+        kind = part_content.get("kind")
+        if kind == "blob":
+            problems.append(f"{part_prefix}/content: Blob Parts are not allowed in connector manifests")
+        elif kind == "text":
+            text = part_content.get("text") or ""
+            if not text or "\x00" in text:
+                problems.append(f"{part_prefix}/content/text: text must be non-empty and contain no NUL")
+        problems.extend(_extensions_problems(manifest, part.get("extensions"), part_prefix + "/extensions"))
+
+    for index, attachment in enumerate(attachments):
+        attachment_prefix = f"{prefix.rsplit('/content', 1)[0]}/attachments/{index}"
+        key = attachment.get("key")
+        if key in keys:
+            problems.append(f"{attachment_prefix}/key: attachment key duplicates a Part key")
+        else:
+            keys[key] = attachment_prefix
+        problems.extend(_extensions_problems(manifest, attachment.get("extensions"),
+                                             attachment_prefix + "/extensions"))
+
+    # Parent references may target either an inline Part or an attachment,
+    # and must form one acyclic hierarchy.
+    parent_of: dict[str, str] = {}
+    for index, part in enumerate(parts):
+        if part.get("parent_key"):
+            parent_of[part["key"]] = part["parent_key"]
+    for index, attachment in enumerate(attachments):
+        if attachment.get("parent_key"):
+            parent_of[attachment["key"]] = attachment["parent_key"]
+    for key, parent in parent_of.items():
+        if parent not in keys:
+            problems.append(f"{keys.get(key, prefix)}/parent_key: unknown parent {parent!r}")
+            continue
+        seen: set[str] = set()
+        current = key
+        while current in parent_of:
+            if current in seen:
+                problems.append(f"{keys.get(key, prefix)}/parent_key: Part parent cycle")
+                break
+            seen.add(current)
+            current = parent_of[current]
+            if current == key:
+                problems.append(f"{keys.get(key, prefix)}/parent_key: Part cannot be its own ancestor")
+                break
+
+    # content.CheckManifest bounds only the non-text shape.  Reconstruct the
+    # same shape after attachment descriptors become Blob Parts, retaining
+    # Part metadata, extension payloads and relations while omitting text.
+    def structural_part(part: dict[str, Any]) -> dict[str, Any]:
+        result = {key: part[key] for key in ("key", "parent_key", "role", "extensions")
+                  if key in part and part[key] is not None}
+        part_content = dict(part.get("content") or {})
+        part_content.pop("text", None)
+        result["content"] = part_content
+        return result
+
+    structural_parts = [structural_part(part) for part in parts]
+    for attachment in attachments:
+        part = {
+            "key": attachment.get("key"),
+            "role": attachment.get("role"),
+            "content": {
+                "kind": "blob",
+                # Blob IDs are UUIDs in the engine; reserve the full shape
+                # when checking the synthetic Part's persisted structure.
+                "blob_id": "00000000-0000-0000-0000-000000000000",
+                "media_type": attachment.get("media_type"),
+            },
+        }
+        if attachment.get("parent_key") is not None:
+            part["parent_key"] = attachment["parent_key"]
+        if attachment.get("extensions") is not None:
+            part["extensions"] = attachment["extensions"]
+        structural_parts.append(part)
+    structure: dict[str, Any] = {"parts": structural_parts}
+    if content.get("relations"):
+        structure["relations"] = content["relations"]
+    try:
+        if len(storage_encoded(structure)) > MAX_GENERIC_JSON_BYTES:
+            problems.append(f"{prefix}: non-text Manifest structure exceeds {MAX_GENERIC_JSON_BYTES} bytes of JSON")
+    except (TypeError, ValueError):
+        problems.append(f"{prefix}: non-text Manifest structure is not JSON-encodable")
+    return problems
+
+
+def _item_problems(manifest: LoadedManifest, item: dict[str, Any], prefix: str,
+                   *, attachments_allowed: bool) -> list[str]:
+    problems: list[str] = []
+    has_content = item.get("content") is not None
+    withdrawn = item.get("withdraw") is True
+    if has_content == withdrawn:
+        problems.append(f"{prefix}: exactly one of content and withdraw: true is required")
+    if withdrawn:
+        if item.get("attachments"):
+            problems.append(f"{prefix}/attachments: a withdrawal carries no attachments")
+        if item.get("extensions"):
+            problems.append(f"{prefix}/extensions: a withdrawal carries no extensions")
+        return problems
+    content = item.get("content") or {}
+    if item.get("attachments"):
+        if not attachments_allowed:
+            problems.append(f"{prefix}/attachments: attachments are not declared by the manifest")
+        if content.get("kind") != "manifest":
+            problems.append(f"{prefix}/attachments: attachments require manifest content")
+    if content.get("kind") == "manifest":
+        problems.extend(_manifest_problems(manifest, content, prefix + "/content", item.get("attachments") or []))
+    elif content.get("kind") == "text" and "\x00" in (content.get("text") or ""):
+        problems.append(f"{prefix}/content/text: text contains NUL")
+    problems.extend(_extensions_problems(manifest, item.get("extensions"), prefix + "/extensions"))
+    seen_attachments: set[str] = set()
+    for index, attachment in enumerate(item.get("attachments") or []):
+        key = attachment.get("key")
+        if key in seen_attachments:
+            problems.append(f"{prefix}/attachments/{index}/key: attachment key is duplicated")
+        seen_attachments.add(key)
+        if not attachment.get("ref"):
+            problems.append(f"{prefix}/attachments/{index}/ref: attachment ref is required")
+        if attachment.get("sha256") is not None and attachment.get("size_bytes") is None:
+            problems.append(f"{prefix}/attachments/{index}: sha256 requires size_bytes")
+        if (attachment.get("size_bytes") is not None
+                and attachment.get("size_bytes") > manifest.attachment_max_bytes
+                and attachment.get("sha256") is not None):
+            problems.append(f"{prefix}/attachments/{index}/size_bytes: attachment exceeds attachments.max_bytes")
+        problems.extend(_extensions_problems(manifest, attachment.get("extensions"),
+                                             f"{prefix}/attachments/{index}/extensions"))
+    return problems
+
+
+def _same_json(left: Any, right: Any) -> bool:
+    try:
+        return _encoded(left) == _encoded(right)
+    except (TypeError, ValueError):
+        return False
+
+
+def _response_problems(manifest: LoadedManifest, document: dict[str, Any], operation: str,
+                       *, kind: Any = None, request: Any = None) -> list[str]:
+    schemas = {
+        "fetch": "connector-fetch-response.schema.json",
+        "check_credential": "connector-check-credential-response.schema.json",
+        "receive": "connector-receive-response.schema.json",
+        "describe_attachment": "connector-describe-attachment-response.schema.json",
+        "upload_attachment": "connector-upload-attachment-response.schema.json",
+    }
+    problems = protocol_errors(schemas[operation], document)
+    if problems:
+        return problems
+    try:
+        if len(_encoded(document)) > (
+                MAX_ATTACHMENT_RESPONSE_BYTES if operation in ("describe_attachment", "upload_attachment")
+                else manifest.connector_max_response_bytes):
+            problems.append("the response exceeds max_response_bytes")
+    except (TypeError, ValueError):
+        return ["the response is not a JSON-encodable protocol response"]
+    contribution = manifest.model.contributions.connector
+    if operation == "check_credential":
+        return problems
+    if operation == "describe_attachment":
+        if document.get("skip") is None and document.get("size_bytes", 0) > manifest.attachment_max_bytes:
+            problems.append("the attachment exceeds attachments.max_bytes; answer with skip")
+        problems.extend(_extensions_problems(manifest, document.get("item_extensions"), "/item_extensions"))
+        return problems
+    if operation == "upload_attachment":
+        return problems
+    if operation == "fetch":
+        items = document.get("items", [])
+        if len(items) > manifest.connector_max_items:
+            problems.append("the page exceeds max_items")
+        try:
+            if len(_encoded(document.get("checkpoint"))) > manifest.connector_max_checkpoint_bytes:
+                problems.append("the checkpoint exceeds max_checkpoint_bytes")
+            if len(_encoded(document.get("diagnostics"))) > (16 << 10):
+                problems.append("the diagnostics exceed 16 KiB")
+        except (TypeError, ValueError):
+            problems.append("the checkpoint or diagnostics is not JSON-encodable")
+        if document.get("not_due") and request is not None:
+            if items or document.get("more") or not _same_json(document.get("checkpoint"), request.checkpoint):
+                problems.append("not_due requires no items, more false and the checkpoint unchanged")
+        if document.get("push") is not None:
+            pushes = kind is not None and "push" in (kind.modes or [])
+            if not pushes:
+                problems.append("a push status requires a push connector kind")
+            else:
+                push = document["push"]
+                state = push.get("state")
+                if state == "failed" and (not push.get("error_class") or not push.get("code")):
+                    problems.append("a failed push status requires error_class and code")
+                if state != "failed" and push.get("error_class"):
+                    problems.append("error_class is only valid for a failed push status")
+                if state == "active" and push.get("code"):
+                    problems.append("an active push status carries no code")
+                if state != "active" and push.get("poll_interval_seconds") is not None:
+                    problems.append("poll_interval_seconds requires an active push status")
+        seen_records: set[str] = set()
+        attachments_allowed = contribution.attachments is not None
+        for index, item in enumerate(items):
+            record_key = item.get("record_key")
+            if record_key in seen_records:
+                problems.append(f"/items/{index}/record_key: record key is duplicated")
+            seen_records.add(record_key)
+            problems.extend(_item_problems(manifest, item, f"/items/{index}",
+                                           attachments_allowed=attachments_allowed))
+        return problems
+    # receive
+    items = document.get("items") or []
+    response = document.get("response") or {}
+    status = response.get("status", 0)
+    verdict = document.get("verdict")
+    if verdict == "accepted" and not 200 <= status <= 299:
+        problems.append("an accepted delivery must answer with a 2xx status")
+    if verdict == "refused" and not 400 <= status <= 499:
+        problems.append("a refused delivery must answer with a 4xx status")
+    if verdict == "refused" and items:
+        problems.append("a refused delivery carries no items")
+    if len(items) > manifest.connector_max_items:
+        problems.append("the delivery exceeds max_items")
+    if len((response.get("body") or "").encode()) > MAX_RECEIVE_RESPONSE_BODY_BYTES:
+        problems.append("the delivery response body exceeds 64 KiB")
+    seen_records: set[str] = set()
+    for index, item in enumerate(items):
+        record_key = item.get("record_key")
+        if record_key in seen_records:
+            problems.append(f"/items/{index}/record_key: record key is duplicated")
+        seen_records.add(record_key)
+        problems.extend(_item_problems(manifest, item, f"/items/{index}", attachments_allowed=False))
+    return problems
+
+
+def _redactor(request: Any) -> Credential:
+    credential = request.credential
+    if isinstance(request, UploadAttachmentRequest):
+        grant = request.grant.to_dict()
+        return Credential({"credential": credential.decode(),
+                           "grant": [grant.get("url", ""), *(grant.get("headers") or {}).values()]})
+    return credential
 
 
 def invoke_connector(manifest: LoadedManifest, implementations: dict[str, Connector],
@@ -143,14 +507,25 @@ def invoke_connector(manifest: LoadedManifest, implementations: dict[str, Connec
     except (UnicodeDecodeError, ValueError):
         return _failure(400, "invalid_request", "request body is not JSON", credential)
     credential = Credential(document.get("credential") if isinstance(document, dict) else None)
-    fetch = path == FETCH_PATH
-    schema = "connector-fetch-request.schema.json" if fetch else "connector-check-credential-request.schema.json"
+    operations = {
+        FETCH_PATH: ("fetch", "connector-fetch-request.schema.json", FetchRequest, ConnectorFetchResponse),
+        CREDENTIAL_PATH: ("check_credential", "connector-check-credential-request.schema.json", CredentialRequest, ConnectorCredentialResponse),
+        RECEIVE_PATH: ("receive", "connector-receive-request.schema.json", ReceiveRequest, ConnectorReceiveResponse),
+        DESCRIBE_ATTACHMENT_PATH: ("describe_attachment", "connector-describe-attachment-request.schema.json", DescribeAttachmentRequest, ConnectorDescribeAttachmentResponse),
+        UPLOAD_ATTACHMENT_PATH: ("upload_attachment", "connector-upload-attachment-request.schema.json", UploadAttachmentRequest, ConnectorUploadAttachmentResponse),
+    }
+    operation, schema, request_type, response_type = operations[path]
     problems = protocol_errors(schema, document)
     if problems:
         return _failure(400, "invalid_request", "; ".join(problems), credential)
-    kind = contribution.kinds.get(document["connector"]["kind"])
+    kind_name = document["connector"]["kind"]
+    kind = contribution.kinds.get(kind_name)
     if kind is None:
         return _failure(400, "unknown_kind", "the connector kind is not declared", credential)
+    if operation == "receive" and "push" not in (kind.modes or []):
+        return _failure(400, "push_unsupported", f"connector kind {kind_name!r} does not declare push", credential)
+    if operation in ("describe_attachment", "upload_attachment") and contribution.attachments is None:
+        return _failure(400, "attachments_unsupported", "the connector does not declare attachments", credential)
     try:
         manifest.validate_configuration(document["configuration"])
     except ConfigurationError as error:
@@ -164,37 +539,46 @@ def invoke_connector(manifest: LoadedManifest, implementations: dict[str, Connec
             or (kind.credential_schema is not None and raw_credential is not None
                 and schema_errors(kind.credential_schema, raw_credential))):
         return _failure(400, "invalid_credential", "the credential does not match the kind's credential_schema", credential)
-    implementation = implementations.get(document["connector"]["kind"])
+    implementation = implementations.get(kind_name)
     if implementation is None:
         return _failure(501, "not_implemented", "the connector kind has no registered implementation", credential)
-    request = (FetchRequest if fetch else CredentialRequest).from_dict(document)
-    credential = request.credential
+    handler = getattr(implementation, operation, None)
+    if not callable(handler):
+        return _failure(501, "not_implemented", f"the connector kind has no registered {operation} handler", credential)
     try:
-        response = implementation.fetch(request) if fetch else implementation.check_credential(request)
+        request = request_type.from_dict(document)
+    except (TypeError, ValueError) as error:
+        return _failure(400, "invalid_request", str(error), credential)
+    credential = request.credential
+    redactor = _redactor(request)
+    try:
+        response = handler(request)
     except NotDue:
-        if fetch:
+        if operation == "fetch":
             return 200, {"items": [], "checkpoint": request.checkpoint, "more": False, "not_due": True}
-        return _failure(500, "internal_error", "NotDue is only valid for fetch", credential, error_class="source")
+        return _failure(500, "internal_error", "NotDue is only valid for fetch", redactor, error_class="source")
     except ConnectorError as error:
-        status, envelope = _failure(error.status, error.code, error.message, credential,
-                                    error_class=error.error_class, retryable=error.retryable)
+        status, envelope = _failure(error.status, error.code, error.message, redactor,
+                                     error_class=error.error_class, retryable=error.retryable)
         if isinstance(error, TransientError) and error.retry_after_seconds:
             envelope["retry_after_seconds"] = error.retry_after_seconds
         return status, envelope
     except OSError:
         request.logger.exception("connector failed with an unclassified I/O error")
         return _failure(503, "unexpected_error", "the plugin failed with an unclassified error; see the plugin log",
-                        credential, error_class="transient", retryable=True)
+                        redactor, error_class="transient", retryable=True)
     except Exception:
         request.logger.exception("connector failed unexpectedly")
         return _failure(500, "internal_error", "the plugin failed unexpectedly; see the plugin log",
-                        credential, error_class="source")
+                        redactor, error_class="source")
     try:
-        result = response if isinstance(response, dict) else response.to_dict()
-        problems = _response_problems(manifest, result, fetch)
+        result = response.to_dict() if isinstance(response, response_type) else response_type.from_dict(response).to_dict()
+        problems = _response_problems(manifest, result, operation, kind=kind, request=request)
+        if redactor.redact(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) != json.dumps(result, ensure_ascii=False, separators=(",", ":")):
+            problems.append("the response contains credential or grant data")
     except (AttributeError, TypeError, ValueError):
         problems = ["the connector response is not a JSON-encodable protocol response"]
     if problems:
         request.logger.error("connector returned an invalid response: %s", "; ".join(problems))
-        return _failure(500, "invalid_response", "; ".join(problems), credential, error_class="source")
+        return _failure(500, "invalid_response", "; ".join(problems), redactor, error_class="source")
     return 200, result

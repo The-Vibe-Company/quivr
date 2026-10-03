@@ -106,6 +106,7 @@ type SearchSpace struct {
 // SearchRequest is a validated round of a search.
 type SearchRequest struct {
 	InvocationID   string          `json:"invocation_id"`
+	Contribution   string          `json:"contribution"`
 	OrganizationID string          `json:"organization_id"`
 	Configuration  json.RawMessage `json:"configuration"`
 	Profile        string          `json:"profile"`
