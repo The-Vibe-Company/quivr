@@ -31,9 +31,17 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: contracts/http/v0/checks/requirements.txt
+          cache-dependency-path: |
+            contracts/http/v0/checks/requirements.txt
+            scripts/eval/requirements-news.txt
+            plugins/jev-rerank/pyproject.toml
       # PyYAML for `make docs`, which regenerates the documentation site's bundled contract to compare it.
       - run: pip install -r contracts/http/v0/checks/requirements.txt
+      - run: pip install -r scripts/eval/requirements-news.txt
+      # The builder reuses this pinned stdlib client, without the plugin runtime dependencies.
+      - run: pip install --no-deps -e plugins/jev-rerank
+      # Private news-set owner tests exercise real encryption with disposable keys and synthetic text.
+      - run: sudo apt-get update -qq && sudo apt-get install -y age
       - run: make check
       # Contract Runner reports (scripts/plugin_sdk.sh), under the artifact names the plugin READMEs give.
       - uses: actions/upload-artifact@v4

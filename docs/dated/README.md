@@ -40,6 +40,7 @@ them may since have changed; the contract and the code are authoritative.
 ## Evidence
 
 - [2026-10-03: direct embedding comparison](evidence/2026-10-03-embedding-comparison/summary.md)
+- [2026-10-03: synthetic private news-set builder validation](evidence/2026-10-03-news-set-builder/summary.md)
 
 Measurements and verification reports tied to a commit.
 

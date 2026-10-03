@@ -1,7 +1,7 @@
 # Measure search quality
 
-`make eval` scores how well Quivr search ranks results on evaluation sets with human or
-generated judgements. For each set it ingests the documents into a new Corpus through the
+`make eval` scores search on evaluation sets, including [private news sets](news-set.md).
+For each set it ingests the documents into a new Corpus through the
 public API, waits until every Record has its vectors, runs every query in each search mode
 (`lexical`, `semantic`, `hybrid`) and each profile the API serves, and reports nDCG@10,
 Recall@10, MRR@10, latency and paid calls per query. Only harness or dependency errors fail a run.

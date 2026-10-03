@@ -190,6 +190,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Retrieval measurement** with a frozen workload (`make measure`), and **search
   quality** on public French and English evaluation sets or a private set, nightly
   (`make eval`, [guide](docs/agents/evaluation.md)).
+- **Private news evaluation builder**: pluggable question generation, pooled judgments,
+  separate encrypted working/held-out sets and a human review sheet
+  ([contributor guide](docs/agents/news-set.md)); real provider runs are operator controlled.
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
   schemas, secrets and limits.

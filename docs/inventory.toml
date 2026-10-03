@@ -71,6 +71,7 @@ excluded = [
 "docs/agents/evaluation.md" = { audience = "contributor", kind = "guide", summary = "measure how well search ranks results on public and private evaluation sets" }
 "docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide", summary = "how parallel agents claim, plan and ship tickets" }
 "docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide", summary = "how specs and tickets are written and tracked" }
+"docs/agents/news-set.md" = { audience = "contributor", kind = "guide", summary = "build an encrypted French news search set and validate its human review" }
 "docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
 "docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide", summary = "the five triage labels" }
 "docs/dated/README.md" = { audience = "contributor", kind = "index", summary = "frozen design records, evidence and research, as decided at their date" }
@@ -113,6 +114,7 @@ excluded = [
 "docs/agents/evaluation.md" = 169
 "docs/agents/fleet-workflow.md" = 65
 "docs/agents/issue-tracker.md" = 110
+"docs/agents/news-set.md" = 142
 "docs/agents/testing.md" = 85
 "docs/agents/triage-labels.md" = 15
 "docs/runnable-guides.md" = 85

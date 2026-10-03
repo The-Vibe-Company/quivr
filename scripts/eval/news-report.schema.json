@@ -1,0 +1,371 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aggregate news-set quality report",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "synthetic",
+        "built"
+      ]
+    },
+    "questions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "articles": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "question_types": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "event": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paraphrase": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "multi_article": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "no_answer": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "entity",
+        "event",
+        "recent",
+        "paraphrase",
+        "multi_article",
+        "no_answer"
+      ]
+    },
+    "rejected": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title_copy": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shared_keywords": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "title_copy",
+        "duplicate",
+        "shared_keywords"
+      ]
+    },
+    "split": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "working": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "held_out": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "working",
+        "held_out"
+      ]
+    },
+    "judgments": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "judged_depth": {
+      "type": "object",
+      "patternProperties": {
+        "^[0-9]+$": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "agreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cohen_kappa": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "fleiss_kappa": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "cohen_kappa",
+        "fleiss_kappa"
+      ]
+    },
+    "jev_grade_mapping": {
+      "enum": [
+        "not_used",
+        "probability_quartiles"
+      ]
+    },
+    "three_way_ties": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hard_negatives": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "human_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "pending",
+            "complete"
+          ]
+        },
+        "sampled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reviewed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "agreement_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "status",
+        "sampled",
+        "reviewed",
+        "agreement_rate"
+      ]
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "enum": [
+            "bm25",
+            "e5_small",
+            "cohere_pro",
+            "hybrid"
+          ]
+        },
+        "queries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "no_answer_queries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ndcg@10": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1.000000000001
+            },
+            "recall@10": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1.000000000001
+            },
+            "mrr@10": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1.000000000001
+            }
+          },
+          "required": [
+            "ndcg@10",
+            "recall@10",
+            "mrr@10"
+          ]
+        }
+      },
+      "required": [
+        "system",
+        "queries",
+        "no_answer_queries",
+        "metrics"
+      ]
+    },
+    "saturation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "working_queries_perfect_in_all_systems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scorable_working_queries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "working_queries_perfect_in_all_systems",
+        "scorable_working_queries"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "working": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "object": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}-[0-9a-f]{32}-working\\.tar\\.gz\\.age$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plaintext_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "object",
+            "sha256",
+            "plaintext_sha256"
+          ]
+        },
+        "held_out": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "object": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}-[0-9a-f]{32}-held_out\\.tar\\.gz\\.age$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plaintext_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "object",
+            "sha256",
+            "plaintext_sha256"
+          ]
+        },
+        "review": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "object": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}-[0-9a-f]{32}-review\\.csv\\.age$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plaintext_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "object",
+            "sha256",
+            "plaintext_sha256"
+          ]
+        }
+      },
+      "required": [
+        "working",
+        "held_out",
+        "review"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "questions",
+    "articles",
+    "question_types",
+    "rejected",
+    "split",
+    "judgments",
+    "judged_depth",
+    "agreement",
+    "jev_grade_mapping",
+    "three_way_ties",
+    "hard_negatives",
+    "human_check",
+    "baseline",
+    "saturation"
+  ]
+}
