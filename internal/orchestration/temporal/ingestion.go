@@ -190,6 +190,9 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	}
 	var ew worker.Worker
 	if service.Evaluation != nil {
+		if service.Evaluation.Serving != nil {
+			registerServingProjection(w, *service.Evaluation, pins)
+		}
 		ew = worker.New(c, ingestionEvaluationQueue, worker.Options{MaxConcurrentActivityExecutionSize: 1})
 		registerIngestionEvaluation(ew, *service.Evaluation, pins)
 		if err = ew.Start(); err != nil {

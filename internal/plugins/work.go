@@ -37,7 +37,8 @@ type Work struct {
 	// Plan is the id of the plan the work is pinned to.
 	Plan string
 	// Stopped reports that a rollback stopped the work when it was pinned:
-	// it never calls a plugin of its plan that left the active plan again.
+	// ingestion never calls its stopped owner again, including an owner retained
+	// for evaluation; other work stops calls to plugins that left the active plan.
 	Stopped bool
 	// BindIngestion records the routed owner for precise drain accounting.
 	BindIngestion func(context.Context, string) error
@@ -71,7 +72,7 @@ func WorkOf(ctx context.Context) (*Work, bool) {
 // version. Work that is not pinned always keeps retrying.
 func Unreachable(ctx context.Context, pin *Pin, contribution string) (*content.Diagnostic, error) {
 	w, ok := WorkOf(ctx)
-	if !ok || pin == nil || w.live.Active(pin) {
+	if !ok || pin == nil || (w.live.Active(pin) && !(w.Kind == WorkIngestion && w.stopped(ctx))) {
 		return nil, nil
 	}
 	if w.stopped(ctx) {
@@ -98,16 +99,17 @@ func Unreachable(ctx context.Context, pin *Pin, contribution string) (*content.D
 }
 
 // Stopped reports whether the work ctx carries must not call pin: a rollback
-// stopped it and pin has left the active plan. The caller fails the call as
+// stopped ingestion, or stopped other work after pin left the active plan.
+// The caller fails the call as
 // unavailable, and Unreachable then stops the work.
 func Stopped(ctx context.Context, pin *Pin) bool {
 	w, ok := WorkOf(ctx)
-	return ok && pin != nil && !w.live.Active(pin) && w.stopped(ctx)
+	return ok && pin != nil && (w.Kind == WorkIngestion || !w.live.Active(pin)) && w.stopped(ctx)
 }
 
 // stopped reports a stop recorded when the work was pinned or since. It is
-// read only for a plugin that left the active plan, so work calling the
-// plugins of the active plan never pays for it.
+// read for ingestion even if its outgoing owner remains an evaluation member.
+// Other work reads it only for plugins that left the active plan.
 func (w *Work) stopped(ctx context.Context) bool {
 	return w.Stopped || (w.StopMarked != nil && w.StopMarked(ctx))
 }

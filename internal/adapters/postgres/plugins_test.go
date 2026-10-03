@@ -349,7 +349,7 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	if pinned, _, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_old", second.ID); err != nil || pinned != first.Plan {
 		t.Fatalf("a retry after the activation is pinned to %q (%v), want its first plan %s", pinned, err, first.Plan)
 	}
-	if pinned, _, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_new", second.ID); err != nil || pinned != second.ID {
+	if pinned, _, err := store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_new", first.Plan); err != nil || pinned != second.ID {
 		t.Fatalf("new work is pinned to %q (%v), want the active plan", pinned, err)
 	}
 	if err = store.BindIngestionWork(ctx, plugins.WorkIngestion, "org_a", "receipt_new", next.ID); err != nil {
@@ -443,14 +443,15 @@ func TestRollbackRestoresThePreviousPlan(t *testing.T) {
 	if err = store.RecordCheck(ctx, next.ID, registry.CheckReport{Certified: true, Checks: []registry.CheckResult{}}); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err = store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_on_old", first.Plan); err != nil {
+		t.Fatal(err)
+	}
 	bad, err := service.Activate(ctx, operatorScope, next.ID)
 	if err != nil || bad.PreviousPlanID != first.Plan {
 		t.Fatalf("activation: %+v (%v), want a plan naming %s as previous", bad, err, first.Plan)
 	}
-	for _, w := range []struct{ id, plan string }{{"receipt_on_old", first.Plan}, {"receipt_on_bad", bad.ID}} {
-		if _, _, err = store.PinWork(ctx, plugins.WorkIngestion, "org_a", w.id, w.plan); err != nil {
-			t.Fatal(err)
-		}
+	if _, _, err = store.PinWork(ctx, plugins.WorkIngestion, "org_a", "receipt_on_bad", bad.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	unreachable = errors.New("connection refused")

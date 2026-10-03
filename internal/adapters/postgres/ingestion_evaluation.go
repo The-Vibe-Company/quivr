@@ -31,15 +31,25 @@ func (s ContentStore) CoverEvaluation(ctx context.Context, org string, g content
 	if !routed {
 		return ErrGenerationChanged
 	}
+	if len(artifacts) == 0 {
+		return content.ErrInvalid
+	}
+	if err = coverOwnerProjection(ctx, tx, org, g, seg, artifacts); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// coverOwnerProjection records an independent owner's coverage inside the
+// caller's eligibility and operation transaction; it does not publish readiness.
+func coverOwnerProjection(ctx context.Context, tx pgx.Tx, org string, g content.Generation, seg content.Segmentation, artifacts []content.Embedding) error {
+	var err error
 	var digest string
 	if err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2 AND version_id=$3`, org, seg.ID, seg.VersionID).Scan(&digest); err != nil {
 		return err
 	}
 	if digest != content.SegmentationDigest(seg) {
 		return content.ErrConflict
-	}
-	if len(artifacts) == 0 {
-		return content.ErrInvalid
 	}
 	segments := map[string]bool{}
 	for _, p := range seg.Segments {
@@ -74,7 +84,7 @@ func (s ContentStore) CoverEvaluation(ctx context.Context, org string, g content
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // PrepareEvaluation adds an owner's spaces to the routed generation before

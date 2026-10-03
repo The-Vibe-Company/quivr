@@ -161,6 +161,9 @@ type Activation struct {
 // namespace ownership); a registration target overlaps only in part is a
 // conflict. validate adds the checks of the running engine.
 func PlanActivation(active Plan, members map[string]Registration, target Registration, validate func(*plugins.PinSet) error) (Activation, error) {
+	if target.State == StateActive {
+		return promoteEvaluation(active, members, target, validate)
+	}
 	switch target.State {
 	case StateValidated, StateInactive, StateDraining:
 	default:
@@ -238,6 +241,57 @@ func PlanActivation(active Plan, members map[string]Registration, target Registr
 	return Activation{Roles: planRoles(set, byPin), Set: set, Retired: retired}, nil
 }
 
+// promoteEvaluation activates the formats on which an installed registration
+// is being evaluated. Memberships and old projections remain available.
+func promoteEvaluation(active Plan, members map[string]Registration, target Registration, validate func(*plugins.PinSet) error) (Activation, error) {
+	routing := ingestionRouting(active.Roles, members)
+	changed := false
+	for mediaType, owners := range routing.Evaluation {
+		for i, owner := range owners {
+			if owner != target.PluginID {
+				continue
+			}
+			previous := routing.Routes[mediaType]
+			if previous == "" {
+				previous = routing.Default
+			}
+			if routing.Routes == nil {
+				routing.Routes = map[string]string{}
+			}
+			routing.Routes[mediaType] = target.PluginID
+			owners = append(owners[:i:i], owners[i+1:]...)
+			if previous != "" && previous != target.PluginID {
+				owners = append(owners, previous)
+			}
+			sort.Strings(owners)
+			routing.Evaluation[mediaType] = owners
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return Activation{Roles: active.Roles, Unchanged: true}, nil
+	}
+	var kept []Registration
+	seen := map[string]bool{}
+	for _, a := range active.Roles {
+		if !seen[a.RegistrationID] {
+			kept = append(kept, members[a.RegistrationID])
+			seen[a.RegistrationID] = true
+		}
+	}
+	set, byPin, err := resolveMembers(kept, &routing)
+	if err != nil {
+		return Activation{}, err
+	}
+	if validate != nil {
+		if err = validate(set); err != nil {
+			return Activation{}, &IssueError{Kind: ErrConflict, Issues: issuesOf(err, "")}
+		}
+	}
+	return Activation{Roles: planRoles(set, byPin), Set: set}, nil
+}
+
 // IsIngestionRole recognizes keyed memberships, source and evaluation routes,
 // and both canonical and legacy defaults.
 func IsIngestionRole(role string) bool {
@@ -282,7 +336,16 @@ func (s Service) Activate(ctx context.Context, scope corpus.Scope, id string) (P
 	}
 	plan, err := s.Store.Activate(ctx, id, func(active Plan, members map[string]Registration, target Registration) (Activation, error) {
 		a, err := PlanActivation(active, members, target, s.Validate)
-		if err == nil && s.Spaces != nil {
+		if err == nil && target.State == StateActive && !a.Unchanged {
+			reach := s.Reach
+			if reach == nil {
+				reach = Discover
+			}
+			if err = reach(ctx, target); err != nil {
+				return Activation{}, &IssueError{Kind: ErrUnreachable, Issues: []plugins.Issue{{Code: CodeUnreachable, Path: "/registrations/" + target.ID, PluginID: target.PluginID, PluginVersion: target.Version, Cause: discoveryCause(err), Message: "start the evaluation plugin before promoting it to served"}}}
+			}
+		}
+		if err == nil && !a.Unchanged && s.Spaces != nil {
 			a.Spaces = s.Spaces(a.Set)
 		}
 		return a, err

@@ -88,6 +88,39 @@ func PlanRollback(active, target Plan, members map[string]Registration, validate
 			a.Returning = append(a.Returning, members[r.RegistrationID])
 		}
 	}
+	// A retained evaluation member can become a serving owner again without
+	// joining the plan. Its newly served source formats need discovery too.
+	oldRoutes, newRoutes := ingestionRouting(active.Roles, members), set.IngestionRouting()
+	formats := map[string]bool{"": true}
+	for media := range oldRoutes.Routes {
+		formats[media] = true
+	}
+	for media := range newRoutes.Routes {
+		formats[media] = true
+	}
+	returning := map[string]bool{}
+	for _, r := range a.Returning {
+		returning[r.ID] = true
+	}
+	for _, media := range sortedKeys(formats) {
+		owner := newRoutes.Routes[media]
+		if owner == "" {
+			owner = newRoutes.Default
+		}
+		previous := oldRoutes.Routes[media]
+		if previous == "" {
+			previous = oldRoutes.Default
+		}
+		if owner == previous {
+			continue
+		}
+		for _, role := range roles {
+			if members[role.RegistrationID].PluginID == owner && !returning[role.RegistrationID] {
+				a.Returning = append(a.Returning, members[role.RegistrationID])
+				returning[role.RegistrationID] = true
+			}
+		}
+	}
 	return a, nil
 }
 

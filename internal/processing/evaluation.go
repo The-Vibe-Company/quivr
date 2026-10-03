@@ -27,6 +27,7 @@ type EvaluationProjection interface {
 // Plugin failures end only this job; dependency publication failures retry it.
 type Evaluator struct {
 	Store      EvaluationStore
+	Serving    ServingProjectionStore
 	Content    content.Service
 	Plugin     *PluginDeriver
 	Projection EvaluationProjection

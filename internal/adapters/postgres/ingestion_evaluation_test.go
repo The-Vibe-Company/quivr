@@ -25,6 +25,7 @@ import (
 type evaluationPublication struct {
 	segmentation content.Segmentation
 	vectors      int
+	artifacts    []content.Embedding
 }
 
 func (p *evaluationPublication) Publish(_ context.Context, _ content.Generation, _, _, _ string, _ content.Version, seg content.Segmentation) error {
@@ -33,6 +34,10 @@ func (p *evaluationPublication) Publish(_ context.Context, _ content.Generation,
 }
 func (p *evaluationPublication) PublishEmbeddings(_ context.Context, _ content.Generation, _ string, data []content.EmbeddingData) error {
 	p.vectors = len(data)
+	p.artifacts = nil
+	for _, d := range data {
+		p.artifacts = append(p.artifacts, d.Artifact)
+	}
 	return nil
 }
 
@@ -46,20 +51,9 @@ func TestIngestionEvaluationRunsAfterServedCommit(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			pool := scratchDatabase(t, ctx)
-			port, err := devhost.FreePort("127.0.0.1")
-			if err != nil {
-				t.Fatal(err)
-			}
 			manifest := "../../../tests/plugin-contract/ingestion-valid/quivr-plugin.yaml"
-			proc, err := devhost.Start(devhost.Options{Command: fakeplugin.Command(), Manifest: manifest, Port: port, Env: []string{fakeplugin.EnvEnable + "=1", fakeplugin.EnvMode + "=" + mode}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer proc.Stop(time.Second)
-			if err = proc.WaitHealthy(ctx); err != nil {
-				t.Fatal(err)
-			}
-			pins, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: hashEmbedder, Endpoint: "http://127.0.0.1:9960", Spaces: hashSpaces}, {Manifest: manifest, Spaces: map[string]string{"certified.ingestion-valid.small": "served", "certified.ingestion-valid.large": "evaluation"}, Endpoint: fmt.Sprintf("http://127.0.0.1:%d", port)}})
+			endpoint := startIngestionFixture(t, ctx, manifest, mode)
+			pins, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: hashEmbedder, Endpoint: "http://127.0.0.1:9960", Spaces: hashSpaces}, {Manifest: manifest, Spaces: map[string]string{"certified.ingestion-valid.small": "served", "certified.ingestion-valid.large": "evaluation"}, Endpoint: endpoint}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -230,4 +224,23 @@ func TestIngestionEvaluationRunsAfterServedCommit(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Both projection lifecycle owners share the contract-validating process;
+// SQL setup never substitutes for its protocol responses.
+func startIngestionFixture(t *testing.T, ctx context.Context, manifest, mode string) string {
+	t.Helper()
+	port, err := devhost.FreePort("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc, err := devhost.Start(devhost.Options{Command: fakeplugin.Command(), Manifest: manifest, Port: port, Env: []string{fakeplugin.EnvEnable + "=1", fakeplugin.EnvMode + "=" + mode}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { proc.Stop(time.Second) })
+	if err = proc.WaitHealthy(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }

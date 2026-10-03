@@ -134,11 +134,9 @@ func TestObserverSeesEveryInvocationOutcome(t *testing.T) {
 }
 
 // Work a rollback stopped (pinned_work=stop), even during an attempt already
-// running, never calls a plugin of its plan once that plugin has left the
-// active plan: the call fails as unavailable without reaching the plugin, and
-// the work stops at once with pinned_plan_stopped naming its plan, without
-// spending the attempt budget. While the plugin still serves the active plan,
-// the work calls it.
+// running, never calls its ingestion owner again. An outgoing source owner
+// can remain an active evaluation member: the call still fails without reaching
+// it, and the diagnostic names the stopped plan without spending the budget.
 func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
 	calls := 0
 	var pin *plugins.Pin
@@ -185,14 +183,14 @@ func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
 	}
 
 	marked = true
-	if _, err = ingestor.SegmentAndEmbed(work, "org", "corpus", version, space); calls != 2 {
-		t.Fatalf("stopped while its plugin still serves the active plan: %d calls (%v), want the plugin called", calls, err)
+	if _, err = ingestor.SegmentAndEmbed(work, "org", "corpus", version, space); !errors.Is(err, pluginhttp.ErrUnavailable) || calls != 1 {
+		t.Fatalf("stopped while its owner remains an active member: %d calls (%v), want unavailable without calling", calls, err)
 	}
 	if err = live.Store("plan_a", nil); err != nil {
 		t.Fatal(err)
 	}
 	_, err = ingestor.SegmentAndEmbed(work, "org", "corpus", version, space)
-	if !errors.Is(err, pluginhttp.ErrUnavailable) || calls != 2 {
+	if !errors.Is(err, pluginhttp.ErrUnavailable) || calls != 1 {
 		t.Fatalf("after the rollback: %v with %d calls, want unavailable without calling the plugin", err, calls)
 	}
 	reason, err := ingestor.Gone(work, err)

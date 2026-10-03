@@ -99,6 +99,16 @@ curl -s "$QUIVR_API_URL/v0/admin/plugins/plan" -H "Authorization: Bearer $QUIVR_
 
 The active plan names your plugin for its roles. Every api and worker process checks the active plan every 2 seconds (`plugin_plan_poll` in the [configuration](/reference/configuration)) and swaps in a new one whole. New work and every new search use the new plan.
 
+## Promote an evaluation plugin
+
+A plugin already active in `ingestion.evaluation` can become the served owner with the same activation request above. Before activating it, [backfill its primary space](/plugins/backfill-a-vector-space#fill-and-promote-another-plugin) for every affected Corpus. It can segment the canonical Parts differently from the served plugin. Search-quality evaluations compare document results, so offsets need not match.
+
+Activation switches all source formats that name this plugin as an evaluation owner. It checks that the plugin still answers and that every current Version has its complete target projection and primary vectors in the routed generation. Missing coverage returns `409 plugin_conflict` and leaves the plan unchanged. An empty Corpus still needs its generation to carry the incoming primary space; an empty backfill prepares it. Calling activation again returns the same plan.
+
+The previous owner becomes an evaluation owner for those formats, retaining its segments and vectors. Keep it running to fill new Versions for a later rollback. An owner that serves another format still receives ordinary queries only for Corpora where it has served projections.
+
+Pending Versions retain their original work pins. A separate job, pinned to the new plan, produces the new owner's projection before publishing the Version. Until then, the previous current Version remains searchable. Late results and refusals from the old owner cannot advance currentness or quarantine the new served path.
+
 ## Roll back
 
 If the new version misbehaves, one call makes the previous plan's plugins serve again:
@@ -113,9 +123,9 @@ curl -s -X POST "$QUIVR_API_URL/v0/admin/plugins/plan/rollback" -H "Authorizatio
 {"source": "rollback", "previous_plan_id": "plan_…", "roles": [{"role": "ingestion:core.ingest", "plugin_id": "core.ingest", "version": "…"}, "…"]}
 ```
 
-The answer is a new plan whose roles are the previous plan's, and `previous_plan_id` names the plan you left. To return to an earlier plan, add its `plan_id` to the request. The api and the worker follow a rollback as they follow an activation. Nothing already produced is rewritten: articles the version you left processed keep their text and stay searchable.
+The answer is a new plan whose roles are the previous plan's, and `previous_plan_id` names the plan you left. To return to an earlier plan, add its `plan_id` to the request. The api and the worker follow a rollback as they follow an activation. Canonical Parts are retained. For a change of ingestion owner, rollback checks the returning plugin and its complete primary coverage on every current Version before switching the projections together. If evaluation failed to fill that owner on new Versions, backfill it first; an incomplete rollback leaves the plan unchanged.
 
-`pinned_work` decides what happens to work pinned to the version you left:
+`pinned_work` decides what happens to work pinned to the version you left. For an ingestion owner switch, `stop` also stops outgoing receipts for the affected source formats when their owner remains an evaluation member:
 
 | Value | What happens |
 | --- | --- |

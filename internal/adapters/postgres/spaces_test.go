@@ -163,10 +163,10 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 	if err != nil || g.ID != op.TargetGenerationID || total != 2 || len(spaces) != 2 {
 		t.Fatalf("vector spaces of %s: %+v, %d segments, %v", g.ID, spaces, total, err)
 	}
-	if s := spaces[0]; s.ID != served.ID || s.GenerationRole != content.SpaceServed || s.OwnerPluginID != "example.words" || s.OwnerPluginVersion != "0.2.0" || s.Segments != 2 || s.Model != served.Model {
+	if s := spaces[0]; s.ID != served.ID || s.GenerationRole != content.SpaceServed || s.OwnerPluginID != "example.words" || s.OwnerPluginVersion != "0.2.0" || s.Segments != 2 || s.VersionsCovered != 1 || s.TotalSegments == nil || *s.TotalSegments != 2 || s.ServingSegments == nil || *s.ServingSegments != 2 || s.Model != served.Model {
 		t.Fatalf("served space %+v", s)
 	}
-	if s := spaces[1]; s.ID != evaluation.ID || s.GenerationRole != content.SpaceEvaluation || s.Segments != 1 || s.VectorSpace.Dimensions != 6 {
+	if s := spaces[1]; s.ID != evaluation.ID || s.GenerationRole != content.SpaceEvaluation || s.Segments != 1 || s.VersionsCovered != 0 || s.TotalSegments == nil || *s.TotalSegments != 2 || s.ServingSegments == nil || *s.ServingSegments != 2 || s.VectorSpace.Dimensions != 6 {
 		t.Fatalf("evaluation space %+v", s)
 	}
 	h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: g.ID})
@@ -249,6 +249,15 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	}
 	if err = store.CoverEvaluation(ctx, org, g, evaluation, artifacts); err != nil {
 		t.Fatal(err)
+	}
+	_, coverage, _, err := store.VectorSpaces(ctx, org, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, covered := range coverage {
+		if covered.OwnerPluginID == "example.evaluation" && (covered.ServingSegments == nil || *covered.ServingSegments != 0 || covered.TotalSegments == nil || *covered.TotalSegments != 2) {
+			t.Fatalf("evaluation-only owner coverage must expose two independent cuts and zero serving cuts: %+v", covered)
+		}
 	}
 	candidates := []content.Candidate{{SegmentID: served.Segments[0].ID, GenerationID: g.ID}, {SegmentID: evaluation.Segments[0].ID, GenerationID: g.ID}, {SegmentID: evaluation.Segments[1].ID, GenerationID: g.ID, EvaluationPlugin: "example.evaluation", EvaluationSpace: space.ID}}
 	got, err := store.Hydrate(ctx, scope, candidates)

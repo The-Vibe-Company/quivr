@@ -56,8 +56,7 @@ func (s ContentStore) SaveEmbedding(ctx context.Context, e content.Embedding, sp
 	return tx.Commit(ctx)
 }
 func (s ContentStore) EnrichmentProgress(ctx context.Context, org, id, state, code string) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4,enrichment_reason=NULL WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, org, id, state, code)
-	return err
+	return s.updatePinnedVersion(ctx, org, id, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4,enrichment_reason=NULL WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, state, code)
 }
 
 // BlockEnrichment stops an enrichment with its reason, under the guards of
@@ -67,14 +66,31 @@ func (s ContentStore) BlockEnrichment(ctx context.Context, org, id string, reaso
 	if err != nil {
 		return err
 	}
-	_, err = s.Pool.Exec(ctx, `UPDATE record_versions SET enrichment_state='blocked',enrichment_error=$3,enrichment_reason=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, org, id, reason.Code, raw)
-	return err
+	return s.updatePinnedVersion(ctx, org, id, `UPDATE record_versions SET enrichment_state='blocked',enrichment_error=$3,enrichment_reason=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, reason.Code, raw)
 }
 func (s ContentStore) CountEnrichmentTimeout(ctx context.Context, org, id string) (int, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return 0, err
+	}
+	serves, err := pinnedOwnerServes(ctx, tx, org, id)
+	if err != nil {
+		return 0, err
+	}
+	if !serves {
+		return 0, tx.Commit(ctx)
+	}
 	var timeouts int
-	err := s.Pool.QueryRow(ctx, `INSERT INTO enrichment_timeouts(organization,version_id,timeouts) VALUES($1,$2,1)
+	err = tx.QueryRow(ctx, `INSERT INTO enrichment_timeouts(organization,version_id,timeouts) VALUES($1,$2,1)
 ON CONFLICT(organization,version_id) DO UPDATE SET timeouts=enrichment_timeouts.timeouts+1,updated_at=now() RETURNING timeouts`, org, id).Scan(&timeouts)
-	return timeouts, err
+	if err != nil {
+		return 0, err
+	}
+	return timeouts, tx.Commit(ctx)
 }
 func (s ContentStore) EnrichmentEligible(ctx context.Context, org, id string) (bool, error) {
 	var eligible bool
@@ -100,6 +116,29 @@ func (s ContentStore) CommitEnrichment(ctx context.Context, org string, seg cont
 		return err
 	}
 	if !eligible {
+		return tx.Commit(ctx)
+	}
+	if err = loadGenerationIngestion(ctx, tx, &g); err != nil {
+		return err
+	}
+	var sourceMediaType string
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(ar.source_media_type,''),'text/plain') FROM record_versions v JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot) WHERE v.organization=$1 AND v.id=$2`, org, seg.VersionID).Scan(&sourceMediaType); err != nil {
+		return err
+	}
+	if g.IngestionRouting != nil && g.IngestionRouting.For(sourceMediaType) != "" && g.IngestionRouting.For(sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
+		var routed bool
+		if err = tx.QueryRow(ctx, `SELECT `+routedGenerationSQL("$1", "$2")+`=$3`, org, corpusID, g.ID).Scan(&routed); err != nil {
+			return err
+		}
+		if !routed {
+			return ErrGenerationChanged
+		}
+		if len(artifacts) == 0 {
+			return content.ErrInvalid
+		}
+		if err = coverOwnerProjection(ctx, tx, org, g, seg, artifacts); err != nil {
+			return err
+		}
 		return tx.Commit(ctx)
 	}
 	// Queue and snapshot before taking the generation's shared row lock:

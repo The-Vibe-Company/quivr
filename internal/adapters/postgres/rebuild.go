@@ -7,6 +7,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
 	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
 	"github.com/jackc/pgx/v5"
 )
@@ -72,6 +73,15 @@ func (s ContentStore) BeginRebuild(ctx context.Context, org, id string) (retriev
 		}
 		op.State = operations.StateRunning
 	}
+	// A target's source routing belongs to the same immutable plan as its
+	// derivation. Record it before this generation can become a serving route.
+	plan := ""
+	if work, ok := plugins.WorkOf(ctx); ok {
+		plan = work.Plan
+	}
+	if err = recordGenerationIngestion(ctx, tx, op.TargetGenerationID, plan); err != nil {
+		return out, err
+	}
 	g := &out.Generation
 	var cfg, spaces []byte
 	if err = tx.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE g.id=$1 AND c.organization=$2 AND c.id=$3`, op.TargetGenerationID, org, op.CorpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &cfg); err != nil {
@@ -81,6 +91,9 @@ func (s ContentStore) BeginRebuild(ctx context.Context, org, id string) (retriev
 		return out, err
 	}
 	if g.Fields, err = retrievalFields(cfg); err != nil {
+		return out, err
+	}
+	if err = loadGenerationIngestion(ctx, tx, g); err != nil {
 		return out, err
 	}
 	out.Operation = op
@@ -225,6 +238,41 @@ func (s ContentStore) ActivateRebuild(ctx context.Context, org, id string) (bool
 	// request; it fails instead of activating.
 	if rank.failure != nil {
 		if err = failOperation(ctx, tx, op, *rank.failure); err != nil {
+			return false, err
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return false, err
+		}
+		return false, operations.ErrNotRunning
+	}
+	// An owner cutover cannot be undone by an older already-pinned rebuild.
+	// Its target routing and its served projections must still agree with the
+	// authoritative active plan before the new generation becomes visible.
+	// Configuration replacement intentionally retains old Corpus routes until
+	// a fresh rebuild moves them onto the new owner's prepared projections.
+	var activePlan string
+	if err = tx.QueryRow(ctx, `SELECT COALESCE((SELECT plan_id FROM active_pipeline_plan),'')`).Scan(&activePlan); err != nil {
+		return false, err
+	}
+	routing, err := planIngestionRouting(ctx, tx, activePlan)
+	if err != nil {
+		return false, err
+	}
+	expected, err := json.Marshal(routing)
+	if err != nil {
+		return false, err
+	}
+	var compatible bool
+	if err = tx.QueryRow(ctx, `SELECT t.ingestion_routing IS NOT NULL AND ($4::jsonb->>'default'='' OR (COALESCE(t.ingestion_routing->>'default','')=COALESCE($4::jsonb->>'default','') AND COALESCE(t.ingestion_routing->'routes','{}'::jsonb)=COALESCE($4::jsonb->'routes','{}'::jsonb)))
+ AND NOT EXISTS(SELECT 1 FROM records rec JOIN record_versions v ON (v.organization,v.id)=(rec.organization,rec.current_version_id)
+ JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
+ JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.generation_id)=(v.organization,v.id,t.id) AND pc.role='served'
+ WHERE rec.organization=$1 AND rec.corpus_id=$2 AND $4::jsonb->>'default'<>'' AND pc.plugin_id<>COALESCE(t.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),t.ingestion_routing->>'default',''))
+ FROM projection_generations t WHERE t.id=$3`, org, op.CorpusID, op.TargetGenerationID, expected).Scan(&compatible); err != nil {
+		return false, err
+	}
+	if !compatible {
+		if err = failOperation(ctx, tx, op, operations.Error{Code: "unsupported_vector_space", Message: "the rebuilt generation no longer matches the serving ingestion routing"}); err != nil {
 			return false, err
 		}
 		if err = tx.Commit(ctx); err != nil {

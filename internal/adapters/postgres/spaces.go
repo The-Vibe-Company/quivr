@@ -116,11 +116,49 @@ func (s ContentStore) VectorSpaces(ctx context.Context, org, corpusID string) (c
 	if err != nil {
 		return g, nil, 0, notFound(err)
 	}
-	current := `FROM segments sg JOIN records r ON (r.organization,r.current_version_id)=(sg.organization,sg.version_id) JOIN record_versions v ON (v.organization,v.id)=(sg.organization,sg.version_id)
+	// Count each Version's independent cuts once, then aggregate all carried
+	// spaces in one snapshot. Correlated missing-segment checks per space can
+	// exhaust the serving query budget during an evaluation backfill.
+	rows, err := s.Pool.Query(ctx, `WITH current AS MATERIALIZED (
+ SELECT sg.id AS segment_id,sg.version_id,pc.plugin_id,pc.role
+ FROM segments sg JOIN records r ON (r.organization,r.current_version_id)=(sg.organization,sg.version_id)
+ JOIN record_versions v ON (v.organization,v.id)=(sg.organization,sg.version_id)
  JOIN projection_coverage pc ON (pc.organization,pc.version_id,pc.segmentation_id,pc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3)
- WHERE sg.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL
+ WHERE sg.organization=$1 AND r.corpus_id=$2 AND `+eligibleVersionSQL+`
+), carried AS (
+ SELECT sp.id,COALESCE(vs.owner_plugin_id,'') AS owner FROM unnest($4::text[]) sp(id) LEFT JOIN vector_spaces vs ON vs.id=sp.id
+), per_version AS (
+ SELECT plugin_id,version_id,role,count(*) AS segments FROM current GROUP BY plugin_id,version_id,role
+), vectors AS MATERIALIZED (
+ SELECT cur.plugin_id,cur.version_id,ec.space_id,count(*) AS covered
+ FROM current cur JOIN embedding_coverage ec ON ec.organization=$1 AND ec.segment_id=cur.segment_id AND ec.generation_id=$3
+ WHERE ec.space_id=ANY($4::text[])
+ GROUP BY cur.plugin_id,cur.version_id,ec.space_id
+)
+SELECT sp.id,COALESCE(sum(vec.covered),0)::bigint,COALESCE(sum(p.segments),0)::bigint,
+ COALESCE(sum(p.segments) FILTER(WHERE p.role='served'),0)::bigint,
+ count(p.version_id) FILTER(WHERE vec.covered=p.segments),
+ (SELECT COALESCE(sum(segments),0)::bigint FROM per_version WHERE role='served')
+FROM carried sp LEFT JOIN per_version p ON p.plugin_id=sp.owner
+ LEFT JOIN vectors vec ON vec.plugin_id=p.plugin_id AND vec.version_id=p.version_id AND vec.space_id=sp.id
+GROUP BY sp.id`, org, corpusID, g.ID, g.VectorSpaces())
+	if err != nil {
+		return g, nil, 0, err
+	}
+	type counts struct{ covered, total, serving, versions int64 }
+	bySpace := make(map[string]counts)
 	var total int64
-	if err = s.Pool.QueryRow(ctx, `SELECT count(*) `+current+` AND pc.role='served'`, org, corpusID, g.ID).Scan(&total); err != nil {
+	for rows.Next() {
+		var id string
+		var c counts
+		if err = rows.Scan(&id, &c.covered, &c.total, &c.serving, &c.versions, &total); err != nil {
+			rows.Close()
+			return g, nil, 0, err
+		}
+		bySpace[id] = c
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
 		return g, nil, 0, err
 	}
 	out := []content.SpaceCoverage{}
@@ -136,19 +174,13 @@ func (s ContentStore) VectorSpaces(ctx context.Context, org, corpusID string) (c
 		if g.Serves(id) {
 			c.GenerationRole = content.SpaceServed
 		}
-		if err = s.Pool.QueryRow(ctx, `SELECT count(*) `+current+` AND pc.plugin_id=$5 AND EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=$4)`, org, corpusID, g.ID, id, c.OwnerPluginID).Scan(&c.Segments); err != nil {
-			return g, nil, 0, err
+		counts := bySpace[id]
+		c.Segments, c.VersionsCovered = counts.covered, counts.versions
+		c.TotalSegments = &counts.total
+		if c.OwnerPluginID == "" {
+			counts.serving = total
 		}
-		var ownerSegments int64
-		if err = s.Pool.QueryRow(ctx, `SELECT count(*) `+current+` AND pc.plugin_id=$4`, org, corpusID, g.ID, c.OwnerPluginID).Scan(&ownerSegments); err != nil {
-			return g, nil, 0, err
-		}
-		c.TotalSegments = &ownerSegments
-		if err = s.Pool.QueryRow(ctx, `SELECT count(DISTINCT v.id) `+current+` AND pc.plugin_id=$4 AND NOT EXISTS(
-          SELECT 1 FROM segments missing WHERE missing.organization=pc.organization AND missing.segmentation_id=pc.segmentation_id AND NOT EXISTS(
-           SELECT 1 FROM embedding_coverage ec WHERE ec.organization=missing.organization AND ec.segment_id=missing.id AND ec.generation_id=$3 AND ec.space_id=$5))`, org, corpusID, g.ID, c.OwnerPluginID, id).Scan(&c.VersionsCovered); err != nil {
-			return g, nil, 0, err
-		}
+		c.ServingSegments = &counts.serving
 		out = append(out, c)
 	}
 	slices.SortStableFunc(out, func(a, b content.SpaceCoverage) int {

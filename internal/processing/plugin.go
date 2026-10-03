@@ -316,6 +316,34 @@ func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content
 	return data, nil
 }
 
+// FillIndependent derives an owner's own segmentation and vectors for a
+// backfill. Unlike Fill, it does not require the owner to serve the
+// generation: an evaluation owner may have no projection yet, so derive
+// creates its segmentation and artifacts before the caller publishes them.
+// When the owner's segmentation and artifacts already exist, derive reuses
+// them and preserves its stored-cut conflict policy.
+func (d PluginDeriver) FillIndependent(ctx context.Context, org, corpusID string, v content.Version, spaces []string) (_ content.Segmentation, _ []content.EmbeddingData, err error) {
+	if len(spaces) == 0 {
+		return content.Segmentation{}, nil, ErrSpaceUnowned
+	}
+	d = d.forSpace(ctx, spaces[0])
+	defer func() {
+		err = d.failure(err)
+	}()
+	if err = d.bind(ctx); err != nil {
+		return content.Segmentation{}, nil, err
+	}
+	if d.Plugin == nil {
+		return content.Segmentation{}, nil, ErrSpaceUnowned
+	}
+	for _, key := range spaces {
+		if !d.owns(key) {
+			return content.Segmentation{}, nil, fmt.Errorf("%w: the pinned ingestion plugin does not own space %s", ErrSpaceUnowned, key)
+		}
+	}
+	return d.derive(ctx, org, corpusID, v, spaces)
+}
+
 // save stores the plugin's segments as the Version's segmentation. Another
 // answer already stored for the Version is a refusal: the plugin is not
 // deterministic, and search would change under a rebuild.

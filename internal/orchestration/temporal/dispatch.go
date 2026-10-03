@@ -63,6 +63,9 @@ func (r *Runtime) dispatch(ctx context.Context) {
 	}
 	if r.Evaluation != nil {
 		poll(time.Second, r.ingestionEvaluationIntents())
+		if r.Evaluation.Serving != nil {
+			poll(200*time.Millisecond, r.servingProjectionIntents())
+		}
 	}
 	lanes.Wait()
 }

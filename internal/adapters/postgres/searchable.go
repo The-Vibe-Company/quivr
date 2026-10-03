@@ -198,8 +198,7 @@ var _ content.SegmentationStore = ContentStore{}
 
 func (s ContentStore) BaselineProgress(ctx context.Context, org, id, state, code string, quarantined bool) error {
 	if !quarantined {
-		_, err := s.Pool.Exec(ctx, `UPDATE record_versions SET processing=$3,error_code=$4 WHERE organization=$1 AND id=$2 AND NOT baseline_ready AND NOT quarantined`, org, id, state, code)
-		return err
+		return s.updatePinnedVersion(ctx, org, id, `UPDATE record_versions SET processing=$3,error_code=$4 WHERE organization=$1 AND id=$2 AND NOT baseline_ready AND NOT quarantined`, state, code)
 	}
 	return s.quarantine(ctx, org, id, state, code, nil)
 }
@@ -227,6 +226,13 @@ func (s ContentStore) quarantine(ctx context.Context, org, id, state, code strin
 	defer tx.Rollback(ctx)
 	if err = lockJournal(ctx, tx, org); err != nil {
 		return err
+	}
+	serves, err := pinnedOwnerServes(ctx, tx, org, id)
+	if err != nil {
+		return err
+	}
+	if !serves {
+		return tx.Commit(ctx)
 	}
 	var recordID, corpusID string
 	var ready, held bool
@@ -287,6 +293,22 @@ func (s ContentStore) Promote(ctx context.Context, org string, seg content.Segme
 	}
 	if digest != content.SegmentationDigest(seg) {
 		return content.ErrConflict
+	}
+	if err = loadGenerationIngestion(ctx, tx, &g); err != nil {
+		return err
+	}
+	var sourceMediaType string
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(ar.source_media_type,''),'text/plain') FROM record_versions v JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot) WHERE v.organization=$1 AND v.id=$2`, org, seg.VersionID).Scan(&sourceMediaType); err != nil {
+		return err
+	}
+	if g.IngestionRouting != nil && g.IngestionRouting.For(sourceMediaType) != "" && g.IngestionRouting.For(sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
+		if err = coverOwnerProjection(ctx, tx, org, g, seg, nil); err != nil {
+			return err
+		}
+		if err = queueServingProjection(ctx, tx, org, seg.VersionID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID); err != nil {
 		return err

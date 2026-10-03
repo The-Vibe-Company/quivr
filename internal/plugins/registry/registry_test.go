@@ -280,6 +280,21 @@ func TestIngestionEvaluationRoundTripsAcrossUpgradeAndRollback(t *testing.T) {
 		},
 	}
 	active, members := routedPlan(t, routing, words, pdf, evaluatorV1)
+	// Activating the already-enabled evaluation registration promotes its formats
+	// in one plan, retaining the old owner as evaluation for rollback.
+	enabled := evaluatorV1
+	enabled.State = registry.StateActive
+	promoted, err := registry.PlanActivation(active, members, enabled, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promotedRoles := roleMap(promoted.Roles)
+	if promotedRoles["ingestion-route:application/pdf"] != "example.evaluator@1.0.0" || promotedRoles["ingestion-evaluation:application/pdf:example.pdf"] != "example.pdf@1.0.0" || promotedRoles["ingestion-evaluation:application/pdf:example.evaluator"] != "" || promotedRoles["ingestion-default"] != "example.words@1.0.0" {
+		t.Fatalf("promotion must switch only the evaluated format and keep the previous owner: %v", promotedRoles)
+	}
+	if replay, err := registry.PlanActivation(registry.Plan{Roles: promoted.Roles}, members, enabled, nil); err != nil || !replay.Unchanged {
+		t.Fatalf("repeated activation must leave the promoted plan unchanged: %+v %v", replay, err)
+	}
 	upgrade, err := registry.PlanActivation(active, members, evaluatorV2, nil)
 	if err != nil {
 		t.Fatal(err)

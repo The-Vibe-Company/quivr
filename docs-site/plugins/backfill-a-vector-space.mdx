@@ -1,14 +1,14 @@
 ---
 title: "Fill a new vector space for past articles"
-description: "After you add an embedding model to your ingestion plugin, give the articles you already have vectors in its space, then make search use it."
+description: "Fill an embedding model or evaluation plugin on past articles before making search use it."
 keywords: ["backfill", "vector space", "embedding model", "promote", "evaluation space", "reprocess"]
 ---
 
-A new embedding model enters as an evaluation space of your ingestion plugin. Articles ingested from then on get vectors in it, but the ones you already have do not. A backfill fills that space for a Corpus's past articles, at low priority, and a promotion then makes search use it. It is the last step of [Upgrade a plugin with no downtime](/plugins/upgrade-a-plugin).
+A new embedding model enters as an evaluation space of your ingestion plugin. Articles ingested from then on get vectors in it, but the ones you already have do not. A backfill fills that space for a Corpus's past articles, at low priority, and a promotion then makes search use it. You can also backfill a second plugin selected in `ingestion.evaluation`; it creates its own segments from each article's canonical Parts. See [Configuration](/reference/configuration#ingestion-routing) for the selection and [Switch plugins without restarting](/plugins/switch-plugins-without-restarting#promote-an-evaluation-plugin) for promotion.
 
 ## Prerequisites
 
-- A version of your ingestion plugin whose manifest declares the new space, activated with it as `evaluation` and the current one as `served` (see [Switch plugins without restarting](/plugins/switch-plugins-without-restarting)). It must cut articles into the same segments as the version that ingested them.
+- A version of your ingestion plugin whose manifest declares the new space, activated with it as `evaluation` and the current one as `served` (see [Switch plugins without restarting](/plugins/switch-plugins-without-restarting)). For another model of the same plugin, it must preserve that plugin's stored segments. A second evaluation plugin can use different cuts.
 - A key of the Organization that owns the Corpus with the actions `plugins:admin`, `operations:read` (to follow the backfill) and `operations:write` (to pause, resume or cancel it), in `QUIVR_OPERATOR_KEY`, and the Corpus id in `CORPUS_ID`.
 - Optional: an `input_price` on the new space in the manifest (`usd_per_million_tokens`), so the estimate shows a cost. Without it the cost is unknown.
 
@@ -31,7 +31,7 @@ EOF
  "input_tokens": 9600000, "estimated_seconds": 6000, "duration_basis": "rate", "estimated_cost_usd": 0.2, "confirmation_required": true}
 ```
 
-`registration_id` selects any ingestion registration in the active plan; omit it to use the default ingestion plugin. `spaces` defaults to that plugin's evaluation spaces; name them in `spaces` to choose. Only articles segmented by that plugin are in scope. To fill only part of the Corpus, add `accepted_after` or `accepted_before`: the time Quivr accepted each article. `estimated_seconds` uses the deployment's `backfill.rate`, or the recent throughput when it is slower (`duration_basis`).
+`registration_id` selects any ingestion registration in the active plan; omit it to use the default ingestion plugin. `spaces` defaults to that plugin's evaluation spaces; name them in `spaces` to choose. For a second plugin, articles of the source formats assigned to it in the pinned plan are in scope, including articles without that plugin's segments. Existing segments of that owner are reused. Name its primary space explicitly when preparing an owner switch. If the owner has no segments yet, the dry run estimates segments and tokens from the current served projection; completion counters use the new owner's actual cuts. To fill only part of the Corpus, add `accepted_after` or `accepted_before`: the time Quivr accepted each article. `estimated_seconds` uses the deployment's `backfill.rate`, or the recent throughput when it is slower (`duration_basis`).
 
 </Step>
 <Step title="Start it">
@@ -93,6 +93,12 @@ curl -s "$QUIVR_API_URL/v0/corpora/$CORPUS_ID/vector-spaces" -H "Authorization: 
 
 The new space is `served` and covers every segment produced by its owner. Semantic hits name it in `vector_space_id`.
 
+## Fill and promote another plugin
+
+Select the evaluation plugin's `registration_id` and name its primary space in `spaces` in both the dry run and the start request. Backfill every affected Corpus. Different segment offsets are allowed when this owner has no projection yet; the current served projection stays searchable throughout.
+
+When coverage is complete, activate that same registration once. This switches its configured evaluation formats to served together. It keeps the previous owner's segments and vectors for rollback. Follow [Promote an evaluation plugin](/plugins/switch-plugins-without-restarting#promote-an-evaluation-plugin) for the activation and rollback checks. The space promotion above changes models within one owner; it does not select a different plugin for a format.
+
 ## Go back to the previous model
 
 Promote the former space the same way. It stayed an evaluation space and kept its vectors, so search uses it again at once. A promotion survives restarts, activations and rollbacks while the ingestion plugin enables both spaces. Once a plugin version stops declaring one of them, its own `spaces` settings decide again.
@@ -103,7 +109,7 @@ Promote the former space the same way. It stayed an evaluation space and kept it
 - It is pinned to the Pipeline Plan active when it started, like other work, and fails with `pinned_plugin_unavailable` or `pinned_plan_stopped` rather than moving to another plugin version.
 - On its first step, the Corpus's search index starts carrying the new space, so articles ingested from then on get their vectors from live ingestion. The backfill fills only the articles that already had theirs.
 - It creates no new Version and no content event in the change feed. Articles outside its window are not touched.
-- An article the plugin now cuts into other segments is skipped and counted as `skipped_segmentation_differs`: rebuild the Corpus to re-cut it (see [Write an ingestion plugin](/plugins/write-an-ingestion-plugin)). A refusal by the plugin is counted as `skipped_ingestion_refused`, and an article the plugin cannot embed within its deadline as `skipped_plugin_deadline`. Rerun the backfill to try skipped articles again.
+- If this plugin already has stored segments, an article it now cuts differently is skipped and counted as `skipped_segmentation_differs`: rebuild the Corpus to re-cut it (see [Write an ingestion plugin](/plugins/write-an-ingestion-plugin)). A refusal by the plugin is counted as `skipped_ingestion_refused`, and an article the plugin cannot embed within its deadline as `skipped_plugin_deadline`. Rerun the backfill to try skipped articles again.
 
 ## Troubleshooting
 

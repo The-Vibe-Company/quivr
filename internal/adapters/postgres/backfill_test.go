@@ -503,3 +503,200 @@ func TestBackfillScopeCheckpointAndControl(t *testing.T) {
 		t.Fatalf("pins left by a queued backfill canceled: %d %v", pins, err)
 	}
 }
+
+// A backfill follows the accepted source media assignments and the selected
+// owner's projection. Missing owner coverage takes the independent path;
+// an existing owner's cuts stay on the Fill path even when those cuts differ
+// from the served segmentation.
+func TestBackfillEvaluationSelectionAndAtomicCoverage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	f := newBackfillFixture(t, ctx, 3, 0)
+	store := f.store
+	secondaryRegistration, secondarySpace, secondaryVersion := addSecondaryOwner(t, ctx, f)
+	const secondaryPlugin = "example.secondary_fill"
+
+	_, err := f.pool.Exec(ctx, `INSERT INTO pipeline_plan_roles(plan_id,role,registration_id)
+VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, f.plan, "ingestion-evaluation:text/plain:"+secondaryPlugin, secondaryRegistration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.pool.Exec(ctx, `INSERT INTO pipeline_plan_roles(plan_id,role,registration_id)
+VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, f.plan, "ingestion-route:application/pdf", f.registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.pool.Exec(ctx, `UPDATE accepted_revisions SET source_media_type='application/pdf' WHERE organization=$1 AND record_id=$2`, f.org, f.recordOf[f.versions[0]]); err != nil {
+		t.Fatal(err)
+	}
+
+	existingVersion := content.Version{ID: f.versions[1], RecordID: f.recordOf[f.versions[1]], Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "Article 1 about the harbour."}}}}}
+	existing, err := content.PluginSegmentation(f.org, existingVersion, "plugin:"+secondaryPlugin+"@0.1.0", json.RawMessage(`{}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SaveSegmentation(ctx, f.org, existing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.pool.Exec(ctx, `INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id,role)
+VALUES($1,$2,$3,$4,'evaluation')`, f.org, existing.VersionID, f.generation.ID, existing.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	spec := operations.Backfill{RegistrationID: secondaryRegistration, Spaces: []string{secondarySpace}}
+	size, err := store.BackfillSize(ctx, f.org, spec, f.corpusID)
+	if err != nil || size.Versions != 3 || size.Segments != 4 {
+		t.Fatalf("evaluation size %+v %v, want one missing-owner cut and two stored owner cuts", size, err)
+	}
+	op, err := store.AcceptBackfill(ctx, f.org, f.corpusID, "evaluation-selection", []byte("evaluation-selection"), spec)
+	if err != nil || op.Backfill == nil || op.Backfill.PlanID != f.plan {
+		t.Fatalf("evaluation backfill acceptance %+v %v", op, err)
+	}
+
+	// A later active plan must not change the source assignments of this
+	// accepted operation.
+	nextPlan := f.plan + "-next"
+	if _, err = f.pool.Exec(ctx, `INSERT INTO pipeline_plans(id) VALUES($1)`, nextPlan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.pool.Exec(ctx, `INSERT INTO pipeline_plan_roles(plan_id,role,registration_id) VALUES($1,$2,$3)`, nextPlan, "ingestion-evaluation:application/pdf:"+secondaryPlugin, secondaryRegistration); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.pool.Exec(ctx, `UPDATE active_pipeline_plan SET plan_id=$1`, nextPlan); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := store.BackfillCandidates(ctx, f.org, op.ID, f.generation, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byVersion := map[string]backfill.Candidate{}
+	for _, candidate := range candidates {
+		byVersion[candidate.VersionID] = candidate
+	}
+	if _, found := byVersion[f.versions[0]]; found {
+		t.Fatalf("unrelated routed media was selected: %+v", byVersion[f.versions[0]])
+	}
+	missing, found := byVersion[f.versions[2]]
+	if !found || !missing.Independent || missing.OwnerPluginID != secondaryPlugin || missing.SourceMediaType != "text/plain" {
+		t.Fatalf("missing owner candidate %+v, all candidates %+v", missing, byVersion)
+	}
+	stored, found := byVersion[f.versions[1]]
+	if !found || stored.Independent || stored.Recipe != "plugin:"+secondaryPlugin+"@0.1.0" {
+		t.Fatalf("stored owner candidate %+v, all candidates %+v", stored, byVersion)
+	}
+	if _, found = byVersion[secondaryVersion]; !found {
+		t.Fatalf("secondary owner Version was not selected: %+v", byVersion)
+	}
+
+	target, err := store.BeginBackfill(ctx, f.org, op.ID, f.plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := store.CarryBackfillSpaces(ctx, f.org, op.ID)
+	if err != nil || !g.Carries(secondarySpace) {
+		t.Fatalf("carry evaluation space %+v %v", g, err)
+	}
+	independentVersion := content.Version{ID: f.versions[2], RecordID: f.recordOf[f.versions[2]], Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "Article 2 about the harbour."}}}}}
+	independent, err := content.PluginSegmentation(f.org, independentVersion, "plugin:"+secondaryPlugin+"@0.1.0", json.RawMessage(`{}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 6}, {PartKey: "body", Start: 7, End: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SaveSegmentation(ctx, f.org, independent); err != nil {
+		t.Fatal(err)
+	}
+	artifacts := make([]content.Embedding, 0, len(independent.Segments))
+	for _, segment := range independent.Segments {
+		artifact := content.Embedding{
+			ID:             "evaluation-" + segment.ID,
+			DerivationID:   "evaluation-derivation-" + segment.ID,
+			Organization:   f.org,
+			CorpusID:       f.corpusID,
+			VersionID:      independent.VersionID,
+			SegmentID:      segment.ID,
+			SegmentationID: independent.ID,
+			SpaceID:        secondarySpace,
+			Producer:       "plugin:" + secondaryPlugin + "@0.1.0",
+		}
+		if err = store.SaveEmbedding(ctx, artifact, content.VectorSpace{ID: secondarySpace, Manifest: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	before, err := store.Operation(ctx, f.org, op.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.CoverBackfillEvaluation(ctx, f.org, op.ID, content.Generation{ID: "other-generation"}, independent.VersionID, independent, artifacts); !errors.Is(err, postgres.ErrGenerationChanged) {
+		t.Fatalf("wrong generation: %v", err)
+	}
+	afterWrongGeneration, err := store.Operation(ctx, f.org, op.ID)
+	if err != nil || afterWrongGeneration.Backfill.Checkpoint != before.Backfill.Checkpoint {
+		t.Fatalf("wrong generation advanced checkpoint: before %+v after %+v err %v", before.Backfill, afterWrongGeneration.Backfill, err)
+	}
+	if err = store.CoverBackfillEvaluation(ctx, f.org, op.ID, g, independent.VersionID, independent, nil); !errors.Is(err, content.ErrInvalid) {
+		t.Fatalf("empty independent artifacts: %v", err)
+	}
+	wrongOwner := independent
+	wrongOwner.Recipe = "plugin:example.fill@0.1.0"
+	if err = store.CoverBackfillEvaluation(ctx, f.org, op.ID, g, independent.VersionID, wrongOwner, artifacts); !errors.Is(err, backfill.ErrInvalid) {
+		t.Fatalf("independent owner mismatch: %v", err)
+	}
+	var wrongTarget string
+	for _, space := range g.Spaces {
+		if space.OwnerPluginID == secondaryPlugin && space.ID != secondarySpace {
+			wrongTarget = space.ID
+			break
+		}
+	}
+	if wrongTarget == "" {
+		t.Fatal("fixture has no carried secondary space outside the target")
+	}
+	wrongTargetArtifacts := append([]content.Embedding(nil), artifacts...)
+	for _, artifact := range artifacts {
+		wrong := artifact
+		wrong.ID = "wrong-target-" + artifact.SegmentID
+		wrong.DerivationID = "wrong-target-derivation-" + artifact.SegmentID
+		wrong.SpaceID = wrongTarget
+		if err = store.SaveEmbedding(ctx, wrong, content.VectorSpace{ID: wrongTarget, Manifest: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		wrongTargetArtifacts = append(wrongTargetArtifacts, wrong)
+	}
+	if err = store.CoverBackfillEvaluation(ctx, f.org, op.ID, g, independent.VersionID, independent, wrongTargetArtifacts); !errors.Is(err, content.ErrInvalid) {
+		t.Fatalf("independent target mismatch: %v", err)
+	}
+	if err = store.CoverBackfillEvaluation(ctx, f.org, op.ID, g, independent.VersionID, independent, artifacts); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.Operation(ctx, f.org, op.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.CoverBackfillEvaluation(ctx, f.org, op.ID, g, independent.VersionID, independent, artifacts); err != nil {
+		t.Fatalf("replay independent coverage: %v", err)
+	}
+	replay, err := store.Operation(ctx, f.org, op.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.Backfill.Checkpoint != first.Backfill.Checkpoint || replay.Counters["versions_done"] != first.Counters["versions_done"] || replay.Counters["segments"] != first.Counters["segments"] {
+		t.Fatalf("replay changed checkpoint/counters: first %+v %+v replay %+v %+v", first.Backfill, first.Counters, replay.Backfill, replay.Counters)
+	}
+	var projectionPlugin, projectionRole, projectionSegmentation string
+	if err = f.pool.QueryRow(ctx, `SELECT plugin_id,role,segmentation_id FROM projection_coverage WHERE organization=$1 AND version_id=$2 AND generation_id=$3 AND plugin_id=$4`, f.org, independent.VersionID, g.ID, secondaryPlugin).Scan(&projectionPlugin, &projectionRole, &projectionSegmentation); err != nil {
+		t.Fatal(err)
+	}
+	if projectionPlugin != secondaryPlugin || projectionRole != "evaluation" || projectionSegmentation != independent.ID {
+		t.Fatalf("independent projection coverage %q %q %q", projectionPlugin, projectionRole, projectionSegmentation)
+	}
+	var embeddingCoverage, checkpoint string
+	if err = f.pool.QueryRow(ctx, `SELECT count(*)::text,(SELECT checkpoint FROM backfills WHERE organization=$1 AND operation_id=$2) FROM embedding_coverage WHERE organization=$1 AND generation_id=$3 AND segment_id=ANY($4)`, f.org, op.ID, g.ID, []string{independent.Segments[0].ID, independent.Segments[1].ID}).Scan(&embeddingCoverage, &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if embeddingCoverage != "2" || checkpoint != independent.VersionID {
+		t.Fatalf("independent coverage/checkpoint count=%s checkpoint=%q", embeddingCoverage, checkpoint)
+	}
+	if target.Operation.State != operations.StateRunning {
+		t.Fatalf("target operation state %+v", target.Operation)
+	}
+}

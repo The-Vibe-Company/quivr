@@ -187,6 +187,9 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 		spaces = []plugins.SearchSpace{spaces[selected]}
 		spaces[0].Role = content.SpaceServed
 	}
+	if s.Registry != nil && len(spaces) == 0 && q.EvaluationPlugin == "" {
+		return out, nil
+	}
 	session := plugins.NewRetrievalSession(m, plugins.SearchRequest{
 		InvocationID: invocationID(), OrganizationID: scope.Organization, Configuration: s.Ranker.Configuration(),
 		Profile: q.Profile, Query: plugins.SearchQuery{Text: query, Mode: q.Mode}, Limit: q.Limit,
@@ -318,12 +321,16 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) (
 		byID := map[string]content.SpaceCoverage{}
 		for _, c := range spaces {
 			if r.Generation.Carries(c.ID) {
+				if c.ServingSegments != nil && *c.ServingSegments == 0 {
+					c.GenerationRole = content.SpaceEvaluation
+				}
 				byID[c.ID] = c
 			}
 		}
 		if i == 0 {
-			for _, c := range spaces {
-				if _, ok := byID[c.ID]; !ok {
+			for _, listed := range spaces {
+				c, ok := byID[listed.ID]
+				if !ok {
 					continue
 				}
 				owner := plugins.SpaceOwner{Kind: "engine"}
@@ -342,6 +349,9 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) (
 		})
 		for j := range out {
 			if c, ok := byID[out[j].ID]; ok {
+				if c.GenerationRole == content.SpaceServed {
+					out[j].Role = content.SpaceServed
+				}
 				out[j].Coverage.Segments += c.Segments
 				out[j].Coverage.Total += ownerTotal(c, total)
 			}

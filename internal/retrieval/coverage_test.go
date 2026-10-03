@@ -12,11 +12,12 @@ import (
 type countingRegistry struct {
 	generation, space string
 	reads             int
+	routing           *content.IngestionRouting
 }
 
 func (r *countingRegistry) VectorSpaces(context.Context, string, string) (content.Generation, []content.SpaceCoverage, int64, error) {
 	r.reads++
-	return content.Generation{ID: r.generation, SpaceID: r.space}, []content.SpaceCoverage{{GenerationRole: content.SpaceServed, Segments: int64(r.reads)}}, 10, nil
+	return content.Generation{ID: r.generation, SpaceID: r.space, IngestionRouting: r.routing}, []content.SpaceCoverage{{GenerationRole: content.SpaceServed, Segments: int64(r.reads)}}, 10, nil
 }
 
 // Coverage is counted once per TTL and routed generation and space, not per
@@ -51,4 +52,10 @@ func TestCoverageIsReadOncePerTTLAndGeneration(t *testing.T) {
 	if got := read(); registry.reads != 4 || got != 4 {
 		t.Fatalf("after a space promotion: %d reads, coverage %d; want the promoted space read at once", registry.reads, got)
 	}
+	registry.routing = &content.IngestionRouting{Default: "example.first", Routes: map[string]string{"text/plain": "example.second"}}
+	route.Generation.IngestionRouting = registry.routing
+	if got := read(); registry.reads != 5 || got != 5 {
+		t.Fatalf("after a source-route promotion: %d reads, coverage %d; want new serving-owner coverage at once", registry.reads, got)
+	}
+
 }

@@ -52,20 +52,27 @@ func pluginGeneration(id string, projected bool, spaces ...string) content.Gener
 }
 
 // spaceRegistry lists each routed generation's spaces, the served one first.
-type spaceRegistry spaceRouting
+type spaceRegistry struct {
+	routing        spaceRouting
+	onlyEvaluation bool
+}
 
 func (r spaceRegistry) VectorSpaces(_ context.Context, _ string, id string) (content.Generation, []content.SpaceCoverage, int64, error) {
-	g := r[id]
+	g := r.routing[id]
 	out := []content.SpaceCoverage{}
 	for _, space := range g.VectorSpaces() {
 		c := content.SpaceCoverage{GenerationRole: content.SpaceEvaluation}
-		if space == g.SpaceID {
+		if g.Serves(space) {
 			c.GenerationRole = content.SpaceServed
 		}
 		for _, projected := range g.Spaces {
 			if projected.ID == space {
 				c.OwnerPluginID = projected.OwnerPluginID
 			}
+		}
+		if r.onlyEvaluation && c.OwnerPluginID == "example.second" {
+			zero := int64(0)
+			c.ServingSegments = &zero
 		}
 		c.ID, c.Metric, c.QueryModalities = space, "cosine", []string{"text"}
 		c.VectorSpace.Dimensions = 2
@@ -110,11 +117,13 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 		builtin                           int    // built-in encoder calls
 		evaluationPlugin, evaluationSpace string
 		otherOwner                        bool
+		corpusOnlyEvaluation              bool
 	}{
 		{name: "explicit independent evaluation", corpora: []string{"plugin"}, request: hybrid("example.large@1"), evaluationPlugin: "example.second", evaluationSpace: "example.large@1", otherOwner: true, space: "example.large@1", encoded: "org/example.large@1/lanterne"},
 		{name: "evaluation across different served spaces", corpora: []string{"plugin", "mixed"}, request: hybrid("example.large@1"), evaluationPlugin: "example.second", evaluationSpace: "example.large@1", otherOwner: true, space: "example.large@1", encoded: "org/example.large@1/lanterne"},
 		{name: "evaluation space missing from one corpus", corpora: []string{"plugin", "builtin"}, request: hybrid("example.large@1"), evaluationPlugin: "example.second", evaluationSpace: "example.large@1", otherOwner: true, wantErr: retrieval.ErrUnsupported},
 		{name: "evaluation owner cannot join ordinary ranking", corpora: []string{"plugin"}, request: hybrid("example.large@1"), otherOwner: true, wantErr: retrieval.ErrPluginInvalid},
+		{name: "owner serving another format cannot delay this corpus", corpora: []string{"plugin"}, request: hybrid("example.large@1"), otherOwner: true, corpusOnlyEvaluation: true, encodeErr: errors.New("connection refused"), wantErr: retrieval.ErrPluginInvalid},
 		{name: "evaluation owner mismatch", corpora: []string{"plugin"}, request: hybrid("example.large@1"), evaluationPlugin: "another", evaluationSpace: "example.large@1", otherOwner: true, wantErr: retrieval.ErrUnsupported},
 		{name: "evaluation owner without space", corpora: []string{"plugin"}, request: hybrid("example.large@1"), evaluationPlugin: "example.second", wantErr: retrieval.ErrUnsupported},
 		{name: "evaluation space without owner", corpora: []string{"plugin"}, request: hybrid("example.large@1"), evaluationSpace: "example.large@1", wantErr: retrieval.ErrUnsupported},
@@ -139,6 +148,9 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 				g := pluginGeneration("gen-plugin", true, "example.small@1", "example.large@1")
 				g.Spaces[0].Role, g.Spaces[0].OwnerPluginID = content.SpaceServed, "example.first"
 				g.Spaces[1].Role, g.Spaces[1].OwnerPluginID = content.SpaceEvaluation, "example.second"
+				if c.corpusOnlyEvaluation {
+					g.Spaces[1].Role = content.SpaceServed
+				}
 				routed["plugin"] = g
 				mixed := routed["mixed"]
 				mixed.Spaces[0].Role, mixed.Spaces[0].OwnerPluginID = content.SpaceServed, "example.builtin"
@@ -149,7 +161,7 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 			calls := 0
 			encoder := &pluginEncoder{err: c.encodeErr}
 			s := retrieval.Service{Embedder: countingEmbedder{calls: &calls}, Routing: routed, Projection: p, Spaces: encoder,
-				Ranker: &scriptedRanker{answer: asking(c.request)}, Registry: spaceRegistry(routed),
+				Ranker: &scriptedRanker{answer: asking(c.request)}, Registry: spaceRegistry{routing: routed, onlyEvaluation: c.corpusOnlyEvaluation},
 				Content: content.Service{RecordStore: fakeRecords{}, Baseline: fakeBaseline{}, Blobs: fakeBlobs{}, Embeddings: &fakeEmbeddings{}}}
 			if c.noPlugin {
 				s.Spaces = nil

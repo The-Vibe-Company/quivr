@@ -13,26 +13,169 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// backfillScopeSQL selects the current eligible Versions of Corpus $2 that
-// generation $3 projects with a plugin segmentation, accepted in the window
-// [$4, $5) when one is set, whose segments are all enriched (a vector in the
-// served space $6 or in another space than the targets $7) and one of which
-// misses a vector in a target space. A Version not yet enriched is left to
-// live enrichment, which fills the target spaces once the generation carries
-// them; a target already promoted to served still finds the Versions it
-// misses. It requires parameters $1
-// (organization) to $7 and exposes aliases r, v and pc.
-const backfillScopeSQL = `records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
- JOIN projection_coverage pc ON pc.organization=v.organization AND pc.version_id=v.id AND pc.generation_id=$3
- JOIN segmentations s ON s.organization=pc.organization AND s.id=pc.segmentation_id
+// backfillScopeSQL selects current eligible Versions for the requested
+// registration and generation. Parameters are:
+//
+//	$1 organization, $2 corpus, $3 generation, $4 accepted-after,
+//	$5 accepted-before, $6 served space, $7 target spaces,
+//	$8 registration, $9 pinned plan (or empty for the active plan),
+//	$10 authorize complete owner coverage instead of selecting gaps.
+//
+// The served projection remains the baseline that makes a Version eligible
+// for backfill. The owner projection is optional: an absent owner projection
+// is an independent-fill candidate. An explicit evaluation assignment can
+// admit an existing owner cut without requiring served-space coverage, while
+// that stored cut still uses the Fill/segmentation-differs policy. A source
+// route assignment takes precedence over the default assignment; an
+// evaluation assignment is considered independently of the served route.
+//
+// The source media type comes only from accepted_revisions. The empty value is
+// normalized to text/plain, matching the value recorded at acceptance; no
+// normalizer output is consulted.
+const backfillScopeSQL = `(
+WITH selected AS (
+ SELECT r.id AS record_id,r.namespace,v.id AS version_id,
+   COALESCE(NULLIF(ar.source_media_type,''),'text/plain') AS source_media_type,
+   selected_pr.plugin_id AS plugin_id,
+   served_pc.segmentation_id AS served_segmentation_id,
+   owner_pc.segmentation_id AS owner_segmentation_id,
+   COALESCE(owner_s.recipe,'') AS owner_recipe,
+   EXISTS(
+     SELECT 1
+     FROM pipeline_plan_roles er
+     WHERE er.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
+       AND er.registration_id=$8
+       AND er.role='ingestion-evaluation:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')||':'||selected_pr.plugin_id
+   ) AS evaluation_match
+ FROM records r
+ JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
+ JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
+ JOIN projection_coverage served_pc ON served_pc.organization=v.organization AND served_pc.version_id=v.id AND served_pc.generation_id=$3 AND served_pc.role='served'
+ JOIN plugin_registrations selected_pr ON selected_pr.id=$8
+ LEFT JOIN projection_coverage owner_pc ON owner_pc.organization=v.organization AND owner_pc.version_id=v.id AND owner_pc.generation_id=$3 AND owner_pc.plugin_id=selected_pr.plugin_id
+ LEFT JOIN segmentations owner_s ON owner_s.organization=owner_pc.organization AND owner_s.id=owner_pc.segmentation_id
  LEFT JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order
- WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + ` AND s.recipe LIKE 'plugin:%'
- AND split_part(substring(s.recipe from 8),'@',1)=(SELECT pr.plugin_id FROM plugin_registrations pr WHERE pr.id=$8)
- AND ($4::timestamptz IS NULL OR rc.accepted_at>=$4) AND ($5::timestamptz IS NULL OR rc.accepted_at<$5)
- AND NOT EXISTS(SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.version_id=v.id AND sg.segmentation_id=pc.segmentation_id
-  AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec JOIN vector_spaces vs ON vs.id=ec.space_id WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND vs.owner_plugin_id=split_part(substring(s.recipe from 8),'@',1) AND (ec.space_id=$6 OR ec.space_id<>ALL($7::text[]))))
- AND EXISTS(SELECT 1 FROM segments sg CROSS JOIN unnest($7::text[]) t(space) WHERE sg.organization=v.organization AND sg.version_id=v.id AND sg.segmentation_id=pc.segmentation_id
-  AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=t.space))`
+ WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + `
+   AND ($4::timestamptz IS NULL OR rc.accepted_at>=$4)
+   AND ($5::timestamptz IS NULL OR rc.accepted_at<$5)
+   AND NOT EXISTS(
+     SELECT 1
+     FROM vector_spaces target_vs
+     WHERE target_vs.id=ANY($7::text[])
+       AND target_vs.owner_plugin_id IS DISTINCT FROM selected_pr.plugin_id
+   )
+   AND (
+     EXISTS(
+       SELECT 1
+       FROM pipeline_plan_roles er
+       WHERE er.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
+         AND er.registration_id=$8
+         AND er.role='ingestion-evaluation:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')||':'||selected_pr.plugin_id
+     )
+     OR EXISTS(
+       SELECT 1
+     FROM pipeline_plan_roles rr
+       WHERE rr.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
+         AND rr.registration_id=$8
+         AND rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')
+         AND served_pc.plugin_id=selected_pr.plugin_id
+     )
+     OR (
+       NOT EXISTS(
+         SELECT 1
+         FROM pipeline_plan_roles rr
+         WHERE rr.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
+           AND rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')
+       )
+       AND served_pc.plugin_id=selected_pr.plugin_id
+       AND EXISTS(
+         SELECT 1
+         FROM pipeline_plan_roles mr
+         WHERE mr.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
+           AND mr.registration_id=$8
+           AND mr.role='ingestion:'||selected_pr.plugin_id
+       )
+       AND owner_s.recipe LIKE 'plugin:'||selected_pr.plugin_id||'@%'
+     )
+     OR (
+       NOT EXISTS(
+         SELECT 1
+         FROM pipeline_plan_roles rr
+         WHERE rr.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
+           AND rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')
+       )
+       AND served_pc.plugin_id=selected_pr.plugin_id
+       AND EXISTS(
+         SELECT 1
+         FROM pipeline_plan_roles dr
+         WHERE dr.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
+           AND dr.registration_id=$8
+           AND (
+             dr.role IN ('ingestion','ingestion-default')
+             OR (
+               dr.role LIKE 'ingestion:%'
+               AND NOT EXISTS(
+                 SELECT 1
+                 FROM pipeline_plan_roles defaults
+                 WHERE defaults.plan_id=dr.plan_id
+                   AND defaults.role IN ('ingestion','ingestion-default')
+               )
+               AND (
+                 NOT EXISTS(
+                   SELECT 1
+                   FROM pipeline_plan_roles members
+                   WHERE members.plan_id=dr.plan_id
+                     AND members.role LIKE 'ingestion:%'
+                     AND members.registration_id<>$8
+                 )
+                 OR selected_pr.plugin_id='core.ingest'
+               )
+             )
+           )
+       )
+     )
+   )
+)
+SELECT selected.record_id,selected.namespace,selected.version_id,selected.source_media_type,
+  selected.owner_recipe,
+  selected.plugin_id,
+  (selected.owner_segmentation_id IS NULL) AS independent,
+  COALESCE(selected.owner_segmentation_id,selected.served_segmentation_id) AS segmentation_id
+FROM selected
+WHERE $10::bool OR (
+  (
+    selected.owner_segmentation_id IS NULL
+    OR selected.evaluation_match
+    OR NOT EXISTS(
+      SELECT 1
+      FROM segments sg
+      WHERE sg.organization=$1 AND sg.version_id=selected.version_id AND sg.segmentation_id=selected.owner_segmentation_id
+        AND NOT EXISTS(
+          SELECT 1
+          FROM embedding_coverage ec
+          JOIN vector_spaces vs ON vs.id=ec.space_id
+          WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3
+            AND vs.owner_plugin_id=selected.plugin_id
+            AND (ec.space_id=$6 OR ec.space_id<>ALL($7::text[]))
+        )
+    )
+  )
+  AND (
+    selected.owner_segmentation_id IS NULL
+    OR EXISTS(
+      SELECT 1
+      FROM segments sg
+      CROSS JOIN unnest($7::text[]) target(space)
+      WHERE sg.organization=$1 AND sg.version_id=selected.version_id AND sg.segmentation_id=selected.owner_segmentation_id
+        AND NOT EXISTS(
+          SELECT 1
+          FROM embedding_coverage ec
+          WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=target.space
+        )
+    )
+  )
+)
+)`
 
 // RegisteredSpaces lists the vector space registry.
 func (s ContentStore) RegisteredSpaces(ctx context.Context) ([]content.RegisteredSpace, error) {
@@ -62,9 +205,10 @@ func (s ContentStore) BackfillSize(ctx context.Context, org string, spec operati
 	if !g.SpacesProjected {
 		return size, backfill.ErrRebuildRequired
 	}
-	err = s.Pool.QueryRow(ctx, `SELECT count(DISTINCT sg.version_id),count(*),COALESCE(sum(sg.end_offset-sg.start_offset),0) FROM segments sg
-WHERE (sg.organization,sg.version_id,sg.segmentation_id) IN (SELECT v.organization,v.id,pc.segmentation_id FROM `+backfillScopeSQL+`)`,
-		org, corpusID, g.ID, spec.AcceptedAfter, spec.AcceptedBefore, g.SpaceID, spec.Spaces, spec.RegistrationID).Scan(&size.Versions, &size.Segments, &size.CodePoints)
+	err = s.Pool.QueryRow(ctx, `SELECT count(DISTINCT scope.version_id),count(*),COALESCE(sum(sg.end_offset-sg.start_offset),0)
+FROM `+backfillScopeSQL+` scope
+JOIN segments sg ON sg.organization=$1 AND sg.version_id=scope.version_id AND sg.segmentation_id=scope.segmentation_id`,
+		org, corpusID, g.ID, spec.AcceptedAfter, spec.AcceptedBefore, g.SpaceID, spec.Spaces, spec.RegistrationID, spec.PlanID, false).Scan(&size.Versions, &size.Segments, &size.CodePoints)
 	return size, err
 }
 
@@ -147,7 +291,9 @@ func insertBackfill(ctx context.Context, tx pgx.Tx, org, id, corpusID, key strin
 	// must still name its registration for ingestion: its first step then
 	// runs on that plan even if a worker has not followed it yet.
 	var plan string
-	err := tx.QueryRow(ctx, `SELECT a.plan_id FROM active_pipeline_plan a JOIN pipeline_plan_roles r ON r.plan_id=a.plan_id AND (r.role='ingestion' OR r.role LIKE 'ingestion:%') AND r.registration_id=$1`, spec.RegistrationID).Scan(&plan)
+	err := tx.QueryRow(ctx, `SELECT a.plan_id FROM active_pipeline_plan a JOIN pipeline_plan_roles r ON r.plan_id=a.plan_id
+ AND r.registration_id=$1
+ AND (r.role IN ('ingestion','ingestion-default') OR r.role LIKE 'ingestion:%' OR r.role LIKE 'ingestion-route:%' OR r.role LIKE 'ingestion-evaluation:%')`, spec.RegistrationID).Scan(&plan)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return operations.Operation{}, backfill.ErrRegistrationNotActive
 	}
@@ -230,6 +376,9 @@ func (s ContentStore) CarryBackfillSpaces(ctx context.Context, org, id string) (
 		return content.Generation{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return content.Generation{}, err
+	}
 	op, err := runningBackfill(ctx, tx, org, id)
 	if err != nil {
 		return content.Generation{}, err
@@ -243,7 +392,7 @@ func (s ContentStore) CarryBackfillSpaces(ctx context.Context, org, id string) (
 	}
 	if _, counted := op.Counters["versions_in_scope"]; !counted {
 		var size int64
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM `+backfillScopeSQL, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID).Scan(&size); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM `+backfillScopeSQL+` scope`, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.PlanID, false).Scan(&size); err != nil {
 			return g, err
 		}
 		if err = addCounters(ctx, tx, org, id, map[string]int64{"versions_in_scope": size}); err != nil {
@@ -332,8 +481,12 @@ func (s ContentStore) BackfillCandidates(ctx context.Context, org, id string, g 
 	if op.Backfill == nil {
 		return nil, operations.ErrUnsupportedKind
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,(SELECT s2.recipe FROM segmentations s2 WHERE s2.organization=pc.organization AND s2.id=pc.segmentation_id) FROM `+backfillScopeSQL+` AND v.id>$9 ORDER BY v.id LIMIT $10`,
-		org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.Checkpoint, limit)
+	rows, err := s.Pool.Query(ctx, `SELECT scope.record_id,scope.version_id,scope.namespace,scope.source_media_type,scope.owner_recipe,scope.plugin_id,scope.independent
+FROM `+backfillScopeSQL+` scope
+WHERE scope.version_id>$11
+ORDER BY scope.version_id
+LIMIT $12`,
+		org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.PlanID, false, op.Backfill.Checkpoint, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +494,7 @@ func (s ContentStore) BackfillCandidates(ctx context.Context, org, id string, g 
 	out := []backfill.Candidate{}
 	for rows.Next() {
 		var c backfill.Candidate
-		if err = rows.Scan(&c.RecordID, &c.VersionID, &c.Recipe); err != nil {
+		if err = rows.Scan(&c.RecordID, &c.VersionID, &c.Namespace, &c.SourceMediaType, &c.Recipe, &c.OwnerPluginID, &c.Independent); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -399,6 +552,9 @@ func (s ContentStore) CoverBackfill(ctx context.Context, org, id string, g conte
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return err
+	}
 	op, err := runningBackfill(ctx, tx, org, id)
 	if err != nil {
 		return err
@@ -444,10 +600,99 @@ FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v
 	return tx.Commit(ctx)
 }
 
+// CoverBackfillEvaluation records one independent owner's projection and
+// target vectors, then advances the backfill checkpoint in the same
+// transaction. The external projection writes happen before this database
+// fence and are idempotent on retry.
+func (s ContentStore) CoverBackfillEvaluation(ctx context.Context, org, id string, g content.Generation, versionID string, seg content.Segmentation, artifacts []content.Embedding) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return err
+	}
+	op, err := runningBackfill(ctx, tx, org, id)
+	if err != nil {
+		return err
+	}
+	var eligible, routed bool
+	err = tx.QueryRow(ctx, `SELECT `+eligibleVersionSQL+` AND r.corpus_id=$3 AND r.current_version_id=v.id,`+routedGenerationSQL("r.organization", "r.corpus_id")+`=$4
+FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR SHARE OF r,v`, org, versionID, op.CorpusID, g.ID).Scan(&eligible, &routed)
+	if err != nil {
+		return notFound(err)
+	}
+	if !routed {
+		return ErrGenerationChanged
+	}
+	if eligible {
+		if seg.VersionID != versionID {
+			return content.ErrInvalid
+		}
+		var owner string
+		err = tx.QueryRow(ctx, `SELECT scope.plugin_id
+FROM `+backfillScopeSQL+` scope
+WHERE scope.version_id=$11`, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.PlanID, true, versionID).Scan(&owner)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return backfill.ErrInvalid
+		}
+		if err != nil {
+			return err
+		}
+		if owner == "" || owner != content.PluginOfRecipe(seg.Recipe) {
+			return backfill.ErrInvalid
+		}
+		if len(artifacts) == 0 {
+			return content.ErrInvalid
+		}
+		if len(op.Backfill.Spaces) == 0 || len(seg.Segments) == 0 {
+			return content.ErrInvalid
+		}
+		targets := make(map[string]bool, len(op.Backfill.Spaces))
+		for _, space := range op.Backfill.Spaces {
+			targets[space] = true
+		}
+		segmentTargets := make(map[string]map[string]bool, len(seg.Segments))
+		for _, p := range seg.Segments {
+			segmentTargets[p.ID] = map[string]bool{}
+		}
+		for _, e := range artifacts {
+			covered, ok := segmentTargets[e.SegmentID]
+			if e.Organization != org || e.VersionID != versionID || e.SegmentationID != seg.ID || !targets[e.SpaceID] || !ok {
+				return content.ErrInvalid
+			}
+			covered[e.SpaceID] = true
+		}
+		for _, covered := range segmentTargets {
+			for target := range targets {
+				if !covered[target] {
+					return content.ErrInvalid
+				}
+			}
+		}
+		if err = coverOwnerProjection(ctx, tx, org, g, seg, artifacts); err != nil {
+			return err
+		}
+	}
+	counters := map[string]int64{"versions_done": 1, "segments": int64(len(seg.Segments))}
+	if !eligible {
+		counters = map[string]int64{"versions_skipped": 1, "skipped_" + backfill.SkipUnavailable: 1}
+	}
+	if err = advance(ctx, tx, org, id, versionID, counters); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // advance moves a backfill's checkpoint and adds to its counters.
 func advance(ctx context.Context, tx pgx.Tx, org, id, versionID string, counters map[string]int64) error {
-	if _, err := tx.Exec(ctx, `UPDATE backfills SET checkpoint=GREATEST(checkpoint,$3) WHERE organization=$1 AND operation_id=$2`, org, id, versionID); err != nil {
+	tag, err := tx.Exec(ctx, `UPDATE backfills SET checkpoint=$3 WHERE organization=$1 AND operation_id=$2 AND checkpoint<$3`, org, id, versionID)
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
 	}
 	return addCounters(ctx, tx, org, id, counters)
 }

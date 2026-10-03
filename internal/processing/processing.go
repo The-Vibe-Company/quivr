@@ -86,6 +86,22 @@ func (s Service) route(ctx context.Context, org string, v content.Version) (rout
 	if err != nil {
 		return route{}, err
 	}
+	// Work admitted before a source cutover continues deriving with its own
+	// owner. Publication separately checks the live serving route.
+	if w, ok := plugins.WorkOf(ctx); ok && w.Kind == plugins.WorkIngestion {
+		driver := s.Plugin.forVersion(ctx, v)
+		if driver.Plugin != nil && g.ServedFor(content.PluginOfRecipe(driver.Plugin.Recipe())) == "" {
+			spaces := driver.Plugin.Spaces()
+			if len(spaces) > 0 && g.Carries(spaces[0]) {
+				g.Spaces = append([]content.GenerationSpace(nil), g.Spaces...)
+				for i := range g.Spaces {
+					if g.Spaces[i].ID == spaces[0] {
+						g.Spaces[i].Role = content.SpaceServed
+					}
+				}
+			}
+		}
+	}
 	return route{corpusID: r.Source.CorpusID, generation: g, legacy: s.LegacySpace != "" && g.SpaceID == s.LegacySpace}, nil
 }
 

@@ -39,6 +39,11 @@ func (s ContentStore) PromoteSpace(ctx context.Context, space string, force bool
 		return out, err
 	}
 	defer tx.Rollback(ctx)
+	// Serialize coverage preflight and model selection with serving publication.
+	// Take routing before spaces, as owner activation does; plugin calls hold neither.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, projectionRoutingLock); err != nil {
+		return out, err
+	}
 	// Space registrations at startup, activation and rollback wait for it.
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, spacesLock); err != nil {
 		return out, err
@@ -121,6 +126,11 @@ func keepPromotion(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredSp
 	for _, p := range promotions {
 		si, sok := byID[p.served]
 		pi, pok := byID[p.previous]
+		// Retaining the owner solely for evaluation must not erase its model
+		// selection. Reapply it when that owner serves a source format again.
+		if sok && pok && out[si].OwnerPluginID == p.owner && out[pi].OwnerPluginID == p.owner && out[si].Role == content.SpaceEvaluation && out[pi].Role == content.SpaceEvaluation {
+			continue
+		}
 		if !sok || !pok || out[si].OwnerPluginID != p.owner || out[pi].OwnerPluginID != p.owner || out[si].Role != content.SpaceEvaluation || out[pi].Role != content.SpaceServed {
 			if _, err = tx.Exec(ctx, `DELETE FROM vector_space_promotions WHERE owner_plugin_id=$1`, p.owner); err != nil {
 				return nil, err

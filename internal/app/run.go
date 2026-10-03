@@ -562,7 +562,7 @@ func Run(command string) error {
 	search.Spaces = ingestor
 	processor.Retrieval, processor.Enrichment = search, search
 	processor.Plugin = deriver
-	processor.Evaluation = &processing.Evaluator{Store: store, Content: contents, Plugin: deriver, Projection: projection}
+	processor.Evaluation = &processing.Evaluator{Store: store, Serving: store, Content: contents, Plugin: deriver, Projection: projection}
 	rebuilder.Plugin = deriver
 	// Backfills fill spaces through the plan each one is pinned to, paced
 	// below live ingestion on their own task queue.

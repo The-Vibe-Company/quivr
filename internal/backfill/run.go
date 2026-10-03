@@ -19,10 +19,15 @@ type Target struct {
 	Generation content.Generation
 }
 
-// Candidate is a current Version in scope whose projected segments miss a
-// vector in a target space; Recipe names its projected segmentation.
+// Candidate is a current Version in scope whose selected owner's projection
+// misses a vector in a target space. Recipe names the owner's stored
+// segmentation when one exists; Independent requests an owner's independent
+// cuts, including when that projection is absent.
 type Candidate struct {
-	RecordID, VersionID, Recipe string
+	RecordID, VersionID        string
+	Namespace, SourceMediaType string
+	Recipe, OwnerPluginID      string
+	Independent                bool
 }
 
 // RunStore keeps a backfill's state. Every effect is fenced on the Operation
@@ -48,6 +53,10 @@ type RunStore interface {
 	// checkpoint past it, with no change event. It is
 	// operations.ErrNotRunning once the backfill is paused or stopped.
 	CoverBackfill(ctx context.Context, org, id string, g content.Generation, versionID string, artifacts []content.Embedding) error
+	// CoverBackfillEvaluation records an independent owner's projection,
+	// vectors, and checkpoint atomically. It is
+	// operations.ErrNotRunning once the backfill is paused or stopped.
+	CoverBackfillEvaluation(ctx context.Context, org, id string, g content.Generation, versionID string, seg content.Segmentation, artifacts []content.Embedding) error
 	// SkipBackfill moves the checkpoint past a Version it cannot fill and
 	// counts why; it is operations.ErrNotRunning like CoverBackfill.
 	SkipBackfill(ctx context.Context, org, id, versionID, code string) error
@@ -70,11 +79,13 @@ type Content interface {
 type Deriver interface {
 	Owns(ctx context.Context, space string) bool
 	Fill(ctx context.Context, org, corpusID string, v content.Version, seg content.Segmentation, spaces []string) ([]content.EmbeddingData, error)
+	FillIndependent(ctx context.Context, org, corpusID string, v content.Version, spaces []string) (content.Segmentation, []content.EmbeddingData, error)
 	Gone(ctx context.Context, cause error) (*content.Diagnostic, error)
 }
 
 // Projection attaches vectors to the generation's projected segments.
 type Projection interface {
+	Publish(ctx context.Context, g content.Generation, org, corpusID, namespace string, v content.Version, seg content.Segmentation) error
 	PublishEmbeddings(ctx context.Context, g content.Generation, org string, data []content.EmbeddingData) error
 }
 
@@ -237,33 +248,60 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 	if err != nil {
 		return err
 	}
-	seg, err := b.Content.PluginSegmentationOf(ctx, org, v, c.Recipe)
-	if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrConflict) {
-		return skip(SkipUnavailable)
-	}
-	if err != nil {
-		return err
-	}
-	counter, _ := b.Content.(processing.DeadlineCounter)
-	out := processing.Derive(ctx, org, b.Plugin, counter, processing.DerivationRequest{CorpusID: op.CorpusID, Version: v, Target: g, Kind: processing.FillVectors, Segmentation: seg, Spaces: op.Backfill.Spaces})
-	if out.Terminal != nil {
-		switch out.Terminal.Code {
-		case "segmentation_differs":
-			return skip(SkipSegmentationDiffers)
-		case "ingestion_refused":
-			return skip(SkipIngestionRefused)
-		case "derivation_conflict", "artifact_unavailable":
-			return skip(SkipArtifactUnavailable)
-		case "plugin_deadline":
-			return skip(SkipPluginDeadline)
-		default:
-			return terminal{failure: operations.Error{Code: out.Terminal.Code, Message: out.Terminal.Message}}
+	var seg content.Segmentation
+	var data []content.EmbeddingData
+	if c.Independent {
+		seg, data, err = b.Plugin.FillIndependent(ctx, org, op.CorpusID, v, op.Backfill.Spaces)
+		if err != nil {
+			reason, goneErr := b.Plugin.Gone(ctx, err)
+			if goneErr != nil {
+				return goneErr
+			}
+			if reason != nil {
+				return terminal{failure: operations.Error{Code: reason.Code, Message: reason.Message}}
+			}
+			switch {
+			case errors.Is(err, processing.ErrSegmentsDiffer):
+				return skip(SkipSegmentationDiffers)
+			case errors.Is(err, content.ErrIngestionRefused):
+				return skip(SkipIngestionRefused)
+			case errors.Is(err, content.ErrConflict), errors.Is(err, content.ErrArtifactCorrupt):
+				return skip(SkipArtifactUnavailable)
+			case errors.Is(err, processing.ErrPluginDeadline):
+				return skip(SkipPluginDeadline)
+			default:
+				return err
+			}
 		}
+	} else {
+		seg, err = b.Content.PluginSegmentationOf(ctx, org, v, c.Recipe)
+		if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrConflict) {
+			return skip(SkipUnavailable)
+		}
+		if err != nil {
+			return err
+		}
+		counter, _ := b.Content.(processing.DeadlineCounter)
+		out := processing.Derive(ctx, org, b.Plugin, counter, processing.DerivationRequest{CorpusID: op.CorpusID, Version: v, Target: g, Kind: processing.FillVectors, Segmentation: seg, Spaces: op.Backfill.Spaces})
+		if out.Terminal != nil {
+			switch out.Terminal.Code {
+			case "segmentation_differs":
+				return skip(SkipSegmentationDiffers)
+			case "ingestion_refused":
+				return skip(SkipIngestionRefused)
+			case "derivation_conflict", "artifact_unavailable":
+				return skip(SkipArtifactUnavailable)
+			case "plugin_deadline":
+				return skip(SkipPluginDeadline)
+			default:
+				return terminal{failure: operations.Error{Code: out.Terminal.Code, Message: out.Terminal.Message}}
+			}
+		}
+		if out.Retry != nil {
+			return out.Retry
+		}
+		data = out.Data
 	}
-	if out.Retry != nil {
-		return out.Retry
-	}
-	data := out.Data
 	targets := map[string]bool{}
 	for _, space := range op.Backfill.Spaces {
 		targets[space] = true
@@ -289,6 +327,13 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 		all = append(all, content.EmbeddingData{Artifact: e, Vector: vector})
 	}
 	all = append(all, data...)
+	if c.Independent {
+		if err = b.Projection.Publish(ctx, g, org, op.CorpusID, c.Namespace, v, seg); errors.Is(err, retrieval.ErrProjectionMissing) {
+			return skip(SkipUnavailable)
+		} else if err != nil {
+			return err
+		}
+	}
 	if err = b.Projection.PublishEmbeddings(ctx, g, org, all); errors.Is(err, retrieval.ErrProjectionMissing) {
 		// Withdrawn or superseded meanwhile: its objects are gone.
 		return skip(SkipUnavailable)
@@ -298,6 +343,9 @@ func (b Backfiller) fill(ctx context.Context, org string, t Target, c Candidate)
 	artifacts := make([]content.Embedding, len(data))
 	for i, d := range data {
 		artifacts[i] = d.Artifact
+	}
+	if c.Independent {
+		return b.Store.CoverBackfillEvaluation(ctx, org, op.ID, g, c.VersionID, seg, artifacts)
 	}
 	return b.Store.CoverBackfill(ctx, org, op.ID, g, c.VersionID, artifacts)
 }

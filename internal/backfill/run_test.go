@@ -47,6 +47,13 @@ func (s *runStore) CoverBackfill(_ context.Context, _, _ string, _ content.Gener
 	s.events = append(s.events, "cover "+versionID+" "+spacesOf(artifacts))
 	return nil
 }
+func (s *runStore) CoverBackfillEvaluation(_ context.Context, _, _ string, _ content.Generation, versionID string, _ content.Segmentation, artifacts []content.Embedding) error {
+	if s.coverErr != nil {
+		return s.coverErr
+	}
+	s.events = append(s.events, "cover-evaluation "+versionID+" "+spacesOf(artifacts))
+	return nil
+}
 func (s *runStore) SkipBackfill(_ context.Context, _, _, versionID, code string) error {
 	s.events = append(s.events, "skip "+versionID+" "+code)
 	return nil
@@ -104,9 +111,24 @@ func (p runPlugin) Fill(_ context.Context, org, _ string, v content.Version, seg
 	}
 	return []content.EmbeddingData{{Artifact: content.Embedding{Organization: org, VersionID: v.ID, SegmentID: seg.Segments[0].ID, SpaceID: spaces[0]}, Vector: []float32{2}}}, nil
 }
+func (p runPlugin) FillIndependent(_ context.Context, org, _ string, v content.Version, spaces []string) (content.Segmentation, []content.EmbeddingData, error) {
+	if err := p.errs[v.ID]; err != nil {
+		return content.Segmentation{}, nil, err
+	}
+	seg := content.Segmentation{ID: "independent_" + v.ID, VersionID: v.ID, Recipe: "plugin:p@1", Segments: []content.Segment{{ID: "independent_segment_" + v.ID}}}
+	return seg, []content.EmbeddingData{{Artifact: content.Embedding{Organization: org, VersionID: v.ID, SegmentID: seg.Segments[0].ID, SpaceID: spaces[0]}, Vector: []float32{3}}}, nil
+}
 func (p runPlugin) Gone(context.Context, error) (*content.Diagnostic, error) { return p.gone, nil }
 
-type runProjection struct{ published []string }
+type runProjection struct {
+	published []string
+	events    []string
+}
+
+func (p *runProjection) Publish(_ context.Context, _ content.Generation, _, _, namespace string, _ content.Version, _ content.Segmentation) error {
+	p.events = append(p.events, "publish "+namespace)
+	return nil
+}
 
 func (p *runProjection) PublishEmbeddings(_ context.Context, _ content.Generation, _ string, data []content.EmbeddingData) error {
 	artifacts := make([]content.Embedding, len(data))
@@ -114,6 +136,7 @@ func (p *runProjection) PublishEmbeddings(_ context.Context, _ content.Generatio
 		artifacts[i] = d.Artifact
 	}
 	p.published = append(p.published, spacesOf(artifacts))
+	p.events = append(p.events, "vectors")
 	return nil
 }
 
@@ -199,5 +222,35 @@ func TestStepPacesTheNextBatch(t *testing.T) {
 	// One Version per step at 0.5 per second: up to two seconds before the next.
 	if err != nil || progress.Done || progress.Wait < time.Second || progress.Wait > 2*time.Second {
 		t.Fatalf("progress %+v %v", progress, err)
+	}
+}
+
+// An absent owner projection derives its own cuts, publishes the lexical
+// anchor before vectors, and records the independent coverage seam.
+func TestStepFillsIndependentOwnerInPublicationOrder(t *testing.T) {
+	store := &runStore{
+		state:      operations.StateRunning,
+		registered: "reg",
+		candidates: []backfill.Candidate{{RecordID: "r1", VersionID: "v1", Namespace: "docs", Independent: true}},
+		covered:    map[string][]content.Embedding{},
+	}
+	projection := &runProjection{}
+	b := backfill.Backfiller{
+		Store:      store,
+		Content:    runContent{},
+		Plugin:     runPlugin{},
+		Projection: projection,
+		Pinned:     pinnedPlan{"reg"},
+		Settings:   backfill.Settings{Rate: 100},
+	}
+	progress, err := b.Step(context.Background(), "org", "op")
+	if err != nil || progress.Done {
+		t.Fatalf("progress %+v %v", progress, err)
+	}
+	if !equal(projection.events, []string{"publish docs", "vectors"}) {
+		t.Fatalf("publication order %v", projection.events)
+	}
+	if !equal(store.events, []string{"candidates", "cover-evaluation v1 [p.large@1]"}) {
+		t.Fatalf("store events %v", store.events)
 	}
 }

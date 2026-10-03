@@ -340,11 +340,22 @@ func (s PluginStore) EvaluatorRegistrations(ctx context.Context) ([]registry.Reg
 // connectorRunPinExpiry no longer counts as draining work, so a run
 // dispatched again under the same identity is pinned again, to plan.
 func (s PluginStore) PinWork(ctx context.Context, kind, org, id, plan string) (pinned string, stopped bool, err error) {
-	err = s.Pool.QueryRow(ctx, `WITH pinned AS (INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES($1,$2,$3,$4)
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return "", false, err
+	}
+	err = tx.QueryRow(ctx, `WITH pinned AS (INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES($1,$2,$3,CASE WHEN $1='ingestion' THEN COALESCE((SELECT plan_id FROM active_pipeline_plan),$4) ELSE $4 END)
  ON CONFLICT (kind,organization,work_id) DO UPDATE SET plan_id=EXCLUDED.plan_id,pinned_at=now(),unavailable_attempts=0,stopped_at=NULL
  WHERE pipeline_plan_work.kind='connector_run' AND pipeline_plan_work.pinned_at<=now()-interval '`+connectorRunPinExpiry+`' RETURNING plan_id,stopped_at IS NOT NULL)
- SELECT * FROM pinned UNION ALL SELECT plan_id,stopped_at IS NOT NULL FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 LIMIT 1`, kind, org, id, plan).Scan(&pinned, &stopped)
-	return pinned, stopped, err
+	 SELECT * FROM pinned UNION ALL SELECT plan_id,stopped_at IS NOT NULL FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 LIMIT 1`, kind, org, id, plan).Scan(&pinned, &stopped)
+	if err != nil {
+		return pinned, stopped, err
+	}
+	return pinned, stopped, tx.Commit(ctx)
 }
 
 // ReleaseWork forgets a finished piece of work; a registration it kept
@@ -489,10 +500,14 @@ func (s PluginStore) Activate(ctx context.Context, id string, decide func(regist
 	if err != nil && !errors.Is(err, registry.ErrNoPlan) {
 		return registry.Plan{}, err
 	}
-	if target.State == registry.StateActive {
-		return active, nil
-	}
 	activation, err := decide(active, members, target)
+	if err != nil {
+		return registry.Plan{}, err
+	}
+	if activation.Unchanged {
+		return active, tx.Commit(ctx)
+	}
+	routingChanged, err := applyIngestionRouting(ctx, tx, active, activation)
 	if err != nil {
 		return registry.Plan{}, err
 	}
@@ -504,6 +519,11 @@ func (s PluginStore) Activate(ctx context.Context, id string, decide func(regist
 	plan, err := recordPlan(ctx, tx, registry.SourceActivation, active.ID, activation.Roles)
 	if err != nil {
 		return registry.Plan{}, err
+	}
+	if routingChanged {
+		if err = queuePendingServingProjections(ctx, tx, active, activation); err != nil {
+			return registry.Plan{}, err
+		}
 	}
 	out, err := pipelinePlan(ctx, tx, plan)
 	if err != nil {
@@ -590,6 +610,10 @@ func (s PluginStore) Rollback(ctx context.Context, req registry.RollbackRequest,
 	}
 	plan := active.ID
 	if !a.Unchanged {
+		routingChanged, err := applyIngestionRouting(ctx, tx, active, a)
+		if err != nil {
+			return registry.Plan{}, err
+		}
 		if a.Spaces != nil {
 			if err = registerSpaces(ctx, tx, a.Spaces); err != nil {
 				return registry.Plan{}, err
@@ -597,6 +621,16 @@ func (s PluginStore) Rollback(ctx context.Context, req registry.RollbackRequest,
 		}
 		if plan, err = recordPlan(ctx, tx, registry.SourceRollback, active.ID, a.Roles); err != nil {
 			return registry.Plan{}, err
+		}
+		if routingChanged {
+			if err = queuePendingServingProjections(ctx, tx, active, a); err != nil {
+				return registry.Plan{}, err
+			}
+		}
+		if req.Stop() && routingChanged {
+			if err = stopOutgoingIngestion(ctx, tx, active, a); err != nil {
+				return registry.Plan{}, err
+			}
 		}
 		if req.Stop() && len(a.Retired) > 0 {
 			if _, err = tx.Exec(ctx, `UPDATE pipeline_plan_work SET stopped_at=now() WHERE stopped_at IS NULL
@@ -622,7 +656,7 @@ func (s PluginStore) BindIngestionWork(ctx context.Context, kind, org, id, regis
 	}
 	tag, err := s.Pool.Exec(ctx, `UPDATE pipeline_plan_work w SET ingestion_registration_id=$4
  WHERE kind=$1 AND organization=$2 AND work_id=$3 AND (ingestion_registration_id IS NULL OR ingestion_registration_id=$4)
- AND EXISTS(SELECT 1 FROM pipeline_plan_roles r WHERE r.plan_id=w.plan_id AND r.registration_id=$4 AND (r.role='ingestion' OR r.role LIKE 'ingestion:%'))`, kind, org, id, registration)
+	 AND EXISTS(SELECT 1 FROM pipeline_plan_roles r WHERE r.plan_id=w.plan_id AND r.registration_id=$4 AND (r.role IN ('ingestion','ingestion-default') OR r.role LIKE 'ingestion:%' OR r.role LIKE 'ingestion-route:%' OR r.role LIKE 'ingestion-evaluation:%'))`, kind, org, id, registration)
 	if err == nil && tag.RowsAffected() != 1 {
 		return registry.ErrConflict
 	}

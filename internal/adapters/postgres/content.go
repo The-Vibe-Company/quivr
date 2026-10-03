@@ -14,6 +14,9 @@ import (
 type ContentStore struct{ Pool *pgxpool.Pool }
 
 func lockJournal(ctx context.Context, tx pgx.Tx, org string) error {
+	if err := lockProjectionRouting(ctx, tx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, "INSERT INTO organization_journals(organization) VALUES($1) ON CONFLICT DO NOTHING", org); err != nil {
 		return err
 	}
@@ -170,6 +173,17 @@ func (s ContentStore) Publish(ctx context.Context, w content.Work, publication c
 	}
 	if err = appendEvent(ctx, tx, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "receipt.resolved", Resource: "receipt", ResourceID: w.ReceiptID}); err != nil {
 		return err
+	}
+	if versionID != "" {
+		serves, err := pinnedOwnerServes(ctx, tx, w.Organization, versionID)
+		if err != nil {
+			return err
+		}
+		if !serves {
+			if err = queueServingProjection(ctx, tx, w.Organization, versionID); err != nil {
+				return err
+			}
+		}
 	}
 	return tx.Commit(ctx)
 }

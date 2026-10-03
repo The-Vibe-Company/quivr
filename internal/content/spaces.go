@@ -66,4 +66,6 @@ type SpaceCoverage struct {
 	TotalSegments *int64
 	// VersionsCovered counts current Versions fully covered in this space.
 	VersionsCovered int64
+	// ServingSegments counts this owner's current served projection, when known.
+	ServingSegments *int64
 }
