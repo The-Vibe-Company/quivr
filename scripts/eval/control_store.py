@@ -6,6 +6,8 @@ strings and dependency errors may contain credentials. Provisioning is explicit.
 import contextlib
 import decimal
 import json
+import os
+import tempfile
 import uuid
 
 import embeddings
@@ -35,6 +37,12 @@ class Store:
             info = conninfo_to_dict(dsn)
         except psycopg.Error:
             raise ValueError('invalid evaluation control connection') from None
+        self.ca_pem = os.environ.get('EVAL_CONTROL_CA_PEM', '')
+        if self.ca_pem:
+            if 'sslrootcert' in info:
+                raise ValueError('EVAL_CONTROL_CA_PEM conflicts with DSN sslrootcert')
+            if info.get('sslmode') != 'verify-full':
+                raise ValueError('EVAL_CONTROL_CA_PEM requires sslmode=verify-full')
         host = info.get('hostaddr') or info.get('host')
         if host not in (None, 'localhost', '127.0.0.1', '::1') and not host.startswith('/'):
             if info.get('sslmode') != 'verify-full':
@@ -43,9 +51,21 @@ class Store:
     @contextlib.contextmanager
     def transaction(self):
         import psycopg
+        from psycopg.conninfo import make_conninfo
         try:
-            with psycopg.connect(self.dsn, connect_timeout=5, options='-c statement_timeout=10000') as db:
-                yield db
+            with contextlib.ExitStack() as stack:
+                dsn = self.dsn
+                if self.ca_pem:
+                    try:
+                        # NamedTemporaryFile creates mode 0600 and unlinks on every exit.
+                        ca = stack.enter_context(tempfile.NamedTemporaryFile(mode='w', encoding='utf-8'))
+                        ca.write(self.ca_pem)
+                        ca.flush()
+                    except (OSError, UnicodeError):
+                        raise Unavailable('evaluation control CA unavailable; paid admission refused') from None
+                    dsn = make_conninfo(dsn, sslrootcert=ca.name)
+                with psycopg.connect(dsn, connect_timeout=5, options='-c statement_timeout=10000') as db:
+                    yield db
         except psycopg.Error:
             raise Unavailable('evaluation control store unavailable; paid admission refused') from None
 

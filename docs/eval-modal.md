@@ -31,12 +31,20 @@ reachable from Modal. The runner uses short connections and ten-second statement
 timeouts; reserve connection capacity for up to four workers per dispatch.
 An unavailable control store refuses paid work, with no local admission fallback.
 
+For a private certificate authority, set `EVAL_CONTROL_CA_PEM` to the full PEM
+certificate text, including real newlines, on the dispatch machine and in
+`quivr-eval-results`. Use the same URL and PEM values in both environments.
+Keep `sslmode=verify-full` in the URL and omit `sslrootcert`: combining that DSN
+option with a PEM is rejected. Each connection writes a mode-0600 temporary CA
+file and removes it when the transaction ends, including on failure. A wrong CA
+or hostname refuses the connection; certificate verification is never disabled.
+
 The operator creates these Modal Secrets; values never belong in configuration:
 Jev is an optional paid [passage reranker](../plugins/jev-rerank/README.md).
 
 | Secret | Environment names |
 | --- | --- |
-| `quivr-eval-results` | `EVAL_CONTROL_DATABASE_URL`, `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD` |
+| `quivr-eval-results` | `EVAL_CONTROL_DATABASE_URL`, optional `EVAL_CONTROL_CA_PEM`, `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD` |
 | `quivr-eval-embeddings` | `AZURE_FOUNDRY_ENDPOINT`, `AZURE_FOUNDRY_KEY` |
 | `quivr-eval-rerank` | `TYPESAFE_API_KEY`, only for Jev |
 

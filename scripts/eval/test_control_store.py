@@ -3,8 +3,10 @@
 Uses an explicitly disposable database, never a provider or Modal. Faking SQL
 cannot detect lost updates; existing results tests cover only tracking/outboxes.
 """
+import importlib.util
 import os
 import pathlib
+import stat
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -12,6 +14,56 @@ from unittest import mock
 
 import control_store
 import embeddings
+
+
+@unittest.skipUnless(importlib.util.find_spec('psycopg'), 'requires psycopg')
+class TLSConfiguration(unittest.TestCase):
+    """Own PEM materialization at the real connection boundary, without SQL fakes."""
+    def test_secret_ca_is_private_and_removed_after_success_or_connection_failure(self):
+        import psycopg
+        from psycopg.conninfo import conninfo_to_dict
+        pem = '-----BEGIN CERTIFICATE-----\nexample CA\n-----END CERTIFICATE-----\n'
+        dsns = ('postgresql://user:secret@db.example.test/control?sslmode=verify-full',
+                'host=db.example.test dbname=control user=user password=secret sslmode=verify-full')
+        for dsn in dsns:
+            for fails in (False, True):
+                with self.subTest(dsn=dsn.split(':')[0], fails=fails):
+                    paths = []
+                    def connect(connection, **kwargs):
+                        info = conninfo_to_dict(connection)
+                        self.assertEqual(info['sslmode'], 'verify-full')
+                        self.assertEqual(info['password'], 'secret')
+                        path = pathlib.Path(info['sslrootcert'])
+                        paths.append(path)
+                        self.assertEqual(path.read_bytes(), pem.encode())
+                        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                        if fails:
+                            raise psycopg.OperationalError('secret ' + pem)
+                        return mock.MagicMock()
+                    with mock.patch.dict(os.environ, EVAL_CONTROL_CA_PEM=pem), mock.patch('psycopg.connect', side_effect=connect):
+                        store = control_store.Store(dsn)
+                        if fails:
+                            with self.assertRaises(control_store.Unavailable) as error:
+                                with store.transaction():
+                                    self.fail('failed connection yielded a transaction')
+                            self.assertNotIn('secret', str(error.exception))
+                            self.assertNotIn(pem, str(error.exception))
+                            self.assertIsNone(error.exception.__cause__)
+                        else:
+                            with store.transaction():
+                                self.assertTrue(paths[0].exists())
+                    self.assertFalse(paths[0].exists())
+
+    def test_pem_rejects_explicit_root_and_unverified_connections(self):
+        for dsn, reason in (
+            ('host=db.example.test sslmode=verify-full sslrootcert=/ca.pem', 'sslrootcert'),
+            ('postgresql://db.example.test/control?sslmode=verify-full&sslrootcert=', 'sslrootcert'),
+            ('host=db.example.test sslmode=require', 'verify-full'),
+            ('host=localhost sslmode=disable', 'verify-full'),
+        ):
+            with self.subTest(reason=reason), mock.patch.dict(os.environ, EVAL_CONTROL_CA_PEM='private CA'):
+                with self.assertRaisesRegex(ValueError, reason):
+                    control_store.Store(dsn)
 
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN'), 'requires disposable PostgreSQL')

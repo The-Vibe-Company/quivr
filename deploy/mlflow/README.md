@@ -61,5 +61,8 @@ with the tracking database URI before starting the new image. MLflow is mutable;
 retain accepted decisions separately from this experiment store.
 
 For capped parallel measurements, provision the evaluation-only
-[control schema](../../docs/eval-modal.md#prerequisites) beside tracking data;
+[control schema](../../docs/eval-modal.md#prerequisites);
 Modal requires a verified TLS PostgreSQL endpoint and its own restricted login.
+Set `EVAL_CONTROL_CA_PEM` (full certificate text) beside `EVAL_CONTROL_DATABASE_URL`
+locally and in Modal Secret `quivr-eval-results`, with `sslmode=verify-full` and no `sslrootcert`.
+Configure MLflow's database TLS separately.
