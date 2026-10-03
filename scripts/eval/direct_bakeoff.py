@@ -122,7 +122,7 @@ class Hosted:
 
     def post(self, path, body, texts, label, model, mode):
         # The shared gate's supported byte/subword bound, including special tokens.
-        tokens = sum(len(text.encode('utf-8')) + 8 for text in texts)
+        tokens = embeddings.estimate_tokens(texts)
         for attempt in range(8):
             call = self.budget.reserve(label, self.set_name, mode, tokens, self.prices[model])
             request = urllib.request.Request(self.endpoint + path, data=json.dumps(body).encode(),
@@ -169,6 +169,8 @@ class Hosted:
                 path = '/providers/cohere/v2/embed'
             else:
                 body, path = {'model': model, 'input': chunk}, '/openai/v1/embeddings'
+                if dimensions is not None:
+                    body['dimensions'] = dimensions
             result = self.post(path, body, chunk, label or model, model, mode)
             try:
                 if cohere:

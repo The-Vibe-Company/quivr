@@ -1,0 +1,10 @@
+{
+  "model": "Cohere-Embed-V5-Fast",
+  "revision": "2026-10-03",
+  "dimensions": 1024,
+  "window_chars": 6000,
+  "overlap_chars": 200,
+  "dense_weight": 0.7,
+  "candidate_count": 30,
+  "reranker": "none"
+}

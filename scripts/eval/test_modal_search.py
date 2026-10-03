@@ -1,0 +1,89 @@
+"""Dispatch owner: CI/holdout refusal, shared compute cap and evidence recovery.
+
+Only the Modal remote call is fake. Real SQL and Results persistence protect
+ordering regressions that the budget and provider owner tests cannot observe.
+"""
+import io
+import json
+import os
+import pathlib
+import tempfile
+import unittest
+import uuid
+from unittest import mock
+
+import control_store
+import modal_search
+import search_trial
+
+
+class Refusal(unittest.TestCase):
+    def test_dry_run_needs_no_keys_and_ci_or_holdout_refuses_before_dispatch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            policy = {'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
+                      'modal_usd_per_second': .001, 'price_revision': '2026-10-03'}
+            (root / 'policy.json').write_text(json.dumps(policy))
+            (root / 'candidate.json').write_text('{}')
+            args = ['--policy', str(root / 'policy.json'), '--candidate', str(root / 'candidate.json')]
+            with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
+                self.assertEqual(modal_search.main(args + ['--dry-run']), 0)
+            self.assertIn('full Modal invoice', output.getvalue())
+            with mock.patch.dict(os.environ, {'CI': 'true'}), mock.patch.object(modal_search, 'launch') as launch, mock.patch('sys.stderr', new_callable=io.StringIO) as error:
+                with self.assertRaises(SystemExit):
+                    modal_search.main(args + ['--allow-paid'])
+                self.assertIn('CI measurements are refused', error.getvalue())
+                launch.assert_not_called()
+            policy['sets']['scifact']['diagnostic'] = True
+            with self.assertRaisesRegex(ValueError, 'explicit reason'):
+                modal_search.policy(policy)
+            policy['sets']['scifact']['reason'] = 'small query sample'
+            self.assertEqual(modal_search.policy(policy)['sets']['scifact']['reason'], 'small query sample')
+            policy['sets']['scifact']['split'] = 'test'
+            with self.assertRaises(PermissionError):
+                modal_search.policy(policy)
+
+
+@unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN'), 'requires disposable PostgreSQL')
+class Dispatch(unittest.TestCase):
+    def test_compute_cap_precedes_second_call_and_completed_result_is_replayed(self):
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        cfg = search_trial.configuration({})
+        policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
+            'modal_usd_per_second': .001, 'price_revision': '2026-10-03',
+            'modal_daily_usd': .08, 'max_seconds': 30, 'startup_seconds': 10})
+        campaign, calls = uuid.uuid4().hex, []
+        def remote(request):
+            calls.append(request)
+            row = {'schema_version': 1, 'experiment': 'public/example', 'git_sha': 'a' * 40,
+                'plugin_digest': 'sha256:fixture', 'config': request['config'], 'tier': 'direct',
+                'machine': 'fake-modal', 'duration_seconds': 1, 'cost': {},
+                'dataset': {'name': 'scifact', 'version': '1', 'split': 'dev', 'fingerprint': 'fixture', 'private': False},
+                'metrics': {'ndcg@10': .5}, 'per_query': {'ndcg@10': {'q': .5}}}
+            store.publish(campaign, request['lease_key'], request['owner'], row)
+            return row
+        with tempfile.TemporaryDirectory() as temp:
+            # Unknown invocation charges remain reserved: no false settlement from a fake clock.
+            def uncertain(_):
+                calls.append('uncertain')
+                raise RuntimeError('reflected-key')
+            with mock.patch.dict(os.environ, {'MLFLOW_TRACKING_URI': ''}):
+                first = modal_search.dispatch(store, campaign, policy, cfg, 'scifact', 'a' * 40,
+                                               'sha256:fixture', remote, pathlib.Path(temp), True)
+                self.assertEqual(first['status'], 'complete')
+                replay = modal_search.dispatch(store, campaign, policy, cfg, 'scifact', 'a' * 40,
+                                                'sha256:fixture', remote, pathlib.Path(temp), True)
+                self.assertEqual(replay['status'], 'reused')
+                self.assertEqual(len(calls), 1)
+                candidate = dict(cfg, dense_weight=.5)
+                modal_search.dispatch(store, campaign, policy, candidate, 'scifact', 'a' * 40,
+                                      'sha256:fixture', uncertain, pathlib.Path(temp), True)
+                capped = modal_search.dispatch(store, campaign, policy, dict(cfg, dense_weight=0),
+                    'scifact', 'a' * 40, 'sha256:fixture', remote, pathlib.Path(temp), True)
+                self.assertEqual(capped['status'], 'capped')
+                self.assertEqual(len(calls), 2)
+                self.assertNotIn('reflected-key', json.dumps(capped))
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -22,6 +22,11 @@ MAX_REQUEST_BYTES = 2 << 20
 MAX_RESPONSE_BYTES = 32 << 20
 
 
+def estimate_tokens(texts):
+    """The supported UTF-8 byte/subword bound, shared by plan and admission."""
+    return sum(len(text.encode('utf-8')) + 8 for text in texts)
+
+
 class BudgetExceeded(RuntimeError):
     pass
 
@@ -230,7 +235,7 @@ class Gate:
         if not isinstance(texts, list) or not texts or any(not isinstance(text, str) for text in texts):
             raise ValueError('only text embedding batches are supported')
         # Eight special tokens are the hosted plugin's bound for these models.
-        tokens = sum(len(text.encode('utf-8')) + 8 for text in texts)
+        tokens = estimate_tokens(texts)
         call = self.budget.reserve(self.label, self.set_name, self.phase, tokens, self.price)
         request = urllib.request.Request(self.endpoint + route, data=json.dumps(body).encode(),
                                          headers={'Content-Type': 'application/json', 'api-key': self.key}, method='POST')

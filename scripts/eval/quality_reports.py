@@ -16,6 +16,7 @@ from collections import Counter
 from collections.abc import Mapping
 
 import direct_bakeoff
+import embeddings
 import public_sets
 import trec
 
@@ -145,7 +146,7 @@ def _docs_for_hosted(corpus):
 def _hosted_estimate(corpus, queries):
     pieces, _ = direct_bakeoff.split_documents(_docs_for_hosted(corpus), HOSTED_WINDOW_CHARS, OVERLAP_CHARS)
     inputs = pieces + [queries[key] for key in sorted(queries)]
-    input_tokens = sum(len(text.encode('utf-8')) + 8 for text in inputs)
+    input_tokens = embeddings.estimate_tokens(inputs)
     estimated_usd = input_tokens * HOSTED_PRICE_USD_PER_MILLION / 1_000_000
     # The byte-plus-special-token estimate is conservative for one pass.  The
     # recommended per-set cap covers two passes (a retry or paired hosted run)

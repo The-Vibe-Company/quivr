@@ -59,3 +59,7 @@ SQLite is useful for local checks; use PostgreSQL for concurrent shared writers.
 When upgrading, back up both databases and artifacts, then run `mlflow db upgrade`
 with the tracking database URI before starting the new image. MLflow is mutable;
 retain accepted decisions separately from this experiment store.
+
+For capped parallel measurements, provision the evaluation-only
+[control schema](../../docs/eval-modal.md#prerequisites) beside tracking data;
+Modal requires a verified TLS PostgreSQL endpoint and its own restricted login.

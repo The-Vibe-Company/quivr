@@ -144,5 +144,5 @@ Both sides of `--compare-to` reports are imported. Supply baseline settings unde
 
 ## Next
 
-- [Measure search quality](agents/evaluation.md) to produce measurements.
+- [Measure on Modal](eval-modal.md) or [measure search quality](agents/evaluation.md).
 - [Deploy the shared store](../deploy/mlflow/README.md) to configure access and backups.

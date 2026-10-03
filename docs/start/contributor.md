@@ -22,6 +22,7 @@ How this repository is organised, tested and changed, for people and coding agen
 - [Measure open-source embeddings](../agents/oss-embeddings.md): preview and measure open-source embedding models on ephemeral CPU and GPU jobs
 - [Testing standard](../agents/testing.md): what a good test looks like here
 - [Triage labels](../agents/triage-labels.md): the five triage labels
+- [Measure search configurations on Modal](../eval-modal.md): measure configurations on Modal with shared caps and gates
 - [Record and compare search measurements](../eval-results.md): log, sync, compare and query shared search measurements
 - [Runnable guide blocks](../runnable-guides.md): write guide blocks that `make verify` replays
 - [Public acceptance suite](../../tests/acceptance/README.md): the public acceptance suite and how to run it
