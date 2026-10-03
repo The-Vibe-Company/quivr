@@ -6,6 +6,9 @@ import {
   advertisedFeeds,
   asFeed,
   feedGuard,
+  feedLinks,
+  imageType,
+  pageIcons,
   parseSuggestions,
   publicAddress,
 } from "../feeds.mjs";
@@ -80,6 +83,9 @@ test("hostile pages parse in linear time", () => {
     const page = unit.repeat(Math.ceil(size / unit.length));
     const started = performance.now();
     advertisedFeeds(page, base);
+    pageIcons(page, base);
+    feedLinks(page, "", base);
+    feedLinks("<rss>" + page, "", base);
     asFeed(page);
     asFeed("<rss>" + page);
     asFeed("<!--" + page);
@@ -202,4 +208,63 @@ test("discovery follows the page, refuses private hops and reports clear errors"
   assert.equal(await code(resolved.check("https://missing.test/feed")), "unreachable");
   assert.equal(await code(resolved.discover("http://mixed.test/")), "private_address");
   assert.equal(await code(resolved.discover("http://loop.test/")), "private_address");
+});
+
+const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+
+test("a feed names its site and image, and a page its icons, best first", () => {
+  const base = new URL("https://news.example.org/feeds/main.xml");
+  assert.deepEqual(
+    feedLinks(
+      `<rss><channel><title>T</title><atom:link rel="self" href="/feeds/main.xml"/><link>https://www.example.org/news/</link><image><url>/img/logo.png</url></image><item><link>https://www.example.org/a</link></item></channel></rss>`,
+      "application/rss+xml",
+      base,
+    ),
+    { site: new URL("https://www.example.org/news/"), image: new URL("https://news.example.org/img/logo.png") },
+  );
+  assert.deepEqual(
+    feedLinks(`<feed><link rel="self" href="/atom"/><link href="https://example.org/"/><icon>/i.png</icon><entry/></feed>`, "", base),
+    { site: new URL("https://example.org/"), image: new URL("https://news.example.org/i.png") },
+  );
+  assert.deepEqual(
+    feedLinks('{"version":"https://jsonfeed.org/version/1.1","home_page_url":"https://example.org/","icon":"javascript:x"}', "application/feed+json", base),
+    { site: new URL("https://example.org/") },
+  );
+  const page = `<head><link rel="icon" href="/favicon.ico"><link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="icon" sizes="192x192" href="/icon-192.png"><link rel="apple-touch-icon" href="/touch.png"><link rel="mask-icon" href="/m.svg"></head>`;
+  assert.deepEqual(
+    pageIcons(page, new URL("https://example.org/")).map((u) => u.pathname),
+    ["/touch.png", "/icon-192.png", "/favicon.ico"],
+  );
+  assert.equal(imageType(PNG), "image/png");
+  assert.equal(imageType(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>")), null);
+  assert.equal(imageType(Buffer.from("<html>not an image</html>")), null);
+});
+
+test("a source's logo comes from its site's icons, raster images only", async (t) => {
+  const server = http.createServer((req, res) => {
+    const send = (status, type, body) => {
+      res.writeHead(status, { "Content-Type": type });
+      res.end(body);
+    };
+    const host = `http://${req.headers.host}`;
+    if (req.url === "/rss") send(200, "application/rss+xml", `<rss><channel><link>${host}/home</link><item/></channel></rss>`);
+    else if (req.url === "/home") send(200, "text/html", `<link rel="apple-touch-icon" href="/fake.png"><link rel="icon" sizes="64x64" href="/real.png">`);
+    else if (req.url === "/fake.png") send(200, "image/png", "<svg onload=alert(1)>");
+    else if (req.url === "/real.png") send(200, "image/png", PNG);
+    else if (req.url === "/bare") send(200, "application/rss+xml", "<rss><channel><item/></channel></rss>");
+    else send(404, "text/plain", "missing");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const guard = feedGuard({ privateOrigins: [base] });
+  const logo = await guard.logo(`${base}/rss`);
+  assert.equal(logo.type, "image/png");
+  assert.deepEqual(logo.bytes, PNG);
+  assert.equal(await guard.logo(`${base}/bare`), null);
+  assert.equal(await guard.logo(`${base}/missing`), null);
+  // Without the exemption, the local site is refused like any private address.
+  await assert.rejects(feedGuard().logo(`${base}/rss`), { code: "private_address" });
 });

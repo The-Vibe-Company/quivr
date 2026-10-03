@@ -595,7 +595,7 @@ li[data-fresh] > .flow-row {
   top: 0;
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - var(--bar-height) - 40px);
+  max-height: calc(100vh / var(--scale) - var(--bar-height) - 40px);
   transition:
     opacity 220ms var(--ease-out),
     translate 240ms var(--ease-out);

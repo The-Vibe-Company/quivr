@@ -30,14 +30,6 @@ export function longTime(value: string, now = Date.now()) {
   return `le ${day.format(new Date(value))}`;
 }
 
-/** "mardi 29 septembre" */
-export const today = (now = Date.now()) =>
-  new Date(now).toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
-
 export const plural = (n: number, one: string, many = one + "s") =>
   `${n} ${n > 1 ? many : one}`;
 

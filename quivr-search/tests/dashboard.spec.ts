@@ -18,8 +18,18 @@ const rows = (page: Page) =>
 const row = (page: Page, title: string) =>
   rows(page).filter({ hasText: title });
 const chips = (page: Page) => page.getByRole("group", { name: "Filtrer le fil" });
-const side = (page: Page) =>
-  page.getByRole("complementary", { name: "Alertes et sources" });
+const side = (page: Page) => page.getByRole("complementary", { name: "Tendances" });
+// The panel of a filter menu of the feed's top bar, opened.
+async function menu(page: Page, title: string) {
+  const button = chips(page).getByRole("button", { name: new RegExp(`^${title}`) });
+  if ((await button.getAttribute("aria-expanded")) !== "true") await button.click();
+  return page.getByRole("dialog", { name: title });
+}
+// Ticks (or unticks) one option of a filter menu, then closes it.
+async function pick(page: Page, title: string, option: RegExp) {
+  await (await menu(page, title)).getByRole("button", { name: option }).click();
+  await page.keyboard.press("Escape");
+}
 const sent = (path: string) =>
   engine.sent.filter((s) => s.path === path).map((s) => s.body);
 // The body of the next POST to path. Start it before the click that sends it:
@@ -34,7 +44,7 @@ const posted = (page: Page, path: string) =>
 const noOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 
-test("le fil marque les non-lus, filtre par alerte et par source, et garde les arrivées en attente", async ({
+test("le fil marque les non-lus, filtre par alerte et par source, et retient les arrivées en pause", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -44,41 +54,82 @@ test("le fil marque les non-lus, filtre par alerte et par source, et garde les a
   // A first visit counts the last hour as unread.
   await chips(page).getByRole("button", { name: /^Non lus/ }).click();
   await expect(rows(page)).toHaveCount(5);
-  await chips(page).getByRole("button", { name: /^Attrapés par une alerte/ }).click();
+  await pick(page, "Alertes", /^Toutes les alertes/);
   await expect(rows(page)).toHaveCount(3);
-  await chips(page).getByRole("button", { name: /^Tout/ }).click();
+  await chips(page).getByRole("button", { name: "Tout effacer" }).click();
+  await expect(rows(page)).toHaveCount(8);
 
-  // An alert card and a source row each filter the feed, and undo it.
-  await side(page).getByRole("button", { name: /^Orages et grêle/ }).click();
-  await expect(chips(page).getByRole("button", { name: /^Orages et grêle/ })).toBeVisible();
+  // Alerts and sources filter the feed, several of each at once.
+  await pick(page, "Alertes", /^Orages et grêle/);
   await expect(rows(page)).toHaveCount(2);
-  await side(page).getByRole("button", { name: /^Revue technique/ }).click();
+  await pick(page, "Alertes", /^Orages et grêle/);
+  await pick(page, "Sources", /^Revue technique/);
   await expect(rows(page)).toHaveCount(2);
   await expect(row(page, "Batteries")).toBeVisible();
-  await chips(page).getByRole("button", { name: /^Revue technique/ }).click();
+  await pick(page, "Sources", /^Météo locale/);
+  await expect(rows(page)).toHaveCount(3);
+  await chips(page).getByRole("button", { name: "Tout effacer" }).click();
   await expect(rows(page)).toHaveCount(8);
+
+  // The last hour folds away and comes back (the five articles under an hour old).
+  const lastHour = page.getByRole("button", { name: /^Dernière heure/ });
+  await lastHour.click();
+  await expect(lastHour).toHaveAttribute("aria-expanded", "false");
+  await expect(rows(page)).toHaveCount(3);
+  await lastHour.click();
+  await expect(rows(page)).toHaveCount(8);
+
+  // An alert's tag on an article filters on that alert; a second click undoes it.
+  const tag = () => row(page, "Orages : la grêle").getByRole("button", { name: /Orages et grêle/ });
+  await tag().click();
+  await expect(rows(page)).toHaveCount(2);
+  await tag().click();
+  await expect(rows(page)).toHaveCount(8);
+
+  // A muted source leaves the feed until it is put back.
+  const sources = await menu(page, "Sources");
+  await sources.getByRole("button", { name: "Masquer Dépêches exemple du fil" }).click();
+  await expect(rows(page)).toHaveCount(4);
+  await sources.getByRole("button", { name: "Remettre Dépêches exemple dans le fil" }).click();
+  await page.keyboard.press("Escape");
+  await expect(rows(page)).toHaveCount(8);
+
+  // A topic of the moment searches it.
+  await side(page).getByRole("button", { name: /^Grêle/ }).click();
+  await expect(page.getByRole("searchbox")).toHaveValue("grêle");
+  await page.getByRole("searchbox").fill("");
 
   // Reading an article marks it read, in this browser.
   await row(page, "Orages : la grêle").getByRole("link").click();
   await expect(row(page, "Orages : la grêle")).not.toHaveAttribute("data-unread");
-  await expect(chips(page).getByRole("button", { name: /^Non lus/ })).toContainText("4");
+  // A second click on the open article closes it; a third opens it again.
+  await row(page, "Orages : la grêle").getByRole("link").click();
+  await expect(page.locator(".peek")).toHaveCount(0);
+  await row(page, "Orages : la grêle").getByRole("link").click();
+  await expect(page.locator(".peek")).toHaveCount(1);
+  // A click beside it, outside the feed's rows, closes it too.
+  await page.locator(".bar-view").click();
+  await expect(page.locator(".peek")).toHaveCount(0);
+  await row(page, "Orages : la grêle").getByRole("link").click();
+  await expect(page.locator(".peek")).toHaveCount(1);
 
-  // While an article is open, an arrival waits behind the button.
+  // Even with an article open, an arrival goes straight to the top, unread.
   const first = engine.arrive();
-  const pending = page.getByRole("button", { name: /1 nouvel article · Afficher/ });
-  await expect(pending).toBeVisible();
-  await expect(rows(page)).toHaveCount(8);
-  await pending.click();
+  await expect(rows(page)).toHaveCount(9);
   await expect(rows(page).first()).toContainText(first.title);
   await expect(rows(page).first()).toHaveAttribute("data-unread", "true");
 
-  // Paused, arrivals wait too; resuming shows the next ones at once.
+  // The reader closed, the filters are back and count what is left to read.
   await page.keyboard.press("Escape");
+  await expect(chips(page).getByRole("button", { name: /^Non lus/ })).toContainText("5");
+
+  // Paused, arrivals wait; resuming shows them at once.
   await page.getByRole("button", { name: "En direct" }).click();
   await expect(page.locator(".bar-live")).toHaveText("En pause");
   const second = engine.arrive();
-  await expect(page.getByRole("button", { name: /1 nouvel article/ })).toBeVisible();
-  await page.getByRole("button", { name: /1 nouvel article/ }).click();
+  await expect(page.locator(".toast")).toContainText("à la reprise");
+  await expect(rows(page)).toHaveCount(9);
+  await page.getByRole("button", { name: "En pause" }).click();
   await expect(rows(page).first()).toContainText(second.title);
 
   await page.reload();
@@ -110,23 +161,23 @@ test("la recherche passe des mots exacts aux idées proches et devient une alert
   await expect(rows(page).first()).toContainText("Orages : la grêle");
 
   // A source picked while searching is searched on its own by the engine.
-  const sources = page.getByRole("complementary", { name: "Alertes et sources" });
-  await sources.getByRole("button", { name: /Météo locale/ }).click();
+  await pick(page, "Sources", /^Météo locale/);
   await expect
     .poll(() => engine.searches.at(-1))
     .toEqual({ query: "grêle", mode: "lexical", limit: 50, sources: ["Météo locale"] });
   await expect(page.getByRole("heading", { name: /1 article sur « grêle »/ })).toBeVisible();
   await expect(rows(page).first()).toContainText("Cellule orageuse");
-  // A corpus the engine cannot filter yet: the top 50 of every source, narrowed here.
+  // Several sources are searched together. A corpus the engine cannot filter
+  // yet: the top 50 of every source, narrowed here.
   engine.options.sourceFilter = false;
   const before = engine.searches.length;
-  await sources.getByRole("button", { name: /Dépêches exemple/ }).click();
+  await pick(page, "Sources", /^Dépêches exemple/);
   await expect.poll(() => engine.searches.slice(before)).toEqual([
-    { query: "grêle", mode: "lexical", limit: 50, sources: ["Dépêches exemple"] },
+    { query: "grêle", mode: "lexical", limit: 50, sources: ["Météo locale", "Dépêches exemple"] },
     { query: "grêle", mode: "lexical", limit: 50 },
   ]);
-  await expect(page.getByRole("heading", { name: /2 articles sur « grêle »/ })).toBeVisible();
-  await sources.getByRole("button", { name: /Dépêches exemple/ }).click();
+  await expect(page.getByRole("heading", { name: /3 articles sur « grêle »/ })).toBeVisible();
+  await chips(page).getByRole("button", { name: "Tout effacer" }).click();
 
   await page.getByRole("button", { name: "Créer une alerte" }).click();
   await expect(page.getByRole("button", { name: "Alerte créée ✓" })).toBeVisible();
@@ -140,7 +191,8 @@ test("la recherche passe des mots exacts aux idées proches et devient une alert
   await box.blur();
   await page.keyboard.press("Escape");
   await expect(box).toHaveValue("");
-  await expect(page.getByRole("heading", { name: "Aujourd’hui" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /sur « / })).toHaveCount(0);
+  await expect(rows(page).first()).toBeVisible();
 });
 
 test("le lecteur dit pourquoi l’article est attrapé, propose le même sujet et se pilote au clavier", async ({
@@ -191,11 +243,11 @@ test("le lecteur dit pourquoi l’article est attrapé, propose le même sujet e
 
   // Escape closes the reader and puts the focus back on the article's row.
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("complementary", { name: "Alertes et sources" })).toBeVisible();
+  await expect(side(page)).toBeVisible();
   await expect(row(page, "Cellule orageuse").getByRole("link")).toBeFocused();
 
   await row(page, "Batteries").getByRole("link").click();
-  await page.getByRole("button", { name: "Chercher le même sujet" }).click();
+  await page.getByRole("button", { name: "Creuser le sujet" }).click();
   await expect(page.getByRole("searchbox")).toHaveValue("Batteries : une usine pilote annoncée");
   await expect(page.getByRole("switch", { name: "Idées proches" })).toHaveAttribute("aria-checked", "true");
 });

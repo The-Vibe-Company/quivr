@@ -205,7 +205,7 @@ mark {
   color: var(--muted);
 }
 .app {
-  min-height: 100dvh;
+  min-height: calc(100dvh / var(--scale, 1));
   display: flex;
   flex-direction: column;
 }
@@ -915,7 +915,7 @@ textarea::placeholder {
   margin-bottom: 24px;
 }
 .auth-page {
-  min-height: 100dvh;
+  min-height: calc(100dvh / var(--scale, 1));
   padding: 36px 5%;
 }
 .auth-card {

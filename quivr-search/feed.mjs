@@ -16,7 +16,7 @@ const HYDRATE_CONCURRENCY = 6;
 const MAX_CLIENTS = 200;
 const KEEPALIVE_MS = 15000;
 const IDLE_MS = 45000;
-const TITLE_CHARS = 110;
+const TITLE_CHARS = 300; // the page cuts titles to one line, the tooltip shows them whole
 const EXCERPT_CHARS = 320;
 const RSS_EXTENSION = "connector.rss";
 

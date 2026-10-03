@@ -13,6 +13,11 @@ const TIMEOUT = 5000; // per request
 const DEADLINE = 10000; // whole discovery, under the facade's 15 s request timeout
 const MAX_FEEDS = 10;
 const MAX_SUGGESTIONS = 12;
+const MAX_LOGO_BYTES = 512 << 10;
+const MAX_LOGO_TRIES = 6;
+const FEED_ACCEPT =
+  "application/rss+xml, application/atom+xml, application/feed+json, text/html;q=0.9, application/xml;q=0.8, */*;q=0.5";
+const IMAGE_ACCEPT = "image/png, image/webp, image/jpeg, image/gif, image/x-icon;q=0.9, */*;q=0.5";
 
 // Mirrors netguard.Allowed: global unicast only, minus private, loopback,
 // link-local and the special-purpose ranges listed there.
@@ -165,7 +170,7 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
     return url;
   }
 
-  function get(url, budget) {
+  function get(url, budget, accept = FEED_ACCEPT, max = MAX_BYTES) {
     return new Promise((resolve, reject) => {
       const client = url.protocol === "https:" ? https : http;
       const request = client.get(
@@ -173,11 +178,7 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
         {
           lookup: guardedLookup(url),
           agent: false,
-          headers: {
-            "User-Agent": "Quivr-Demo/1.0 (feed discovery)",
-            Accept:
-              "application/rss+xml, application/atom+xml, application/feed+json, text/html;q=0.9, application/xml;q=0.8, */*;q=0.5",
-          },
+          headers: { "User-Agent": "Quivr-Demo/1.0 (feed discovery)", Accept: accept },
         },
         (response) => {
           const status = response.statusCode || 0;
@@ -195,18 +196,20 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
           let size = 0;
           response.on("data", (chunk) => {
             size += chunk.length;
-            if (size > MAX_BYTES) {
+            if (size > max) {
               request.destroy();
               reject(feedError("too_large"));
             } else chunks.push(chunk);
           });
-          response.on("end", () =>
+          response.on("end", () => {
+            const bytes = Buffer.concat(chunks);
             resolve({
               status,
               type: String(response.headers["content-type"] || "").toLowerCase(),
-              body: Buffer.concat(chunks).toString("utf8"),
-            }),
-          );
+              bytes,
+              body: bytes.toString("utf8"),
+            });
+          });
           response.on("error", () => reject(feedError("unreachable")));
         },
       );
@@ -227,17 +230,16 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
     });
   }
 
-  /** Fetches a page or feed and returns the feeds it is or advertises. */
-  async function discover(raw) {
+  // Fetches an address, following redirects, each hop checked again, until
+  // the deadline that started at `started`.
+  async function follow(raw, started, accept, max) {
     let url = parse(raw);
-    let response;
-    const started = Date.now();
     for (let hop = 0; ; hop++) {
       const left = DEADLINE - (Date.now() - started);
       if (left <= 0) throw feedError("unreachable");
       checkLiteral(url);
-      response = await get(url, left);
-      if (!response.location) break;
+      const response = await get(url, left, accept, max);
+      if (!response.location) return { ...response, url };
       if (hop >= MAX_REDIRECTS) throw feedError("unreachable");
       try {
         url = parse(new URL(response.location, url).href);
@@ -245,6 +247,12 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
         throw feedError("unreachable");
       }
     }
+  }
+
+  /** Fetches a page or feed and returns the feeds it is or advertises. */
+  async function discover(raw) {
+    const response = await follow(raw, Date.now());
+    const url = response.url;
     if (response.status === 404 || response.status === 410) throw feedError("not_found");
     if (response.status >= 400)
       throw feedError("unreachable", `(erreur ${response.status})`);
@@ -255,7 +263,44 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
     return { feeds };
   }
 
-  return { check, discover, exempt: (url) => exempt.has(new URL(url).origin) };
+  /**
+   * The logo of the site behind a feed: the icons its home page declares
+   * (apple-touch-icon first), then the feed's own image, then the usual
+   * /apple-touch-icon.png and /favicon.ico. Only raster images are kept,
+   * recognised by their first bytes; null when none answers.
+   */
+  async function logo(raw) {
+    const started = Date.now();
+    const feed = await follow(raw, started);
+    if (feed.status >= 400) return null;
+    let page = asFeed(feed.body, feed.type) ? null : feed;
+    const links = page ? {} : feedLinks(feed.body, feed.type, feed.url);
+    const home = links.site || new URL("/", feed.url);
+    if (!page)
+      page = await follow(home.href, started).catch(() => null);
+    const candidates = [
+      ...(page && page.status < 400 ? pageIcons(page.body, page.url) : []),
+      ...(links.image ? [links.image] : []),
+    ];
+    for (const origin of new Set([home.origin, feed.url.origin]))
+      candidates.push(new URL("/apple-touch-icon.png", origin), new URL("/favicon.ico", origin));
+    const tried = new Set();
+    for (const url of candidates) {
+      if (tried.has(url.href)) continue;
+      if (tried.size >= MAX_LOGO_TRIES || Date.now() - started >= DEADLINE) break;
+      tried.add(url.href);
+      try {
+        const image = await follow(url.href, started, IMAGE_ACCEPT, MAX_LOGO_BYTES);
+        const type = image.status < 300 && imageType(image.bytes);
+        if (type) return { type, bytes: image.bytes };
+      } catch {
+        // Too large, refused or unreachable: try the next one.
+      }
+    }
+    return null;
+  }
+
+  return { check, discover, logo, exempt: (url) => exempt.has(new URL(url).origin) };
 }
 
 // Parsing is deliberately linear-time: a fetched page is untrusted and up to
@@ -368,6 +413,91 @@ export function advertisedFeeds(page, base) {
     if (feeds.length >= MAX_FEEDS) break;
   }
   return feeds;
+}
+
+function webURL(value, base) {
+  try {
+    const url = new URL(value.trim(), base);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password
+      ? url
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The site a feed belongs to and its image, from the part before the first item. */
+export function feedLinks(body = "", type = "", base) {
+  const text = body.replace(/^\uFEFF/, "").trimStart();
+  const out = {};
+  const keep = (name, value) => {
+    const url = typeof value === "string" && webURL(decode(value, 2048), base);
+    if (url && !out[name]) out[name] = url;
+  };
+  if (type.includes("json") || text.startsWith("{")) {
+    try {
+      const data = JSON.parse(text);
+      keep("site", data.home_page_url);
+      keep("image", data.icon);
+      keep("image", data.favicon);
+    } catch {
+      /* not JSON */
+    }
+    return out;
+  }
+  const head = text.slice(0, SCAN);
+  const first = head.search(/<(item|entry)[\s>]/i);
+  const channel = first < 0 ? head : head.slice(0, first);
+  // RSS: <link>address</link>; Atom: <link href> without rel or rel="alternate".
+  keep("site", /<link>([^<]{1,2048})<\/link>/i.exec(channel)?.[1]);
+  for (const [tag] of channel.matchAll(/<link\b[^<>]{0,4096}>/gi)) {
+    const attrs = attributes(tag.slice(5, -1).replace(/\/$/, ""));
+    const rel = (attrs.rel || "alternate").toLowerCase();
+    const kind = (attrs.type || "text/html").toLowerCase();
+    if (rel === "alternate" && kind.startsWith("text/html")) keep("site", attrs.href);
+  }
+  const image = channel.search(/<image[\s>]/i);
+  if (image >= 0)
+    keep("image", /<url>([^<]{1,2048})<\/url>/i.exec(channel.slice(image, image + 4096))?.[1]);
+  keep("image", /<(?:atom:)?logo>([^<]{1,2048})<\//i.exec(channel)?.[1]);
+  keep("image", /<(?:atom:)?icon>([^<]{1,2048})<\//i.exec(channel)?.[1]);
+  return out;
+}
+
+/**
+ * The icons an HTML page declares, best first: apple-touch-icon, then the
+ * largest declared icon. SVG is left out: only raster images are served.
+ */
+export function pageIcons(page, base) {
+  const html = page.slice(0, SCAN);
+  const found = [];
+  for (const [tag] of html.matchAll(/<link\b[^<>]{0,4096}>/gi)) {
+    const attrs = attributes(tag.slice(5, -1));
+    const rel = (attrs.rel || "").toLowerCase().split(/\s+/);
+    const touch = rel.some((r) => r.startsWith("apple-touch-icon"));
+    if (!touch && !rel.includes("icon")) continue;
+    const url = attrs.href && webURL(attrs.href, base);
+    if (!url || (attrs.type || "").includes("svg") || /\.svg$/i.test(url.pathname)) continue;
+    const size = Math.max(
+      0,
+      ...(attrs.sizes || "").split(/\s+/).map((s) => parseInt(s, 10) || 0),
+    );
+    found.push({ url, rank: (touch ? 1000 : 0) + Math.min(size || (touch ? 180 : 16), 512) });
+    if (found.length >= MAX_FEEDS * 2) break;
+  }
+  return found.sort((a, b) => b.rank - a.rank).map((icon) => icon.url);
+}
+
+/** The type of a raster image, read from its first bytes, or null. */
+export function imageType(bytes) {
+  if (!bytes || bytes.length < 12) return null;
+  const at = (offset, ...values) => values.every((v, i) => bytes[offset + i] === v);
+  if (at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  if (at(0, 0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (at(0, 0x47, 0x49, 0x46, 0x38)) return "image/gif";
+  if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return "image/webp";
+  if (at(0, 0x00, 0x00, 0x01, 0x00) && bytes[4] + bytes[5] > 0) return "image/x-icon";
+  return null;
 }
 
 /** Parses DEMO_FEED_SUGGESTIONS: a JSON array of {title, url}. */

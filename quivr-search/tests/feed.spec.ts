@@ -95,16 +95,19 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
       fullPage: true,
     });
 
-    // 3. A source of the side column keeps one source at a time.
-    const sources = page.getByRole("complementary", {
-      name: "Alertes et sources",
-    });
-    await sources.getByRole("button", { name: /^Ajouté à la main/ }).click();
+    // 3. A source picked in the Sources menu shows its articles only.
+    const filters = page.getByRole("group", { name: "Filtrer le fil" });
+    await filters.getByRole("button", { name: /^Sources/ }).click();
+    const sources = page.getByRole("dialog", { name: "Sources" });
+    const hand = sources.getByRole("button", { name: /^Ajouté à la main/ });
+    await hand.click();
     await expect(list.getByText(handTitle)).toBeVisible();
     await expect(list.getByText(rssTitle)).toHaveCount(0);
+    await hand.click();
     await sources
       .getByRole("button", { name: new RegExp(`^${namespace}`) })
       .click();
+    await page.keyboard.press("Escape");
     await expect(list.getByText(rssTitle)).toBeVisible();
     await expect(list.getByText(handTitle)).toHaveCount(0);
     await expect(items).toHaveCount(1);
@@ -116,10 +119,7 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
     await expect(reader).toContainText(rssBody);
     await expect(reader).not.toContainText("<");
     await page.keyboard.press("Escape");
-    await page
-      .getByRole("group", { name: "Filtrer le fil" })
-      .getByRole("button", { name: /^Tout/ })
-      .click();
+    await filters.getByRole("button", { name: "Tout effacer" }).click();
 
     await page.setViewportSize({ width: 375, height: 812 });
     expect(
