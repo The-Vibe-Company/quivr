@@ -450,6 +450,72 @@ test("sources: suggestions, guarded discovery and creation, removal hides every 
   assert.equal((await fetch(base + "/v0/connectors/connector_b")).status, 200);
 });
 
+test("source logos: an RSS source of the demo corpus only, raster images served from this origin", async (t) => {
+  const png = Buffer.from("89504e470d0a1a0a0000000d494844520000001000000010", "hex");
+  const hits = [];
+  const site = http.createServer((req, res) => {
+    hits.push(req.url);
+    const host = `http://${req.headers.host}`;
+    const send = (type, body) => {
+      res.writeHead(200, { "Content-Type": type });
+      res.end(body);
+    };
+    if (req.url === "/feed") send("application/rss+xml", `<rss><channel><link>${host}/home</link><item/></channel></rss>`);
+    else if (req.url === "/home") send("text/html", '<link rel="apple-touch-icon" href="/icon.png">');
+    else if (req.url === "/icon.png") send("image/png", png);
+    else if (req.url === "/bare") send("application/rss+xml", "<rss><channel><item/></channel></rss>");
+    else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  site.listen(0, "127.0.0.1");
+  await once(site, "listening");
+  const origin = `http://127.0.0.1:${site.address().port}`;
+  const connectors = {
+    rss_ok: { kind: "rss", config: { url: `${origin}/feed` } },
+    rss_bare: { kind: "rss", config: { url: `${origin}/bare` } },
+    rss_outside: { kind: "rss", config: { url: `${origin}/feed` }, corpus_id: "private-corpus" },
+    other_kind: { kind: "webhook", config: { url: `${origin}/feed` } },
+  };
+  const upstream = http.createServer((req, res) => {
+    const id = req.url.match(/^\/v0\/connectors\/([\w-]+)$/)?.[1];
+    const found = id && connectors[id];
+    res.writeHead(found ? 200 : 404, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify(
+        found
+          ? { connector_id: id, corpus_id: "demo", source_namespace: "Example news", ...found }
+          : { code: "not_found", message: "Not found" },
+      ),
+    );
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+    site.close();
+  });
+  const base = await startDemo(t, upstream.address().port, {
+    DEMO_FEED_PRIVATE_ORIGINS: origin,
+  });
+  const logo = await fetch(`${base}/demo/sources/logo/rss_ok`);
+  assert.equal(logo.status, 200);
+  assert.equal(logo.headers.get("content-type"), "image/png");
+  assert.equal(logo.headers.get("x-content-type-options"), "nosniff");
+  assert.match(logo.headers.get("cache-control"), /^private/);
+  assert.deepEqual(Buffer.from(await logo.arrayBuffer()), png);
+  // A second request is served from the cache, without fetching the site again.
+  const fetched = hits.length;
+  assert.equal((await fetch(`${base}/demo/sources/logo/rss_ok`)).status, 200);
+  assert.equal(hits.length, fetched);
+  // Another corpus, another kind, an unknown connector and a site without an
+  // icon all answer 404.
+  for (const id of ["rss_outside", "other_kind", "missing", "rss_bare"])
+    assert.equal((await fetch(`${base}/demo/sources/logo/${id}`)).status, 404, id);
+});
+
 test("the Veille feed scans the catalog, relays live Records newest first and never exposes the key", async (t) => {
   const records = {
     rec_rss: { namespace: "wire", version: "v_rss" },
@@ -717,6 +783,7 @@ test("the Veille feed and Admin routes need the demo session", async (t) => {
     "/demo/admin/stream",
     "/demo/admin/documents/v/timeline",
     "/demo/admin/stats/steps",
+    "/demo/sources/logo/connector_any",
   ])
     assert.equal((await fetch(base + route)).status, 401, route);
   assert.deepEqual(seen, [], "nothing reaches the core without a session");

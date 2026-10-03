@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowSquareOut } from "@phosphor-icons/react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  ChevronsRightIcon,
+  ExternalLinkIcon,
+  SearchIcon,
+} from "../RailIcons";
+import { SourceLogo } from "./SourceLogo";
 import { fetchDocument, search, tokenize } from "../../lib/search";
 import { fetchAlert, type Alert, type CaughtArticle } from "../../lib/alerts";
 import { diffWords, summarize, type Change } from "../../lib/diff";
@@ -19,6 +26,15 @@ const sourceLabel = (namespace?: string) =>
     : namespace === HAND_NAMESPACE
       ? "Ajouté à la main"
       : namespace;
+
+/** "liberation.fr" for an article's address. */
+function host(link: string) {
+  try {
+    return new URL(link).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
 
 /** The title and text parts of a Version, as the reader shows them. */
 function readable(detail: DocumentDetail | null, fallback?: string) {
@@ -65,9 +81,11 @@ function why(alert: Alert, match?: CaughtArticle) {
 }
 
 /**
- * The built-in reader: the article's text as collected, why an alert caught
- * it, a correction notice, articles on the same subject (a semantic search
- * seeded by this one) and the original on its site.
+ * The built-in reader, a panel that opens over the right of the page while
+ * the feed stays in view: the article's text as collected, why an alert
+ * caught it, a correction notice, articles on the same subject (a semantic
+ * search seeded by this one) and the original on its site. A click outside
+ * it, other than on an article, closes it.
  */
 export function Reader({
   doc,
@@ -76,7 +94,10 @@ export function Reader({
   terms,
   caught,
   feedById,
+  logoOf,
   onClose,
+  onStep,
+  canStep,
   onOpen,
   onSimilar,
 }: {
@@ -86,7 +107,12 @@ export function Reader({
   terms: string[];
   caught: Alert[];
   feedById: Map<string, FeedItem>;
+  /** The connector whose site gives each source its logo. */
+  logoOf: Map<string, string>;
   onClose: () => void;
+  /** Opens the article above or below in the feed. */
+  onStep: (delta: 1 | -1) => void;
+  canStep: { back: boolean; forward: boolean };
   onOpen: (record: string, version: string) => void;
   onSimilar: (text: string) => void;
 }) {
@@ -101,9 +127,19 @@ export function Reader({
     new Map(),
   );
   const [neighbours, setNeighbours] = useState<
-    { record_id: string; version_id: string; title: string; meta: string }[]
+    { record_id: string; version_id: string; namespace?: string; title: string; meta: string }[]
   >([]);
   const heading = useRef<HTMLHeadingElement>(null);
+
+  // A click outside the panel closes it, unless it opens another article.
+  useEffect(() => {
+    const outside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest?.(".peek, .row, .menu, .rail, dialog, .toast-region")) onClose();
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [onClose]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -194,6 +230,7 @@ export function Reader({
           found.push({
             record_id: r.record_id,
             version_id: known?.version_id || r.version_id,
+            namespace: known?.namespace,
             title: known?.title || r.excerpt.text.slice(0, 110),
             meta: [sourceLabel(known?.namespace), at && longTime(at)]
               .filter(Boolean)
@@ -227,21 +264,52 @@ export function Reader({
   return (
     <aside className="panel reader" aria-labelledby="reader-title">
       <div className="reader-top">
-        <span className="reader-source">{sourceLabel(item?.namespace)}</span>
-        {at && (
-          <span className="reader-when">
-            · {item?.received_at ? "Arrivé à" : "Publié à"} {hhmm(at)} ·{" "}
-            {longTime(at)}
-          </span>
-        )}
         <button
           type="button"
-          className="button small reader-close"
+          className="reader-tool"
           title="Fermer (Échap)"
           onClick={onClose}
         >
-          Fermer
+          <ChevronsRightIcon />
+          <span className="visually-hidden">Fermer</span>
         </button>
+        <span className="reader-steps">
+          <button
+            type="button"
+            className="reader-tool"
+            title="Article précédent (↑)"
+            disabled={!canStep.back}
+            onClick={() => onStep(-1)}
+          >
+            <ChevronUpIcon />
+            <span className="visually-hidden">Article précédent</span>
+          </button>
+          <button
+            type="button"
+            className="reader-tool"
+            title="Article suivant (↓)"
+            disabled={!canStep.forward}
+            onClick={() => onStep(1)}
+          >
+            <ChevronDownIcon size={16} />
+            <span className="visually-hidden">Article suivant</span>
+          </button>
+        </span>
+        <span className="reader-meta">
+          {item?.namespace && (
+            <SourceLogo
+              namespace={item.namespace}
+              connectorId={logoOf.get(item.namespace)}
+              size="small"
+            />
+          )}
+          <span className="reader-source">{sourceLabel(item?.namespace)}</span>
+          {at && (
+            <span className="reader-when">
+              {item?.received_at ? "Arrivé à" : "Publié à"} {hhmm(at)} · {longTime(at)}
+            </span>
+          )}
+        </span>
       </div>
       <div className="reader-scroll">
         <h2 id="reader-title" ref={heading} tabIndex={-1}>
@@ -331,10 +399,21 @@ export function Reader({
                     type="button"
                     onClick={() => onOpen(n.record_id, n.version_id)}
                   >
-                    <span className="reader-near-title">{n.title}</span>
-                    {n.meta && (
-                      <span className="reader-near-meta">{n.meta}</span>
+                    {n.namespace ? (
+                      <SourceLogo
+                        namespace={n.namespace}
+                        connectorId={logoOf.get(n.namespace)}
+                        size="small"
+                      />
+                    ) : (
+                      <span className="reader-near-blank" aria-hidden="true" />
                     )}
+                    <span className="reader-near-text">
+                      <span className="reader-near-title">{n.title}</span>
+                      {n.meta && (
+                        <span className="reader-near-meta">{n.meta}</span>
+                      )}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -343,27 +422,27 @@ export function Reader({
         )}
       </div>
       <div className="reader-foot">
-        <button
-          type="button"
-          className="button primary small"
-          onClick={() => onSimilar(title)}
-        >
-          Chercher le même sujet
-        </button>
         {item?.link && (
           <a
-            className="button small"
+            className="reader-action"
+            data-main
             href={item.link}
             target="_blank"
             rel="noopener noreferrer"
           >
+            <ExternalLinkIcon />
             Ouvrir l’original
-            <ArrowSquareOut size={15} aria-hidden="true" />
+            <span className="reader-host">{host(item.link)}</span>
           </a>
         )}
-        <span className="reader-keys" aria-hidden="true">
-          ↑ ↓ article suivant · Échap fermer
-        </span>
+        <button
+          type="button"
+          className="reader-action"
+          onClick={() => onSimilar(title)}
+        >
+          <SearchIcon size={15} />
+          Creuser le sujet
+        </button>
       </div>
     </aside>
   );

@@ -31,6 +31,35 @@ const suggestions = parseSuggestions(
   process.env.DEMO_FEED_SUGGESTIONS,
   console.warn,
 );
+// Source logos: the icon of the site behind each RSS source, fetched under
+// the same refusal and served from this origin (the page's CSP keeps images
+// same-origin). Kept a day once found, an hour when the site has none.
+const LOGO_TTL = 86400000;
+const LOGO_MISS_TTL = 3600000;
+const MAX_LOGOS = 200;
+const MAX_LOGO_CACHE_BYTES = 16 << 20;
+const logos = new Map();
+const cachedBytes = () =>
+  [...logos.values()].reduce((sum, entry) => sum + (entry.logo?.bytes.length || 0), 0);
+function logoFor(feedURL) {
+  const known = logos.get(feedURL);
+  if (known && (known.pending || Date.now() < known.until)) return known.pending || known.logo;
+  const pending = feeds
+    .logo(feedURL)
+    .catch(() => null)
+    .then((logo) => {
+      logos.delete(feedURL);
+      logos.set(feedURL, { logo, until: Date.now() + (logo ? LOGO_TTL : LOGO_MISS_TTL) });
+      // Oldest first, until both the count and the bytes fit.
+      for (const [key, entry] of logos) {
+        if (logos.size <= MAX_LOGOS && cachedBytes() <= MAX_LOGO_CACHE_BYTES) break;
+        if (key !== feedURL && !entry.pending) logos.delete(key);
+      }
+      return logo;
+    });
+  logos.set(feedURL, { pending });
+  return pending;
+}
 const stateFile = process.env.DEMO_STATE_FILE;
 let removed = new Set();
 // Alerts (THE-734) created by the demo, oldest first.
@@ -316,6 +345,7 @@ const server = http.createServer(async (req, res) => {
       path.startsWith("/v0/") ||
       path.startsWith("/demo/feeds/") ||
       path === "/demo/sources/remove" ||
+      path.startsWith("/demo/sources/logo/") ||
       path === "/demo/feed" ||
       path === "/demo/feed/stream" ||
       path === "/demo/alerts" ||
@@ -337,6 +367,20 @@ const server = http.createServer(async (req, res) => {
       ) {
         if (path === "/demo/feed") send(res, 200, await feedFor(id).snapshot());
         else await feedFor(id).subscribe(req, res);
+        return;
+      }
+      const logo = path.match(/^\/demo\/sources\/logo\/([\w-]+)$/);
+      if (logo && req.method === "GET") {
+        const current = await ownConnector(logo[1], id);
+        const feedURL = current.data?.kind === "rss" && current.data.config?.url;
+        const image = typeof feedURL === "string" && (await logoFor(feedURL));
+        if (!image) throw fail(404, "Logo introuvable.");
+        res.writeHead(200, {
+          "Content-Type": image.type,
+          "Content-Length": image.bytes.length,
+          "Cache-Control": "private, max-age=86400",
+        });
+        res.end(image.bytes);
         return;
       }
       // The Admin tab, read-only: a snapshot, a live stream and one timeline.

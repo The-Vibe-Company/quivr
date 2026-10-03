@@ -13,8 +13,7 @@ const FRESH_MS = 2800;
 
 /**
  * The feed of the demo corpus, newest first. An article that arrives while
- * `hold()` is true (the reader is busy: arrivals paused, a search, an open
- * article, the list scrolled down) waits in `pending` until `showPending`.
+ * `hold()` is true (arrivals paused) waits in `pending` until `showPending`.
  */
 export function useFeedStream(
   hold: () => boolean,

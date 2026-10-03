@@ -20,7 +20,7 @@ import {
 import { Brand } from "./components/Logo";
 import { AddText } from "./components/AddText";
 import { ConnectorsView } from "./components/connectors/ConnectorsView";
-import { FeedPage, type Filter } from "./components/feed/FeedPage";
+import { ALL, FeedPage, type Filter } from "./components/feed/FeedPage";
 import { AlertsView } from "./components/alerts/AlertsView";
 import { AdminView } from "./components/admin/AdminView";
 import { Notice } from "./components/ui";
@@ -207,7 +207,7 @@ function Dashboard({
   const [doc, setDoc] = useState<Doc | null>(initial.doc);
   const [alert, setAlert] = useState<string | null>(initial.alert);
   const [version, setVersion] = useState<string | null>(initial.version);
-  const [filter, setFilter] = useState<Filter>({ kind: "all" });
+  const [filter, setFilter] = useState<Filter>(ALL);
   const [paused, setPaused] = useState(false);
   const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState<{ text: string; at: number } | null>(
@@ -218,13 +218,9 @@ function Dashboard({
   const scroller = useRef<HTMLDivElement>(null);
   const query = input.trim();
 
-  const hold = () =>
-    paused ||
-    (view === "feed" &&
-      (!!query ||
-        !!doc ||
-        (scroller.current?.scrollTop || 0) > 8 ||
-        window.scrollY > 8));
+  // New articles go straight into the timeline, marked unread, unless
+  // arrivals are paused from the rail.
+  const hold = () => paused;
   const feed = useFeedStream(hold, onUnauthorized);
   const alerts = useAlertList(onUnauthorized);
   const sources = useConnectorList(onUnauthorized);
@@ -332,13 +328,13 @@ function Dashboard({
         <a
           className="rail-brand"
           href="/"
-          title="Quivr Veille"
+          data-tip="Quivr Veille"
           onClick={(event) => {
             event.preventDefault();
             setView("feed");
             setInput("");
             setDoc(null);
-            setFilter({ kind: "all" });
+            setFilter(ALL);
           }}
         >
           <span className="rail-logo" aria-hidden="true" />
@@ -353,7 +349,7 @@ function Dashboard({
               href={href}
               className="rail-tab"
               data-section={target}
-              title={label}
+              data-tip={label}
               aria-current={view === target ? "page" : undefined}
               onClick={(event) => {
                 event.preventDefault();
@@ -383,7 +379,7 @@ function Dashboard({
               <button
                 type="button"
                 className="rail-tool"
-                title={theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre"}
+                data-tip={theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre"}
                 onClick={() => {
                   const next = theme === "dark" ? "light" : "dark";
                   saveTheme(next);
@@ -398,7 +394,7 @@ function Dashboard({
               <button
                 type="button"
                 className="rail-tool"
-                title="Ajouter du texte"
+                data-tip="Ajouter du texte"
                 onClick={() => setAdding(true)}
               >
                 <PlusIcon />
@@ -409,13 +405,14 @@ function Dashboard({
                 className="rail-tool bar-live"
                 data-state={paused ? "paused" : feed.live ? "live" : "off"}
                 aria-pressed={!paused}
-                title={paused ? "Reprendre les arrivées" : "Mettre les arrivées en pause"}
+                data-tip={paused ? "Reprendre les arrivées" : "Mettre les arrivées en pause"}
                 onClick={() => {
+                  if (paused) feed.showPending();
                   setPaused((p) => !p);
                   notify(
                     paused
                       ? "Les nouveaux articles s’affichent de nouveau dès leur arrivée."
-                      : "Arrivées en pause : les nouveaux articles attendent en haut du fil.",
+                      : "Arrivées en pause : les nouveaux articles s’afficheront à la reprise.",
                   );
                 }}
               >
@@ -461,7 +458,10 @@ function Dashboard({
               setInput(event.target.value);
               setView("feed");
               setDoc(null);
-              setFilter((f) => (f.kind === "source" ? f : { kind: "all" }));
+              // A search keeps the chosen sources, which it searches within.
+              setFilter((f) =>
+                f.read === "all" && !f.alerts.length ? f : { ...ALL, sources: f.sources },
+              );
             }}
             onKeyDown={(event) => {
               if (event.key === "Escape" && input) {
