@@ -439,6 +439,7 @@ const server = http.createServer(async (req, res) => {
         ".js": "text/javascript",
         ".css": "text/css",
         ".svg": "image/svg+xml",
+        ".png": "image/png",
         ".woff2": "font/woff2",
       }[extname(file)] || "application/octet-stream";
     res.writeHead(200, {
