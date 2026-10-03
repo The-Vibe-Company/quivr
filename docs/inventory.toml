@@ -65,6 +65,7 @@ excluded = [
 "contracts/http/v0/README.md" = { audience = "functional", kind = "concept", summary = "how the HTTP API contract is organised and checked" }
 "contracts/plugins/v0/README.md" = { audience = "plugin-author", kind = "concept", summary = "the plugin manifest, routes, schemas and fixtures" }
 "deploy/railway/README.md" = { audience = "functional", kind = "guide", summary = "run a hosted single-node evaluation demo" }
+"deploy/railway/hosted-embeddings.md" = { audience = "functional", kind = "guide", summary = "evaluate, fill and switch hosted text embeddings with rollback" }
 "docs/agents/documentation.md" = { audience = "contributor", kind = "guide", summary = "living and dated documents, the inventory, budgets and when docs may change" }
 "docs/agents/domain.md" = { audience = "contributor", kind = "guide", summary = "how the domain documentation is laid out" }
 "docs/agents/evaluation.md" = { audience = "contributor", kind = "guide", summary = "measure how well search ranks results on public and private evaluation sets" }
@@ -106,6 +107,7 @@ excluded = [
 "AGENTS.md" = 45
 "CONTEXT.md" = 327
 "deploy/railway/README.md" = 250
+"deploy/railway/hosted-embeddings.md" = 107
 "docs/agents/documentation.md" = 55
 "docs/agents/domain.md" = 45
 "docs/agents/evaluation.md" = 169

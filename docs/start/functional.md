@@ -11,6 +11,7 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 ## Guides
 
 - [Railway evaluation demo](../../deploy/railway/README.md): run a hosted single-node evaluation demo
+- [Switch hosted text embeddings with rollback](../../deploy/railway/hosted-embeddings.md): evaluate, fill and switch hosted text embeddings with rollback
 - [Quivr Search demo (THE-663)](../../quivr-search/README.md): the demo web app: search, sources, live feed and the admin view
 
 ## Reference

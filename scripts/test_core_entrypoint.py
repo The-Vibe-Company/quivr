@@ -29,11 +29,15 @@ class CoreEntrypointTest(unittest.TestCase):
         # main owns environment inheritance; sidecar_commands alone cannot see this leak.
         with tempfile.TemporaryDirectory() as tmp:
             runtime = pathlib.Path(tmp) / 'runtime.json'
+            manifest = pathlib.Path(tmp) / 'hosted-embed' / 'quivr-plugin.yaml'
             for role in ('api', 'worker', 'migrate'):
                 with self.subTest(role=role), patch.dict(os.environ, {
                     **ENV, 'QUIVR_ROLE': role, 'QUIVR_DEMO_JEV_RERANK': '1',
                     'TYPESAFE_API_KEY': 'fixture-typesafe-key', 'PATH': '/usr/bin',
-                }, clear=True), patch.object(core_entrypoint.pathlib, 'Path', return_value=runtime), \
+                    'AZURE_FOUNDRY_KEY': 'fixture-foundry-key',
+                    'AZURE_FOUNDRY_ENDPOINT': 'https://resource.example.org', 'QUIVR_DEMO_HOSTED_EMBED': '1',
+                }, clear=True), patch.object(core_entrypoint.pathlib, 'Path',
+                    side_effect=lambda value: runtime if value == '/tmp/quivr-runtime.json' else manifest), \
                     patch.object(core_entrypoint.os, 'umask'), \
                     patch.object(core_entrypoint.subprocess, 'run') as migrate, \
                     patch.object(core_entrypoint, 'supervise', return_value=0) as supervise, \
@@ -42,6 +46,11 @@ class CoreEntrypointTest(unittest.TestCase):
                     with self.assertRaises(SystemExit) as stopped:
                         core_entrypoint.main()
                     self.assertEqual(stopped.exception.code, 0)
+                    configure = migrate.call_args_list[0]
+                    self.assertEqual(configure.args[0], ['/usr/local/bin/quivr-hosted-embed', 'configure',
+                                     str(manifest.parent / 'configuration.json')])
+                    self.assertNotIn('AZURE_FOUNDRY_KEY', configure.kwargs['env'])
+                    self.assertNotIn('fixture-foundry-key', (manifest.parent / 'configuration.json').read_text())
                     if role == 'migrate':
                         effective = explicit_exec.call_args.args[2] if explicit_exec.called else dict(os.environ)
                     else:
@@ -49,18 +58,22 @@ class CoreEntrypointTest(unittest.TestCase):
                         core_env = next(child for name, _, _, child in commands if name == 'quivr ' + role)
                         effective = core_env if core_env is not None else dict(os.environ)
                         jev = [child for name, _, _, child in commands if name == 'jev-rerank']
+                        hosted = [child for name, _, _, child in commands if name == 'hosted-embed']
+                        self.assertEqual(hosted[0]['AZURE_FOUNDRY_KEY'], 'fixture-foundry-key')
                         self.assertEqual(len(jev), 1 if role == 'api' else 0)
                         if jev:
                             self.assertEqual(jev[0]['TYPESAFE_API_KEY'], 'fixture-typesafe-key')
                     self.assertNotIn('TYPESAFE_API_KEY', effective)
+                    self.assertNotIn('AZURE_FOUNDRY_KEY', effective)
                     self.assertEqual(effective['QUIVR_CONFIG'], str(runtime))
                     self.assertEqual(effective['DATABASE_URL'], ENV['DATABASE_URL'])
                     if role == 'api':
                         migration_env = migrate.call_args.kwargs.get('env', dict(os.environ))
                         self.assertNotIn('TYPESAFE_API_KEY', migration_env)
+                        self.assertNotIn('AZURE_FOUNDRY_KEY', migration_env)
                         self.assertEqual(migration_env['QUIVR_CONFIG'], str(runtime))
                     else:
-                        migrate.assert_not_called()
+                        self.assertEqual(migrate.call_count, 1)  # configure only; no migration
 
     def test_jev_adds_deep_beside_normal_search_and_runs_only_on_api(self):
         # Owns the deployment switch, process selection and secret boundary; no provider call.
@@ -105,6 +118,56 @@ class CoreEntrypointTest(unittest.TestCase):
                 else:
                     self.assertEqual(config, core_entrypoint.build_config(ENV))
 
+    def test_hosted_embedding_is_evaluation_only_and_has_its_own_secret(self):
+        # Owns runtime selection and inheritance; a shared-key or served-owner
+        # regression is not visible to the hosted plugin's provider tests.
+        for switch in ('', '0', 'true', '1'):
+            with self.subTest(switch=switch):
+                env = {**ENV, 'QUIVR_DEMO_HOSTED_EMBED': switch,
+                       'AZURE_FOUNDRY_ENDPOINT': 'https://resource.example.org/',
+                       'AZURE_FOUNDRY_KEY': 'fixture-foundry-key'}
+                config = core_entrypoint.build_config(env)
+                pins = {pathlib.PurePosixPath(p['manifest']).parent.name: p for p in config['plugins']}
+                enabled = switch == '1'
+                self.assertEqual('hosted-embed' in pins, enabled)
+                self.assertEqual(pins['core-ingest'], next(p for p in core_entrypoint.build_config(ENV)['plugins']
+                                 if p['manifest'] == pins['core-ingest']['manifest']))
+                self.assertNotIn('fixture-foundry-key', json.dumps(config))
+                if enabled:
+                    self.assertEqual(config['ingestion']['default'], 'core.ingest')
+                    self.assertEqual(config['ingestion']['evaluation'], {
+                        media: ['hosted.embed'] for media in ('text/plain', 'text/html', 'application/pdf')})
+                    hosted = pins['hosted-embed']['configuration']
+                    self.assertEqual(hosted['base_url'], 'https://resource.example.org/providers/cohere/v2')
+                    self.assertEqual((hosted['model'], hosted['dimensions']), ('Cohere-Embed-V5-Pro', 1024))
+                    self.assertEqual((hosted['document_input_type'], hosted['query_input_type']),
+                                     ('search_document', 'search_query'))
+                    self.assertEqual(hosted['usd_per_million_tokens'], 0.12)
+                else:
+                    self.assertEqual(config, core_entrypoint.build_config(ENV))
+                for role in ('api', 'worker'):
+                    children = {name: (argv, child) for name, argv, _, child in core_entrypoint.sidecar_commands(env, role)}
+                    self.assertEqual('hosted-embed' in children, enabled)
+                    for name, (argv, child) in children.items():
+                        if name == 'hosted-embed':
+                            self.assertEqual(argv, ['/usr/local/bin/quivr-hosted-embed'])
+                            self.assertEqual(child['AZURE_FOUNDRY_KEY'], 'fixture-foundry-key')
+                            self.assertEqual(child['QUIVR_PLUGIN_MANIFEST'], pins['hosted-embed']['manifest'])
+                            self.assertEqual(child['QUIVR_PLUGIN_PORT'], '9980')
+                            self.assertNotIn('AZURE_FOUNDRY_ENDPOINT', child)
+                        else:
+                            self.assertNotIn('AZURE_FOUNDRY_KEY', child)
+
+    def test_hosted_embedding_requires_endpoint_and_key_only_when_enabled(self):
+        for name in ('AZURE_FOUNDRY_ENDPOINT', 'AZURE_FOUNDRY_KEY'):
+            for value in ('', '  '):
+                env = {**ENV, 'QUIVR_DEMO_HOSTED_EMBED': '1',
+                       'AZURE_FOUNDRY_ENDPOINT': 'https://resource.example.org',
+                       'AZURE_FOUNDRY_KEY': 'fixture-foundry-key', name: value}
+                with self.subTest(name=name, value=value):
+                    with self.assertRaisesRegex(ValueError, name):
+                        core_entrypoint.build_config(env)
+
     def test_credential_key_is_passed_when_set(self):
         config = core_entrypoint.build_config({**ENV, 'QUIVR_CREDENTIAL_KEY': 'placeholder-credential-key'})
         self.assertEqual(config['credential_key'], 'placeholder-credential-key')
@@ -122,11 +185,11 @@ class CoreEntrypointTest(unittest.TestCase):
     def test_operator_key_is_separate_and_opt_in(self):
         self.assertEqual(len(core_entrypoint.build_config(ENV)['keys']), 1)
         keys = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']
-        for action in ('projections:rebuild', 'plugins:admin'):
+        for action in ('projections:rebuild', 'plugins:admin', 'operations:write'):
             self.assertIn(action, keys['placeholder-operator-key']['actions'])
         # The web app's key never administers plugins, whatever else is enabled.
         everything = {**ENV, 'QUIVR_DEMO_CONNECTORS': '1', 'QUIVR_DEMO_PLUGINS': '1', 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'}
-        for action in ('projections:rebuild', 'plugins:admin'):
+        for action in ('projections:rebuild', 'plugins:admin', 'operations:write'):
             self.assertNotIn(action, core_entrypoint.build_config(everything)['keys'][ENV['QUIVR_API_KEY']]['actions'])
 
     def test_connector_permissions_are_opt_in(self):

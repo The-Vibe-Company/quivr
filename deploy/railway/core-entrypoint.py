@@ -47,6 +47,12 @@ CONNECTORS = [
     # Today's search: keywords, vectors or both, from the candidates the engine serves (plugins/core-retrieve).
     {'id': 'core-retrieve', 'port': 9960, 'api': True, 'worker': False},
 ]
+# The configure command emits a model-locked manifest without a provider call.
+# /app is read-only to the runtime user; both files belong in private /tmp.
+HOSTED_MANIFEST = '/tmp/hosted-embed/quivr-plugin.yaml'
+HOSTED_EMBED = {'id': 'hosted-embed', 'port': 9980, 'api': True,
+                'manifest': HOSTED_MANIFEST, 'secrets': ['AZURE_FOUNDRY_KEY']}
+HOSTED_MEDIA_TYPES = ('text/plain', 'text/html', 'application/pdf')
 # The demo Organization's webhook destination. The web facade reads Matches
 # through the API, so nothing needs the webhook: the reserved .invalid name never
 # resolves and every delivery attempt fails without leaving the container. The
@@ -70,16 +76,46 @@ def described_enabled(env):
 
 
 def runtime_connectors(env):
-    """Keep normal search and optionally add Jev for deep searches."""
+    """Keep core.ingest and optionally add evaluation embeddings and Jev."""
+    connectors = CONNECTORS
+    if env.get('QUIVR_DEMO_HOSTED_EMBED') == '1':
+        connectors = connectors + [{**HOSTED_EMBED, 'configuration': hosted_configuration(env)}]
     if env.get('QUIVR_DEMO_JEV_RERANK') != '1':
-        return CONNECTORS
-    return CONNECTORS + [{
+        return connectors
+    return connectors + [{
         'id': 'jev-rerank', 'module': 'jev_rerank', 'port': 9970,
         'api': True, 'worker': False, 'secrets': ['TYPESAFE_API_KEY'],
         'configuration': {'candidate_count': 30, 'trim_tokens': '256',
                           'tokenizer_path': TOKENIZER['model'], 'ranking': 'noul',
                           'cache_entries': 4096},
     }]
+
+
+def hosted_configuration(env):
+    for name in ('AZURE_FOUNDRY_ENDPOINT', 'AZURE_FOUNDRY_KEY'):
+        if not env.get(name, '').strip():
+            raise ValueError('Missing runtime variable: ' + name)
+    return {'format': 'cohere',
+            'base_url': env['AZURE_FOUNDRY_ENDPOINT'].strip().rstrip('/') + '/providers/cohere/v2',
+            'auth': 'api-key', 'model': 'Cohere-Embed-V5-Pro', 'dimensions': 1024,
+            'document_input_type': 'search_document', 'query_input_type': 'search_query',
+            # Conservative UTF-8 byte/token bound, not an exact provider token window.
+            'max_tokens_per_segment': 6144, 'overlap': 192, 'max_batch_tokens': 98304,
+            'usd_per_million_tokens': 0.12}
+
+
+def prepare_hosted_manifest(env):
+    if env.get('QUIVR_DEMO_HOSTED_EMBED') != '1':
+        return
+    manifest = pathlib.Path(HOSTED_MANIFEST)
+    manifest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    configuration = manifest.parent / 'configuration.json'
+    configuration.write_text(json.dumps(hosted_configuration(env)))
+    # Configure needs no credentials. Its errors name fields, never runtime values.
+    with manifest.open('w') as output:
+        subprocess.run(['/usr/local/bin/quivr-hosted-embed', 'configure', str(configuration)],
+                       stdout=output, check=True,
+                       env={'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin')})
 
 
 def plugin_pins(env):
@@ -100,7 +136,7 @@ def connector_pins(env):
     def configuration(c):
         value = c.get('configuration', {})
         return value(env) if callable(value) else value
-    return [{'manifest': str(PLUGIN_ROOT / c['id'] / 'quivr-plugin.yaml'), 'endpoint': f"http://127.0.0.1:{c['port']}",
+    return [{'manifest': c.get('manifest', str(PLUGIN_ROOT / c['id'] / 'quivr-plugin.yaml')), 'endpoint': f"http://127.0.0.1:{c['port']}",
              'configuration': configuration(c)} for c in runtime_connectors(env)]
 
 
@@ -143,10 +179,13 @@ def build_config(env):
     operator = env.get('QUIVR_OPERATOR_KEY', '').strip()
     if operator:
         config['keys'][operator] = {'organization': 'quivr-demo', 'corpora': ['*'],
-                                    'actions': ['corpora:read', 'projections:rebuild', 'operations:read',
+                                    'actions': ['corpora:read', 'projections:rebuild', 'operations:read', 'operations:write',
                                                 'plugins:admin', 'observability:read']}
     if CONNECTORS:
         config['plugins'] = connector_pins(env)
+    if env.get('QUIVR_DEMO_HOSTED_EMBED') == '1':
+        config['ingestion'] = {'default': 'core.ingest',
+                               'evaluation': {media: ['hosted.embed'] for media in HOSTED_MEDIA_TYPES}}
     if env.get('QUIVR_DEMO_JEV_RERANK') == '1':
         config['retrieval'] = {'profiles': {'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'}}
     if plugins_enabled(env):
@@ -169,7 +208,7 @@ def sidecar_commands(env, role='worker'):
     deliveries to, the ingestion plugin it encodes queries with, the retrieval plugin
     that ranks its searches, and the subscription plugins it calls for previews. Its
     environment carries only the secrets that plugin declares (alerts and Jev:
-    TYPESAFE_API_KEY), never the core's.
+    TYPESAFE_API_KEY, hosted.embed: AZURE_FOUNDRY_KEY), never the core's.
 
     The plugins are first-party code under the same user as the worker, not an isolation boundary.
     """
@@ -182,7 +221,7 @@ def sidecar_commands(env, role='worker'):
         directory = PLUGIN_ROOT / connector['id']
         child = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
                  'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(connector['port']),
-                 'QUIVR_PLUGIN_MANIFEST': str(directory / 'quivr-plugin.yaml')}
+                 'QUIVR_PLUGIN_MANIFEST': connector.get('manifest', str(directory / 'quivr-plugin.yaml'))}
         child.update({name: env[name] for name in connector.get('secrets', []) if env.get(name, '').strip()})
         if 'module' in connector:
             child['PYTHONUNBUFFERED'] = '1'
@@ -252,11 +291,12 @@ def main():
         raise SystemExit('QUIVR_ROLE must be api, worker or migrate')
     config = build_config(os.environ)
     os.umask(0o077)
+    prepare_hosted_manifest(os.environ)
     path = pathlib.Path('/tmp/quivr-runtime.json')
     path.write_text(json.dumps(config))
     os.environ['QUIVR_CONFIG'] = str(path)
     # Plugin-only credentials belong to declared sidecar environments, not the engine.
-    plugin_secrets = {name for plugin in PLUGINS + runtime_connectors(os.environ)
+    plugin_secrets = {name for plugin in PLUGINS + runtime_connectors(os.environ) + [HOSTED_EMBED]
                       for name in plugin.get('secrets', [])}
     core_env = {name: value for name, value in os.environ.items() if name not in plugin_secrets}
     # Only the API applies startup migrations; failures abort before serving.
@@ -277,3 +317,5 @@ if __name__ == '__main__':
         main()
     except KeyError as error:
         sys.exit('Missing runtime variable: ' + str(error))
+    except ValueError as error:
+        sys.exit(str(error))

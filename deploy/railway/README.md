@@ -62,7 +62,7 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 
 ## Operator key (optional)
 
-`QUIVR_OPERATOR_KEY` on api adds a second key with `projections:rebuild`, `plugins:admin` and
+`QUIVR_OPERATOR_KEY` on api adds a second key with `projections:rebuild`, `plugins:admin`, `operations:write` and
 `observability:read`; the web app never gets the first two. Use it from inside the deployment
 (`railway ssh --service api`, port 8080) to rebuild a Corpus projection, to follow documents through
 their steps (`GET /v0/admin/documents`), or to register and activate plugins ([Switch plugins without restarting](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting)); a redeploy that changes the plugin pins applies them, even over an earlier activation of the same role.
@@ -79,6 +79,9 @@ Until then search works in every mode and new articles are searchable by keyword
 their vectors attach at the rebuild, which re-embeds with the same model, so results hold.
 
 ## Jev deep searches (optional)
+
+For optional Cohere embeddings beside core.ingest, follow
+[Switch hosted text embeddings with rollback](hosted-embeddings.md).
 
 The core image includes [`jev.rerank`](../../plugins/jev-rerank/README.md).
 To enable it, set `QUIVR_DEMO_JEV_RERANK=1` identically on api and worker,
