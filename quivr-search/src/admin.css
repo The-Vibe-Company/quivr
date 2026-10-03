@@ -534,11 +534,17 @@ li[data-fresh] > .flow-row {
   --cell-line: color-mix(in oklab, var(--error) 30%, transparent);
   --cell-ink: var(--error);
 }
+/* Dark theme: follows the system unless a theme was chosen in the rail
+   (data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :is(.cell, .legend-swatch)[data-state="done"] {
+  :root:not([data-theme="light"]) :is(.cell, .legend-swatch)[data-state="done"] {
     --cell-fill: color-mix(in oklab, var(--success) 14%, var(--panel));
     --cell-line: color-mix(in oklab, var(--success) 26%, transparent);
   }
+}
+:root[data-theme="dark"] :is(.cell, .legend-swatch)[data-state="done"] {
+  --cell-fill: color-mix(in oklab, var(--success) 14%, var(--panel));
+  --cell-line: color-mix(in oklab, var(--success) 26%, transparent);
 }
 .cell[data-state="todo"] {
   box-shadow: none;
@@ -911,6 +917,12 @@ li[data-fresh] > .flow-row {
     border-radius: 0;
     border-width: 0 0 0 1px;
     box-shadow: var(--shadow);
+  }
+}
+/* On a phone the rail is a bar at the bottom: the timeline covers it while open. */
+@media (max-width: 760px) {
+  .timeline-panel {
+    z-index: 31;
   }
 }
 @media (max-width: 999px) {

@@ -3,7 +3,7 @@
    tokens it adjusts and whose shared pieces (buttons, notices, dialogs) it
    reuses. */
 :root {
-  --page: #f4f4f6;
+  --page: #eef2f0;
   --panel: #fff;
   --line: #e8e8ee;
   --line-soft: #f0f0f4;
@@ -13,8 +13,8 @@
   --ink-faint: #8a8b99;
   --hover: #f4f4f6;
   --pressed: #f0f0f4;
-  --selected: #f7f5ff;
-  --fresh: #efeaff;
+  --selected: #f1f9f5;
+  --fresh: #e2f5ed;
   --hot: #e0561f;
   --hot-text: #c2410c;
   --hot-bg: #fff8f4;
@@ -28,36 +28,97 @@
   --live-line: #c7e3d4;
   --strong-button: #1a1a22;
   --strong-button-text: #fff;
-  --bar-height: 60px;
+  --bar-height: 81px;
+  /* Navigation rail */
+  --rail: #10261f;
+  --rail-hover: #173a2f;
+  --rail-accent: #3fd6a0;
+  --rail-line: rgb(63 214 160 / 0.26);
+  --rail-width: 60px;
+  --rail-gap: 12px;
+  /* Search field */
+  --search-bg: var(--panel);
+  --search-ring: rgb(12 125 92 / 0.35);
+  --search-tint: rgb(12 125 92 / 0.1);
+  --search-ink: #0c7d5c;
+  --bar-line: rgb(12 125 92 / 0.22);
+  --tile-bg: var(--panel);
+  --title-ink: #10261f;
+  --raise: 0 1px 2px rgb(16 38 31 / 0.08), 0 4px 12px rgb(16 38 31 / 0.05), inset 0 0 0 1px rgb(16 38 31 / 0.05);
 }
+/* Dark theme: follows the system unless a theme was chosen in the rail
+   (data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --page: #121218;
-    --panel: #1b1b23;
-    --line: #2e2e3a;
-    --line-soft: #26262f;
-    --ink: #eeeef5;
-    --ink-2: #d4d4de;
-    --ink-soft: #aaabba;
-    --ink-faint: #8e8fa0;
-    --hover: #24242e;
-    --pressed: #2a2a35;
-    --selected: #251f3a;
-    --fresh: #2d2446;
+  :root:not([data-theme="light"]) {
+    --page: #111214;
+    --search-bg: #0e1311;
+    --search-ring: rgb(63 214 160 / 0.35);
+    --search-tint: rgb(63 214 160 / 0.14);
+    --search-ink: #3fd6a0;
+    --bar-line: rgb(63 214 160 / 0.2);
+    --tile-bg: rgb(255 255 255 / 0.07);
+    --title-ink: var(--ink);
+    --raise: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+    --panel: #18191b;
+    --line: #2a2b2f;
+    --line-soft: #222326;
+    --ink: #ececef;
+    --ink-2: #d2d3d8;
+    --ink-soft: #a5a7ae;
+    --ink-faint: #8c8e96;
+    --hover: #212225;
+    --pressed: #28292d;
+    --selected: #15291f;
+    --fresh: #173a2d;
     --hot: #f08a5d;
     --hot-text: #f5a27c;
     --hot-bg: #2b1d17;
     --hot-strong: #f7b393;
     --ok-dot: #5fb892;
-    --idle-dot: #55556a;
+    --idle-dot: #55575e;
     --mark: #5c4d12;
     --warn-bg: #2a2413;
     --warn-line: #b58a36;
     --live-bg: #16291f;
     --live-line: #2a4a39;
-    --strong-button: #eeeef5;
-    --strong-button-text: #16161d;
+    --strong-button: #ececef;
+    --strong-button-text: #141517;
   }
+}
+:root[data-theme="dark"] {
+  --page: #111214;
+  --search-bg: #0e1311;
+  --search-ring: rgb(63 214 160 / 0.35);
+  --search-tint: rgb(63 214 160 / 0.14);
+  --search-ink: #3fd6a0;
+  --bar-line: rgb(63 214 160 / 0.2);
+  --tile-bg: rgb(255 255 255 / 0.07);
+  --title-ink: var(--ink);
+  --raise: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  --panel: #18191b;
+  --line: #2a2b2f;
+  --line-soft: #222326;
+  --ink: #ececef;
+  --ink-2: #d2d3d8;
+  --ink-soft: #a5a7ae;
+  --ink-faint: #8c8e96;
+  --hover: #212225;
+  --pressed: #28292d;
+  --selected: #15291f;
+  --fresh: #173a2d;
+  --hot: #f08a5d;
+  --hot-text: #f5a27c;
+  --hot-bg: #2b1d17;
+  --hot-strong: #f7b393;
+  --ok-dot: #5fb892;
+  --idle-dot: #55575e;
+  --mark: #5c4d12;
+  --warn-bg: #2a2413;
+  --warn-line: #b58a36;
+  --live-bg: #16291f;
+  --live-line: #2a4a39;
+  --strong-button: #ececef;
+  --strong-button-text: #141517;
 }
 
 body {
@@ -72,151 +133,277 @@ mark {
 }
 
 .shell {
+  padding-left: calc(var(--rail-gap) + var(--rail-width));
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--page);
 }
 
-/* Top bar */
+/* Navigation rail: a slim dark-green bar floating on the left, one icon per
+   section (the label is the link's accessible name and its tooltip). */
+.rail {
+  position: fixed;
+  z-index: 30;
+  left: var(--rail-gap);
+  top: var(--rail-gap);
+  bottom: var(--rail-gap);
+  width: var(--rail-width);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0;
+  border-radius: 18px;
+  background: var(--rail);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.07),
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    0 14px 34px rgb(16 18 24 / 0.22),
+    0 2px 6px rgb(16 18 24 / 0.14);
+}
+.rail-brand {
+  width: 40px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: #fff;
+}
+.rail-logo {
+  width: 28px;
+  height: 28px;
+  background-color: currentColor;
+  -webkit-mask: url("./assets/quivr-tree.png") center / contain no-repeat;
+  mask: url("./assets/quivr-tree.png") center / contain no-repeat;
+}
+.rail-sep {
+  width: 22px;
+  height: 1px;
+  margin: 8px 0 6px;
+  background: var(--rail-line);
+}
+.rail-tab {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: rgb(255 255 255 / 0.6);
+  transition:
+    background-color var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+.rail-tab:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 0.06);
+}
+.rail-tab[aria-current="page"] {
+  color: #fff;
+  background: rgb(255 255 255 / 0.11);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+}
+.rail-tab[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 11px;
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: var(--rail-accent);
+}
+.rail-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.rail-tool {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.6);
+  transition:
+    background-color var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+.rail-tool:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 0.06);
+}
+.rail-tool:focus-visible {
+  outline: 2px solid var(--rail-accent);
+  outline-offset: 2px;
+}
+.rail-brand:focus-visible,
+.rail-tab:focus-visible {
+  outline: 2px solid var(--rail-accent);
+  outline-offset: 2px;
+}
+.rail-badge {
+  position: absolute;
+  top: 3px;
+  right: 1px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--rail-accent);
+  color: var(--rail);
+  box-shadow: 0 0 0 2px var(--rail);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rail-badge[data-kind="sources"] {
+  top: 8px;
+  right: 8px;
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  background: #f0b443;
+}
+
+/* Top bar: the page's title and a search field with a touch of green. */
 .bar {
   position: sticky;
   top: 0;
   z-index: 20;
   display: flex;
   align-items: center;
-  gap: 24px;
-  height: var(--bar-height);
-  padding: 0 24px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  gap: 11px;
+  /* The hairline lines up with the rail's separator under the logo, and the
+     row stays centred on the logo. */
+  height: 67px;
+  padding-top: 10px;
+  margin: 0 24px;
+  background: var(--page);
+  border-bottom: 1px solid var(--bar-line);
 }
-.bar-brand {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex: none;
-  border-radius: 6px;
-}
-.bar-name {
-  font-size: 19px;
-  font-weight: 680;
-  letter-spacing: -0.5px;
-}
-.bar-product {
-  font-size: 13px;
-  color: var(--ink-faint);
-  letter-spacing: 0.2px;
-}
-.bar-tabs {
-  display: flex;
-  gap: 2px;
-  flex: none;
-}
-.bar-tabs a {
+.bar-view {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 32px;
-  padding: 0 11px;
+  gap: 10px;
+  color: var(--title-ink);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.5px;
+}
+.bar-view-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 8px;
-  color: var(--ink-soft);
-  font-size: 13.5px;
-  font-weight: 500;
-  white-space: nowrap;
+  background: var(--tile-bg);
+  box-shadow: var(--raise);
+  color: var(--search-ink);
+  letter-spacing: 0;
 }
-.bar-tabs a:hover {
-  background: var(--hover);
-}
-.bar-tabs a[aria-current="page"] {
-  background: var(--pressed);
-  color: var(--ink);
-  font-weight: 600;
-}
-.bar-badge {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--hot-text);
+.shell[data-view="admin"] .bar-view {
+  display: none;
 }
 .bar-search {
   flex: 1;
   min-width: 0;
-  max-width: 560px;
-  margin: 0 auto;
+  max-width: 460px;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 40px;
-  padding: 0 6px 0 14px;
-  background: var(--hover);
-  border: 1px solid var(--line);
+  height: 36px;
+  padding: 0 6px 0 12px;
   border-radius: 10px;
+  background: var(--search-bg);
+  box-shadow: var(--raise);
   color: var(--ink-faint);
-  transition: border-color 150ms var(--ease);
+  transition: box-shadow var(--duration) var(--ease);
 }
 .bar-search:focus-within,
 .bar-search[data-active] {
-  border-color: var(--accent);
+  box-shadow:
+    inset 0 0 0 1.5px var(--search-ink),
+    0 0 0 4px var(--search-tint);
+}
+.bar-search-icon {
+  flex: none;
+  display: flex;
+  color: var(--search-ink);
 }
 .bar-search input {
   flex: 1;
   min-width: 0;
-  height: 36px;
+  height: 32px;
   border: 0;
   outline: none;
   background: transparent;
   color: var(--ink);
-  font-size: 14.5px;
+  font-size: 14px;
+}
+.bar-search input::placeholder {
+  color: var(--ink-soft);
 }
 .bar-search input::-webkit-search-cancel-button {
   display: none;
+}
+.bar-kbd {
+  min-width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
 }
 .bar-clear {
   height: 28px;
   padding: 0 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--line);
   color: var(--ink-2);
   font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
 }
-.bar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
-}
-.bar-add,
-.bar-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--ink-2);
-  font-size: 12.5px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.bar-add:hover {
-  background: var(--hover);
-}
-.bar-live[data-state="live"] {
-  background: var(--live-bg);
-  border-color: var(--live-line);
-  color: var(--success);
-}
-.bar-live-dot {
+/* Live arrivals: a dot in the rail, green and pulsing while live; a click
+   pauses them. */
+.bar-live .bar-live-dot {
   position: relative;
-  width: 7px;
-  height: 7px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: currentColor;
+  background: rgb(255 255 255 / 0.4);
+}
+.bar-live[data-state="live"] .bar-live-dot {
+  background: var(--rail-accent);
+  box-shadow: 0 0 0 4px rgb(63 214 160 / 0.16);
+}
+.bar-live[data-state="paused"] .bar-live-dot {
+  background: #f0b443;
+  box-shadow: 0 0 0 4px rgb(240 180 67 / 0.16);
 }
 .bar-live[data-state="live"] .bar-live-dot::after {
   content: "";
@@ -224,6 +411,7 @@ mark {
   inset: 0;
   border-radius: 50%;
   background: currentColor;
+  color: var(--rail-accent);
   animation: qpulse 2s var(--ease-out) infinite;
 }
 @keyframes qpulse {
@@ -260,7 +448,7 @@ mark {
   flex: 1;
   display: flex;
   gap: 20px;
-  padding: 20px 24px 24px;
+  padding: 14px 24px 24px;
   min-width: 0;
 }
 .panel {
@@ -1565,7 +1753,7 @@ mark {
   }
   .reader {
     position: fixed;
-    inset: var(--bar-height) 0 0 0;
+    inset: var(--bar-height) 0 0 calc(var(--rail-gap) + var(--rail-width));
     z-index: 15;
     width: auto;
     border-radius: 0;
@@ -1580,49 +1768,77 @@ mark {
 }
 @media (max-width: 760px) {
   :root {
-    --bar-height: 108px;
+    --bar-height: 128px;
   }
-  .bar {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    grid-template-areas:
-      "brand tabs actions"
-      "search search search";
-    gap: 8px 12px;
-    height: auto;
-    min-height: var(--bar-height);
-    padding: 10px 14px;
+  .shell {
+    padding-left: 0;
+    padding-bottom: 88px;
   }
-  .bar-brand {
-    grid-area: brand;
+  .rail {
+    top: auto;
+    left: 50%;
+    bottom: 14px;
+    width: auto;
+    height: 60px;
+    transform: translateX(-50%);
+    flex-direction: row;
+    padding: 0 6px;
+    border-radius: 22px;
+    gap: 2px;
   }
-  .bar-product {
+  .rail-brand,
+  .rail-sep {
     display: none;
   }
-  .bar-tabs {
-    grid-area: tabs;
-    min-width: 0;
-    overflow-x: auto;
+  .rail-tab {
+    width: 44px;
+    height: 46px;
+    border-radius: 14px;
   }
-  .bar-tabs a {
-    padding: 0 8px;
+  .rail-tab[data-section="admin"] {
+    margin-top: 0;
   }
-  .bar-actions {
-    grid-area: actions;
+  .rail-tab[aria-current="page"]::before {
+    left: 50%;
+    top: auto;
+    bottom: 4px;
+    width: 14px;
+    height: 3px;
+    margin-left: -7px;
+    border-radius: 3px;
+  }
+  .rail-foot {
+    margin-top: 0;
+    flex-direction: row;
+    gap: 2px;
+  }
+  .rail-tool {
+    width: 42px;
+    height: 46px;
+  }
+  .bar {
+    flex-wrap: wrap;
+    gap: 10px;
+    height: auto;
+    margin: 0 12px;
+    padding: 12px 0;
   }
   .bar-search {
-    grid-area: search;
+    flex-basis: 100%;
     max-width: none;
-    width: 100%;
+    margin-left: 0;
   }
-  .bar-live {
-    padding: 0 10px;
-    font-size: 0;
-    gap: 0;
+  .bar-kbd {
+    display: none;
   }
-  .bar-live .bar-live-dot {
-    width: 8px;
-    height: 8px;
+  /* The reader covers the bottom bar while it is open; toasts sit above it. */
+  .reader {
+    left: 0;
+    z-index: 31;
+  }
+  .toast-region {
+    bottom: 88px;
+    z-index: 32;
   }
   .board {
     padding: 12px 10px 20px;
@@ -1667,28 +1883,6 @@ mark {
   }
   .form-actions .form-advanced {
     margin-left: 0;
-  }
-}
-/* Four tabs and the search share the bar: below 1000 px the add button
-   keeps only its icon. */
-@media (max-width: 999px) {
-  .bar-add {
-    width: 32px;
-    padding: 0;
-    justify-content: center;
-  }
-  .bar-add-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-}
-@media (max-width: 760px) {
-  .bar-badge-long {
-    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1746,4 +1940,27 @@ mark {
   flex: none;
   color: var(--ink-soft);
   font-size: 12px;
+}
+
+/* Forced colours (Windows contrast themes): keep the active section and the
+   search field visible once backgrounds and shadows are dropped. */
+@media (forced-colors: active) {
+  .rail-tab[aria-current="page"] {
+    outline: 2px solid CanvasText;
+    outline-offset: -2px;
+  }
+  .bar-search {
+    border: 1px solid CanvasText;
+  }
+  .bar-search:focus-within {
+    outline: 2px solid Highlight;
+  }
+  .rail-tab:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  .rail-logo {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+  }
 }

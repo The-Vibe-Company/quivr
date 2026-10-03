@@ -12,7 +12,7 @@ make demo
 
 Open http://127.0.0.1:5183. The command builds the frontend, starts isolated real dependencies, migrates the database and serves the production bundle. First startup downloads the pinned E5 model (~958 MB). Ctrl+C stops services; texts persist across runs. `make demo-reset` deletes **only this demo's** volumes. Set `DEMO_PORT` to use another port. Optional `DEMO_PASSWORD` enables a shared demo password locally.
 
-The app is a monitoring dashboard with four tabs, **Fil**, **Alertes**, **Sources** and **Admin**, and a search box in the top bar (`/` or Ctrl+K). **Ajouter du texte** pastes a note: it is limited to 256 KiB, whitespace and Unicode are preserved, drafts and retry identity survive reloads within the same browser tab, and ambiguous network failures reuse the same ingestion identity.
+The app is a monitoring dashboard with four tabs, **Fil**, **Alertes**, **Sources** and **Admin**, shown as icons in a slim rail on the left (each name is its tooltip), and a search box at the top (`/` or Ctrl+K). At the bottom of the rail sit the light/dark switch (kept in this browser), **Ajouter du texte** and the live dot that pauses arrivals. **Ajouter du texte** pastes a note: it is limited to 256 KiB, whitespace and Unicode are preserved, drafts and retry identity survive reloads within the same browser tab, and ambiguous network failures reuse the same ingestion identity.
 
 ### Fil
 

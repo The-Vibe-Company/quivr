@@ -1,5 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, LockKey, NotePencil } from "@phosphor-icons/react";
+import {
+  type ComponentType,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { ArrowRight, LockKey } from "@phosphor-icons/react";
+import {
+  AdminIcon,
+  AlertsIcon,
+  FeedIcon,
+  MoonIcon,
+  PlusIcon,
+  SearchIcon,
+  SourcesIcon,
+  SunIcon,
+} from "./components/RailIcons";
 import { Brand } from "./components/Logo";
 import { AddText } from "./components/AddText";
 import { ConnectorsView } from "./components/connectors/ConnectorsView";
@@ -13,6 +30,7 @@ import { useReadState } from "./lib/readState";
 import { groupSources } from "./components/connectors/SourceList";
 import { displayState } from "./components/connectors/HealthBadge";
 import { needsCheck } from "./lib/format";
+import { currentTheme, onSystemTheme, saveTheme, type Theme } from "./lib/theme";
 
 type Auth = "loading" | "login" | "ready" | "error";
 type View = "feed" | "alerts" | "sources" | "admin";
@@ -25,6 +43,12 @@ const TABS: { view: View; label: string; href: string }[] = [
   { view: "sources", label: "Sources", href: "/?view=sources" },
   { view: "admin", label: "Admin", href: "/?view=admin" },
 ];
+const TAB_ICONS: Record<View, ComponentType<{ size?: number }>> = {
+  feed: FeedIcon,
+  alerts: AlertsIcon,
+  sources: SourcesIcon,
+  admin: AdminIcon,
+};
 const TITLES: Record<View, string> = {
   feed: "Fil",
   alerts: "Alertes",
@@ -286,13 +310,16 @@ function Dashboard({
     sources: `${toCheck} source${toCheck > 1 ? "s" : ""} à vérifier`,
   };
   const liveLabel = paused ? "En pause" : feed.live ? "En direct" : "Reconnexion…";
+  const [theme, setTheme] = useState<Theme>(currentTheme);
+  useEffect(() => onSystemTheme(setTheme), []);
 
   return (
     <div className="shell" data-view={view}>
-      <header className="bar">
+      <nav className="rail" aria-label="Sections">
         <a
-          className="bar-brand"
+          className="rail-brand"
           href="/"
+          title="Quivr Veille"
           onClick={(event) => {
             event.preventDefault();
             setView("feed");
@@ -301,14 +328,19 @@ function Dashboard({
             setFilter({ kind: "all" });
           }}
         >
-          <span className="bar-name">Quivr</span>
-          <span className="bar-product">Veille</span>
+          <span className="rail-logo" aria-hidden="true" />
+          <span className="visually-hidden">Quivr Veille, accueil</span>
         </a>
-        <nav className="bar-tabs" aria-label="Sections">
-          {TABS.map(({ view: target, label, href }) => (
+        <span className="rail-sep" aria-hidden="true" />
+        {TABS.map(({ view: target, label, href }) => {
+          const Icon = TAB_ICONS[target];
+          const tab = (
             <a
               key={target}
               href={href}
+              className="rail-tab"
+              data-section={target}
+              title={label}
               aria-current={view === target ? "page" : undefined}
               onClick={(event) => {
                 event.preventDefault();
@@ -316,14 +348,12 @@ function Dashboard({
                 setView(target);
               }}
             >
-              {label}
+              <Icon />
+              <span className="visually-hidden">{label}</span>
               {badges[target] && (
-                <span className="bar-badge">
+                <span className="rail-badge" data-kind={target}>
                   <span aria-hidden="true">
-                    {badges[target]}
-                    {target === "sources" && (
-                      <span className="bar-badge-long"> à vérifier</span>
-                    )}
+                    {target === "alerts" ? badges[target] : ""}
                   </span>
                   <span className="visually-hidden">
                     , {badgeLabels[target]}
@@ -331,8 +361,70 @@ function Dashboard({
                 </span>
               )}
             </a>
-          ))}
-        </nav>
+          );
+          if (target !== "admin") return tab;
+          // Admin sits at the bottom, under the two tools: adding a text
+          // (mostly for demos) and pausing arrivals.
+          return (
+            <div key={target} className="rail-foot">
+              <button
+                type="button"
+                className="rail-tool"
+                title={theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre"}
+                onClick={() => {
+                  const next = theme === "dark" ? "light" : "dark";
+                  saveTheme(next);
+                  setTheme(next);
+                }}
+              >
+                {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+                <span className="visually-hidden">
+                  {theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre"}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="rail-tool"
+                title="Ajouter du texte"
+                onClick={() => setAdding(true)}
+              >
+                <PlusIcon />
+                <span className="visually-hidden">Ajouter du texte</span>
+              </button>
+              <button
+                type="button"
+                className="rail-tool bar-live"
+                data-state={paused ? "paused" : feed.live ? "live" : "off"}
+                aria-pressed={!paused}
+                title={paused ? "Reprendre les arrivées" : "Mettre les arrivées en pause"}
+                onClick={() => {
+                  setPaused((p) => !p);
+                  notify(
+                    paused
+                      ? "Les nouveaux articles s’affichent de nouveau dès leur arrivée."
+                      : "Arrivées en pause : les nouveaux articles attendent en haut du fil.",
+                  );
+                }}
+              >
+                <span className="bar-live-dot" aria-hidden="true" />
+                <span className="visually-hidden">{liveLabel}</span>
+              </button>
+              <span className="rail-sep" aria-hidden="true" />
+              {tab}
+            </div>
+          );
+        })}
+      </nav>
+      <header className="bar">
+        <span className="bar-view">
+          <span className="bar-view-icon" aria-hidden="true">
+            {(() => {
+              const ViewIcon = TAB_ICONS[view];
+              return <ViewIcon size={16} />;
+            })()}
+          </span>
+          {TITLES[view]}
+        </span>
         <form
           role="search"
           className="bar-search"
@@ -342,18 +434,9 @@ function Dashboard({
             setView("feed");
           }}
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <circle cx="8.5" cy="8.5" r="6" />
-            <path d="M13 13l5 5" strokeLinecap="round" />
-          </svg>
+          <span className="bar-search-icon" aria-hidden="true">
+            <SearchIcon size={16} />
+          </span>
           <input
             ref={searchRef}
             type="search"
@@ -374,7 +457,7 @@ function Dashboard({
               }
             }}
           />
-          {input && (
+          {input ? (
             <button
               type="button"
               className="bar-clear"
@@ -385,36 +468,12 @@ function Dashboard({
             >
               Effacer
             </button>
+          ) : (
+            <kbd className="bar-kbd" aria-hidden="true">
+              /
+            </kbd>
           )}
         </form>
-        <div className="bar-actions">
-          <button
-            type="button"
-            className="bar-add"
-            onClick={() => setAdding(true)}
-          >
-            <NotePencil size={16} aria-hidden="true" />
-            <span className="bar-add-label">Ajouter du texte</span>
-          </button>
-          <button
-            type="button"
-            className="bar-live"
-            data-state={paused ? "paused" : feed.live ? "live" : "off"}
-            aria-pressed={!paused}
-            title={paused ? "Reprendre les arrivées" : "Mettre les arrivées en pause"}
-            onClick={() => {
-              setPaused((p) => !p);
-              notify(
-                paused
-                  ? "Les nouveaux articles s’affichent de nouveau dès leur arrivée."
-                  : "Arrivées en pause : les nouveaux articles attendent en haut du fil.",
-              );
-            }}
-          >
-            <span className="bar-live-dot" aria-hidden="true" />
-            {liveLabel}
-          </button>
-        </div>
       </header>
       {view === "feed" ? (
         <FeedPage

@@ -16,8 +16,10 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: -16px -22px -20px;
 }
+/* Dark theme: follows the system unless a theme was chosen in the rail
+   (data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  .usage-grid {
+  :root:not([data-theme="light"]) .usage-grid {
     --series-1: #9085e9;
     --series-2: #199e70;
     --series-3: #d95926;
@@ -25,6 +27,14 @@
     --series-5: #d55181;
     --series-other: #4a4b5a;
   }
+}
+:root[data-theme="dark"] .usage-grid {
+  --series-1: #9085e9;
+  --series-2: #199e70;
+  --series-3: #d95926;
+  --series-4: #3987e5;
+  --series-5: #d55181;
+  --series-other: #4a4b5a;
 }
 
 .usage-block {
