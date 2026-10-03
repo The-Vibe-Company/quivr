@@ -78,3 +78,7 @@ func (FixtureConnector) Fetch(ctx context.Context, req connectors.FetchRequest) 
 	}
 	return result, nil
 }
+
+func (c FixtureConnector) Descriptor() connectors.Descriptor {
+	return connectors.Descriptor{Kind: c.Source.Kind(), ConfigSchema: c.Source.ConfigSchema(), CredentialSchema: c.Source.CredentialSchema(), DefaultInterval: c.Source.DefaultInterval()}
+}

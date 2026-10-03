@@ -26,8 +26,6 @@ type echoPush struct {
 	answer *connectors.Delivery
 }
 
-func (echoPush) Kind() string { return "echo" }
-func (echoPush) Pushes() bool { return true }
 func (e echoPush) Receive(_ context.Context, r connectors.ReceiveRequest) (connectors.Delivery, error) {
 	*e.seen = append(*e.seen, r)
 	if e.answer != nil {
@@ -115,4 +113,11 @@ func TestWebhookRouteRelaysABoundedRequestWithoutAnAPIKey(t *testing.T) {
 	if rec := send("POST", "/v0/connector-webhooks/connector_push", nil, nil); rec.Code != 503 || rec.Header().Get("Retry-After") != "30" || rec.Header().Get("Content-Type") != "text/plain" || rec.Body.String() != "temporarily unavailable; retry later" || rec.Header().Get("Quivr-Response-Origin") != "" {
 		t.Fatalf("retry hint: %d %v", rec.Code, rec.Header())
 	}
+}
+
+func (c echoPush) Descriptor() connectors.Descriptor {
+	d := c.FixtureConnector.Descriptor()
+	d.Kind = "echo"
+	d.Receiver = c
+	return d
 }

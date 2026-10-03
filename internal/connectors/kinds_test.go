@@ -81,16 +81,20 @@ type noCredential struct{ Fixture }
 // x_list do.
 type bearerSource struct{ Fixture }
 
-func (bearerSource) Kind() string                   { return "bearer_source" }
-func (bearerSource) DefaultInterval() time.Duration { return 2 * time.Minute }
-func (bearerSource) CredentialRequired() bool       { return true }
-func (bearerSource) ConfigSchema() []byte {
-	return []byte(`{"title":"Bearer source","description":"A source that needs a bearer token.","type":"object","additionalProperties":false,"required":["list_id"],"properties":{"list_id":{"type":"string","pattern":"^[0-9]+$"}}}`)
-}
-func (bearerSource) CredentialSchema() []byte {
-	return []byte(`{"type":"object","required":["bearer_token"],"properties":{"bearer_token":{"type":"string","writeOnly":true}}}`)
+func (c bearerSource) Descriptor() Descriptor {
+	d := c.Fixture.Descriptor()
+	d.Kind = "bearer_source"
+	d.DefaultInterval = 2 * time.Minute
+	d.CredentialRequired = true
+	d.ConfigSchema = []byte(`{"title":"Bearer source","description":"A source that needs a bearer token.","type":"object","additionalProperties":false,"required":["list_id"],"properties":{"list_id":{"type":"string","pattern":"^[0-9]+$"}}}`)
+	d.CredentialSchema = []byte(`{"type":"object","required":["bearer_token"],"properties":{"bearer_token":{"type":"string","writeOnly":true}}}`)
+	return d
 }
 
-func (noCredential) Kind() string             { return "noop" }
-func (noCredential) ConfigSchema() []byte     { return []byte(`{"type":"object"}`) }
-func (noCredential) CredentialSchema() []byte { return nil }
+func (c noCredential) Descriptor() Descriptor {
+	d := c.Fixture.Descriptor()
+	d.Kind = "noop"
+	d.ConfigSchema = []byte(`{"type":"object"}`)
+	d.CredentialSchema = nil
+	return d
+}

@@ -34,9 +34,9 @@ func receiverWebhookURL(c Connector, publicURL, id string) string {
 	if publicURL == "" {
 		return ""
 	}
-	if api, ok := c.(APIReceiver); ok {
+	if routes := c.Descriptor().APIRoutes; len(routes) > 0 {
 		signed := false
-		for _, route := range api.APIRoutes() {
+		for _, route := range routes {
 			signed = signed || route.Auth == "signature"
 			if route.Path == "receive" && route.Method == "POST" && route.Auth == "signature" {
 				return strings.TrimRight(publicURL, "/") + "/v0/connectors/" + url.PathEscape(id) + "/api/receive"
@@ -170,9 +170,8 @@ type Delivery struct {
 }
 
 // Receiver is implemented by a Connector that can receive relayed deliveries
-// (plugin kinds). Pushes reports whether this kind declares the push mode.
+// (plugin kinds). The descriptor exposes it only for push kinds.
 type Receiver interface {
-	Pushes() bool
 	Receive(context.Context, ReceiveRequest) (Delivery, error)
 }
 
@@ -257,9 +256,9 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 		return unavailable("storage_unavailable"), nil
 	}
 	entry, ok := r.Registry.current()[target.Kind]
-	connector := entry.connector
-	receiver, pushes := connector.(Receiver)
-	if !target.Enabled || !ok || !pushes || !receiver.Pushes() {
+	connector := entry
+	receiver := entry.descriptor.Receiver
+	if !target.Enabled || !ok || receiver == nil {
 		return RelayAnswer{}, ErrNoWebhook
 	}
 	// A kind declaring signature ingress cannot bypass its guards through
@@ -331,11 +330,12 @@ func (r Relay) deliver(ctx context.Context, target Target, connector Connector, 
 	if route != "" {
 		answer.Receipts = []content.Receipt{}
 	}
-	if owner, ok := connector.(ExtensionOwner); ok {
-		ctx = content.WithExtensionWriter(ctx, owner.ExtensionOwner())
+	descriptor := connector.Descriptor()
+	if owner := descriptor.ExtensionOwner; owner != "" {
+		ctx = content.WithExtensionWriter(ctx, owner)
 	}
 	submitter := Acquirer{Ingest: r.Ingest}
-	rc := runContext{connector: connector, target: target, credential: credential}
+	rc := runContext{descriptor: descriptor, target: target, credential: credential}
 	outcome := DeliveryOutcome{Accepted: true, Carried: len(delivery.Items) > 0, Reads: delivery.Reads}
 	for _, item := range delivery.Items {
 		_, receipt, err := submitter.submit(ctx, org, rc, item)

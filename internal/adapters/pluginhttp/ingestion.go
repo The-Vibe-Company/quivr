@@ -34,18 +34,30 @@ func (i Ingestor) Bind(ctx context.Context) error { return plugins.BindIngestion
 
 func (i Ingestor) contribution() *plugins.Ingestion { return i.Pin.Manifest.Contributions.Ingestion }
 
-// Recipe names the plugin's segmentation by its id and version.
-func (i Ingestor) Recipe() string {
-	return "plugin:" + i.Pin.Manifest.ID + "@" + i.Pin.Manifest.Version
-}
-
-// Producer names the producer of the plugin's Embedding Artifacts.
-func (i Ingestor) Producer() string { return i.Recipe() }
-
-// Provenance is recorded with each Segmentation the plugin makes.
-func (i Ingestor) Provenance() json.RawMessage {
-	b, _ := json.Marshal(map[string]string{"plugin_id": i.Pin.Manifest.ID, "plugin_version": i.Pin.Manifest.Version})
-	return b
+// Descriptor captures the metadata of this installed ingestion owner.
+func (i Ingestor) Descriptor() processing.IngestionDescriptor {
+	recipe := "plugin:" + i.Pin.Manifest.ID + "@" + i.Pin.Manifest.Version
+	provenance, _ := json.Marshal(map[string]string{"plugin_id": i.Pin.Manifest.ID, "plugin_version": i.Pin.Manifest.Version})
+	d := processing.IngestionDescriptor{PluginID: i.Pin.Manifest.ID, PluginVersion: i.Pin.Manifest.Version,
+		RegistrationID: i.Pin.Registration, Configuration: i.Pin.Configuration, InputPrices: map[string]*float64{},
+		Recipe: recipe, Producer: recipe, Provenance: provenance,
+		SegmentsOnly: i.Pin.Speaks(plugins.FeatureSegmentsOnly), VectorSpaces: map[string]content.VectorSpace{}}
+	for _, space := range i.Pin.EnabledSpaces() {
+		d.Spaces = append(d.Spaces, space.Key)
+	}
+	if in := i.contribution(); in != nil {
+		for id, space := range in.Spaces {
+			key := plugins.SpaceKey(id, space.Version)
+			var price *float64
+			if space.InputPrice != nil {
+				usd := space.InputPrice.USDPerMillionTokens
+				price = &usd
+			}
+			d.InputPrices[key] = price
+			d.VectorSpaces[key] = content.VectorSpace{ID: key, Manifest: plugins.SpaceManifest(i.Pin.Manifest.ID, id, space), Dimensions: space.Dimensions}
+		}
+	}
+	return d
 }
 
 // declared returns the declared space id of a space key.
@@ -58,32 +70,10 @@ func (i Ingestor) declared(key string) (string, plugins.VectorSpace, bool) {
 	return "", plugins.VectorSpace{}, false
 }
 
-// Owns reports whether a space key is one of the plugin's declared spaces.
+// Owns supplies the query encoder's declared-space lookup.
 func (i Ingestor) Owns(key string) bool {
 	_, _, ok := i.declared(key)
 	return ok
-}
-
-// Spaces are the space keys the pin enables, the served one first.
-func (i Ingestor) Spaces() []string {
-	var keys []string
-	for _, s := range i.Pin.EnabledSpaces() {
-		keys = append(keys, s.Key)
-	}
-	return keys
-}
-
-// SegmentsOnly reports whether the plugin's plugin_api range admits a
-// request with no space.
-func (i Ingestor) SegmentsOnly() bool { return i.Pin.Speaks(plugins.FeatureSegmentsOnly) }
-
-// VectorSpace describes one of the plugin's spaces.
-func (i Ingestor) VectorSpace(key string) (content.VectorSpace, bool) {
-	id, space, ok := i.declared(key)
-	if !ok {
-		return content.VectorSpace{}, false
-	}
-	return content.VectorSpace{ID: key, Manifest: plugins.SpaceManifest(i.Pin.Manifest.ID, id, space), Dimensions: space.Dimensions}, true
 }
 
 // refused is content.ErrIngestionRefused for the reason message states, which

@@ -17,18 +17,6 @@ const ReceiveTimeoutCap = plugins.ReceiveTimeoutCap
 
 var _ connectors.Receiver = Connector{}
 
-// APIRoutes exposes the routes declared for this pinned kind.
-func (c Connector) APIRoutes() []connectors.APIRoute {
-	api := c.Pin.Manifest.Contributions.Connector.Kinds[c.Name].API
-	if api == nil {
-		return nil
-	}
-	return api.Routes
-}
-
-// Pushes reports whether the kind declares the push mode.
-func (c Connector) Pushes() bool { return plugins.KindPushes(&c.Pin.Manifest, c.Name) }
-
 // Receive relays one delivery to the plugin's receive route and judges the
 // answer with plugins.CheckReceiveOutput, as the Contract Runner does. The
 // plugin's discovery is checked within the delivery deadline.

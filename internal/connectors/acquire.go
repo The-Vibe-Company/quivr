@@ -178,7 +178,8 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		}
 		credential = plaintext
 	}
-	if checker, ok := connector.(CredentialChecker); ok && credential != nil && target.Credential != nil &&
+	descriptor := connector.Descriptor()
+	if checker := descriptor.Credentials; checker != nil && credential != nil && target.Credential != nil &&
 		(target.Health.LastSuccessAt == nil || target.Credential.DepositedAt.After(*target.Health.LastSuccessAt)) {
 		// A new or rotated credential, or one that has not worked since its
 		// deposit: ask the source before fetching.
@@ -191,8 +192,8 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			return failure(ClassTransient, "source_unavailable")
 		}
 	}
-	if owner, ok := connector.(ExtensionOwner); ok {
-		ctx = content.WithExtensionWriter(ctx, owner.ExtensionOwner())
+	if owner := descriptor.ExtensionOwner; owner != "" {
+		ctx = content.WithExtensionWriter(ctx, owner)
 	}
 	checkpoint := target.Checkpoint
 	pages := a.MaxPages
@@ -208,7 +209,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		soft = DefaultSoftRunLimit
 	}
 	started := a.now()
-	rc := runContext{connector: connector, target: target, credential: credential}
+	rc := runContext{descriptor: descriptor, target: target, credential: credential}
 	var stored int64
 	var rejected string
 	var notice string
@@ -290,7 +291,7 @@ var errSkipped = errors.New("already accepted")
 
 // runContext is what submitting an item needs from its run.
 type runContext struct {
-	connector  Connector
+	descriptor Descriptor
 	target     Target
 	credential json.RawMessage
 }
@@ -346,8 +347,8 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 				return 0, content.Receipt{}, errSkipped
 			}
 		}
-		exchanger, ok := rc.connector.(AttachmentExchanger)
-		if !ok || a.Blobs == nil {
+		exchanger := rc.descriptor.Attachments
+		if exchanger == nil || a.Blobs == nil {
 			return 0, content.Receipt{}, content.ErrUnsupported
 		}
 		m := content.Manifest{Kind: "manifest"}
@@ -358,7 +359,7 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 		for _, at := range item.Attachments {
 			req := AttachmentRequest{Organization: org, InstanceID: inst.ID, Config: inst.Config, Credential: rc.credential, Now: a.now(),
 				RecordKey: item.RecordKey, Revision: revision, Extensions: item.Extensions, Attachment: at}
-			blobID, size, skip, err := a.transfer(ctx, exchanger, rc.target.RunSequence, key, req)
+			blobID, size, skip, err := a.transfer(ctx, exchanger, rc.descriptor.MaxAttachmentBytes, rc.target.RunSequence, key, req)
 			if err != nil {
 				return 0, content.Receipt{}, err
 			}
@@ -391,10 +392,10 @@ var errAttachmentInvalid = fmt.Errorf("%w: attachment cannot be stored", content
 // storage holds. Bytes that changed between describe and upload are
 // described again once. It returns the Blob and its size, or the skip the
 // source asked for.
-func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, run int64, itemKey string, req AttachmentRequest) (string, int64, *AttachmentDescription, error) {
+func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes int64, run int64, itemKey string, req AttachmentRequest) (string, int64, *AttachmentDescription, error) {
 	at := req.Attachment
 	limit := MaxAttachmentBytes
-	if own := ex.MaxAttachmentBytes(); own > 0 && own < limit {
+	if own := maxBytes; own > 0 && own < limit {
 		limit = own
 	}
 	for attempt := 0; attempt < 2; attempt++ {

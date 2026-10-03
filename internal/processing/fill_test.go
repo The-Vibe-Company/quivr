@@ -18,14 +18,9 @@ type fillPlugin struct {
 	calls    *int
 }
 
-func (fillPlugin) Recipe() string              { return "plugin:p@2" }
-func (fillPlugin) Producer() string            { return "plugin:p@2" }
-func (fillPlugin) Provenance() json.RawMessage { return nil }
-func (fillPlugin) Owns(space string) bool      { return space == "p.large@1" }
-func (fillPlugin) Spaces() []string            { return []string{"p.large@1"} }
-func (fillPlugin) SegmentsOnly() bool          { return true }
-func (fillPlugin) VectorSpace(key string) (content.VectorSpace, bool) {
-	return content.VectorSpace{ID: key, Manifest: json.RawMessage(`{"space":"p.large"}`), Dimensions: 2}, true
+func (fillPlugin) Descriptor() processing.IngestionDescriptor {
+	return processing.IngestionDescriptor{Recipe: "plugin:p@2", Producer: "plugin:p@2", Spaces: []string{"p.large@1"}, SegmentsOnly: true,
+		VectorSpaces: map[string]content.VectorSpace{"p.large@1": {ID: "p.large@1", Manifest: json.RawMessage(`{"space":"p.large"}`), Dimensions: 2}}}
 }
 func (p fillPlugin) SegmentAndEmbed(_ context.Context, _, _ string, _ content.Version, spaces []string) ([]processing.PluginSegment, error) {
 	*p.calls++

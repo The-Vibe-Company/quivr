@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
 	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
 	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
@@ -95,17 +96,8 @@ func (p planIngestion) ingestion(ctx context.Context, id string) (backfill.Inges
 			return backfill.Ingestion{}, err
 		}
 	}
-	out := backfill.Ingestion{RegistrationID: reg.ID, PluginID: reg.PluginID, Version: reg.Version, Prices: map[string]*float64{}}
-	if in := pin.Manifest.Contributions.Ingestion; in != nil {
-		for name, space := range in.Spaces {
-			var price *float64
-			if space.InputPrice != nil {
-				usd := space.InputPrice.USDPerMillionTokens
-				price = &usd
-			}
-			out.Prices[plugins.SpaceKey(name, space.Version)] = price
-		}
-	}
+	descriptor := (pluginhttp.Ingestor{Pin: pin}).Descriptor()
+	out := backfill.Ingestion{RegistrationID: reg.ID, PluginID: descriptor.PluginID, Version: descriptor.PluginVersion, Prices: descriptor.InputPrices}
 	return out, nil
 }
 

@@ -191,14 +191,6 @@ type tokenPushSource struct {
 	leaked bool
 }
 
-func (*tokenPushSource) Pushes() bool { return true }
-func (*tokenPushSource) APIRoutes() []connectors.APIRoute {
-	return []connectors.APIRoute{
-		{Name: "push", Method: "POST", Path: "events", Auth: "instance_token"},
-		{Name: "challenge", Method: "GET", Path: "challenge", Auth: "instance_token"},
-		{Name: "key", Method: "POST", Path: "key-events", Auth: "quivr_key"},
-	}
-}
 func (s *tokenPushSource) Receive(_ context.Context, r connectors.ReceiveRequest) (connectors.Delivery, error) {
 	s.calls++
 	s.leaked = s.leaked || len(r.Request.Headers["authorization"]) > 0
@@ -381,4 +373,15 @@ func TestConnectorTokenHTTPShowsSecretsOnceAndAuthenticatesBeforeReceiving(t *te
 	call("POST", api+"events", replacement.Secret, 202)
 	call("DELETE", base+"/"+replacement.Token.ID, "admin", 200)
 	call("GET", api+"challenge", replacement.Secret, 401)
+}
+
+func (c *tokenPushSource) Descriptor() connectors.Descriptor {
+	d := c.FixtureConnector.Descriptor()
+	d.Receiver = c
+	d.APIRoutes = []connectors.APIRoute{
+		{Name: "push", Method: "POST", Path: "events", Auth: "instance_token"},
+		{Name: "challenge", Method: "GET", Path: "challenge", Auth: "instance_token"},
+		{Name: "key", Method: "POST", Path: "key-events", Auth: "quivr_key"},
+	}
+	return d
 }

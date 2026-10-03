@@ -2,7 +2,6 @@ package pluginhttp
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -51,19 +50,14 @@ func (l LiveIngestor) ForSpace(ctx context.Context, space string) processing.Ing
 	return nil
 }
 
-func (l LiveIngestor) Recipe() string              { return l.now().Recipe() }
-func (l LiveIngestor) Producer() string            { return l.now().Producer() }
-func (l LiveIngestor) Provenance() json.RawMessage { return l.now().Provenance() }
+func (l LiveIngestor) Descriptor() processing.IngestionDescriptor { return l.now().Descriptor() }
+
+// Owns is the query encoder's space lookup, including retained registry owners.
 func (l LiveIngestor) Owns(space string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	pin, _ := l.queryOwner(ctx, space)
 	return pin != nil
-}
-func (l LiveIngestor) Spaces() []string   { return l.now().Spaces() }
-func (l LiveIngestor) SegmentsOnly() bool { return l.now().SegmentsOnly() }
-func (l LiveIngestor) VectorSpace(space string) (content.VectorSpace, bool) {
-	return l.now().VectorSpace(space)
 }
 func (l LiveIngestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v content.Version, spaces []string) ([]processing.PluginSegment, error) {
 	if owner := l.Ingestor(ctx, v.SourceMediaType); owner != nil {

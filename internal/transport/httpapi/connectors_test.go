@@ -133,12 +133,6 @@ const (
 // x_list do.
 type bearerSource struct{ fakeplugin.FixtureConnector }
 
-func (bearerSource) Kind() string             { return "bearer_source" }
-func (bearerSource) CredentialRequired() bool { return true }
-func (bearerSource) CredentialSchema() []byte {
-	return []byte(`{"type":"object","required":["bearer_token"],"properties":{"bearer_token":{"type":"string","writeOnly":true}}}`)
-}
-
 func connectorAPI(t *testing.T) http.Handler {
 	t.Helper()
 	return connectorAPIWith(t, &memoryConnectors{items: map[string]connectors.Instance{}})
@@ -442,4 +436,12 @@ func TestConnectorValidationErrorsPointAtTheOffendingField(t *testing.T) {
 	if status != 422 || body["code"] != "invalid_credential" || body["field"] != "/secret/token" {
 		t.Fatalf("rotation: %d %v", status, body)
 	}
+}
+
+func (c bearerSource) Descriptor() connectors.Descriptor {
+	d := c.FixtureConnector.Descriptor()
+	d.Kind = "bearer_source"
+	d.CredentialRequired = true
+	d.CredentialSchema = []byte(`{"type":"object","required":["bearer_token"],"properties":{"bearer_token":{"type":"string","writeOnly":true}}}`)
+	return d
 }

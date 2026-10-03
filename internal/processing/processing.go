@@ -90,8 +90,8 @@ func (s Service) route(ctx context.Context, org string, v content.Version) (rout
 	// owner. Publication separately checks the live serving route.
 	if w, ok := plugins.WorkOf(ctx); ok && w.Kind == plugins.WorkIngestion {
 		driver := s.Plugin.forVersion(ctx, v)
-		if driver.Plugin != nil && g.ServedFor(content.PluginOfRecipe(driver.Plugin.Recipe())) == "" {
-			spaces := driver.Plugin.Spaces()
+		if driver.Plugin != nil && g.ServedFor(content.PluginOfRecipe(driver.descriptor.Recipe)) == "" {
+			spaces := driver.descriptor.Spaces
 			if len(spaces) > 0 && g.Carries(spaces[0]) {
 				g.Spaces = append([]content.GenerationSpace(nil), g.Spaces...)
 				for i := range g.Spaces {

@@ -123,7 +123,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 		if err = contents.SaveSegmentation(ctx, scope.Organization, v, seg); err != nil {
 			t.Fatal(err)
 		}
-		space, ok := (pluginhttp.Ingestor{Pin: a}).VectorSpace("example.hash_embedder.small@1")
+		space, ok := (pluginhttp.Ingestor{Pin: a}).Descriptor().VectorSpace("example.hash_embedder.small@1")
 		if !ok {
 			t.Fatal("fixture primary space is missing")
 		}
@@ -151,7 +151,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	// A previously promoted model must survive the owner becoming evaluation-only.
 	saveLarge := func(v content.Version, seg content.Segmentation) content.Embedding {
 		t.Helper()
-		large, ok := (pluginhttp.Ingestor{Pin: a}).VectorSpace("example.hash_embedder.large@1")
+		large, ok := (pluginhttp.Ingestor{Pin: a}).Descriptor().VectorSpace("example.hash_embedder.large@1")
 		if !ok {
 			t.Fatal("retained model missing")
 		}

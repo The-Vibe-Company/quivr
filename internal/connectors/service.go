@@ -130,7 +130,7 @@ type Service struct {
 // declares the push mode, or "".
 func (s Service) WebhookURL(in Instance) string {
 	c, ok := s.Registry.Lookup(in.Kind)
-	if r, pushes := c.(Receiver); !ok || !pushes || !r.Pushes() {
+	if !ok || c.Descriptor().Receiver == nil {
 		return ""
 	}
 	return receiverWebhookURL(c, s.PublicURL, in.ID)
@@ -183,20 +183,21 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput,
 	if in.Secret != nil && !s.Sealer.CanSeal() {
 		return Instance{}, ErrCredentialsUnavailable
 	}
-	connector, ok := s.Registry.Lookup(in.Kind)
+	connector, ok := s.Registry.current()[in.Kind]
 	if !ok {
 		return Instance{}, ErrUnsupportedKind
 	}
 	if in.PushPolicy != nil && in.PushPolicy.Validate() != nil {
 		return Instance{}, WithField(ErrInvalidConfig, "/push_policy")
 	}
-	if err := s.Registry.validate(in.Kind, in.Config, in.Secret, "/credential/secret"); err != nil {
+	if err := connector.validate(in.Config, in.Secret, "/credential/secret"); err != nil {
 		return Instance{}, err
 	}
-	if cc, ok := connector.(ConfigChecker); ok && cc.CheckConfig(in.Config, time.Now()) != nil {
+	descriptor := connector.Descriptor()
+	if cc := descriptor.Config; cc != nil && cc.CheckConfig(in.Config, time.Now()) != nil {
 		return Instance{}, WithField(ErrInvalidConfig, "/config")
 	}
-	interval := connector.DefaultInterval()
+	interval := descriptor.DefaultInterval
 	if in.IntervalSeconds != nil {
 		interval = time.Duration(*in.IntervalSeconds) * time.Second
 	}

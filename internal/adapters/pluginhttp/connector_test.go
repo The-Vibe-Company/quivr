@@ -106,7 +106,7 @@ func pinnedConnector(t *testing.T, manifest string, answer func(route string) (i
 		t.Fatal(err)
 	}
 	kinds := pluginhttp.Connectors(set)
-	if len(kinds) != 1 || kinds[0].Kind() != "feed" {
+	if len(kinds) != 1 || kinds[0].Descriptor().Kind != "feed" {
 		t.Fatalf("kinds %+v", kinds)
 	}
 	c := kinds[0].(pluginhttp.Connector)
@@ -135,8 +135,8 @@ func TestAPluginPageBecomesAnAcquisitionPage(t *testing.T) {
 				map[string]any{"record_key": "c", "withdraw": true},
 			}}
 	})
-	if c.DefaultInterval() != 15*time.Minute || !c.CredentialRequired() || c.ExtensionOwner() != "acme.source" || c.Description() != "Items of a feed." {
-		t.Fatalf("kind description %v %v %q", c.DefaultInterval(), c.CredentialRequired(), c.ExtensionOwner())
+	if c.Descriptor().DefaultInterval != 15*time.Minute || !c.Descriptor().CredentialRequired || c.Descriptor().ExtensionOwner != "acme.source" || c.Descriptor().Description != "Items of a feed." {
+		t.Fatalf("kind description %v %v %q", c.Descriptor().DefaultInterval, c.Descriptor().CredentialRequired, c.Descriptor().ExtensionOwner)
 	}
 	page, err := c.Fetch(context.Background(), fetchRequest())
 	if err != nil {
@@ -233,8 +233,8 @@ func TestAnOptionalCredentialKindDoesNotRequireOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := pluginhttp.Connectors(set)[0].(pluginhttp.Connector)
-	if c.CredentialRequired() || c.CredentialSchema() == nil {
-		t.Fatalf("required %v schema %s", c.CredentialRequired(), c.CredentialSchema())
+	if c.Descriptor().CredentialRequired || c.Descriptor().CredentialSchema == nil {
+		t.Fatalf("required %v schema %s", c.Descriptor().CredentialRequired, c.Descriptor().CredentialSchema)
 	}
 }
 
@@ -323,8 +323,8 @@ func TestAttachmentsAreExchangedThroughDescribeAndUpload(t *testing.T) {
 		"/v0/contributions/connector/upload_attachment":   map[string]any{"status": "uploaded"},
 	}
 	c, plugin, _ := pinnedConnector(t, attachmentManifest, func(route string) (int, any) { return 200, answers[route] })
-	if c.MaxAttachmentBytes() != 1024 {
-		t.Fatalf("max bytes %d", c.MaxAttachmentBytes())
+	if c.Descriptor().MaxAttachmentBytes != 1024 {
+		t.Fatalf("max bytes %d", c.Descriptor().MaxAttachmentBytes)
 	}
 	page, err := c.Fetch(context.Background(), fetchRequest())
 	if err != nil {

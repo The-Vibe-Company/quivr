@@ -197,7 +197,6 @@ func TestOnlyNewVersionsAdvanceLastItem(t *testing.T) {
 
 type skippingConnector struct{ Fixture }
 
-func (skippingConnector) Kind() string { return "skipping" }
 func (skippingConnector) Fetch(context.Context, FetchRequest) (Page, error) {
 	return Page{}, ErrNotDue
 }
@@ -228,10 +227,6 @@ type stubConnector struct {
 	requests []FetchRequest
 }
 
-func (s *stubConnector) Kind() string                   { return "stub" }
-func (s *stubConnector) ConfigSchema() []byte           { return []byte(`{"type":"object"}`) }
-func (s *stubConnector) CredentialSchema() []byte       { return nil }
-func (s *stubConnector) DefaultInterval() time.Duration { return time.Minute }
 func (s *stubConnector) Fetch(_ context.Context, r FetchRequest) (Page, error) {
 	s.requests = append(s.requests, r)
 	if len(s.requests) > len(s.pages) {
@@ -323,8 +318,6 @@ type checkingConnector struct {
 	ctxs     []context.Context
 }
 
-func (c *checkingConnector) CredentialSchema() []byte { return []byte(`{"type":"object"}`) }
-func (c *checkingConnector) ExtensionOwner() string   { return "acme.source" }
 func (c *checkingConnector) CheckCredential(_ context.Context, r CredentialRequest) error {
 	c.checks = append(c.checks, r)
 	return c.checkErr
@@ -410,4 +403,27 @@ func TestAPluginKindWritesItsOwnExtensionNamespaces(t *testing.T) {
 	if c.requests[0].Organization != "org_a" || c.requests[0].InstanceID != "connector_1" {
 		t.Fatalf("fetch request %+v", c.requests[0])
 	}
+}
+
+func (c skippingConnector) Descriptor() Descriptor {
+	d := c.Fixture.Descriptor()
+	d.Kind = "skipping"
+	return d
+}
+
+func (c *stubConnector) Descriptor() Descriptor {
+	d := Descriptor{}
+	d.Kind = "stub"
+	d.ConfigSchema = []byte(`{"type":"object"}`)
+	d.CredentialSchema = nil
+	d.DefaultInterval = time.Minute
+	return d
+}
+
+func (c *checkingConnector) Descriptor() Descriptor {
+	d := c.stubConnector.Descriptor()
+	d.CredentialSchema = []byte(`{"type":"object"}`)
+	d.ExtensionOwner = "acme.source"
+	d.Credentials = c
+	return d
 }

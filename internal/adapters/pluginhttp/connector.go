@@ -50,9 +50,6 @@ type Connector struct {
 var (
 	_ connectors.Connector           = Connector{}
 	_ connectors.CredentialChecker   = Connector{}
-	_ connectors.CredentialRequirer  = Connector{}
-	_ connectors.ExtensionOwner      = Connector{}
-	_ connectors.Provider            = Connector{}
 	_ connectors.AttachmentExchanger = Connector{}
 )
 
@@ -69,37 +66,30 @@ func (c Connector) declared() plugins.ConnectorKind {
 	return c.Pin.Manifest.Contributions.Connector.Kinds[c.Name]
 }
 
-func (c Connector) Kind() string         { return c.Name }
-func (c Connector) ConfigSchema() []byte { return c.declared().ConfigSchema }
-
-// Description is the kind's manifest description.
-func (c Connector) Description() string { return c.declared().Description }
-
-// CredentialSchema is nil for a kind that declares no credential.
-func (c Connector) CredentialSchema() []byte {
-	if schema := c.declared().CredentialSchema; len(schema) > 0 {
-		return schema
+// Descriptor exposes installed metadata and the supported behavior ports.
+func (c Connector) Descriptor() connectors.Descriptor {
+	kind := c.declared()
+	schema := kind.CredentialSchema
+	if len(schema) == 0 {
+		schema = nil
 	}
-	return nil
-}
-
-// CredentialRequired: a kind that declares a credential schema needs one,
-// unless its manifest sets credential_required: false.
-func (c Connector) CredentialRequired() bool {
-	d := c.declared()
-	d.CredentialSchema = c.CredentialSchema()
-	return d.NeedsCredential()
-}
-
-func (c Connector) DefaultInterval() time.Duration {
-	return time.Duration(c.declared().DefaultIntervalSeconds) * time.Second
-}
-
-// ExtensionOwner is the plugin id: its items may write the namespaces it owns.
-func (c Connector) ExtensionOwner() string { return c.Pin.Manifest.ID }
-
-func (c Connector) Provider() string {
-	return "plugin " + c.Pin.Manifest.ID + "@" + c.Pin.Manifest.Version
+	kind.CredentialSchema = schema
+	d := connectors.Descriptor{Kind: c.Name, Description: kind.Description, ConfigSchema: kind.ConfigSchema,
+		CredentialSchema: schema, CredentialRequired: kind.NeedsCredential(),
+		DefaultInterval: time.Duration(kind.DefaultIntervalSeconds) * time.Second,
+		Provider:        "plugin " + c.Pin.Manifest.ID + "@" + c.Pin.Manifest.Version,
+		ExtensionOwner:  c.Pin.Manifest.ID, MaxAttachmentBytes: plugins.AttachmentMaxBytes(&c.Pin.Manifest),
+		Credentials: c}
+	if d.MaxAttachmentBytes > 0 {
+		d.Attachments = c
+	}
+	if plugins.KindPushes(&c.Pin.Manifest, c.Name) {
+		d.Receiver = c
+	}
+	if kind.API != nil {
+		d.APIRoutes = kind.API.Routes
+	}
+	return d
 }
 
 func orNull(raw json.RawMessage) json.RawMessage {
@@ -134,7 +124,7 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 		if plugins.ResolveAPI(served).Speaks(plugins.FeatureInstanceScope) {
 			scoped.CorpusID, scoped.SourceNamespace = r.CorpusID, r.Namespace
 		}
-		if c.Pushes() && plugins.ResolveAPI(served).Speaks(plugins.FeaturePush) {
+		if plugins.KindPushes(&c.Pin.Manifest, c.Name) && plugins.ResolveAPI(served).Speaks(plugins.FeaturePush) {
 			scoped.WebhookURL = r.WebhookURL
 		}
 		return plugins.BuildConnectorFetchRequest(plugins.ConnectorFetchRequest{InvocationID: plugins.InvocationID(), Contribution: "connector", OrganizationID: r.Organization, Configuration: c.configuration(), Connector: scoped, Credential: orNull(r.Credential), Checkpoint: checkpoint, Now: r.Now.UTC().Format(time.RFC3339), PageInRun: r.PageInRun, ReadsToday: r.ReadsToday})
@@ -153,7 +143,7 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 		return connectors.Page{}, connectors.ErrNotDue
 	}
 	out := connectors.Page{Checkpoint: page.Checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice}
-	if p := page.Push; p != nil && c.Pushes() {
+	if p := page.Push; p != nil && plugins.KindPushes(&c.Pin.Manifest, c.Name) {
 		out.Push = &connectors.PushStatus{State: p.State, Class: connectors.ErrorClass(p.ErrorClass), Code: p.Code, PollInterval: time.Duration(p.PollIntervalSeconds) * time.Second}
 	}
 	for _, item := range page.Items {
@@ -176,10 +166,6 @@ func (c Connector) CheckCredential(ctx context.Context, r connectors.CredentialR
 	observe(c.Pin, r.Organization, OpCheckCredential, started, result, err)
 	return err
 }
-
-// MaxAttachmentBytes is the plugin's effective attachments.max_bytes; 0 when
-// its manifest declares no attachments.
-func (c Connector) MaxAttachmentBytes() int64 { return plugins.AttachmentMaxBytes(&c.Pin.Manifest) }
 
 func (c Connector) attachmentRequest(r connectors.AttachmentRequest, grant *plugins.ConnectorAttachmentGrant) ([]byte, error) {
 	at := r.Attachment

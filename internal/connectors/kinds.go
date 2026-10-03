@@ -3,6 +3,7 @@ package connectors
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,13 +17,6 @@ const (
 	CredentialOptional = "optional"
 	CredentialRequired = "required"
 )
-
-// CredentialRequirer is optionally implemented by a Connector that cannot
-// collect without a Deposited Credential. Kinds with a credential schema that
-// do not implement it take the credential as optional.
-type CredentialRequirer interface {
-	CredentialRequired() bool
-}
 
 // KindDescription publishes what a client needs to configure one enabled
 // kind. Title and Description are the config schema's own annotations, so a
@@ -53,9 +47,14 @@ func (r *Registry) Describe() []KindDescription {
 		return out
 	}
 	current := r.current()
-	for _, name := range r.Enabled() {
-		c := current[name].connector
-		d := KindDescription{Kind: name, Title: name, ConfigSchema: json.RawMessage(c.ConfigSchema()), Credential: CredentialNone, DefaultInterval: c.DefaultInterval()}
+	names := make([]string, 0, len(current))
+	for name := range current {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		c := current[name].descriptor
+		d := KindDescription{Kind: name, Title: name, ConfigSchema: json.RawMessage(c.ConfigSchema), Credential: CredentialNone, DefaultInterval: c.DefaultInterval}
 		var annotations struct{ Title, Description string }
 		if json.Unmarshal(d.ConfigSchema, &annotations) == nil {
 			if annotations.Title != "" {
@@ -63,14 +62,14 @@ func (r *Registry) Describe() []KindDescription {
 			}
 			d.Description = annotations.Description
 		}
-		if describer, ok := c.(interface{ Description() string }); ok && d.Description == "" {
+		if d.Description == "" {
 			// A plugin kind's manifest description, when its schema has none.
-			d.Description = describer.Description()
+			d.Description = c.Description
 		}
-		if schema := c.CredentialSchema(); schema != nil {
+		if schema := c.CredentialSchema; schema != nil {
 			d.CredentialSchema = json.RawMessage(schema)
 			d.Credential = CredentialOptional
-			if req, ok := c.(CredentialRequirer); ok && req.CredentialRequired() {
+			if c.CredentialRequired {
 				d.Credential = CredentialRequired
 			}
 		}

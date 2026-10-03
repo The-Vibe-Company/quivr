@@ -61,8 +61,9 @@ type plugin struct {
 	errs []error
 }
 
-func (p *plugin) Owns(string) bool { return true }
-func (p *plugin) Recipe() string   { return "plugin:acme@1" }
+func (p *plugin) Descriptor() processing.IngestionDescriptor {
+	return processing.IngestionDescriptor{Recipe: "plugin:acme@1", VectorSpaces: map[string]content.VectorSpace{"acme.space@1": {ID: "acme.space@1"}}}
+}
 func (p *plugin) SegmentAndEmbed(context.Context, string, string, content.Version, []string) ([]processing.PluginSegment, error) {
 	err := p.errs[0]
 	p.errs = p.errs[1:]

@@ -23,18 +23,13 @@ type pushKind struct {
 	fetched  *[]FetchRequest
 }
 
-func (pushKind) Kind() string                   { return "alerts" }
-func (pushKind) ConfigSchema() []byte           { return []byte(`{"type":"object"}`) }
-func (pushKind) CredentialSchema() []byte       { return []byte(`{"type":"object"}`) }
-func (pushKind) DefaultInterval() time.Duration { return time.Minute }
 func (k pushKind) Fetch(_ context.Context, req FetchRequest) (Page, error) {
 	if k.fetched != nil {
 		*k.fetched = append(*k.fetched, req)
 	}
 	return k.page, nil
 }
-func (k pushKind) Pushes() bool          { return k.pushes }
-func (k pushKind) APIRoutes() []APIRoute { return k.routes }
+
 func (k pushKind) Receive(_ context.Context, r ReceiveRequest) (Delivery, error) {
 	if k.received != nil {
 		*k.received = append(*k.received, r)
@@ -312,4 +307,17 @@ func TestSignedKindAdvertisesDeclaredWebhookForProviderSetup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (c pushKind) Descriptor() Descriptor {
+	d := Descriptor{}
+	d.Kind = "alerts"
+	d.ConfigSchema = []byte(`{"type":"object"}`)
+	d.CredentialSchema = []byte(`{"type":"object"}`)
+	d.DefaultInterval = time.Minute
+	if c.pushes {
+		d.Receiver = c
+	}
+	d.APIRoutes = c.routes
+	return d
 }

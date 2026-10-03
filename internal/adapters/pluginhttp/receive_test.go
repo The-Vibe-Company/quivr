@@ -97,7 +97,7 @@ func TestFetchSendsTheWebhookURLAndMapsThePushReportOfAPushKindOnly(t *testing.T
 	if _, err := pull.Fetch(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if _, sent := plugin.requests["/v0/contributions/connector/fetch"][0]["connector"].(map[string]any)["webhook_url"]; sent || pull.Pushes() || !push.Pushes() {
+	if _, sent := plugin.requests["/v0/contributions/connector/fetch"][0]["connector"].(map[string]any)["webhook_url"]; sent || pull.Descriptor().Receiver != nil || push.Descriptor().Receiver == nil {
 		t.Fatal("a pull-only kind received a webhook_url")
 	}
 }

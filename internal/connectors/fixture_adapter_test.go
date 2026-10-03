@@ -24,3 +24,7 @@ func (Fixture) Fetch(ctx context.Context, req FetchRequest) (Page, error) {
 	}
 	return result, nil
 }
+
+func (c Fixture) Descriptor() Descriptor {
+	return Descriptor{Kind: c.Source.Kind(), ConfigSchema: c.Source.ConfigSchema(), CredentialSchema: c.Source.CredentialSchema(), DefaultInterval: c.Source.DefaultInterval()}
+}

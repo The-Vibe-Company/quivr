@@ -30,11 +30,6 @@ type fakeSource struct {
 	storage   *fakeGrants
 }
 
-func (exchangingConnector) Kind() string                   { return "fixture" }
-func (exchangingConnector) ConfigSchema() []byte           { return []byte(`{"type":"object"}`) }
-func (exchangingConnector) CredentialSchema() []byte       { return nil }
-func (exchangingConnector) DefaultInterval() time.Duration { return time.Minute }
-func (exchangingConnector) MaxAttachmentBytes() int64      { return 1 << 20 }
 func (c exchangingConnector) Fetch(context.Context, FetchRequest) (Page, error) {
 	return Page{Items: c.items(), Checkpoint: json.RawMessage(`{}`), More: c.more}, nil
 }
@@ -310,10 +305,26 @@ func TestARunStopsStartingPagesAfterItsSoftLimit(t *testing.T) {
 
 type plainConnector struct{ items []Item }
 
-func (plainConnector) Kind() string                   { return "fixture" }
-func (plainConnector) ConfigSchema() []byte           { return []byte(`{"type":"object"}`) }
-func (plainConnector) CredentialSchema() []byte       { return nil }
-func (plainConnector) DefaultInterval() time.Duration { return time.Minute }
 func (c plainConnector) Fetch(context.Context, FetchRequest) (Page, error) {
 	return Page{Items: c.items, Checkpoint: json.RawMessage(`{}`)}, nil
+}
+
+func (c exchangingConnector) Descriptor() Descriptor {
+	d := Descriptor{}
+	d.Kind = "fixture"
+	d.ConfigSchema = []byte(`{"type":"object"}`)
+	d.CredentialSchema = nil
+	d.DefaultInterval = time.Minute
+	d.MaxAttachmentBytes = 1 << 20
+	d.Attachments = c
+	return d
+}
+
+func (c plainConnector) Descriptor() Descriptor {
+	d := Descriptor{}
+	d.Kind = "fixture"
+	d.ConfigSchema = []byte(`{"type":"object"}`)
+	d.CredentialSchema = nil
+	d.DefaultInterval = time.Minute
+	return d
 }

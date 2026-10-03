@@ -118,12 +118,10 @@ func (a *API) servePushAudited(w http.ResponseWriter, r *http.Request) {
 			}
 			if err == nil {
 				if connector, ok := a.Relay.Registry.Lookup(target.Kind); ok {
-					if api, ok := connector.(connectors.APIReceiver); ok {
-						for _, route := range api.APIRoutes() {
-							if route.Auth == "signature" {
-								id = aliasID
-								break
-							}
+					for _, route := range connector.Descriptor().APIRoutes {
+						if route.Auth == "signature" {
+							id = aliasID
+							break
 						}
 					}
 				}

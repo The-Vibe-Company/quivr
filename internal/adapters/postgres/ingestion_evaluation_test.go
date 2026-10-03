@@ -107,7 +107,7 @@ func TestIngestionEvaluationRunsAfterServedCommit(t *testing.T) {
 			if jobs, err := store.ClaimIngestionEvaluations(ctx, 10); err != nil || len(jobs) != 0 {
 				t.Fatalf("evaluation before served vectors: %+v %v", jobs, err)
 			}
-			sp, ok := (pluginhttp.Ingestor{Pin: pins.IngestionFor("text/plain")}).VectorSpace(g.SpaceID)
+			sp, ok := (pluginhttp.Ingestor{Pin: pins.IngestionFor("text/plain")}).Descriptor().VectorSpace(g.SpaceID)
 			if !ok {
 				t.Fatal("served space missing")
 			}
@@ -160,7 +160,7 @@ func TestIngestionEvaluationRunsAfterServedCommit(t *testing.T) {
 				t.Fatalf("evaluation target %+v", job)
 			}
 			for _, key := range job.Spaces {
-				if !(pluginhttp.Ingestor{Pin: evaluationPin}).Owns(key) {
+				if !(pluginhttp.Ingestor{Pin: evaluationPin}).Descriptor().Owns(key) {
 					t.Fatalf("old plan queued an upgraded space: %+v", job)
 				}
 			}

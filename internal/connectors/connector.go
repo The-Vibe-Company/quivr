@@ -135,9 +135,6 @@ const CodeAttachmentChanged = "attachment_changed"
 type AttachmentExchanger interface {
 	DescribeAttachment(context.Context, AttachmentRequest) (AttachmentDescription, error)
 	UploadAttachment(context.Context, AttachmentRequest, UploadGrant) error
-	// MaxAttachmentBytes is the connector's own cap; the engine's
-	// MaxAttachmentBytes still applies.
-	MaxAttachmentBytes() int64
 }
 
 // FetchRequest is one page request. Credential is the decrypted secret JSON,
@@ -190,12 +187,7 @@ type Page struct {
 // future connector Plugin Contribution can implement it remotely: pure
 // config/credential/checkpoint in, items/checkpoint/typed errors out.
 type Connector interface {
-	Kind() string
-	// ConfigSchema and CredentialSchema are JSON Schemas; a nil
-	// CredentialSchema means the kind takes no credential.
-	ConfigSchema() []byte
-	CredentialSchema() []byte
-	DefaultInterval() time.Duration
+	Descriptor() Descriptor
 	Fetch(context.Context, FetchRequest) (Page, error)
 }
 
@@ -208,7 +200,7 @@ type CredentialRequest struct {
 	Now          time.Time
 }
 
-// CredentialChecker is optionally implemented by a Connector that can check
+// CredentialChecker is the descriptor's behavior port for checking
 // a credential without fetching (plugin kinds, through check_credential). The
 // Acquirer calls it at the start of a run whose credential was deposited
 // after the last successful poll; a typed *Error ends the run like a fetch.
@@ -216,27 +208,36 @@ type CredentialChecker interface {
 	CheckCredential(context.Context, CredentialRequest) error
 }
 
-// ExtensionOwner is optionally implemented by a Connector that runs as a
-// pinned plugin: its items may write the extension namespaces that plugin
-// owns, because its output was validated against the plugin's manifest.
-type ExtensionOwner interface {
-	ExtensionOwner() string
+// Descriptor describes one installed connector kind. Nil behavior ports mean
+// the capability is unavailable. Registry keeps this descriptor with its
+// connector through each acquisition or delivery, including after Replace.
+// Treat its schemas and routes as read-only. A nil CredentialSchema means the
+// kind accepts no credential; MaxAttachmentBytes is capped again by the engine.
+type Descriptor struct {
+	Kind               string
+	Description        string
+	ConfigSchema       []byte
+	CredentialSchema   []byte
+	CredentialRequired bool
+	DefaultInterval    time.Duration
+	Provider           string
+	ExtensionOwner     string
+	MaxAttachmentBytes int64
+	APIRoutes          []APIRoute
+	Config             ConfigChecker
+	Credentials        CredentialChecker
+	Attachments        AttachmentExchanger
+	Receiver           Receiver
 }
 
-// Provider is optionally implemented by a Connector to name who provides its
-// kind in startup errors; connectors without it use "the engine" as a fallback.
-type Provider interface {
-	Provider() string
-}
-
-func providerOf(c Connector) string {
-	if p, ok := c.(Provider); ok {
-		return p.Provider()
+func (d Descriptor) provider() string {
+	if d.Provider != "" {
+		return d.Provider
 	}
 	return "the engine"
 }
 
-// ConfigChecker is optionally implemented by a Connector whose configuration
+// ConfigChecker is the descriptor's behavior port for configuration
 // has rules JSON Schema cannot express (e.g. a bounded backfill window).
 type ConfigChecker interface {
 	CheckConfig(config json.RawMessage, now time.Time) error
@@ -244,9 +245,15 @@ type ConfigChecker interface {
 
 type registered struct {
 	connector  Connector
+	descriptor Descriptor
 	config     *jsonschema.Schema
 	credential *jsonschema.Schema
 	routes     []apiRoute
+}
+
+func (e registered) Descriptor() Descriptor { return e.descriptor }
+func (e registered) Fetch(ctx context.Context, req FetchRequest) (Page, error) {
+	return e.connector.Fetch(ctx, req)
 }
 
 // Registry resolves the connector kinds enabled in this deployment. The kinds
@@ -268,30 +275,30 @@ func NewRegistry(list ...Connector) (*Registry, error) {
 func (r *Registry) Replace(list ...Connector) error {
 	kinds := map[string]registered{}
 	for _, c := range list {
-		if other, exists := kinds[c.Kind()]; exists {
-			return fmt.Errorf("connector kind %q is provided by %s and by %s; each kind resolves to one provider", c.Kind(), providerOf(other.connector), providerOf(c))
+		d := c.Descriptor()
+		if other, exists := kinds[d.Kind]; exists {
+			return fmt.Errorf("connector kind %q is provided by %s and by %s; each kind resolves to one provider", d.Kind, other.descriptor.provider(), d.provider())
 		}
-		entry := registered{connector: c}
+		entry := registered{connector: c, descriptor: d}
 		var err error
-		if entry.config, err = compile(c.Kind()+"/config", c.ConfigSchema()); err != nil {
+		if entry.config, err = compile(d.Kind+"/config", d.ConfigSchema); err != nil {
 			return err
 		}
-		if c.CredentialSchema() != nil {
-			if entry.credential, err = compile(c.Kind()+"/credential", c.CredentialSchema()); err != nil {
+		if d.CredentialSchema != nil {
+			if entry.credential, err = compile(d.Kind+"/credential", d.CredentialSchema); err != nil {
 				return err
 			}
 		}
-		if api, ok := c.(APIReceiver); ok && len(api.APIRoutes()) > 0 {
-			receiver, pushes := c.(Receiver)
-			if !pushes || !receiver.Pushes() {
+		if len(d.APIRoutes) > 0 {
+			if d.Receiver == nil {
 				return fmt.Errorf("API routes require a push receiver")
 			}
-			entry.routes, err = compileRoutes(api.APIRoutes())
+			entry.routes, err = compileRoutes(d.APIRoutes)
 			if err != nil {
 				return err
 			}
 		}
-		kinds[c.Kind()] = entry
+		kinds[d.Kind] = entry
 	}
 	r.kinds.Store(&kinds)
 	return nil
@@ -335,7 +342,10 @@ func (r *Registry) Enabled() []string {
 // Lookup returns the connector of an enabled kind.
 func (r *Registry) Lookup(kind string) (Connector, bool) {
 	e, ok := r.current()[kind]
-	return e.connector, ok
+	if !ok {
+		return nil, false
+	}
+	return e, true
 }
 
 // validate checks config and secret against the kind's schemas. Failures
@@ -346,6 +356,10 @@ func (r *Registry) validate(kind string, config, secret json.RawMessage, secretA
 	if !ok {
 		return ErrUnsupportedKind
 	}
+	return e.validate(config, secret, secretAt)
+}
+
+func (e registered) validate(config, secret json.RawMessage, secretAt string) error {
 	if err := validateJSON(e.config, config); err != nil {
 		return WithField(ErrInvalidConfig, "/config"+location(err))
 	}

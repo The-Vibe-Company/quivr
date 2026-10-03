@@ -29,9 +29,6 @@ type APIRoute struct {
 	Signature     *Signature      `json:"signature,omitempty"`
 }
 
-// APIReceiver declares the routes served by a Connector Receiver.
-type APIReceiver interface{ APIRoutes() []APIRoute }
-
 var routeName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 var routePath = regexp.MustCompile(`^(?:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*|\{[a-z][a-z0-9_]*\})(?:/(?:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*|\{[a-z][a-z0-9_]*\}))*$`)
 
@@ -231,8 +228,8 @@ func (r Relay) DeliverAPIWithAuth(ctx context.Context, auth APIAuth, id, path st
 		return RelayAnswer{}, corpus.ErrNotFound
 	}
 	entry, ok := r.Registry.current()[target.Kind]
-	receiver, pushes := entry.connector.(Receiver)
-	if !ok || !pushes || !receiver.Pushes() {
+	receiver := entry.descriptor.Receiver
+	if !ok || receiver == nil {
 		return RelayAnswer{}, corpus.ErrNotFound
 	}
 	route, allow := resolveRoute(entry.routes, req.Method, path)
@@ -265,7 +262,7 @@ func (r Relay) DeliverAPIWithAuth(ctx context.Context, auth APIAuth, id, path st
 	default:
 		return RelayAnswer{}, corpus.ErrForbidden
 	}
-	return r.deliverRoute(ctx, target, entry.connector, receiver, route, path, req)
+	return r.deliverRoute(ctx, target, entry, receiver, route, path, req)
 }
 
 // deliverProtectedRoute follows mode-specific authentication and replay guards.
