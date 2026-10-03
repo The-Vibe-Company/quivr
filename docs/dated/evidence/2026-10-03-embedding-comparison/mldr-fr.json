@@ -1,0 +1,106 @@
+{
+  "set": "mldr-fr",
+  "documents": 600,
+  "queries": 200,
+  "results": {
+    "multilingual-e5-small (current)": {
+      "mean": {
+        "ndcg@10": 0.9166962063761928,
+        "recall@10": 0.96,
+        "mrr@10": 0.9026666666666666
+      },
+      "dims": 384,
+      "pieces": 5767,
+      "index_s": 108.6,
+      "query_ms": 7.7
+    },
+    "Cohere-Embed-V5-Fast": {
+      "mean": {
+        "ndcg@10": 0.9316072935721629,
+        "recall@10": 0.965,
+        "mrr@10": 0.9204166666666667
+      },
+      "dims": 2048,
+      "pieces": 1781,
+      "index_s": 223.6,
+      "query_ms": 34.3,
+      "vs_current": {
+        "ndcg@10": {
+          "queries": 200,
+          "delta": 0.014911087195970002,
+          "p_value": 0.3021029698499354,
+          "significant": false
+        },
+        "recall@10": {
+          "queries": 200,
+          "delta": 0.005,
+          "p_value": 0.6558532764186373,
+          "significant": false
+        }
+      }
+    },
+    "Cohere-Embed-V5-Pro": {
+      "mean": {
+        "ndcg@10": 0.9360277120222271,
+        "recall@10": 0.97,
+        "mrr@10": 0.9248809523809524
+      },
+      "dims": 2048,
+      "pieces": 1781,
+      "index_s": 212.3,
+      "query_ms": 54.3,
+      "vs_current": {
+        "ndcg@10": {
+          "queries": 200,
+          "delta": 0.019331505646034374,
+          "p_value": 0.1931363331400197,
+          "significant": false
+        },
+        "recall@10": {
+          "queries": 200,
+          "delta": 0.01,
+          "p_value": 0.4155821571097935,
+          "significant": false
+        }
+      }
+    },
+    "text-embedding-3-large": {
+      "mean": {
+        "ndcg@10": 0.8981558055725987,
+        "recall@10": 0.95,
+        "mrr@10": 0.8812916666666666
+      },
+      "dims": 3072,
+      "pieces": 1781,
+      "index_s": 27.0,
+      "query_ms": 12.0,
+      "vs_current": {
+        "ndcg@10": {
+          "queries": 200,
+          "delta": -0.018540400803594197,
+          "p_value": 0.2549768620905229,
+          "significant": false
+        },
+        "recall@10": {
+          "queries": 200,
+          "delta": -0.01,
+          "p_value": 0.565005915484345,
+          "significant": false
+        }
+      }
+    }
+  },
+  "tokens": {
+    "tokens": 7371247,
+    "by_model": {
+      "Cohere-Embed-V5-Fast": 2403714,
+      "Cohere-Embed-V5-Pro": 2307997,
+      "text-embedding-3-large": 2659536
+    }
+  },
+  "usd": {
+    "Cohere-Embed-V5-Fast": 0.1923,
+    "Cohere-Embed-V5-Pro": 0.277,
+    "text-embedding-3-large": 0.3457
+  }
+}

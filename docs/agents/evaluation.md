@@ -123,45 +123,47 @@ optionally with `-f baseline_run_id=<run>`; by default it compares with the late
 run on `main`. `-f compare_to=main -f sets=miracl-fr` compares in one job instead. Its artifact
 `search-quality` holds `report.md`, `report.json` and the stack logs; the report is on the run page.
 
-## Compare hosted embeddings with a cap
+## Compare embeddings directly on your machine
 
-The coordinator dispatches `Embedding quality` (`.github/workflows/measure-embeddings.yml`)
-after the harness merges. It never runs on PRs or schedules. The bakeoff measures
-Cohere-Embed-V5-Pro/Fast (2048 dimensions) and text-embedding-3-large (3072), paired
-against core.ingest on all three public sets, in semantic and hybrid modes. Each set is
-submitted once to one Corpus carrying all hosted owners beside core.ingest. Fusion stays
-at core.retrieve's default. Prepare it offline with no key or provider request:
+Use `scripts/eval/direct_bakeoff.py` to compare dense embeddings without an engine or vector database. It uses public samples, exact cosine top ten and repository scoring,
+with e5-small as the paired baseline. Long documents use the
+reference character windows: 1,800 for e5 and 6,000 for hosted models, overlapping
+by 200 characters (roughly 450 and 1,500 tokens). A document's best piece wins. The local encoder can truncate at its token limit.
+
+Use Python 3.10+ and a virtual environment. The first run downloads `intfloat/multilingual-e5-small`.
+Hosted runs need an Azure AI Foundry resource
+serving the requested deployments, with its endpoint and key in environment
+variables `AZURE_FOUNDRY_ENDPOINT` and `AZURE_FOUNDRY_KEY`. Keep keys out of Git. Paid measurements run locally; this command refuses CI execution.
+
+For example, not run here with a provider key:
 
 ```sh
-python3 scripts/eval/campaign.py --dry-run --max-input-tokens 15000000 --max-usd 8
+python3 -m venv .scratch/eval/venv
+.scratch/eval/venv/bin/pip install -r scripts/eval/requirements-direct.txt
+.scratch/eval/venv/bin/python scripts/eval/direct_bakeoff.py --set miracl-fr \
+  --max-input-tokens 5000000 --max-usd 1 \
+  --out .scratch/eval/direct/miracl-fr.json
 ```
 
-Illustrative paid dispatch, run only by the coordinator: `gh workflow run measure-embeddings.yml
---ref main -f campaign=bakeoff -f max_input_tokens=15000000 -f max_usd=8`.
-Expected input is 4–5 million tokens per model; every retry and query call also counts.
-The runner keeps the key in its forwarding gate; hosted.embed gets only a loopback URL.
-Before each attempt, the gate atomically reserves one token per UTF-8 byte plus eight
-special tokens per input. Valid provider usage releases unused reservations; unknown,
-failed or timed-out calls remain reserved. A token or USD cap stops forwarding and writes
-status `capped` with completed cuts, unfinished indexing and spend. Missing cuts have no scores.
+Defaults: Cohere Pro/Fast and OpenAI 3-large. Add `--models Cohere-Embed-V5-Pro-1024 Cohere-Embed-V5-Pro`
+for the dimensions comparison,
+or `--models 'multilingual-e5-small (current)'` for an unpaid baseline. Run each
+public set separately; token and USD caps apply across every model in one command.
 
-Then dispatch `campaign=winner`, `winner=<measured deployment>`, `prior_run_id=<bakeoff run>`,
-`max_input_tokens=5000000`, `max_usd=2`. A winner requires all three sets. Earlier upper-bound spend is
-subtracted from $10; admission refuses a per-run USD cap above the remainder.
-The smaller SciFact matrix measures segment limits 512/2048 with full/1024 dimensions.
-The token sizes are conservative byte estimates, as described in the
-[hosted plugin reference](../../plugins/hosted-embed/README.md).
-The `embedding-quality` artifact holds report JSON/Markdown: deployment, dimensions,
-segment limit, paired quality, query p50/p95, per-owner indexing time, confirmed/reserved
-input tokens, indexing USD per 1,000 documents and total USD. Reports link the dated list
-price sources; estimates are not Azure billing receipts. Secrets AZURE_FOUNDRY_KEY and
-AZURE_FOUNDRY_ENDPOINT enter only the measurement step. Private sets are excluded.
+Every provider attempt, including retries, is blocked before sending if it would exceed either cap.
+It reserves one token per UTF-8 byte plus eight per input,
+using the shared [budget guard](../../scripts/eval/embeddings.py). Failed or unknown calls stay reserved;
+valid usage releases unused reservations; retries reserve again.
+Prices are the 2026-10-03 estimates ($0.12/$0.08/$0.13 per million input tokens
+for Pro/Fast/OpenAI); override them with `--price MODEL=USD_PER_MILLION` when needed.
+These bounds use list prices, not billing receipts. The JSON records both confirmed
+and reserved spend, sample fingerprint, settings, completed scores and timings.
+`complete` exits 0; `capped` or `failed` exits 2 and retains completed models. Query timing is batch encoding time per query, not engine search latency.
 
-For a six-hour runner, split the bakeoff with workflow input `sets=miracl-fr`, then
-`sets=mldr-fr`, then `sets=scifact`. Set `prior_run_id` on each later dispatch to the
-previous run, including a failed run: the runner debits all prior spend from $10 and
-carries completed scores and costs forward. The final report combines the three sets.
-A set reports each owner's first complete coverage from first submission, sampled every
-five seconds, independently of the slowest owner. Ingestion, coverage and receipt polls
-retry only explicit retryable 429/503 responses, with backoff capped at ten seconds and
-the owning wait's deadline. Non-retryable errors stop immediately.
+Outputs refuse overwrites. Inspect the JSON before committing it with a summary
+under a new dated folder in `docs/dated/evidence/`; the summary needs `Date:` and `Status:` lines and a link in the [dated index](../dated/README.md). Keep only
+public-set measurements, never query/document text or secrets. Preserve merged
+evidence and add a new filename or dated folder for future runs. The [2026-10-03 comparison](../dated/evidence/2026-10-03-embedding-comparison/summary.md)
+preserves the four original result files and explains their limitations.
+
+The legacy `Embedding quality` manual workflow previews a plan with no credentials or paid step. Direct scores do not measure hybrid fusion or engine throughput.

@@ -39,6 +39,8 @@ them may since have changed; the contract and the code are authoritative.
 
 ## Evidence
 
+- [2026-10-03: direct embedding comparison](evidence/2026-10-03-embedding-comparison/summary.md)
+
 Measurements and verification reports tied to a commit.
 
 - [THE-661: text retrieval baseline](evidence/the-661-retrieval-baseline.md)

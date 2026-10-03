@@ -1,0 +1,102 @@
+{
+  "set": "miracl-fr",
+  "documents": 5000,
+  "queries": 343,
+  "results": {
+    "multilingual-e5-small (current)": {
+      "mean": {
+        "ndcg@10": 0.7117010513711787,
+        "recall@10": 0.9542759961127308,
+        "mrr@10": 0.676326993382387
+      },
+      "dims": 384,
+      "index_s": 46.8,
+      "query_ms": 0.8
+    },
+    "Cohere-Embed-V5-Fast": {
+      "mean": {
+        "ndcg@10": 0.7672642935236658,
+        "recall@10": 0.9698250728862973,
+        "mrr@10": 0.7363043176454255
+      },
+      "dims": 2048,
+      "index_s": 80.9,
+      "query_ms": 14.5,
+      "vs_current": {
+        "ndcg@10": {
+          "queries": 343,
+          "delta": 0.055563242152487126,
+          "p_value": 9.503490363982237e-06,
+          "significant": true
+        },
+        "recall@10": {
+          "queries": 343,
+          "delta": 0.01554907677356657,
+          "p_value": 0.0684054976845653,
+          "significant": false
+        }
+      }
+    },
+    "Cohere-Embed-V5-Pro": {
+      "mean": {
+        "ndcg@10": 0.777668727242398,
+        "recall@10": 0.9648202137998056,
+        "mrr@10": 0.7565215882271277
+      },
+      "dims": 2048,
+      "index_s": 82.8,
+      "query_ms": 15.9,
+      "vs_current": {
+        "ndcg@10": {
+          "queries": 343,
+          "delta": 0.06596767587121935,
+          "p_value": 7.827713930700353e-08,
+          "significant": true
+        },
+        "recall@10": {
+          "queries": 343,
+          "delta": 0.010544217687074831,
+          "p_value": 0.24063355073076334,
+          "significant": false
+        }
+      }
+    },
+    "text-embedding-3-large": {
+      "mean": {
+        "ndcg@10": 0.7544835499919557,
+        "recall@10": 0.9625850340136055,
+        "mrr@10": 0.7223494840112916
+      },
+      "dims": 3072,
+      "index_s": 56.4,
+      "query_ms": 10.2,
+      "vs_current": {
+        "ndcg@10": {
+          "queries": 343,
+          "delta": 0.04278249862077702,
+          "p_value": 0.0007829868399944177,
+          "significant": true
+        },
+        "recall@10": {
+          "queries": 343,
+          "delta": 0.008309037900874635,
+          "p_value": 0.39271292354695314,
+          "significant": false
+        }
+      }
+    }
+  },
+  "tokens": {
+    "tokens": 1981794,
+    "by_model": {
+      "Cohere-Embed-V5-Fast": 632725,
+      "Cohere-Embed-V5-Pro": 620730,
+      "text-embedding-3-large": 728339
+    }
+  },
+  "usd": {
+    "Cohere-Embed-V5-Fast": 0.0506,
+    "Cohere-Embed-V5-Pro": 0.0745,
+    "text-embedding-3-large": 0.0947
+  }
+}
