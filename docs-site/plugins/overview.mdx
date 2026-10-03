@@ -1,106 +1,118 @@
 ---
 title: "How plugins work"
-description: "What a Quivr plugin is, how the engine calls it, and why it can never break the engine."
-keywords: ["plugin", "manifest", "contribution", "plugin api", "extension"]
+description: "What a plugin is, the five jobs it can do for Quivr, who runs it, and where your documents go."
+keywords: ["plugin", "contribution", "extension", "deployment", "data boundary"]
 ---
 
-A plugin is a separate HTTP service that Quivr calls with JSON when it needs a decision that depends on your content: how to read a file, what a source published, how to embed or rank text, whether an article matches an alert. Quivr keeps everything that must stay safe and uniform, and the plugin only answers questions.
+A plugin is a separate web service that Quivr calls over HTTP. Quivr hands it a job, such as reading PDF files or ranking search results, and does everything else itself.
+
+## Five jobs a plugin can do
+
+On this page, a passage is a short piece of a document, and a vector is a list of numbers that captures what a passage means, so Quivr can find passages close in meaning to a search.
+
+Quivr does the bookkeeping that must work the same for everyone, and asks plugins for the decisions that depend on your content:
 
 ```mermaid
-sequenceDiagram
-    participant Q as Quivr worker or API
-    participant P as Your plugin
-    Q->>P: GET /v0/discovery
-    P-->>Q: identity, Plugin API version, manifest digest
-    Q->>P: POST /v0/contributions/normalizer
-    P-->>Q: 200 with the Parts of the document
-    Note over Q: checks the answer, then stores and indexes it
+flowchart TD
+    engine["Quivr keeps documents, versions, access rules, schedules and retries"]
+    engine <-->|"sends jobs, receives answers"| jobs
+    subgraph jobs["Jobs a plugin can do"]
+        direction TB
+        collect["Collect items from a source"]
+        read["Read files"]
+        embed["Split text and turn it into vectors"]
+        rank["Rank search results"]
+        alert["Check alerts"]
+        collect ~~~ read ~~~ embed ~~~ rank ~~~ alert
+    end
 ```
 
-## The engine keeps the state, the plugin decides
+In words: Quivr keeps your documents, their earlier versions, who may read them, and the schedules and retries of all its work. It asks plugins what a source published, how to read a file, how to cut and compare text, which passages answer a search, and which alerts a document matches.
 
-Quivr's core owns storage, identity, versions, the search index, access control, schedules, credentials and retries. A plugin owns one kind of decision and nothing else. It holds no state between calls: a connector gets its last position back in each request, a normalizer gets a signed link to the file it reads.
+<span id="contributions" />Each job is one plugin type:
 
-This split keeps Quivr generic: two organizations with different content run the same engine and pin different plugins. It also bounds the damage a plugin can do: Quivr validates every answer before it records anything, so a buggy plugin produces an error or a quarantined document, never corrupted data.
-
-## Contributions
-
-What a plugin provides is called a Contribution. There are five types:
-
-| Contribution | Quivr calls it | See |
-| --- | --- | --- |
-| `normalizer` | when a file of a routed media type arrives, to turn it into text Parts | [Build your first plugin](/plugins/first-plugin) |
-| `connector` | on a schedule, to fetch what a source published since last time | [Write a connector](/plugins/write-a-connector) |
-| `ingestion` | for every new Version, to cut its text into passages and embed them | [Write an ingestion plugin](/plugins/write-an-ingestion-plugin) |
-| `retrieval` | for every search, to choose candidates and rank them | [Write a retrieval plugin](/plugins/write-a-retrieval-plugin) |
-| `subscription` | when a Version becomes searchable, to decide which alerts it matches | [Write an alert rule](/plugins/write-an-alert-rule) |
-
-One plugin may provide several Contributions. [Plugin types](/plugins/types) compares them in detail.
-
-## The manifest
-
-Every plugin ships a `quivr-plugin.yaml` that declares its identity, version, compatibility ranges, Contributions and limits:
-
-```yaml quivr-plugin.yaml
-id: acme.markdown
-version: 0.1.0
-compatibility:
-  engine: ">=0.1.0 <0.3.0"
-  plugin_api: ">=0.1.0 <0.2.0"
-contributions:
-  normalizer:
-    media_types: [text/markdown]
-    timeout_ms: 10000
-run:
-  command: [python3, -m, acme_markdown]
-```
-
-The operator gives Quivr the same file. At call time Quivr compares its SHA-256 digest with the `manifest_digest` the running plugin reports on `GET /v0/discovery`, so Quivr never talks to a plugin built from a different manifest. The [plugin manifest reference](/reference/plugin-manifest) lists every field.
-
-## The operator runs it, Quivr never starts it
-
-Quivr does not install, launch or scale plugins. You run the plugin wherever you like, as a process, a container or a managed service, then pin it in Quivr's configuration with its manifest and address:
-
-```json
-{"plugins": [{"manifest": "/etc/quivr/plugins/acme-markdown/quivr-plugin.yaml",
-              "endpoint": "http://127.0.0.1:9900",
-              "routes": [{"media_type": "text/markdown"}]}]}
-```
-
-At startup Quivr validates each pin without contacting the plugin: the manifest, the compatibility ranges, the configuration against the plugin's schema, and conflicts between pins. An invalid pin stops startup with the list of problems. A plugin that is down does not: work that needs it waits and is retried, and resumes when the plugin is back. Nothing is lost and nothing is decided in its absence. [Pin a plugin](/plugins/pin) shows the configuration for each type. To change plugins while Quivr runs, register the new version through the API instead: Quivr checks it, and you activate it without a restart ([Switch plugins without restarting](/plugins/switch-plugins-without-restarting)).
-
-## Versions
-
-Two version numbers matter. The plugin's own `version` is SemVer; bump it when its output changes, because documents record which version produced them. The Plugin API version is the version of the protocol itself. A plugin declares the range it supports in `compatibility.plugin_api`, and Quivr speaks the highest version in that range it implements. A minor Plugin API version only adds to the previous one, so a plugin built for an earlier minor keeps working.
-
-## Same input, same answer
-
-Quivr retries calls and replays them during rebuilds. Each request carries an `idempotency_key` that stays the same across retries of the same logical call, and a plugin must answer the same thing for the same key. Quivr keeps the first answer it recorded and treats a different one as a conflict.
-
-## Certification
-
-`quivr plugin test` is the Contract Runner. It starts your plugin, calls every route over HTTP with the normative fixtures and your own, and judges each answer with the engine's own validation code. It also replays calls to check determinism, sends invalid requests, enforces the declared deadlines and checks that no secret leaks. When it prints `CERTIFIED`, Quivr can safely call your plugin. It works offline, in any language's CI.
-
-## SDKs
-
-Any language that serves HTTP can implement the [plugin protocol](/reference/plugin-protocol). Two SDKs handle routing, validation, errors and the digest for you:
-
-| SDK | Contributions |
+| Job (type) | When Quivr asks |
 | --- | --- |
-| Python (`sdks/python`) | All five Contributions, including push routes and attachments |
-| Go (`sdks/go`) | All five Contributions |
+| Collect from a source (`connector`) | On a schedule, or when the source sends Quivr an update |
+| Read a file format (`normalizer`) | When a file of that type arrives, such as a PDF |
+| Cut and compare text (`ingestion`) | For every new document version, and for every search by meaning |
+| Find and rank results (`retrieval`) | For every search |
+| Check alerts (`subscription`, the alert rule) | When a document becomes searchable; an alert that needed vectors is asked again once they are ready |
 
-`quivr plugin init` supplies Python normalizer, subscription and pull or push connector starters.
-Go starters and Python ingestion/retrieval starters are omitted because they need
-language module setup or a chosen vector model/search strategy; use the SDKs directly.
+A plugin lists the jobs it does in its manifest, the file that describes it. There, each job is called a Contribution, and its type is one of the five above. Most plugins provide one Contribution, but one plugin can provide several of different types: a plugin for one service could both collect its items (`connector`) and read its file format (`normalizer`). Quivr ships a plugin for each job; [First-party plugins](/plugins/catalog) lists them.
+
+## What Quivr checks, and what it cannot
+
+Quivr checks every answer before it records anything. It checks the shape of the JSON, the limits the plugin declared, and that the answer fits the request: for example, one vector of the right size for each passage. An answer that fails is refused, and nothing from it is recorded: the document is set aside with a diagnostic (quarantined), the search returns an error, or the call is retried.
+
+These checks cannot tell whether an answer is right. A plugin that reads the wrong text from a PDF, or ranks results badly, still passes them. They also do not make plugin code safe to run. A plugin runs with whatever access its process has, and it sees the text Quivr sends it. Install plugins you trust, and try their output on your own content before you rely on it.
+
+## Who runs what
+
+Quivr sends alerts as webhooks: HTTP requests to an address in your system, your webhook receiver.
+
+You run Quivr and every plugin. Quivr sends your plugins what their job needs, and a plugin may send it on to an outside service:
+
+```mermaid
+flowchart TD
+    app["Your application"] -->|"documents<br/>and searches"| quivr
+    sources["Sources: feeds,<br/>mailboxes, partners"] -->|"pushed<br/>items"| quivr
+    quivr["Quivr API and worker,<br/>with its database,<br/>files and index"]
+    sources -->|"items a plugin<br/>collects"| plugins
+    quivr -->|"alerts:<br/>identifiers only"| receiver["Your webhook<br/>receiver"]
+    quivr -->|"documents<br/>and searches"| plugins["Plugins you run"]
+    plugins -->|"collected items<br/>and job answers"| quivr
+    plugins -.->|"optional: text to<br/>embed, check or rank"| models["External<br/>model service"]
+```
+
+In words:
+
+1. Your application sends documents and searches to Quivr's API. Sources can also push items to the same API.
+2. Quivr's API and worker keep everything in their own database, file storage and search index. If you use a managed service for one of these, your documents are stored there.
+3. Quivr sends plugins what their job needs: document text, a short-lived link to a file, or a search. Plugins return their answers to Quivr. A connector calls its source itself and returns the items it collected to Quivr.
+4. A plugin may call an external model service, such as a hosted embedding model or a classifier, and send it text.
+5. Alerts go to your webhook receiver as identifiers, without document text. Your receiver reads the match or the document through the API if it needs more.
+
+| Part | Who runs it, and what it receives |
+| --- | --- |
+| Quivr API and worker | You, the operator. Every document and version; source credentials are stored encrypted. |
+| Plugins | You, as processes, containers or hosted services. What the job needs: text, a file link, a search or a source's update. A connector also gets its source credential. |
+| External model service | Its provider, only if a plugin calls one. What that plugin sends it. |
+| Your webhook receiver | You. The identifiers of the alert, the match, the document and its version. |
+
+<Warning>
+Quivr sends document text to your plugins, which may send it on. Among the plugins that ship with Quivr, `core-ingest` sends passages and searches to the embedding server you configure: it runs locally in the default stack, but its address can be remote. `hosted-embed` sends them to the hosted model you configure, and `alerts` and `jev-rerank` can send text to TypeSafe's Jev model when they have a TypeSafe key. Check what a plugin calls before you give it confidential content. [First-party plugins](/plugins/catalog) describes what each one calls.
+</Warning>
+
+## Add a plugin
+
+<span id="the-operator-runs-it-quivr-never-starts-it" />Quivr does not install, start or scale plugins. You run each one and tell Quivr where it is:
+
+1. Choose a plugin from [First-party plugins](/plugins/catalog), or write your own.
+2. Run it as a process, a container or a hosted service that Quivr's API and worker can reach. A plugin that reads or uploads files must also reach Quivr's file storage, because files travel through short-lived links.
+3. Give Quivr its manifest and address. Either [pin it](/plugins/pin): list it in the configuration file Quivr reads at startup, then restart Quivr. Or [register it through the API](/plugins/switch-plugins-without-restarting) and switch to it while Quivr runs, with no restart.
+
+Quivr checks the manifest, the version compatibility and the plugin's settings before it sends any work. Before each job, it also checks that the plugin reports the expected identity, version and manifest digest (a fingerprint of the manifest file). This catches a plugin started with the wrong manifest; it does not verify the plugin's code. On a local development stack, `make dev` starts the default plugins for you.
+
+If a plugin is down, background work that needs it waits, and Quivr retries until the plugin is back. A search that needs it fails with `503` instead of returning an empty list. An update a source pushes to Quivr also gets `503`, and the source must send it again. Background work already tied to a plugin version you have since replaced is the exception: it stops after a set number of tries, 10 by default, with a diagnostic that names the plugin. [Switch plugins without restarting](/plugins/switch-plugins-without-restarting#work-finishes-on-the-version-it-started-with) explains that case.
+
+## Write your own
+
+Any language that serves HTTP can implement a plugin, and the Python and Go SDKs handle the protocol for you. `quivr plugin test` checks a plugin against the contract before you install it. [Plugin types](/plugins/types) explains each type and the rules every plugin follows:
+
+- <span id="the-manifest" />[Ship a manifest](/plugins/types#ship-a-manifest) that describes the plugin.
+- <span id="versions" />[Version the plugin and the protocol](/plugins/types#version-the-plugin-and-the-protocol).
+- <span id="same-input-same-answer" />[Give the same answer to the same request](/plugins/types#give-the-same-answer-to-the-same-request).
+- <span id="certification" />[Pass the Contract Runner](/plugins/types#pass-the-contract-runner).
+- <span id="sdks" />[Use an SDK](/plugins/types#use-an-sdk).
 
 ## Next
 
 <CardGroup cols={2}>
 <Card title="Plugin types" icon="shapes" href="/plugins/types">
-What each Contribution does, when Quivr calls it, and a minimal manifest.
+What each type does, when Quivr calls it, and the rules every plugin follows.
 </Card>
 <Card title="Build your first plugin" icon="hammer" href="/plugins/first-plugin">
-From an empty folder to a certified plugin that makes a new file format searchable.
+From an empty folder to a plugin that makes a new file format searchable.
 </Card>
 </CardGroup>

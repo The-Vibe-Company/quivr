@@ -1,6 +1,6 @@
 ---
 title: "Plugin types"
-description: "The five kinds of plugin Quivr calls: what each decides, when Quivr calls it, and its smallest manifest."
+description: "The five kinds of plugin Quivr calls: what each decides, when Quivr calls it, its smallest manifest, and the rules every plugin follows."
 keywords: ["normalizer", "connector", "ingestion", "retrieval", "subscription", "alert rule", "contribution"]
 ---
 
@@ -166,6 +166,55 @@ run:
 ```
 
 `expression_schema` is the shape of the queries your rule understands; Quivr refuses a Saved Query that does not fit it when the alert is created. See [Write an alert rule](/plugins/write-an-alert-rule).
+
+## What every plugin does
+
+Whatever its type, a plugin follows the same few rules. The [plugin protocol reference](/reference/plugin-protocol) states them field by field.
+
+### Ship a manifest
+
+Every plugin ships a `quivr-plugin.yaml` that declares its identity, version, compatibility ranges, Contributions and limits:
+
+```yaml quivr-plugin.yaml
+id: acme.markdown
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown]
+    timeout_ms: 10000
+run:
+  command: [python3, -m, acme_markdown]
+```
+
+The operator gives Quivr the same file when they [pin](/plugins/pin) or [register](/plugins/switch-plugins-without-restarting) the plugin. Before each call, Quivr checks that the plugin reports, on `GET /v0/discovery`, the expected identity, version and `manifest_digest`: the SHA-256 of that file. This catches a plugin started with a different manifest; the digest is reported by the plugin, so it does not verify the plugin's code. The [plugin manifest reference](/reference/plugin-manifest) lists every field.
+
+### Version the plugin and the protocol
+
+Two version numbers matter. The plugin's own `version` is SemVer; bump it when its output changes, because documents record which version produced them. The Plugin API version is the version of the protocol itself. A plugin declares the range it supports in `compatibility.plugin_api` and reports the version it implements on `GET /v0/discovery`. Quivr uses that version, provided Quivr supports it and it falls inside the declared range. A minor Plugin API version only adds to the previous one, so a plugin built for an earlier minor keeps working.
+
+### Give the same answer to the same request
+
+Quivr retries calls and replays them during rebuilds, so a plugin must answer the same thing to the same request. Normalizer, `segment_and_embed` and alert rule requests carry an `idempotency_key` that stays the same across retries of the same logical call, so a plugin can recognise a retry. For normalizer and ingestion answers, Quivr keeps the first answer it recorded and flags a different one as a conflict. For alerts, it keeps the first match it recorded for a document version and ignores later decisions about it.
+
+A plugin must not rely on local state to remember Quivr's progress: a connector gets its last checkpoint back in each request, and a normalizer gets a signed link to the file it reads. It may still cache models or results, as `core-ingest` caches the vectors it computed.
+
+### Pass the Contract Runner
+
+`quivr plugin test` is the Contract Runner. It starts your plugin, calls every route over HTTP with the protocol's test cases and your own, and judges each answer with the engine's own validation code. It also replays calls to check determinism, sends invalid requests and enforces the declared deadlines. It looks for fixture credentials and configured secret values in the answers it sees and, when it started the plugin, in the plugin's output. `CERTIFIED` means your plugin speaks the protocol correctly; it does not check that its answers are good for your content. It needs no running Quivr deployment, so it runs in any language's CI, though your plugin may still need its own external services.
+
+### Use an SDK
+
+Any language that serves HTTP can implement the protocol. Two SDKs handle routing, validation, errors and the digest for you:
+
+| SDK | Contributions |
+| --- | --- |
+| Python (`sdks/python`) | All five, including push routes and attachments |
+| Go (`sdks/go`) | All five |
+
+`quivr plugin init` supplies Python normalizer, subscription and pull or push connector starters. There are no Go starters, and no Python ingestion or retrieval starters, because those need a language module setup or a chosen vector model or search strategy; use the SDKs directly.
 
 ## Next
 
