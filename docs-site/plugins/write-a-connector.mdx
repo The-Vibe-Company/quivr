@@ -201,83 +201,11 @@ To add the plugin to a deployment that is already running, register it with its 
 
 ## Receive data through a Quivr key
 
-For a push source, use a Plugin API range that admits `0.11.0`, declare
-`modes: [pull, push]`, and add `api.routes` to the kind. This illustrative kind
-fragment declares one JSON push route and one synchronous challenge:
-
-```yaml
-modes: [pull, push]
-api:
-  routes:
-    - name: push
-      method: POST
-      path: events/{category}
-      auth: quivr_key
-      request_schema:
-        type: object
-        required: [text]
-        properties:
-          text: {type: string}
-    - {name: challenge, method: GET, path: challenge, auth: quivr_key}
-```
-
-Implement `Receiver.Receive` in Go (or the language-neutral
-`POST /v0/contributions/connector/receive` contract). Select the handler with
-`req.Route`, decode the JSON in `req.Body`, and read template values from
-`req.Request.Path`. Return stable Record Keys and revisions just as `Fetch`
-does. For a POST, return an accepted `Delivery` with its items; Quivr ingests
-them and returns `202` with their Receipts. For a GET challenge, return the
-challenge response without items. The [plugin contract](/reference/plugin-protocol#connector)
-lists the request and response fields.
-
-Grant the caller's key `connector:push` on the instance's collection using the
-[API key configuration](/reference/configuration#api-keys). A caller sends JSON
-to `POST /v0/connectors/<instance_id>/api/events/news` with that bearer key.
-The response's `receipts` array contains the normal ingestion Receipts; poll
-those with a key that grants `content:read`. Missing keys, missing permission
-or a different collection are refused before your plugin is called. A malformed
-body is `400`, a schema mismatch is `422`, an undeclared path is `404`, and a
-wrong method is `405` with `Allow`. Bodies are limited to 1 MiB. Rejected items
-return `422 item_rejected`; retrying unchanged revisions replays items that
-were already accepted. Transient failures return `503` with `Retry-After`.
-
-Set the engine-owned `push_policy` when you create an instance to override its
-request rate and burst capacity or restrict callers with `allowed_cidrs`.
-Keep these fields separate from your kind's `config`. Defaults and trusted proxy
-networks are set in [deployment configuration](/reference/configuration).
-A rate refusal returns `429` with `Retry-After` before your plugin is called.
-An address outside the allowlist returns `403 ip_not_allowed`.
-
-Send an `Idempotency-Key` to replay the first completed answer for that instance
-within the configured TTL, including its Receipts, without another plugin call.
-Use a new key for a new delivery. Authentication, schema, IP and rate refusals
-do not reserve a key. A completed plugin or ingestion failure is cached too;
-after correcting its cause, retry with a new key and stable item revisions.
-
-Every attempt on an existing instance records `connector.push.received` for a
-2xx answer or `connector.push.refused` for another status. Cached replies and
-GET challenges count as attempts. Events and per-instance counters commit
-together; audit storage failure returns `503`. Read counters at
-`GET /v0/admin/stats/connector-pushes` with `observability:read` on all collections.
-The listing returns the largest 100 instance/outcome pairs and a total across all
-pairs; use `limit` (1–100) to shorten it, or `connector_id` to read both outcomes
-of one instance. Those two filters cannot be combined.
-
-Quivr strips the bearer key and cookies before relaying the request. The existing public webhook address stays
-available with its existing plugin-owned authentication.
+[Write a push source](/plugins/push-source#choose-authentication) to declare a `quivr_key` route and implement its handler. [Operate the instance](/run-quivr/receive-pushes) for admission, retries and audit.
 
 ## Receive data through an instance token
 
-For a third-party sender, declare `auth: instance_token` on the route and use a
-Plugin API range admitting `0.12.0`. The same `Receiver.Receive` handler and
-route/body fields apply. Quivr authenticates the token before applying the same push protection policy
-and calling your plugin; do not pass it to the handler or store it in the plugin configuration.
-
-An operator issues and manages tokens under `/v0/connectors/<instance_id>/tokens`
-with `connectors:admin`. Each token works only on that instance's token routes.
-Quivr keys cannot authorize those routes, and instance tokens cannot authorize
-Quivr-key routes or normal API reads. The [operator guide](/guides/connectors#give-a-third-party-a-push-token)
-explains one-time issuance, five-minute rotation overlap and immediate revocation.
+[Write a push source](/plugins/push-source#choose-authentication) to declare an `instance_token` route. [Manage tokens](/run-quivr/receive-pushes#manage-tokens) for issuance, rotation and revocation.
 
 ## Go further
 
@@ -285,32 +213,4 @@ A kind can also store binary attachments next to an item: declare `contributions
 
 ## Verify provider signatures
 
-For a provider that signs pushes, declare `auth: signature` and
-`signature: {header, timestamp_header?, window_seconds}` on its POST route.
-This requires Plugin API 0.12. Use a window between 1 and 86400 seconds.
-If the provider signs a timestamp, name its Unix-seconds header; Quivr rejects
-calls outside the window before invoking your plugin. Your handler still
-verifies the cryptographic signature over the raw request before accepting
-items. Preserve `request.body_base64` for that check.
-
-The engine runs the signature freshness and replay guard before the instance's
-IP allowlist and token bucket. A signature replay returns `409 push_replayed`.
-Signature routes bypass the response cache: after the replay window expires,
-every admitted POST or GET challenge reaches provider verification, even with
-an earlier idempotency key. These protections and audit
-counters also apply at a declared signature route's legacy receive alias.
-
-Quivr reserves signature and `Idempotency-Key` fingerprints per instance in
-PostgreSQL before calling your handler. A replay returns `409 push_replayed`;
-invalid signature or timestamp headers return `401 invalid_signature`.
-Reservations last for the window and are released on refusal or failed
-processing within the request deadline so a valid retry can succeed. If the deadline expires or storage prevents cleanup, the reservation remains until its window expires and retries return 409 meanwhile. A provider without signed timestamps
-has replay protection only within the cache window.
-
-Declare a GET signature route for synchronous challenges. It bypasses POST
-signature and replay guards, and must return no ingestion items. If your kind
-has signature routes, its legacy webhook is an alias only for its declared
-signature `receive` path. The first-party X plugin uses POST receive and GET
-challenge on that path; its old address is scheduled for removal in engine 1.0.0.
-
-For a source that receives records from a third party, start with `quivr plugin init <name> --kind connector --push` and follow [Receive pushed records](/plugins/push-source).
+[Verify signatures in your push handler](/plugins/push-source#verify-provider-signatures) and [answer synchronous challenges](/plugins/push-source#answer-provider-challenges). The [push-checks diagram](/plugins/push-source#push-checks) shows the engine's exact check order and your plugin's responsibilities.

@@ -1,16 +1,16 @@
 ---
-title: "Receive pushed records"
-description: "Write a source route, give a third party an instance token, and read the record it pushes."
-keywords: ["push source", "connector route", "instance token", "Python SDK"]
+title: "Write a push source"
+description: "Declare push routes, verify provider signatures, and return records or synchronous challenges."
+keywords: ["push source", "signature", "challenge", "connector route", "Python SDK"]
 ---
 
-Receive text from a third party through a source plugin. Quivr authenticates the sender, calls your handler and returns an Ingestion Receipt, an identifier you can use to follow processing.
+Your source plugin turns incoming requests into records, or answers a provider's challenge to confirm the webhook address. Quivr checks the route and admission policy; your handler verifies any provider signature before accepting data.
 
 ## Prerequisites
 
-- Python 3.12+ (`python3 --version`), the Quivr checkout and its CLI (`go build -o .scratch/quivr ./cmd/quivr`). Add `.scratch` to your `PATH`.
-- A local stack (`make dev`), which pins the offline `plugins/push-source` sample used below. It declares the `events` source kind. Export its address and operator key with `eval "$(make -s env)"`.
-- The operator key needs `corpora:write`, `connectors:write`, `connectors:admin` and `content:read`. Instance tokens permit pushing to one source; reads use the operator key.
+- Python 3.12+ (`python3 --version`), a Quivr checkout and its CLI (`go build -o .scratch/quivr ./cmd/quivr`). Add `.scratch` to your `PATH`.
+- Read [How plugins work](/plugins/overview) for the engine/plugin boundary and [Write a connector](/plugins/write-a-connector) for source kinds and stable record identities.
+- For signature routes, the provider's signature format and signing secret. The operator deposits that secret as the instance's credential; you receive it decrypted in the handler. The offline sample below needs no provider account.
 
 ## Steps
 
@@ -28,11 +28,11 @@ python3 -m unittest discover -s tests
 quivr plugin test --report contract-report.json
 ```
 
-Expect `CERTIFIED`. The generated fixture covers an accepted record and a refused blank record. The sample in `plugins/push-source` follows the same pattern. Its CI report is uploaded as `push-source-contract-reports`.
+Expect `CERTIFIED`. The generated fixture covers an accepted record and a refused blank record. The offline sample in `plugins/push-source` follows the same pattern; its CI report is uploaded as `push-source-contract-reports`.
 
 ### Declare and handle a route
 
-The generated manifest contains this route under `contributions.connector.kinds.events.api.routes`:
+Declare `modes: [pull, push]` on your source kind; API routes require push mode, and a push kind must also support pull. Declare the requests it accepts under `api.routes`. Its `method` and relative `path` select a named handler; `request_schema` validates JSON before the handler runs. The generated manifest contains this route under `contributions.connector.kinds.events.api.routes`:
 
 ```yaml
 - name: publish
@@ -50,129 +50,148 @@ The generated manifest contains this route under `contributions.connector.kinds.
       text: {type: string, minLength: 1, maxLength: 65536}
 ```
 
-The SDK dispatches `@plugin.connector_route("events", "publish")` with a typed `ReceiveRequest`. `request.body` holds parsed JSON and `request.request` preserves the caller's path, query and body bytes. Return a `ConnectorReceiveResponse` with items or a refusal; the generated handler shows the complete mapping. Quivr converts accepted POST items into `202` Receipts, regardless of the handler's accepted response status. Tokens never reach the plugin. See the [Python kit](https://github.com/The-Vibe-Company/quivr-v2/blob/main/sdks/python/README.md) or [Go kit](https://github.com/The-Vibe-Company/quivr-v2/blob/main/sdks/go/README.md) for handler signatures.
+The Python SDK dispatches `@plugin.connector_route("events", "publish")` with a typed `ReceiveRequest`. `request.body` holds parsed JSON; `request.request` preserves the caller's path, query and raw body. Return a `ConnectorReceiveResponse` with accepted items or a refusal; the generated handler shows the complete mapping. Go implements `Receiver.Receive`, selects `req.Route` and decodes `req.Body`. For a route such as `events/{category}`, read the actual relative path, such as `events/news`, from Python's `request.request.path` or Go's `req.Request.Path`.
 
-For certification, a fixture's `receive` case sets `route: "publish"` and `request.path: "records"`, with the source JSON as `request.body`. The runner builds the same route/body wire fields as the engine. It tests plugin handling; engine token authentication is exercised in the following API steps.
+Return a stable Record Key for each document and a new `revision` when its source content changes. Accepted POST items enter normal ingestion, and Quivr returns `202` with Receipts, identifiers used to follow processing. The handler's accepted status does not replace that response. Read [the plugin contract](/reference/plugin-protocol#connector) for wire fields and the [Python kit](https://github.com/The-Vibe-Company/quivr-v2/blob/main/sdks/python/README.md) or [Go kit](https://github.com/The-Vibe-Company/quivr-v2/blob/main/sdks/go/README.md) for handler types.
 
-To run your generated plugin in another deployment, serve it with `quivr plugin dev --port 9940 incoming-records` from the directory containing it, and add its absolute manifest path and reachable endpoint to [`QUIVR_CONFIG.plugins`](/reference/configuration#plugin-pins). Restart api and worker with that pin. The local stack already runs the sample, so the remaining steps use it.
+For certification, a fixture's `receive` case sets `route: "publish"` and `request.path: "records"`, with source JSON in `request.body`. The runner checks plugin handling; engine authentication and admission are separate checks.
 
-### Create a collection and source instance
+### Choose authentication
 
-A Corpus is a collection of Records. Each Record has a stable `key` within its Source Namespace; a new `revision` identifies changed source content.
+| Route `auth` | Responsibility |
+| --- | --- |
+| `quivr_key` | Quivr checks the API key's `connector:push` permission and Corpus scope. Requires Plugin API 0.11. |
+| `instance_token` | Quivr checks a token restricted to that instance. Requires Plugin API 0.12. |
+| `signature` | Quivr guards freshness and replay for POST; your plugin verifies the provider's cryptographic signature. Requires Plugin API 0.12. |
 
-{/* runnable */}
-```bash
-curl -fsS -X POST "$QUIVR_API_URL/v0/corpora" \
-  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
-  -d '{"name":"Pushed records","idempotency_key":"push-guide-corpus"}' | jq '{corpus_id}'
+Your compatibility range must admit that Plugin API version. Token routes and Quivr-key routes accept only their declared credential type. Quivr strips bearer credentials and cookies before relaying requests; they never reach your handler.
+
+### Verify provider signatures
+
+Declare `signature: {header, timestamp_header?, window_seconds}` on a signature route. The window is 1–86400 seconds. If the provider signs a Unix-seconds timestamp, name its header: Quivr rejects timestamps outside the window, including too far in the future. Without a signed timestamp, replay protection lasts only for the reservation window.
+
+Your handler verifies the provider's signature over the exact raw bytes before accepting items. On the wire these are `request.body_base64`. In Python, decode `request.request.body_base64` with `base64.b64decode`; Go exposes `req.Request.Body()`. Re-encoding parsed JSON can change the bytes and invalidate the signature. If you declare `timestamp_header`, verify that timestamp as part of the signed message too. Quivr checks its age, not its authenticity.
+
+For example, the first-party X plugin compares `sha256=` plus the base64 HMAC-SHA256 of the raw body against `x-twitter-webhooks-signature`, using the deposited consumer secret and a constant-time comparison. It refuses a mismatch with `401` and no items. See its [handler](https://github.com/The-Vibe-Company/quivr-v2/blob/main/plugins/x-list/webhook.go) and [offline checks](https://github.com/The-Vibe-Company/quivr-v2/blob/main/plugins/x-list/webhook_test.go).
+
+### Answer provider challenges
+
+A challenge asks your plugin to prove it can receive at this address. Declare a GET signature route and return its response synchronously, without ingestion items. GET skips the POST signature-header, freshness and replay guards, but still passes JSON/schema, IP and rate admission. An empty GET body is validated as `null`, so omit `request_schema` or allow `null` on that route.
+
+For example, not run: X's route declarations, under a kind's `api.routes`:
+
+```yaml
+- name: receive
+  method: POST
+  path: receive
+  auth: signature
+  signature: {header: x-twitter-webhooks-signature, window_seconds: 300}
+- name: challenge
+  method: GET
+  path: receive
+  auth: signature
+  signature: {header: x-twitter-webhooks-signature, window_seconds: 300}
 ```
 
-{/* output */}
-```json
-{"corpus_id":"{{PUSH_CORPUS_ID}}"}
+X calls `GET /v0/connectors/<instance_id>/api/receive?crc_token=<challenge>`. The plugin signs the query's challenge with the consumer secret and returns `200 application/json` containing `{"response_token":"sha256=<base64 HMAC>"}`. Missing `crc_token` returns `400`. The GET needs no POST signature header, and its `Idempotency-Key` never retrieves a cached answer. Test the reply offline with the linked X checks; registering the address with X needs provider credentials.
+
+This Python excerpt implements the same signature and challenge format. In your plugin module, declare the two routes above on `events` and a credential schema with a required `consumer_secret` string; the operator deposits that credential. Reuse your module's `plugin` object. The POST branch accepts an empty delivery to show verification; add your record mapping after the signature check.
+
+<CodeGroup>
+```python Python handler (excerpt)
+import base64
+import hashlib
+import hmac
+import json
+from urllib.parse import parse_qs
+
+from quivr_plugin import ConnectorReceiveResponse, ReceiveAnswer, ReceiveRequest
+
+
+@plugin.connector_route("events", "receive")
+@plugin.connector_route("events", "challenge")
+def receive(request: ReceiveRequest) -> ConnectorReceiveResponse:
+    secret = request.credential.decode()["consumer_secret"].encode()
+
+    def sign(raw: bytes) -> str:
+        digest = hmac.new(secret, raw, hashlib.sha256).digest()
+        return "sha256=" + base64.b64encode(digest).decode("ascii")
+
+    if request.request.method == "GET":
+        token = parse_qs(request.request.query).get("crc_token", [""])[0]
+        if not token:
+            return ConnectorReceiveResponse(
+                verdict="refused", response=ReceiveAnswer(status=400, body="crc_token is missing")
+            )
+        return ConnectorReceiveResponse(
+            verdict="accepted",
+            response=ReceiveAnswer(
+                status=200, content_type="application/json",
+                body=json.dumps({"response_token": sign(token.encode())}),
+            ),
+        )
+
+    raw = base64.b64decode(request.request.body_base64)
+    values = request.request.headers.get("x-twitter-webhooks-signature", [])
+    if len(values) != 1 or not hmac.compare_digest(values[0], sign(raw)):
+        return ConnectorReceiveResponse(
+            verdict="refused", response=ReceiveAnswer(status=401, body="invalid signature")
+        )
+    return ConnectorReceiveResponse(
+        verdict="accepted", response=ReceiveAnswer(status=202), items=[]
+    )
+```
+</CodeGroup>
+
+
+## Push checks
+
+An IP allowlist restricts sender addresses; a rate bucket limits how quickly an instance admits requests. An idempotency key names one delivery: bearer routes (`quivr_key` and `instance_token`) may reuse its cached answer, while signed POSTs reserve fingerprints to refuse replay. The operator configures these policies in [Receive and secure pushes](/run-quivr/receive-pushes).
+
+Quivr runs freshness and replay before schema validation, then IP and rate admission; only your plugin verifies the provider's cryptographic signature.
+
+```mermaid
+flowchart TD
+    B[Quivr checks sender access and route]
+    B --> C{Signed POST?}
+    C -- Yes --> D[Quivr checks age and replay]
+    C -- No --> E[Quivr validates JSON/schema]
+    D --> E
+    E --> F[Quivr checks sender IP]
+    F --> G[Quivr uses cache or rate limit]
+    G -- Uncached --> H[Plugin verifies signature<br/>or answers challenge]
+    G -- Cached --> I[Quivr audits and replies]
+    H -- Accepted POST --> J[Quivr ingests items]
+    J --> I
+    H -- GET or refusal --> I
 ```
 
-```bash
-export PUSH_CORPUS_ID=<the corpus_id above>
-```
+1. Quivr recognizes a supplied bearer, checks a recognized API key's push permission and bounds the request.
+2. It loads the enabled instance, checks API key Organization and Corpus scope, resolves the route and checks its authentication, including an instance token.
+3. Signed POSTs require one signature header, check any timestamp's age and reserve signature and delivery-key fingerprints to refuse replays. GET challenges skip these guards.
+4. Quivr checks delivery-key metadata, parses JSON and validates the route schema, then checks the IP allowlist.
+5. A completed bearer cache entry skips the rate limit and plugin. Otherwise, a bearer request with a delivery key claims its cache entry; all uncached requests pass the rate bucket.
+6. Quivr opens the source credential and calls the plugin. The plugin verifies a signed POST over raw bytes, maps a bearer POST to items, or answers a GET challenge without items.
+7. Quivr validates and ingests accepted POST items, records acceptance, then caches bearer answers or keeps successful signed reservations. Failed signed processing releases its reservation when cleanup succeeds.
+8. Quivr commits the attempt's audit and counters before replying with Receipts, a challenge answer or a refusal. Cached answers follow this audit step too.
 
-{/* runnable */}
-```bash
-curl -fsS -X POST "$QUIVR_API_URL/v0/connectors" \
-  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
-  -d @- <<EOF | jq '{connector_id, kind}'
-{"idempotency_key":"push-guide-instance","corpus_id":"$PUSH_CORPUS_ID","source_namespace":"incoming","kind":"events","config":{},"schedule":{"interval_seconds":900}}
-EOF
-```
+Each failed check stops later checks. Existing-instance refusals are audited too. Successful signed POSTs retain their reservation for the window, including accepted empty deliveries. Refusals and failed processing release it within the request deadline; cleanup failure or an expired deadline leaves it until expiry. GET signature routes skip the POST guard and response cache, so an admitted challenge reaches the plugin every time. See [retry behaviour](/run-quivr/receive-pushes#how-retries-behave) for examples and limits.
 
-{/* output */}
-```json
-{"connector_id":"{{PUSH_CONNECTOR_ID}}","kind":"events"}
-```
-
-```bash
-export PUSH_CONNECTOR_ID=<the connector_id above>
-```
-
-### Issue a token and push
-
-Save the once-only `secret` in a private file, then use it for the sender's authorization header. Give it to the third party through your secret-delivery channel. Keep the token ID for [rotation and revocation](/guides/connectors#give-a-third-party-a-push-token).
-
-{/* runnable */}
-```bash
-umask 077
-curl -fsS -X POST "$QUIVR_API_URL/v0/connectors/$PUSH_CONNECTOR_ID/tokens" \
-  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
-  -d '{}' > push-token.json
-jq '{token_id: .token.token_id}' push-token.json
-```
-
-{/* output */}
-```json
-{"token_id":"{{PUSH_TOKEN_ID}}"}
-```
-
-{/* runnable */}
-```bash
-curl -fsS -X POST "$QUIVR_API_URL/v0/connectors/$PUSH_CONNECTOR_ID/api/records" \
-  -H "Authorization: Bearer $(jq -r .secret push-token.json)" \
-  -H "Content-Type: application/json" -H "Idempotency-Key: push-guide-note-1" \
-  -d '{"key":"note-1","revision":"1","title":"Library opens","text":"The library opens on Monday."}' \
-  | jq '{receipt_id: .receipts[0].receipt_id}'
-```
-
-{/* output */}
-```json
-{"receipt_id":"{{PUSH_RECEIPT_ID}}"}
-```
-
-```bash
-export PUSH_RECEIPT_ID=<the receipt_id above>
-```
-
-The push answers `202`. Retrying the same idempotency key and source revision returns the same Receipt. A correction uses a new revision and idempotency key.
+For a kind with signature routes, the legacy webhook address aliases only its declared signature `receive` path, with the same protections and audit. The X plugin supports this alias; its old address is scheduled for removal in engine 1.0.0. Other legacy webhooks keep their plugin-owned authentication.
 
 ## Check it worked
 
-Read the Receipt with your Quivr key until processing resolves:
+Certify the generated handler, then [pin it](/run-quivr/pin) or [register and activate it](/run-quivr/upgrade-a-plugin). The local stack already runs the sample in `plugins/push-source`; [the offline push example](/run-quivr/receive-pushes#steps) exercises that sample. To exercise your generated plugin, run `quivr plugin dev --port 9940 incoming-records` from the checkout, replace the sample's pin with its absolute manifest path and an endpoint reachable by Quivr, then restart Quivr. Follow the same instance and push steps with your declared kind and route. Add provider-specific fixtures for valid signatures, invalid signatures and challenges before deploying a signed handler.
 
-{/* runnable retry */}
-```bash
-curl -fsS "$QUIVR_API_URL/v0/ingestion-receipts/$PUSH_RECEIPT_ID" \
-  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{state, outcome, record_id, version_id}'
-```
+## Clean up
 
-{/* output */}
-```json
-{"state":"resolved","outcome":"created","record_id":"{{PUSH_RECORD_ID}}","version_id":"{{PUSH_VERSION_ID}}"}
-```
+The generated `incoming-records` directory is local to your checkout. Remove it when you no longer need the example. [Revoke issued tokens](/run-quivr/receive-pushes#manage-tokens) and [disable any deployed example instance](/guides/connectors#disable-an-instance).
 
-```bash
-export PUSH_RECORD_ID=<the record_id above> PUSH_VERSION_ID=<the version_id above>
-```
+## Next
 
-{/* runnable */}
-```bash
-curl -fsS "$QUIVR_API_URL/v0/records/$PUSH_RECORD_ID" \
-  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{record_id, source}'
-```
+<span id="create-a-collection-and-source-instance" />
+<span id="issue-a-token-and-push" />
 
-{/* output */}
-```json
-{"record_id":"{{PUSH_RECORD_ID}}","source":{"corpus_id":"{{PUSH_CORPUS_ID}}","namespace":"incoming","record_key":"note-1"}}
-```
-
-Read the stored title and body:
-
-{/* runnable */}
-```bash
-curl -fsS "$QUIVR_API_URL/v0/records/$PUSH_RECORD_ID/versions/$PUSH_VERSION_ID" \
-  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{parts: [.manifest.parts[] | {key, text: .content.text}]}'
-```
-
-{/* output */}
-```json
-{"parts":[{"key":"title","text":"Library opens"},{"key":"body","text":"The library opens on Monday."}]}
-```
-
-Use [Add content](/guides/add-content) for the Record's Parts and Versions. When the sender no longer needs access, [revoke its token](/guides/connectors#give-a-third-party-a-push-token).
+- [Receive and secure pushes](/run-quivr/receive-pushes) for token lifecycle, limits, retries and audit.
+- [Write a connector](/plugins/write-a-connector) for scheduled collection and attachments.
+- [Plugin protocol](/reference/plugin-protocol#connector) for the exact request and response fields.

@@ -60,6 +60,7 @@
             "pages": [
               "run-quivr/catalog",
               "run-quivr/pin",
+              "run-quivr/receive-pushes",
               "run-quivr/upgrade-a-plugin",
               "run-quivr/upgrade-an-alert-rule",
               "run-quivr/retire-alert-evaluations",
