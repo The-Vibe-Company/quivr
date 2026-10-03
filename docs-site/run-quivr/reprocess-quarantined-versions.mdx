@@ -4,11 +4,11 @@ description: "After you fix a plugin or roll one back, run the articles it quara
 keywords: ["quarantine", "reprocess", "retry", "failed articles", "plugin fix"]
 ---
 
-A plugin that refuses an article, or stops while processing it, leaves its Version quarantined: Quivr keeps the article and its reason but withholds it from search. Once a fixed plugin version is active, or a rollback restored a working one, a reprocess runs those articles again and makes the ones that succeed searchable. It follows a rollback in [Upgrade a plugin with no downtime](/plugins/upgrade-a-plugin).
+A plugin that refuses an article, or stops while processing it, leaves its Version quarantined: Quivr keeps the article and its reason but withholds it from search. Once a fixed plugin version is active, or a rollback restored a working one, a reprocess runs those articles again and makes the ones that succeed searchable. It follows a rollback in [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
 
 ## Prerequisites
 
-- The plan that should process the articles is active: the fixed plugin version is activated (see [Switch plugins without restarting](/plugins/switch-plugins-without-restarting)), or the plan was rolled back.
+- The plan that should process the articles is active: the fixed plugin version is activated (see [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin)), or the plan was rolled back.
 - A key of the Organization that owns the Corpus with the actions `plugins:admin`, `operations:read` (to follow the reprocess) and `operations:write` (to pause, resume or cancel it), in `QUIVR_OPERATOR_KEY`.
 
 ## Steps

@@ -8,7 +8,7 @@ A keyword alert fires when a new article matches a query such as `"harbour strik
 
 ## Prerequisites
 
-- The `alerts` plugin pinned. The local stack pins it; elsewhere see [Pin a plugin](/plugins/pin).
+- The `alerts` plugin pinned. The local stack pins it; elsewhere see [Pin a plugin](/run-quivr/pin).
 - `QUIVR_API_URL` and a `QUIVR_API_KEY` with `monitoring:read` and `monitoring:write`, plus `content:write` to add the test article below.
 - `QUIVR_DESTINATION`: the id of a webhook destination the operator configured for your Organization. Destinations live in Quivr's configuration, never in API requests. The local stack's `make env` sets one that delivers nowhere.
 
@@ -32,7 +32,7 @@ A keyword alert fires when a new article matches a query such as `"harbour strik
 
 ## Turn it into an expression
 
-Quivr stores a query as a JSON tree, which it validates when you save the alert, so a mistake is refused at once instead of silently never matching. The plugin ships the parser. From a `quivr-v2` checkout:
+Quivr stores a query as a JSON tree, which it validates when you save the alert, so a malformed query is refused at once. An unmapped metadata field is still valid syntax but never matches (see [Filter on your own metadata](#filter-on-your-own-metadata)). The plugin ships the parser. From a `quivr-v2` checkout:
 
 ```bash
 cd plugins/alerts && python3 -m alerts.notation '"harbour strike" AND (ferry OR port) NOT football'
@@ -193,49 +193,15 @@ When an article that matched changes, the Subscription gets a follow-up: `match.
 
 ## Upgrade the alert rule without losing alerts
 
-A Subscription Version fixes the query and alert-rule plugin version that judges each article. Moving a Subscription to a new Version affects future changes only. Evaluations already queued keep their original Version and plugin pin; a missing evaluator keeps retrying with `evaluator_unavailable`.
-
-For a zero-loss upgrade, use a key with `plugins:admin` and the relevant Corpus grants:
-
-1. Run the exact old implementation A and new implementation B concurrently at separate reachable endpoints. If the plugin is baked into an image, retain and run A's old code separately. Do not label B as A.
-2. [Register, certify and activate B](/plugins/switch-plugins-without-restarting#upgrade-an-alert-rule). Dry-run `POST /v0/admin/subscriptions/evaluator-migrations`, inspect any refusals, then migrate the accepted Subscriptions in pages.
-3. Keep A running until `GET /v0/admin/plugins` shows both its `subscriptions` and `pinned_work` at zero. Pinned work includes old triggers waiting to dispatch into evaluations; current Subscriptions alone do not prove that A has drained.
+Operators can [upgrade an alert rule](/run-quivr/upgrade-an-alert-rule) while keeping old evaluations on their pinned version.
 
 ## Retire evaluations you cannot finish
 
-Restore A to finish its evaluations without losing potential Matches. If you cannot restore it, you can explicitly abandon a bounded batch. Retirement does not judge an article: it records `evaluator_retired`, never `no_match`, and creates no Match or Delivery. Earlier Matches and Delivery history remain unchanged.
-
-Use `plugins:admin` for backlog inspection, retirement and receipt reads. The API key's Organization and Corpus grants bound the work you can see or retire.
-
-1. Inspect `GET /v0/admin/subscriptions/evaluation-backlog`. Its response has `items` with `plugin_id`, `version`, `pending`, `erroring`, `unavailable` and `retired`. Request `limit` up to 500; when `next_after` is present, pass it as `after` to continue. This cursor is the last `plugin_id@version` returned.
-2. Dry-run `POST /v0/admin/subscriptions/evaluation-retirements` for the exact unavailable version, with a reason explaining why you are abandoning it. The request body below is illustrative, not a runnable request. Replace the version and reason with your operational decision:
-
-   ```json
-   {"key": "retire-alerts-batch-1", "plugin_id": "alerts", "version": "0.2.0", "reason": "The old implementation cannot be restored; accept losing potential matches", "dry_run": true, "limit": 100}
-   ```
-
-3. Inspect the selected items and `leased` count. Only pending evaluations whose latest error is `evaluator_unavailable` and whose leases have expired can close. Live leases, other errors and work not yet dispatched are not retired.
-4. Send a real request with `dry_run: false` when you accept that loss. A dry run reserves no key and changes nothing; you may reuse its key or choose another. The batch limit defaults to 100 and cannot exceed 500.
-5. Read the receipt with `GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id}`. Preserve it for the operational record. The read requires grants covering the original request's Corpus scope, even for an empty batch; a missing or hidden receipt returns `404`.
-6. Let old triggers fan out, wait for live leases to expire, then repeat dry-run/real batches with new keys until the old version's `pending` and `unavailable` are zero. Resolve other errors separately, and check the registry's `subscriptions` and `pinned_work` before removing A. Retirement is a batch, not a permanent policy against that version.
-
-Backlog counts describe recorded work, not endpoint health: `erroring` counts pending evaluations with an error, `unavailable` counts those whose latest error is `evaluator_unavailable`, and `retired` counts those closed with `evaluator_retired`. A restored endpoint can still have recorded errors until evaluation runs again.
-
-The receipt contains the full request body with normalized `limit`, `retirement_id`, `outcome`, `items`, `remaining` and `leased`. Each item keeps its original `subscription_id`, `subscription_version_id`, `sequence`, `corpus_id`, `record_id` and `record_version_id`. Real retirements also have `created_at` and an `event_id` per item. Each event is `evaluation.retired`, with `resource.kind=evaluation_retirement` and `resource.id=retirement_id`; dry runs have neither event IDs nor a creation timestamp.
-
-`remaining` counts unavailable evaluations left after the batch, including live leases counted by `leased`. A dry run reports that remainder as if its selected items were retired. Within an Organization, replaying a real key with the same normalized request and Corpus scope returns the original receipt, not new work or refreshed counts. Changing the request or scope with that key returns `409 idempotency_conflict`. Even an empty real batch reserves its receipt, so use a new key for later arrivals.
+Operators can [retire unavailable evaluations](/run-quivr/retire-alert-evaluations) when the old rule cannot be restored and they accept losing potential Matches.
 
 ## Filter on your own metadata
 
-Names such as `author` or `category` depend on where your sources put that information, usually in a Version extension. The operator maps each name to a JSON Pointer in the `alerts` pin's configuration:
-
-```json QUIVR_CONFIG
-{"plugins": [{"manifest": "plugins/alerts/quivr-plugin.yaml", "endpoint": "http://127.0.0.1:9910",
-  "configuration": {"fields": {"author": "/extensions/example.news/data/author",
-                               "category": "/extensions/example.news/data/categories"}}}]}
-```
-
-A list field matches when one of its values does. A name the operator has not mapped never matches, and the plugin logs a warning.
+Ask your operator to [map the metadata fields](/run-quivr/configure-alert-fields) your alerts use, such as `author` or `category`. A list field matches when one of its values does. A name the operator has not mapped never matches.
 
 ## Timing
 

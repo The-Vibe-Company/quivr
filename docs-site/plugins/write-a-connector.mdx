@@ -189,7 +189,7 @@ CERTIFIED: the engine can safely invoke this plugin (17 passed, 0 failed, 1 skip
 
 ## Check it worked
 
-[Pin the plugin](/plugins/pin) in your deployment, then look for the new kind:
+[Pin the plugin](/run-quivr/pin) in your deployment, then look for the new kind:
 
 ```bash
 curl -s "$QUIVR_API_URL/v0/connector-kinds" -H "Authorization: Bearer $QUIVR_API_KEY" | jq '[.items[].kind]'
@@ -197,7 +197,7 @@ curl -s "$QUIVR_API_URL/v0/connector-kinds" -H "Authorization: Bearer $QUIVR_API
 
 `folder_notes` is listed next to the other kinds. Create an instance as for any kind, with `"kind": "folder_notes"` and `"config": {"path": "/srv/notes"}`: see [Collect from a source](/guides/connectors).
 
-To add the plugin to a deployment that is already running, register it with its `fixtures/` folder instead of pinning it: Quivr runs the same checks, and you activate it without a restart. See [Switch plugins without restarting](/plugins/switch-plugins-without-restarting).
+To add the plugin to a deployment that is already running, register it with its `fixtures/` folder instead of pinning it: Quivr runs the same checks, and you activate it without a restart. See [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
 
 ## Receive data through a Quivr key
 

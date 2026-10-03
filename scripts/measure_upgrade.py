@@ -9,7 +9,7 @@ space for evaluation. Each is reached through a proxy that delays
 segment_and_embed by PLUGIN_DELAY, like a model would, so work is always in
 flight when the plan changes. While a client ingests Records without pause and
 a sampler reads the API every 100 ms, an operator follows the upgrade guide
-(docs-site/plugins/upgrade-a-plugin.mdx):
+(docs-site/run-quivr/upgrade-a-plugin.mdx):
 
 1. A alone.
 2. B is registered, checked and activated; A drains while the worker restarts.

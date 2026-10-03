@@ -39,7 +39,7 @@ In words: Quivr keeps your documents, their earlier versions, who may read them,
 | Find and rank results (`retrieval`) | For every search |
 | Check alerts (`subscription`, the alert rule) | When a document becomes searchable; an alert that needed vectors is asked again once they are ready |
 
-A plugin lists the jobs it does in its manifest, the file that describes it. There, each job is called a Contribution, and its type is one of the five above. Most plugins provide one Contribution, but one plugin can provide several of different types: a plugin for one service could both collect its items (`connector`) and read its file format (`normalizer`). Quivr ships a plugin for each job; [First-party plugins](/plugins/catalog) lists them.
+A plugin lists the jobs it does in its manifest, the file that describes it. There, each job is called a Contribution, and its type is one of the five above. Most plugins provide one Contribution, but one plugin can provide several of different types: a plugin for one service could both collect its items (`connector`) and read its file format (`normalizer`). Quivr ships a plugin for each job; [First-party plugins](/run-quivr/catalog) lists them.
 
 ## What Quivr checks, and what it cannot
 
@@ -81,20 +81,20 @@ In words:
 | Your webhook receiver | You. The identifiers of the alert, the match, the document and its version. |
 
 <Warning>
-Quivr sends document text to your plugins, which may send it on. Among the plugins that ship with Quivr, `core-ingest` sends passages and searches to the embedding server you configure: it runs locally in the default stack, but its address can be remote. `hosted-embed` sends them to the hosted model you configure, and `alerts` and `jev-rerank` can send text to TypeSafe's Jev model when they have a TypeSafe key. Check what a plugin calls before you give it confidential content. [First-party plugins](/plugins/catalog) describes what each one calls.
+Quivr sends document text to your plugins, which may send it on. Among the plugins that ship with Quivr, `core-ingest` sends passages and searches to the embedding server you configure: it runs locally in the default stack, but its address can be remote. `hosted-embed` sends them to the hosted model you configure, and `alerts` and `jev-rerank` can send text to TypeSafe's Jev model when they have a TypeSafe key. Check what a plugin calls before you give it confidential content. [First-party plugins](/run-quivr/catalog) describes what each one calls.
 </Warning>
 
 ## Add a plugin
 
 <span id="the-operator-runs-it-quivr-never-starts-it" />Quivr does not install, start or scale plugins. You run each one and tell Quivr where it is:
 
-1. Choose a plugin from [First-party plugins](/plugins/catalog), or write your own.
-2. Run it as a process, a container or a hosted service that Quivr's API and worker can reach. A plugin that reads or uploads files must also reach Quivr's file storage, because files travel through short-lived links.
-3. Give Quivr its manifest and address. Either [pin it](/plugins/pin): list it in the configuration file Quivr reads at startup, then restart Quivr. Or [register it through the API](/plugins/switch-plugins-without-restarting) and switch to it while Quivr runs, with no restart.
+1. Choose from [First-party plugins](/run-quivr/catalog), or write your own.
+2. Run the plugin as a process, container or hosted service that Quivr's API and worker can reach. A plugin that reads or uploads files must also reach Quivr's file storage, because files travel through short-lived links.
+3. Give Quivr its manifest and address. [Pin it](/run-quivr/pin) in the startup configuration and restart Quivr, or [register and activate it](/run-quivr/upgrade-a-plugin) while Quivr runs, with no restart.
 
 Quivr checks the manifest, the version compatibility and the plugin's settings before it sends any work. Before each job, it also checks that the plugin reports the expected identity, version and manifest digest (a fingerprint of the manifest file). This catches a plugin started with the wrong manifest; it does not verify the plugin's code. On a local development stack, `make dev` starts the default plugins for you.
 
-If a plugin is down, background work that needs it waits, and Quivr retries until the plugin is back. A search that needs it fails with `503` instead of returning an empty list. An update a source pushes to Quivr also gets `503`, and the source must send it again. Background work already tied to a plugin version you have since replaced is the exception: it stops after a set number of tries, 10 by default, with a diagnostic that names the plugin. [Switch plugins without restarting](/plugins/switch-plugins-without-restarting#work-finishes-on-the-version-it-started-with) explains that case.
+If a plugin is down, background work that needs it waits, and Quivr retries until the plugin is back. A search that needs it fails with `503` instead of returning an empty list. An update a source pushes to Quivr also gets `503`, and the source must send it again. Plan-pinned ingestion work already tied to a plugin version you have since replaced is the exception: it stops after a set number of tries, 10 by default, with a diagnostic that names the plugin. [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin#work-finishes-on-the-version-it-started-with) explains that case. Alert evaluations keep retrying until the old rule is back, unless you explicitly [retire unavailable evaluations](/run-quivr/retire-alert-evaluations).
 
 ## Write your own
 

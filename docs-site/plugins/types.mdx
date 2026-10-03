@@ -189,7 +189,7 @@ run:
   command: [python3, -m, acme_markdown]
 ```
 
-The operator gives Quivr the same file when they [pin](/plugins/pin) or [register](/plugins/switch-plugins-without-restarting) the plugin. Before each call, Quivr checks that the plugin reports, on `GET /v0/discovery`, the expected identity, version and `manifest_digest`: the SHA-256 of that file. This catches a plugin started with a different manifest; the digest is reported by the plugin, so it does not verify the plugin's code. The [plugin manifest reference](/reference/plugin-manifest) lists every field.
+The operator gives Quivr the same file when they [pin](/run-quivr/pin) or [register](/run-quivr/upgrade-a-plugin) the plugin. Before each call, Quivr checks that the plugin reports, on `GET /v0/discovery`, the expected identity, version and `manifest_digest`: the SHA-256 of that file. This catches a plugin started with a different manifest; the digest is reported by the plugin, so it does not verify the plugin's code. The [plugin manifest reference](/reference/plugin-manifest) lists every field.
 
 ### Version the plugin and the protocol
 
@@ -222,7 +222,7 @@ Any language that serves HTTP can implement the protocol. Two SDKs handle routin
 <Card title="Build your first plugin" icon="hammer" href="/plugins/first-plugin">
 A normalizer from an empty folder to a local Quivr.
 </Card>
-<Card title="Pin a plugin" icon="pin" href="/plugins/pin">
+<Card title="Pin a plugin" icon="pin" href="/run-quivr/pin">
 The configuration that makes Quivr call each type.
 </Card>
 </CardGroup>

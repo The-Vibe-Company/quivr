@@ -88,7 +88,7 @@ Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup 
 
 ## Plugin pins
 
-Each item of `plugins` pins one plugin. [Pin a plugin](/plugins/pin) explains how to use them.
+Each item of `plugins` pins one plugin. [Pin a plugin](/run-quivr/pin) explains how to use them.
 
 | Field | Meaning |
 | --- | --- |
@@ -117,7 +117,7 @@ Illustrative routing with both plugins pinned:
 
 A plugin listed only for evaluation keeps its own segmentation and vector coverage. Evaluation work runs on separate activity capacity; a refusal, timeout or outage is recorded in the Version's diagnostics with the plugin id and never changes served readiness.
 
-Each serving plugin owns its distinct vector spaces and serves one of them. Search uses the spaces whose owners have served projections in the requested Corpora. A plugin serving another source format does not encode an ordinary query for a Corpus where its projections are evaluation-only. Routes, defaults and evaluation selections are stored in immutable Pipeline Plans; work keeps the plan it started with during activation and rollback. Backfill an evaluation owner's primary space on past Versions before [activating it as served](/plugins/switch-plugins-without-restarting#promote-an-evaluation-plugin). Activation and rollback require complete coverage of each returning owner's own segments; the former projection stays available for rollback. Embedding image, audio or video Parts is a separate capability.
+Each serving plugin owns its distinct vector spaces and serves one of them. Search uses the spaces whose owners have served projections in the requested Corpora. A plugin serving another source format does not encode an ordinary query for a Corpus where its projections are evaluation-only. Routes, defaults and evaluation selections are stored in immutable Pipeline Plans; work keeps the plan it started with during activation and rollback. Backfill an evaluation owner's primary space on past Versions before [activating it as served](/run-quivr/upgrade-a-plugin#promote-an-evaluation-plugin). Activation and rollback require complete coverage of each returning owner's own segments; the former projection stays available for rollback. Embedding image, audio or video Parts is a separate capability.
 
 To measure an evaluation projection, send `evaluation_plugin` and `evaluation_space` together in `/v0/search`. The space must belong to that plugin and be carried by every requested Corpus. Omitted fields follow served routing. `GET /v0/corpora/{corpus_id}/vector-spaces` reports each owner's `total_segments` and fully covered `versions_covered`; different owners may cut the same documents differently.
 
@@ -186,7 +186,7 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 
 ## Backfill
 
-`backfill` tunes [backfills](/plugins/backfill-a-vector-space). Every field is optional.
+`backfill` tunes [backfills](/run-quivr/backfill-a-vector-space). Every field is optional.
 
 | Field | Default | Meaning |
 | --- | --- | --- |

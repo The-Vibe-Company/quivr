@@ -63,7 +63,7 @@ Add a file format, a source, a way to prepare text for meaning search or rank re
 
 ## What Quivr promises
 
-Quivr confirms a document only once it has stored it, so an outage delays processing and does not lose what it confirmed. Processing has no deadline. While a plugin Quivr needs is down, Quivr waits and retries. A document a plugin rejects is set aside (quarantined) with the reason, and an operator can [process it again](/plugins/reprocess-quarantined-versions) once the cause is fixed. A file with no text Quivr can read, such as a scanned PDF, stays stored but is not searchable.
+Quivr confirms a document only once it has stored it, so an outage delays processing and does not lose what it confirmed. Processing has no deadline. While a plugin Quivr needs is down, Quivr waits and retries. A document a plugin rejects is set aside (quarantined) with the reason, and an operator can [process it again](/run-quivr/reprocess-quarantined-versions) once the cause is fixed. A file with no text Quivr can read, such as a scanned PDF, stays stored but is not searchable.
 
 Each document submission must carry an idempotency key, a name your application gives it. Repeating the same submission with the same key returns the same receipt, Quivr's tracking record for it, instead of storing a second copy. Reusing the key for a different submission returns a conflict.
 

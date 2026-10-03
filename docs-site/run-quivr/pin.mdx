@@ -11,6 +11,8 @@ You run the plugin yourself, then add it to the `plugins` list of Quivr's config
 - The plugin runs at an address Quivr's processes can reach, and `quivr plugin test` certifies it.
 - You can edit the JSON configuration file that `QUIVR_CONFIG` names, and restart Quivr. In the local stack, `make dev` writes that file for you; see [Build your first plugin](/plugins/first-plugin) for the local shortcut.
 
+A plugin that reads or uploads files must also reach Quivr’s file storage, because files travel through short-lived links.
+
 ## Steps
 
 <Steps>
@@ -64,7 +66,7 @@ An operator key with the `plugins:admin` action reads what the deployment regist
 curl -s "$QUIVR_API_URL/v0/admin/plugins" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY"
 ```
 
-Each registration shows the plugin's id, version, endpoint, manifest digest, the roles it serves and its state. `GET /v0/admin/plugins/plan` shows the active Pipeline Plan: which plugin serves each media type, alert rule, connector kind, ingestion and retrieval. Then exercise the plugin: ingest a file of a routed type, create an instance of a new connector kind, or run a search. To change plugins later without a restart, see [Switch plugins without restarting](/plugins/switch-plugins-without-restarting).
+Each registration shows the plugin's id, version, endpoint, manifest digest, the roles it serves and its state. `GET /v0/admin/plugins/plan` shows the active Pipeline Plan: which plugin serves each media type, alert rule, connector kind, ingestion and retrieval. Then exercise the plugin: ingest a file of a routed type, create an instance of a new connector kind, or run a search. To change plugins later without a restart, see [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
 
 ## Troubleshooting
 

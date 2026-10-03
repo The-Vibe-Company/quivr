@@ -31,12 +31,11 @@ The navigation lives in `docs-site/docs.json`. This table mirrors it; a pull req
 | --- | --- | --- |
 | Documentation › **Get started** | Introduction, Quickstart, Core concepts | Someone deciding whether Quivr fits, then trying it |
 | Documentation › **Plugins** | How plugins work, Plugin types, Build your first plugin, and _Write a plugin_ with one how-to per type (push sources included) | Plugin authors |
-| | Pin, upgrade or switch a plugin, backfill a vector space, reprocess quarantined Versions, re-rank with Jev | Operators who run plugins |
-| | First-party plugins (the catalogue) | Anyone choosing a plugin |
+| Documentation › **Run Quivr** | First-party plugins, pin, upgrade or switch, migrate alert rules, retire evaluations, configure alert fields, backfill a vector space, reprocess quarantine, re-rank with Jev | Operators |
 | Documentation › **Guides** | One task per page: add content, search, keyword and described alerts, _Collect from sources_ (connectors, RSS, Microsoft 365, X), connect an AI agent | Integrators calling the API |
 | **Reference** tab | HTTP API overview and endpoints, CLI, MCP tools, plugin manifest and protocol, configuration | Anyone looking up an exact fact |
 
-The Plugins group serves three readers. Name a page's reader from step 1, never from its group, and put a new operator task next to the other operator pages rather than under _Write a plugin_.
+Name a page's reader from step 1. Plugin-author tasks go in Plugins; operator tasks go in Run Quivr next to the related procedure.
 
 Reference pages generated from contracts (`openapi.yaml`, `reference/cli.mdx`, `reference/mcp.mdx`, `reference/plugin-*.mdx`) are edited at their source, never in the generated output. A guide joins the site once every step that needs no external credentials has been run end to end. A step that needs a third-party console, a provider account or a paid key may stay: the page lists those credentials in its prerequisites and says which steps were run and which are examples ([STYLE.md](STYLE.md#claims)).
 

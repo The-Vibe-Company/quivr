@@ -25,7 +25,7 @@ Supply `TYPESAFE_API_KEY` to this process through your secret manager or
 environment before starting it. Do not put the key in the plugin configuration.
 Without it, `deep` works in fallback mode, without a paid call.
 
-Keep `core.retrieve` running and add Jev to your engine's [plugin pins](/plugins/pin).
+Keep `core.retrieve` running and add Jev to your engine's [plugin pins](/run-quivr/pin).
 This illustrative configuration maps each short name to its provider:
 
 ```yaml
@@ -46,7 +46,7 @@ retrieval:
 ```
 
 Keep the ingestion plugin pinned. [Search profile aliases](/reference/configuration#search-profiles)
-are required when several retrieval plugins are installed. Follow the [plugin activation guide](/plugins/switch-plugins-without-restarting)
+are required when several retrieval plugins are installed. Follow the [plugin activation guide](/run-quivr/upgrade-a-plugin)
 when changing an existing installation.
 
 ## Search and inspect

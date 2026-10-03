@@ -4,11 +4,11 @@ description: "Fill an embedding model or evaluation plugin on past articles befo
 keywords: ["backfill", "vector space", "embedding model", "promote", "evaluation space", "reprocess"]
 ---
 
-A new embedding model enters as an evaluation space of your ingestion plugin. Articles ingested from then on get vectors in it, but the ones you already have do not. A backfill fills that space for a Corpus's past articles, at low priority, and a promotion then makes search use it. You can also backfill a second plugin selected in `ingestion.evaluation`; it creates its own segments from each article's canonical Parts. See [Configuration](/reference/configuration#ingestion-routing) for the selection and [Switch plugins without restarting](/plugins/switch-plugins-without-restarting#promote-an-evaluation-plugin) for promotion.
+A new embedding model enters as an evaluation space of your ingestion plugin. Articles ingested from then on get vectors in it, but the ones you already have do not. A backfill fills that space for a Corpus's past articles, at low priority, and a promotion then makes search use it. You can also backfill a second plugin selected in `ingestion.evaluation`; it creates its own segments from each article's canonical Parts. See [Configuration](/reference/configuration#ingestion-routing) for the selection and [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin#promote-an-evaluation-plugin) for promotion.
 
 ## Prerequisites
 
-- A version of your ingestion plugin whose manifest declares the new space, activated with it as `evaluation` and the current one as `served` (see [Switch plugins without restarting](/plugins/switch-plugins-without-restarting)). For another model of the same plugin, it must preserve that plugin's stored segments. A second evaluation plugin can use different cuts.
+- A version of your ingestion plugin whose manifest declares the new space, activated with it as `evaluation` and the current one as `served` (see [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin)). For another model of the same plugin, it must preserve that plugin's stored segments. A second evaluation plugin can use different cuts.
 - A key of the Organization that owns the Corpus with the actions `plugins:admin`, `operations:read` (to follow the backfill) and `operations:write` (to pause, resume or cancel it), in `QUIVR_OPERATOR_KEY`, and the Corpus id in `CORPUS_ID`.
 - Optional: an `input_price` on the new space in the manifest (`usd_per_million_tokens`), so the estimate shows a cost. Without it the cost is unknown.
 
@@ -97,7 +97,7 @@ The new space is `served` and covers every segment produced by its owner. Semant
 
 Select the evaluation plugin's `registration_id` and name its primary space in `spaces` in both the dry run and the start request. Backfill every affected Corpus. Different segment offsets are allowed when this owner has no projection yet; the current served projection stays searchable throughout.
 
-When coverage is complete, activate that same registration once. This switches its configured evaluation formats to served together. It keeps the previous owner's segments and vectors for rollback. Follow [Promote an evaluation plugin](/plugins/switch-plugins-without-restarting#promote-an-evaluation-plugin) for the activation and rollback checks. The space promotion above changes models within one owner; it does not select a different plugin for a format.
+When coverage is complete, activate that same registration once. This switches its configured evaluation formats to served together. It keeps the previous owner's segments and vectors for rollback. Follow [Promote an evaluation plugin](/run-quivr/upgrade-a-plugin#promote-an-evaluation-plugin) for the activation and rollback checks. The space promotion above changes models within one owner; it does not select a different plugin for a format.
 
 ## Go back to the previous model
 

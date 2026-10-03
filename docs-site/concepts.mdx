@@ -38,7 +38,7 @@ flowchart TD
 
 In words: inline text and supported text files skip extraction. Other files use the reader plugin. The ingestion plugin cuts passages, then Quivr makes word search available and checks alerts. The plugin adds embeddings for meaning search; only alerts still waiting for a decision are asked again. A reader or passage-processing failure can quarantine the version. Enrichment failure blocks meaning search while word search stays available.
 
-An unavailable dependency can leave work retrying. File-reader timeouts and repeated retryable errors have a retry budget; exhausting it can quarantine the version. Quivr keeps quarantined content but withholds that version from search until an operator fixes the cause and [reprocesses it](/plugins/reprocess-quarantined-versions). Enrichment never quarantines a version.
+An unavailable dependency can leave work retrying. File-reader timeouts and repeated retryable errors have a retry budget; exhausting it can quarantine the version. Quivr keeps quarantined content but withholds that version from search until an operator fixes the cause and [reprocesses it](/run-quivr/reprocess-quarantined-versions). Enrichment never quarantines a version.
 
 ## Acceptance and search readiness
 
@@ -113,7 +113,7 @@ Read the receipt's `processing` progress, `availability` readiness and `diagnost
 | Search returns old text | The correction may be pending or quarantined. Check its receipt; the original stays current. |
 | HTTP `409` on a write | A key was reused for a different request, or the document was withdrawn. |
 
-Resending a quarantined submission with the same key returns its receipt; it does not restart processing. See [quarantine recovery](/plugins/reprocess-quarantined-versions) for the operator's next step.
+Resending a quarantined submission with the same key returns its receipt; it does not restart processing. See [quarantine recovery](/run-quivr/reprocess-quarantined-versions) for the operator's next step.
 
 ## Search and alerts
 

@@ -52,13 +52,20 @@
                   "plugins/write-a-retrieval-plugin",
                   "plugins/write-an-alert-rule"
                 ]
-              },
-              "plugins/pin",
-              "plugins/upgrade-a-plugin",
-              "plugins/switch-plugins-without-restarting",
-              "plugins/backfill-a-vector-space",
-              "plugins/reprocess-quarantined-versions",
-              "plugins/catalog",
+              }
+            ]
+          },
+          {
+            "group": "Run Quivr",
+            "pages": [
+              "run-quivr/catalog",
+              "run-quivr/pin",
+              "run-quivr/upgrade-a-plugin",
+              "run-quivr/upgrade-an-alert-rule",
+              "run-quivr/retire-alert-evaluations",
+              "run-quivr/configure-alert-fields",
+              "run-quivr/backfill-a-vector-space",
+              "run-quivr/reprocess-quarantined-versions",
               "guides/rerank-with-jev"
             ]
           },
@@ -171,27 +178,27 @@
     },
     {
       "source": "/plugins/run-a-connector-plugin",
-      "destination": "/plugins/pin"
+      "destination": "/run-quivr/pin"
     },
     {
       "source": "/plugins/alerts",
-      "destination": "/plugins/catalog"
+      "destination": "/run-quivr/catalog"
     },
     {
       "source": "/plugins/core-ingest",
-      "destination": "/plugins/catalog"
+      "destination": "/run-quivr/catalog"
     },
     {
       "source": "/plugins/pdf-text",
-      "destination": "/plugins/catalog"
+      "destination": "/run-quivr/catalog"
     },
     {
       "source": "/plugins/rss",
-      "destination": "/plugins/catalog"
+      "destination": "/run-quivr/catalog"
     },
     {
       "source": "/plugins/x-list",
-      "destination": "/plugins/catalog"
+      "destination": "/run-quivr/catalog"
     },
     {
       "source": "/sdks/go",
@@ -260,6 +267,30 @@
     {
       "source": "/third_party",
       "destination": "/"
+    },
+    {
+      "source": "/plugins/pin",
+      "destination": "/run-quivr/pin"
+    },
+    {
+      "source": "/plugins/upgrade-a-plugin",
+      "destination": "/run-quivr/upgrade-a-plugin"
+    },
+    {
+      "source": "/plugins/backfill-a-vector-space",
+      "destination": "/run-quivr/backfill-a-vector-space"
+    },
+    {
+      "source": "/plugins/reprocess-quarantined-versions",
+      "destination": "/run-quivr/reprocess-quarantined-versions"
+    },
+    {
+      "source": "/plugins/catalog",
+      "destination": "/run-quivr/catalog"
+    },
+    {
+      "source": "/plugins/switch-plugins-without-restarting",
+      "destination": "/run-quivr/upgrade-a-plugin"
     }
   ]
 }

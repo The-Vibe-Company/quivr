@@ -1,0 +1,42 @@
+---
+title: "Configure alert metadata fields"
+description: "Map alert field names to document metadata in the alerts plugin's configuration."
+keywords: ["alerts", "metadata", "fields", "configuration"]
+---
+
+Map names such as `author` to where that value lives in a document's metadata. Your API clients can then filter their keyword alerts using those names.
+
+## Prerequisites
+
+- Operator access to edit and apply the `alerts` plugin configuration, as in [Pin a plugin](/run-quivr/pin).
+- The JSON Pointer to each value, often inside a Version extension, the structured metadata attached to that document version. Allowed roots are `/source`, `/provenance`, `/extensions` and `/accepted_at`.
+- To check a preview: an API key with `monitoring:write` and grants for the collection (Corpus) containing the test document.
+
+## Steps
+
+1. Map each field name to its JSON Pointer in the `alerts` pin's `configuration`. Replace `<plugin endpoint reachable by Quivr>` with the running plugin's address. For example, not run:
+
+   ```json QUIVR_CONFIG
+   {
+     "plugins": [{
+       "manifest": "plugins/alerts/quivr-plugin.yaml",
+       "endpoint": "<plugin endpoint reachable by Quivr>",
+       "configuration": {"fields": {
+         "author": "/extensions/example.news/data/author",
+         "category": "/extensions/example.news/data/categories"
+       }}
+     }]
+   }
+   ```
+
+2. Apply the configuration using [Pin a plugin](/run-quivr/pin#steps), or [register and activate the plugin](/run-quivr/upgrade-a-plugin#steps) with the updated settings.
+
+A list field matches when one of its values does. An unmapped name never matches, and the plugin logs a warning.
+
+## Check it worked
+
+Send `POST /v0/subscription-previews` with a keyword query using your mapped field and a document carrying that value. Use `monitoring:write` and the relevant Corpus grants. [Create a keyword alert](/guides/keyword-alerts) explains the query syntax and preview; inspect the returned matches before saving an alert.
+
+## Next
+
+- [Create a keyword alert](/guides/keyword-alerts) using the mapped names.
