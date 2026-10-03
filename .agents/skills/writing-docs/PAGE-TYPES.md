@@ -14,8 +14,10 @@ keywords: [<3 to 5 search terms>]
 ---
 <one paragraph: what you will build, how long it takes, what you need>
 
-## Before you start      prerequisites as a checklist, each with the command that verifies it
+## Before you start      prerequisites as a checklist, each with the command that verifies it,
+                         and the API key permissions the tutorial uses
 ## <Step 1..n>           inside <Steps>; one action per step, with the expected output
+## Clean up              optional: how to remove what the tutorial created, or why leaving it is harmless
 ## What you built        two or three sentences, then Cards to the next pages
 ```
 
@@ -33,10 +35,13 @@ keywords: [<3 to 5 search terms>]
 ---
 <one sentence: the goal and the result>
 
-## Prerequisites         only what this task needs
+## Prerequisites         only what this task needs: tools, API key permissions or operator access,
+                         and any external credentials
 ## Steps                 numbered, minimal, with the command or request for each
 ## Check it worked       the observable result
-## Troubleshooting       optional: a table symptom | cause | fix, for failures readers actually hit
+## Troubleshooting       optional: a table symptom | cause and fix, for failures readers actually hit
+## Clean up              optional: how to remove what the task created, or why leaving it is harmless
+## Next                  one to three links
 ```
 
 Rules: start from the reader's goal, not from the feature; link to reference for every field instead of explaining them all.
@@ -71,7 +76,7 @@ description: <the question this page answers>
 keywords: [<3 to 5 search terms>]
 ---
 <the answer in two sentences>
-<one diagram>
+<a diagram if it carries the idea: takeaway sentence before it, text alternative after it>
 
 ## <Idea 1..n>           each idea: what it is, why it is that way, what it means for the reader
 ## Next                  Cards to the tutorial or how-to that puts it into practice

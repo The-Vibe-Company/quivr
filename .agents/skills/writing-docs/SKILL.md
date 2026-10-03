@@ -3,7 +3,7 @@ name: writing-docs
 description: Writing Quivr's public documentation site. Use when adding or editing a docs page, documenting a new feature, plugin type, API or CLI change, or reviewing documentation.
 ---
 
-The docs site is the first thing a developer sees of Quivr. Every page answers one question for one reader, in the fewest words that fully answer it. The bar is the docs of the best-run open-source projects: calm, concrete, and correct to the last command.
+The docs site is the first thing a developer sees of Quivr, and what people use to explain it to others. Every page answers one question for one reader, in plain words and the fewest that fully answer it, with a picture where a picture helps. The bar is the docs of the best-run open-source projects: calm, concrete, and correct to the last command.
 
 ## Steps
 
@@ -15,22 +15,30 @@ The docs site is the first thing a developer sees of Quivr. Every page answers o
 
 4. **Write it** following [STYLE.md](STYLE.md). Use the domain terms of `CONTEXT.md`, and explain each in plain words the first time a newcomer meets it.
 
-5. **Run everything you wrote.** Every command, request and code block runs on a clean checkout exactly as printed, with its output checked against what the page claims. API requests are [runnable blocks](../../../docs/runnable-guides.md) (a `{/* runnable */}` mark before the fence), which `make verify` replays; see [STYLE.md](STYLE.md#runnable-examples) for how to write them. A snippet you could not run is removed or marked as illustrative in the text around it. Done when each block has been run once since its last edit.
+5. **Run everything you wrote.** Every command, request and code block runs on a clean checkout exactly as printed, with its output checked against what the page claims. API requests are [runnable blocks](../../../docs/runnable-guides.md) (a `{/* runnable */}` mark before the fence), which `make verify` replays; see [STYLE.md](STYLE.md#runnable-examples) for how to write them. A snippet you could not run is removed or introduced as an example ("For example, not run:"). Done when each block has been run once since its last edit, or is introduced as an example.
 
 6. **Regenerate and check the site.** After a change to the HTTP contract, a command or the plugin schemas, run `make generate`, then `make docs-site` (it rewrites only the generated pages). Then run `make docs`, `make denylist` and `make docs-site-check` (Mintlify validation and anchor-checked links), and preview with `make docs-preview` any page that uses components. `docs/agents/documentation.md` names every failure rule. Done when all pass and the page renders.
 
-7. **Reread as the reader from step 1**, top to bottom, then do the final pass in [STYLE.md](STYLE.md#final-pass). Cut every sentence that reader does not need. Done when no sentence survives that fails the reader test.
+7. **Reread as the reader from step 1**, top to bottom, then do the final pass in [STYLE.md](STYLE.md#final-pass). Cut every sentence that reader does not need. Done when every line of the final pass holds.
+
+8. **Run the reader test.** Write 5 to 8 questions the reader from step 1 would ask: the page's main answer, a prerequisite or permission, the result of one step, one failure. Give each question to a fresh sub-agent that may read only the page's file, with no other file, tool or conversation. Ask for a short answer, a confidence, and the terms or steps it could not follow, with "the page does not say" instead of a guess. Check each answer against the facts. Fix the page where an answer is wrong or unsure, or where it names a gap that reader needs filled, then ask the failed questions again with new sub-agents. Record the questions, the verdicts and the fixes in the pull request. Done when every answer is right and no needed gap remains.
 
 ## Site map
 
-| Section | Holds | Reader |
-| --- | --- | --- |
-| **Get started** | Introduction, Quickstart, Core concepts | Someone deciding whether Quivr fits, then trying it |
-| **Plugins** | How plugins work, Plugin types, Build your first plugin, one how-to per type, first-party plugin catalogue | Plugin authors |
-| **Guides** | One task per page: add content, search, alerts, connectors, AI agents (MCP) | Operators and API clients |
-| **Reference** | HTTP API, CLI, MCP tools, plugin contract, configuration, errors | Anyone looking up an exact fact |
+The navigation lives in `docs-site/docs.json`. This table mirrors it; a pull request that changes the navigation updates the table too.
 
-Reference pages generated from contracts (`openapi.yaml`, `reference/cli.mdx`, `reference/mcp.mdx`, `reference/plugin-*.mdx`) are edited at their source, never in the generated output. A guide joins the site only once its steps can be run end to end; one that needs paid infrastructure or a third-party console waits until it can.
+| Tab › group | Holds | Reader |
+| --- | --- | --- |
+| Documentation › **Get started** | Introduction, Quickstart, Core concepts | Someone deciding whether Quivr fits, then trying it |
+| Documentation › **Plugins** | How plugins work, Plugin types, Build your first plugin, and _Write a plugin_ with one how-to per type (push sources included) | Plugin authors |
+| | Pin, upgrade or switch a plugin, backfill a vector space, reprocess quarantined Versions, re-rank with Jev | Operators who run plugins |
+| | First-party plugins (the catalogue) | Anyone choosing a plugin |
+| Documentation › **Guides** | One task per page: add content, search, keyword and described alerts, _Collect from sources_ (connectors, RSS, Microsoft 365, X), connect an AI agent | Integrators calling the API |
+| **Reference** tab | HTTP API overview and endpoints, CLI, MCP tools, plugin manifest and protocol, configuration | Anyone looking up an exact fact |
+
+The Plugins group serves three readers. Name a page's reader from step 1, never from its group, and put a new operator task next to the other operator pages rather than under _Write a plugin_.
+
+Reference pages generated from contracts (`openapi.yaml`, `reference/cli.mdx`, `reference/mcp.mdx`, `reference/plugin-*.mdx`) are edited at their source, never in the generated output. A guide joins the site once every step that needs no external credentials has been run end to end. A step that needs a third-party console, a provider account or a paid key may stay: the page lists those credentials in its prerequisites and says which steps were run and which are examples ([STYLE.md](STYLE.md#claims)).
 
 What stays off the public site: contributor process (`AGENTS.md`, `docs/agents/`), dated documents and ADRs, internal limits notes. They live in the repository for contributors.
 
