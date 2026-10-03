@@ -184,7 +184,7 @@ Versions compare by SemVer 2.0.0 precedence, so `0.2.0-rc.1` satisfies
 implementation.
 
 This engine implements the latest Plugin API in the [feature history](#plugin-api-versions)
-and reports engine version `0.1.0`. Release builds may override the engine version.
+and reports engine version `0.2.0`. Release builds may override the engine version.
 `quivr plugin inspect --json` reports both, and the negotiated Plugin API
 version under `compatibility.plugin_api.version`.
 
@@ -1116,6 +1116,25 @@ kind's old webhook address resolves the declared signature `receive` path
 through the same guards. Other undeclared webhook kinds retain their behavior.
 
 ## Changelog
+
+### Engine 0.2.0
+
+The deprecated `balanced` alias of the `default` search profile is removed.
+Searches and new Saved Query definitions using that unconfigured name return
+`422 unsupported_profile`. Use `default` or another name listed by
+`GET /v0/search/profiles`. Deployment aliases and full plugin/profile names
+continue to resolve as configured.
+
+Stored Saved Query Versions with `retrieval_profile: balanced` keep evaluating:
+evaluation does not read the profile. Their definitions remain unchanged.
+The historical projection recipe identifier remains unchanged so existing
+indexes remain searchable. Measurement runs use the v2 workload with `default`;
+the v1 workload is archived unchanged. Evaluation comparisons now require exact
+system names, without remapping old report profiles.
+
+Plugin API remains `0.13.0`. Bundled plugins and examples accept engine 0.2.0;
+third-party plugins declaring an engine range below 0.2.0 must update their
+compatibility declaration before upgrading.
 
 ### Plugin API 0.12.0
 

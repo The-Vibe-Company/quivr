@@ -107,7 +107,7 @@ func TestSignatureRoutesRefuseStaleAndReplayedPushesBeforeReceive(t *testing.T) 
 	defer source.Close()
 	manifest := []byte(`id: example-signed
 version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.12.0 <0.13.0"}
+compatibility: {engine: ">=0.1.0 <0.3.0", plugin_api: ">=0.12.0 <0.13.0"}
 contributions:
   connector:
     kinds:

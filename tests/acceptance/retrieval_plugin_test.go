@@ -55,7 +55,6 @@ func TestRetrievalPlugin(t *testing.T) {
 		rounds              float64
 	}{
 		"":                                    {"default", "example.fusion_retriever", "default", 2},
-		"balanced":                            {"default", "example.fusion_retriever", "default", 2},
 		"default":                             {"default", "example.fusion_retriever", "default", 2},
 		"deep":                                {"deep", "example.fusion_retriever", "deep", 3},
 		"example.fusion_retriever/default":    {"example.fusion_retriever/default", "example.fusion_retriever", "default", 2},

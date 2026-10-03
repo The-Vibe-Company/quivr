@@ -104,12 +104,8 @@ func (s Service) Profiles() []Profile {
 	return out
 }
 
-// Serves reports whether the deployment answers profile, by its name or by
-// LegacyProfile for the default: what a Saved Query may record.
+// Serves reports whether the deployment answers a profile a Saved Query may record.
 func (s Service) Serves(profile string) bool {
-	if profile == LegacyProfile {
-		profile = DefaultProfile
-	}
 	return s.declares(profile)
 }
 

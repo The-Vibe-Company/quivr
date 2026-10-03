@@ -13,7 +13,7 @@ import (
 const pinManifest = `id: acme.markdown
 version: 1.2.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.1.0 <0.2.0"
 contributions:
   normalizer:
@@ -75,7 +75,7 @@ func TestLoadPinAcceptsAValidPin(t *testing.T) {
 func TestLoadPinRefusesInvalidPins(t *testing.T) {
 	good := writePinManifest(t, pinManifest)
 	incompatible := writePinManifest(t, strings.Replace(pinManifest, `plugin_api: ">=0.1.0 <0.2.0"`, `plugin_api: ">=9.0.0 <10.0.0"`, 1))
-	oldEngine := writePinManifest(t, strings.Replace(pinManifest, `engine: ">=0.1.0 <0.2.0"`, `engine: ">=1.0.0"`, 1))
+	oldEngine := writePinManifest(t, strings.Replace(pinManifest, `engine: ">=0.1.0 <0.3.0"`, `engine: ">=1.0.0"`, 1))
 	foreign := writePinManifest(t, pinManifest+"extensions:\n  other.outline:\n    \"1\": {type: object}\n")
 	clash := writePinManifest(t, strings.Replace(pinManifest, "id: acme.markdown", "id: example", 1)+"extensions:\n  example.editorial:\n    \"1\": {type: object}\n")
 	for name, tc := range map[string]struct {
@@ -142,7 +142,7 @@ func TestLoadPinDefaultsConfigurationToAnEmptyObject(t *testing.T) {
 const kindsManifest = `id: acme.alerts
 version: 0.2.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.2.0 <0.3.0"
 contributions:
   subscription:

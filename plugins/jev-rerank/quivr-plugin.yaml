@@ -2,7 +2,7 @@ id: jev.rerank
 version: 1.0.0
 description: Jev reranking of core.retrieve's hybrid ranking, with an unpaid hybrid fallback.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.13.0 <0.14.0"
 requires:
   - plugin: core.retrieve

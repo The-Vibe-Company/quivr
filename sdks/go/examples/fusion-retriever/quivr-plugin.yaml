@@ -6,7 +6,7 @@ id: example.fusion_retriever
 version: 0.1.0
 description: Keyword and vector candidates fused by reciprocal rank.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.7.0 <0.8.0"
 contributions:
   retrieval:

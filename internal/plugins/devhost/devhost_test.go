@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 const manifestYAML = `id: fake
 version: 1.0.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.1.0 <0.2.0"
 contributions:
   normalizer:
@@ -81,7 +81,7 @@ func start(t *testing.T, dir string, env ...string) *devhost.Process {
 func TestDiscoveryIsComparedWithTheManifest(t *testing.T) {
 	raw := []byte(`id: both
 version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.1.0 <0.3.0"}
+compatibility: {engine: ">=0.1.0 <0.3.0", plugin_api: ">=0.1.0 <0.3.0"}
 contributions:
   normalizer: {media_types: [text/markdown]}
   subscription: {expression_schema: {type: object}}
@@ -314,7 +314,7 @@ func TestDiscoveryRequiresDeclaredFeatures(t *testing.T) {
 	cases := []struct{ name, raw, contribution, old, current string }{
 		{"routes", `id: source
 version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.5.0 <0.13.0"}
+compatibility: {engine: ">=0.1.0 <0.3.0", plugin_api: ">=0.5.0 <0.13.0"}
 contributions:
   connector:
     kinds:
@@ -327,7 +327,7 @@ contributions:
 `, "connector", "0.10.0", "0.11.0"},
 		{"profile dependencies", `id: source
 version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.7.0 <0.13.0"}
+compatibility: {engine: ">=0.1.0 <0.3.0", plugin_api: ">=0.7.0 <0.13.0"}
 requires: [{plugin: core.retrieve, version: ">=1.0.0", profiles: [default]}]
 contributions:
   retrieval:

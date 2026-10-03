@@ -25,7 +25,7 @@ import (
 const faultyManifest = `id: acme.faulty
 version: 1.0.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.1.0 <0.2.0"
 contributions:
   normalizer:

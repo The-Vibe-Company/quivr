@@ -197,7 +197,7 @@ func TestReportShowsEffectiveManifestAndVersions(t *testing.T) {
 func TestSubscriptionManifestDefaultsAndNegotiation(t *testing.T) {
 	raw := []byte(`id: rule
 version: 0.1.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.1.0 <0.3.0"}
+compatibility: {engine: ">=0.1.0 <0.3.0", plugin_api: ">=0.1.0 <0.3.0"}
 contributions:
   subscription:
     expression_schema: {type: object}

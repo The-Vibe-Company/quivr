@@ -383,6 +383,7 @@ func TestMonitoringRejectsWithPublicErrors(t *testing.T) {
 		{"read-only key writes", "POST", "/v0/subscriptions", monitorReader, `{}`, 403, "forbidden"},
 		{"unknown field such as an inline secret", "POST", "/v0/subscriptions", monitor, strings.Replace(subscriptionBody("x", "quivr.fixture", "receiver_a"), `"destination_id"`, `"secret":"whsec_x","destination_id"`, 1), 422, "invalid_schema"},
 		{"unsupported temporal policy", "POST", "/v0/saved-queries", monitor, strings.Replace(savedQueryBody, "from_activation", "backfill", 1), 422, "invalid_schema"},
+		{"removed profile", "POST", "/v0/saved-queries", monitor, strings.Replace(savedQueryBody, `"default"`, `"balanced"`, 1), 422, "unsupported_profile"},
 		{"unimplemented profile", "POST", "/v0/saved-queries", monitor, strings.Replace(savedQueryBody, `"default"`, `"deep"`, 1), 422, "unsupported_profile"},
 		{"unknown Subscription disable", "POST", "/v0/subscriptions/missing/disable", monitor, `{"idempotency_key":"d"}`, 404, "not_found"},
 		{"disable without key", "POST", "/v0/subscriptions/missing/disable", monitor, `{}`, 422, "invalid_schema"},

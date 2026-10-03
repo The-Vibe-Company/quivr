@@ -22,7 +22,7 @@ import (
 const alertsManifest = `id: acme.alerts
 version: 0.1.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.2.0 <0.3.0"
 contributions:
   subscription:

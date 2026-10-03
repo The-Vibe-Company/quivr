@@ -291,7 +291,7 @@ a cold cache must not silently skip model-dependent assertions. Cross-platform
 vector checks from THE-553 remain separately reported evidence.
 
 `make measure` is that explicit run for text retrieval (THE-661). It follows the
-frozen [workload](../tests/measurement/workload-v1.json): public search in three
+frozen [workload](../tests/measurement/workload-v2.json): public search in three
 modes over the 24-query CC0 fixture, three load conditions, cold preparation and
 start recorded separately from warm start and model readiness, resource peaks and
 exact pins. Harness or dependency errors fail it; a missed p95 target or relevance

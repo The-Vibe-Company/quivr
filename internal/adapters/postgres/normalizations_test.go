@@ -76,7 +76,7 @@ func TestNormalizationRerunsConvergeOnOnePublishedManifest(t *testing.T) {
 	}
 
 	manifestPath := filepath.Join(t.TempDir(), plugins.ManifestFile)
-	if err := os.WriteFile(manifestPath, []byte("id: acme.markdown\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\nextensions:\n  acme.markdown.outline:\n    \"1\": {type: object, properties: {heading_count: {type: integer}}}\n"), 0o600); err != nil {
+	if err := os.WriteFile(manifestPath, []byte("id: acme.markdown\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.3.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\nextensions:\n  acme.markdown.outline:\n    \"1\": {type: object, properties: {heading_count: {type: integer}}}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32

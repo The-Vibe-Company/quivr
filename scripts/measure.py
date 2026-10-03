@@ -26,7 +26,7 @@ import uuid
 import measure_metrics as m
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-WORKLOAD = ROOT / 'tests/measurement/workload-v1.json'
+WORKLOAD = ROOT / 'tests/measurement/workload-v2.json'
 # The search parity queries (THE-779): the 24 fixture queries, then edge cases of query normalization.
 PARITY_QUERIES = ROOT / 'plugins/core-ingest/testdata/parity-input.json'
 THE_641 = 'https://linear.app/thevibecompany/issue/THE-641'
@@ -88,7 +88,7 @@ def pins():
             'model_lock': json.loads((ROOT / 'third_party/e5/model-lock.json').read_text()),
             'processing_profile_sha256': sha256('plugins/core-ingest/profile.json'),
             'tokenizer_requirements_sha256': sha256('third_party/tokenizer/requirements-linux-x86_64.txt'),
-            'workload_sha256': sha256('tests/measurement/workload-v1.json'),
+            'workload_sha256': sha256('tests/measurement/workload-v2.json'),
             'hybrid_recipe_source': 'internal/adapters/weaviate/projection.go (unchanged by this measurement)'}
 
 
@@ -261,8 +261,7 @@ def measure(stack, workload, rows, report):
         connector_plugin.start_first_party(stack)
         stack.start_processes()
 
-    # The frozen v1 workload names the default profile by its former name, balanced.
-    cfg = {**workload['search'], 'profile': {'balanced': 'default'}.get(workload['search']['profile'], workload['search']['profile'])}
+    cfg = workload['search']
     def client():
         return Client(f"http://127.0.0.1:{stack.state['api_port']}", stack.state['admin'], cfg['request_timeout_seconds'])
 

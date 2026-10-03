@@ -17,7 +17,7 @@ type PinnedProfile struct {
 // pin set and the deployment aliases. Callers retain the returned pin for every
 // round; replacing the active plan cannot change this selection.
 func (s *PinSet) ResolveRetrievalProfile(profile string, aliases map[string]string) (PinnedProfile, bool) {
-	if profile == "" || profile == "balanced" {
+	if profile == "" {
 		profile = DefaultProfile
 	}
 	profiles, err := s.RetrievalProfiles(aliases)
@@ -63,17 +63,12 @@ func (s *PinSet) RetrievalProfiles(aliases map[string]string) ([]PinnedProfile, 
 		}
 		aliases = map[string]string{}
 		for _, p := range out {
-			// balanced has always selected default, even if a plugin declares it.
-			// Keep such a profile installed and reachable by its full name.
-			if p.Name == "balanced" {
-				continue
-			}
 			aliases[p.Name] = p.FullName
 		}
 	}
 	for _, alias := range sortedProfileAliases(aliases) {
-		if strings.TrimSpace(alias) != alias || alias == "" || strings.Contains(alias, "/") || alias == "balanced" {
-			return nil, fmt.Errorf("retrieval.profiles alias %q must be a nonempty short name without a slash; balanced is reserved for default", alias)
+		if strings.TrimSpace(alias) != alias || alias == "" || strings.Contains(alias, "/") {
+			return nil, fmt.Errorf("retrieval.profiles alias %q must be a nonempty short name without a slash", alias)
 		}
 		target := aliases[alias]
 		i, ok := byName[target]

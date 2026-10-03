@@ -58,7 +58,7 @@ func TestConnectorAPIRequiresScopedPushPermissionAndReturnsReceipts(t *testing.T
 	defer server.Close()
 	manifest := []byte(`id: example-push
 version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.11.0 <0.12.0"}
+compatibility: {engine: ">=0.1.0 <0.3.0", plugin_api: ">=0.11.0 <0.12.0"}
 contributions:
   connector:
     kinds:

@@ -5,7 +5,7 @@ id: connector.m365_mail
 version: 1.0.0
 description: Collects the messages and attachments of a Microsoft 365 mailbox folder through Microsoft Graph.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.4.0 <0.5.0"
 contributions:
   connector:

@@ -3,7 +3,7 @@ id: example-pdf
 version: 1.2.0-rc.1+build.7
 description: Turns PDF Blobs into one text Part per page.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.1.0 <0.2.0"
 contributions:
   normalizer:

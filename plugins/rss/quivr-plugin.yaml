@@ -6,7 +6,7 @@ id: connector.rss
 version: 1.0.0
 description: Collects the entries of RSS 2.0, RSS 1.0 (RDF), Atom and JSON Feed documents, with conditional polling and the feed's ttl.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.3.1 <0.4.0"
 contributions:
   connector:

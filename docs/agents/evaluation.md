@@ -79,7 +79,7 @@ licence on its ticket.
 
 - **Systems** are `mode/profile`. Profiles `GET /v0/search/profiles` lists but the API
   refuses are listed as not served. `hybrid/default`, the API default, is the baseline within
-  a run. A baseline run from before `balanced` was renamed is compared as `*/default`.
+  a run. Baseline comparisons require identical system names; profile names are not remapped.
 - **nDCG@10** uses linear gain (gain = grade) and a log2(rank + 1) discount, as trec_eval's
   `ndcg_cut_10`; the report states it. Hits are deduplicated by Record before scoring.
 - **Δ** is the mean per-query difference with the p-value of a two-sided paired t-test;

@@ -73,7 +73,7 @@ class Schedule(unittest.TestCase):
 class Workload(unittest.TestCase):
     def test_repository_workload_matches_fixture(self):
         root = pathlib.Path(__file__).resolve().parents[1]
-        workload, rows = m.load_workload(root / 'tests/measurement/workload-v1.json', root)
+        workload, rows = m.load_workload(root / 'tests/measurement/workload-v2.json', root)
         self.assertEqual(len(rows), workload['fixture']['queries'])
 
     def test_fixture_hash_mismatch_rejected(self):

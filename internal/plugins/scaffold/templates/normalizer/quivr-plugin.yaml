@@ -4,7 +4,7 @@ id: __PLUGIN_ID__
 version: 0.1.0
 description: Splits Markdown documents into a title Part and one Part per section.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.1.0 <0.2.0"
 contributions:
   normalizer:

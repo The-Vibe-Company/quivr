@@ -16,16 +16,13 @@ import (
 )
 
 // ProfileVersion identifies the projection recipe every generation is built
-// with; a routed generation of another recipe cannot be searched.
+// with; a routed generation of another recipe cannot be searched. This persisted
+// index identifier stays stable across search-profile renames.
 const ProfileVersion = "balanced.e5-token-windows.v1"
 
 // DefaultProfile answers a search that names no profile. Every retrieval
 // plugin declares it beside its own.
 const DefaultProfile = plugins.DefaultProfile
-
-// LegacyProfile is the former name of the default profile, accepted as an
-// alias of DefaultProfile for one release.
-const LegacyProfile = "balanced"
 
 // MaxLimit is the largest page a search may request.
 const MaxLimit = 50
@@ -206,7 +203,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 	if q.Mode == "" {
 		q.Mode = "hybrid"
 	}
-	if q.Profile == "" || q.Profile == LegacyProfile {
+	if q.Profile == "" {
 		q.Profile = DefaultProfile
 	}
 	if q.Limit == 0 {

@@ -95,7 +95,6 @@ func TestSearchResolvesProfilesAndPinsAllRounds(t *testing.T) {
 	}
 	for _, tc := range []struct{ profile, plugin, local, version string }{
 		{"", "normal", "default", "plugin:example.normal@1.0.0/default"},
-		{"balanced", "normal", "default", "plugin:example.normal@1.0.0/default"},
 		{"deep", "careful", "deep", "plugin:example.careful@1.0.0/deep"},
 		{"example.normal/deep", "normal", "deep", "plugin:example.normal@1.0.0/deep"},
 		{"example.careful/default", "careful", "default", "plugin:example.careful@1.0.0/default"},

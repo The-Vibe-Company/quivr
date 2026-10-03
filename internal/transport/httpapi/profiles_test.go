@@ -52,6 +52,10 @@ func TestSearchUsesRoutedProfileDeadline(t *testing.T) {
 	if res.StatusCode != 503 || body["code"] != "search_unavailable" || routing.remaining < 8*time.Second || routing.remaining > 9*time.Second {
 		t.Fatalf("profile deadline %s, response %d: %v", routing.remaining, res.StatusCode, body)
 	}
+	res, body = operationCall(t, server, "POST", "/v0/search", observer, "application/json", `{"query":"library","corpus_ids":["corpus_a"],"profile":"balanced"}`)
+	if res.StatusCode != 422 || body["code"] != "unsupported_profile" {
+		t.Fatalf("removed profile: response %d: %v", res.StatusCode, body)
+	}
 }
 
 // The public list serializes the full name and aliases, including an empty

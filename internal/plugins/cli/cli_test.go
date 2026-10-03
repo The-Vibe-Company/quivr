@@ -41,7 +41,7 @@ func TestInspectPrintsAHumanSummary(t *testing.T) {
 	}
 	for _, want := range []string{
 		"example-pdf 1.2.0-rc.1+build.7", "valid",
-		">=0.1.0 <0.2.0", "engine 0.1.0", "Plugin API 0.1.0",
+		">=0.1.0 <0.2.0", "engine 0.2.0", "Plugin API 0.1.0",
 		"normalizer", "application/pdf", "60000 ms", "4 attempts", "8388608 bytes", "200",
 		"max_pages", "required",
 		"EXAMPLE_PDF_LICENSE_KEY", "optional",

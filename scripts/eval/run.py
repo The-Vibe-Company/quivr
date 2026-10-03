@@ -436,18 +436,11 @@ def compare_within(result):
                                              for s, v in result['systems'].items() if s != BASELINE_SYSTEM}
 
 
-def legacy_systems(systems):
-    """Systems of a run made before the default profile was renamed from balanced, under today's names."""
-    return {(s[:-len('/balanced')] + '/default' if s.endswith('/balanced') else s): v for s, v in systems.items()}
-
-
 def compare_runs(current, baseline):
     """Each system against the same system of an earlier run, on sets with the same fingerprint."""
     import scoring
     for name, result in current['sets'].items():
         before = baseline.get('sets', {}).get(name)
-        if before:
-            before = {**before, 'systems': legacy_systems(before.get('systems', {}))}
         if not before or before['manifest'].get('fingerprint') != result['manifest'].get('fingerprint'):
             result['against_baseline_run'] = None
             continue

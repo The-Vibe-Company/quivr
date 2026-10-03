@@ -196,7 +196,7 @@ func (a *API) recordSearch(org string, q retrieval.Request, result retrieval.Res
 	profile := result.Profile
 	if profile == "" {
 		profile = q.Profile
-		if profile == "" || profile == retrieval.LegacyProfile {
+		if profile == "" {
 			profile = retrieval.DefaultProfile
 		}
 		if !a.Retrieval.Serves(profile) {

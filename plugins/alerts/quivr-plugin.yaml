@@ -5,7 +5,7 @@ id: alerts
 version: 0.3.0
 description: Keyword and meaning alerts, alone or combined. Meaning checks use local stored vectors or TypeSafe's Jev classifier.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.10.0 <0.11.0"
 contributions:
   subscription:

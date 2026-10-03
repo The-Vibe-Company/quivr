@@ -40,7 +40,7 @@ Every type is served over HTTP under `/v0/contributions/<type>`, and every manif
 id: csv-rows
 version: 0.1.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.1.0 <0.2.0"
 contributions:
   normalizer:
@@ -65,7 +65,7 @@ Quivr never sends the file inline: the request carries a short-lived signed URL,
 id: acme.feeds
 version: 0.1.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.3.0 <0.4.0"
 contributions:
   connector:
@@ -93,7 +93,7 @@ Quivr keeps the instances, schedules, checkpoints, encrypted credentials and hea
 id: acme.embedder
 version: 0.1.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.8.0 <0.9.0"
 contributions:
   ingestion:
@@ -125,7 +125,7 @@ A deployment can pin several ingestion plugins and [route source media types](/r
 id: acme.ranker
 version: 0.1.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.7.0 <0.8.0"
 contributions:
   retrieval:
@@ -151,7 +151,7 @@ The plugin never queries the index and never sees a candidate the caller may not
 id: acme.phrases
 version: 0.1.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.2.0 <0.3.0"
 contributions:
   subscription:

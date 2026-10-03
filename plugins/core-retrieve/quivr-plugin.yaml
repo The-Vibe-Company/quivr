@@ -6,7 +6,7 @@ id: core.retrieve
 version: 1.1.0
 description: Keywords (BM25F on title and body), the served vector space, or both fused with alpha 0.5 by relative score, as the index ranks them.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.8.0 <0.10.0"
 contributions:
   retrieval:

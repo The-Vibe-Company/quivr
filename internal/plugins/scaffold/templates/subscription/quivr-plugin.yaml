@@ -4,7 +4,7 @@ id: __PLUGIN_ID__
 version: 0.1.0
 description: An alert rule that matches an article when a phrase appears in its text.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.2.0 <0.3.0"
 contributions:
   subscription:

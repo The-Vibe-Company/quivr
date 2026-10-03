@@ -49,7 +49,7 @@ func backfillRegistration(t *testing.T, pluginID, served, target string, state s
 	manifest := fmt.Sprintf(`id: %s
 version: 0.1.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.8.0 <0.9.0"
 contributions:
   ingestion:

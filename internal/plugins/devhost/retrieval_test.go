@@ -15,7 +15,7 @@ import (
 func TestProfileCandidateCatalogue(t *testing.T) {
 	m := plugins.Validate([]byte(`id: example.rerank
 version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.12.0 <0.13.0"}
+compatibility: {engine: ">=0.1.0 <0.3.0", plugin_api: ">=0.12.0 <0.13.0"}
 contributions:
   retrieval:
     profiles:
@@ -62,7 +62,7 @@ func TestDriveSearchDecimalBudget(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			report := plugins.Validate([]byte(`id: example.rank
 version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.12.0 <0.13.0"}
+compatibility: {engine: ">=0.1.0 <0.3.0", plugin_api: ">=0.12.0 <0.13.0"}
 contributions:
   retrieval:
     profiles:

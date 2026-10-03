@@ -6478,8 +6478,7 @@ components:
           type: string
           minLength: 1
           description: A search profile the deployment answers (listSearchProfiles), recorded as sent;
-            balanced, the deprecated name of default, is accepted through engine 0.1.x. Another profile
-            is 422 unsupported_profile. The profile is checked only when a definition is written, so a
+            an unserved profile is 422 unsupported_profile. The profile is checked only when a definition is written, so a
             Version keeps its profile and keeps evaluating after the profile stops being served.
         temporal_policy:
           type: string
@@ -7105,8 +7104,8 @@ components:
           minLength: 1
           default: default
           description: A configured short name or a full plugin/profile name this deployment answers
-            (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. balanced is a deprecated alias of default, accepted through engine
-            0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
+            (listSearchProfiles). retrieval.profiles maps short names, including default, to full names.
+            An unknown profile returns 422 unsupported_profile.
         limit:
           type: integer
           minimum: 1
@@ -7166,7 +7165,7 @@ components:
       - name
       - version
       description: Resolved retrieval profile identity. Name is the requested short or full name (default when
-        the request named none or the deprecated balanced). Version identifies what ranked as
+        the request named none). Version identifies what ranked as
         plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
     SearchProfileList:
       type: object

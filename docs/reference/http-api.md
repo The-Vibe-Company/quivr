@@ -8092,7 +8092,7 @@ Immutable query definition. Expression semantics belong to the evaluator plugin;
 | --- | --- | --- | --- |
 | `corpus_ids` | array of string | yes | At least `1` items. Items are unique. Each item: Minimum length `1`. |
 | `expression` | object | yes |  |
-| `retrieval_profile` | string | yes | A search profile the deployment answers (listSearchProfiles), recorded as sent; balanced, the deprecated name of default, is accepted through engine 0.1.x. Another profile is 422 unsupported_profile. The profile is checked only when a definition is written, so a Version keeps its profile and keeps evaluating after the profile stops being served. Minimum length `1`. |
+| `retrieval_profile` | string | yes | A search profile the deployment answers (listSearchProfiles), recorded as sent; an unserved profile is 422 unsupported_profile. The profile is checked only when a definition is written, so a Version keeps its profile and keeps evaluating after the profile stops being served. Minimum length `1`. |
 | `temporal_policy` | string | yes | One of `from_activation`. |
 
 <details>
@@ -8115,7 +8115,7 @@ properties:
   retrieval_profile:
     type: string
     minLength: 1
-    description: A search profile the deployment answers (listSearchProfiles), recorded as sent; balanced, the deprecated name of default, is accepted through engine 0.1.x. Another profile is 422 unsupported_profile. The profile is checked only when a definition is written, so a Version keeps its profile and keeps evaluating after the profile stops being served.
+    description: A search profile the deployment answers (listSearchProfiles), recorded as sent; an unserved profile is 422 unsupported_profile. The profile is checked only when a definition is written, so a Version keeps its profile and keeps evaluating after the profile stops being served.
   temporal_policy:
     type: string
     enum:
@@ -9411,7 +9411,7 @@ Text-only top-k query. Resolve all Corpora in the authenticated Organization and
 | `query` | string | yes | At most 8192 code points on the wire. A semantic or hybrid query is also limited by the owner of the searched vector space (the first-party core.ingest plugin accepts at most 256 tokens of its model's tokenizer); a longer query is refused with 422 query_too_long, whose message names the limit, never truncated. Minimum length `1`. Maximum length `8192`. |
 | `corpus_ids` | array of string | yes | At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
 | `mode` | string |  | One of `lexical`, `semantic`, `hybrid`. Default `hybrid`. |
-| `profile` | string |  | A configured short name or a full plugin/profile name this deployment answers (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile. Default `default`. Minimum length `1`. |
+| `profile` | string |  | A configured short name or a full plugin/profile name this deployment answers (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. An unknown profile returns 422 unsupported_profile. Default `default`. Minimum length `1`. |
 | `limit` | integer |  | Default `10`. Minimum `1`. Maximum `50`. |
 | `evaluation_plugin` | string |  | Ingestion plugin whose independent projection to measure. Requires evaluation_space; omitted searches follow served routing. Minimum length `1`. |
 | `evaluation_space` | string |  | Vector space owned by evaluation_plugin. Both fields are required together; invalid selections return 422 unsupported_search. Minimum length `1`. |
@@ -9462,7 +9462,7 @@ properties:
     type: string
     minLength: 1
     default: default
-    description: A configured short name or a full plugin/profile name this deployment answers (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. balanced is a deprecated alias of default, accepted through engine 0.1.x and removed in engine 0.2.0. An unknown profile returns 422 unsupported_profile.
+    description: A configured short name or a full plugin/profile name this deployment answers (listSearchProfiles). retrieval.profiles maps short names, including default, to full names. An unknown profile returns 422 unsupported_profile.
   limit:
     type: integer
     minimum: 1
@@ -9519,7 +9519,7 @@ description: Candidate filter applied before ranking. Every present condition mu
 
 ### `SearchProfile`
 
-Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -9542,7 +9542,7 @@ properties:
 required:
   - name
   - version
-description: Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none or the deprecated balanced). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
+description: Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 ```
 
 </details>

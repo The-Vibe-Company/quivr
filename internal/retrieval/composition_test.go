@@ -30,7 +30,7 @@ func TestProfileCandidatesReorderAnotherPluginRanking(t *testing.T) {
 		dir := t.TempDir()
 		raw := fmt.Sprintf(`id: %s
 version: 1.0.0
-compatibility: {engine: ">=0.1.0 <0.2.0", plugin_api: ">=0.12.0 <0.13.0"}
+compatibility: {engine: ">=0.1.0 <0.3.0", plugin_api: ">=0.12.0 <0.13.0"}
 contributions:
   retrieval:
     profiles:

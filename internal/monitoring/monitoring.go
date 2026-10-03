@@ -294,8 +294,7 @@ func (s Service) validDefinition(ctx context.Context, scope corpus.Scope, d Defi
 
 func (s Service) serves(profile string) bool {
 	if s.Profiles == nil {
-		// balanced is the deprecated name of default until engine 0.2.0.
-		return profile == "default" || profile == "balanced"
+		return profile == "default"
 	}
 	return s.Profiles.Serves(profile)
 }

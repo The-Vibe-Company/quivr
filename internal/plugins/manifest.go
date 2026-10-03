@@ -22,8 +22,8 @@ import (
 // EngineVersion is the engine version plugins declare compatibility with.
 // Release builds may override it:
 //
-//	go build -ldflags "-X github.com/The-Vibe-Company/quivr-v2/internal/plugins.EngineVersion=0.1.1"
-var EngineVersion = "0.1.0"
+//	go build -ldflags "-X github.com/The-Vibe-Company/quivr-v2/internal/plugins.EngineVersion=0.2.1"
+var EngineVersion = "0.2.0"
 
 // ManifestFile is the plugin manifest file name inside a plugin directory.
 const ManifestFile = "quivr-plugin.yaml"

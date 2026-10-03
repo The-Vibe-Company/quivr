@@ -2,7 +2,7 @@ id: example.fusion
 version: 0.1.0
 description: A retrieval plugin that serves only deep; the deployment routes default elsewhere.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.7.0 <0.8.0"
 contributions:
   retrieval:

@@ -71,7 +71,7 @@ func TestSeedMirrorsWhatThePinsResolve(t *testing.T) {
 
 // manifest is a test plugin manifest declaring the given contributions YAML.
 func manifest(id, version, contributions string) string {
-	return "id: " + id + "\nversion: " + version + "\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.8.0 <0.9.0\"\ncontributions:\n" + contributions
+	return "id: " + id + "\nversion: " + version + "\ncompatibility:\n  engine: \">=0.1.0 <0.3.0\"\n  plugin_api: \">=0.8.0 <0.9.0\"\ncontributions:\n" + contributions
 }
 
 func normalizer(mediaTypes ...string) string {
@@ -523,7 +523,7 @@ func TestRetrievalPluginsActivateAndRollbackIndependently(t *testing.T) {
 // a provider cannot silently break an already-active dependent.
 func TestActivationPreservesSearchDependencies(t *testing.T) {
 	raw := func(id, version, requires string) string {
-		return "id: " + id + "\nversion: " + version + "\ncompatibility: {engine: '>=0.1.0 <0.2.0', plugin_api: '>=0.12.0 <0.13.0'}\ncontributions:\n  retrieval:\n    profiles:\n      default: {max_latency_ms: 100, max_cost_cents: 1}\n" + requires
+		return "id: " + id + "\nversion: " + version + "\ncompatibility: {engine: '>=0.1.0 <0.3.0', plugin_api: '>=0.12.0 <0.13.0'}\ncontributions:\n  retrieval:\n    profiles:\n      default: {max_latency_ms: 100, max_cost_cents: 1}\n" + requires
 	}
 	base := dependencyRegistration(t, raw("core.retrieve", "1.0.0", ""))
 	dependent := dependencyRegistration(t, raw("example.rerank", "1.0.0", "requires: [{plugin: core.retrieve, version: '>=1.0.0 <2.0.0', profiles: [default]}]\n"))

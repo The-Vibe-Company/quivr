@@ -124,7 +124,7 @@ The search protocol carries at most 16 enabled vector spaces, counting served an
 
 ## Search profiles
 
-`retrieval.profiles` maps deployment short names to full `plugin_id/profile` names. Pin several retrieval plugins in `plugins`, then choose which profile serves each short name. An explicit map must contain `default`; every target must be declared by an installed retrieval plugin. Short names cannot contain `/`, surrounding whitespace, or be `balanced`, the deprecated spelling of `default`.
+`retrieval.profiles` maps deployment short names to full `plugin_id/profile` names. Pin several retrieval plugins in `plugins`, then choose which profile serves each short name. An explicit map must contain `default`; every target must be declared by an installed retrieval plugin. Short names cannot contain `/` or surrounding whitespace.
 
 This illustrative configuration selects profiles from two installed retrieval plugins:
 
@@ -139,7 +139,7 @@ This illustrative configuration selects profiles from two installed retrieval pl
 }
 ```
 
-A deployment with one retrieval plugin and no map keeps its existing short names. The deprecated short name `balanced` still selects `default`; a plugin-local `balanced` profile is selected by its full name. Several retrieval plugins require an explicit map. Searches also accept full names directly. `GET /v0/search/profiles` lists every installed profile, its `full_name`, provider and `aliases`, including profiles without short names. Activating a new version replaces only that plugin; the map must still resolve in the new plan.
+A deployment with one retrieval plugin and no map keeps its existing short names. Several retrieval plugins require an explicit map. Searches also accept full names directly. `GET /v0/search/profiles` lists every installed profile, its `full_name`, provider and `aliases`, including profiles without short names. Activating a new version replaces only that plugin; the map must still resolve in the new plan.
 
 ## Webhook destinations
 

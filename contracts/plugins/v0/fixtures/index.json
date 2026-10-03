@@ -55,7 +55,7 @@
       "errors": [
         "incompatible_engine"
       ],
-      "description": "Engine 0.1.0 is outside the declared range."
+      "description": "Engine 0.2.0 is outside the declared range."
     },
     {
       "file": "manifests/invalid/reserved-contribution.yaml",

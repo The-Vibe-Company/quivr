@@ -27,7 +27,7 @@ configuration and credential:
 id: example.feeds
 version: 0.1.0
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.3.0 <0.4.0"
 contributions:
   connector:

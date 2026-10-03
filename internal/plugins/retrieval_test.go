@@ -63,7 +63,6 @@ func TestRetrievalProfileAliases(t *testing.T) {
 		wantError string
 	}{
 		{name: "legacy", pins: []plugins.PinConfig{first}},
-		{name: "legacy reserved profile", pins: []plugins.PinConfig{{Manifest: writePinManifest(t, strings.Replace(readFile(t, retrieverManifest), "      deep:", "      balanced:", 1)), Endpoint: first.Endpoint}}},
 		{name: "several", pins: []plugins.PinConfig{first, other}, aliases: map[string]string{"default": "example.fusion_retriever/default", "deep": "acme.other_retriever/deep", "careful": "acme.other_retriever/deep"}},
 		{name: "missing map", pins: []plugins.PinConfig{first, other}, wantError: "must map default"},
 		{name: "missing default", pins: []plugins.PinConfig{first}, aliases: map[string]string{}, wantError: "must contain default"},
@@ -93,23 +92,16 @@ func TestRetrievalProfileAliases(t *testing.T) {
 			if tc.name == "legacy" && (len(profiles) != 2 || profiles[1].FullName != "example.fusion_retriever/deep" || strings.Join(profiles[1].Aliases, ",") != "deep") {
 				t.Fatalf("legacy profiles: %+v", profiles)
 			}
-			if tc.name == "legacy reserved profile" && (len(profiles) != 2 || profiles[1].FullName != "example.fusion_retriever/balanced" || len(profiles[1].Aliases) != 0) {
-				t.Fatalf("legacy reserved profile: %+v", profiles)
-			}
 			if tc.name == "several" && (len(profiles) != 4 || profiles[1].FullName != "acme.other_retriever/deep" || strings.Join(profiles[1].Aliases, ",") != "careful,deep") {
 				t.Fatalf("all profiles: %+v", profiles)
 			}
 			queries := map[string]string{
-				"": "example.fusion_retriever/default", "balanced": "example.fusion_retriever/default",
+				"":        "example.fusion_retriever/default",
 				"default": "example.fusion_retriever/default", "missing": "", "missing/default": "",
 				"example.fusion_retriever/default": "example.fusion_retriever/default",
 			}
-			if tc.name == "legacy reserved profile" {
-				queries["example.fusion_retriever/balanced"] = "example.fusion_retriever/balanced"
-			} else {
-				queries["example.fusion_retriever/deep"] = "example.fusion_retriever/deep"
-				queries["deep"] = "example.fusion_retriever/deep"
-			}
+			queries["example.fusion_retriever/deep"] = "example.fusion_retriever/deep"
+			queries["deep"] = "example.fusion_retriever/deep"
 			if tc.name == "several" {
 				queries["deep"], queries["careful"] = "acme.other_retriever/deep", "acme.other_retriever/deep"
 				queries["acme.other_retriever/default"] = "acme.other_retriever/default"

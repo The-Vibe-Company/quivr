@@ -243,8 +243,7 @@ func TestASearchMayRunPastItsObjective(t *testing.T) {
 }
 
 // Profiles resolve against what the pinned retrieval plugin declares;
-// balanced is the deprecated name of default. Without a plugin nothing
-// answers.
+// without a plugin nothing answers.
 func TestSearchResolvesProfiles(t *testing.T) {
 	for _, c := range []struct {
 		profile  string
@@ -253,7 +252,6 @@ func TestSearchResolvesProfiles(t *testing.T) {
 		err      error
 	}{
 		{profile: "", want: "default"},
-		{profile: "balanced", want: "default"},
 		{profile: "deep", want: "deep"},
 		{profile: "fast", err: retrieval.ErrUnsupportedProfile},
 		{profile: "", unpinned: true, err: retrieval.ErrUnavailable},

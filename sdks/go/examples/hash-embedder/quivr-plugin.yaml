@@ -6,7 +6,7 @@ id: example.hash_embedder
 version: 0.1.0
 description: Paragraph segments embedded by hashing their words, in two vector spaces.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.9.0 <0.10.0"
 contributions:
   ingestion:

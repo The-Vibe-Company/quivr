@@ -254,7 +254,7 @@ type servedProfiles []string
 func (p servedProfiles) Serves(profile string) bool { return slices.Contains(p, profile) }
 
 // A definition names a profile the deployment answers: the built-in default
-// (or its deprecated name) without a retrieval plugin, the plugin's profiles
+// without a retrieval plugin, the plugin's profiles
 // with one. The profile is recorded as sent.
 func TestSavedQueryNamesAServedProfile(t *testing.T) {
 	ctx := context.Background()
@@ -264,7 +264,6 @@ func TestSavedQueryNamesAServedProfile(t *testing.T) {
 		want    error
 	}{
 		{profile: "default"},
-		{profile: "balanced"},
 		{profile: "deep", want: monitoring.ErrUnsupportedProfile},
 		{profile: "deep", served: servedProfiles{"default", "deep"}},
 		{profile: "fast", served: servedProfiles{"default", "deep"}, want: monitoring.ErrUnsupportedProfile},

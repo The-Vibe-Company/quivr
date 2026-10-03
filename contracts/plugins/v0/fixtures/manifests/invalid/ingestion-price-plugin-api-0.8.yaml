@@ -2,7 +2,7 @@ id: example.words
 version: 0.1.0
 description: Normative ingestion plugin with two vector spaces.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.8.0 <0.9.0"
 contributions:
   ingestion:

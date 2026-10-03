@@ -2,7 +2,7 @@ id: __PLUGIN_ID__
 version: 0.1.0
 description: Pages through the items listed in its configuration.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.3.0 <1.0.0"
 contributions:
   connector:

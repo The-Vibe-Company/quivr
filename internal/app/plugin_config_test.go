@@ -16,7 +16,7 @@ import (
 // namespaces not prefixed by the plugin id, and namespaces clashing with a
 // built-in one.
 func TestInvalidPluginPinRefusesStartup(t *testing.T) {
-	const compatible = "compatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\n"
+	const compatible = "compatibility:\n  engine: \">=0.1.0 <0.3.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\n"
 	for name, tc := range map[string]struct{ body, code string }{
 		"plugin api range":   {"id: acme.markdown\nversion: 1.0.0\n" + strings.Replace(compatible, "plugin_api: \">=0.1.0 <0.2.0\"", "plugin_api: \">=999.0.0 <1000.0.0\"", 1), "incompatible_plugin_api"},
 		"foreign namespace":  {"id: acme.markdown\nversion: 1.0.0\n" + compatible + "extensions:\n  other.outline:\n    \"1\": {type: object}\n", "foreign_namespace"},
@@ -55,7 +55,7 @@ func TestConflictingPluginPinsRefuseStartup(t *testing.T) {
 		}
 		return path
 	}
-	const normalizer = "compatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\n"
+	const normalizer = "compatibility:\n  engine: \">=0.1.0 <0.3.0\"\n  plugin_api: \">=0.1.0 <0.2.0\"\ncontributions:\n  normalizer:\n    media_types: [text/markdown]\n"
 	markdown := write("markdown.yaml", "id: acme.markdown\nversion: 1.0.0\n"+normalizer)
 	other := write("other.yaml", "id: acme.other\nversion: 1.0.0\n"+normalizer)
 	route := []any{map[string]any{"media_type": "text/markdown"}}
@@ -87,7 +87,7 @@ func TestConflictingPluginPinsRefuseStartup(t *testing.T) {
 func TestAConnectorKindWithTwoProvidersRefusesStartup(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "quivr-plugin.yaml")
-	body := "id: acme.mail\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.2.0\"\n  plugin_api: \">=0.3.0 <0.4.0\"\ncontributions:\n  connector:\n    kinds:\n      fixture:\n        config_schema: {type: object}\n        default_interval_seconds: 900\n        modes: [pull]\n"
+	body := "id: acme.mail\nversion: 1.0.0\ncompatibility:\n  engine: \">=0.1.0 <0.3.0\"\n  plugin_api: \">=0.3.0 <0.4.0\"\ncontributions:\n  connector:\n    kinds:\n      fixture:\n        config_schema: {type: object}\n        default_interval_seconds: 900\n        modes: [pull]\n"
 	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

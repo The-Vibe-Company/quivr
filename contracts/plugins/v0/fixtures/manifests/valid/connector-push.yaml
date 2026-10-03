@@ -5,7 +5,7 @@ id: example-alerts
 version: 1.0.0
 description: Collects alerts from a service that polls and pushes.
 compatibility:
-  engine: ">=0.1.0 <0.2.0"
+  engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.5.0 <0.6.0"
 contributions:
   connector:
