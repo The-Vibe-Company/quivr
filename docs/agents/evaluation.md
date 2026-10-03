@@ -115,7 +115,7 @@ it downloads no benchmark data and makes no model/provider calls. Measurement co
 
 ## Compare embeddings directly on your machine
 
-Use `scripts/eval/direct_bakeoff.py` to compare dense embeddings without an engine or vector database. It uses public samples, exact cosine top ten and repository scoring,
+Use `scripts/eval/direct_bakeoff.py` to compare dense embeddings without an engine or vector database ([open-source procedure](oss-embeddings.md)). It uses public samples, exact cosine top ten and repository scoring,
 with e5-small as the paired baseline. Long documents use the
 reference windows: 1,800 characters for e5 and 6,000 for hosted models, with 200-character overlap. A document's best piece wins. The local encoder can truncate at its token limit.
 

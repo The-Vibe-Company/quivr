@@ -241,6 +241,67 @@ class Privacy(Offline):
 
 
 class Import(Offline):
+    def test_partial_direct_runs_are_rejected_before_any_rows_are_yielded(self):
+        for status in ('capped', 'failed', 'timed_out', 'running'):
+            with self.subTest(status=status), self.assertRaisesRegex(ValueError, 'complete'):
+                list(results.direct_records({'status': status, 'results': {}}, 'public/fixture'))
+
+    def test_direct_report_retains_oss_pin_latency_and_serving_evidence(self):
+        # The conversion owner keeps the exact safe plugin pin and separates
+        # zero-priced provider accounting from measured serving resources.
+        report = {'status': 'complete', 'source': {'git_sha': 'a' * 40, 'plugin_digest': 'sha256:direct', 'machine': 'runner'},
+                  'set': 'tiny', 'fingerprint': 'tiny-v2', 'documents': 2, 'queries': 2,
+                  'sample': {'version': 'release-1', 'split': 'dev', 'tier': 'default'},
+                  'promotion_eligible': True,
+                  'settings': {'openai_configs': {'qwen3': {
+                      'format': 'openai', 'base_url': 'http://127.0.0.1:8080/v1', 'auth': 'none',
+                      'model': 'Qwen/Qwen3-Embedding-0.6B', 'dimensions': 1024,
+                      'model_revision': 'rev-qwen', 'query_prefix': '', 'document_prefix': '',
+                      'max_tokens_per_segment': 2048, 'api_key': 'must-not-be-copied'}}},
+                  'by_model': {'qwen3': {'confirmed_input_tokens': 0, 'cost_upper_bound_usd': 0}},
+                  'results': {'qwen3': {
+                      'mean': {'ndcg@10': .8, 'recall@10': .7, 'mrr@10': .6},
+                      'per_query': {'ndcg@10': {'q1': .7, 'q2': .9},
+                                    'recall@10': {'q1': .5, 'q2': .9},
+                                    'mrr@10': {'q1': .5, 'q2': .7}},
+                      'dims': 1024, 'index_s': 12.5,
+                      'latency_ms': {'p50': 18, 'p95': 31, 'samples': 2,
+                                     'scope': 'single query encoding, warm'},
+                      'serving': {'hardware': 'L4', 'image': 'image@sha256:fixture',
+                                  'model_revision': 'rev-qwen', 'cpu_cores': 4, 'memory_gib': 8,
+                                  'hourly_usd': .72, 'seconds': 90, 'estimated_usd': .018,
+                                  'input_tokens': 1234, 'usd_per_million_tokens': 14.59,
+                                  'cold_start_seconds': 4,
+                                  'scope': 'candidate encoding and scoring; excludes baseline and preparation',
+                                  'estimate_only': True}}}}
+        report['serving_campaign'] = {'model': 'qwen3', 'hardware': 'L4', 'elapsed_seconds': 100,
+                                      'estimated_usd': .02, 'estimate_only': True,
+                                      'scope': 'whole function body, including downloads, baseline and scoring; excludes image build and scheduling',
+                                      'requested_sets': ['tiny'], 'completed_sets': ['tiny'], 'status': 'complete'}
+        row = next(results.direct_records(report, 'public/direct'))
+        self.assertEqual(row['config']['candidate_config']['max_tokens_per_segment'], 2048)
+        self.assertNotIn('api_key', row['config']['candidate_config'])
+        self.assertEqual(row['config']['hardware'], 'L4')
+        self.assertEqual(row['config']['model_revision'], 'rev-qwen')
+        self.assertEqual(row['metrics']['latency_p50_ms'], 18)
+        self.assertEqual(row['metrics']['latency_p95_ms'], 31)
+        self.assertEqual(row['provenance']['latency_ms']['samples'], 2)
+        self.assertEqual(row['cost']['serving']['input_tokens'], 1234)
+        self.assertEqual(row['metrics']['serving_usd_per_million_tokens'], 14.59)
+        self.assertEqual(row['metrics']['serving_estimated_usd'], .018)
+        self.assertIsNone(row['cost']['provider']['usd'])
+        self.assertIsNone(row['metrics']['cost_per_search_usd'])
+        self.assertEqual(row['provenance']['serving_campaign']['elapsed_seconds'], 100)
+        restricted = copy.deepcopy(report)
+        restricted['sample']['tier'] = 'restricted'
+        restricted['promotion_eligible'] = False
+        restricted_row = next(results.direct_records(restricted, 'public/direct'))
+        self.assertEqual(restricted_row['per_query'], {})
+        remote = copy.deepcopy(report)
+        remote['settings']['openai_configs']['qwen3']['base_url'] = 'https://deployment.example.com/v1'
+        remote_row = next(results.direct_records(remote, 'public/direct'))
+        self.assertNotIn('deployment.example.com', json.dumps(remote_row))
+
     def test_engine_report_ingestion_preserves_scores_cost_and_private_default(self):
         # The engine report writer owns measurement; this owner covers conversion only.
         report = {'status': 'completed', 'run': {'source_revision': 'c' * 40, 'host': {'machine': 'x86_64'},

@@ -33,6 +33,37 @@ class Retrieval(unittest.TestCase):
 
 
 class Providers(unittest.TestCase):
+    def test_configured_openai_prefixes_usage_and_response_validation(self):
+        # Owns the configured serving wire contract; fake HTTP only.
+        config = {'format': 'openai', 'auth': 'none', 'base_url': 'http://127.0.0.1:8080/v1',
+                  'model': 'example/model', 'dimensions': 2, 'send_dimensions': False,
+                  'query_prefix': 'Instruct: retrieve\nQuery:', 'document_prefix': '', 'batch_size': 2}
+        budget = embeddings.Budget(1000, 1)
+        client = bakeoff.OpenAI(config, budget, 'scifact', 'candidate')
+        response = {'data': [{'index': 1, 'embedding': [0, 1]}, {'index': 0, 'embedding': [1, 0]}],
+                    'usage': {'prompt_tokens': 10}}
+        with mock.patch.object(client.opener, 'open', return_value=io.BytesIO(json.dumps(response).encode())) as opened:
+            self.assertEqual(client.embed(['a', 'b'], 'query'), [[1, 0], [0, 1]])
+        request = opened.call_args.args[0]
+        self.assertEqual(request.full_url, 'http://127.0.0.1:8080/v1/embeddings')
+        self.assertEqual(json.loads(request.data), {'model': 'example/model',
+                         'input': ['Instruct: retrieve\nQuery:a', 'Instruct: retrieve\nQuery:b']})
+        self.assertEqual(budget.summary()['confirmed_input_tokens'], 10)
+        for bad in ([{'index': 0, 'embedding': [1, 0]}],
+                    [{'index': 0, 'embedding': [1, 0]}, {'index': 0, 'embedding': [0, 1]}],
+                    [{'index': 0, 'embedding': [float('nan'), 0]}, {'index': 1, 'embedding': [0, 1]}]):
+            with mock.patch.object(client.opener, 'open', return_value=io.BytesIO(json.dumps({'data': bad}).encode())):
+                with self.assertRaisesRegex(RuntimeError, 'invalid'):
+                    client.embed(['a', 'b'], 'document')
+        exhausted = bakeoff.OpenAI(config, embeddings.Budget(1, 1), 'scifact', 'candidate')
+        with mock.patch.object(exhausted.opener, 'open') as opened:
+            with self.assertRaises(embeddings.BudgetExceeded):
+                exhausted.embed(['a'], 'query')
+            opened.assert_not_called()
+        for changes in ({'metric': 'dot'}, {'max_retries': 2}, {'request_timeout_ms': 4000}):
+            with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, 'benchmark'):
+                bakeoff.OpenAI(dict(config, **changes), budget, 'scifact', 'candidate')
+
     def test_formats_batching_dimensions_and_response_order(self):
         for model, dimension in [('Cohere-Embed-V5-Pro', 1024), ('text-embedding-3-large', None)]:
             with self.subTest(model=model):
@@ -101,6 +132,35 @@ class Providers(unittest.TestCase):
 
 @unittest.skipUnless(HAS_NUMPY and HAS_RANX, 'local comparison needs numpy and ranx')
 class Run(unittest.TestCase):
+    def test_configured_candidate_uses_real_scoring_and_records_query_latency(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            trec.write(root / 'set', {'a': {'text': 'relevant'}, 'b': {'text': 'other'}},
+                       {'q': 'question'}, {'q': {'a': 1}})
+            (root / 'set' / 'manifest.json').write_text('{"sample":{"seed":775}}')
+            config = {'format': 'openai', 'auth': 'none', 'base_url': 'http://localhost:8080/v1',
+                      'model': 'example/model', 'dimensions': 2, 'send_dimensions': False,
+                      'query_prefix': 'query: ', 'document_prefix': ''}
+            (root / 'config.json').write_text(json.dumps(config))
+            documents = {'data': [{'index': 0, 'embedding': [1, 0]}, {'index': 1, 'embedding': [0, 1]}],
+                         'usage': {'prompt_tokens': 5}}
+            query = {'data': [{'index': 0, 'embedding': [1, 0]}], 'usage': {'prompt_tokens': 3}}
+            with mock.patch.dict(os.environ, {'CI': '', 'GITHUB_ACTIONS': ''}), \
+                 mock.patch.object(bakeoff.public_sets, 'prepare', return_value=root / 'set'), \
+                 mock.patch.object(bakeoff.E5, 'embed', side_effect=[[[1, 0], [0, 1]], [[1, 0]]]), \
+                 mock.patch('urllib.request.OpenerDirector.open',
+                            side_effect=[io.BytesIO(json.dumps(v).encode()) for v in (documents, query)]):
+                code = bakeoff.main(['--set', 'scifact', '--openai-config', 'candidate=' + str(root / 'config.json'),
+                                     '--max-input-tokens', '1000', '--max-usd', '1', '--query-latency',
+                                     '--out', str(root / 'out.json')])
+            report = json.loads((root / 'out.json').read_text())
+            self.assertEqual(code, 0)
+            self.assertEqual(report['settings']['openai_configs']['candidate'], config)
+            self.assertEqual(report['results']['candidate']['per_query']['ndcg@10'], {'q': 1})
+            self.assertEqual(report['by_model']['candidate']['confirmed_input_tokens'], 8)
+            self.assertEqual(report['results']['candidate']['latency_ms']['samples'], 1)
+            self.assertGreaterEqual(report['results']['candidate']['latency_ms']['p95'], 0)
+
     def test_completed_scores_and_capped_partial_evidence_survive(self):
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)

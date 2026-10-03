@@ -1,0 +1,3 @@
+# Coordinator-local Modal dispatch. No paid jobs are part of CI.
+-r requirements-direct.txt
+modal==1.6.1       # Apache-2.0; ephemeral CPU/GPU functions

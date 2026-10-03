@@ -421,8 +421,59 @@ def paired_comparison(a, b, private_reader=False):
     return output
 
 
+_CONFIG_SECRET_PARTS = ('api_key', 'apikey', 'authorization', 'credential', 'password', 'secret')
+
+
+def _safe_direct_config(value):
+    """Keep a candidate plugin config without copying credentials or remote targets."""
+    if isinstance(value, dict):
+        clean = {}
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if (any(part in lowered for part in _CONFIG_SECRET_PARTS)
+                    or lowered in ('token', 'access_token', 'refresh_token', 'bearer_token')
+                    or lowered.endswith('_token')):
+                continue
+            if lowered in ('endpoint', 'base_url', 'url') and isinstance(item, str):
+                parsed = urllib.parse.urlsplit(item)
+                if (parsed.scheme not in ('http', 'https') or not parsed.netloc
+                        or parsed.username or parsed.password or parsed.query or parsed.fragment
+                        or parsed.hostname not in ('localhost', '127.0.0.1', '::1')):
+                    continue
+            clean[key] = _safe_direct_config(item)
+        return clean
+    if isinstance(value, list):
+        return [_safe_direct_config(item) for item in value]
+    return value
+
+
+def _direct_settings(report):
+    """Copy direct settings while applying the public-config filter to OSS pins."""
+    settings = report.get('settings')
+    if not isinstance(settings, dict):
+        return settings
+    if not isinstance(settings.get('openai_configs'), dict):
+        return settings
+    copied = dict(settings)
+    copied['openai_configs'] = {label: _safe_direct_config(config)
+                                for label, config in settings['openai_configs'].items()}
+    return copied
+
+
+def _candidate_config(report, model):
+    """Find the exact public candidate pin from the direct report settings."""
+    settings = report.get('settings')
+    configs = settings.get('openai_configs') if isinstance(settings, dict) else None
+    candidate = configs.get(model) if isinstance(configs, dict) else None
+    return _safe_direct_config(candidate) if isinstance(candidate, dict) else None
+
+
 def direct_records(report, experiment, provenance=None):
     """Convert direct bakeoff output, including older aggregate-only evidence."""
+    # Preserve frozen legacy aggregate files lacking status/source; modern
+    # producers must attest completion before their rows enter shared tracking.
+    if report.get('status') != 'complete' and (report.get('status') is not None or report.get('source')):
+        raise ValueError('direct evidence must be complete before import')
     provenance = dict(provenance or {})
     source = report.get('source', {})
     historical = not bool(source)
@@ -439,8 +490,13 @@ def direct_records(report, experiment, provenance=None):
                                    'usd': report.get('usd', {}).get(price_model),
                                    'models': ['Cohere-Embed-V5-Pro', 'Cohere-Embed-V5-Pro-1024']}
             tokens, usd = None, None
+        latency = result.get('latency_ms')
+        latency = latency if isinstance(latency, dict) else {}
+        serving = result.get('serving')
+        serving = serving if isinstance(serving, dict) else None
         metrics = dict(result['mean'], index_seconds=result.get('index_s'),
-                       query_encoding_mean_ms=result.get('query_ms'), latency_p50_ms=None, latency_p95_ms=None,
+                       query_encoding_mean_ms=result.get('query_ms'),
+                       latency_p50_ms=latency.get('p50'), latency_p95_ms=latency.get('p95'),
                        cost_per_search_usd=None, cost_per_1000_documents_usd=None)
         # Historical total cost includes encoding queries, not just documents.
         indexing = result.get('index_usage', {})
@@ -449,23 +505,71 @@ def direct_records(report, experiment, provenance=None):
             metrics['cost_per_1000_documents_usd'] = indexing['cost_upper_bound_usd'] * 1000 / report['documents']
         if querying.get('cost_upper_bound_usd') is not None:
             metrics['cost_per_search_usd'] = querying['cost_upper_bound_usd'] / report['queries']
+        if serving is not None:
+            # Serving is a resource estimate, independent of the provider budget.
+            # In particular, a zero-priced OSS request is not evidence of free serving.
+            if metrics['cost_per_search_usd'] == 0:
+                metrics['cost_per_search_usd'] = None
+            if metrics['cost_per_1000_documents_usd'] == 0:
+                metrics['cost_per_1000_documents_usd'] = None
+            metrics['serving_usd_per_million_tokens'] = serving.get('usd_per_million_tokens')
+            metrics['serving_estimated_usd'] = serving.get('estimated_usd')
+            metrics['cost_per_million_tokens_usd'] = serving.get('usd_per_million_tokens')
+            metrics['estimated_serving_cost_usd'] = serving.get('estimated_usd')
+        settings = _direct_settings(report)
+        candidate = _candidate_config(report, model)
+        window_sizes = settings.get('window_chars') if isinstance(settings, dict) else None
+        window_chars = result.get('window_chars')
+        if window_chars is None and isinstance(window_sizes, dict):
+            window_chars = window_sizes.get(model)
+        if window_chars is None:
+            candidate_model = candidate.get('model', '') if isinstance(candidate, dict) else ''
+            window_chars = (1800 if (model == 'multilingual-e5-small (current)'
+                                     or model.startswith('multilingual-e5')
+                                     or 'e5' in str(candidate_model).lower()) else 6000)
+        config = {'model': model, 'dimensions': result['dims'],
+                  'chunking': {'window_chars': window_chars,
+                               'overlap_chars': 200}, 'candidate_count': 10, 'reranker': None,
+                  'fusion_weights': None, 'retrieval': 'exact cosine, best piece, top 10',
+                  'settings': settings, 'evidence_sha256': provenance.get('sha256')}
+        if candidate is not None:
+            config['candidate_config'] = candidate
+            if candidate.get('hardware') is not None:
+                config['hardware'] = candidate['hardware']
+            if candidate.get('model_revision') is not None:
+                config['model_revision'] = candidate['model_revision']
+        if serving is not None:
+            config['hardware'] = serving.get('hardware')
+            if serving.get('model_revision') is not None:
+                config['model_revision'] = serving['model_revision']
+        cost = {'provider': {'tokens': tokens, 'usd': usd, 'modal_seconds': None,
+                             'accounting': usage or None}}
+        if serving is not None:
+            cost['serving'] = dict(serving)
+            # The provider budget reserves zero USD for a self-hosted endpoint. Keep
+            # that accounting distinct from the measured serving resource estimate.
+            if (not usage or (usage.get('confirmed_input_tokens') in (None, 0)
+                              and usage.get('cost_upper_bound_usd') in (None, 0))):
+                cost['provider']['tokens'] = None
+                cost['provider']['usd'] = None
+        restricted = (isinstance(report.get('sample'), dict)
+                      and report['sample'].get('tier') == 'restricted') or report.get('promotion_eligible') is False
+        per_query = {} if restricted else result.get('per_query', {})
+        provenance_value = dict(meta, historical=historical, historical_comparison=result.get('vs_current'),
+                                **({'latency_ms': dict(latency)} if latency else {}),
+                                **({'serving_campaign': dict(report['serving_campaign'])}
+                                   if isinstance(report.get('serving_campaign'), dict) else {}),
+                                promotion_eligible=report.get('promotion_eligible'),
+                                dataset_tier=report.get('sample', {}).get('tier'))
         yield {'schema_version': 1, 'experiment': experiment, 'git_sha': source.get('git_sha'),
                'plugin_digest': source.get('plugin_digest'),
-               'config': {'model': model, 'dimensions': result['dims'],
-                          'chunking': {'window_chars': 1800 if model.startswith('multilingual-e5') else 6000,
-                                       'overlap_chars': 200}, 'candidate_count': 10, 'reranker': None,
-                          'fusion_weights': None, 'retrieval': 'exact cosine, best piece, top 10',
-                          'settings': report.get('settings'), 'evidence_sha256': provenance.get('sha256')},
+               'config': config,
                'dataset': {'name': report['set'], 'version': report.get('sample', {}).get('version', report.get('fingerprint')),
                            'split': report.get('sample', {}).get('split'), 'fingerprint': report.get('fingerprint'),
                            'private': False}, 'tier': 'direct', 'machine': source.get('machine'),
                'duration_seconds': result.get('duration_seconds'),
-               'cost': {'provider': {'tokens': tokens, 'usd': usd, 'modal_seconds': None,
-                                      'accounting': usage or None}}, 'metrics': metrics,
-               'per_query': result.get('per_query', {}),
-               'provenance': dict(meta, historical=historical, historical_comparison=result.get('vs_current'),
-                                  promotion_eligible=report.get('promotion_eligible'),
-                                  dataset_tier=report.get('sample', {}).get('tier'))}
+               'cost': cost, 'metrics': metrics,
+               'per_query': per_query, 'provenance': provenance_value}
 
 
 def import_evidence(directory, experiment):

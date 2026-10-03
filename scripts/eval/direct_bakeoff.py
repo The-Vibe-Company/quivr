@@ -12,6 +12,8 @@ import socket
 import subprocess
 import os
 import pathlib
+import math
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -31,6 +33,80 @@ PRICES = {'Cohere-Embed-V5-Pro': .12, 'Cohere-Embed-V5-Fast': .08, 'text-embeddi
 HOSTED_DIMENSIONS = {'Cohere-Embed-V5-Pro': 2048, 'Cohere-Embed-V5-Fast': 2048, 'text-embedding-3-large': 3072}
 MODELS = [BASELINE, 'Cohere-Embed-V5-Fast', 'Cohere-Embed-V5-Pro', 'text-embedding-3-large',
           'Cohere-Embed-V5-Pro-1024']
+
+
+class OpenAI:
+    """Self-hosted endpoint using the hosted.embed plugin's configuration."""
+    def __init__(self, config, budget, set_name, label):
+        fields = {'plugin_id', 'format', 'base_url', 'auth', 'model', 'dimensions', 'send_dimensions',
+                  'metric', 'model_revision', 'plugin_version', 'query_prefix', 'document_prefix',
+                  'query_input_type', 'document_input_type', 'max_tokens_per_segment', 'overlap',
+                  'batch_size', 'max_batch_tokens', 'request_timeout_ms', 'call_budget_ms',
+                  'max_concurrent_requests', 'max_retries', 'usd_per_million_tokens'}
+        if not isinstance(config, dict) or set(config) - fields:
+            raise ValueError('configuration must use declared hosted.embed fields only')
+        operational = {'request_timeout_ms', 'call_budget_ms', 'max_concurrent_requests', 'max_retries', 'max_batch_tokens'}
+        if config.get('metric', 'cosine') != 'cosine' or set(config) & operational:
+            raise ValueError('direct benchmark requires cosine and omits plugin operational controls')
+        target = urllib.parse.urlsplit(config.get('base_url', ''))
+        if (config.get('format') != 'openai' or config.get('auth') != 'none'
+                or target.scheme not in ('http', 'https') or not target.netloc
+                or target.username or target.password or target.query or target.fragment
+                or target.scheme == 'http' and target.hostname not in ('localhost', '127.0.0.1', '::1')):
+            raise ValueError('self-hosted configuration requires OpenAI format, auth none and HTTPS or loopback')
+        if (not isinstance(config.get('model'), str) or not config['model']
+                or type(config.get('dimensions')) is not int or not 1 <= config['dimensions'] <= 4096
+                or type(config.get('batch_size', 16)) is not int or not 1 <= config.get('batch_size', 16) <= 32
+                or any(not isinstance(config.get(k, ''), str) for k in ('query_prefix', 'document_prefix'))):
+            raise ValueError('invalid self-hosted model, dimensions, batch size or prefixes')
+        self.config, self.budget, self.set_name, self.label = config, budget, set_name, label
+        self.opener = urllib.request.build_opener(embeddings.NoRedirect())
+
+    def embed(self, texts, mode):
+        vectors = []
+        batch = self.config.get('batch_size', 16)
+        prefix = self.config.get('query_prefix' if mode == 'query' else 'document_prefix', '')
+        for start in range(0, len(texts), batch):
+            chunk = [prefix + text for text in texts[start:start + batch]]
+            # Zero provider price does not mean free serving. Modal resource costs
+            # are attached separately, with actual token counts when available.
+            call = self.budget.reserve(self.label, self.set_name, mode,
+                                       sum(len(text.encode('utf-8')) + 8 for text in chunk), 0)
+            body = {'model': self.config['model'], 'input': chunk}
+            if self.config.get('send_dimensions', True):
+                body['dimensions'] = self.config['dimensions']
+            request = urllib.request.Request(self.config['base_url'].rstrip('/') + '/embeddings',
+                                             data=json.dumps(body).encode(), method='POST',
+                                             headers={'Content-Type': 'application/json'})
+            try:
+                with self.opener.open(request, timeout=120) as response:
+                    raw = response.read(embeddings.MAX_RESPONSE_BYTES + 1)
+                if len(raw) > embeddings.MAX_RESPONSE_BYTES:
+                    raise ValueError('response size')
+                result = json.loads(raw)
+                self.budget.settle(call, result.get('usage', {}).get('prompt_tokens'))
+                if not isinstance(result['data'], list) or any(type(item['index']) is not int for item in result['data']):
+                    raise ValueError('indices')
+                ordered = sorted(result['data'], key=lambda item: item['index'])
+                if [item['index'] for item in ordered] != list(range(len(chunk))):
+                    raise ValueError('indices')
+                received = [item['embedding'] for item in ordered]
+                if any(len(v) != self.config['dimensions'] or
+                       any(type(x) not in (int, float) or not math.isfinite(x) for x in v) or
+                       not any(x != 0 for x in v) for v in received):
+                    raise ValueError('vectors')
+                vectors.extend(received)
+            except embeddings.BudgetExceeded:
+                raise
+            except urllib.error.HTTPError as error:
+                code = error.code
+                error.close()
+                raise RuntimeError(f'self-hosted HTTP {code}') from None
+            except (urllib.error.URLError, TimeoutError):
+                raise RuntimeError('self-hosted transport failed') from None
+            except (ValueError, KeyError, TypeError, AttributeError):
+                raise RuntimeError('invalid self-hosted embeddings response') from None
+        return vectors
 
 
 class Hosted:
@@ -172,8 +248,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--set', required=True, choices=sorted(public_sets.SETS))
     parser.add_argument('--include-restricted', action='store_true', help='opt into diagnostic-only sets under their restricted licences')
-    parser.add_argument('--models', nargs='+', choices=MODELS, default=MODELS[1:4],
+    parser.add_argument('--models', nargs='+', default=None,
                         help='e5 baseline always runs first; include Cohere-Embed-V5-Pro-1024 for reduced dimensions')
+    parser.add_argument('--openai-config', action='append', default=[], metavar='LABEL=FILE',
+                        help='self-hosted candidate with the same JSON configuration as hosted.embed (auth none)')
+    parser.add_argument('--query-latency', action='store_true',
+                        help='encode queries individually to measure warm query p50/p95, instead of batch throughput')
     parser.add_argument('--max-input-tokens', required=True, type=int)
     parser.add_argument('--max-usd', required=True)
     parser.add_argument('--price', action='append', default=[], metavar='MODEL=USD_PER_MILLION',
@@ -197,9 +277,19 @@ def main(argv=None):
             prices[model] = float(value)
         except (ValueError, decimal.InvalidOperation):
             parser.error('--price requires a supported deployment and finite non-negative USD rate')
-    systems = list(dict.fromkeys([BASELINE] + args.models))
+    configs = {}
+    for selection in args.openai_config:
+        label, separator, filename = selection.partition('=')
+        if not separator or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', label) or label in MODELS or label in configs:
+            parser.error('--openai-config requires a unique LABEL=FILE')
+        configs[label] = json.loads(pathlib.Path(filename).read_text())
+        OpenAI(configs[label], budget, args.set, label)  # fail before any download
+    models = args.models if args.models is not None else list(configs) if configs else MODELS[1:4]
+    if any(name not in MODELS and name not in configs for name in models):
+        parser.error('--models must name hosted deployments or configured self-hosted labels')
+    systems = list(dict.fromkeys([BASELINE] + models))
     hosted = None
-    if any(name != BASELINE for name in systems):
+    if any(name != BASELINE and name not in configs for name in systems):
         if not os.environ.get('AZURE_FOUNDRY_ENDPOINT') or not os.environ.get('AZURE_FOUNDRY_KEY'):
             parser.error('hosted models need AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_KEY')
         hosted = Hosted(os.environ['AZURE_FOUNDRY_ENDPOINT'], os.environ['AZURE_FOUNDRY_KEY'], budget, args.set, prices)
@@ -208,8 +298,11 @@ def main(argv=None):
     doc_ids, query_ids = sorted(data['corpus']), sorted(data['queries'])
     docs = [((data['corpus'][d]['title'] + '\n') if data['corpus'][d]['title'] else '') + data['corpus'][d]['text'] for d in doc_ids]
     queries = [data['queries'][q] for q in query_ids]
+    git_sha = os.environ.get('QUIVR_EVAL_GIT_SHA') or subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+    if not re.fullmatch('[0-9a-f]{40}', git_sha):
+        raise ValueError('measurement requires a full git SHA')
     report = {'date': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'status': 'running',
-              'source': {'git_sha': subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip(),
+              'source': {'git_sha': git_sha,
                          'plugin_digest': 'sha256:' + hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
                          'machine': socket.gethostname()},
               'set': args.set, 'documents': len(docs), 'queries': len(queries), 'results': {},
@@ -219,6 +312,11 @@ def main(argv=None):
                            'overlap_chars': 200, 'retrieval': 'exact cosine, best piece, top 10',
                            'prices_usd_per_million': prices, 'price_reference_date': '2026-10-03',
                            'scoring': scoring.CONVENTION, 'paired_test': scoring.TEST}}
+    if configs:
+        report['settings']['openai_configs'] = configs
+        report['settings']['self_hosted_execution'] = {'request_timeout_seconds': 120, 'attempts': 1,
+                                                     'concurrency': 1, 'segmentation': 'reference character windows',
+                                                     'batch_size': 'configured; query latency uses one input'}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     # Exclusive creation protects previously saved results, including concurrent runs.
     with args.out.open('x', encoding='utf-8') as output:
@@ -236,21 +334,40 @@ def main(argv=None):
                 report['active_model'] = name
                 save()
                 started = time.monotonic()
-                pieces, owners = split_documents(docs, 1800 if name == BASELINE else 6000)
+                width = 1800 if name == BASELINE or configs.get(name, {}).get('model') == E5_MODEL else 6000
+                report['settings'].setdefault('window_chars', {})[name] = width
+                pieces, owners = split_documents(docs, width)
+                compatible = OpenAI(configs[name], budget, args.set, name) if name in configs else None
                 def embed(texts, mode):
                     if name == BASELINE:
                         return local.embed(texts, mode)
+                    if compatible:
+                        return compatible.embed(texts, mode)
                     reduced = name.endswith('-1024')
                     model = name[:-5] if reduced else name
                     return hosted.embed(model, texts, mode, dimensions=1024 if reduced else None, label=name)
                 document_vectors = normalize(embed(pieces, 'document'))
                 indexed = time.monotonic()
-                query_vectors = normalize(embed(queries, 'query'))
+                latencies = []
+                if args.query_latency:
+                    encoded = []
+                    for query in queries:
+                        before = time.monotonic()
+                        encoded.extend(embed([query], 'query'))
+                        latencies.append((time.monotonic() - before) * 1000)
+                    query_vectors = normalize(encoded)
+                else:
+                    query_vectors = normalize(embed(queries, 'query'))
                 queried = time.monotonic()
                 scores = scoring.score(data['qrels'], rank(doc_ids, query_ids, query_vectors, document_vectors, owners))
                 result = {'mean': scores['mean'], 'per_query': scores['per_query'],
                           'duration_seconds': round(time.monotonic() - started, 3), 'dims': int(document_vectors.shape[1]), 'pieces': len(pieces),
                           'index_s': round(indexed - started, 1), 'query_ms': round(1000 * (queried - indexed) / len(queries), 1)}
+                if latencies:
+                    import numpy as np
+                    result['latency_ms'] = {'p50': float(np.percentile(latencies, 50)),
+                                            'p95': float(np.percentile(latencies, 95)), 'samples': len(latencies),
+                                            'scope': 'single query encoding; first query may include initialization'}
                 if name != BASELINE:
                     result['index_usage'] = budget.summary(model=name, phase='document')
                     result['query_usage'] = budget.summary(model=name, phase='query')
