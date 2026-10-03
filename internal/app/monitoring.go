@@ -98,7 +98,9 @@ func (cfg Config) planEvaluators(ctx context.Context, store registry.Store, set 
 	for _, r := range named {
 		pin, err := r.Pin()
 		if err != nil || pin.Manifest.Contributions.Subscription == nil {
-			slog.Error("an earlier alert-rule version cannot be loaded; the Subscription Versions pinning it wait", "plugin", r.PluginID, "version", r.Version, "registration", r.ID, "error", err)
+			if r.Subscriptions > 0 || r.PinnedWork > 0 {
+				slog.Error("an earlier alert-rule version cannot be loaded; the Subscription Versions pinning it wait", "plugin", r.PluginID, "version", r.Version, "registration", r.ID, "subscriptions", r.Subscriptions, "pinned_work", r.PinnedWork, "error", err)
+			}
 			continue
 		}
 		retained[plugins.EvaluatorKey(pin.Manifest.ID, pin.Manifest.Version)] = pluginhttp.Evaluator{Pin: pin}
