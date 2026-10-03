@@ -115,7 +115,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Described alerts** through the same plugin: a plain-language description such as
   "Labour strikes at ports and harbours", judged by TypeSafe's Jev classifier, so
   rephrased and translated articles alert too:
-  - one classifier call per article covers all described alerts;
+  - the plugin batches ready checks and asks each distinct description once per batch;
   - an alert can be limited to chosen sources, whose other articles are never sent;
   - the Match evidence carries the classifier's score;
   - they are off without a TypeSafe key, because article text is sent to TypeSafe
@@ -126,9 +126,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Local meaning alerts** through the same plugin: the `meaning` kind with
   `meaning_check: vectors` compares
   a description with stored embeddings to catch rephrased or translated articles
-  without an external classifier. `keywords_or_meaning` and `keywords_and_meaning`
+  without an external classifier (text stays local only with a local embedding provider). `keywords_or_meaning` and `keywords_and_meaning`
   combine keyword and meaning checks
-  ([guide](https://docs.quivr.thevibecompany.co/guides/described-alerts#keep-the-meaning-check-inside-the-installation)).
+  ([guide](https://docs.quivr.thevibecompany.co/guides/described-alerts#use-the-local-meaning-check)).
 - **Subscription previews** (`POST /v0/subscription-previews`): before saving an alert,
   see which of the most recent articles it would have caught, judged by the same plugin
   with the same rules. A preview saves nothing and sends nothing, and it judges at most

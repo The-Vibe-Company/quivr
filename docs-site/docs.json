@@ -74,8 +74,14 @@
             "pages": [
               "guides/add-content",
               "guides/search",
-              "guides/keyword-alerts",
-              "guides/described-alerts",
+              {
+                "group": "Alerts",
+                "pages": [
+                  "guides/alerts",
+                  "guides/keyword-alerts",
+                  "guides/described-alerts"
+                ]
+              },
               {
                 "group": "Collect from sources",
                 "pages": [

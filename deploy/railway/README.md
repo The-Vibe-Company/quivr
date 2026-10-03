@@ -151,7 +151,7 @@ Use an operator key with `plugins:admin` and the relevant Corpus grants. Call th
 3. Keep A reachable until its registry `subscriptions` and `pinned_work` are both zero, including undispatched old triggers. Only then remove A's endpoint or image.
 
 If A has already disappeared, its missing-evaluator retries continue unchanged. Restore A for zero-loss recovery, or intentionally abandon potential Matches with `POST /v0/admin/subscriptions/evaluation-retirements`.
-Follow the [bounded retirement procedure](https://docs.quivr.thevibecompany.co/guides/keyword-alerts#retire-evaluations-you-cannot-finish): inspect `GET /v0/admin/subscriptions/evaluation-backlog`, dry-run first, wait for leases and dispatch, then repeat real batches with new keys. Retirement records `evaluator_retired`, never `no_match`, and creates no Match or Delivery.
+Follow the [bounded retirement procedure](https://docs.quivr.thevibecompany.co/run-quivr/retire-alert-evaluations): inspect `GET /v0/admin/subscriptions/evaluation-backlog`, dry-run first, wait for leases and dispatch, then repeat real batches with new keys. Retirement records `evaluator_retired`, never `no_match`, and creates no Match or Delivery.
 
 ## Provision and deploy
 

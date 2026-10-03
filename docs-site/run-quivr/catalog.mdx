@@ -35,14 +35,24 @@ Pin it with a route for `application/pdf`. See [Add content](/guides/add-content
 
 Keyword and local-vector checks need no classifier key. Jev checks need a `TYPESAFE_API_KEY` in the plugin's environment.
 
-| Kind | Checks | Sends text out? |
+| Kind | Checks | Sends text to Jev? |
 | --- | --- | --- |
 | `keywords` | Boolean query and metadata filters | No |
 | `meaning` | Local stored vectors; requires `meaning_check: vectors` | No |
-| `described` | Jev by default, local vectors with `meaning_check: vectors` | With Jev |
-| `keywords_or_meaning` / `keywords_and_meaning` | Keyword and meaning checks, with an explicit `meaning_check` | With Jev |
+| `described` | Jev by default, local vectors with `meaning_check: vectors` | Yes, unless `meaning_check: vectors` |
+| `keywords_or_meaning` / `keywords_and_meaning` | Keyword and meaning checks, with an explicit `meaning_check` | With `meaning_check: jev` |
+
+Vector checks embed the description with the deployment's embedding provider, which also embeds every article. With the default `core-ingest` and an embedding server you run, that text stays inside the installation; with a hosted provider, it goes to that provider.
 
 The pin's `kinds` lists the alert kinds the deployment accepts. For keyword and local meaning checks without a TypeSafe key, pin `"kinds": ["keywords", "meaning", "keywords_or_meaning", "keywords_and_meaning"]`, as `make dev` does. Use `kind: meaning` for a local description, and `meaning_check: vectors` for every meaning check. This pin excludes `described`, so that kind is refused with `422 invalid_expression` even when it selects vectors. The kind list alone does not prevent a mixed expression from selecting Jev.
+
+To offer Jev checks:
+
+1. Put the key in the `alerts` plugin's environment: `TYPESAFE_API_KEY=<your key>`. Never put it in Quivr's configuration, in logs or in a repository.
+2. Add `described` to the pin's `kinds`, keeping the kinds already offered: `"kinds": ["keywords", "meaning", "keywords_or_meaning", "keywords_and_meaning", "described"]`. A kind missing from the list is refused for new alerts.
+3. Restart the plugin and Quivr. The plugin logs at startup whether described alerts are enabled.
+
+`make dev` adds `described` only when `TYPESAFE_API_KEY` is set in its environment. Meaning kinds need `alerts` `0.3.0`; existing Subscriptions keep the version they name until you [migrate them](/run-quivr/upgrade-an-alert-rule).
 
 | Configuration | Default | Meaning |
 | --- | --- | --- |
@@ -51,7 +61,7 @@ The pin's `kinds` lists the alert kinds the deployment accepts. For keyword and 
 | `described.threshold` | `0.5` | Default Jev probability threshold, 0.2 to 0.95 |
 | `vectors.threshold` | `0.8` | Default local-vector cosine similarity threshold, 0.2 to 0.95 |
 
-See [Keyword alerts](/guides/keyword-alerts) and [Described alerts](/guides/described-alerts).
+See [How alerts work](/guides/alerts), [Keyword alerts](/guides/keyword-alerts) and [Meaning alerts](/guides/described-alerts).
 
 ## core-ingest
 

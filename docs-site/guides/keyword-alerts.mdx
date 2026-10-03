@@ -4,12 +4,12 @@ description: "Get notified when a new article matches a keyword query, and read 
 keywords: ["alerts", "keywords", "saved query", "subscription", "match", "webhook", "boolean query"]
 ---
 
-A keyword alert fires when a new article matches a query such as `"harbour strike" AND (ferry OR port) NOT football`. Quivr records each catch as a Match with the words that matched, and sends it to your webhook. The first-party `alerts` plugin decides the matches.
+A keyword alert fires when a new article matches a query such as `"harbour strike" AND (ferry OR port) NOT football`. Quivr records each catch as a Match with the words that matched, and sends it to your webhook. The first-party `alerts` plugin decides the matches. [How alerts work](/guides/alerts) explains the objects this page creates.
 
 ## Prerequisites
 
 - The `alerts` plugin pinned. The local stack pins it; elsewhere see [Pin a plugin](/run-quivr/pin).
-- `QUIVR_API_URL` and a `QUIVR_API_KEY` with `monitoring:read` and `monitoring:write`, plus `content:write` to add the test article below.
+- `QUIVR_API_URL` and a `QUIVR_API_KEY` with `monitoring:read` and `monitoring:write`, plus `content:write` to add the test article below. The first request creates a Corpus, which needs `corpora:write` and a key not limited to some Corpora; with another key, use an existing Corpus id instead. The local stack's `make env` key has all of these.
 - `QUIVR_DESTINATION`: the id of a webhook destination the operator configured for your Organization. Destinations live in Quivr's configuration, never in API requests. The local stack's `make env` sets one that delivers nowhere.
 
 ## Write the query
@@ -174,13 +174,85 @@ For each Match, Quivr sends a `POST` to the destination's URL. The body only ref
                 "record_id": "…", "record_version_id": "…", "delivery_id": "…", "owner": "user-123"}}
 ```
 
-Verify the signature before you parse the body. Requests follow [Standard Webhooks](https://www.standardwebhooks.com/): the `webhook-signature` header holds an HMAC-SHA256 of `webhook-id`, `webhook-timestamp` and the raw body, keyed with the secret the operator configured for the destination.
+Answer with a 2xx status within 10 seconds to acknowledge it. Timeouts, connection failures, `408`, `429` and `5xx` answers are retried with growing delays, from 1 second up to 5 minutes, for 24 hours; any other answer stops the retries. These are defaults the operator can change, and a `Retry-After` header on a `429` or `503` sets the next delay. `GET /v0/deliveries/{delivery_id}` shows a delivery's state and its attempts.
 
-Answer with a 2xx status to acknowledge. Timeouts, `408`, `429` and `5xx` answers are retried with exponential backoff, from 1 second up to 5 minutes, for 24 hours; any other answer stops the retries. Delivery is at least once, and a retry sends the same `event_id` and the same bytes, so deduplicate on `webhook-id`.
+When an article that matched is corrected or withdrawn, the same receiver gets a follow-up: `match.corrected`, `match.no_longer_matches` or `match.withdrawn`. [Corrections and withdrawals](/guides/alerts#corrections-and-withdrawals) says which ones store a new Match.
 
-`GET /v0/deliveries/{delivery_id}` shows a delivery's state and its attempts.
+## Verify the signature
 
-When an article that matched changes, the Subscription gets a follow-up: `match.corrected` when a correction still matches (a new Match linked to the earlier one), `match.no_longer_matches` when it does not, and `match.withdrawn` when the article is withdrawn.
+Check the signature on the raw body before you parse it. Requests follow [Standard Webhooks](https://www.standardwebhooks.com/): the `webhook-signature` header holds `v1,` and a base64 HMAC-SHA256 of `webhook-id`, `webhook-timestamp` and the raw body, joined by dots. The key is the destination's secret, `whsec_` followed by base64. The operator sets it in [Quivr's configuration](/reference/configuration#webhook-destinations) and gives it to you. The header can hold several signatures separated by spaces; accept the request when one of them matches.
+
+This Python function takes the headers as a dictionary with lower-case names. It accepts only `v1` signatures, skips malformed ones, and refuses a request whose timestamp is more than five minutes old; every retry carries a fresh timestamp. It was run by hand against Quivr's [public test vector](https://github.com/The-Vibe-Company/quivr-v2/blob/main/contracts/http/v0/webhook-vector.json) and against altered copies of it.
+
+```python
+import base64, binascii, hashlib, hmac, time
+
+def verify(secret: str, headers: dict, body: bytes, tolerance: int = 300) -> bool:
+    key = base64.b64decode(secret.removeprefix("whsec_"))
+    msg_id = headers.get("webhook-id", "")
+    ts = headers.get("webhook-timestamp", "")
+    if not msg_id or not (ts.isascii() and ts.isdigit()):
+        return False
+    if abs(time.time() - int(ts)) > tolerance:
+        return False
+    signed = f"{msg_id}.{ts}.".encode() + body
+    expected = hmac.new(key, signed, hashlib.sha256).digest()
+    for token in headers.get("webhook-signature", "").split():
+        version, _, value = token.partition(",")
+        if version != "v1" or not value.isascii():
+            continue
+        try:
+            candidate = base64.b64decode(value, validate=True)
+        except binascii.Error:
+            continue
+        if hmac.compare_digest(candidate, expected):
+            return True
+    return False
+```
+
+Answer `401` when it returns `False`. That answer is permanent, so Quivr stops retrying that webhook. With a wrong secret, every webhook is refused this way; the Matches stay listable through the API.
+
+## Deduplicate
+
+Delivery is at least once: a webhook can arrive twice, for example when your answer is lost on the way back. A retry sends the same `webhook-id`, which is the body's `event_id`, and the same body. Each event, follow-ups included, has its own id. Store the ids you have handled for at least the retry window, 24 hours by default, and answer 2xx without acting again when one comes back. Record an id only after you have acted on the event, so a crash before then gets the webhook again.
+
+<Accordion title="A complete receiver in Python">
+
+This receiver uses only the standard library. It verifies each webhook with the `verify` function above, acts on each event once, and acknowledges with `204`. It was run by hand with signed test requests: a valid one, a repeat and a forged one. Quivr refuses loopback and private addresses by default, so put the receiver behind the public URL of the destination the operator configured. Keep the handled ids in your database rather than in memory, so they survive a restart, and give them a unique constraint if two copies can arrive at the same time.
+
+```python
+import json, os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# Paste the verify function from above here.
+
+SECRET = os.environ["QUIVR_WEBHOOK_SECRET"]  # the destination's whsec_ secret
+handled = set()
+
+
+class Receiver(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        headers = {name.lower(): value for name, value in self.headers.items()}
+        if not verify(SECRET, headers, body):
+            self.send_response(401)
+            self.end_headers()
+            return
+        event_id = headers["webhook-id"]
+        if event_id not in handled:
+            event = json.loads(body)
+            print(event["type"], event["references"]["match_id"])  # your own handling
+            handled.add(event_id)
+        self.send_response(204)
+        self.end_headers()
+
+
+HTTPServer(("127.0.0.1", 8787), Receiver).serve_forever()
+```
+
+</Accordion>
+
+A receiver that stays down past the retry window misses those webhooks. List Matches with `GET /v0/matches?subscription_id=…` to recover first matches and corrections that still matched. Corrections that no longer match and withdrawals create notices without new Matches: an application that already follows the [change feed](https://docs.quivr.thevibecompany.co/api-reference/changes/poll-changes) from a saved position, with a key that has `changes:read`, finds them there for as long as the operator keeps events, 7 days by default.
 
 ## Change or stop an alert
 
@@ -191,14 +263,6 @@ When an article that matched changes, the Subscription gets a follow-up: `match.
 | Pause, resume | `POST /v0/subscriptions/{id}/disable`, `…/enable` | Articles that arrive during the pause are not judged |
 | Delete | `POST /v0/subscriptions/{id}/delete` | Permanent; earlier Matches stay readable |
 
-## Upgrade the alert rule without losing alerts
-
-Operators can [upgrade an alert rule](/run-quivr/upgrade-an-alert-rule) while keeping old evaluations on their pinned version.
-
-## Retire evaluations you cannot finish
-
-Operators can [retire unavailable evaluations](/run-quivr/retire-alert-evaluations) when the old rule cannot be restored and they accept losing potential Matches.
-
 ## Filter on your own metadata
 
 Ask your operator to [map the metadata fields](/run-quivr/configure-alert-fields) your alerts use, such as `author` or `category`. A list field matches when one of its values does. A name the operator has not mapped never matches.
@@ -207,4 +271,14 @@ Ask your operator to [map the metadata fields](/run-quivr/configure-alert-fields
 
 A keyword alert is decided as soon as the article becomes searchable, before its vectors are computed. Set `{"wait_for_enrichment": true}` in the Subscription's `evaluator.configuration` to wait for them.
 
-To match articles by subject rather than by words, use [described alerts](/guides/described-alerts).
+## For operators
+
+<span id="upgrade-the-alert-rule-without-losing-alerts" />
+<span id="retire-evaluations-you-cannot-finish" />
+
+Moving existing alerts to a new version of the alert rule, and abandoning evaluations whose old rule cannot be restored, are operator tasks: see [Upgrade an alert rule](/run-quivr/upgrade-an-alert-rule) and [Retire alert evaluations](/run-quivr/retire-alert-evaluations).
+
+## Next
+
+- [Meaning alerts](/guides/described-alerts): match articles by subject rather than by words.
+- [How alerts work](/guides/alerts): what happens between a new article and your webhook.

@@ -123,7 +123,7 @@ A retrieval plugin finds and ranks results using a search profile. `core.retriev
 
 An alert pairs a search definition (a Saved Query) with activation and notification settings (a Subscription). The saved query says what to look for and in which collections. The subscription chooses the rule and the notification destination. A positive decision is stored as a Match with evidence; that match never changes. Enrichment asks only undecided alerts again.
 
-A subscription can carry `owner`, a reference from your application that Quivr echoes so you can route notifications to the right person. Notifications are signed webhooks: HTTP requests to your receiver. Attempts can repeat, so receivers deduplicate; retries end on a permanent failure or when the retry window ends. Delivery is not guaranteed. Corrections and withdrawals of matched content can produce follow-up notices.
+A subscription can carry `owner`, a reference from your application that Quivr echoes so you can route notifications to the right person. Notifications are signed webhooks: HTTP requests to your receiver. Attempts can repeat, so receivers deduplicate; retries end on a permanent failure or when the retry window ends. Delivery is not guaranteed. Corrections and withdrawals of matched content can produce follow-up notices. [How alerts work](/guides/alerts) follows one alert from saved search to webhook.
 
 ## Access, sources and plugins
 
