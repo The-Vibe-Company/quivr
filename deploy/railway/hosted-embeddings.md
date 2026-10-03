@@ -83,7 +83,11 @@ curl -fsS -X POST "$QUIVR_API_URL/v0/admin/plugins/$REGISTRATION_ID/activate" \
 
 Activation of the evaluation owner switches its selected source formats together; it refuses incomplete coverage. Use this activation, rather than `/admin/spaces/{id}/promote`, which switches spaces within one owner. Inspect plan roles and repeat ordinary searches without evaluation fields. Hits should name the hosted space. Keep both sidecars running: core.ingest becomes an evaluation owner and fills new Versions for rollback.
 
-Identical startup pins preserve the operator's active plan across restarts. Changing the endpoint, model configuration, or evaluation switch changes the startup pins and can reconcile affected roles. Inspect the active plan after every redeploy; keep api and worker variables identical.
+## Redeploy after promotion
+
+Keep api and worker variables identical. A new build with the same plugin id, version, endpoint, installed settings and contribution contracts automatically replaces the current registration in a new plan, preserving the hosted serving routes and core.ingest evaluation routes. Configuration-schema changes are allowed if the unchanged settings still validate. A change to the model, vector-space declaration or other contribution contract follows normal startup reconciliation instead; inspect the active plan and search after every redeploy.
+
+Earlier plans still name their exact build. Work already started never moves to the replacement: keep the earlier build reachable until its `pinned_work` is zero. For an upgrade that must drain live work, run builds at separate addresses and use the [upgrade guide](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-a-plugin).
 
 ## Roll back
 
@@ -95,8 +99,9 @@ curl -fsS -X POST "$QUIVR_API_URL/v0/admin/plugins/plan/rollback" \
 EOF
 ```
 
+A saved plan that includes a replaced hosted build is refused with `409 plugin_unreachable`, even when that build was only an evaluation member. Restore its exact build at its recorded endpoint to use that plan, or activate the current active `core.ingest` registration listed by `GET /v0/admin/plugins`. Activating core.ingest promotes its evaluated source formats back to served and keeps the current hosted registration for evaluation.
+
 Verify core.ingest serves the selected formats and repeat ordinary searches. Rollback checks the returning owner's complete coverage; if new Versions lack E5 vectors, backfill core.ingest before retrying. Keep the hosted switch enabled during this drill so both implementations remain reachable. `stop` stops outgoing pinned work after processes follow the plan; use `drain` if that work should finish. After rollback is verified, disabling the switch on both services and redeploying removes hosted evaluation; first drain work that still needs it. Check the hosted registration's `pinned_work` at `GET /v0/admin/plugins` until zero before removing its sidecar.
 
 ## Next
-
 See [hosted.embed](../../plugins/hosted-embed/README.md) for provider configuration, and [switch plugins](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting) for activation and rollback contracts.

@@ -537,7 +537,7 @@ def parts():
     steps in order, so a step sees only the state its own part built. CI runs the parts in parallel
     (.github/workflows/verify.yml); `make verify` runs them one after another. To add a step, add one
     line to the part whose state it needs: acceptance('name','^TestPattern') or step('name',fn)."""
-    from hosted_embed_plugin import verify as verify_hosted_embed
+    from hosted_embed_plugin import verify as verify_hosted_embed, verify_redeploy as verify_hosted_redeploy
     from embedding_outage import verify as verify_embedding_outage
     from first_search import verify as verify_first_search
     from rebuild_recovery import verify as verify_rebuild_recovery
@@ -580,9 +580,10 @@ def parts():
             journey,
             step('validate_captures',validate_captures)],
         # Normalizer and alert-rule plugins, the keyless core, then the harness lifecycle.
-        'plugins':setup+[
-            # First, while the stack still runs on the pins it was seeded from: the plugin registry lists them.
+        'plugins':[
+            # Inspect the pristine registry before redeploy leaves historical registrations behind.
             acceptance('plugin_registry','^TestPluginRegistry$'),
+            step('hosted_build_redeploy',verify_hosted_redeploy)]+setup+[
             # A routed Markdown Blob is normalized by the pinned plugin and its outline extension is mapped into search;
             # then invalid pins are refused, and with the plugin stopped the processes stay healthy and a rebuild needs no plugin.
             acceptance('normalizer','TestNormalizerMakesRoutedBlobsSearchable|TestNormalizerExtensionsFeedRetrievalMappings'),

@@ -152,7 +152,7 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 			&registry.IssueError{Kind: registry.ErrConflict, Issues: pinError.Issues}},
 		{"plugin_conflict", "plugin conflict; space_owner_conflict vector space example.space@1", 409,
 			&content.SpaceError{Kind: content.ErrSpaceOwner, Space: "example.space@1", Detail: internalErrorMarker}},
-		{"plugin_unreachable", "plugin unreachable; plugin_unreachable /registrations/old plugin=example.source@1.0.0 cause=network_error", 409,
+		{"plugin_unreachable", "plugin unreachable; plugin_unreachable /registrations/old plugin=example.source@1.0.0 cause=network_error; restore the exact build at its endpoint, or activate the current registration of the previous owner listed by GET /v0/admin/plugins", 409,
 			&registry.IssueError{Kind: registry.ErrUnreachable, Issues: []plugins.Issue{{Code: registry.CodeUnreachable, Path: "/registrations/old", PluginID: "example.source", PluginVersion: "1.0.0", Cause: plugins.CauseNetwork, Message: internalErrorMarker}}}},
 	} {
 		for style, err := range detailed(tc.err) {
@@ -171,9 +171,11 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 	for _, tc := range []struct {
 		name, id, version string
 		count             int
+		kind              error
 	}{
-		{"many long Unicode values", strings.Repeat("é", 4000), strings.Repeat("1", 4000), 100},
-		{"invalid UTF-8 expands during JSON encoding", strings.Repeat("\xff", 128), strings.Repeat("\xff", 64), 5},
+		{"many long Unicode values", strings.Repeat("é", 4000), strings.Repeat("1", 4000), 100, registry.ErrConflict},
+		{"invalid UTF-8 expands during JSON encoding", strings.Repeat("\xff", 128), strings.Repeat("\xff", 64), 5, registry.ErrConflict},
+		{"unreachable guidance stays bounded", strings.Repeat("é", 4000), strings.Repeat("1", 4000), 100, registry.ErrUnreachable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			issues := make([]plugins.Issue, tc.count)
@@ -181,7 +183,7 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 				issues[i] = plugins.Issue{Code: plugins.CodeKindConflict, Path: "/manifest", PluginID: tc.id, PluginVersion: tc.version, Cause: plugins.IssueCause(internalErrorMarker), Message: internalErrorMarker}
 			}
 			rec := httptest.NewRecorder()
-			writeError(rec, &registry.IssueError{Kind: registry.ErrConflict, Issues: issues}, publicerr.StorageUnavailable)
+			writeError(rec, &registry.IssueError{Kind: tc.kind, Issues: issues}, publicerr.StorageUnavailable)
 			var body struct{ Message string }
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
@@ -236,7 +238,7 @@ func TestRollbackFailureReportsTypedCause(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 			writeError(rec, fmt.Errorf("%s: %w", internalErrorMarker, err), publicerr.StorageUnavailable)
-			assertPublicMessage(t, rec, "plugin_unreachable", "plugin unreachable; plugin_unreachable /registrations/old plugin=example.static-source@0.1.0 cause="+tc.cause)
+			assertPublicMessage(t, rec, "plugin_unreachable", "plugin unreachable; plugin_unreachable /registrations/old plugin=example.static-source@0.1.0 cause="+tc.cause+"; restore the exact build at its endpoint, or activate the current registration of the previous owner listed by GET /v0/admin/plugins")
 		})
 	}
 }

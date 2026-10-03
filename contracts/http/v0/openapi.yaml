@@ -236,7 +236,7 @@ x-public-errors:
   plugin_unreachable:
     status_class: 409
     retryable: false
-    operations: [rollbackPipelinePlan]
+    operations: [activatePlugin, rollbackPipelinePlan]
   push_replayed:
     status_class: 409
     retryable: false
@@ -2518,8 +2518,11 @@ paths:
         media type, one provider per connector kind, valid ingestion source routes and retrieval providers per plugin id, extension
         namespace and vector space ownership); otherwise 409 plugin_conflict lists what breaks. 409
         registration_not_validated for a registration that is not validated or inactive. Activating the
-        registration that is already active returns the active plan. Work already started may finish on
-        the new plan (THE-782 pins it to its own). A new version of an alert-rule plugin serves the
+        registration that is already active promotes its evaluation source formats to served, retaining the
+        previous owner for evaluation; it returns the active plan when there is nothing to promote.
+        The target must answer discovery with its exact manifest digest, including for an unchanged
+        activation; otherwise 409 plugin_unreachable names the registration and cause and no plan changes.
+        Work already started keeps its earlier plan. A new version of an alert-rule plugin serves the
         Subscription Versions created or edited from then on. Every Subscription Version keeps the version
         it recorded, which keeps judging it and stays draining while Subscriptions pin it, until
         migrateSubscriptionEvaluators moves them. Requires plugins:admin.
@@ -2541,7 +2544,7 @@ paths:
                 $ref: '#/components/schemas/PipelinePlan'
         default:
           description: Structured error; 401 unauthenticated, 403 without plugins:admin, 404 unknown
-            registration, 409 registration_not_validated or plugin_conflict, 503 storage unavailable.
+            registration, 409 registration_not_validated, plugin_conflict or plugin_unreachable, 503 storage unavailable.
           content:
             application/json:
               schema:
@@ -2998,7 +3001,10 @@ paths:
         pin it, whatever pinned_work says, as after an activation.
         Every plugin it brings back must answer discovery at its endpoint with its manifest's digest.
         Otherwise the answer is 409 plugin_unreachable, naming the plugin and the cause, and no plan
-        changes. 409 no_previous_plan when there is no earlier plan to return to. A rollback to the active
+        changes. Restore that registration's exact build at its endpoint, or activate the current registration
+        of the previous ingestion owner to restore its evaluated source formats while retaining the newer build.
+        Historical plans are never rewritten to follow a redeployed build.
+        409 no_previous_plan when there is no earlier plan to return to. A rollback to the active
         plan's roles returns the active plan. The same idempotency key with the same request returns the
         plan it recorded. The same key with another request is 409 idempotency_conflict. Nothing already
         produced is rewritten. Requires plugins:admin.

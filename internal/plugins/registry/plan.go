@@ -336,13 +336,13 @@ func (s Service) Activate(ctx context.Context, scope corpus.Scope, id string) (P
 	}
 	plan, err := s.Store.Activate(ctx, id, func(active Plan, members map[string]Registration, target Registration) (Activation, error) {
 		a, err := PlanActivation(active, members, target, s.Validate)
-		if err == nil && target.State == StateActive && !a.Unchanged {
+		if err == nil {
 			reach := s.Reach
 			if reach == nil {
 				reach = Discover
 			}
 			if err = reach(ctx, target); err != nil {
-				return Activation{}, &IssueError{Kind: ErrUnreachable, Issues: []plugins.Issue{{Code: CodeUnreachable, Path: "/registrations/" + target.ID, PluginID: target.PluginID, PluginVersion: target.Version, Cause: discoveryCause(err), Message: "start the evaluation plugin before promoting it to served"}}}
+				return Activation{}, &IssueError{Kind: ErrUnreachable, Issues: []plugins.Issue{{Code: CodeUnreachable, Path: "/registrations/" + target.ID, PluginID: target.PluginID, PluginVersion: target.Version, Cause: discoveryCause(err), Message: "the running plugin must match this registration; restore its exact build at its endpoint, or activate the current registration listed by GET /v0/admin/plugins"}}}
 			}
 		}
 		if err == nil && !a.Unchanged && s.Spaces != nil {
@@ -397,6 +397,31 @@ func Reconcile(configured Seed, snapshot map[string]string, active *Plan, regist
 		activeRoles = canonicalRoles(active.Roles, registrations)
 	}
 	snapshot = canonicalSnapshot(snapshot, registrations)
+	// A compatible build at the same configured address follows every current
+	// assignment, including routes changed by an operator. Comparing snapshots
+	// with the same replacement prevents the startup evaluation routes from
+	// undoing that promotion. Historical plans and their work remain untouched.
+	previousIDs := map[string]bool{}
+	for _, id := range snapshot {
+		previousIDs[id] = true
+	}
+	for _, next := range configured.Registrations {
+		for _, id := range sortedKeys(previousIDs) {
+			if !compatibleBuild(registrations[id], next) {
+				continue
+			}
+			for role, registrationID := range snapshot {
+				if registrationID == id {
+					snapshot[role] = next.ID
+				}
+			}
+			for i, a := range activeRoles {
+				if a.RegistrationID == id {
+					activeRoles[i].RegistrationID = next.ID
+				}
+			}
+		}
+	}
 	whole := func(reason string) Reconciliation {
 		r := Reconciliation{Roles: configuredRoles, Whole: reason != "", Reason: reason}
 		r.Changed = active == nil || !sameRoles(originalActiveRoles, configuredRoles)
@@ -471,6 +496,31 @@ func Reconcile(configured Seed, snapshot map[string]string, active *Plan, regist
 		return whole("a plugin would keep only part of the roles it declares")
 	}
 	return Reconciliation{Roles: out, Changed: !sameRoles(originalActiveRoles, out), Overridden: overridden}
+}
+
+// compatibleBuild permits schema evolution only when the unchanged installed
+// settings still validate. Contribution contracts (including vector spaces),
+// requirements, extensions and secrets must stay the same.
+func compatibleBuild(before, next Registration) bool {
+	if before.ID == next.ID || before.Origin != OriginConfiguration || next.Origin != OriginConfiguration ||
+		before.PluginID != next.PluginID || before.Version != next.Version || before.Endpoint != next.Endpoint {
+		return false
+	}
+	oldPin, oldErr := before.Pin()
+	newPin, newErr := next.Pin()
+	if oldErr != nil || newErr != nil {
+		return false
+	}
+	// PostgreSQL jsonb can reorder configuration keys. Compare the resolved,
+	// canonical settings rather than the bytes read back from storage.
+	if SettingsOf(oldPin).Digest() != SettingsOf(newPin).Digest() {
+		return false
+	}
+	oldManifest, newManifest := oldPin.Manifest, newPin.Manifest
+	oldManifest.Run, newManifest.Run = nil, nil
+	oldManifest.Configuration, newManifest.Configuration = nil, nil
+	oldManifest.Description, newManifest.Description = "", ""
+	return reflect.DeepEqual(oldManifest, newManifest)
 }
 
 // canonicalRoles gives plans one role vocabulary while keeping old plans

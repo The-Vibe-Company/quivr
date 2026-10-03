@@ -1,6 +1,7 @@
 package registry_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"reflect"
@@ -322,6 +323,93 @@ func TestIngestionEvaluationRoundTripsAcrossUpgradeAndRollback(t *testing.T) {
 	}
 	if got := roleMap(back.Roles); !reflect.DeepEqual(got, roleMap(target.Roles)) || !reflect.DeepEqual(back.Retired, []string{evaluatorV2.ID}) {
 		t.Fatalf("evaluation rollback roles=%v retired=%v, want %v and %s", got, back.Retired, roleMap(target.Roles), evaluatorV2.ID)
+	}
+}
+
+// This owns compatible startup build replacement after an operator promotion:
+// membership, served routes and evaluation routes must follow the new digest
+// together without changing which owner serves a format.
+func TestRedeployKeepsOperatorIngestionRouting(t *testing.T) {
+	core := registered(t, manifest("example.words", "1.0.0", ingestion("example.words.small")))
+	old := registered(t, manifest("example.evaluator", "1.0.0", ingestion("example.evaluator.small")))
+	routing := plugins.IngestionRouting{Default: core.PluginID, Evaluation: map[string][]string{"text/plain": {old.PluginID}}}
+	withConfiguration := func(r registry.Registration, raw string) registry.Registration {
+		r.Settings.Configuration = json.RawMessage(raw)
+		pin, err := r.Pin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return registry.FromPins(set).Registrations[0]
+	}
+	for name, c := range map[string]struct {
+		source        string
+		before, after string
+		change        func(*registry.Registration)
+		follow        bool
+	}{
+		"build":                  {source: string(old.Manifest) + "\n# new build\n", follow: true},
+		"run command":            {source: string(old.Manifest) + "\nrun: {command: [new-build]}\n", follow: true},
+		"schema default":         {source: string(old.Manifest) + "\nconfiguration:\n  schema: {type: object, properties: {concurrency: {type: integer, default: 4}}}\n", follow: true},
+		"large integer changed":  {source: string(old.Manifest) + "\n# new build\n", before: `{"sequence":9007199254740992}`, after: `{"sequence":9007199254740993}`},
+		"JSONB number spelling":  {source: string(old.Manifest) + "\n# new build\n", before: `{"sequence":9007199254740993,"fraction":0.000001}`, after: `{"fraction":1e-6,"sequence":9.007199254740993e15}`, follow: true},
+		"decimal changed":        {source: string(old.Manifest) + "\n# new build\n", before: `{"fraction":0.1234567890123456789012}`, after: `{"fraction":0.1234567890123456789013}`},
+		"nested number spelling": {source: string(old.Manifest) + "\n# new build\n", before: `{"values":[-0.00000001,1.234567890123456789012,{"budget":1e30}]}`, after: `{"values":[-1e-8,0.1234567890123456789012e1,{"budget":1000000000000000000000000000000}]}`, follow: true},
+		"new version":            {source: strings.Replace(string(old.Manifest), "version: 1.0.0", "version: 2.0.0", 1)},
+		"new model":              {source: strings.Replace(string(old.Manifest), "fake/hash-8", "fake/other-8", 1)},
+		"new call contract":      {source: strings.Replace(string(old.Manifest), "timeout_ms: 5000", "timeout_ms: 6000", 1)},
+		"new endpoint":           {source: string(old.Manifest) + "\n# new build\n", change: func(r *registry.Registration) { r.Endpoint = "http://127.0.0.1:9901" }},
+		"operator registration":  {source: string(old.Manifest) + "\n# new build\n", change: func(r *registry.Registration) { r.Origin = registry.OriginRegistration }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			next := registered(t, c.source)
+			current := old
+			if c.before != "" {
+				current = withConfiguration(current, c.before)
+				next = withConfiguration(next, c.after)
+			}
+			initial, members := routedPlan(t, routing, core, current)
+			current.State = registry.StateActive
+			promoted, err := registry.PlanActivation(initial, members, current, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			active := registry.Plan{ID: "promoted", Roles: promoted.Roles}
+			previous := registry.Seed{Registrations: []registry.Registration{core, current}, Roles: initial.Roles}
+			if c.change != nil {
+				c.change(&next)
+			}
+			members[next.ID] = next
+			p, _ := routedPlan(t, routing, core, next)
+			configured := registry.Seed{Registrations: []registry.Registration{core, next}, Roles: p.Roles}
+			reconciled := registry.Reconcile(configured, previous.Snapshot(), &active, members)
+			want := map[string]string{
+				"ingestion-default":                                core.ID,
+				"ingestion:" + core.PluginID:                       core.ID,
+				"ingestion:" + next.PluginID:                       next.ID,
+				"ingestion-route:text/plain":                       next.ID,
+				"ingestion-evaluation:text/plain:" + core.PluginID: core.ID,
+			}
+			got := map[string]string{}
+			for _, a := range reconciled.Roles {
+				got[a.Role] = a.RegistrationID
+			}
+			if !c.follow {
+				if got["ingestion-route:text/plain"] == next.ID {
+					t.Fatalf("an incompatible change silently followed operator routing: %+v", reconciled)
+				}
+				return
+			}
+			if !reconciled.Changed || reconciled.Whole || len(reconciled.Overridden) != 0 || !reflect.DeepEqual(got, want) {
+				t.Fatalf("redeploy after promotion: %+v roles %v, want %v", reconciled, got, want)
+			}
+			if again := registry.Reconcile(configured, configured.Snapshot(), &registry.Plan{Roles: reconciled.Roles}, members); again.Changed {
+				t.Fatalf("second process changed the redeployed plan: %+v", again)
+			}
+		})
 	}
 }
 

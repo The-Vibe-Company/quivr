@@ -204,6 +204,14 @@ Quivr first checks that every plugin the rollback brings back still answers at i
 
 `GET /v0/admin/plugins/plans` lists the latest plans, newest first. Each plan shows what recorded it (`source`: `configuration`, `activation` or `rollback`) and the plan it replaced.
 
+## Redeploy a configured build
+
+A plugin in startup configuration can keep an operator activation when its build changes. Redeploy api and worker with identical pins. Quivr creates a new registration and plan, keeping the operator's serving and evaluation routes, when the plugin id, version, endpoint, installed settings and contribution contracts stay the same. Those contracts include the complete vector-space declarations, requirements, extensions and secrets. The new manifest may change its run command, description or configuration schema if the installed settings still validate. Other changes follow normal configuration reconciliation; inspect the active plan after deployment.
+
+The earlier registration and plans stay exact. Work already started stays on its earlier build; keep that build reachable until its `pinned_work` reaches zero. Use the separate-address upgrade steps above when work must drain during deployment.
+
+A saved rollback plan may name the replaced build, even as an evaluation member. Quivr refuses that rollback with `409 plugin_unreachable` until the exact build runs again at its recorded endpoint. To restore the previous ingestion owner while keeping the new build installed, activate that owner's current evaluation registration from `GET /v0/admin/plugins`: select its `plugin_id` with `state: active`, then use its `registration_id` in the activation call above. Its evaluated source formats become served again, subject to [complete coverage](/run-quivr/backfill-a-vector-space). For example, activating the current `core.ingest` registration reverses a promotion to another embedding owner. The newer owner remains available for evaluation.
+
 ## Troubleshooting
 
 | Symptom | Cause and action |
@@ -211,7 +219,7 @@ Quivr first checks that every plugin the rollback brings back still answers at i
 | Documents are quarantined after the switch | Inspect their reasons, roll back if the new plugin caused them, then reprocess through the restored plan. |
 | Old version stays `draining` | Work or Subscriptions still pin it. Keep it running; migrate alerts if appropriate. Never terminate pinned work by hand in Temporal. |
 | `409 registration_not_validated` | Read `check.checks`, fix the build or fixtures, and register with a new key. |
-| `409 plugin_unreachable` on rollback | Start the expected build at its registered address, then retry. |
+| `409 plugin_unreachable` on activation or rollback | Restore the exact registered build, or activate the current registration of the owner you want. |
 | `409 plugin_conflict` on owner switch or rollback | Backfill missing owner coverage, or correct the conflicting routes and settings; the plan stays unchanged. |
 
 ## Promote an evaluation plugin

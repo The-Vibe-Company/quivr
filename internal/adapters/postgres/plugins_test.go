@@ -159,7 +159,7 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := postgres.PluginStore{Pool: pool}
-	service := registry.Service{Store: store, Spaces: app.DeploymentSpaces}
+	service := registry.Service{Store: store, Spaces: app.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return nil }}
 	applied, err := store.ApplyConfiguration(ctx, configured(t, plugins.PinConfig{Manifest: hashEmbedder, Endpoint: "http://127.0.0.1:9960", Spaces: hashSpaces}))
 	if err != nil {
 		t.Fatal(err)
@@ -342,7 +342,7 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	if err = store.RecordCheck(ctx, next.ID, registry.CheckReport{Certified: true, Checks: []registry.CheckResult{}}); err != nil {
 		t.Fatal(err)
 	}
-	second, err := registry.Service{Store: store, Spaces: app.DeploymentSpaces}.Activate(ctx, operatorScope, next.ID)
+	second, err := registry.Service{Store: store, Spaces: app.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return nil }}.Activate(ctx, operatorScope, next.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,6 +455,16 @@ func TestRollbackRestoresThePreviousPlan(t *testing.T) {
 	}
 
 	unreachable = errors.New("connection refused")
+	// Activation must also refuse a disappeared or replaced build, including
+	// an already-active target. Refusal must not record a plan.
+	for _, id := range []string{next.ID, seed.Registrations[0].ID} {
+		if _, err = service.Activate(ctx, operatorScope, id); !errors.Is(err, registry.ErrUnreachable) {
+			t.Fatalf("activating unavailable registration %s: %v, want ErrUnreachable", id, err)
+		}
+		if active, _ := store.ActivePlanID(ctx); active != bad.ID {
+			t.Fatalf("refused activation changed the plan to %s", active)
+		}
+	}
 	if _, err = service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "down"}); !errors.Is(err, registry.ErrUnreachable) || !strings.Contains(err.Error(), "connection refused") {
 		t.Fatalf("a rollback to a plugin that does not answer: %v, want ErrUnreachable with the cause", err)
 	}

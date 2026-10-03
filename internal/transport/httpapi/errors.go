@@ -12,6 +12,7 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
 	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
 	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
 )
@@ -44,8 +45,15 @@ func errorResponse(err error, fallback *publicerr.Error, corpusID ...string) (in
 				body.Message = message
 			}
 		}
-	case publicerr.InvalidPlugin, publicerr.PluginConflict, publicerr.PluginUnreachable:
+	case publicerr.InvalidPlugin, publicerr.PluginConflict:
 		body.Message = pluginErrorMessage(err, body.Message)
+	case publicerr.PluginUnreachable:
+		body.Message = pluginErrorMessage(err, body.Message)
+		var issues *registry.IssueError
+		if errors.As(err, &issues) && len(issues.Issues) > 0 {
+			const recovery = "; restore the exact build at its endpoint, or activate the current registration of the previous owner listed by GET /v0/admin/plugins"
+			body.Message = boundedPublicText(body.Message, maxPublicErrorMessage-len(recovery)) + recovery
+		}
 	case publicerr.CostConfirmationRequired:
 		body.Message = "the estimated cost exceeds backfill.max_cost_without_confirmation; repeat the request with confirm_cost"
 	case publicerr.CoverageIncomplete:

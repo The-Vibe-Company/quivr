@@ -259,7 +259,7 @@ func addSecondaryOwner(t *testing.T, ctx context.Context, f *backfillFixture) (r
 	if err := pluginStore.RecordCheck(ctx, secondary.ID, registry.CheckReport{Certified: true, Checks: []registry.CheckResult{}}); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := (registry.Service{Store: pluginStore}).Activate(ctx, corpus.Scope{Actions: []string{registry.Action}, Corpora: []string{"*"}}, secondary.ID)
+	plan, err := (registry.Service{Store: pluginStore, Reach: func(context.Context, registry.Registration) error { return nil }}).Activate(ctx, corpus.Scope{Actions: []string{registry.Action}, Corpora: []string{"*"}}, secondary.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

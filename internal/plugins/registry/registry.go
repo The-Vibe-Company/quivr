@@ -8,12 +8,14 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"sort"
 	"strings"
 	"time"
@@ -124,11 +126,77 @@ func (s Settings) Digest() string {
 
 func canonicalJSON(raw json.RawMessage) json.RawMessage {
 	var v any
-	if len(raw) == 0 || json.Unmarshal(raw, &v) != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if !json.Valid(raw) || decoder.Decode(&v) != nil {
 		return json.RawMessage(`{}`)
 	}
-	b, _ := json.Marshal(v)
+	b, _ := json.Marshal(canonicalNumbers(v))
 	return b
+}
+
+func canonicalNumbers(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, item := range v {
+			v[key] = canonicalNumbers(item)
+		}
+	case []any:
+		for i, item := range v {
+			v[i] = canonicalNumbers(item)
+		}
+	case json.Number:
+		return canonicalNumber(v)
+	}
+	return value
+}
+
+// Normalize decimal spelling without float64 rounding. JSONB may expand an
+// exponent or retain fractional zeros. Keep exponent arithmetic symbolic so
+// even a large exponent never expands into a large allocation.
+func canonicalNumber(number json.Number) json.Number {
+	text := string(number)
+	negative := strings.HasPrefix(text, "-")
+	text = strings.TrimPrefix(text, "-")
+	mantissa, exponent, hasExponent := strings.Cut(strings.ToLower(text), "e")
+	power := new(big.Int)
+	if hasExponent {
+		power.SetString(exponent, 10)
+	}
+	whole, fraction, _ := strings.Cut(mantissa, ".")
+	digits := strings.TrimLeft(whole+fraction, "0")
+	trimmed := strings.TrimRight(digits, "0")
+	if trimmed == "" {
+		return json.Number("0")
+	}
+	power.Add(power, big.NewInt(int64(len(digits)-len(trimmed)-len(fraction))))
+	digits = trimmed
+	exp := new(big.Int).Add(power, big.NewInt(int64(len(digits)-1)))
+	if exp.IsInt64() && exp.Int64() >= -6 && exp.Int64() < 21 {
+		point := int(exp.Int64()) + 1
+		switch {
+		case point <= 0:
+			text = "0." + strings.Repeat("0", -point) + digits
+		case point >= len(digits):
+			text = digits + strings.Repeat("0", point-len(digits))
+		default:
+			text = digits[:point] + "." + digits[point:]
+		}
+	} else {
+		text = digits[:1]
+		if len(digits) > 1 {
+			text += "." + digits[1:]
+		}
+		text += "e"
+		if exp.Sign() > 0 {
+			text += "+"
+		}
+		text += exp.String()
+	}
+	if negative {
+		text = "-" + text
+	}
+	return json.Number(text)
 }
 
 // Registration is one plugin version the operator runs at an address, with

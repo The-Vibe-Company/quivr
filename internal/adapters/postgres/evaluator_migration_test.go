@@ -106,7 +106,7 @@ func TestAlertRuleVersionDrainsUntilItsSubscriptionsMove(t *testing.T) {
 		return sub
 	}
 	moving, edited, gone := subscribe("moving", "0.2.0"), subscribe("edited", "0.2.0"), subscribe("gone", "0.2.0")
-	if _, err = (registry.Service{Store: registrations, Spaces: app.DeploymentSpaces}).Activate(ctx, operatorScope, next.ID); err != nil {
+	if _, err = (registry.Service{Store: registrations, Spaces: app.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return nil }}).Activate(ctx, operatorScope, next.ID); err != nil {
 		t.Fatalf("activating alerts 0.3.0: %v", err)
 	}
 	subscribe("new", "0.3.0")

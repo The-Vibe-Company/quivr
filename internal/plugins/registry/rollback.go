@@ -159,7 +159,7 @@ func (s Service) Rollback(ctx context.Context, scope corpus.Scope, req RollbackR
 			if err := reach(ctx, r); err != nil {
 				issues = append(issues, plugins.Issue{Code: CodeUnreachable, Path: "/registrations/" + r.ID,
 					PluginID: r.PluginID, PluginVersion: r.Version, Cause: discoveryCause(err),
-					Message: fmt.Sprintf("%s@%s at %s: %v; start it again, or roll back to another plan", r.PluginID, r.Version, r.Endpoint, err)})
+					Message: fmt.Sprintf("%s@%s at %s: %v; restore this registration's exact build, roll back to another plan, or activate the current registration of the previous owner listed by GET /v0/admin/plugins", r.PluginID, r.Version, r.Endpoint, err)})
 			}
 		}
 		if len(issues) > 0 {
