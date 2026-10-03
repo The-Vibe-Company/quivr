@@ -1,0 +1,75 @@
+quivr-search/src/components/RailIcons.tsx
+  s_7fb3107caab2e1::t_844f0454fd49bc 71-77
+  s_7fb3107caab2e1::t_fc604d365c4729 1-4,6-70,91-92
+  s_7fb3107caab2e1::t_a0ce41afac4f93 5,78-90
+quivr-search/server.mjs
+  s_7fb3107caab2e1::t_90da629cd214e2 437
+quivr-search/src/usage.css
+  s_7fb3107caab2e1::t_3b0273f50ea70b 19-20,22,31-37
+  s_7fb3107caab2e1::t_d95a48e04cafd1 38
+quivr-search/src/dashboard.css
+  s_7fb3107caab2e1::t_809ab1a06e2726 286,295-297,1823-1824
+  s_7fb3107caab2e1::t_3b0273f50ea70b 36,44,49-50,52,58,88-93,95-122,186
+  s_7fb3107caab2e1::t_edcad38738ae08 45,54,59-70,78,84-85,316
+  s_7fb3107caab2e1::t_235c3f5687a16b 6,16-17,32-35,37-38,71-72,136,143-152,154,156-167,169-173,175-185,187-191,193-199,201-203,205-208,210-219,221,249-282,289,299,305,321-322,328,342,367,370-373,377-379,1756,1773-1775,1777-1784,1786,1789-1790,1793,1795,1798-1799,1801-1808,1821,1829,1831-1832
+  s_7fb3107caab2e1::t_9f82480ab3e38d 31,291-294
+  s_7fb3107caab2e1::t_34dd852ffe9bb3 1835-1836
+  s_7fb3107caab2e1::t_707cb275dbd1c5 1771
+  s_7fb3107caab2e1::t_90da629cd214e2 94,362,1833-1834,1837,1839-1841,1944-1965
+  s_7fb3107caab2e1::t_035009bf6f8c7d 1785,1787,1794,1796,1813,1816
+  s_7fb3107caab2e1::t_a86b96d741b7b4 168,290,302-304,310-311,315,332-333,354,359,368-369,451
+  s_7fb3107caab2e1::t_003f443985ca1a 288,300-301,307-309,312-314,318-319
+  s_7fb3107caab2e1::t_13e4e5f5ec591e 48,220,223-225,227-230,232-239,241-243,245-247,298,320,338,360-361,391-393,395-396,398-406,414,1809-1812,1814-1815,1817-1820,1827,1966
+  s_7fb3107caab2e1::t_16abe43a6e3fd7 39-43
+  s_7fb3107caab2e1::t_e31b090998d950 46-47
+  s_7fb3107caab2e1::t_58dcf8873d0301 53
+  s_7fb3107caab2e1::t_4c1de0820a7631 55-57
+  s_7fb3107caab2e1::t_82bcd8200ca75d 283-285
+  s_7fb3107caab2e1::t_34a11675172abe 287
+  s_7fb3107caab2e1::t_5015f5c8593d60 306
+  s_7fb3107caab2e1::t_14a2c8f21bc884 317
+  s_7fb3107caab2e1::t_9a6b233e593b28 327
+  s_7fb3107caab2e1::t_67fcb05319ab56 343-345
+  s_7fb3107caab2e1::t_8f323640efa740 374-376
+  s_7fb3107caab2e1::t_fa6d3890910ab3 1822
+  s_7fb3107caab2e1::t_f57a76f5017b4e 335-336,346-349,384
+quivr-search/src/admin.css
+  s_7fb3107caab2e1::t_90da629cd214e2 548,922-927
+  s_7fb3107caab2e1::t_3b0273f50ea70b 537-538,540,545-547
+quivr-search/src/main.tsx
+  s_7fb3107caab2e1::t_a0ce41afac4f93 4,10
+  s_7fb3107caab2e1::t_7fa053ebb5d401 11
+quivr-search/README.md
+  s_7fb3107caab2e1::t_22c78367f8b288 15
+quivr-search/src/lib/theme.ts
+  s_7fb3107caab2e1::t_df2b9c312409eb 1-31,42-49
+  s_7fb3107caab2e1::t_90da629cd214e2 32-41
+quivr-search/src/styles.css
+  s_7fb3107caab2e1::t_235c3f5687a16b 24-25,27,92-95
+  s_7fb3107caab2e1::t_3e186df38dc05e 476
+  s_7fb3107caab2e1::t_3b0273f50ea70b 81-82,84,106-132
+quivr-search/src/App.tsx
+  s_7fb3107caab2e1::t_90da629cd214e2 33,314
+  s_7fb3107caab2e1::t_844f0454fd49bc 15,337,341-343,351-352,354,356,364-369,385-415
+  s_7fb3107caab2e1::t_614c8afb92618c 1-8,10,46
+  s_7fb3107caab2e1::t_a0ce41afac4f93 14,18,313,370-384
+  s_7fb3107caab2e1::t_a86b96d741b7b4 423
+  s_7fb3107caab2e1::t_003f443985ca1a 419-422,424-427,439
+  s_7fb3107caab2e1::t_15cbd161d5dd6b 9,11-13,16-17,19,47-51,318,320,322,331-332,334-336,416-418,437-438,460,471-474
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "166f8fea4799e61af2c696aea642dc6bd03910aa",
+  "prompts": {},
+  "sessions": {
+    "s_7fb3107caab2e1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7b97b57e-40c1-46cb-96fc-ac50b3581266",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}
