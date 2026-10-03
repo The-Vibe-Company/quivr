@@ -1,0 +1,88 @@
+name: Embedding quality
+# Paid measurements only. The coordinator dispatches after the harness merges;
+# PR checks and scheduled jobs never inject these provider secrets.
+on:
+  workflow_dispatch:
+    inputs:
+      campaign:
+        description: First bakeoff, then winner matrix on SciFact
+        type: choice
+        options: [bakeoff, winner]
+        required: true
+      max_input_tokens:
+        description: Explicit run-wide input-token cap (bakeoff estimate 15000000; winner 5000000)
+        required: true
+      max_usd:
+        description: Explicit run USD cap (bakeoff 8; winner at most 10 minus prior report upper-bound spend)
+        required: true
+      winner:
+        description: Deployment selected from the completed bakeoff (winner campaign only)
+        type: choice
+        options: [none, Cohere-Embed-V5-Pro, Cohere-Embed-V5-Fast, text-embedding-3-large]
+      prior_run_id:
+        description: Completed bakeoff workflow run ID, required for winner; debits prior spend from campaign 10 USD
+        default: ''
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: embedding-quality
+  cancel-in-progress: false
+jobs:
+  embedding-quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/eval/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: .scratch/eval/cache
+          key: eval-sets-${{ hashFiles('scripts/eval/public_sets.py', 'plugins/core-ingest/profile.json') }}
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia*
+      - run: python3 -m pip install -q -r scripts/eval/requirements.txt -r contracts/http/v0/checks/requirements.txt
+      - name: Offline harness checks
+        run: python3 -m unittest discover -s scripts/eval -p 'test_*.py'
+      - name: Download the completed bakeoff for winner admission
+        if: inputs.campaign == 'winner'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIOR_RUN_ID: ${{ inputs.prior_run_id }}
+        run: |
+          test -n "$PRIOR_RUN_ID"
+          gh run download "$PRIOR_RUN_ID" --name embedding-quality --dir .scratch/eval/prior
+      - name: Measure configured embeddings
+        env:
+          AZURE_FOUNDRY_KEY: ${{ secrets.AZURE_FOUNDRY_KEY }}
+          AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
+          CAMPAIGN: ${{ inputs.campaign }}
+          WINNER: ${{ inputs.winner }}
+          TOKEN_CAP: ${{ inputs.max_input_tokens }}
+          USD_CAP: ${{ inputs.max_usd }}
+        shell: bash
+        run: |
+          args=(--campaign "$CAMPAIGN" --max-input-tokens "$TOKEN_CAP" --max-usd "$USD_CAP" --out .scratch/eval/embedding-out --allow-paid)
+          if [ "$CAMPAIGN" = winner ]; then
+            args+=(--winner "$WINNER" --prior-report .scratch/eval/prior/report.json)
+          fi
+          python3 scripts/eval/campaign.py "${args[@]}"
+      # Artifacts deliberately exclude configuration/state and raw stack logs:
+      # the safe report records deployments, never keys, endpoints or texts.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: embedding-quality
+          include-hidden-files: true
+          path: |
+            .scratch/eval/embedding-out/report.json
+            .scratch/eval/embedding-out/report.md
+          if-no-files-found: warn
+      - if: always()
+        run: cat .scratch/eval/embedding-out/report.md >> "$GITHUB_STEP_SUMMARY" || true

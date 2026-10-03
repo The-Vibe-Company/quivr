@@ -89,6 +89,39 @@ class Markdown(unittest.TestCase):
         self.assertNotIn('| tiny | hybrid/deep |', text)  # the base did not serve it: nothing to compare
         self.assertIn(f"Against the same system at `main` (source `{'a' * 40}`), measured in this run:", text)
 
+    def test_embedding_partial_report_has_price_cost_and_matched_mode_significance(self):
+        usage = {'confirmed_input_tokens': 100, 'reserved_input_tokens': 50,
+                 'budgeted_input_tokens': 150, 'cost_upper_bound_usd': .000018,
+                 'confirmed_cost_usd': .000012, 'admitted_calls': 2, 'blocked_calls': 1,
+                 'max_input_tokens': 200, 'max_usd': 8, 'stopped': True,
+                 'reason': 'input-token budget exhausted'}
+        candidate = {'model': 'neutral-deployment', 'dimensions': 2048, 'segment_tokens': 512,
+                     'price': {'usd_per_million_tokens': .12, 'date': '2026-10-03', 'source': 'https://example.org/pricing'}}
+        paired = {'queries': 2, 'delta': .125, 'p_value': .01, 'significant': True}
+        r = {'status': 'capped', 'error': 'input-token budget exhausted', 'run': RUN,
+             'convention': 'linear gain', 'test': 'paired t-test', 'baseline_system': 'hybrid/default', 'limit': 50,
+             'embedding_campaign': {'kind': 'bakeoff', 'budget': usage, 'candidates': [candidate],
+                                    'prior_cost_upper_bound_usd': 0, 'campaign_cap_usd': 10},
+             'sets': {'neutral/tiny': {'manifest': {}, 'queries': 2, 'documents': 5, 'status': 'searching',
+                          'ingestion': {'paired_vectors_seconds': 3.2}, 'embedding_indexing': usage,
+                          'embedding_total': usage, 'embedding_model': candidate,
+                          'systems': {'semantic/default': system(.5),
+                                      'semantic/evaluation/example.embedding/model@1': system(.625)},
+                          'against_served_mode': {'semantic/evaluation/example.embedding/model@1':
+                                                  {key: paired for key in ('ndcg@10', 'recall@10', 'mrr@10')}}},
+                      'neutral/pending': {'manifest': {}, 'queries': 2, 'documents': 5, 'status': 'indexing',
+                          'ingestion': {'partial_seconds': 1.2}, 'systems': {},
+                          'embedding_indexing': usage, 'embedding_model': candidate}}}
+        text = report.markdown(r)
+        self.assertIn('Status: **capped**', text)
+        self.assertIn('Confirmed input: 100; reserved/unconfirmed: 50', text)
+        self.assertIn('USD / 1,000 documents', text)
+        self.assertIn('0.003600', text)
+        self.assertIn('[2026-10-03](https://example.org/pricing)', text)
+        self.assertIn('Δ MRR@10', text)
+        self.assertIn('| semantic/evaluation/example.embedding/model@1 | semantic/default | +0.1250 (p 0.010) * |', text)
+        self.assertIn('Unfinished set: indexing', text)
+
     def test_failed_run_before_any_set_names_the_error(self):
         r = {'status': 'failed', 'error': 'RuntimeError: TEI never ready', 'run': RUN, 'convention': None, 'test': None,
              'baseline_system': 'hybrid/default', 'limit': 50, 'sets': {}}

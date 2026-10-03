@@ -36,6 +36,7 @@ import public_sets  # noqa: E402
 import jev  # noqa: E402
 import report as render  # noqa: E402
 import resources  # noqa: E402
+import embeddings  # noqa: E402
 import trec  # noqa: E402
 from measure_metrics import percentile  # noqa: E402
 
@@ -61,13 +62,20 @@ class Client:
         self.jev_log = None
         self.stack = None
         self.budget = None
+        self.embedding_gate = None
         self.deep_enabled = bool(os.environ.get('TYPESAFE_API_KEY'))
         self.deep_skip_reason = 'TYPESAFE_API_KEY absent; paid deep evaluation skipped'
 
     def call(self, method, path, body=None, expected=(200,), attempts=5):
+        if self.embedding_gate is not None:
+            self.embedding_gate.budget.check()
         paid = method == 'POST' and path == '/v0/search' and body is not None and is_deep(body.get('profile', 'default'))
         if not paid:
-            return self._call(method, path, body, expected, attempts)
+            try:
+                return self._call(method, path, body, expected, attempts)
+            finally:
+                if self.embedding_gate is not None:
+                    self.embedding_gate.budget.check()
         if self.budget is None:
             raise RuntimeError('paid deep evaluation requires a run input token budget')
         with self.budget.request_lock:
@@ -286,6 +294,8 @@ def search(client, corpus, query, mode, profile, keys, limit=LIMIT, evaluation=_
     body.update(evaluation_selection(selected))
     try:
         _, result = client.call('POST', '/v0/search', body, attempts=1)
+    except embeddings.BudgetExceeded:
+        raise  # admission stops the campaign; unattempted queries are not zero scores
     except Exception as error:  # a failed search scores 0 and is counted, never hidden
         return [], {'client_ms': (time.perf_counter() - start) * 1000}, str(error)[:200]
     usage = result.get('usage') or {}
@@ -331,18 +341,34 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
     deep_queries = deep_warmups(set(data['queries'].values()), run_id)
     sides = []
     for client in clients:
+        gate = getattr(client, 'embedding_gate', None)
+        if gate is not None:
+            gate.set_name, gate.phase = name, 'indexing'
         _, created = client.call('POST', '/v0/corpora', {'name': f'Evaluation {name}', 'idempotency_key': f'eval-{name}-{run_id}'}, expected=(201,))
         corpus = created['corpus_id']
+        result = {'manifest': manifest, 'queries': len(data['queries']), 'documents': len(data['corpus']),
+                  'dropped_queries': len(data['dropped_queries']), 'ingestion': {}, 'profiles': {},
+                  'systems': {}, 'status': 'indexing'}
+        publish = getattr(options, 'publish_partial', None)
+        if publish:
+            publish(name, result)
         print(f'[eval] {name}: ingesting {len(data["corpus"])} documents', flush=True)
-        records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall)
-        if evaluation is not None:
-            wait_evaluation_space(client, corpus, evaluation, len(records), options.ingest_timeout)
+        index_started = time.monotonic()
+        try:
+            records, ingestion = ingest(client, corpus, namespace, data['corpus'], options.ingest_timeout, options.stall)
+            if evaluation is not None:
+                wait_evaluation_space(client, corpus, evaluation, len(records), options.ingest_timeout)
+            result['ingestion'] = {**ingestion, 'paired_vectors_seconds': round(time.monotonic() - index_started, 3)}
+            result['status'] = 'searching'
+        finally:
+            if gate is not None:
+                result['embedding_indexing'] = gate.budget.summary(gate.label, name, 'indexing')
+                result['ingestion'].setdefault('partial_seconds', round(time.monotonic() - index_started, 3))
+                gate.phase = 'query'
         advertised = advertised_profiles(client)
         served, refused = serving_profiles(client, corpus, advertised, deep_queries[0], allow_paid=allow_paid)
-        sides.append({'client': client, 'corpus': corpus, 'records': records, 'served': served,
-                      'out': {'manifest': manifest, 'queries': len(data['queries']), 'documents': len(data['corpus']),
-                              'dropped_queries': len(data['dropped_queries']), 'ingestion': ingestion,
-                              'profiles': {'advertised': advertised, 'served': served, 'refused': refused}, 'systems': {}}})
+        result['profiles'] = {'advertised': advertised, 'served': served, 'refused': refused}
+        sides.append({'client': client, 'corpus': corpus, 'records': records, 'served': served, 'out': result})
     queries = sorted(data['queries'])
     reranking = any('deep' in side['served'] for side in sides)
     for profile, label, configuration in measurements(sides, evaluation):
@@ -350,7 +376,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
         deep = is_deep(profile)
         scored_limit = DEEP_LIMIT if deep or reranking else LIMIT
         limits = [scored_limit] if deep else [scored_limit] + [limit for limit in TIMING_LIMITS if limit != scored_limit]
-        for mode in ['hybrid'] if deep else MODES:
+        for mode in ['hybrid'] if deep else getattr(options, 'modes', MODES):
             serving = [side for side in sides if profile in side['served']]
             if configuration is not None:
                 serving = [side for side in serving if side['client'].stack is not None and 'jev_pin' in side['client'].stack.state]
@@ -368,6 +394,9 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
             for side in serving:
                 side.update(ranking={}, errors=[], timings={limit: [] for limit in limits}, failed={limit: 0 for limit in limits},
                             attempts=[], log_begin=jev.offset(side['client'].jev_log))
+                gate = getattr(side['client'], 'embedding_gate', None)
+                if gate is not None and selected_evaluation is not None:
+                    side['embedding_begin'] = gate.budget.summary(gate.label, name, 'query')
             # The other limits are timed only, after the scored pass, so they never change what it measures.
             for limit in limits:
                 for n, q in enumerate(queries):
@@ -386,6 +415,12 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                 if limit == scored_limit:
                     for side in serving:
                         side['log_end'] = jev.offset(side['client'].jev_log)
+                        gate = getattr(side['client'], 'embedding_gate', None)
+                        if gate is not None and selected_evaluation is not None:
+                            after = gate.budget.summary(gate.label, name, 'query')
+                            side['embedding_scored'] = {key: after[key] - side['embedding_begin'][key]
+                                                        for key in ('confirmed_input_tokens', 'reserved_input_tokens',
+                                                                    'cost_upper_bound_usd', 'admitted_calls')}
             system = f'{mode}/{label}'
             print(f'[eval] {name}: {system} searched', flush=True)
             for side in serving:
@@ -401,6 +436,14 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                                                   'paid_calls_per_query': accounting['paid_calls_per_search']}
                 if configuration is not None:
                     side['out']['systems'][system]['configuration_seconds'] = side['configuration_seconds']
+                if selected_evaluation is not None and 'embedding_scored' in side:
+                    usage = side['embedding_scored']
+                    side['out']['systems'][system]['embedding_usage'] = usage
+                    side['out']['systems'][system]['paid_calls_per_query'] = usage['admitted_calls'] / len(queries) if queries else None
+                elif selected_evaluation is not None:
+                    # Engine retrieval usage does not include an unmanaged
+                    # ingestion owner's provider attempts. Unknown is not zero.
+                    side['out']['systems'][system]['paid_calls_per_query'] = None
             if deep and not getattr(options, 'live_paid', False):
                 for side in serving:
                     side.update(warm_timings=[], warm_attempts=[], warm_failures=0, warm_begin=jev.offset(side['client'].jev_log))
@@ -419,6 +462,7 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
                     result['accounting']['warm_cache'] = jev.summary(side['warm_attempts'], events)
                     result['warm_cache_timing'] = time_summary(side['warm_timings'], side['warm_failures'])
     for side in sides:
+        side['out']['status'] = 'completed'
         compare_within(side['out'])
     return [side['out'] for side in sides]
 
@@ -434,6 +478,13 @@ def compare_within(result):
     if base:
         result['against_baseline_system'] = {s: {m: scoring.paired(v['per_query'][m], base['per_query'][m]) for m in scoring.METRICS}
                                              for s, v in result['systems'].items() if s != BASELINE_SYSTEM}
+    result['against_served_mode'] = {}
+    for system, value in result['systems'].items():
+        mode, label = system.split('/', 1)
+        baseline = result['systems'].get(mode + '/default')
+        if label.startswith('evaluation/') and baseline:
+            result['against_served_mode'][system] = {
+                m: scoring.paired(value['per_query'][m], baseline['per_query'][m]) for m in scoring.METRICS}
 
 
 def compare_runs(current, baseline):
@@ -466,7 +517,7 @@ def checkout(ref):
     return commit, directory
 
 
-def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key=''):
+def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key='', ingestion=None):
     """A client of an isolated local stack with only the core plugins pinned (core.ingest, core.retrieve), as make measure runs it,
     built from source; appended to stacks as soon as it exists, so a failed start is still cleaned up."""
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
@@ -481,6 +532,8 @@ def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key=''):
         def config(self):
             super().config()
             jev.configure(self)
+            if ingestion is not None:
+                embeddings.install(self.directory, ingestion)
 
     stack = EvalStack('quivr-eval-' + uuid.uuid4().hex[:10] + suffix, source)
     stacks.append(stack)
@@ -534,18 +587,22 @@ def main():
     parser.add_argument('--api-url', help='measure this installation instead of a local stack; key in QUIVR_EVAL_API_KEY')
     parser.add_argument('--evaluation-plugin', help='ingestion plugin owner for an evaluation search cut (requires --evaluation-space and --api-url)')
     parser.add_argument('--evaluation-space', help='vector space name for an evaluation search cut (requires --evaluation-plugin and --api-url)')
+    parser.add_argument('--ingestion-config', help='JSON evaluation pin: manifest, endpoint, configuration, secret_names, plugin, space (local stack)')
     parser.add_argument('--compare-to', metavar='REF', help='also measure this git revision on a second local stack, searched alternately with this checkout')
     parser.add_argument('--out', default=str(ROOT / '.scratch/eval/runs' / datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')))
     parser.add_argument('--cache', default=str(ROOT / '.scratch/eval/cache'))
     parser.add_argument('--ingest-timeout', type=int, default=5400, help='seconds for one set to become searchable with vectors')
     parser.add_argument('--stall', type=int, default=600, help='seconds without a Record gaining vectors before failing')
     options = parser.parse_args()
+    if options.ingestion_config and (options.api_url or options.compare_to or options.evaluation_plugin or options.evaluation_space):
+        parser.error('--ingestion-config uses one local stack and excludes existing selection and --compare-to')
+    ingestion = embeddings.load_pin(options.ingestion_config) if options.ingestion_config else None
     if bool(options.evaluation_plugin) != bool(options.evaluation_space):
         parser.error('--evaluation-plugin and --evaluation-space must be provided together')
     if (options.evaluation_plugin or options.evaluation_space) and not options.api_url:
         parser.error('evaluation selection requires --api-url')
     typesafe_key = os.environ.pop('TYPESAFE_API_KEY', '').strip()
-    if (options.evaluation_plugin or options.evaluation_space) and typesafe_key:
+    if (options.evaluation_plugin or options.evaluation_space or ingestion) and typesafe_key:
         parser.error('evaluation selection cannot be combined with paid live configuration')
     if typesafe_key:
         if options.api_url or [name.strip() for name in options.sets.split(',') if name.strip()] != ['miracl-fr']:
@@ -555,6 +612,8 @@ def main():
     options.live_paid = bool(typesafe_key)
     options.evaluation = ({'plugin': options.evaluation_plugin, 'space': options.evaluation_space}
                           if options.evaluation_plugin else None)
+    if ingestion:
+        options.evaluation = {key: ingestion[key] for key in ('plugin', 'space')}
     if options.compare_to and (options.api_url or options.baseline):
         parser.error('--compare-to measures two local stacks; it excludes --api-url and --baseline')
     try:
@@ -602,10 +661,12 @@ def main():
                 commit, worktree = checkout(options.compare_to)
                 report['compare'] = {'ref': options.compare_to, 'source_revision': commit, 'phases_seconds': {}, 'sets': {}}
                 clients.append(start_stack(report['compare']['phases_seconds'], stacks, worktree, '-base'))
-            clients.append(start_stack(report['run']['phases_seconds'], stacks, typesafe_key=typesafe_key))
+            clients.append(start_stack(report['run']['phases_seconds'], stacks, typesafe_key=typesafe_key, ingestion=ingestion))
             clients[-1].budget = budget
             options.paid_calls = 0
             report['run']['target'] = 'isolated local stack, optional reranker' if typesafe_key else 'isolated local stack, core plugins only'
+            if ingestion is not None:
+                report['run']['target'] = 'isolated local stack, core.ingest and configured evaluation owner'
             watch = resources.Watch(stacks)
             watch.snapshot('stack started')
         for name, directory in sets:

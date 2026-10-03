@@ -1,6 +1,7 @@
 """Timing summaries: the numbers the query-vector cache decision reads (THE-873)."""
 import contextlib
 import io
+import importlib.util
 import json
 import pathlib
 import tempfile
@@ -112,6 +113,8 @@ class EvaluationSelection(unittest.TestCase):
                 result, = run.measure_set([client], 'tiny', directory, 'run', options)
 
         self.assertEqual(client.corpora, 1)
+        self.assertTrue(all(value['paid_calls_per_query'] is None
+                            for system, value in result['systems'].items() if '/evaluation/' in system))
         self.assertEqual(set(result['systems']), {
             'lexical/default', 'semantic/default', 'hybrid/default',
             'lexical/evaluation/plugin.eval/model@1',
@@ -129,6 +132,21 @@ class EvaluationSelection(unittest.TestCase):
         self.assertTrue(all(body['evaluation_plugin'] == 'plugin.eval' and body['evaluation_space'] == 'model@1'
                             for body in evaluation))
         self.assertEqual({body['mode'] for body in evaluation}, set(run.MODES))
+
+    @unittest.skipUnless(importlib.util.find_spec('scipy'), 'measurement lane installs scipy')
+    def test_evaluation_significance_uses_the_same_served_mode(self):
+        values = lambda value: {key: {'q1': value, 'q2': value} for key in scoring.METRICS}
+        result = {'systems': {'semantic/default': {'per_query': values(.5)},
+                              'hybrid/default': {'per_query': values(.25)},
+                              'semantic/evaluation/example.embedding/model@1': {'per_query': values(.75)},
+                              'hybrid/evaluation/example.embedding/model@1': {'per_query': values(.5)}}}
+        run.compare_within(result)
+        for key, comparison in result['against_served_mode'].items():
+            for metric in scoring.METRICS:
+                self.assertEqual(comparison[metric]['queries'], 2)
+                self.assertEqual(comparison[metric]['delta'], .25)
+        # Historical within-run baseline remains hybrid/default.
+        self.assertEqual(result['against_baseline_system']['semantic/evaluation/example.embedding/model@1']['mrr@10']['delta'], .5)
 
     def test_paid_admission_is_run_wide_and_missing_telemetry_stays_reserved(self):
         class Response:

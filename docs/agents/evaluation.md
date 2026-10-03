@@ -29,11 +29,18 @@ changes the folder). Downloads are cached in `.scratch/eval/cache`.
 
 On an existing installation with `ingestion.evaluation` configured, add
 `--evaluation-plugin <plugin-id> --evaluation-space <space-id>` to `--api-url`.
-Both fields are required together. The lane waits for that space to cover every
+Both fields are required together. For a local stack, use `--ingestion-config <pin.json>`
+instead. That JSON holds `manifest` (relative to the JSON), `endpoint`, `configuration`,
+`plugin`, `space` and `secret_names` (environment names only). Run the plugin yourself
+with those secrets injected; the engine receives no secret values. The lane pins it beside
+`core.ingest` under `ingestion.evaluation.text/plain` before creating Corpora. Each owner's
+primary space keeps role `served`. This excludes `--api-url` and `--compare-to`.
+The lane waits for that space to cover every
 current document, then measures its default profile beside the served default
 in all three modes on the same Corpus. Systems carry the evaluation plugin and
 space ids; scoring deduplicates by Record, so different segmentation offsets
-compare at document level. This option excludes live paid reranker evaluation.
+compare at document level. All three metrics also get a paired comparison against
+core.ingest in the same mode. These options exclude live paid reranker evaluation.
 
 ## The public sets
 
@@ -90,8 +97,8 @@ licence on its ticket.
 - **Failures** are searches the API refused or could not answer; they score 0. Two `mldr-fr`
   queries are over the default profile's 256-token limit: they always fail, `query_too_long`.
 - **Latency** is client wall time per search (p50, p95), one search at a time.
-  **Paid calls** is 0 on the local stack, which calls no paid service, and unknown (`—`)
-  with `--api-url`. **Ingestion to vectors** is the time from the first submission until
+  **Paid calls** is 0 with only core plugins, and unknown (`—`) for unmanaged evaluation
+  owners or `--api-url`. Hosted campaigns count attempts at the gate. **Ingestion to vectors** is the time from the first submission until
   every Record has its vectors.
 - **Where search time goes** splits it by the engine's `usage.phases`, at limit 50 and, in a
   second pass timed only, limit 10. Encoding share is the part of the engine's time spent
@@ -115,3 +122,36 @@ demand, never on pull requests: `gh workflow run measure-search.yml --ref <branc
 optionally with `-f baseline_run_id=<run>`; by default it compares with the latest successful
 run on `main`. `-f compare_to=main -f sets=miracl-fr` compares in one job instead. Its artifact
 `search-quality` holds `report.md`, `report.json` and the stack logs; the report is on the run page.
+
+## Compare hosted embeddings with a cap
+
+The coordinator dispatches `Embedding quality` (`.github/workflows/measure-embeddings.yml`)
+after the harness merges. It never runs on PRs or schedules. The bakeoff measures
+Cohere-Embed-V5-Pro/Fast (2048 dimensions) and text-embedding-3-large (3072), paired
+against core.ingest on all three public sets, in semantic and hybrid modes. Fusion stays
+at core.retrieve's default. Prepare it offline with no key or provider request:
+
+```sh
+python3 scripts/eval/campaign.py --dry-run --max-input-tokens 15000000 --max-usd 8
+```
+
+Illustrative paid dispatch, run only by the coordinator: `gh workflow run measure-embeddings.yml
+--ref main -f campaign=bakeoff -f max_input_tokens=15000000 -f max_usd=8`.
+Expected input is 4–5 million tokens per model; every retry and query call also counts.
+The runner keeps the key in its forwarding gate; hosted.embed gets only a loopback URL.
+Before each attempt, the gate atomically reserves one token per UTF-8 byte plus eight
+special tokens per input. Valid provider usage releases unused reservations; unknown,
+failed or timed-out calls remain reserved. A token or USD cap stops forwarding and writes
+status `capped` with completed cuts, unfinished indexing and spend. Missing cuts have no scores.
+
+Then dispatch `campaign=winner`, `winner=<measured deployment>`, `prior_run_id=<bakeoff run>`,
+`max_input_tokens=5000000`, `max_usd=2`. The completed bakeoff's upper-bound spend is
+subtracted from $10; admission refuses a per-run USD cap above the remainder.
+The smaller SciFact matrix measures segment limits 512/2048 with full/1024 dimensions.
+The token sizes are conservative byte estimates, as described in the
+[hosted plugin reference](../../plugins/hosted-embed/README.md).
+The `embedding-quality` artifact holds report JSON/Markdown: deployment, dimensions,
+segment limit, paired quality, query p50/p95, paired indexing time, confirmed/reserved
+input tokens, indexing USD per 1,000 documents and total USD. Reports link the dated list
+price sources; estimates are not Azure billing receipts. Secrets AZURE_FOUNDRY_KEY and
+AZURE_FOUNDRY_ENDPOINT enter only the measurement step. Private sets are excluded.

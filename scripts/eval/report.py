@@ -121,6 +121,65 @@ def resources(r):
     return lines
 
 
+def embedding_budget(r):
+    campaign = r.get('embedding_campaign')
+    if not campaign:
+        return []
+    b = campaign['budget']
+    prior = campaign.get('prior_cost_upper_bound_usd', 0)
+    lines = ['## Embedding campaign budget', '',
+             f"Admission cap: {b['max_input_tokens']:,} input tokens and ${b['max_usd']:.2f} in this dispatch. "
+             f"Confirmed input: {b['confirmed_input_tokens']:,}; reserved/unconfirmed: {b['reserved_input_tokens']:,}. "
+             f"Confirmed priced cost: ${b['confirmed_cost_usd']:.6f}; cost upper bound: ${b['cost_upper_bound_usd']:.6f}. "
+             f"Prior dispatch: ${prior:.6f}; combined upper bound: ${prior + b['cost_upper_bound_usd']:.6f} "
+             f"of campaign ${campaign['campaign_cap_usd']:.2f}. Blocked calls: {b['blocked_calls']}.", '',
+             'Every provider attempt, including retries and query calls, reserves a UTF-8 byte token bound before forwarding. '
+             'Missing or invalid usage retains the reservation; cap exhaustion stops new calls and preserves completed cuts. '
+             'Unattempted cuts carry no scores. Prices are dated provider list prices, estimates rather than Azure billing receipts. '
+             'Hybrid fusion uses the unchanged default configuration.', '']
+    for candidate in campaign['candidates']:
+        p = candidate['price']
+        lines.append(f"Price for `{candidate['model']}`: ${p['usd_per_million_tokens']:.2f}/million input tokens, "
+                     f"checked [{p['date']}]({p['source']}).")
+    return lines + ['']
+
+
+def embedding_table(sets):
+    rows = [(name, s) for name, s in sets.items() if 'embedding_model' in s]
+    if not rows:
+        return []
+    lines = ['## Embedding indexing and cost', '',
+             'Indexing time runs from first submission until both core.ingest and the evaluation owner cover the Corpus; '
+             'unfinished indexing shows elapsed time only. Indexing USD / 1,000 documents excludes query calls; '
+             'total USD includes queries and failed attempts. ≤ includes unconfirmed reservations. '
+             'The local core.ingest baseline has no provider charge. Each variant uses a new Corpus with the same sample.', '',
+             '| Set | Deployment | Dimensions | Segment limit | State | Indexing s | Index input tokens | Reserved tokens | Index USD / 1,000 documents | Total USD |',
+             '| --- ' * 10 + '|']
+    for name, s in rows:
+        c = s['embedding_model']
+        index = s.get('embedding_indexing', {})
+        total = s.get('embedding_total', index)
+        cost = index.get('cost_upper_bound_usd')
+        normalized = cost * 1000 / s['documents'] if cost is not None and s['documents'] and s.get('status') != 'indexing' else None
+        elapsed = s['ingestion'].get('paired_vectors_seconds', s['ingestion'].get('partial_seconds'))
+        lines.append(f"| {name} | {c['model']} | {c['dimensions']} | {c['segment_tokens']} | {s.get('status', 'completed')} | "
+                     f"{number(elapsed, 1)} | {index.get('confirmed_input_tokens', '—')} | {index.get('reserved_input_tokens', '—')} | "
+                     f"≤ {number(normalized, 6)} | ≤ {number(total.get('cost_upper_bound_usd'), 6)} |")
+    return lines + ['']
+
+
+def embedding_comparisons(s):
+    comparisons = s.get('against_served_mode')
+    if not comparisons:
+        return []
+    lines = ['Paired against core.ingest in the same mode, on the same queries and documents:', '',
+             '| Evaluation system | Served baseline | Δ nDCG@10 | Δ Recall@10 | Δ MRR@10 |', '| --- ' * 5 + '|']
+    for system, metrics in comparisons.items():
+        baseline = system.split('/', 1)[0] + '/default'
+        lines.append(f'| {system} | {baseline} | ' + ' | '.join(delta(metrics.get(k)) for k, _ in METRIC_NAMES) + ' |')
+    return lines + ['']
+
+
 def markdown(r):
     run = r['run']
     lines = ['# Search quality evaluation', '',
@@ -138,6 +197,7 @@ def markdown(r):
                   f"Actual input: {budget['actual_input_tokens']:,}; reserved/unconfirmed: {budget['reserved_input_tokens']:,}; "
                   f"actual priced cost: {budget['actual_cost_cents']:.4f} cents; cost upper bound: {budget['cost_upper_bound_cents']:.4f} cents. "
                   f"Blocked searches: {budget['blocked_searches']}. Reservations include all three possible attempts; missing telemetry is not zero.", '']
+    lines += embedding_budget(r)
     h = run.get('host', {})
     lines += [f"Host: {h.get('cpu_model', h.get('machine', ''))}, {h.get('logical_cpus')} logical CPUs. "
               'Default runs in every mode; paid deep profiles run only hybrid. Paid matrix runs score both profiles '
@@ -154,11 +214,15 @@ def markdown(r):
         for name, s in r['sets'].items():
             m, sample = s['manifest'], s['manifest'].get('sample', {})
             how = f"seed {sample['seed']}, {sample.get('eligible_queries')} eligible queries" if sample else 'as given'
-            lines.append(f"| {name} | {s['queries']} | {s['documents']} | {how} | {m.get('licence', 'private')} | {s['ingestion']['searchable_with_vectors_seconds']:.0f} |")
+            elapsed = s['ingestion'].get('searchable_with_vectors_seconds')
+            lines.append(f"| {name} | {s['queries']} | {s['documents']} | {how} | {m.get('licence', 'private')} | {number(elapsed, 0)} |")
         lines.append('')
+    lines += embedding_table(r['sets'])
     for name, s in r['sets'].items():
         p = s.get('profiles', {})
         lines += [f'## {name}', '']
+        if s.get('status') and s['status'] != 'completed':
+            lines += [f"Unfinished set: {s['status']}. Only fully completed query cuts are scored.", '']
         if p.get('refused'):
             lines += ['Profiles not served: ' + ', '.join(f'`{k}` ({v})' for k, v in p['refused'].items()) + '.', '']
         lines += [f"Against `{r['baseline_system']}` in this run:", '',
@@ -175,6 +239,7 @@ def markdown(r):
         lines.append('')
         lines += time_table(s['systems'])
         lines += accounting_table(s['systems'])
+        lines += embedding_comparisons(s)
         if 'against_baseline_run' in s:
             if s['against_baseline_run'] is None:
                 lines += ['Not compared with the baseline run: that run did not measure this exact sample.', '']
