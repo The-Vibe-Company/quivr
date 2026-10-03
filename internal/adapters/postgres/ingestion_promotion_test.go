@@ -174,9 +174,17 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	if _, err = store.PromoteSpace(ctx, "example.hash_embedder.large@1", false); err != nil {
 		t.Fatal(err)
 	}
+	assertCoverage := func(err error, versions, generations int64) {
+		t.Helper()
+		var coverage *registry.CoverageError
+		if !errors.As(err, &coverage) || len(coverage.Gaps) != 1 || coverage.Gaps[0] != (registry.CoverageGap{Owner: b.Manifest.ID, Space: "certified.ingestion-valid.small@1", MissingVersions: versions, MissingGenerations: generations}) {
+			t.Fatalf("coverage refusal: %v, want owner %s primary space with %d missing documents and %d missing generations", err, b.Manifest.ID, versions, generations)
+		}
+	}
 	if _, err = registryService.Activate(ctx, operator, b.Registration); !errors.Is(err, registry.ErrConflict) {
 		t.Fatalf("activation without target owner's projection: %v", err)
 	}
+	assertCoverage(err, 1, 0)
 	if id, _ := pluginsStore.ActivePlanID(ctx); id != oldPlan.ID {
 		t.Fatalf("incomplete activation replaced %s with %s", oldPlan.ID, id)
 	}
@@ -199,6 +207,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	if _, err = registryService.Activate(ctx, operator, b.Registration); !errors.Is(err, registry.ErrConflict) {
 		t.Fatalf("activation with a target vector gap: %v", err)
 	}
+	assertCoverage(err, 1, 0)
 	g, err = store.Generation(ctx, scope.Organization, c.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -217,6 +226,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	if _, err = registryService.Activate(ctx, operator, b.Registration); !errors.Is(err, registry.ErrConflict) {
 		t.Fatalf("activation without carried target space: %v", err)
 	}
+	assertCoverage(err, 0, 1)
 	if _, err = pool.Exec(ctx, `UPDATE projection_generations SET spaces=$2 WHERE id=$1`, g.ID, carried); err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +245,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	if _, err = registryService.Activate(ctx, operator, b.Registration); !errors.Is(err, registry.ErrConflict) {
 		t.Fatalf("activation without empty Corpus primary: %v", err)
 	}
+	assertCoverage(err, 0, 1)
 	if _, err = store.PrepareEvaluation(ctx, scope.Organization, empty.ID, []string{"certified.ingestion-valid.small@1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -336,6 +347,84 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 		large := saveLarge(old.v, old.seg)
 		if err = store.CommitEnrichment(old.ctx, scope.Organization, old.seg, g, []content.Embedding{old.artifact, large}); err != nil {
 			t.Fatal(err)
+		}
+	}
+	// An incompatible configuration replacement restores startup plan roles,
+	// while existing Corpora retain their serving owner until rebuilt.
+	newEndpoint := startIngestionFixture(t, ctx, manifest, "ingestion-split")
+	configuredPins, err := plugins.LoadPins([]plugins.PinConfig{
+		{Manifest: hashEmbedder, Endpoint: aEndpoint, Spaces: hashSpaces},
+		{Manifest: manifest, Endpoint: newEndpoint, Spaces: map[string]string{"certified.ingestion-valid.small": "served", "certified.ingestion-valid.large": "evaluation"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = configuredPins.ConfigureIngestion(plugins.IngestionRouting{Default: a.Manifest.ID, Evaluation: map[string][]string{"text/plain": {b.Manifest.ID}}}); err != nil {
+		t.Fatal(err)
+	}
+	reset, err := pluginsStore.ApplyConfiguration(ctx, registry.FromPins(configuredPins))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetPlan, resetMembers, err := pluginsStore.PlanMembers(ctx, reset.Plan)
+	if err != nil || roles(resetPlan)["ingestion-default"] != "example.hash_embedder@0.1.0" || roles(resetPlan)["ingestion-route:text/plain"] != "" {
+		t.Fatalf("expected startup plan roles after replacement: %+v %v", resetPlan, err)
+	}
+	fresh := accept("after-promotion", "new harbour document")
+	freshCtx, err := live.Pin(ctx, plugins.Work{Kind: plugins.WorkIngestion, Organization: scope.Organization, ID: fresh.ID, Plan: reset.Plan}, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = contents.Materialize(freshCtx, scope.Organization, fresh.ID); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err = store.Receipt(ctx, scope.Organization, fresh.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshV, err := contents.Version(ctx, scope, fresh.RecordID, fresh.VersionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshServing, err := store.ClaimServingProjections(ctx, 10)
+	if err != nil || len(freshServing) != 1 || freshServing[0].PluginID != b.Manifest.ID {
+		t.Fatalf("retained Corpus serving work: %+v %v", freshServing, err)
+	}
+	resetSet, _, err := registry.Resolve(resetPlan.Roles, resetMembers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newB := resetSet.EvaluationFor("text/plain")[0]
+	freshEvaluator := evaluator
+	freshEvaluator.Plugin = &processing.PluginDeriver{Content: contents, Plugin: pluginhttp.Ingestor{Pin: newB}}
+	if err = freshEvaluator.RunServing(ctx, scope.Organization, freshServing[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	// Restore the promoted plan before testing the returning-owner switch.
+	promoted, err = registryService.Activate(ctx, operator, newB.Registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registryService.Rollback(ctx, operator, registry.RollbackRequest{Key: "incomplete-return", Plan: oldPlan.ID, PinnedWork: registry.PinnedWorkDrain}); !errors.Is(err, registry.ErrConflict) {
+		t.Fatalf("return before optional coverage: %v, want plugin_conflict", err)
+	}
+	var returningGap *registry.CoverageError
+	if !errors.As(err, &returningGap) || len(returningGap.Gaps) != 1 || returningGap.Gaps[0] != (registry.CoverageGap{Owner: a.Manifest.ID, Space: "example.hash_embedder.large@1", MissingVersions: 1}) {
+		t.Fatalf("returning-owner refusal must identify the one new document: %v", err)
+	}
+	optional, err := store.ClaimIngestionEvaluations(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshPublication := &evaluationPublication{}
+	oldOwnerEvaluator := evaluator
+	oldOwnerEvaluator.Projection = freshPublication
+	oldOwnerEvaluator.Plugin = &processing.PluginDeriver{Content: contents, Plugin: pluginhttp.Ingestor{Pin: a}}
+	for _, job := range optional {
+		if job.VersionID == freshV.ID && job.PluginID == a.Manifest.ID {
+			if err = oldOwnerEvaluator.Run(ctx, scope.Organization, job.ID); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	stoppedReceipt := accept("stop-work", "stop this pending call")
@@ -441,6 +530,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 		seg       content.Segmentation
 		artifacts []content.Embedding
 	}{
+		freshV.ID:   {freshPublication.segmentation, freshPublication.artifacts},
 		firstV.ID:   {firstSeg, []content.Embedding{firstArtifact, firstLarge}},
 		pendingV.ID: {pendingSeg, []content.Embedding{pendingArtifact, saveLarge(pendingV, pendingSeg)}},
 		lateV.ID:    {lateSeg, []content.Embedding{lateArtifact, saveLarge(lateV, lateSeg)}},

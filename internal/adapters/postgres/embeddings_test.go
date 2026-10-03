@@ -63,7 +63,14 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seg, err := wholeParts(scope.Organization, v)
+	// The cuts and vectors belong to the same serving owner, including on replay.
+	var cuts []content.SegmentInput
+	for _, part := range v.Manifest.Parts {
+		if part.Content.Kind == "text" && part.Content.Text != "" {
+			cuts = append(cuts, content.SegmentInput{PartKey: part.Key, End: len([]rune(part.Content.Text))})
+		}
+	}
+	seg, err := content.PluginSegmentation(scope.Organization, v, "plugin:core.ingest@1.0.0", json.RawMessage(`{"plugin_id":"core.ingest"}`), cuts)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,6 +32,19 @@ func boundedPublicText(text string, limit int) string {
 // pluginErrorMessage keeps the issue list and typed operator context. Neither
 // Issue.Message nor error text is public: both can contain dependency details.
 func pluginErrorMessage(err error, fallback string) string {
+	var coverage *registry.CoverageError
+	if errors.As(err, &coverage) {
+		const recovery = "; backfill the returning owner with POST /v0/admin/backfills, then retry"
+		var message strings.Builder
+		message.WriteString(fallback)
+		for _, gap := range coverage.Gaps {
+			fmt.Fprintf(&message, "; owner=%s space=%s missing_documents=%d missing_generations=%d", boundedPublicText(gap.Owner, 128), boundedPublicText(gap.Space, 128), gap.MissingVersions, gap.MissingGenerations)
+			if message.Len() >= maxPublicErrorMessage-len(recovery) {
+				break
+			}
+		}
+		return boundedPublicText(message.String(), maxPublicErrorMessage-len(recovery)) + recovery
+	}
 	var issues *registry.IssueError
 	if errors.As(err, &issues) {
 		var message strings.Builder

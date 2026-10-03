@@ -290,7 +290,7 @@ func (s ServingProjectionStore) CoverServingProjection(ctx context.Context, j co
 			return err
 		}
 	}
-	if err = queueIngestionEvaluations(ctx, tx, j.Organization, j.RecordID, j.VersionID, g.ID, j.PlanID); err != nil {
+	if err = queueIngestionEvaluations(ctx, tx, j.Organization, j.RecordID, j.VersionID, g.ID, j.PlanID, j.PluginID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

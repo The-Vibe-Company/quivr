@@ -152,6 +152,8 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 			&registry.IssueError{Kind: registry.ErrConflict, Issues: pinError.Issues}},
 		{"plugin_conflict", "plugin conflict; space_owner_conflict vector space example.space@1", 409,
 			&content.SpaceError{Kind: content.ErrSpaceOwner, Space: "example.space@1", Detail: internalErrorMarker}},
+		{"plugin_conflict", "plugin conflict; owner=example.source space=example.source.small@1 missing_documents=3 missing_generations=0; backfill the returning owner with POST /v0/admin/backfills, then retry", 409,
+			&registry.CoverageError{Gaps: []registry.CoverageGap{{Owner: "example.source", Space: "example.source.small@1", MissingVersions: 3}}}},
 		{"plugin_unreachable", "plugin unreachable; plugin_unreachable /registrations/old plugin=example.source@1.0.0 cause=network_error; restore the exact build at its endpoint, or activate the current registration of the previous owner listed by GET /v0/admin/plugins", 409,
 			&registry.IssueError{Kind: registry.ErrUnreachable, Issues: []plugins.Issue{{Code: registry.CodeUnreachable, Path: "/registrations/old", PluginID: "example.source", PluginVersion: "1.0.0", Cause: plugins.CauseNetwork, Message: internalErrorMarker}}}},
 	} {
@@ -172,10 +174,13 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 		name, id, version string
 		count             int
 		kind              error
+		coverage          bool
 	}{
-		{"many long Unicode values", strings.Repeat("é", 4000), strings.Repeat("1", 4000), 100, registry.ErrConflict},
-		{"invalid UTF-8 expands during JSON encoding", strings.Repeat("\xff", 128), strings.Repeat("\xff", 64), 5, registry.ErrConflict},
-		{"unreachable guidance stays bounded", strings.Repeat("é", 4000), strings.Repeat("1", 4000), 100, registry.ErrUnreachable},
+		{"many long Unicode values", strings.Repeat("é", 4000), strings.Repeat("1", 4000), 100, registry.ErrConflict, false},
+		{"invalid UTF-8 expands during JSON encoding", strings.Repeat("\xff", 128), strings.Repeat("\xff", 64), 5, registry.ErrConflict, false},
+		{"unreachable guidance stays bounded", strings.Repeat("é", 4000), strings.Repeat("1", 4000), 100, registry.ErrUnreachable, false},
+		{"coverage hint stays bounded", strings.Repeat("é", 4000), "unused", 100, registry.ErrConflict, true},
+		{"coverage invalid UTF-8", strings.Repeat("\xff", 4000), "unused", 100, registry.ErrConflict, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			issues := make([]plugins.Issue, tc.count)
@@ -183,12 +188,22 @@ func TestPluginFailurePreservesTypedDiagnostics(t *testing.T) {
 				issues[i] = plugins.Issue{Code: plugins.CodeKindConflict, Path: "/manifest", PluginID: tc.id, PluginVersion: tc.version, Cause: plugins.IssueCause(internalErrorMarker), Message: internalErrorMarker}
 			}
 			rec := httptest.NewRecorder()
-			writeError(rec, &registry.IssueError{Kind: tc.kind, Issues: issues}, publicerr.StorageUnavailable)
+			var refusal error = &registry.IssueError{Kind: tc.kind, Issues: issues}
+			want := "kind_conflict /manifest"
+			if tc.coverage {
+				gaps := make([]registry.CoverageGap, tc.count)
+				for i := range gaps {
+					gaps[i] = registry.CoverageGap{Owner: tc.id, Space: tc.id, MissingVersions: 3}
+				}
+				refusal = &registry.CoverageError{Gaps: gaps}
+				want = "POST /v0/admin/backfills, then retry"
+			}
+			writeError(rec, refusal, publicerr.StorageUnavailable)
 			var body struct{ Message string }
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
-			if len(body.Message) > 2048 || !strings.Contains(body.Message, "kind_conflict /manifest") || strings.Contains(rec.Body.String(), internalErrorMarker) {
+			if len(body.Message) > 2048 || !strings.Contains(body.Message, want) || strings.Contains(rec.Body.String(), internalErrorMarker) {
 				t.Fatalf("bounded public diagnostics: %d bytes, %s", len(body.Message), rec.Body.String())
 			}
 		})

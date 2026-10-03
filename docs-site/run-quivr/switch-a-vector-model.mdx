@@ -292,7 +292,7 @@ For the example's three source formats, expect this output (plan id replaced):
 
 This switches every source format that names this plugin as an evaluation owner, moving its segments and vectors together. Its primary space must be carried by every Corpus's index across every Organization, including empty Corpora. Every current document routed to the candidate must have all its candidate segments and primary vectors.
 
-Missing coverage returns `409 plugin_conflict` and leaves the plan unchanged; an unreachable candidate returns `409 plugin_unreachable`. Repeating activation returns the same plan. The previous owner becomes an evaluation owner for those formats.
+Missing coverage returns `409 plugin_conflict` and leaves the plan unchanged; an unreachable candidate returns `409 plugin_unreachable`. Repeating activation returns the same plan. The previous owner becomes an evaluation owner for those formats and continues filling new documents asynchronously. If a configuration change leaves an existing Corpus serving another owner, new documents also fill the active plan's default or source-route owner. Keep these plugins reachable and check coverage before returning to either model.
 
 **Same owner, another space:** follow [Fill a new vector space](/run-quivr/backfill-a-vector-space), which ends with a space promotion. That API allows `force` as an explicit exception for incomplete coverage; documents without vectors then disappear from semantic results until filled. Registration activation has no force option.
 
@@ -389,7 +389,7 @@ curl -fsS -X POST "$QUIVR_API_URL/v0/admin/plugins/plan/rollback" \
 EOF
 ```
 
-Use `drain` for sound output; [use `stop` for bad output or hangs](/run-quivr/upgrade-a-plugin#roll-back). The same key and body replay this rollback. Keep the explicit target: another untargeted rollback can return to the plan you just left. Unreachable builds return `409 plugin_unreachable`; missing owner coverage returns `409 plugin_conflict`.
+Use `drain` for sound output; [use `stop` for bad output or hangs](/run-quivr/upgrade-a-plugin#roll-back). The same key and body replay this rollback. Keep the explicit target: another untargeted rollback can return to the plan you just left. Unreachable builds return `409 plugin_unreachable`; missing owner coverage returns `409 plugin_conflict`. Its message names the owner, space and number of missing documents, and points to `POST /v0/admin/backfills`. It also reports missing index generations: even an empty Corpus must carry the returning space. Find the returning owner's registration with `GET /v0/admin/plugins` and read each Corpus's coverage to locate gaps. Use the [backfill procedure](/run-quivr/backfill-a-vector-space) for that registration and space in each affected Corpus, wait for complete coverage, then retry. Historical gaps and failed optional calls still need this recovery.
 
 For a same-owner space switch, promote the returned `previous_space_id` back with the space-promotion request. It needs complete coverage too. Immediately after either rollback, create another Saved Query Version using the restored served model and migrate its Subscriptions again with fresh keys; the earlier migrations do not reverse themselves.
 

@@ -150,7 +150,7 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 	if w, ok := plugins.WorkOf(ctx); ok {
 		plan = w.Plan
 	}
-	if err = queueIngestionEvaluations(ctx, tx, org, recordID, seg.VersionID, g.ID, plan); err != nil {
+	if err = queueIngestionEvaluations(ctx, tx, org, recordID, seg.VersionID, g.ID, plan, content.PluginOfRecipe(seg.Recipe)); err != nil {
 		return err
 	}
 	var active bool

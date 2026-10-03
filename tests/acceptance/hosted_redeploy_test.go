@@ -128,7 +128,65 @@ func TestHostedEmbeddingRedeployAfter(t *testing.T) {
 		t.Fatalf("previous owner was not promoted back: %v", back)
 	}
 	hostedRedeploySearch(t, admin, s, coreIngestSpace)
-	// Restoring startup files preserves operator routes by design. Restore the
-	// harness's original exact plan so later scenarios own their routing changes.
+	// Start the coverage regression from a promoted, reachable current build.
+	s.RollbackPlan = back["plan_id"].(string)
+	s.PromotedPlan = request(t, "POST", "/v0/admin/plugins/"+next+"/activate", operator, map[string]any{}, 200)["plan_id"].(string)
+	if err = os.WriteFile(statePath, []byte(mustJSON(t, s)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The harness now changes the endpoint, an incompatible startup replacement.
+// Existing Corpora keep their serving routes; the plan's default owner must
+// also fill new documents so returning to that owner needs no backfill.
+func TestHostedEmbeddingRollbackCoverage(t *testing.T) {
+	admin, operator, space, statePath := hostedRedeploySetup(t)
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s hostedRedeployState
+	if err = json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	plan := request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200)
+	if planRoles(plan)["ingestion-default"] != "core.ingest@1.0.0" || planRoles(plan)["ingestion-route:text/plain"] != "" || planRoles(plan)["ingestion-evaluation:text/plain:hosted.embed"] == "" {
+		t.Fatalf("expected default/evaluation plan after endpoint replacement: %v", plan)
+	}
+	cursor := request(t, "GET", changesPath(s.Corpus, "", 0), admin, nil, 200)["next_cursor"].(string)
+	accepted := request(t, "POST", "/v0/records", admin, inlineCommand(s.Corpus, "rollback-coverage-"+monitoringRun(), "Tram", "The mountain tram arrives every Friday."), 202)
+	ready := awaitReceiptAs(t, admin, accepted["receipt_id"].(string))
+	awaitEnriched(t, admin, s.Corpus, cursor, ready["record_id"].(string))
+	// Optional projection work is asynchronous. Its public coverage must
+	// eventually include both current documents in both owners' spaces.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		spaces := request(t, "GET", "/v0/corpora/"+s.Corpus+"/vector-spaces", admin, nil, 200)
+		covered := map[string]bool{}
+		for _, item := range spaces["items"].([]any) {
+			sp := item.(map[string]any)
+			covered[sp["vector_space_id"].(string)] = sp["coverage"].(map[string]any)["versions_covered"] == float64(2)
+		}
+		if covered[coreIngestSpace] && covered[space] {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("new document lacks rollback coverage: %v", spaces)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	current := hostedRegistration(t, operator, "hosted.embed")
+	request(t, "POST", "/v0/admin/plugins/"+current+"/activate", operator, map[string]any{}, 200)
+	request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "coverage-rollback-" + monitoringRun(), "plan_id": s.RollbackPlan, "pinned_work": "drain"}, 200)
+	result := request(t, "POST", "/v0/search", admin, map[string]any{"query": "The mountain tram arrives every Friday.", "corpus_ids": []string{s.Corpus}, "mode": "semantic", "limit": 10}, 200)
+	found := false
+	for _, raw := range result["items"].([]any) {
+		hit := raw.(map[string]any)
+		found = found || hit["version_id"] == ready["version_id"] && hit["vector_space_id"] == coreIngestSpace
+	}
+	if !found {
+		t.Fatalf("rollback lost new document: %v", result)
+	}
+	// Restore the harness's original exact plan for later plugin scenarios.
 	request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "redeploy-cleanup-" + monitoringRun(), "plan_id": os.Getenv("QUIVR_TEST_HOSTED_REDEPLOY_ORIGINAL_PLAN"), "pinned_work": "stop"}, 200)
 }

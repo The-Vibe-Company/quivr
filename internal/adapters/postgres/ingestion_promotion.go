@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"maps"
 
 	"github.com/The-Vibe-Company/quivr-v2/internal/content"
@@ -89,35 +88,58 @@ func applyIngestionRouting(ctx context.Context, tx pgx.Tx, previous registry.Pla
 			changedOwners[selectedRouting.For(media)] = true
 		}
 	}
+	primaryOwners := map[string]string{}
 	var primaries []string
 	for _, sp := range next.Spaces {
 		if sp.Role == content.SpaceServed && changedOwners[sp.OwnerPluginID] {
 			primaries = append(primaries, sp.ID)
+			primaryOwners[sp.ID] = sp.OwnerPluginID
 		}
 	}
-	var generationsMissing int64
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM projection_generations g WHERE id=ANY($1::text[]) AND (NOT spaces_projected OR EXISTS(SELECT 1 FROM unnest($2::text[]) sp(id) WHERE NOT g.spaces @> jsonb_build_array(jsonb_build_object('id',sp.id))))`, ids, primaries).Scan(&generationsMissing); err != nil {
+	rows, err = tx.Query(ctx, `SELECT sp.id,count(*) FROM projection_generations g
+ CROSS JOIN unnest($2::text[]) sp(id) WHERE g.id=ANY($1::text[])
+ AND (NOT g.spaces_projected OR NOT g.spaces @> jsonb_build_array(jsonb_build_object('id',sp.id)))
+ GROUP BY sp.id ORDER BY sp.id`, ids, primaries)
+	if err != nil {
 		return false, err
 	}
-	if generationsMissing > 0 {
-		return false, fmt.Errorf("%w: %d routed generations need the target ingestion primary spaces; backfill or rebuild them before activation", registry.ErrConflict, generationsMissing)
+	gaps, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (registry.CoverageGap, error) {
+		var gap registry.CoverageGap
+		err := row.Scan(&gap.Space, &gap.MissingGenerations)
+		gap.Owner = primaryOwners[gap.Space]
+		return gap, err
+	})
+	if err != nil {
+		return false, err
+	}
+	if len(gaps) > 0 {
+		return false, &registry.CoverageError{Gaps: gaps}
 	}
 	// The route expression uses accepted source media, independent of any
 	// normalizer's output format.
 	const selected = `COALESCE($1::jsonb->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),$1::jsonb->>'default','')`
 	const prior = `COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')`
-	var missing int64
-	err = tx.QueryRow(ctx, `SELECT count(*) FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
+	rows, err = tx.Query(ctx, `SELECT `+selected+`,COALESCE(vs.id,''),count(DISTINCT (v.organization,v.id)) FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
  JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
  JOIN projection_generations g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`
  LEFT JOIN projection_coverage target ON (target.organization,target.version_id,target.generation_id,target.plugin_id)=(v.organization,v.id,g.id,`+selected+`)
- WHERE `+eligibleVersionSQL+` AND `+selected+`<>`+prior+` AND (target.segmentation_id IS NULL OR NOT EXISTS(SELECT 1 FROM vector_spaces vs WHERE vs.owner_plugin_id=`+selected+` AND vs.id=ANY($2::text[])) OR EXISTS(
- SELECT 1 FROM segments sg CROSS JOIN vector_spaces vs WHERE sg.organization=v.organization AND sg.segmentation_id=target.segmentation_id AND vs.owner_plugin_id=`+selected+` AND vs.id=ANY($2::text[]) AND (NOT g.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id)) OR NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=g.id AND ec.space_id=vs.id))))`, raw, servingSpaceIDs(next.Spaces)).Scan(&missing)
+ LEFT JOIN vector_spaces vs ON vs.owner_plugin_id=`+selected+` AND vs.id=ANY($2::text[])
+ WHERE `+eligibleVersionSQL+` AND `+selected+`<>`+prior+` AND (target.segmentation_id IS NULL OR vs.id IS NULL OR EXISTS(
+ SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.segmentation_id=target.segmentation_id AND (NOT g.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id)) OR NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=g.id AND ec.space_id=vs.id))))
+ GROUP BY `+selected+`,vs.id ORDER BY `+selected+`,vs.id`, raw, servingSpaceIDs(next.Spaces))
 	if err != nil {
 		return false, err
 	}
-	if missing > 0 {
-		return false, fmt.Errorf("%w: %d current Versions need the target ingestion owner's projection; backfill it before activation", registry.ErrConflict, missing)
+	gaps, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (registry.CoverageGap, error) {
+		var gap registry.CoverageGap
+		err := row.Scan(&gap.Owner, &gap.Space, &gap.MissingVersions)
+		return gap, err
+	})
+	if err != nil {
+		return false, err
+	}
+	if len(gaps) > 0 {
+		return false, &registry.CoverageError{Gaps: gaps}
 	}
 	// Demote before promoting to preserve the unique served row per Version.
 	changed := `SELECT v.organization,v.id,g.id AS generation_id,` + selected + ` AS owner FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot) JOIN projection_generations g ON g.id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` WHERE ` + eligibleVersionSQL + ` AND ` + selected + `<>` + prior
