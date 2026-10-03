@@ -8,7 +8,7 @@ keywords: ["search", "lexical", "semantic", "hybrid", "profile", "excerpt", "qui
 
 ## Prerequisites
 
-- `QUIVR_API_URL` and a `QUIVR_API_KEY` with `content:read` and `search:query` on the Corpora you search ([Quickstart](/quickstart)).
+- `QUIVR_API_URL` and a `QUIVR_API_KEY` with `content:read` and `search:query` on the Corpora you search ([Quickstart](/quickstart)). The setup below also creates a Corpus and articles, which needs `corpora:write` and `content:write` on every Corpus, as the key `eval "$(make -s env)"` exports does.
 - Some articles. These examples use a Corpus with two, from two sources:
 
 {/* runnable */}
@@ -43,6 +43,8 @@ EOF
 ```json
 ["...", "..."]
 ```
+
+Quivr indexes the articles in the background, usually within seconds, so a search sent at once can miss them. Each batch item's `receipt` has a `receipt_id`: read `GET /v0/ingestion-receipts/{receipt_id}` until `availability.searchable` is `true`, as [Add content](/guides/add-content#send-an-article-with-a-title) shows. If `availability.state` reads `quarantined` instead, the article is on hold until an operator reprocesses it; [If you can't find it](/concepts#if-you-cant-find-it) lists the other cases.
 
 ## Choose a mode
 
@@ -102,7 +104,7 @@ Each hit carries what a citation needs:
 
 ## Choose a profile
 
-A profile names how results are found and ranked. Each installed retrieval plugin declares profiles. The deployment maps short names such as `default` and `deep` to full names such as `core.retrieve/default`; see [Search profiles](/reference/configuration#search-profiles). With one plugin and no map, its existing short names keep working. List them:
+A profile names how results are found and ranked. Each installed retrieval plugin declares profiles. The deployment maps short names such as `default` and `deep` to full names such as `core.retrieve/default`; [Search profiles](/run-quivr/search-profiles) explains the names and how one profile can re-rank another's results. With one plugin and no map, its existing short names keep working. List them:
 
 {/* runnable */}
 ```bash
@@ -114,7 +116,41 @@ curl -s "$QUIVR_API_URL/v0/search/profiles" -H "Authorization: Bearer $QUIVR_API
 {"names": ["default", "..."]}
 ```
 
-Pass a configured short name such as `"profile": "deep"` or a full name such as `"profile": "core.retrieve/default"` in the search. The list includes `full_name`, `aliases` and `provider` for every profile. An unknown profile is refused with `422 unsupported_profile`.
+The profile list includes `full_name`, `aliases` and `provider` for every profile.
+
+Pass a short name in `profile`. `retrieval_profile.name` echoes the name you sent, and `usage.profiles` lists the full name of each profile that ran:
+
+{/* runnable retry */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/search" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF \
+  | jq -c '{asked: .retrieval_profile.name, ran: [.usage.profiles[].profile], hits: (.items | length)}'
+{"query": "ferry", "corpus_ids": ["$CORPUS_ID"], "mode": "lexical", "profile": "deep"}
+EOF
+```
+
+{/* output */}
+```json
+{"asked": "deep", "ran": ["core.retrieve/deep"], "hits": 1}
+```
+
+A full name selects a profile without the deployment's map, here the same one:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/search" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF \
+  | jq -c '{asked: .retrieval_profile.name, ran: [.usage.profiles[].profile], hits: (.items | length)}'
+{"query": "ferry", "corpus_ids": ["$CORPUS_ID"], "mode": "lexical", "profile": "core.retrieve/deep"}
+EOF
+```
+
+{/* output */}
+```json
+{"asked": "core.retrieve/deep", "ran": ["core.retrieve/deep"], "hits": 1}
+```
+
+These outputs come from the `make dev` stack, where `deep` maps to `core.retrieve/deep`. An unknown profile is refused with `422 unsupported_profile`.
 
 ## Search from the command line
 

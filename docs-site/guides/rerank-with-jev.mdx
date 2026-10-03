@@ -52,40 +52,37 @@ when changing an existing installation.
 ## Search and inspect
 
 Send your ordinary [search request](/guides/search) with `profile: deep`.
-Round 1 asks the engine for `core.retrieve/default`'s hybrid shortlist,
-regardless of the requested mode. Round 2
-scores it with `jev-1.13.0`. Hit explanations show the Noul probability, and
-`usage.paid_calls` and `usage.cost_cents` report the paid work. `default` follows
+Jev asks Quivr for `core.retrieve/default`'s hybrid results, whatever mode the
+search sent, then scores them with the `jev-1.13.0` model. Each re-ranked hit's
+explanation shows Jev's probability that the passage answers the query.
+`usage.paid_calls` and `usage.cost_cents` report the paid work, and
+`usage.profiles` lists both profiles with their own share. `default` follows
 the requested search mode and never calls Jev.
 
 `re-ranker unavailable: <reason>` means hybrid order was returned, without a
 Jev probability. Missing credentials, provider errors, invalid answers and
-the paid round's deadline or remaining cost allowance all fall back this way.
-The paid round gets at most 2 seconds within the engine's remaining chain
-time. Jev reports its own spend; the engine aggregates both plugins in `usage`
-and lists their full names in `usage.profiles`. Failed attempts
-without provider usage reserve an upper-bound cost, not a claimed invoice.
+the paid call's 2-second deadline or the cost left all fall back this way.
+[Search profiles](/run-quivr/search-profiles) explains how the two profiles
+share one time and cost budget.
 
 `GET /v0/search/profiles` lists `core.retrieve/default` with alias `default`
 and `jev.rerank/deep` with alias `deep`, alongside other installed profiles.
 
-## Tune with measurements
+## Settings
 
-The paid lane uses only K=30, trim=256 and Noul on miracl-fr, capped at 150
-searches and 5M input tokens per run, with no paid probes, warmups or replay.
-It prints actual/reserved tokens and cost; missing usage stays reserved.
-K/trim/fusion sweeps are offline or deferred. RRF fuses the Noul rank with
-hybrid rank using constant 60. Trimming requires a local `tokenizer_path`
-and its `tokenizer_sha256`; by default the digest is the pinned E5 tokenizer.
-These trim lengths are tokenizer tokens, not provider billing tokens.
+| Setting | Effect |
+| --- | --- |
+| `candidate_count` | How many hybrid results Jev scores: 20, 30 (default) or 50 |
+| `trim_tokens` | Cuts each passage before scoring: `"128"`, `"256"` or `full` (default, no cut), as strings |
+| `ranking` | `noul` (default) sorts by Jev's probability; `rrf` fuses it with the hybrid rank |
+| `cache_entries` | How many scores to keep for repeated queries, up to 16384; default 4096, `0` turns it off |
 
-The bounded pair cache reuses valid scores for repeated queries and immutable
-segments. Its scope includes organization, model, rubric and trim recipe.
-Case is preserved; whitespace is normalized. Set `cache_entries: 0` to disable
-it. Scores from a failed response never enter the cache.
+Trimming counts tokens with a local tokenizer file, `tokenizer_path`, checked
+against `tokenizer_sha256`; by default the digest is `core.ingest`'s pinned
+tokenizer. These are tokenizer tokens, not provider billing tokens. Scores
+from a failed response never enter the cache.
 
-Watch relevance, p95 latency, input tokens, cost, fallback rate and cold/warm
-cache hit rates. The profile objective remains 3 seconds and 1 cent. TypeSafe's
-organization-wide limits are 100k input tokens/s and 40 requests/s; batching,
-trimming and caching matter more than price. A deployment must measure its
-own workload before relying on the optional re-ranker.
+Watch relevance, p95 latency, input tokens, cost and the fallback rate on
+your own workload before relying on `deep`. The plugin's
+[README](https://github.com/The-Vibe-Company/quivr-v2/tree/main/plugins/jev-rerank)
+describes the cache, cost reservation, provider limits and how it was measured.

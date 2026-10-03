@@ -119,7 +119,7 @@ Resending a quarantined submission with the same key returns its receipt; it doe
 
 A search covers up to 16 collections. It offers word matching (`lexical`), meaning matching (`semantic`) and a combined ranking (`hybrid`, the default). Meaning search needs embeddings; hybrid can return word matches while embeddings are pending. Quivr checks each hit against stored content and your access; a required dependency outage returns an error.
 
-A retrieval plugin finds and ranks results using a search profile. `core.retrieve` provides `default` and `deep`; both use the same ranking today, with different work budgets. See [Search](/guides/search#choose-a-profile) for configured profiles and other retrieval plugins.
+A retrieval plugin finds and ranks results using a search profile. `core.retrieve` provides `default` and `deep`; both use the same ranking today, with different work budgets. [Search profiles](/run-quivr/search-profiles) explains how a deployment picks the plugin behind each name, and how one profile can re-rank another's results.
 
 An alert pairs a search definition (a Saved Query) with activation and notification settings (a Subscription). The saved query says what to look for and in which collections. The subscription chooses the rule and the notification destination. A positive decision is stored as a Match with evidence; that match never changes. Enrichment asks only undecided alerts again.
 

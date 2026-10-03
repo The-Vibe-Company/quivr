@@ -54,8 +54,9 @@ reserves the model's 65,536-token maximum, so total reported cost stays below
 1 cent even on three failures. This is a cost upper bound, not evidence that
 the provider billed a rejected request. Structured round logs distinguish
 these estimated tokens and report cache hits and fallbacks for measurement.
-TypeSafe's organization-wide request/token rate limits remain external;
-there is no per-user quota in the engine.
+TypeSafe's organization-wide request and token rate limits remain external;
+check your account's limits. Batching, trimming and caching matter more than price.
+There is no per-user quota in the engine.
 
 ## Verification
 
@@ -69,3 +70,10 @@ with no paid probes, warmups or replay. A run reserves retries before each searc
 and stops paid admission before its 5M-token budget can be exceeded; logs print
 actual/reserved tokens and costs. K/trim/fusion sweeps are offline or deferred.
 Without a key the lane skips deep; nightly unpaid sets remain unchanged.
+
+## Measurement
+
+The paid lane above is the only measured setting. Before relying on `deep`,
+measure your own workload: relevance, p95 latency,
+input tokens, cost, fallback rate, and cold and warm cache hit rates. The
+profile objective is 3 seconds and 1 cent per search.

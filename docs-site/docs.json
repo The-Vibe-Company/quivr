@@ -66,6 +66,7 @@
               "run-quivr/configure-alert-fields",
               "run-quivr/backfill-a-vector-space",
               "run-quivr/reprocess-quarantined-versions",
+              "run-quivr/search-profiles",
               "guides/rerank-with-jev"
             ]
           },
