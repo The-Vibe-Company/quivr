@@ -303,6 +303,8 @@ test("sans classifieur, la page ne propose que les mots-clés et dit pourquoi", 
   await expect(page.locator(".alert-kind-off")).toContainText(
     "ne sont pas activées sur ce déploiement",
   );
+  // The app reads the list twice on load; the second fetch may still be in flight.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("la page des alertes tient sur mobile, en mode clair et sombre", async ({
