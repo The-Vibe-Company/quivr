@@ -77,7 +77,7 @@ run:
   command: [go, run, .]
 ```
 
-Quivr keeps the instances, schedules, checkpoints, encrypted credentials and health. The plugin is stateless: it gets its last checkpoint and the decrypted credential in each request, and returns items plus the next checkpoint. Quivr moves the checkpoint only after the items are stored. See [Write a connector](/plugins/write-a-connector).
+Quivr keeps the instances, schedules, checkpoints, encrypted credentials and health. The plugin is stateless: it gets its last checkpoint and the decrypted credential in each request, and returns items plus the next checkpoint. Quivr moves the checkpoint only after the items are stored. See [Write a connector](/plugins/write-a-connector) or [receive pushed records](/plugins/push-source).
 
 ## Ingestion
 

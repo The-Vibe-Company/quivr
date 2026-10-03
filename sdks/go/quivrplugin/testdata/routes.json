@@ -1,0 +1,82 @@
+{
+  "id": "sdk-route-test",
+  "version": "1.0.0",
+  "compatibility": {
+    "engine": ">=0.1.0 <0.2.0",
+    "plugin_api": ">=0.11.0 <0.12.0"
+  },
+  "contributions": {
+    "connector": {
+      "kinds": {
+        "events": {
+          "config_schema": {
+            "type": "object",
+            "additionalProperties": false
+          },
+          "credential_schema": {
+            "type": "object",
+            "required": ["token"],
+            "properties": {
+              "token": {"type": "string", "minLength": 8}
+            }
+          },
+          "default_interval_seconds": 300,
+          "modes": ["pull", "push"],
+          "api": {
+            "routes": [
+              {
+                "name": "event",
+                "method": "POST",
+                "path": "events/{category}",
+                "auth": "quivr_key",
+                "request_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["text"],
+                  "properties": {"text": {"type": "string"}}
+                }
+              },
+              {
+                "name": "challenge",
+                "method": "GET",
+                "path": "challenge",
+                "auth": "quivr_key"
+              }
+            ]
+          }
+        },
+        "alerts": {
+          "config_schema": {
+            "type": "object",
+            "additionalProperties": false
+          },
+          "credential_schema": {
+            "type": "object",
+            "required": ["token"],
+            "properties": {
+              "token": {"type": "string", "minLength": 8}
+            }
+          },
+          "default_interval_seconds": 300,
+          "modes": ["pull", "push"],
+          "api": {
+            "routes": [
+              {
+                "name": "event",
+                "method": "POST",
+                "path": "alerts/{category}",
+                "auth": "quivr_key",
+                "request_schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["severity"],
+                  "properties": {"severity": {"type": "string"}}
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

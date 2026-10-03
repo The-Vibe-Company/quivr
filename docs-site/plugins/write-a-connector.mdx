@@ -312,3 +312,5 @@ signature and replay guards, and must return no ingestion items. If your kind
 has signature routes, its legacy webhook is an alias only for its declared
 signature `receive` path. The first-party X plugin uses POST receive and GET
 challenge on that path; its old address is scheduled for removal in engine 1.0.0.
+
+For a source that receives records from a third party, start with `quivr plugin init <name> --kind connector --push` and follow [Receive pushed records](/plugins/push-source).

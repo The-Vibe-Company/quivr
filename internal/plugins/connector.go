@@ -374,6 +374,28 @@ func ValidateConnectorInstance(m *Manifest, kind string, config, credential []by
 	return issues
 }
 
+// ValidateConnectorAPIBody checks a parsed route delivery against its declared
+// request schema. A nil schema accepts any JSON value; external references are
+// forbidden, as for other plugin-declared schemas. Issue paths start at /body.
+func ValidateConnectorAPIBody(requestSchema, body []byte) []Issue {
+	instance, err := decodeInstance(body)
+	if err == nil && len(requestSchema) > 0 {
+		var value any
+		value, err = decodeInstance(requestSchema)
+		if err == nil {
+			if schema, compileErr := compileUserSchema(value); compileErr != nil {
+				err = compileErr
+			} else {
+				err = schema.Validate(instance)
+			}
+		}
+	}
+	if err != nil {
+		return []Issue{{Code: CodeInvalidConfig, Path: "/body", Message: err.Error()}}
+	}
+	return nil
+}
+
 // SameJSON reports whether two JSON documents are equal values; empty is null.
 func SameJSON(a, b json.RawMessage) bool {
 	var av, bv any

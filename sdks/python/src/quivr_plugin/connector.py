@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -124,6 +125,9 @@ class Receiver(Protocol):
     """Optional push delivery capability for a connector kind."""
 
     def receive(self, request: ReceiveRequest) -> ConnectorReceiveResponse | dict[str, Any]: ...
+
+
+ConnectorRouteHandler = Callable[[ReceiveRequest], ConnectorReceiveResponse]
 
 
 class AttachmentSource(Protocol):
@@ -493,8 +497,22 @@ def _redactor(request: Any) -> Credential:
     return credential
 
 
+def _match_route_path(pattern: str, path: str) -> bool:
+    """Match one relative path against a declared literal/template path."""
+    patterns, actual = pattern.split("/"), path.split("/")
+    if len(patterns) != len(actual):
+        return False
+    for declared, segment in zip(patterns, actual):
+        if segment in ("", ".", ".."):
+            return False
+        if not declared.startswith("{") and declared != segment:
+            return False
+    return True
+
+
 def invoke_connector(manifest: LoadedManifest, implementations: dict[str, Connector],
-                     path: str, body: bytes) -> tuple[int, dict[str, Any]]:
+                     path: str, body: bytes,
+                     route_handlers: dict[str, dict[str, ConnectorRouteHandler]] | None = None) -> tuple[int, dict[str, Any]]:
     """Validate, dispatch and self-check one connector call without retaining credentials."""
     credential = Credential(None)
     contribution = manifest.model.contributions.connector
@@ -524,6 +542,29 @@ def invoke_connector(manifest: LoadedManifest, implementations: dict[str, Connec
         return _failure(400, "unknown_kind", "the connector kind is not declared", credential)
     if operation == "receive" and "push" not in (kind.modes or []):
         return _failure(400, "push_unsupported", f"connector kind {kind_name!r} does not declare push", credential)
+    route_handler: ConnectorRouteHandler | None = None
+    if operation == "receive" and document.get("route") is not None and kind.api is not None:
+        route_name = document["route"]
+        route = next((declared for declared in kind.api.routes if declared.name == route_name), None)
+        if route is None:
+            return _failure(400, "unknown_route", f"the connector route {route_name!r} is not declared", credential)
+        request_document = document.get("request") or {}
+        request_method = request_document.get("method")
+        request_path = request_document.get("path")
+        if request_method != route.method:
+            return _failure(400, "invalid_request",
+                            f"route {route_name!r} accepts {route.method}, not {request_method}", credential)
+        if not isinstance(request_path, str) or not _match_route_path(route.path, request_path):
+            return _failure(400, "invalid_request",
+                            f"request path {request_path!r} does not match route {route.path!r}", credential)
+        if route.request_schema is not None:
+            try:
+                route_problems = schema_errors(route.request_schema, document.get("body"))
+            except (TypeError, ValueError) as error:
+                route_problems = [f"route request_schema is invalid: {error}"]
+            if route_problems:
+                return _failure(400, "invalid_request", "; ".join(route_problems), credential)
+        route_handler = (route_handlers or {}).get(kind_name, {}).get(route_name)
     if operation in ("describe_attachment", "upload_attachment") and contribution.attachments is None:
         return _failure(400, "attachments_unsupported", "the connector does not declare attachments", credential)
     try:
@@ -542,8 +583,10 @@ def invoke_connector(manifest: LoadedManifest, implementations: dict[str, Connec
     implementation = implementations.get(kind_name)
     if implementation is None:
         return _failure(501, "not_implemented", "the connector kind has no registered implementation", credential)
-    handler = getattr(implementation, operation, None)
+    handler = route_handler if route_handler is not None else getattr(implementation, operation, None)
     if not callable(handler):
+        if operation == "receive" and document.get("route") is None:
+            return _failure(400, "push_unsupported", f"connector kind {kind_name!r} has no receive handler", credential)
         return _failure(501, "not_implemented", f"the connector kind has no registered {operation} handler", credential)
     try:
         request = request_type.from_dict(document)

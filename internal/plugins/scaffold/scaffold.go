@@ -100,6 +100,15 @@ func CheckKind(kind string) error {
 // Write creates the template of the given kind for plugin id in dir, which
 // must not exist or be empty. It returns the written paths relative to dir.
 func Write(dir, id, kind string) ([]string, error) {
+	return write(dir, id, kind, false)
+}
+
+// WritePush writes a Python source that handles an instance-token API route.
+func WritePush(dir, id string) ([]string, error) {
+	return write(dir, id, KindConnector, true)
+}
+
+func write(dir, id, kind string, push bool) ([]string, error) {
 	if err := CheckName(id); err != nil {
 		return nil, err
 	}
@@ -107,6 +116,9 @@ func Write(dir, id, kind string) ([]string, error) {
 		return nil, err
 	}
 	root := "templates/" + kind
+	if push {
+		root = "templates/push"
+	}
 	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
 		return nil, fmt.Errorf("%s already exists and is not empty", dir)
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {

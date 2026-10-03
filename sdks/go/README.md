@@ -116,6 +116,23 @@ covers pinning it.
   (`PushIsActive`, `PushIsPending`, `PushHasFailed`) reports your setup at the
   source; an active one may relax polling.
 
+For a kind with declared secure `api.routes`, register a typed helper for each
+route:
+
+```go
+plugin.Route("alerts", "event", func(ctx context.Context, req *quivrplugin.ReceiveRequest) (*quivrplugin.Delivery, error) {
+	if req.Body == nil {
+		return quivrplugin.Refuse(http.StatusBadRequest, "missing event"), nil
+	}
+	return quivrplugin.Accept(), nil
+})
+```
+
+The engine authenticates the request. The SDK matches the declared method and
+path, validates the parsed JSON body against `request_schema`, and then calls
+the helper. Register every declared route when the connector has no `Receiver`;
+a `Receiver` can continue handling routes without helpers.
+
 ## Test it
 
 `plugintest` replays a fixture in process, through the same handler the core
@@ -161,8 +178,8 @@ return `TerminalError` or `RetryableError` to classify failures.
 
 ## Scaffold and version ownership
 
-`quivr plugin init` generates Python normalizer, subscription and pull connector
-starters. Go starters and Python ingestion/retrieval starters are omitted:
+`quivr plugin init` generates Python normalizer, subscription and connector
+starters, including a push source with `--kind connector --push`. Go starters and Python ingestion/retrieval starters are omitted:
 these need a chosen vector model or search strategy, or Go module setup.
 Start from the SDK examples or register the operations above; both kits can
 serve every Contribution even when no starter exists.

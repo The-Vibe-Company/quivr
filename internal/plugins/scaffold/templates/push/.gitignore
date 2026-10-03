@@ -1,0 +1,4 @@
+.venv/
+__pycache__/
+*.egg-info/
+contract-report.json

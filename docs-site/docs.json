@@ -47,6 +47,7 @@
                 "group": "Write a plugin",
                 "pages": [
                   "plugins/write-a-connector",
+                  "plugins/push-source",
                   "plugins/write-an-ingestion-plugin",
                   "plugins/write-a-retrieval-plugin",
                   "plugins/write-an-alert-rule"

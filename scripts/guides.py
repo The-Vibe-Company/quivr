@@ -37,7 +37,7 @@ COMMAND_TIMEOUT = 30
 # What a page's own Organization may do: everything an integrator's full key can.
 ACTIONS = ['corpora:read', 'corpora:write', 'content:read', 'content:write', 'search:query', 'blobs:read', 'blobs:write',
            'changes:read', 'monitoring:read', 'monitoring:write', 'projections:rebuild', 'operations:read', 'operations:write',
-           'connectors:read', 'connectors:write']
+           'connectors:read', 'connectors:write', 'connectors:admin', 'connector:push']
 
 _FENCE = re.compile(r'^\s{0,3}(`{3,}|~{3,})(.*)$')
 _BIND = re.compile(r'^\{\{([A-Z][A-Z0-9_]*)\}\}$')

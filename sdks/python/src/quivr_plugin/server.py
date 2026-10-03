@@ -37,6 +37,7 @@ from .connector import (
     RECEIVE_PATH,
     UPLOAD_ATTACHMENT_PATH,
     Connector,
+    ConnectorRouteHandler,
     invoke_connector,
 )
 from .errors import PluginError, TerminalError
@@ -142,6 +143,7 @@ class Plugin:
         self._segment_and_embed = None
         self._embed_query = None
         self._connectors: dict[str, Connector] = {}
+        self._connector_routes: dict[str, dict[str, Callable]] = {}
         self._health: HealthCheck | None = None
 
     def normalizer(self, fn: Normalizer) -> Normalizer:
@@ -193,6 +195,26 @@ class Plugin:
 
         return register
 
+    def connector_route(self, kind: str, name: str) -> Callable[[ConnectorRouteHandler], ConnectorRouteHandler]:
+        """Register a handler for one declared secure Connector API route."""
+        contribution = self.manifest.model.contributions.connector
+        if contribution is None or kind not in contribution.kinds:
+            raise ValueError(f"connector kind {kind!r} is not declared in the manifest")
+        declared = contribution.kinds[kind]
+        if declared.api is None or name not in {route.name for route in declared.api.routes}:
+            raise ValueError(f"connector route {name!r} for kind {kind!r} is not declared in the manifest")
+
+        def register(handler: ConnectorRouteHandler) -> ConnectorRouteHandler:
+            if not callable(handler):
+                raise TypeError(f"connector route {name!r} for kind {kind!r} needs a callable handler")
+            handlers = self._connector_routes.setdefault(kind, {})
+            if name in handlers:
+                raise ValueError(f"connector route {name!r} for kind {kind!r} is already registered")
+            handlers[name] = handler
+            return handler
+
+        return register
+
     def check_registered(self) -> None:
         """Raise when a declared Contribution or connector operation is unregistered."""
         declared = self.manifest.model.contributions
@@ -215,8 +237,14 @@ class Plugin:
             raise ValueError(f"no implementation registered for connector kinds {sorted(missing_kinds)!r}")
         for kind_name, implementation in self._connectors.items():
             kind = connector.kinds[kind_name]
-            if "push" in (kind.modes or []) and not callable(getattr(implementation, "receive", None)):
-                raise ValueError(f"connector kind {kind_name!r} declares push; register receive")
+            receiver = callable(getattr(implementation, "receive", None))
+            if "push" in (kind.modes or []) and not receiver:
+                if kind.api is None:
+                    raise ValueError(f"connector kind {kind_name!r} declares push; register receive")
+                missing = [route.name for route in kind.api.routes
+                           if not callable(self._connector_routes.get(kind_name, {}).get(route.name))]
+                if missing:
+                    raise ValueError(f"connector kind {kind_name!r} declares API routes; register {', '.join(sorted(missing))} or receive")
             if connector.attachments is not None:
                 missing = [name for name in ("describe_attachment", "upload_attachment")
                            if not callable(getattr(implementation, name, None))]
@@ -258,7 +286,7 @@ class Plugin:
         if path == DISCOVERY_PATH:
             return Reply(200, self.discovery().to_dict())
         if path in (FETCH_PATH, CREDENTIAL_PATH, RECEIVE_PATH, DESCRIBE_ATTACHMENT_PATH, UPLOAD_ATTACHMENT_PATH):
-            status, document = invoke_connector(self.manifest, self._connectors, path, body)
+            status, document = invoke_connector(self.manifest, self._connectors, path, body, self._connector_routes)
             return Reply(status, document)
         if path in (SEGMENT_AND_EMBED_PATH, EMBED_QUERY_PATH):
             status, document = invoke_ingestion(

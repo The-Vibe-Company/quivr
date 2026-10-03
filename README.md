@@ -228,9 +228,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   registered at startup beside the built-in ones. Its normalizer's extensions are
   validated against their schemas and published on the Version, clients cannot write
   them (`422 extension_namespace_owned`), and retrieval mappings can map them into search.
-- **Go and Python Plugin SDKs** serve all five Contributions, including push
-  routes and attachments. `quivr plugin init` scaffolds a
-  Markdown normalizer, and `quivr plugin dev`, which runs it locally, checks its
+- **Go and Python Plugin SDKs** serve all five Contributions, with named source route handlers and an offline [push-source sample](plugins/push-source/README.md). Both kits support push
+  routes and attachments. `quivr plugin init` scaffolds normalizers, alert rules and pull or push sources, and `quivr plugin dev`, which runs it locally, checks its
   discovery digest and replays a fixture through the engine's Manifest validation,
   without a Quivr stack ([SDK guide](sdks/python/README.md)).
 - **Plugin Contract Runner** (`quivr plugin test`), which certifies a normalizer over

@@ -1,0 +1,33 @@
+id: push-source
+version: 0.1.0
+description: Receive versioned text records through an instance-token route.
+compatibility:
+  engine: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.12.0 <1.0.0"
+contributions:
+  connector:
+    kinds:
+      events:
+        description: Text records pushed by a third party.
+        config_schema: {type: object, additionalProperties: false}
+        default_interval_seconds: 900
+        modes: [pull, push]
+        api:
+          routes:
+            - name: publish
+              method: POST
+              path: records
+              auth: instance_token
+              request_schema:
+                type: object
+                additionalProperties: false
+                required: [key, revision, title, text]
+                properties:
+                  key: {type: string, minLength: 1, maxLength: 256}
+                  revision: {type: string, minLength: 1, maxLength: 256}
+                  title: {type: string, minLength: 1, maxLength: 256}
+                  text: {type: string, minLength: 1, maxLength: 65536}
+    timeout_ms: 5000
+    limits: {max_items: 1}
+run:
+  command: [python3, -m, push_source]

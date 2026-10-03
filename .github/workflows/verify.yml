@@ -60,6 +60,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          name: push-source-contract-reports
+          path: .scratch/plugin-sdk/push-*-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
           name: python-connector-contract-report
           path: .scratch/plugin-sdk/python-static-source-contract-report.json
           include-hidden-files: true

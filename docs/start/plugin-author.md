@@ -16,6 +16,7 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 ## Guides
 
 - [pdf-text](../../plugins/pdf-text/README.md): the reference PDF normalizer, one Part per page
+- [push-source](../../plugins/push-source/README.md): an offline instance-token push source and its certification
 - [RSS and Atom connector plugin](../../plugins/rss/README.md): the first-party RSS and Atom connector plugin
 - [Quivr Plugin SDK for Go](../../sdks/go/README.md): write, test and certify every kind of plugin in Go
 - [Quivr Plugin SDK for Python](../../sdks/python/README.md): write, test and run Python plugins

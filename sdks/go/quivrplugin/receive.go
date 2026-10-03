@@ -155,14 +155,68 @@ func (p *Plugin) pushes() bool {
 	return false
 }
 
+// matchRoutePath matches a relative request path against a declared route.
+// Template segments match one nonempty segment; dot segments are never valid
+// even when a route uses a template there.
+func matchRoutePath(pattern, path string) bool {
+	patterns, actual := strings.Split(pattern, "/"), strings.Split(path, "/")
+	if len(patterns) != len(actual) {
+		return false
+	}
+	for i, segment := range actual {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+		if !strings.HasPrefix(patterns[i], "{") && patterns[i] != segment {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *Plugin) validateDeclaredRoute(k *kind, req *ReceiveRequest) (*ConnectorAPIRoute, string, string) {
+	declared := p.m.Connector.Kinds[req.Connector.Kind]
+	if declared.API == nil {
+		// A legacy receiver may see route fields from older engine versions; keep
+		// that path unchanged when the manifest has no secure API declaration.
+		return nil, "", ""
+	}
+	var route *ConnectorAPIRoute
+	for i := range declared.API.Routes {
+		if declared.API.Routes[i].Name == req.Route {
+			route = &declared.API.Routes[i]
+			break
+		}
+	}
+	if route == nil {
+		return nil, "unknown_route", fmt.Sprintf("route %q is not declared for kind %q", req.Route, req.Connector.Kind)
+	}
+	if req.Request.Method != route.Method {
+		return nil, "invalid_request", fmt.Sprintf("route %q accepts %s, not %s", route.Name, route.Method, req.Request.Method)
+	}
+	if !matchRoutePath(route.Path, req.Request.Path) {
+		return nil, "invalid_request", fmt.Sprintf("request path %q does not match route %q", req.Request.Path, route.Path)
+	}
+	if schema := k.routeSchemas[route.Name]; schema != nil {
+		body := req.Body
+		if len(body) == 0 {
+			body = json.RawMessage("null")
+		}
+		if err := validateWith(schema, body); err != nil {
+			return nil, "invalid_request", fmt.Sprintf("route %q body %v", route.Name, err)
+		}
+	}
+	return route, "", ""
+}
+
 func (p *Plugin) serveReceive(w http.ResponseWriter, r *http.Request) {
 	var req ReceiveRequest
 	k, credential := p.decode(w, r, "plugins/v0/connector-receive-request.schema.json", &req)
 	if k == nil {
 		return
 	}
-	impl, ok := k.impl.(Receiver)
-	if !ok || !p.m.Connector.Kinds[req.Connector.Kind].Pushes() {
+	declared := p.m.Connector.Kinds[req.Connector.Kind]
+	if !declared.Pushes() {
 		refuse(w, 400, "push_unsupported", fmt.Sprintf("kind %q does not declare the push mode", req.Connector.Kind), credential)
 		return
 	}
@@ -172,11 +226,32 @@ func (p *Plugin) serveReceive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Request.body = body
+	var receive func(context.Context, *ReceiveRequest) (*Delivery, error)
+	if req.Route != "" && declared.API != nil {
+		_, code, problem := p.validateDeclaredRoute(k, &req)
+		if problem != "" {
+			refuse(w, 400, code, problem, credential)
+			return
+		}
+		receive = p.routes[req.Connector.Kind][req.Route]
+	}
+	if receive == nil {
+		impl, ok := k.impl.(Receiver)
+		if !ok {
+			if req.Route != "" && declared.API != nil {
+				refuse(w, 400, "push_unsupported", fmt.Sprintf("route %q has no registered handler", req.Route), credential)
+				return
+			}
+			refuse(w, 400, "push_unsupported", fmt.Sprintf("kind %q does not have a Receive handler", req.Connector.Kind), credential)
+			return
+		}
+		receive = impl.Receive
+	}
 	req.logger = p.requestLogger(credential, req.InvocationID)
 	defer p.recoverPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), p.m.timeoutDur)
 	defer cancel()
-	delivery, err := impl.Receive(ctx, &req)
+	delivery, err := receive(ctx, &req)
 	if err != nil {
 		p.fail(w, req.logger, err, credential)
 		return

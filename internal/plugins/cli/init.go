@@ -10,16 +10,19 @@ import (
 	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/scaffold"
 )
 
-const initUsage = "quivr plugin init <name> [--kind normalizer|subscription|connector] [--dir <path>]"
+const initUsage = "quivr plugin init <name> [--kind normalizer|subscription|connector] [--push] [--dir <path>]"
 
 // initCommand writes an embedded Python plugin template: a normalizer (the
 // default) or an alert rule (--kind subscription).
 func initCommand(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	var name, dir string
+	var push bool
 	kind := scaffold.KindNormalizer
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
+		case arg == "--push":
+			push = true
 		case arg == "--dir":
 			if i+1 >= len(args) {
 				fmt.Fprintf(stderr, "--dir needs a path\nusage: %s\n", initUsage)
@@ -60,10 +63,20 @@ func initCommand(_ context.Context, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "%v\nusage: %s\n", err, initUsage)
 		return ExitUsage
 	}
+	if push && kind != scaffold.KindConnector {
+		fmt.Fprintln(stderr, "--push requires --kind connector")
+		return ExitUsage
+	}
 	if dir == "" {
 		dir = name
 	}
-	files, err := scaffold.Write(dir, name, kind)
+	var files []string
+	var err error
+	if push {
+		files, err = scaffold.WritePush(dir, name)
+	} else {
+		files, err = scaffold.Write(dir, name, kind)
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return ExitInvalid

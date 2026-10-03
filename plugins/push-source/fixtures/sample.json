@@ -1,0 +1,17 @@
+{
+  "description": "Maintenance does not collect; publish maps a versioned record and refuses blank text.",
+  "connector": {"kind": "events", "config": {}},
+  "expect": {"pages": [{"record_keys": [], "more": false}], "check_credential": {"status": "ok"}},
+  "receive": [
+    {
+      "route": "publish",
+      "request": {"method": "POST", "path": "records", "body": "{\"key\":\"note-1\",\"revision\":\"1\",\"title\":\"Library opens\",\"text\":\"The library opens on Monday.\"}"},
+      "expect": {"verdict": "accepted", "status": 200, "record_keys": ["note-1"]}
+    },
+    {
+      "route": "publish",
+      "request": {"method": "POST", "path": "records", "body": "{\"key\":\"note-2\",\"revision\":\"1\",\"title\":\"Blank note\",\"text\":\" \"}"},
+      "expect": {"verdict": "refused", "status": 422, "record_keys": [], "body_contains": "non-whitespace"}
+    }
+  ]
+}

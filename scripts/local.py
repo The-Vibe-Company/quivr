@@ -8,6 +8,7 @@ import guides
 import normalizer_plugin
 import ports
 import subscription_plugin
+import push_plugin
 import connector_plugin
 import fixture_plugin
 import core_ingest_plugin
@@ -129,7 +130,7 @@ class Stack:
             public_url=f"http://127.0.0.1:{s['api_port']}",
             keys={
             s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','observability:read'],['*']),
-            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write'],['*']),
+            s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write','connectors:admin','connector:push'],['*']),
             # Connector acceptance owns org_c so its scheduled load cannot skew org_a/org_b scenarios.
             s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
             s['connector_scoped']:scope('org_c',['connectors:read','connectors:write'],['corpus_not_granted']),
@@ -173,7 +174,7 @@ class Stack:
             # The keyword alerts plugin and the alert-rule template pinned beside it (scripts/subscription_plugin.py), and in
             # verification the sample connector plugin (scripts/connector_plugin.py). The shared fake plugin
             # supplies the scripted connector and notification-mechanics evaluator.
-            plugins=subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self)+fixture_plugin.pins(self),
+            plugins=push_plugin.pins(self)+subscription_plugin.pins(self)+connector_plugin.pins(self)+connector_plugin.first_party_pins(self)+fixture_plugin.pins(self),
             # Counts reach the stats reads within 200 ms; query text is recorded so top queries can be read back.
             observability=OBSERVABILITY_OVERRIDES)
         f=self.directory/'config.json';f.write_text(json.dumps(cfg));f.chmod(0o600)
@@ -186,7 +187,7 @@ class Stack:
         keyless_logs=self.directory/'keyless';keyless_logs.mkdir(mode=0o700,exist_ok=True)
         keyless={k:v for k,v in cfg.items() if k!='credential_key'}
         # The keyless core also pins the alerts plugin as an installation without a TypeSafe key: keyword alerts only.
-        keyless.update(log_directory=str(keyless_logs),plugins=subscription_plugin.pins(self,described='off')+connector_plugin.first_party_pins(self)+fixture_plugin.pins(self),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
+        keyless.update(log_directory=str(keyless_logs),plugins=push_plugin.pins(self)+subscription_plugin.pins(self,described='off')+connector_plugin.first_party_pins(self)+fixture_plugin.pins(self),keys={s['keyless']:scope('org_k',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','monitoring:read','monitoring:write'],['*'])})
         for name,probe in [('keyless.json','probe_port'),('keyless-worker.json','worker_probe_port')]:
             f=self.directory/name;f.write_text(json.dumps({**keyless,'probe_listen':f"127.0.0.1:{s[probe]}"}));f.chmod(0o600)
     def running(self):
@@ -303,7 +304,7 @@ class Stack:
         run([GO,'build','-o',str(self.directory/'quivr'),'./cmd/quivr'],cwd=self.source)
         self.start_dependencies()
         normalizer_plugin.prepare(self);subscription_plugin.prepare(self);fixture_plugin.prepare(self)
-        self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);connector_plugin.start_first_party(self);fixture_plugin.start(self);self.start_processes()
+        self.migrate();self.migrate();normalizer_plugin.start(self);subscription_plugin.start(self);push_plugin.start(self);connector_plugin.start_first_party(self);fixture_plugin.start(self);self.start_processes()
     def start_dependencies(self,attempts=2):
         """Start the pinned dependencies with bounded readiness. A dependency that crashes while
         starting (SeaweedFS 4.45 can hit a raft map race when restarting on existing data) gets one
@@ -442,7 +443,7 @@ class Stack:
         started again (make dev initializes a fresh schema)."""
         if hasattr(self,"fake_x"): self.fake_x.close()
         if hasattr(self,"fake_graph"): self.fake_graph.close()
-        normalizer_plugin.stop(self);subscription_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);fixture_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
+        normalizer_plugin.stop(self);subscription_plugin.stop(self);push_plugin.stop(self);connector_plugin.stop(self);connector_plugin.stop_first_party(self);fixture_plugin.stop(self);self.stop_processes();self.compose('down',*(['--volumes'] if reset else []))
         if reset:
             for key in ['scoped_id','worker_pid','api_pid']:self.state.pop(key,None)
             self.save()

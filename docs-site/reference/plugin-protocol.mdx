@@ -535,6 +535,7 @@ Schema: `connector-fixture.schema.json`.
 | `receive[].description` | string | no | — |
 | `receive[].request` | object | yes | — |
 | `receive[].expect` | object | no | — |
+| `receive[].route` | string | no | Declared API route name. With route, request.path is required and the exact request body is parsed as JSON (empty GET becomes null). This certifies plugin handling, not engine authentication. |
 
 ### Ingestion fixture
 

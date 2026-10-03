@@ -68,3 +68,7 @@ Collects one folder of one Microsoft 365 mailbox through Microsoft Graph: subjec
 ## x-list
 
 Polls the posts of one X list, turns edits into corrections, and withdraws posts deleted or made protected on X within a recheck window. It can also receive posts in real time through X webhooks. `api_endpoint` overrides the X API origin, for a test fake only. See [X lists](/guides/x).
+
+## push-source
+
+The offline Python sample accepts versioned text records at `POST records`, secured by a Quivr instance token. Its `events` kind maps each record into title and body Parts, preserving the sender's key and revision. It has no upstream credential or configuration, and its scheduled fetch only reports channel health. [Receive pushed records](/plugins/push-source) walks through its route and token.

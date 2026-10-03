@@ -7,7 +7,7 @@ name = "example.python-static-source"
 version = "0.1.0"
 description = "A Quivr static-source connector plugin."
 requires-python = ">=3.12"
-dependencies = ["quivr-plugin-sdk>=0.3,<0.6"]
+dependencies = ["quivr-plugin-sdk>=0.3,<0.7"]
 
 [tool.setuptools]
 packages = ["static_source"]

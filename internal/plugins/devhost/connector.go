@@ -87,7 +87,9 @@ type ConnectorRun struct {
 // ConnectorReceiveCase is one delivery a connector fixture relays to receive.
 type ConnectorReceiveCase struct {
 	Description string `json:"description,omitempty"`
+	Route       string `json:"route,omitempty"`
 	Request     struct {
+		Path       string            `json:"path,omitempty"`
 		Method     string            `json:"method"`
 		Query      string            `json:"query,omitempty"`
 		Headers    map[string]string `json:"headers,omitempty"`
@@ -177,6 +179,42 @@ func BuildConnectorRun(path string, m *plugins.Manifest) (*ConnectorRun, []plugi
 			Message: fmt.Sprintf("kind %q does not declare the push mode; only a push kind's fixture has receive cases", run.Kind)})
 	}
 	issues = append(issues, plugins.ValidateConnectorInstance(m, run.Kind, run.Config, run.Credential)...)
+	for i, c := range run.Receives {
+		if c.Route == "" {
+			continue
+		}
+		var api *plugins.ConnectorAPI
+		if m.Contributions.Connector != nil {
+			api = m.Contributions.Connector.Kinds[run.Kind].API
+		}
+		valid := false
+		var requestSchema json.RawMessage
+		if api != nil {
+			for _, route := range api.Routes {
+				if route.Name == c.Route && route.Method == c.Request.Method && fixturePathMatches(route.Path, c.Request.Path) {
+					valid = true
+					requestSchema = route.RequestSchema
+				}
+			}
+		}
+		if !valid {
+			issues = append(issues, plugins.Issue{Code: plugins.CodeInvalidConfig, Path: fmt.Sprintf("/receive/%d/route", i), Message: "route, method and path must match a declared API route"})
+		}
+		raw, err := base64.StdEncoding.DecodeString(c.Relayed().BodyBase64)
+		if err != nil || !(json.Valid(raw) || (c.Request.Method == "GET" && len(raw) == 0)) {
+			issues = append(issues, plugins.Issue{Code: plugins.CodeInvalidConfig, Path: fmt.Sprintf("/receive/%d/request/body", i), Message: "API body must be JSON (an empty GET body becomes null)"})
+			continue
+		}
+		if c.Request.Method == "GET" && len(raw) == 0 {
+			raw = []byte("null")
+		}
+		if valid {
+			for _, issue := range plugins.ValidateConnectorAPIBody(requestSchema, raw) {
+				issue.Path = fmt.Sprintf("/receive/%d/request%s", i, issue.Path)
+				issues = append(issues, issue)
+			}
+		}
+	}
 	if len(issues) > 0 {
 		return nil, issues, nil
 	}
@@ -234,7 +272,7 @@ func (r *ConnectorRun) CheckCredentialRequest(suffix string) []byte {
 // Relayed turns a fixture receive case into the relayed request: header names
 // lowercased, a text body encoded as base64.
 func (c ConnectorReceiveCase) Relayed() RelayedRequest {
-	out := RelayedRequest{Method: c.Request.Method, Query: c.Request.Query, Headers: map[string][]string{}}
+	out := RelayedRequest{Path: c.Request.Path, Method: c.Request.Method, Query: c.Request.Query, Headers: map[string][]string{}}
 	names := make([]string, 0, len(c.Request.Headers))
 	for name := range c.Request.Headers {
 		names = append(names, name)
@@ -319,4 +357,32 @@ func InvokeDescribeAttachment(ctx context.Context, baseURL string, request []byt
 // 200 body with plugins.CheckUploadAnswer.
 func InvokeUploadAttachment(ctx context.Context, baseURL string, request []byte) (*Result, error) {
 	return invoke(ctx, baseURL, ConnectorUploadAttachmentRoute, request, attachmentAnswerBytes, plugins.CheckUploadAnswer)
+}
+
+// ReceiveCaseRequest adds declared-route metadata to the shared receive wire
+// builder; legacy cases retain their original unnamed webhook shape.
+func (r *ConnectorRun) ReceiveCaseRequest(c ConnectorReceiveCase, suffix string) []byte {
+	body := r.ReceiveRequest(c.Relayed(), suffix)
+	if c.Route == "" {
+		return body
+	}
+	var request plugins.ConnectorReceiveRequest
+	_ = json.Unmarshal(body, &request)
+	request.Route = c.Route
+	request.Body, _ = base64.StdEncoding.DecodeString(request.Request.BodyBase64)
+	body, _ = plugins.BuildConnectorReceiveRequest(request)
+	return body
+}
+
+func fixturePathMatches(pattern, path string) bool {
+	a, b := strings.Split(pattern, "/"), strings.Split(path, "/")
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if b[i] == "" || b[i] == "." || b[i] == ".." || (!strings.HasPrefix(a[i], "{") && a[i] != b[i]) {
+			return false
+		}
+	}
+	return true
 }

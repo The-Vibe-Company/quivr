@@ -1,4 +1,5 @@
 """Owner tests for the Python connector adapter's invocation safeguards."""
+import base64
 import io
 import json
 import logging
@@ -9,6 +10,7 @@ import unittest
 import yaml
 
 from quivr_plugin import Plugin
+from quivr_plugin.connector import RECEIVE_PATH
 from quivr_plugin.logs import configure_logging
 from quivr_plugin.schema import protocol_errors
 
@@ -246,6 +248,33 @@ class ExtendedConnectors(unittest.TestCase):
         path.write_text(yaml.safe_dump(manifest))
         return Plugin(path)
 
+    def write_route_manifest(self):
+        manifest = json.loads((REPO / "contracts/plugins/v0/fixtures/manifests/valid/connector-api.json").read_text())
+        events = manifest["contributions"]["connector"]["kinds"]["events"]
+        alerts = json.loads(json.dumps(events))
+        alerts["api"]["routes"][0]["path"] = "alerts/{category}"
+        alerts["api"]["routes"][0]["request_schema"] = {
+            "type": "object", "additionalProperties": False,
+            "required": ["severity"], "properties": {"severity": {"type": "string"}},
+        }
+        manifest["contributions"]["connector"]["kinds"]["alerts"] = alerts
+        path = Path(self.directory.name) / "connector-routes.yaml"
+        path.write_text(yaml.safe_dump(manifest))
+        return Plugin(path)
+
+    def route_request(self, kind="events", route="push", method="POST", path="events/news", body=None):
+        raw_body = json.dumps(body).encode()
+        return {
+            "invocation_id": "route-1", "contribution": "connector", "organization_id": "org",
+            "configuration": {},
+            "connector": {"instance_id": "route-1", "kind": kind, "corpus_id": "corpus",
+                           "source_namespace": kind, "config": {}},
+            "credential": None, "checkpoint": None, "now": "2026-01-01T00:00:00Z", "reads_today": 0,
+            "request": {"method": method, "query": "", "headers": {},
+                        "body_base64": base64.b64encode(raw_body).decode(), "path": path},
+            "route": route, "body": body,
+        }
+
     def receive_request(self):
         return {
             "invocation_id": "receive-1", "contribution": "connector", "organization_id": "org",
@@ -293,6 +322,161 @@ class ExtendedConnectors(unittest.TestCase):
         plugin.connector("alerts")(Invalid)
         invalid = plugin.handle("POST", "/v0/contributions/connector/receive", json.dumps(self.receive_request()).encode())
         self.assertEqual((invalid.status, invalid.body["code"]), (500, "invalid_response"), invalid.body)
+
+    def test_connector_routes_register_dispatch_and_validate_before_handler(self):
+        from quivr_plugin import ConnectorReceiveResponse, ReceiveAnswer, ReceiveRequest
+
+        plugin = self.write_route_manifest()
+        calls = {"events": 0, "alerts": 0}
+
+        class Source:
+            def fetch(self, request):
+                return {"items": [], "checkpoint": request.checkpoint, "more": False}
+
+            def check_credential(self, request):
+                return {"status": "ok"}
+
+        plugin.connector("events")(Source)
+        plugin.connector("alerts")(Source)
+
+        @plugin.connector_route("events", "push")
+        def events(request: ReceiveRequest) -> ConnectorReceiveResponse:
+            self.assertIsInstance(request, ReceiveRequest)
+            calls["events"] += 1
+            self.assertEqual((request.route, request.request.path, request.body), ("push", "events/news", {"text": "hello"}))
+            return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=202), items=[])
+
+        @plugin.connector_route("alerts", "push")
+        def alerts(request: ReceiveRequest) -> ConnectorReceiveResponse:
+            self.assertIsInstance(request, ReceiveRequest)
+            calls["alerts"] += 1
+            self.assertEqual(request.body, {"severity": "high"})
+            return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=202), items=[])
+
+        @plugin.connector_route("events", "challenge")
+        def challenge(request: ReceiveRequest) -> ConnectorReceiveResponse:
+            return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
+
+        @plugin.connector_route("alerts", "challenge")
+        def alert_challenge(request: ReceiveRequest) -> ConnectorReceiveResponse:
+            return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
+
+        plugin.check_registered()
+        reply = plugin.handle("POST", RECEIVE_PATH, json.dumps(self.route_request(body={"text": "hello"})).encode())
+        self.assertEqual((reply.status, reply.body["verdict"]), (200, "accepted"), reply.body)
+        reply = plugin.handle("POST", RECEIVE_PATH, json.dumps(
+            self.route_request(kind="alerts", path="alerts/critical", body={"severity": "high"})).encode())
+        self.assertEqual((reply.status, reply.body["verdict"]), (200, "accepted"), reply.body)
+        self.assertEqual(calls, {"events": 1, "alerts": 1})
+
+        invalid = [
+            ("missing route", self.route_request(route="missing", body={"text": "hello"}), "unknown_route"),
+            ("wrong method", self.route_request(method="GET", body={"text": "hello"}), "invalid_request"),
+            ("wrong path", self.route_request(path="alerts/news", body={"text": "hello"}), "invalid_request"),
+            ("empty segment", self.route_request(path="events/", body={"text": "hello"}), "invalid_request"),
+            ("dot segment", self.route_request(path="events/.", body={"text": "hello"}), "invalid_request"),
+            ("body schema", self.route_request(body={"severity": "high"}), "invalid_request"),
+        ]
+        for description, request, code in invalid:
+            with self.subTest(description=description):
+                reply = plugin.handle("POST", RECEIVE_PATH, json.dumps(request).encode())
+                self.assertEqual((reply.status, reply.body["code"]), (400, code), reply.body)
+        self.assertEqual(calls, {"events": 1, "alerts": 1})
+
+    def test_connector_route_registration_requires_declared_nonduplicate_handlers(self):
+        plugin = self.write_route_manifest()
+        with self.assertRaises(TypeError):
+            plugin.connector_route("events", "push")(None)
+        with self.assertRaises(ValueError):
+            plugin.connector_route("events", "missing")
+        with self.assertRaises(ValueError):
+            plugin.connector_route("missing", "push")
+
+        @plugin.connector_route("events", "push")
+        def handler(request):
+            return {"verdict": "accepted", "response": {"status": 200}}
+
+        with self.assertRaises(ValueError):
+            plugin.connector_route("events", "push")(handler)
+
+    def test_route_only_connector_refuses_legacy_receive_and_requires_routes(self):
+        from quivr_plugin import ConnectorReceiveResponse, ReceiveAnswer
+
+        plugin = self.write_route_manifest()
+
+        class Source:
+            def fetch(self, request):
+                return {"items": [], "checkpoint": request.checkpoint, "more": False}
+
+            def check_credential(self, request):
+                return {"status": "ok"}
+
+        plugin.connector("events")(Source)
+        plugin.connector("alerts")(Source)
+
+        @plugin.connector_route("events", "push")
+        def events(request):
+            return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=202), items=[])
+
+        @plugin.connector_route("events", "challenge")
+        def challenge(request):
+            return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
+
+        @plugin.connector_route("alerts", "push")
+        def alerts(request):
+            return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=202), items=[])
+
+        @plugin.connector_route("alerts", "challenge")
+        def alert_challenge(request):
+            return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
+
+        plugin.check_registered()
+        request = self.route_request(route=None, body=None)
+        request.pop("route")
+        request.pop("body")
+        reply = plugin.handle("POST", RECEIVE_PATH, json.dumps(request).encode())
+        self.assertEqual((reply.status, reply.body["code"]), (400, "push_unsupported"), reply.body)
+
+    def test_connector_route_uses_existing_error_and_response_boundary(self):
+        from quivr_plugin import ConnectorReceiveResponse, ReceiveAnswer
+
+        for description, handler, status, code in (
+            ("handler error", lambda request: (_ for _ in ()).throw(RuntimeError("source unavailable")), 500, "internal_error"),
+            ("invalid response", lambda request: {"verdict": "refused", "response": {"status": 200}}, 500, "invalid_response"),
+        ):
+            with self.subTest(description=description):
+                plugin = self.write_route_manifest()
+
+                class Source:
+                    def fetch(self, request):
+                        return {"items": [], "checkpoint": request.checkpoint, "more": False}
+
+                    def check_credential(self, request):
+                        return {"status": "ok"}
+
+                plugin.connector("events")(Source)
+                plugin.connector("alerts")(Source)
+
+                @plugin.connector_route("events", "push")
+                def events(request):
+                    return handler(request)
+
+                @plugin.connector_route("events", "challenge")
+                def challenge(request) -> ConnectorReceiveResponse:
+                    return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
+
+                @plugin.connector_route("alerts", "push")
+                def alerts(request) -> ConnectorReceiveResponse:
+                    return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
+
+                @plugin.connector_route("alerts", "challenge")
+                def alert_challenge(request) -> ConnectorReceiveResponse:
+                    return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
+
+                plugin.check_registered()
+                reply = plugin.handle("POST", RECEIVE_PATH,
+                                      json.dumps(self.route_request(body={"text": "hello"})).encode())
+                self.assertEqual((reply.status, reply.body["code"]), (status, code), reply.body)
 
     def attachment_request(self, *, upload=False):
         request = {

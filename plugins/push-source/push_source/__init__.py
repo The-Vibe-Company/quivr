@@ -1,0 +1,1 @@
+"""A Quivr push source."""

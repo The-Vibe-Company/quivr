@@ -1,0 +1,178 @@
+---
+title: "Receive pushed records"
+description: "Write a source route, give a third party an instance token, and read the record it pushes."
+keywords: ["push source", "connector route", "instance token", "Python SDK"]
+---
+
+Receive text from a third party through a source plugin. Quivr authenticates the sender, calls your handler and returns an Ingestion Receipt, an identifier you can use to follow processing.
+
+## Prerequisites
+
+- Python 3.12+ (`python3 --version`), the Quivr checkout and its CLI (`go build -o .scratch/quivr ./cmd/quivr`). Add `.scratch` to your `PATH`.
+- A local stack (`make dev`), which pins the offline `plugins/push-source` sample used below. It declares the `events` source kind. Export its address and operator key with `eval "$(make -s env)"`.
+- The operator key needs `corpora:write`, `connectors:write`, `connectors:admin` and `content:read`. Instance tokens permit pushing to one source; reads use the operator key.
+
+## Steps
+
+### Generate a push source
+
+From the checkout:
+
+```bash
+quivr plugin init incoming-records --kind connector --push
+python3 -m venv incoming-records/.venv
+. incoming-records/.venv/bin/activate
+pip install -e sdks/python
+cd incoming-records
+python3 -m unittest discover -s tests
+quivr plugin test --report contract-report.json
+```
+
+Expect `CERTIFIED`. The generated fixture covers an accepted record and a refused blank record. The sample in `plugins/push-source` follows the same pattern. Its CI report is uploaded as `push-source-contract-reports`.
+
+### Declare and handle a route
+
+The generated manifest contains this route under `contributions.connector.kinds.events.api.routes`:
+
+```yaml
+- name: publish
+  method: POST
+  path: records
+  auth: instance_token
+  request_schema:
+    type: object
+    additionalProperties: false
+    required: [key, revision, title, text]
+    properties:
+      key: {type: string, minLength: 1, maxLength: 256}
+      revision: {type: string, minLength: 1, maxLength: 256}
+      title: {type: string, minLength: 1, maxLength: 256}
+      text: {type: string, minLength: 1, maxLength: 65536}
+```
+
+The SDK dispatches `@plugin.connector_route("events", "publish")` with a typed `ReceiveRequest`. `request.body` holds parsed JSON and `request.request` preserves the caller's path, query and body bytes. Return a `ConnectorReceiveResponse` with items or a refusal; the generated handler shows the complete mapping. Quivr converts accepted POST items into `202` Receipts, regardless of the handler's accepted response status. Tokens never reach the plugin. See the [Python kit](https://github.com/The-Vibe-Company/quivr-v2/blob/main/sdks/python/README.md) or [Go kit](https://github.com/The-Vibe-Company/quivr-v2/blob/main/sdks/go/README.md) for handler signatures.
+
+For certification, a fixture's `receive` case sets `route: "publish"` and `request.path: "records"`, with the source JSON as `request.body`. The runner builds the same route/body wire fields as the engine. It tests plugin handling; engine token authentication is exercised in the following API steps.
+
+To run your generated plugin in another deployment, serve it with `quivr plugin dev --port 9940 incoming-records` from the directory containing it, and add its absolute manifest path and reachable endpoint to [`QUIVR_CONFIG.plugins`](/reference/configuration#plugin-pins). Restart api and worker with that pin. The local stack already runs the sample, so the remaining steps use it.
+
+### Create a collection and source instance
+
+A Corpus is a collection of Records. Each Record has a stable `key` within its Source Namespace; a new `revision` identifies changed source content.
+
+{/* runnable */}
+```bash
+curl -fsS -X POST "$QUIVR_API_URL/v0/corpora" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"name":"Pushed records","idempotency_key":"push-guide-corpus"}' | jq '{corpus_id}'
+```
+
+{/* output */}
+```json
+{"corpus_id":"{{PUSH_CORPUS_ID}}"}
+```
+
+```bash
+export PUSH_CORPUS_ID=<the corpus_id above>
+```
+
+{/* runnable */}
+```bash
+curl -fsS -X POST "$QUIVR_API_URL/v0/connectors" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '{connector_id, kind}'
+{"idempotency_key":"push-guide-instance","corpus_id":"$PUSH_CORPUS_ID","source_namespace":"incoming","kind":"events","config":{},"schedule":{"interval_seconds":900}}
+EOF
+```
+
+{/* output */}
+```json
+{"connector_id":"{{PUSH_CONNECTOR_ID}}","kind":"events"}
+```
+
+```bash
+export PUSH_CONNECTOR_ID=<the connector_id above>
+```
+
+### Issue a token and push
+
+Save the once-only `secret` in a private file, then use it for the sender's authorization header. Give it to the third party through your secret-delivery channel. Keep the token ID for [rotation and revocation](/guides/connectors#give-a-third-party-a-push-token).
+
+{/* runnable */}
+```bash
+umask 077
+curl -fsS -X POST "$QUIVR_API_URL/v0/connectors/$PUSH_CONNECTOR_ID/tokens" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d '{}' > push-token.json
+jq '{token_id: .token.token_id}' push-token.json
+```
+
+{/* output */}
+```json
+{"token_id":"{{PUSH_TOKEN_ID}}"}
+```
+
+{/* runnable */}
+```bash
+curl -fsS -X POST "$QUIVR_API_URL/v0/connectors/$PUSH_CONNECTOR_ID/api/records" \
+  -H "Authorization: Bearer $(jq -r .secret push-token.json)" \
+  -H "Content-Type: application/json" -H "Idempotency-Key: push-guide-note-1" \
+  -d '{"key":"note-1","revision":"1","title":"Library opens","text":"The library opens on Monday."}' \
+  | jq '{receipt_id: .receipts[0].receipt_id}'
+```
+
+{/* output */}
+```json
+{"receipt_id":"{{PUSH_RECEIPT_ID}}"}
+```
+
+```bash
+export PUSH_RECEIPT_ID=<the receipt_id above>
+```
+
+The push answers `202`. Retrying the same idempotency key and source revision returns the same Receipt. A correction uses a new revision and idempotency key.
+
+## Check it worked
+
+Read the Receipt with your Quivr key until processing resolves:
+
+{/* runnable retry */}
+```bash
+curl -fsS "$QUIVR_API_URL/v0/ingestion-receipts/$PUSH_RECEIPT_ID" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{state, outcome, record_id, version_id}'
+```
+
+{/* output */}
+```json
+{"state":"resolved","outcome":"created","record_id":"{{PUSH_RECORD_ID}}","version_id":"{{PUSH_VERSION_ID}}"}
+```
+
+```bash
+export PUSH_RECORD_ID=<the record_id above> PUSH_VERSION_ID=<the version_id above>
+```
+
+{/* runnable */}
+```bash
+curl -fsS "$QUIVR_API_URL/v0/records/$PUSH_RECORD_ID" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{record_id, source}'
+```
+
+{/* output */}
+```json
+{"record_id":"{{PUSH_RECORD_ID}}","source":{"corpus_id":"{{PUSH_CORPUS_ID}}","namespace":"incoming","record_key":"note-1"}}
+```
+
+Read the stored title and body:
+
+{/* runnable */}
+```bash
+curl -fsS "$QUIVR_API_URL/v0/records/$PUSH_RECORD_ID/versions/$PUSH_VERSION_ID" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{parts: [.manifest.parts[] | {key, text: .content.text}]}'
+```
+
+{/* output */}
+```json
+{"parts":[{"key":"title","text":"Library opens"},{"key":"body","text":"The library opens on Monday."}]}
+```
+
+Use [Add content](/guides/add-content) for the Record's Parts and Versions. When the sender no longer needs access, [revoke its token](/guides/connectors#give-a-third-party-a-push-token).

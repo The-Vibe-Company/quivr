@@ -27,7 +27,7 @@ func (r *run) receiveConnector(ctx context.Context, cr connectorRun) {
 		}
 		check := Check{ID: CheckReceive, Contribution: ContributionConnector, Fixture: label,
 			Title: fmt.Sprintf("kind %s: %s answered within %d ms with a verdict the engine accepts", cr.run.Kind, strings.TrimSuffix(title, "."), r.connectorTimeoutMS())}
-		result, problem := r.callReceive(ctx, cr.run.ReceiveRequest(c.Relayed(), fmt.Sprintf("receive-%d", i)))
+		result, problem := r.callReceive(ctx, cr.run.ReceiveCaseRequest(c, fmt.Sprintf("receive-%d", i)))
 		check.Issues, check.Note = judgeDelivery(result, problem, c.Expect)
 		r.add(check, started)
 	}
@@ -124,7 +124,7 @@ func (r *run) invalidReceiveRequests(ctx context.Context, runs []connectorRun, n
 	if push == nil {
 		return
 	}
-	valid := push.ReceiveRequest(push.Receives[0].Relayed(), "invalid")
+	valid := push.ReceiveCaseRequest(push.Receives[0], "invalid")
 	cases := []invalidCase{
 		{label: "receive/non-json-body", reason: "the body is not JSON", body: []byte(`{"invocation_id": `)},
 		{label: "receive/unknown-field", reason: "the request carries an unknown top-level field", body: withRequest(valid, func(m map[string]any) { m["unexpected_field"] = true })},

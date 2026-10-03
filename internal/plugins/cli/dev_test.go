@@ -49,7 +49,7 @@ func TestInitWritesTheRequestedTemplate(t *testing.T) {
 	if code, out, _ := run("inspect", alerts); code != 0 || !strings.Contains(out, "Contribution subscription") {
 		t.Fatalf("init --kind subscription wrote no alert rule: %s", out)
 	}
-	for _, args := range [][]string{{"init"}, {"init", "Bad_Name"}, {"init", "a", "b"}, {"init", "demo", "--dir"}, {"init", "demo", "--kind"}} {
+	for _, args := range [][]string{{"init"}, {"init", "Bad_Name"}, {"init", "a", "b"}, {"init", "demo", "--dir"}, {"init", "demo", "--kind"}, {"init", "demo", "--push"}, {"init", "demo", "--kind", "subscription", "--push"}} {
 		if code, _, errOut := run(args...); code != 2 {
 			t.Errorf("%v: exit %d %s", args, code, errOut)
 		}
@@ -61,6 +61,15 @@ func TestInitWritesTheRequestedTemplate(t *testing.T) {
 	if code, out, _ := run("inspect", collector); code != 0 {
 		t.Fatalf("init --kind connector wrote no collector: %s", out)
 	}
+	push := filepath.Join(t.TempDir(), "push")
+	if code, _, errOut := run("init", "push", "--kind", "connector", "--push", "--dir", push); code != 0 {
+		t.Fatalf("init push: exit %d %s", code, errOut)
+	}
+	report := plugins.Inspect(push)
+	if !report.Valid || !plugins.KindPushes(report.Manifest, "events") {
+		t.Fatalf("push scaffold invalid: %+v", report)
+	}
+
 	if code, _, errOut := run("init", "demo", "--kind=unknown"); code != 2 || !strings.Contains(errOut, "connector") {
 		t.Errorf("unknown kind: exit %d %s", code, errOut)
 	}

@@ -88,6 +88,7 @@ excluded = [
 "plugins/core-retrieve/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine" }
 "plugins/jev-rerank/README.md" = { audience = "plugin-author", kind = "concept", summary = "optional Jev reranking, bounded pair caching and hybrid fallback" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
+"plugins/push-source/README.md" = { audience = "plugin-author", kind = "guide", summary = "an offline instance-token push source and its certification" }
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
 "plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources, live feed and the admin view" }
@@ -115,10 +116,11 @@ excluded = [
 "plugins/core-ingest/README.md" = 60
 "plugins/core-retrieve/README.md" = 60
 "plugins/pdf-text/README.md" = 120
+"plugins/push-source/README.md" = 21
 "plugins/rss/README.md" = 60
 "plugins/x-list/README.md" = 60
 "quivr-search/README.md" = 117
-"sdks/go/README.md" = 191
-"sdks/python/README.md" = 140
+"sdks/go/README.md" = 212
+"sdks/python/README.md" = 166
 "tests/acceptance/README.md" = 50
 "tests/fakes/README.md" = 60

@@ -190,6 +190,12 @@
                 "type": "string",
                 "contentEncoding": "base64",
                 "description": "A binary body, standard base64."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "description": "Relative API path, for example events/news. Required with route."
               }
             }
           },
@@ -243,8 +249,31 @@
                 "description": "The delivery is expected to fail with this error class instead of a verdict."
               }
             }
+          },
+          "route": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "description": "Declared API route name. With route, request.path is required and the exact request body is parsed as JSON (empty GET becomes null). This certifies plugin handling, not engine authentication."
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "route"
+              ]
+            },
+            "then": {
+              "properties": {
+                "request": {
+                  "required": [
+                    "path"
+                  ]
+                }
+              }
+            }
+          }
+        ]
       }
     }
   }

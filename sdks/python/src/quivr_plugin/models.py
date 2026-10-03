@@ -743,6 +743,7 @@ class FixtureReceiveRequest(Model):
     headers: dict[str, str] | None = None
     body: str | None = None
     body_base64: str | None = None
+    path: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -767,6 +768,7 @@ class FixtureReceiveCase(Model):
     description: str | None = None
     request: FixtureReceiveRequest
     expect: ExpectedDelivery | None = None
+    route: str | None = None
 
 
 @dataclass(kw_only=True)

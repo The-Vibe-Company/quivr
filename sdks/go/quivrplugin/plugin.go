@@ -36,6 +36,7 @@ const maxRequestBytes = 16 << 20
 type Plugin struct {
 	m          *loadedManifest
 	kinds      map[string]*kind
+	routes     map[string]map[string]func(context.Context, *ReceiveRequest) (*Delivery, error)
 	logger     *slog.Logger
 	configSch  *jsonschema.Schema
 	spool      spool
@@ -46,9 +47,10 @@ type Plugin struct {
 }
 
 type kind struct {
-	impl       Connector
-	config     *jsonschema.Schema
-	credential *jsonschema.Schema
+	impl         Connector
+	config       *jsonschema.Schema
+	credential   *jsonschema.Schema
+	routeSchemas map[string]*jsonschema.Schema
 	// optional: the manifest sets credential_required: false.
 	optional bool
 }
@@ -73,7 +75,7 @@ func New(path string, opts ...Option) (*Plugin, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plugin{m: m, kinds: map[string]*kind{}, logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
+	p := &Plugin{m: m, kinds: map[string]*kind{}, routes: map[string]map[string]func(context.Context, *ReceiveRequest) (*Delivery, error){}, logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -86,13 +88,23 @@ func New(path string, opts ...Option) (*Plugin, error) {
 		return p, nil
 	}
 	for name, declared := range m.Connector.Kinds {
-		k := &kind{optional: declared.CredentialRequired != nil && !*declared.CredentialRequired}
+		k := &kind{optional: declared.CredentialRequired != nil && !*declared.CredentialRequired, routeSchemas: map[string]*jsonschema.Schema{}}
 		if k.config, err = compileDeclared(declared.ConfigSchema); err != nil {
 			return nil, fmt.Errorf("kind %s config_schema: %w", name, err)
 		}
 		if len(declared.CredentialSchema) > 0 {
 			if k.credential, err = compileDeclared(declared.CredentialSchema); err != nil {
 				return nil, fmt.Errorf("kind %s credential_schema: %w", name, err)
+			}
+		}
+		if declared.API != nil {
+			for _, route := range declared.API.Routes {
+				if len(route.RequestSchema) == 0 || string(route.RequestSchema) == "null" {
+					continue
+				}
+				if k.routeSchemas[route.Name], err = compileDeclared(route.RequestSchema); err != nil {
+					return nil, fmt.Errorf("kind %s route %s request_schema: %w", name, route.Name, err)
+				}
 			}
 		}
 		p.kinds[name] = k
@@ -119,6 +131,42 @@ func (p *Plugin) MustConnector(kindName string, impl Connector) *Plugin {
 		panic(err)
 	}
 	return p
+}
+
+// Route registers the handler for one declared secure Connector API route.
+// The engine owns authentication; the SDK validates the declared route and
+// request body before it invokes this handler.
+func (p *Plugin) Route(kindName, routeName string, handler func(context.Context, *ReceiveRequest) (*Delivery, error)) error {
+	if handler == nil {
+		return fmt.Errorf("route %q for kind %q has a nil handler", routeName, kindName)
+	}
+	_, ok := p.kinds[kindName]
+	if !ok {
+		return fmt.Errorf("kind %q is not declared under contributions.connector.kinds in the manifest", kindName)
+	}
+	if p.m.Connector.Kinds[kindName].API == nil {
+		return fmt.Errorf("kind %q does not declare Connector API routes", kindName)
+	}
+	declared := false
+	for _, route := range p.m.Connector.Kinds[kindName].API.Routes {
+		if route.Name == routeName {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return fmt.Errorf("route %q for kind %q is not declared in the manifest", routeName, kindName)
+	}
+	byName := p.routes[kindName]
+	if byName == nil {
+		byName = map[string]func(context.Context, *ReceiveRequest) (*Delivery, error){}
+		p.routes[kindName] = byName
+	}
+	if _, exists := byName[routeName]; exists {
+		return fmt.Errorf("route %q for kind %q is already registered", routeName, kindName)
+	}
+	byName[routeName] = handler
+	return nil
 }
 
 func (p *Plugin) checkRegistered() error {
@@ -148,8 +196,29 @@ func (p *Plugin) checkRegistered() error {
 		return fmt.Errorf("no implementation registered for declared kinds %v", missing)
 	}
 	for name, k := range p.kinds {
-		if _, ok := k.impl.(Receiver); p.m.Connector.Kinds[name].Pushes() && !ok {
-			return fmt.Errorf("kind %q declares the push mode, so its implementation must implement Receiver", name)
+		declared := p.m.Connector.Kinds[name]
+		_, hasReceiver := k.impl.(Receiver)
+		if !declared.Pushes() {
+			continue
+		}
+		if declared.API == nil {
+			if !hasReceiver {
+				return fmt.Errorf("kind %q declares the push mode, so its implementation must implement Receiver", name)
+			}
+			continue
+		}
+		if hasReceiver {
+			continue
+		}
+		var missing []string
+		for _, route := range declared.API.Routes {
+			if p.routes[name] == nil || p.routes[name][route.Name] == nil {
+				missing = append(missing, route.Name)
+			}
+		}
+		if len(missing) > 0 {
+			sort.Strings(missing)
+			return fmt.Errorf("kind %q declares API routes, so register handlers for %v or implement Receiver", name, missing)
 		}
 	}
 	if p.m.Connector.Attachments != nil {

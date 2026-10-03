@@ -67,7 +67,7 @@ const inspectUsage = "quivr plugin inspect [--json] <plugin-dir|quivr-plugin.yam
 func init() {
 	commands = map[string]command{
 		"inspect": {usage: inspectUsage, summary: "Validate a plugin manifest and print what the plugin declares.", run: inspect},
-		"init":    {usage: initUsage, summary: "Write a new Python plugin from a template: a normalizer, an alert rule (`--kind subscription`) or a source collector (`--kind connector`).", run: initCommand},
+		"init":    {usage: initUsage, summary: "Write a new Python plugin from a template: a normalizer, an alert rule (`--kind subscription`) or a source collector (`--kind connector`; add `--push` for an instance-token push source).", run: initCommand},
 		"dev":     {usage: devUsage, summary: "Run a plugin locally, check its discovery against the manifest and replay a fixture; restarts it on change with `--watch`.", run: dev},
 		"test":    {usage: testUsage, summary: "Certify that the engine can safely invoke every Contribution the plugin declares.", run: test},
 	}

@@ -114,6 +114,19 @@ python3 -m unittest discover -s tests
 grep -q "^CERTIFIED" contract.log || { cat contract.log; exit 1; }
 echo "quivr plugin test certified the scaffolded connector: $work/connector-contract-report.json"
 
+# Push scaffold and neutral source, certified without external services.
+cd "$e2e"
+"$quivr" plugin init push-demo --kind connector --push > init-push.log
+cd push-demo
+python3 -m unittest discover -s tests
+"$quivr" plugin test --report "$work/push-scaffold-contract-report.json" . > contract.log 2>&1 || { cat contract.log; exit 1; }
+grep -q "^CERTIFIED" contract.log || { cat contract.log; exit 1; }
+cd "$root/plugins/push-source"
+python3 -m unittest discover -s tests
+"$quivr" plugin test --report "$work/push-source-contract-report.json" . > "$work/push-source-contract.log" 2>&1 || { cat "$work/push-source-contract.log"; exit 1; }
+grep -q "^CERTIFIED" "$work/push-source-contract.log" || { cat "$work/push-source-contract.log"; exit 1; }
+echo "quivr plugin test certified the push scaffold and plugins/push-source"
+
 cd "$root/sdks/python/examples/static-source"
 "$quivr" plugin inspect . > "$work/python-static-source-inspect.log"
 "$quivr" plugin test --report "$work/python-static-source-contract-report.json" . > "$work/python-static-source-contract.log" 2>&1 || { cat "$work/python-static-source-contract.log"; exit 1; }

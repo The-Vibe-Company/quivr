@@ -72,6 +72,28 @@ Attachment declarations require `describe_attachment` and `upload_attachment`;
 requests include a redacting logger. The upload handler writes to the grant itself.
 See the runnable [static-source example](examples/static-source/static_source/connector.py) and its [manifest](examples/static-source/quivr-plugin.yaml).
 
+### Named connector routes
+
+Declare a secure route under the connector kind's `api.routes`, then register
+its typed handler. The engine authenticates the request and the SDK checks the
+declared method, path and parsed body before calling the handler:
+
+```python
+from quivr_plugin import ConnectorReceiveResponse, ReceiveAnswer, ReceiveRequest
+
+@plugin.connector_route("alerts", "event")
+def receive_event(request: ReceiveRequest) -> ConnectorReceiveResponse:
+    return ConnectorReceiveResponse(
+        verdict="accepted",
+        response=ReceiveAnswer(status=202),
+        items=[],
+    )
+```
+
+Register every declared route when the connector has no `receive` method. A
+connector that implements `receive` can keep using that legacy handler for
+routes without a helper. Unnamed webhook deliveries still use `receive`.
+
 ## What the SDK does
 
 | Concern | Behavior |
