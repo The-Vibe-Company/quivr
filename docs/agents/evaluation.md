@@ -4,8 +4,7 @@
 generated judgements. For each set it ingests the documents into a new Corpus through the
 public API, waits until every Record has its vectors, runs every query in each search mode
 (`lexical`, `semantic`, `hybrid`) and each profile the API serves, and reports nDCG@10,
-Recall@10, MRR@10, latency and paid calls per query. It is a measurement, not a test: scores
-never fail a run, only harness or dependency errors do.
+Recall@10, MRR@10, latency and paid calls per query. Only harness or dependency errors fail a run.
 
 ## Run it
 
@@ -17,13 +16,10 @@ make eval args='--baseline <report.json>'   # also compare with an earlier run, 
 make eval args='--sets miracl-fr --compare-to main'  # also measure main, on this machine
 ```
 
-The local stack needs Linux x86_64, like `make measure`; it runs the engine with only its
-core plugins pinned, core.ingest and core.retrieve. To measure an existing installation instead, pass `--api-url <url>` and put a key
-with `corpora:read`, `corpora:write`, `content:read`, `content:write`, `changes:read` and `search:query` in
+The local stack needs Linux x86_64. For an existing installation, use `--api-url <url>` with a key granting `corpora:read`, `corpora:write`, `content:read`, `content:write`, `changes:read` and `search:query` in
 `QUIVR_EVAL_API_KEY`. Each run creates new Corpora and never deletes them.
 
-The report is written to `.scratch/eval/runs/<time>/report.md` and `report.json` (`--out`
-changes the folder). Downloads are cached in `.scratch/eval/cache`.
+Reports go in `.scratch/eval/runs/<time>/` (`--out` overrides it); downloads in `.scratch/eval/cache`.
 
 ## Compare an evaluation plugin
 
@@ -44,23 +40,24 @@ core.ingest in the same mode. These options exclude live paid reranker evaluatio
 
 ## The public sets
 
-| Set | Language | Sample (queries / documents) | Licence |
-| --- | --- | --- | --- |
-| `miracl-fr` | French | 343 / 5,000 Wikipedia passages | Apache-2.0; passages CC BY-SA 4.0 |
-| `mldr-fr` | French | 200 / 600 long documents | MIT |
-| `scifact` | English | 300 / 2,000 scientific abstracts | claims CC BY 4.0, abstracts ODC-By 1.0 |
+The default suite contains five French sets (`miracl-fr`, `mldr-fr`, `xpqa-fr`,
+`webfaq-fr`, `mkqa-fr`) and five English sets (`scifact`, `fiqa`, `trec-covid`,
+`arguana`, `scidocs`). Only default sets count toward promotion gates.
+`python3 scripts/eval/run.py --list-sets` prints pinned versions, licences and sizes offline.
+The [registry](../../scripts/eval/public_sets.json) records each licence check and SHA-256.
 
-`scripts/eval/public_sets.py` pins every file by URL and sha256 and records each licence
-and where it was checked. Every judged query is kept; the documents are sampled so that a
-nightly run fits a 2-CPU runner (about 90 minutes, mostly ingestion; `mldr-fr` alone takes
-40): every judged document is kept, and a fixed seed picks distractors for the rest (the
-source's own hard negatives first when it lists them). Documents over the engine's
-`max_source_bytes` are left out. Sampled corpora are much smaller than the
-originals, so scores are higher than published full-corpus numbers; compare runs with each
-other, not with papers.
+`--include-restricted` opts into Alloprof and BSARD (CC BY-NC-SA 4.0) and NFCorpus
+(academic-only). Use these only when your purpose meets their terms. Their reports have
+`promotion_eligible: false`; they are diagnostics and stay out of gates. Data downloads
+at run time into the ignored cache; never commit or redistribute restricted data.
+Syntec remains excluded because its licence is unknown; mMARCO's inherited terms remain unresolved.
 
-NFCorpus (academic use only), mMARCO, FQuAD, BSARD and Alloprof are not used: their
-licences do not allow it.
+Every sample uses a fixed seed and retains all available judgments for its selected
+queries. Distractors come from listed hard negatives first, then a seeded random draw.
+Documents over `max_source_bytes` are excluded. Changing sources, size or seed changes
+the sample fingerprint. Sampled scores are usually higher than full-corpus scores;
+compare only runs with identical fingerprints. TREC-COVID samples five topics to keep
+its deep judgments within 10,000 documents; that alone cannot establish significance.
 
 ## Add a set
 
@@ -74,12 +71,11 @@ or a `.zip` / `.tar.gz` archive:
   line is optional), or the 4-column TREC form `q1 Q0 d1 1`.
 
 Run it with `make eval args='--sets "" --private <dir|archive|URL> --private-sha256 <hex>'`;
-a URL needs its sha256. The nightly lane measures a private set when the repository secrets
-`EVAL_SET_URL` and `EVAL_SET_SHA256` are set, and sends `EVAL_SET_AUTHORIZATION`, when set,
-as the download's `Authorization` header. Reports hold identifiers and scores, never texts.
+a URL needs its sha256. Set `QUIVR_EVAL_SET_AUTHORIZATION` for an authenticated download.
+Reports hold identifiers and scores, never texts.
 
 A new public set needs a licence that allows this use, checked at its source; add it to
-`SETS` in `public_sets.py` with pinned files, a converter and a sample size, and record the
+`public_sets.json` with pinned files, a converter and a sample size, and record the
 licence on its ticket.
 
 ## Read the report
@@ -108,31 +104,23 @@ licence on its ticket.
 
 ## Compare speed before and after a change
 
-Latency differs between runners, even with the same CPU model, by more than most changes.
-`--compare-to <ref>` (a branch, tag or full commit SHA) checks it out in a worktree and starts
-a second local stack from it in the same run; each set is ingested into both, and each query
-is searched on both, alternating which goes first. The report opens with base, branch and
-Δ p50 and p95 per system, under the CPU model, and compares scores with the base query by
-query. Ingestion takes twice as long, so one set is usually enough.
+Use `--compare-to <ref>` to measure both revisions on the same machine, alternating
+query calls. It reports score and latency changes. Ingestion runs twice, so start with one set.
 
-## The lane
+## Measurement machines and CI
 
-The `Search quality` workflow (`.github/workflows/measure-search.yml`) runs nightly and on
-demand, never on pull requests: `gh workflow run measure-search.yml --ref <branch>`,
-optionally with `-f baseline_run_id=<run>`; by default it compares with the latest successful
-run on `main`. `-f compare_to=main -f sets=miracl-fr` compares in one job instead. Its artifact
-`search-quality` holds `report.md`, `report.json` and the stack logs; the report is on the run page.
+Measurements run on your machine or the coordinator's compute, never GitHub Actions.
+The `Search quality` manual workflow checks tiny fixtures and prints the default registry;
+it downloads no benchmark data and makes no model/provider calls. Measurement commands refuse CI execution.
 
 ## Compare embeddings directly on your machine
 
 Use `scripts/eval/direct_bakeoff.py` to compare dense embeddings without an engine or vector database. It uses public samples, exact cosine top ten and repository scoring,
 with e5-small as the paired baseline. Long documents use the
-reference character windows: 1,800 for e5 and 6,000 for hosted models, overlapping
-by 200 characters (roughly 450 and 1,500 tokens). A document's best piece wins. The local encoder can truncate at its token limit.
+reference windows: 1,800 characters for e5 and 6,000 for hosted models, with 200-character overlap. A document's best piece wins. The local encoder can truncate at its token limit.
 
-Use Python 3.10+ and a virtual environment. The first run downloads `intfloat/multilingual-e5-small`.
-Hosted runs need an Azure AI Foundry resource
-serving the requested deployments, with its endpoint and key in environment
+Use Python 3.11+ and a virtual environment. The first run downloads a pinned `intfloat/multilingual-e5-small` revision.
+Hosted runs need Azure AI Foundry serving the requested deployments, with its endpoint and key in environment
 variables `AZURE_FOUNDRY_ENDPOINT` and `AZURE_FOUNDRY_KEY`. Keep keys out of Git. Paid measurements run locally; this command refuses CI execution.
 
 For example, not run here with a provider key:
@@ -160,10 +148,22 @@ These bounds use list prices, not billing receipts. The JSON records both confir
 and reserved spend, sample fingerprint, settings, completed scores and timings.
 `complete` exits 0; `capped` or `failed` exits 2 and retains completed models. Query timing is batch encoding time per query, not engine search latency.
 
-Outputs refuse overwrites. Inspect the JSON before committing it with a summary
-under a new dated folder in `docs/dated/evidence/`; the summary needs `Date:` and `Status:` lines and a link in the [dated index](../dated/README.md). Keep only
-public-set measurements, never query/document text or secrets. Preserve merged
-evidence and add a new filename or dated folder for future runs. The [2026-10-03 comparison](../dated/evidence/2026-10-03-embedding-comparison/summary.md)
-preserves the four original result files and explains their limitations.
+Outputs refuse overwrites. Keep public measurements and summaries in a new dated evidence folder,
+with `Date:` and `Status:` lines. Never commit query/document text or secrets. Preserve merged evidence. The [2026-10-03 comparison](../dated/evidence/2026-10-03-embedding-comparison/summary.md)
+preserves the original results and their limitations.
 
-The legacy `Embedding quality` manual workflow previews a plan with no credentials or paid step. Direct scores do not measure hybrid fusion or engine throughput.
+## Inspect a set's quality
+
+After a local baseline, run (example paths):
+
+```sh
+python3 scripts/eval/quality_reports.py --set xpqa-fr \
+  --e5-run .scratch/eval/local-runs/xpqa-fr.json --out .scratch/eval/quality
+```
+The JSON and short Markdown hold judged depth, query lengths, heuristic question/statement
+mix, source limitations and e5 saturation. Judge agreement and manual intent labels are
+unavailable where the source supplies none. Joint saturation is the share both systems score nDCG@10=1.
+It stays `null` until `--cohere-run` supplies a complete `direct_bakeoff.py` Cohere Pro JSON with matching queries/fingerprint.
+Outputs refuse overwrites. Restricted reports contain aggregates only and remain ineligible
+for gates. The [dated suite report](../dated/evidence/2026-10-03-public-sets/summary.md)
+records local scores, licence exclusions, and per-set hosted commands with caps totaling under $20.

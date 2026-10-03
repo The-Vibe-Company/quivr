@@ -373,6 +373,8 @@ def measure_set(clients, name, directory, run_id, options, allow_paid=True, eval
         data['qrels'] = {query: data['qrels'][query] for query in selected}
     manifest_path = pathlib.Path(directory) / 'manifest.json'
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {'name': name, 'fingerprint': trec.fingerprint(directory)}
+    if name in public_sets.SETS:
+        manifest.update(tier=public_sets.SETS[name]['tier'], promotion_eligible=public_sets.SETS[name]['promotion_eligible'])
     namespace = f'eval-{name}'
     deep_queries = deep_warmups(set(data['queries'].values()), run_id)
     sides = []
@@ -623,11 +625,11 @@ def start_stack(phases, stacks, source=ROOT, suffix='', typesafe_key='', ingesti
 
 def resolve_sets(options):
     """[(name, directory)] for the requested public sets and the optional private one."""
-    chosen = [s for s in options.sets.split(',') if s]
+    chosen = [s for s in options.sets.split(',') if s] if options.sets is not None else list(public_sets.names(options.include_restricted))
     unknown = [s for s in chosen if s not in public_sets.SETS]
     if unknown:
         sys.exit(f"eval: unknown set {', '.join(unknown)}; public sets: {', '.join(public_sets.SETS)}")
-    out = [(name, public_sets.prepare(name, options.cache)) for name in chosen]
+    out = [(name, public_sets.prepare(name, options.cache, include_restricted=getattr(options, 'include_restricted', False))) for name in chosen]
     if options.private:
         headers = {'Authorization': os.environ['QUIVR_EVAL_SET_AUTHORIZATION']} if os.environ.get('QUIVR_EVAL_SET_AUTHORIZATION') else None
         path = trec.fetch(options.private, options.private_sha256, options.cache, headers)
@@ -637,7 +639,9 @@ def resolve_sets(options):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    parser.add_argument('--sets', default=','.join(public_sets.SETS), help='comma-separated public sets (default: all); empty for none')
+    parser.add_argument('--sets', help='comma-separated public sets (default: default suite); empty for none')
+    parser.add_argument('--include-restricted', action='store_true', help='opt into diagnostic-only sets under their restricted licences')
+    parser.add_argument('--list-sets', action='store_true', help='print the licence-tier registry offline and exit')
     parser.add_argument('--private', default=os.environ.get('QUIVR_EVAL_SET', ''), help='a TREC-layout set: directory, archive path or URL (env QUIVR_EVAL_SET)')
     parser.add_argument('--private-sha256', default=os.environ.get('QUIVR_EVAL_SET_SHA256', ''), help='sha256 of the archive; required for a URL (env QUIVR_EVAL_SET_SHA256)')
     parser.add_argument('--private-name', default='private', help='name of the private set in the report')
@@ -652,6 +656,13 @@ def main():
     parser.add_argument('--ingest-timeout', type=int, default=5400, help='seconds for one set to become searchable with vectors')
     parser.add_argument('--stall', type=int, default=600, help='seconds without a Record gaining vectors before failing')
     options = parser.parse_args()
+    if options.list_sets:
+        print(json.dumps({name: public_sets.SETS[name] for name in public_sets.names(options.include_restricted)}, indent=2))
+        return
+    if any(os.environ.get(key, '').lower() not in ('', '0', 'false') for key in ('CI', 'GITHUB_ACTIONS')):
+        parser.error('measurements run locally only; use --list-sets for offline CI preview')
+    if options.sets is None:
+        options.sets = ','.join(public_sets.names(options.include_restricted))
     if options.ingestion_config and (options.api_url or options.compare_to or options.evaluation_plugin or options.evaluation_space):
         parser.error('--ingestion-config uses one local stack and excludes existing selection and --compare-to')
     ingestion = embeddings.load_pin(options.ingestion_config) if options.ingestion_config else None
@@ -704,6 +715,7 @@ def main():
     try:
         import scoring
         report.update(convention=scoring.CONVENTION, test=scoring.TEST)
+        report['promotion_sets'] = [name for name in options.sets.split(',') if name in public_sets.DEFAULT_SETS]
         sets = resolve_sets(options)
         clients = []
         if options.api_url:

@@ -1,0 +1,351 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "nfcorpus",
+  "metadata": {
+    "name": "nfcorpus",
+    "language": "en",
+    "description": "nutrition and medical questions",
+    "licence": "academic-only",
+    "source": "https://huggingface.co/datasets/BeIR/nfcorpus",
+    "version": {
+      "BeIR/nfcorpus": "b5026a0e96e8a7ac4f95f482a596389289d46269",
+      "BeIR/nfcorpus-qrels": "a451b3b26d3ae1358f259c1a3a4dd61fcea35a65"
+    },
+    "split": "test",
+    "tier": "restricted",
+    "promotion_eligible": false,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/BeIR/nfcorpus/blob/b5026a0e96e8a7ac4f95f482a596389289d46269/README.md",
+      "https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/"
+    ],
+    "query_type": "nutrition and medical questions",
+    "known_issues": [
+      "Academic-only source terms override generic BEIR mirror metadata; excluded from promotion gates.",
+      "Judgments derived from website links, not independent human relevance assessors."
+    ],
+    "source_counts": {
+      "documents": 3633,
+      "queries": 3237,
+      "judgments": 12334
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 3600,
+      "seed": 991,
+      "max_source_bytes": 262144,
+      "eligible_queries": 323,
+      "judged_documents": 2745,
+      "listed_negatives": 0,
+      "random_distractors": 855,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "17c5fec9d0636ddce6e5b9f9a479bf181a3df228a57c086669111cdefe312f02",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/BeIR/nfcorpus/resolve/b5026a0e96e8a7ac4f95f482a596389289d46269/corpus/corpus-00000-of-00001.parquet",
+        "sha256": "f2a1c0b570a5efdf23cfa36f5e573d062cc113c6e7251e22c69b323a33ea895e"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/BeIR/nfcorpus/resolve/b5026a0e96e8a7ac4f95f482a596389289d46269/queries/queries-00000-of-00001.parquet",
+        "sha256": "edd2b878b8130fb3b5e3c4b9428ddc1e67fbd6eedf8ae099fca3b87838ba6b29"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/BeIR/nfcorpus-qrels/resolve/a451b3b26d3ae1358f259c1a3a4dd61fcea35a65/test.tsv",
+        "sha256": "f8fba6ef3d4dd9c3a242a8ba4ae38276fc3622fce7dcbae764766d564542fd2a"
+      }
+    }
+  },
+  "counts": {
+    "documents": 3600,
+    "queries": 200,
+    "judgments": 8239
+  },
+  "source_counts": {
+    "documents": 3633,
+    "queries": 3237,
+    "judgments": 12334
+  },
+  "fingerprint": "17c5fec9d0636ddce6e5b9f9a479bf181a3df228a57c086669111cdefe312f02",
+  "sample": {
+    "queries": 200,
+    "documents": 3600,
+    "seed": 991,
+    "max_source_bytes": 262144,
+    "eligible_queries": 323,
+    "judged_documents": 2745,
+    "listed_negatives": 0,
+    "random_distractors": 855,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 200,
+    "min": 1,
+    "max": 475,
+    "mean": 41.195,
+    "median": 15.0,
+    "histogram": {
+      "1": 17,
+      "2": 13,
+      "3": 14,
+      "4": 5,
+      "5": 9,
+      "6": 7,
+      "7": 6,
+      "8": 5,
+      "9": 3,
+      "10": 5,
+      "11": 5,
+      "12": 2,
+      "13": 4,
+      "14": 3,
+      "15": 4,
+      "16": 3,
+      "17": 2,
+      "18": 5,
+      "19": 1,
+      "20": 1,
+      "21": 3,
+      "22": 1,
+      "23": 1,
+      "24": 6,
+      "25": 3,
+      "26": 1,
+      "27": 3,
+      "29": 2,
+      "30": 1,
+      "31": 2,
+      "32": 1,
+      "34": 3,
+      "35": 1,
+      "36": 2,
+      "37": 1,
+      "38": 1,
+      "39": 1,
+      "41": 2,
+      "42": 2,
+      "43": 2,
+      "44": 1,
+      "45": 2,
+      "46": 2,
+      "47": 1,
+      "48": 1,
+      "49": 2,
+      "50": 1,
+      "51": 1,
+      "54": 2,
+      "55": 1,
+      "56": 1,
+      "57": 2,
+      "58": 1,
+      "59": 1,
+      "60": 1,
+      "61": 2,
+      "62": 1,
+      "63": 1,
+      "65": 1,
+      "69": 1,
+      "73": 2,
+      "74": 1,
+      "79": 1,
+      "90": 1,
+      "116": 1,
+      "132": 1,
+      "153": 1,
+      "159": 1,
+      "186": 1,
+      "196": 2,
+      "206": 1,
+      "244": 1,
+      "245": 1,
+      "410": 1,
+      "420": 1,
+      "421": 1,
+      "431": 1,
+      "463": 1,
+      "475": 1
+    },
+    "total_judgments": 8239,
+    "queries": 200
+  },
+  "grades": {
+    "counts": {
+      "1": 7926,
+      "2": 313
+    },
+    "positive_judgments": 8239,
+    "max_grade": 2
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 200,
+      "min": 4,
+      "max": 66,
+      "mean": 20.43,
+      "median": 15.0,
+      "histogram": {
+        "4": 9,
+        "5": 6,
+        "6": 10,
+        "7": 12,
+        "8": 13,
+        "9": 10,
+        "10": 14,
+        "11": 8,
+        "12": 3,
+        "13": 5,
+        "14": 8,
+        "15": 3,
+        "16": 5,
+        "17": 1,
+        "18": 7,
+        "19": 1,
+        "20": 3,
+        "21": 2,
+        "22": 1,
+        "23": 4,
+        "24": 6,
+        "25": 4,
+        "26": 4,
+        "27": 2,
+        "28": 2,
+        "29": 4,
+        "30": 3,
+        "31": 5,
+        "32": 1,
+        "33": 4,
+        "34": 3,
+        "35": 3,
+        "36": 6,
+        "37": 1,
+        "38": 1,
+        "39": 1,
+        "41": 2,
+        "42": 1,
+        "43": 4,
+        "44": 3,
+        "45": 1,
+        "46": 3,
+        "49": 1,
+        "50": 1,
+        "51": 1,
+        "53": 1,
+        "54": 1,
+        "56": 3,
+        "57": 1,
+        "59": 1,
+        "66": 1
+      }
+    },
+    "words": {
+      "count": 200,
+      "min": 1,
+      "max": 10,
+      "mean": 3.125,
+      "median": 2.0,
+      "histogram": {
+        "1": 69,
+        "2": 42,
+        "3": 14,
+        "4": 23,
+        "5": 20,
+        "6": 13,
+        "7": 4,
+        "8": 6,
+        "9": 6,
+        "10": 3
+      }
+    }
+  },
+  "query_types": {
+    "source": "nutrition and medical questions",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 26,
+      "statement": 174
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.31666032616003237,
+      "recall@10": 0.15698209818233858,
+      "mrr@10": 0.5150952380952382
+    },
+    "saturation": {
+      "saturated_queries": 11,
+      "queries": 200,
+      "share": 0.055
+    },
+    "dims": 384,
+    "pieces": 4767,
+    "index_s": 367.4,
+    "query_ms": 3.1
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T19:20:06.336719+00:00",
+      "status": "complete",
+      "set": "nfcorpus",
+      "fingerprint": "17c5fec9d0636ddce6e5b9f9a479bf181a3df228a57c086669111cdefe312f02",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 11,
+      "queries": 200,
+      "share": 0.055
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 200,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 3606,
+    "query_inputs": 200,
+    "input_tokens": 5772420,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 0.6926904,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 11544840,
+      "max_usd": 1.39
+    }
+  },
+  "local_run_sha256": "311de145bb736835cfe1d9c71c03c9b5505fc26c4bbe99d69d36c76b5206fcb0"
+}

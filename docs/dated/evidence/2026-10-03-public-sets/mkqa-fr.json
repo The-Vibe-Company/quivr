@@ -1,0 +1,276 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "mkqa-fr",
+  "metadata": {
+    "name": "mkqa-fr",
+    "language": "fr",
+    "description": "knowledge questions to short answers",
+    "licence": "cc-by-3.0",
+    "source": "https://huggingface.co/datasets/mteb/MKQARetrieval",
+    "version": {
+      "mteb/MKQARetrieval": "3e069e7a30079d214a859741f5a0de75cf878867"
+    },
+    "split": "train",
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/MKQARetrieval/blob/3e069e7a30079d214a859741f5a0de75cf878867/README.md",
+      "https://github.com/apple-aiml-research/ml-mkqa/blob/main/LICENSE"
+    ],
+    "query_type": "knowledge questions to short answers",
+    "known_issues": [
+      "MTEB conversion retrieves short answers, not source passages; train is the only available split; translated questions and ambiguous answers limit realism."
+    ],
+    "source_counts": {
+      "documents": 6617,
+      "queries": 6751,
+      "judgments": 9929
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2000,
+      "seed": 991,
+      "max_source_bytes": 262144,
+      "eligible_queries": 6751,
+      "judged_documents": 283,
+      "listed_negatives": 0,
+      "random_distractors": 1717,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "208a8e4a385677bd1d731ce61b34bf8425a557422fd6e0e84d71295259d3e9d4",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/mteb/MKQARetrieval/resolve/3e069e7a30079d214a859741f5a0de75cf878867/fr-corpus/train-00000-of-00001.parquet",
+        "sha256": "20e4daf32abec2efbea17cb1d0da6ed46b414091b95dcb39e6f3de5e315e622c"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/mteb/MKQARetrieval/resolve/3e069e7a30079d214a859741f5a0de75cf878867/fr-queries/train-00000-of-00001.parquet",
+        "sha256": "a2d8d7adbbb9edcf647a3229611f2fbd98b2f6cf3b262f50af890b61e8e00730"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/mteb/MKQARetrieval/resolve/3e069e7a30079d214a859741f5a0de75cf878867/fr-qrels/train-00000-of-00001.parquet",
+        "sha256": "ec3bf580a70bef23b0ac146f165cd017ba6828d06249a274406a75f9b2b9cf16"
+      }
+    }
+  },
+  "counts": {
+    "documents": 2000,
+    "queries": 200,
+    "judgments": 299
+  },
+  "source_counts": {
+    "documents": 6617,
+    "queries": 6751,
+    "judgments": 9929
+  },
+  "fingerprint": "208a8e4a385677bd1d731ce61b34bf8425a557422fd6e0e84d71295259d3e9d4",
+  "sample": {
+    "queries": 200,
+    "documents": 2000,
+    "seed": 991,
+    "max_source_bytes": 262144,
+    "eligible_queries": 6751,
+    "judged_documents": 283,
+    "listed_negatives": 0,
+    "random_distractors": 1717,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 200,
+    "min": 1,
+    "max": 6,
+    "mean": 1.495,
+    "median": 1.0,
+    "histogram": {
+      "1": 154,
+      "2": 24,
+      "3": 4,
+      "4": 8,
+      "5": 7,
+      "6": 3
+    },
+    "total_judgments": 299,
+    "queries": 200
+  },
+  "grades": {
+    "counts": {
+      "1": 299
+    },
+    "positive_judgments": 299,
+    "max_grade": 1
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 200,
+      "min": 30,
+      "max": 105,
+      "mean": 50.375,
+      "median": 49.0,
+      "histogram": {
+        "30": 2,
+        "31": 1,
+        "32": 1,
+        "33": 3,
+        "34": 3,
+        "35": 4,
+        "36": 4,
+        "37": 1,
+        "38": 5,
+        "39": 6,
+        "40": 5,
+        "41": 10,
+        "42": 8,
+        "43": 9,
+        "44": 6,
+        "45": 5,
+        "46": 7,
+        "47": 7,
+        "48": 9,
+        "49": 8,
+        "50": 6,
+        "51": 9,
+        "52": 9,
+        "53": 7,
+        "54": 10,
+        "55": 4,
+        "56": 5,
+        "57": 3,
+        "58": 4,
+        "59": 4,
+        "60": 1,
+        "61": 5,
+        "62": 2,
+        "63": 4,
+        "64": 1,
+        "65": 1,
+        "66": 3,
+        "67": 2,
+        "68": 3,
+        "69": 1,
+        "70": 2,
+        "71": 1,
+        "72": 1,
+        "74": 2,
+        "75": 1,
+        "77": 1,
+        "79": 1,
+        "93": 1,
+        "97": 1,
+        "105": 1
+      }
+    },
+    "words": {
+      "count": 200,
+      "min": 6,
+      "max": 20,
+      "mean": 9.595,
+      "median": 9.0,
+      "histogram": {
+        "6": 4,
+        "7": 15,
+        "8": 41,
+        "9": 50,
+        "10": 34,
+        "11": 33,
+        "12": 8,
+        "13": 7,
+        "14": 4,
+        "15": 2,
+        "16": 1,
+        "20": 1
+      }
+    }
+  },
+  "query_types": {
+    "source": "knowledge questions to short answers",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 150,
+      "statement": 50
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.09664053358174332,
+      "recall@10": 0.13616666666666666,
+      "mrr@10": 0.09512896825396824
+    },
+    "saturation": {
+      "saturated_queries": 8,
+      "queries": 200,
+      "share": 0.04
+    },
+    "dims": 384,
+    "pieces": 2000,
+    "index_s": 7.5,
+    "query_ms": 2.7
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T19:11:21.566906+00:00",
+      "status": "complete",
+      "set": "mkqa-fr",
+      "fingerprint": "208a8e4a385677bd1d731ce61b34bf8425a557422fd6e0e84d71295259d3e9d4",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 8,
+      "queries": 200,
+      "share": 0.04
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 200,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 2000,
+    "query_inputs": 200,
+    "input_tokens": 54552,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 0.00654624,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 109104,
+      "max_usd": 0.02
+    }
+  },
+  "local_run_sha256": "8a5d5ea0fb3c93a0c3094c9548a29ab4999c54b90d0fdcf4ebe717f50d20675d"
+}

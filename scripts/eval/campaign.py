@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prepare/run coordinator-dispatched hosted embedding measurements; never called by CI.
 
-The live gate is enabled only with --allow-paid in a workflow_dispatch job.
+The live gate is enabled only with --allow-paid on a coordinator measurement machine.
 --dry-run prints deployments, price sources, planned cuts and caps without
 reading a key, starting a plugin or making a provider request.
 """
@@ -224,8 +224,9 @@ def main():
     if options.dry_run:
         print(json.dumps(campaign, indent=2))
         return
-    if not options.allow_paid or os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch':
-        parser.error('paid campaign requires --allow-paid in a coordinator workflow_dispatch job')
+    if not options.allow_paid or any(os.environ.get(key, '').lower() not in ('', '0', 'false')
+                                     for key in ('CI', 'GITHUB_ACTIONS')):
+        parser.error('paid campaign requires --allow-paid locally; CI execution is refused')
     endpoint = os.environ.pop('AZURE_FOUNDRY_ENDPOINT', '')
     key = os.environ.pop('AZURE_FOUNDRY_KEY', '')
     os.environ.pop('TYPESAFE_API_KEY', None)

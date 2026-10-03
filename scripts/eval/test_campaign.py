@@ -16,12 +16,12 @@ import campaign
 
 
 class Dispatch(unittest.TestCase):
-    def test_paid_work_requires_dispatch_and_explicit_opt_in(self):
-        for arguments, event in [([], 'workflow_dispatch'), (['--allow-paid'], 'pull_request'),
-                                 (['--allow-paid'], 'schedule')]:
-            with self.subTest(event=event, arguments=arguments), \
+    def test_paid_work_requires_local_execution_and_explicit_opt_in(self):
+        for arguments, flags in [([], {}), (['--allow-paid'], {'CI': 'true'}),
+                                 (['--allow-paid'], {'GITHUB_ACTIONS': 'true'})]:
+            with self.subTest(flags=flags, arguments=arguments), \
                  mock.patch('sys.argv', ['campaign', '--max-input-tokens', '100', '--max-usd', '8'] + arguments), \
-                 mock.patch.dict('os.environ', {'GITHUB_EVENT_NAME': event}, clear=True), \
+                 mock.patch.dict('os.environ', flags, clear=True), \
                  mock.patch.object(campaign, 'execute') as execute, contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as refused:
                     campaign.main()
@@ -154,7 +154,7 @@ class Dispatch(unittest.TestCase):
             args = ['campaign', '--sets', 'mldr-fr', '--prior-report', str(first),
                     '--max-input-tokens', '100', '--max-usd', '1', '--allow-paid', '--out', str(directory / 'out')]
             with mock.patch('sys.argv', args), \
-                 mock.patch.dict('os.environ', {'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                 mock.patch.dict('os.environ', {'CI': '', 'GITHUB_ACTIONS': '',
                                                'AZURE_FOUNDRY_KEY': 'fixture', 'AZURE_FOUNDRY_ENDPOINT': 'https://example.org'}), \
                  mock.patch.object(campaign, 'execute'), contextlib.redirect_stdout(io.StringIO()):
                 campaign.main()

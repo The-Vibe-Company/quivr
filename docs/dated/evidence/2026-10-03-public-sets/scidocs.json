@@ -1,0 +1,321 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "scidocs",
+  "metadata": {
+    "name": "scidocs",
+    "language": "en",
+    "description": "scientific citation-related titles",
+    "licence": "cc-by-sa-4.0",
+    "source": "https://huggingface.co/datasets/BeIR/scidocs",
+    "version": {
+      "BeIR/scidocs": "acebceec772628c6679d76d6cff30ad517d17f4e",
+      "BeIR/scidocs-qrels": "735ea1048e37b1ebce14c6dc3d33a5edaf66d3dc"
+    },
+    "split": "test",
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/BeIR/scidocs/blob/acebceec772628c6679d76d6cff30ad517d17f4e/README.md"
+    ],
+    "query_type": "scientific citation-related titles",
+    "known_issues": [
+      "Citation-based relevance is a proxy rather than independent judgments; only a few relevant papers per title."
+    ],
+    "source_counts": {
+      "documents": 25657,
+      "queries": 1000,
+      "judgments": 29928
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 6000,
+      "seed": 991,
+      "max_source_bytes": 262144,
+      "eligible_queries": 1000,
+      "judged_documents": 5795,
+      "listed_negatives": 0,
+      "random_distractors": 205,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "4aa61a6cc3210a8ccee30c54f885d1f3a2bc5e84c5f47518f8701d243bed80fb",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/BeIR/scidocs/resolve/acebceec772628c6679d76d6cff30ad517d17f4e/corpus/corpus-00000-of-00001.parquet",
+        "sha256": "e1855cbf47a19e4ff1fc870674c3c441bc5a32a76ecc151851d4452a9aa43a28"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/BeIR/scidocs/resolve/acebceec772628c6679d76d6cff30ad517d17f4e/queries/queries-00000-of-00001.parquet",
+        "sha256": "f9ad7adff7d396e652789de371f69b5a3adfa8f39e1f37fff728c231e7db3202"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/BeIR/scidocs-qrels/resolve/735ea1048e37b1ebce14c6dc3d33a5edaf66d3dc/test.tsv",
+        "sha256": "dcd3d7f77417294bb6f338537f3c28d8a5ea72b30fe6633f407fa85528767e35"
+      }
+    }
+  },
+  "counts": {
+    "documents": 6000,
+    "queries": 200,
+    "judgments": 5988
+  },
+  "source_counts": {
+    "documents": 25657,
+    "queries": 1000,
+    "judgments": 29928
+  },
+  "fingerprint": "4aa61a6cc3210a8ccee30c54f885d1f3a2bc5e84c5f47518f8701d243bed80fb",
+  "sample": {
+    "queries": 200,
+    "documents": 6000,
+    "seed": 991,
+    "max_source_bytes": 262144,
+    "eligible_queries": 1000,
+    "judged_documents": 5795,
+    "listed_negatives": 0,
+    "random_distractors": 205,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 200,
+    "min": 28,
+    "max": 30,
+    "mean": 29.94,
+    "median": 30.0,
+    "histogram": {
+      "28": 1,
+      "29": 10,
+      "30": 189
+    },
+    "total_judgments": 5988,
+    "queries": 200
+  },
+  "grades": {
+    "counts": {
+      "0": 5000,
+      "1": 988
+    },
+    "positive_judgments": 988,
+    "max_grade": 1
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 200,
+      "min": 19,
+      "max": 150,
+      "mean": 73.32,
+      "median": 70.5,
+      "histogram": {
+        "19": 1,
+        "26": 1,
+        "28": 1,
+        "30": 1,
+        "32": 2,
+        "33": 1,
+        "34": 1,
+        "36": 2,
+        "37": 1,
+        "38": 1,
+        "39": 1,
+        "40": 1,
+        "41": 3,
+        "42": 3,
+        "43": 2,
+        "44": 3,
+        "45": 2,
+        "46": 1,
+        "47": 1,
+        "48": 1,
+        "49": 4,
+        "50": 4,
+        "51": 5,
+        "52": 3,
+        "53": 1,
+        "54": 3,
+        "55": 1,
+        "56": 1,
+        "57": 4,
+        "58": 3,
+        "59": 3,
+        "60": 3,
+        "61": 3,
+        "62": 8,
+        "63": 4,
+        "64": 2,
+        "65": 4,
+        "66": 4,
+        "67": 3,
+        "68": 1,
+        "69": 4,
+        "70": 2,
+        "71": 2,
+        "72": 1,
+        "73": 1,
+        "74": 2,
+        "75": 3,
+        "76": 1,
+        "77": 2,
+        "78": 4,
+        "79": 2,
+        "80": 3,
+        "81": 4,
+        "82": 3,
+        "83": 3,
+        "84": 4,
+        "85": 6,
+        "86": 2,
+        "87": 5,
+        "88": 4,
+        "89": 3,
+        "90": 3,
+        "91": 4,
+        "92": 1,
+        "93": 4,
+        "94": 1,
+        "95": 3,
+        "97": 1,
+        "99": 1,
+        "100": 1,
+        "101": 3,
+        "102": 1,
+        "105": 1,
+        "106": 1,
+        "107": 1,
+        "108": 1,
+        "110": 1,
+        "111": 1,
+        "112": 2,
+        "113": 1,
+        "114": 1,
+        "120": 1,
+        "121": 3,
+        "124": 1,
+        "126": 1,
+        "131": 1,
+        "133": 1,
+        "142": 1,
+        "143": 1,
+        "147": 1,
+        "150": 1
+      }
+    },
+    "words": {
+      "count": 200,
+      "min": 3,
+      "max": 20,
+      "mean": 9.645,
+      "median": 9.0,
+      "histogram": {
+        "3": 2,
+        "4": 4,
+        "5": 13,
+        "6": 21,
+        "7": 18,
+        "8": 25,
+        "9": 20,
+        "10": 20,
+        "11": 24,
+        "12": 16,
+        "13": 10,
+        "14": 13,
+        "15": 3,
+        "16": 3,
+        "17": 2,
+        "18": 1,
+        "19": 3,
+        "20": 2
+      }
+    }
+  },
+  "query_types": {
+    "source": "scientific citation-related titles",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 3,
+      "statement": 197
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.24251802612657933,
+      "recall@10": 0.2436666666666668,
+      "mrr@10": 0.41276785714285724
+    },
+    "saturation": {
+      "saturated_queries": 2,
+      "queries": 200,
+      "share": 0.01
+    },
+    "dims": 384,
+    "pieces": 6725,
+    "index_s": 498.7,
+    "query_ms": 5.4
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T19:27:10.430905+00:00",
+      "status": "complete",
+      "set": "scidocs",
+      "fingerprint": "4aa61a6cc3210a8ccee30c54f885d1f3a2bc5e84c5f47518f8701d243bed80fb",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 2,
+      "queries": 200,
+      "share": 0.01
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 200,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 6025,
+    "query_inputs": 200,
+    "input_tokens": 7344613,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 0.88135356,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 14689226,
+      "max_usd": 1.77
+    }
+  },
+  "local_run_sha256": "1cc9d92bd1757730ce8c0747522857d225930301bd0267b352dd4b39b1b2853d"
+}

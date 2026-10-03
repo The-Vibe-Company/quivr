@@ -24,6 +24,34 @@ def timing(encoding, elapsed):
     return {'client_ms': elapsed + 2.0, 'elapsed_ms': elapsed, 'query_encoding_ms': encoding, 'index_query_ms': 1, 'hydration_ms': 1, 'plugin_rounds_ms': 1}
 
 
+class DatasetCLI(unittest.TestCase):
+    def test_ci_only_previews_the_licence_tiers_without_preparing_data(self):
+        # CLI admission has its own owner; prepare owns restriction and conversion.
+        for restricted in (False, True):
+            args = ['eval', '--list-sets'] + (['--include-restricted'] if restricted else [])
+            output = io.StringIO()
+            with self.subTest(restricted=restricted), \
+                 mock.patch('sys.argv', args), \
+                 mock.patch.dict('os.environ', {'CI': 'true'}), \
+                 mock.patch.object(run.public_sets, 'prepare') as prepare, \
+                 contextlib.redirect_stdout(output):
+                run.main()
+            prepare.assert_not_called()
+            registry = json.loads(output.getvalue())
+            if restricted:
+                self.assertFalse(registry['nfcorpus']['promotion_eligible'])
+            else:
+                self.assertTrue(all(spec['tier'] == 'default' for spec in registry.values()))
+        with mock.patch('sys.argv', ['eval']), \
+             mock.patch.dict('os.environ', {'CI': 'true'}), \
+             mock.patch.object(run.public_sets, 'prepare') as prepare, \
+             contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as refusal:
+                run.main()
+            self.assertEqual(refusal.exception.code, 2)
+        prepare.assert_not_called()
+
+
 class TimeSummary(unittest.TestCase):
     def test_encoding_share_is_over_the_searches_that_report_phases(self):
         older = {'client_ms': 500.0}  # an installation that reports no usage

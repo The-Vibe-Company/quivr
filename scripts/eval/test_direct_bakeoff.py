@@ -124,6 +124,7 @@ class Run(unittest.TestCase):
                 self.assertEqual(report['status'], 'capped' if capped else 'complete')
                 self.assertEqual(report['fingerprint'], trec.fingerprint(root / 'set'))
                 self.assertEqual(report['results'][bakeoff.BASELINE]['mean']['ndcg@10'], 1)
+                self.assertEqual(report['results'][bakeoff.BASELINE]['per_query']['ndcg@10'], {'q': 1.0})
                 self.assertNotIn('fixture-key', output.read_text())
                 if not capped:
                     self.assertEqual(report['results']['Cohere-Embed-V5-Pro-1024']['vs_current']['ndcg@10']['delta'], 0)

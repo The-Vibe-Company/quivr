@@ -1,0 +1,523 @@
+{
+  "miracl-fr": {
+    "language": "fr",
+    "description": "MIRACL French dev queries over Wikipedia passages (MTEB hard-negative pool), native-speaker judgements",
+    "licence": "Apache-2.0 (MIRACL); passages CC BY-SA 4.0 (Wikipedia)",
+    "source": "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives/resolve/332a9acb49f5e83d5397683f79d23e588f685916/fr-corpus/dev-00000-of-00001.parquet",
+        "521cfb7e34f1dac0ed80c00ddf860f518b15435b656b74f442d7fd82d215a7c8"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives/resolve/332a9acb49f5e83d5397683f79d23e588f685916/fr-queries/dev-00000-of-00001.parquet",
+        "cd8448c32adb202e649d94662d1f2827c3f9011ad784611d36e5c95a0f03d44d"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives/resolve/332a9acb49f5e83d5397683f79d23e588f685916/fr-qrels/dev-00000-of-00001.parquet",
+        "f873ab0be474ee555bf45858b4c51fafaa52e40c7f1af06d37c100771ea0672a"
+      ]
+    },
+    "sample": {
+      "queries": 343,
+      "documents": 5000,
+      "seed": 775
+    },
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives"
+    ],
+    "version": {
+      "mteb/MIRACLRetrievalHardNegatives": "332a9acb49f5e83d5397683f79d23e588f685916"
+    },
+    "split": "dev",
+    "query_type": "Wikipedia information questions",
+    "known_issues": [
+      "Hard-negative pool and sampled distractors, not full Wikipedia retrieval."
+    ]
+  },
+  "mldr-fr": {
+    "language": "fr",
+    "description": "MLDR French test queries over long Wikipedia and mC4 documents, one positive each, with their listed negatives first among distractors",
+    "licence": "MIT",
+    "source": "https://huggingface.co/datasets/Shitao/MLDR",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/Shitao/MLDR/resolve/d67138e705d963e346253a80e59676ddb418810a/mldr-v1.0-fr/corpus.jsonl.gz",
+        "99e1966e8bc52b5bed73796d86cb097590e7ec9009c8c9b0e2f34d8134c36639"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/Shitao/MLDR/resolve/d67138e705d963e346253a80e59676ddb418810a/mldr-v1.0-fr/test.jsonl.gz",
+        "3adccbec08b75d7b84cadaca1690049d5efa1e32d36df02f84d14995248b254c"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/Shitao/MLDR/resolve/d67138e705d963e346253a80e59676ddb418810a/qrels/qrels.mldr-v1.0-fr-test.tsv",
+        "cc05a6a8bd66b0ca56cede3ea7014954b2ba2622f634c5445672def1c6f5e148"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 600,
+      "seed": 775
+    },
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/Shitao/MLDR"
+    ],
+    "version": {
+      "Shitao/MLDR": "d67138e705d963e346253a80e59676ddb418810a"
+    },
+    "split": "test",
+    "query_type": "synthetic long-document questions",
+    "known_issues": [
+      "GPT-3.5 generated queries; one positive per query; document sampling and e5 character windows change task difficulty."
+    ]
+  },
+  "scifact": {
+    "language": "en",
+    "description": "SciFact (BEIR) test claims over scientific abstracts",
+    "licence": "claims CC BY 4.0, abstracts ODC-By 1.0",
+    "source": "https://github.com/allenai/scifact",
+    "files": {
+      "archive": [
+        "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/scifact.zip",
+        "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165"
+      ]
+    },
+    "sample": {
+      "queries": 300,
+      "documents": 2000,
+      "seed": 775
+    },
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://github.com/allenai/scifact"
+    ],
+    "version": {
+      "BEIR": "scifact archive sha256 536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165"
+    },
+    "split": "test",
+    "query_type": "scientific claims",
+    "known_issues": [
+      "Sparse claims-to-abstract judgments; unjudged documents treated as nonrelevant."
+    ]
+  },
+  "xpqa-fr": {
+    "language": "fr",
+    "description": "product questions",
+    "licence": "cdla-sharing-1.0",
+    "source": "https://huggingface.co/datasets/mteb/XPQARetrieval",
+    "version": {
+      "mteb/XPQARetrieval": "fc4624be978945a0ceebbc4b85737258fe26330b"
+    },
+    "split": "test",
+    "tier": "default",
+    "query_type": "product questions",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/XPQARetrieval/blob/fc4624be978945a0ceebbc4b85737258fe26330b/README.md"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/mteb/XPQARetrieval/resolve/fc4624be978945a0ceebbc4b85737258fe26330b/fra-fra-corpus/test-00000-of-00001.parquet",
+        "df8246facd7c6c7f329bef352c3093df6c5ef0d1f47df7a061cb51fa824fab7a"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/mteb/XPQARetrieval/resolve/fc4624be978945a0ceebbc4b85737258fe26330b/fra-fra-queries/test-00000-of-00001.parquet",
+        "555b8ee516b67642ec193903b936babe4e330482fdf0755bb3050b431bb3605f"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/mteb/XPQARetrieval/resolve/fc4624be978945a0ceebbc4b85737258fe26330b/fra-fra-qrels/test-00000-of-00001.parquet",
+        "9a221de5ad9547fad349b5597e46f0daf594eaa091b409dcc7f057661d7ebf4e"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2000,
+      "seed": 991
+    },
+    "promotion_eligible": true,
+    "known_issues": [
+      "French-to-French product question/evidence pairs; sparse judgments; no manual query-intent annotations."
+    ]
+  },
+  "webfaq-fr": {
+    "language": "fr",
+    "description": "web frequently asked questions",
+    "licence": "cc-by-4.0",
+    "source": "https://huggingface.co/datasets/mteb/WebFAQRetrieval",
+    "version": {
+      "mteb/WebFAQRetrieval": "f64f483ad0f31d2e78209d524c14a4a867965959"
+    },
+    "split": "test",
+    "tier": "default",
+    "query_type": "web frequently asked questions",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/WebFAQRetrieval/blob/f64f483ad0f31d2e78209d524c14a4a867965959/README.md"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/mteb/WebFAQRetrieval/resolve/f64f483ad0f31d2e78209d524c14a4a867965959/fra-corpus/test-00000-of-00001.parquet",
+        "a425f2d4365c6a631e1737f0997a7597aed1ef013422c417dcc369cddab1a988"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/mteb/WebFAQRetrieval/resolve/f64f483ad0f31d2e78209d524c14a4a867965959/fra-queries/test-00000-of-00001.parquet",
+        "0476313f4cf135bdbe26eb2be083dc1fccda86058583ed09394bc5f60175bf90"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/mteb/WebFAQRetrieval/resolve/f64f483ad0f31d2e78209d524c14a4a867965959/fra-qrels/test-00000-of-00001.parquet",
+        "e9c6604202d14b5b8be99eb9383680dab538dadd34193e13e7ae3f145c0f2865"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2500,
+      "seed": 991
+    },
+    "promotion_eligible": true,
+    "known_issues": [
+      "Web-scraped question/answer pairs; sparse relevance and possible duplicate answers; sampled corpus is easier than full corpus."
+    ]
+  },
+  "mkqa-fr": {
+    "language": "fr",
+    "description": "knowledge questions to short answers",
+    "licence": "cc-by-3.0",
+    "source": "https://huggingface.co/datasets/mteb/MKQARetrieval",
+    "version": {
+      "mteb/MKQARetrieval": "3e069e7a30079d214a859741f5a0de75cf878867"
+    },
+    "split": "train",
+    "tier": "default",
+    "query_type": "knowledge questions to short answers",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/MKQARetrieval/blob/3e069e7a30079d214a859741f5a0de75cf878867/README.md",
+      "https://github.com/apple-aiml-research/ml-mkqa/blob/main/LICENSE"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/mteb/MKQARetrieval/resolve/3e069e7a30079d214a859741f5a0de75cf878867/fr-corpus/train-00000-of-00001.parquet",
+        "20e4daf32abec2efbea17cb1d0da6ed46b414091b95dcb39e6f3de5e315e622c"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/mteb/MKQARetrieval/resolve/3e069e7a30079d214a859741f5a0de75cf878867/fr-queries/train-00000-of-00001.parquet",
+        "a2d8d7adbbb9edcf647a3229611f2fbd98b2f6cf3b262f50af890b61e8e00730"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/mteb/MKQARetrieval/resolve/3e069e7a30079d214a859741f5a0de75cf878867/fr-qrels/train-00000-of-00001.parquet",
+        "ec3bf580a70bef23b0ac146f165cd017ba6828d06249a274406a75f9b2b9cf16"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2000,
+      "seed": 991
+    },
+    "promotion_eligible": true,
+    "known_issues": [
+      "MTEB conversion retrieves short answers, not source passages; train is the only available split; translated questions and ambiguous answers limit realism."
+    ]
+  },
+  "alloprof": {
+    "language": "fr",
+    "description": "student questions to educational pages",
+    "licence": "cc-by-nc-sa-4.0",
+    "source": "https://huggingface.co/datasets/mteb/AlloprofRetrieval",
+    "version": {
+      "mteb/AlloprofRetrieval": "96a52a1744e2d1981a66d93ff3b5a595f9a150d5"
+    },
+    "split": "test",
+    "tier": "restricted",
+    "query_type": "student questions to educational pages",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/AlloprofRetrieval/blob/96a52a1744e2d1981a66d93ff3b5a595f9a150d5/README.md"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/mteb/AlloprofRetrieval/resolve/96a52a1744e2d1981a66d93ff3b5a595f9a150d5/corpus/test-00000-of-00001.parquet",
+        "d4cc3f31c740d08f5e1bef9d83188da42f5ae07fdb2be920bd2f54754d05a09a"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/mteb/AlloprofRetrieval/resolve/96a52a1744e2d1981a66d93ff3b5a595f9a150d5/queries/test-00000-of-00001.parquet",
+        "0706659a4b9cfc45d6e6eb97458edb37ca7609c96493c9b64de538ab65a5f5d3"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/mteb/AlloprofRetrieval/resolve/96a52a1744e2d1981a66d93ff3b5a595f9a150d5/qrels/test-00000-of-00001.parquet",
+        "f3c0cefa3e200f89f432981069b0d1f841d92e8653a96040d3ac67089db4d387"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2000,
+      "seed": 991
+    },
+    "promotion_eligible": false,
+    "known_issues": [
+      "Noncommercial-only: diagnostic use must comply with upstream terms; excluded from promotion gates.",
+      "Original card MIT metadata conflicts with MTEB noncommercial licence; use the restrictive MTEB licence.",
+      "One judged page per student question."
+    ]
+  },
+  "bsard": {
+    "language": "fr",
+    "description": "legal questions to statutory articles",
+    "licence": "cc-by-nc-sa-4.0",
+    "source": "https://huggingface.co/datasets/mteb/BSARDRetrieval",
+    "version": {
+      "mteb/BSARDRetrieval": "8c492add6a14ac188f2debdaf6cbdfb406fd6be3"
+    },
+    "split": "test",
+    "tier": "restricted",
+    "query_type": "legal questions to statutory articles",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/BSARDRetrieval/blob/8c492add6a14ac188f2debdaf6cbdfb406fd6be3/README.md"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/mteb/BSARDRetrieval/resolve/8c492add6a14ac188f2debdaf6cbdfb406fd6be3/corpus/test-00000-of-00001.parquet",
+        "cc232c76567a1474b1002d890a8fde86134ec91b1f40a424df0a7a1d537399e8"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/mteb/BSARDRetrieval/resolve/8c492add6a14ac188f2debdaf6cbdfb406fd6be3/queries/test-00000-of-00001.parquet",
+        "7687d8fcb5f197703bc1bfb2965a8c728518dd74afd442a88fd1473f667a9444"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/mteb/BSARDRetrieval/resolve/8c492add6a14ac188f2debdaf6cbdfb406fd6be3/qrels/test-00000-of-00001.parquet",
+        "78f38df874f89718442ef80f86574e06daed3c3372f8c81c8984a57fa2f15b6a"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2000,
+      "seed": 991
+    },
+    "promotion_eligible": false,
+    "known_issues": [
+      "Noncommercial-only: diagnostic use must comply with upstream terms; excluded from promotion gates.",
+      "Expert legal judgments are sparse and cannot represent all relevant articles."
+    ]
+  },
+  "fiqa": {
+    "language": "en",
+    "description": "financial questions",
+    "licence": "cc-by-sa-4.0",
+    "source": "https://huggingface.co/datasets/BeIR/fiqa",
+    "version": {
+      "BeIR/fiqa": "979c07a7cb5ccc6ca009792241fa1250b98055dd",
+      "BeIR/fiqa-qrels": "252958f2d646e22cab6d0c72dd3f0d5de6d0655a"
+    },
+    "split": "test",
+    "tier": "default",
+    "query_type": "financial questions",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/BeIR/fiqa/blob/979c07a7cb5ccc6ca009792241fa1250b98055dd/README.md"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/BeIR/fiqa/resolve/979c07a7cb5ccc6ca009792241fa1250b98055dd/corpus/corpus-00000-of-00001.parquet",
+        "b36bb07dab3bfad488190818828e749a52faf5ba391c1d51dac8b06064576f99"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/BeIR/fiqa/resolve/979c07a7cb5ccc6ca009792241fa1250b98055dd/queries/queries-00000-of-00001.parquet",
+        "e9b3863724ffd538d8efff19684ef8ae495bdbddd96b35e81bdc39e3e22860d6"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/BeIR/fiqa-qrels/resolve/252958f2d646e22cab6d0c72dd3f0d5de6d0655a/test.tsv",
+        "6adc2a640dcdd22bb8b3858f89107adef2a7c3db20a63550dfa7a0f71e379e44"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2000,
+      "seed": 991
+    },
+    "promotion_eligible": true,
+    "known_issues": [
+      "Sparse financial question/answer judgments; unjudged answers treated as nonrelevant."
+    ]
+  },
+  "trec-covid": {
+    "language": "en",
+    "description": "COVID research topics",
+    "licence": "cc-by-sa-4.0",
+    "source": "https://huggingface.co/datasets/BeIR/trec-covid",
+    "version": {
+      "BeIR/trec-covid": "7e16fde3016c639c7f856e803f4bab92645562c4",
+      "BeIR/trec-covid-qrels": "532ac68ee6756ac22c9346eebf65bd3c6a042e10"
+    },
+    "split": "test",
+    "tier": "default",
+    "query_type": "COVID research topics",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/BeIR/trec-covid/blob/7e16fde3016c639c7f856e803f4bab92645562c4/README.md"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/BeIR/trec-covid/resolve/7e16fde3016c639c7f856e803f4bab92645562c4/corpus/corpus-00000-of-00001.parquet",
+        "d76cea1b2304dbe67a1a54f7376a61de294976682a1d7d58d82de27141f3ba4a"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/BeIR/trec-covid/resolve/7e16fde3016c639c7f856e803f4bab92645562c4/queries/queries-00000-of-00001.parquet",
+        "80bd564b1218a519ef0a396fa7b874941b7188d8240933e8d6fa867d7db59d6f"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/BeIR/trec-covid-qrels/resolve/532ac68ee6756ac22c9346eebf65bd3c6a042e10/test.tsv",
+        "10669ab7d526cb04f52079139fd88c3d467a0776441b046567f540582798982b"
+      ]
+    },
+    "sample": {
+      "queries": 5,
+      "documents": 10000,
+      "seed": 991
+    },
+    "promotion_eligible": true,
+    "known_issues": [
+      "Only five seeded topics to preserve deep judgments within document budget; inadequate alone for significance.",
+      "Pooled graded judgments retain explicit nonrelevant documents; sampled corpus differs from full CORD-19."
+    ]
+  },
+  "arguana": {
+    "language": "en",
+    "description": "counterarguments",
+    "licence": "cc-by-sa-4.0",
+    "source": "https://huggingface.co/datasets/BeIR/arguana",
+    "version": {
+      "BeIR/arguana": "9bcf8fc0320c4e3860e25b8b85fa205fcdd7078f",
+      "BeIR/arguana-qrels": "ae5468c6f1c198109a8af5f0d4dc58bd18b6fea7"
+    },
+    "split": "test",
+    "tier": "default",
+    "query_type": "counterarguments",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/BeIR/arguana/blob/9bcf8fc0320c4e3860e25b8b85fa205fcdd7078f/README.md"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/BeIR/arguana/resolve/9bcf8fc0320c4e3860e25b8b85fa205fcdd7078f/corpus/corpus-00000-of-00001.parquet",
+        "18eedd19306ea9adbf83110d74a844dc9501a1bf084def48bfa5a8eab5600b86"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/BeIR/arguana/resolve/9bcf8fc0320c4e3860e25b8b85fa205fcdd7078f/queries/queries-00000-of-00001.parquet",
+        "6c08bf568afae82e10b5e93dcd6b589d55be1d2242c1ead8e5244608c6a1a1e7"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/BeIR/arguana-qrels/resolve/ae5468c6f1c198109a8af5f0d4dc58bd18b6fea7/test.tsv",
+        "0c47b481fa8b47fb9ca5e74bc8a017bdea14518c0e4a5d21345291180b3aca76"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2000,
+      "seed": 991
+    },
+    "promotion_eligible": true,
+    "known_issues": [
+      "Counterargument retrieval; long queries; one relevant document each and sparse judgments."
+    ]
+  },
+  "scidocs": {
+    "language": "en",
+    "description": "scientific citation-related titles",
+    "licence": "cc-by-sa-4.0",
+    "source": "https://huggingface.co/datasets/BeIR/scidocs",
+    "version": {
+      "BeIR/scidocs": "acebceec772628c6679d76d6cff30ad517d17f4e",
+      "BeIR/scidocs-qrels": "735ea1048e37b1ebce14c6dc3d33a5edaf66d3dc"
+    },
+    "split": "test",
+    "tier": "default",
+    "query_type": "scientific citation-related titles",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/BeIR/scidocs/blob/acebceec772628c6679d76d6cff30ad517d17f4e/README.md"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/BeIR/scidocs/resolve/acebceec772628c6679d76d6cff30ad517d17f4e/corpus/corpus-00000-of-00001.parquet",
+        "e1855cbf47a19e4ff1fc870674c3c441bc5a32a76ecc151851d4452a9aa43a28"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/BeIR/scidocs/resolve/acebceec772628c6679d76d6cff30ad517d17f4e/queries/queries-00000-of-00001.parquet",
+        "f9ad7adff7d396e652789de371f69b5a3adfa8f39e1f37fff728c231e7db3202"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/BeIR/scidocs-qrels/resolve/735ea1048e37b1ebce14c6dc3d33a5edaf66d3dc/test.tsv",
+        "dcd3d7f77417294bb6f338537f3c28d8a5ea72b30fe6633f407fa85528767e35"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 6000,
+      "seed": 991
+    },
+    "promotion_eligible": true,
+    "known_issues": [
+      "Citation-based relevance is a proxy rather than independent judgments; only a few relevant papers per title."
+    ]
+  },
+  "nfcorpus": {
+    "language": "en",
+    "description": "nutrition and medical questions",
+    "licence": "academic-only",
+    "source": "https://huggingface.co/datasets/BeIR/nfcorpus",
+    "version": {
+      "BeIR/nfcorpus": "b5026a0e96e8a7ac4f95f482a596389289d46269",
+      "BeIR/nfcorpus-qrels": "a451b3b26d3ae1358f259c1a3a4dd61fcea35a65"
+    },
+    "split": "test",
+    "tier": "restricted",
+    "query_type": "nutrition and medical questions",
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/BeIR/nfcorpus/blob/b5026a0e96e8a7ac4f95f482a596389289d46269/README.md",
+      "https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/"
+    ],
+    "format": "parquet",
+    "files": {
+      "corpus": [
+        "https://huggingface.co/datasets/BeIR/nfcorpus/resolve/b5026a0e96e8a7ac4f95f482a596389289d46269/corpus/corpus-00000-of-00001.parquet",
+        "f2a1c0b570a5efdf23cfa36f5e573d062cc113c6e7251e22c69b323a33ea895e"
+      ],
+      "queries": [
+        "https://huggingface.co/datasets/BeIR/nfcorpus/resolve/b5026a0e96e8a7ac4f95f482a596389289d46269/queries/queries-00000-of-00001.parquet",
+        "edd2b878b8130fb3b5e3c4b9428ddc1e67fbd6eedf8ae099fca3b87838ba6b29"
+      ],
+      "qrels": [
+        "https://huggingface.co/datasets/BeIR/nfcorpus-qrels/resolve/a451b3b26d3ae1358f259c1a3a4dd61fcea35a65/test.tsv",
+        "f8fba6ef3d4dd9c3a242a8ba4ae38276fc3622fce7dcbae764766d564542fd2a"
+      ]
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 3600,
+      "seed": 991
+    },
+    "promotion_eligible": false,
+    "known_issues": [
+      "Academic-only source terms override generic BEIR mirror metadata; excluded from promotion gates.",
+      "Judgments derived from website links, not independent human relevance assessors."
+    ]
+  }
+}

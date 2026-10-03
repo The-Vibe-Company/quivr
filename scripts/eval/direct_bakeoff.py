@@ -21,6 +21,8 @@ import trec
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = 'multilingual-e5-small (current)'
+E5_MODEL = 'intfloat/multilingual-e5-small'
+E5_REVISION = '614241f622f53c4eeff9890bdc4f31cfecc418b3'
 # Historical USD / million input tokens, 2026-10-03; override when prices change.
 PRICES = {'Cohere-Embed-V5-Pro': .12, 'Cohere-Embed-V5-Fast': .08, 'text-embedding-3-large': .13}
 HOSTED_DIMENSIONS = {'Cohere-Embed-V5-Pro': 2048, 'Cohere-Embed-V5-Fast': 2048, 'text-embedding-3-large': 3072}
@@ -115,7 +117,7 @@ class E5:
     def embed(self, texts, mode):
         from sentence_transformers import SentenceTransformer
         if self.model is None:
-            self.model = SentenceTransformer('intfloat/multilingual-e5-small', device='cpu')
+            self.model = SentenceTransformer(E5_MODEL, revision=E5_REVISION, device='cpu')
         prefix = 'query: ' if mode == 'query' else 'passage: '
         return self.model.encode([prefix + text for text in texts], batch_size=64,
                                  normalize_embeddings=True, show_progress_bar=False)
@@ -166,6 +168,7 @@ def rank(doc_ids, query_ids, query_vectors, piece_vectors, owners):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--set', required=True, choices=sorted(public_sets.SETS))
+    parser.add_argument('--include-restricted', action='store_true', help='opt into diagnostic-only sets under their restricted licences')
     parser.add_argument('--models', nargs='+', choices=MODELS, default=MODELS[1:4],
                         help='e5 baseline always runs first; include Cohere-Embed-V5-Pro-1024 for reduced dimensions')
     parser.add_argument('--max-input-tokens', required=True, type=int)
@@ -197,7 +200,7 @@ def main(argv=None):
         if not os.environ.get('AZURE_FOUNDRY_ENDPOINT') or not os.environ.get('AZURE_FOUNDRY_KEY'):
             parser.error('hosted models need AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_KEY')
         hosted = Hosted(os.environ['AZURE_FOUNDRY_ENDPOINT'], os.environ['AZURE_FOUNDRY_KEY'], budget, args.set, prices)
-    directory = public_sets.prepare(args.set, args.cache)
+    directory = public_sets.prepare(args.set, args.cache, include_restricted=args.include_restricted)
     data = trec.load(directory)
     doc_ids, query_ids = sorted(data['corpus']), sorted(data['queries'])
     docs = [((data['corpus'][d]['title'] + '\n') if data['corpus'][d]['title'] else '') + data['corpus'][d]['text'] for d in doc_ids]
@@ -205,7 +208,8 @@ def main(argv=None):
     report = {'date': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'status': 'running',
               'set': args.set, 'documents': len(docs), 'queries': len(queries), 'results': {},
               'fingerprint': trec.fingerprint(directory), 'sample': json.loads((directory / 'manifest.json').read_text()),
-              'settings': {'models': systems, 'e5_window_chars': 1800, 'hosted_window_chars': 6000,
+              'promotion_eligible': public_sets.SETS[args.set]['promotion_eligible'],
+              'settings': {'models': systems, 'e5_model': E5_MODEL, 'e5_revision': E5_REVISION, 'e5_window_chars': 1800, 'hosted_window_chars': 6000,
                            'overlap_chars': 200, 'retrieval': 'exact cosine, best piece, top 10',
                            'prices_usd_per_million': prices, 'price_reference_date': '2026-10-03',
                            'scoring': scoring.CONVENTION, 'paired_test': scoring.TEST}}
@@ -238,7 +242,7 @@ def main(argv=None):
                 query_vectors = normalize(embed(queries, 'query'))
                 queried = time.monotonic()
                 scores = scoring.score(data['qrels'], rank(doc_ids, query_ids, query_vectors, document_vectors, owners))
-                result = {'mean': scores['mean'], 'dims': int(document_vectors.shape[1]), 'pieces': len(pieces),
+                result = {'mean': scores['mean'], 'per_query': scores['per_query'], 'dims': int(document_vectors.shape[1]), 'pieces': len(pieces),
                           'index_s': round(indexed - started, 1), 'query_ms': round(1000 * (queried - indexed) / len(queries), 1)}
                 if base is None:
                     base = scores
