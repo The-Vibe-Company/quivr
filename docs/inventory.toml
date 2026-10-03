@@ -64,6 +64,7 @@ excluded = [
 "README.md" = { audience = "functional", kind = "index", summary = "the project overview: why Quivr, architecture, quickstart and what works today" }
 "contracts/http/v0/README.md" = { audience = "functional", kind = "concept", summary = "how the HTTP API contract is organised and checked" }
 "contracts/plugins/v0/README.md" = { audience = "plugin-author", kind = "concept", summary = "the plugin manifest, routes, schemas and fixtures" }
+"deploy/mlflow/README.md" = { audience = "functional", kind = "guide", summary = "deploy an authenticated shared search measurement store" }
 "deploy/railway/README.md" = { audience = "functional", kind = "guide", summary = "run a hosted single-node evaluation demo" }
 "deploy/railway/hosted-embeddings.md" = { audience = "functional", kind = "guide", summary = "evaluate, fill and switch hosted text embeddings with rollback" }
 "docs/agents/documentation.md" = { audience = "contributor", kind = "guide", summary = "living and dated documents, the inventory, budgets and when docs may change" }
@@ -75,6 +76,7 @@ excluded = [
 "docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
 "docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide", summary = "the five triage labels" }
 "docs/dated/README.md" = { audience = "contributor", kind = "index", summary = "frozen design records, evidence and research, as decided at their date" }
+"docs/eval-results.md" = { audience = "contributor", kind = "guide", summary = "log, sync, compare and query shared search measurements" }
 "docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept", summary = "how `make dev` and `make verify` work" }
 "docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept", summary = "known limits and what is not claimed" }
 "docs/reference/cli.md" = { audience = "functional", kind = "generated-reference", summary = "every `quivr` command, what it needs to run, its flags and exit codes" }
@@ -105,6 +107,8 @@ excluded = [
 
 # Maximum number of lines per page, in path order.
 [budgets]
+"deploy/mlflow/README.md" = 68
+"docs/eval-results.md" = 160
 "AGENTS.md" = 45
 "CONTEXT.md" = 327
 "deploy/railway/README.md" = 250

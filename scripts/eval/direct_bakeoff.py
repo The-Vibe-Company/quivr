@@ -7,6 +7,9 @@ input-token/USD budget; credentials are read only from the environment.
 import argparse
 import datetime
 import json
+import hashlib
+import socket
+import subprocess
 import os
 import pathlib
 import time
@@ -206,6 +209,9 @@ def main(argv=None):
     docs = [((data['corpus'][d]['title'] + '\n') if data['corpus'][d]['title'] else '') + data['corpus'][d]['text'] for d in doc_ids]
     queries = [data['queries'][q] for q in query_ids]
     report = {'date': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'status': 'running',
+              'source': {'git_sha': subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip(),
+                         'plugin_digest': 'sha256:' + hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
+                         'machine': socket.gethostname()},
               'set': args.set, 'documents': len(docs), 'queries': len(queries), 'results': {},
               'fingerprint': trec.fingerprint(directory), 'sample': json.loads((directory / 'manifest.json').read_text()),
               'promotion_eligible': public_sets.SETS[args.set]['promotion_eligible'],
@@ -242,8 +248,12 @@ def main(argv=None):
                 query_vectors = normalize(embed(queries, 'query'))
                 queried = time.monotonic()
                 scores = scoring.score(data['qrels'], rank(doc_ids, query_ids, query_vectors, document_vectors, owners))
-                result = {'mean': scores['mean'], 'per_query': scores['per_query'], 'dims': int(document_vectors.shape[1]), 'pieces': len(pieces),
+                result = {'mean': scores['mean'], 'per_query': scores['per_query'],
+                          'duration_seconds': round(time.monotonic() - started, 3), 'dims': int(document_vectors.shape[1]), 'pieces': len(pieces),
                           'index_s': round(indexed - started, 1), 'query_ms': round(1000 * (queried - indexed) / len(queries), 1)}
+                if name != BASELINE:
+                    result['index_usage'] = budget.summary(model=name, phase='document')
+                    result['query_usage'] = budget.summary(model=name, phase='query')
                 if base is None:
                     base = scores
                 else:

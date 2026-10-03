@@ -126,6 +126,8 @@ class Run(unittest.TestCase):
                 self.assertEqual(report['results'][bakeoff.BASELINE]['mean']['ndcg@10'], 1)
                 self.assertEqual(report['results'][bakeoff.BASELINE]['per_query']['ndcg@10'], {'q': 1.0})
                 self.assertNotIn('fixture-key', output.read_text())
+                self.assertEqual(len(report['source']['git_sha']), 40)
+                self.assertTrue(report['source']['plugin_digest'].startswith('sha256:'))
                 if not capped:
                     self.assertEqual(report['results']['Cohere-Embed-V5-Pro-1024']['vs_current']['ndcg@10']['delta'], 0)
                 with self.assertRaises(FileExistsError):

@@ -19,7 +19,7 @@ make eval args='--sets miracl-fr --compare-to main'  # also measure main, on thi
 The local stack needs Linux x86_64. For an existing installation, use `--api-url <url>` with a key granting `corpora:read`, `corpora:write`, `content:read`, `content:write`, `changes:read` and `search:query` in
 `QUIVR_EVAL_API_KEY`. Each run creates new Corpora and never deletes them.
 
-Reports go in `.scratch/eval/runs/<time>/` (`--out` overrides it); downloads in `.scratch/eval/cache`.
+Reports go in `.scratch/eval/runs/<time>/` (`--out` overrides it); downloads in `.scratch/eval/cache`. [Record and compare measurements](../eval-results.md) in the shared store.
 
 ## Compare an evaluation plugin
 

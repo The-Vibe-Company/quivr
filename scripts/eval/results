@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+"""Command-line entry point for the search measurement store."""
+from results import main
+
+raise SystemExit(main())
