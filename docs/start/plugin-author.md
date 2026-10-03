@@ -10,6 +10,7 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 - [Local-vector calibration](../../plugins/alerts/calibration/README.md): the local E5 alert threshold measurements and their limits
 - [core.ingest](../../plugins/core-ingest/README.md): the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine
 - [core.retrieve](../../plugins/core-retrieve/README.md): the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine
+- [hosted.embed](../../plugins/hosted-embed/README.md): configure hosted text embeddings in OpenAI and Cohere formats
 - [Jev reranking](../../plugins/jev-rerank/README.md): optional Jev reranking, bounded pair caching and hybrid fallback
 - [X list connector plugin (`x-list`)](../../plugins/x-list/README.md): the first-party X list connector plugin and its parity tests
 

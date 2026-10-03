@@ -537,6 +537,7 @@ def parts():
     steps in order, so a step sees only the state its own part built. CI runs the parts in parallel
     (.github/workflows/verify.yml); `make verify` runs them one after another. To add a step, add one
     line to the part whose state it needs: acceptance('name','^TestPattern') or step('name',fn)."""
+    from hosted_embed_plugin import verify as verify_hosted_embed
     from embedding_outage import verify as verify_embedding_outage
     from first_search import verify as verify_first_search
     from rebuild_recovery import verify as verify_rebuild_recovery
@@ -615,6 +616,7 @@ def parts():
             # then a rollback serves 0.1.0 again and the alerts are migrated back (THE-805).
             step('alert_plugin_upgrade',subscription_plugin.upgrade),
             # Runnable guide blocks, each page in its own Organization (scripts/guides.py).
+            step('hosted_embedding_plugin',verify_hosted_embed),
             step('runnable_guides',guides.verify),
             # The keyless worker would fail credentialed instances of earlier scenarios.
             step('keyless_core',Stack.verify_keyless),

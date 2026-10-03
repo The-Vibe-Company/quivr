@@ -1,0 +1,10 @@
+{
+  "format": "openai",
+  "base_url": "http://127.0.0.1:8080/v1",
+  "auth": "none",
+  "model": "intfloat/multilingual-e5-small",
+  "dimensions": 384,
+  "send_dimensions": false,
+  "query_prefix": "query: ",
+  "document_prefix": "passage: "
+}

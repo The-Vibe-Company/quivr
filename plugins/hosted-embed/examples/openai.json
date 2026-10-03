@@ -1,0 +1,7 @@
+{
+  "format": "openai",
+  "base_url": "https://api.openai.com/v1",
+  "auth": "bearer",
+  "model": "text-embedding-3-large",
+  "dimensions": 3072
+}

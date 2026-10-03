@@ -1,0 +1,7 @@
+{
+  "format": "openai",
+  "base_url": "https://resource.example.org/openai/v1",
+  "auth": "api-key",
+  "model": "text-embedding-3-large",
+  "dimensions": 3072
+}

@@ -53,3 +53,8 @@ one-page delta entries. `mailbox` configures `page_size` and `attachments_next`;
 failures; `clear-failures`, `expire-delta` and `delay` drive recovery scenarios.
 `GET /_fake/stats?mailbox=...&client_id=...` observes request/token counts and
 the last token form. Mailbox state is isolated, and delays release the lock.
+
+## Embeddings
+
+`go run ./cmd/embedding -listen 127.0.0.1:0` serves OpenAI `/embeddings` and Cohere v2 `/embed` at any base path, with `fake-key` bearer or `api-key` authentication. It validates request modes and returns word-hash vectors and token usage; it never calls upstream.
+`POST /_control` with `{"statuses":[429,503,200]}` scripts responses with `Retry-After: 0`; `GET /_fake/stats` lists calls. Go consumers use `embedding.New()` with an HTTP test server. The Go kit certifies both hosted embedding formats; the plugins stack lane pins and searches them.

@@ -86,6 +86,7 @@ excluded = [
 "plugins/alerts/calibration/README.md" = { audience = "plugin-author", kind = "concept", summary = "the local E5 alert threshold measurements and their limits" }
 "plugins/core-ingest/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine" }
 "plugins/core-retrieve/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine" }
+"plugins/hosted-embed/README.md" = { audience = "plugin-author", kind = "concept", summary = "configure hosted text embeddings in OpenAI and Cohere formats" }
 "plugins/jev-rerank/README.md" = { audience = "plugin-author", kind = "concept", summary = "optional Jev reranking, bounded pair caching and hybrid fallback" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
 "plugins/push-source/README.md" = { audience = "plugin-author", kind = "guide", summary = "an offline instance-token push source and its certification" }

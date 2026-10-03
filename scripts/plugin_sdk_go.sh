@@ -67,6 +67,10 @@ for mod in "$root"/plugins/*/go.mod; do
   cd "$dir"
   "$GO" vet ./... && "$GO" test ./...
   "$GO" build -o /dev/null .
+  if [ "$id" = hosted-embed ]; then
+    python3 "$root/scripts/hosted_embed_plugin.py" --quivr "$quivr" --out "$work/hosted-embed"
+    continue
+  fi
   "$quivr" plugin inspect . > "$work/$id-inspect.log"
   [ "$id" = core-ingest ] && continue
   fixtures=()

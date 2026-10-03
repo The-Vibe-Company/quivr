@@ -127,6 +127,13 @@ jobs:
           path: .scratch/plugin-sdk/m365-mail-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hosted-embedding-contract-reports
+          path: .scratch/plugin-sdk/hosted-embed/hosted-embed-*-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
       # The public contracts this commit checked.
       - uses: actions/upload-artifact@v4
         if: always()
@@ -251,6 +258,8 @@ jobs:
             .scratch/quivr-verify-*/tokenizer-provenance.json
             .scratch/quivr-verify-*/embedding-provenance.json
             .scratch/quivr-verify-*/embedding-outage.json
+            .scratch/quivr-verify-*/hosted-embed.json
+            .scratch/quivr-verify-*/hosted-embed/*.log
             .scratch/quivr-verify-*/core-ingest*.json
             .scratch/quivr-verify-*/core-ingest*.log
             .scratch/quivr-verify-*/rebuild-recovery.json

@@ -277,6 +277,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   and coverage ([Write an ingestion plugin](https://docs.quivr.thevibecompany.co/plugins/write-an-ingestion-plugin)).
   The first-party [core.ingest](plugins/core-ingest/README.md) plugin (token windows,
   E5) is pinned by default; the engine segments and embeds nothing itself.
+  Optional [hosted.embed](plugins/hosted-embed/README.md) selects a hosted model
+  or OpenAI-compatible server by configuration, with OpenAI and Cohere v2 formats.
 - **Search ranked by a plugin** (Plugin API 0.7, the `retrieval` Contribution): a
   selected plugin answers each search in up to three rounds, asking the engine for
   keyword, vector or hybrid candidates it has already authorized, then ranking them
