@@ -1,0 +1,42 @@
+.agents/skills/mermaid-diagrams/references/class-diagrams.md
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 1-361
+.agents/skills/mermaid-diagrams/references/sequence-diagrams.md
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 1-394
+.agents/skills/mermaid-diagrams/README.md
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 1-244
+.agents/skills/mermaid-diagrams/references/advanced-features.md
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 1-556
+.agents/skills/mermaid-diagrams/LICENSE
+  s_54b80c92daa9cb::t_411417a3744f29 1-21
+.agents/skills/mermaid-diagrams/references/architecture-diagrams.md
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 1-192
+.agents/skills/mermaid-diagrams/references/erd-diagrams.md
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 1-510
+.agents/skills/mermaid-diagrams/SKILL.md
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 1-217
+skills-lock.json
+  s_54b80c92daa9cb::t_411417a3744f29 146
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 142-145,147-148
+.agents/skills/mermaid-diagrams/references/c4-diagrams.md
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 1-410
+.agents/skills/mermaid-diagrams/references/flowcharts.md
+  s_54b80c92daa9cb::t_fdce7f17d1e3b9 1-450
+.claude/skills/mermaid-diagrams
+  s_54b80c92daa9cb::t_93185fa27c0c60 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "03f22ae384e325a075f2579016bbfb1b8c3b4795",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
