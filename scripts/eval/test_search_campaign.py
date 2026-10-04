@@ -31,6 +31,18 @@ class Spec(unittest.TestCase):
             self.assertEqual(parsed['policy']['baseline']['model'], 'Cohere-Embed-V5-Pro')
             self.assertEqual(parsed['policy']['baseline']['dimensions'], 1024)
             self.assertEqual(parsed['policy']['baseline']['dense_weight'], .5)
+            private_spec = copy.deepcopy(value)
+            from test_private_working import policy
+            private_spec['policy']['sets'].update(policy()['sets'])
+            private_spec['goal']['weights']['private-example'] = 2
+            path.write_text(yaml.safe_dump(private_spec))
+            with mock.patch('sys.stdout', new_callable=io.StringIO) as private_output:
+                self.assertEqual(search_campaign.main(['validate', str(path)]), 0)
+            self.assertEqual(json.loads(private_output.getvalue())['policy']['sets']['private-example']['input']['split'], 'working')
+            private_spec['goal']['weights'].pop('private-example')
+            with self.assertRaisesRegex(ValueError, 'eligible datasets'):
+                search_campaign.specification(private_spec)
+            path.write_text(yaml.safe_dump(value))
             # No datastore/provider setup occurs when CI refuses live lifecycle.
             with mock.patch.dict(os.environ, CI='true'), mock.patch('sys.stderr', new_callable=io.StringIO):
                 for command in (['start', str(path), '--allow-paid'],

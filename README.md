@@ -192,8 +192,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   (`make eval`, [guide](docs/agents/evaluation.md)).
   Share measurements through MLflow with an offline outbox, paired comparisons and a
   Pareto leaderboard ([results guide](docs/eval-results.md)).
-- **Bounded search campaigns** explore public settings with a persistent Pareto
-  front, daily/total caps, recoverable cleanup and daily summaries. Leads submit bounded
+- **Bounded search campaigns** explore settings on public development or encrypted
+  private working sets, with a persistent Pareto front, daily/total caps, recoverable
+  cleanup and daily summaries. Leads submit bounded
   proposals and exact usage receipts ([guide](docs/search-campaigns.md)).
   Configured campaigns confirm finalists on the full stack before opening settings PRs.
 - **Private news evaluation builder**: pluggable generation with configurable targets

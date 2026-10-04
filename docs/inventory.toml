@@ -79,6 +79,7 @@ excluded = [
 "docs/dated/README.md" = { audience = "contributor", kind = "index", summary = "frozen design records, evidence and research, as decided at their date" }
 "docs/eval-engine-confirmation.md" = { audience = "contributor", kind = "guide", summary = "confirm finalists with aggregate held-out measurements on the full engine" }
 "docs/eval-engine-smoke.md" = { audience = "contributor", kind = "guide", summary = "run and stop a temporary full-stack Modal smoke" }
+"docs/eval-private-working.md" = { audience = "contributor", kind = "guide", summary = "configure private working inputs and aggregate-only exploration" }
 "docs/eval-modal.md" = { audience = "contributor", kind = "guide", summary = "measure configurations on Modal with shared caps and gates" }
 "docs/search-campaign-reporting.md" = { audience = "contributor", kind = "guide", summary = "report exact usage, propose bounded candidates and review campaign promotion" }
 "docs/search-campaigns.md" = { audience = "contributor", kind = "guide", summary = "start, resume and stop a bounded configuration search campaign" }
@@ -113,13 +114,14 @@ excluded = [
 
 # Maximum number of lines per page, in path order.
 [budgets]
-"docs/search-campaigns.md" = 138
+"docs/eval-private-working.md" = 90
+"docs/search-campaigns.md" = 150
 "docs/search-campaign-reporting.md" = 138
 "deploy/mlflow/README.md" = 68
 "docs/eval-engine-confirmation.md" = 174
 "docs/eval-engine-smoke.md" = 149
 "docs/eval-results.md" = 160
-"docs/eval-modal.md" = 176
+"docs/eval-modal.md" = 195
 "AGENTS.md" = 45
 "CONTEXT.md" = 327
 "deploy/railway/README.md" = 250

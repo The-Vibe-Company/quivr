@@ -25,6 +25,7 @@ How this repository is organised, tested and changed, for people and coding agen
 - [Confirm a search finalist on the full engine](../eval-engine-confirmation.md): confirm finalists with aggregate held-out measurements on the full engine
 - [Run a temporary Quivr stack on Modal](../eval-engine-smoke.md): run and stop a temporary full-stack Modal smoke
 - [Measure search configurations on Modal](../eval-modal.md): measure configurations on Modal with shared caps and gates
+- [Explore a private encrypted working set](../eval-private-working.md): configure private working inputs and aggregate-only exploration
 - [Record and compare search measurements](../eval-results.md): log, sync, compare and query shared search measurements
 - [Runnable guide blocks](../runnable-guides.md): write guide blocks that `make verify` replays
 - [Report and review campaign candidates](../search-campaign-reporting.md): report exact usage, propose bounded candidates and review campaign promotion

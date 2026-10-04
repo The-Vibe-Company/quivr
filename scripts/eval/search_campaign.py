@@ -325,7 +325,7 @@ def lineage():
         raise ValueError('campaign measurement code must be committed')
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     scorer = 'sha256:' + search_trial.digest({name: (ROOT / 'scripts/eval' / name).read_text()
-        for name in ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py')})
+        for name in ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py', 'private_working.py', 'protected_inputs.py')})
     return sha, scorer
 
 

@@ -47,6 +47,36 @@ def evaluate(pairs, policy):
                 or candidate.get('cost', {}).get('latency_method') != baseline.get('cost', {}).get('latency_method')):
             incomplete.add(name)
             continue
+        provenance = candidate.get('provenance', {})
+        if not isinstance(provenance, dict):
+            incomplete.add(name)
+            continue
+        if candidate['dataset'].get('private') and 'private_pair' in provenance:
+            import results
+            import search_trial
+            evidence = provenance['private_pair']
+            if not isinstance(evidence, dict) or not isinstance(evidence.get('statistics'), dict):
+                incomplete.add(name)
+                continue
+            paired = evidence['statistics']
+            if (evidence.get('baseline_result_key') != results.record(baseline)['result_key']
+                    or evidence.get('baseline_payload_digest') != search_trial.digest(baseline)
+                    or evidence.get('candidate_result_key') != results.record(candidate)['result_key']
+                    or evidence.get('candidate_payload_digest') != search_trial.digest(
+                        {key: value for key, value in candidate.items() if key != 'provenance'})
+                    or set(paired) != {'queries', 'delta', 'p_value'}
+                    or type(paired.get('queries')) is not int or paired['queries'] < 1
+                    or type(paired.get('delta')) not in (int, float) or not math.isfinite(paired['delta'])
+                    or not -1 <= paired['delta'] <= 1
+                    or paired['p_value'] is not None and (not finite(paired['p_value']) or paired['p_value'] > 1)
+                    or type(evidence.get('latency_comparable')) is not bool):
+                incomplete.add(name)
+                continue
+            comparable_samples[name] = evidence['latency_comparable']
+            stats[name] = {**paired, 'significant': paired['p_value'] is not None and paired['p_value'] < .05,
+                           'role': 'diagnostic' if names[name]['diagnostic'] else 'gate',
+                           'reason': names[name].get('reason')}
+            continue
         a, b = (pairs[name][side].get('per_query', {}).get('ndcg@10', {})
                 for side in ('candidate', 'baseline'))
         if not a or set(a) != set(b) or any(not finite(v) or v > 1 for v in [*a.values(), *b.values()]):

@@ -152,8 +152,8 @@ def rerank(query, passages, budget, key, price):
 
 def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             fresh_latency=True, rerank_key='', flush=lambda: None):
-    if dataset['split'] != 'dev' or dataset['private']:
-        raise PermissionError('tier 1 accepts public campaign-dev data only')
+    if dataset['split'] != 'dev':
+        raise PermissionError('tier 1 accepts campaign-dev data only')
     cfg = configuration(cfg)
     indexing_started = time.monotonic()
     doc_ids, query_ids = sorted(data['corpus']), sorted(data['qrels'])
@@ -162,7 +162,8 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     if not docs or not query_ids:
         raise ValueError('empty measurement set')
     cache = pathlib.Path(cache)
-    cache.mkdir(parents=True, exist_ok=True)
+    if not dataset['private']:
+        cache.mkdir(parents=True, exist_ok=True)
     local = direct.E5()
     def embed(texts, mode, task_budget=budget, client=hosted):
         if cfg['model'] == direct.E5_MODEL:
@@ -179,6 +180,31 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     index_overhead_seconds = time.monotonic() - indexing_started
     for mode, texts in (('document', docs if semantic else []),
                         ('query', [data['queries'][q] for q in query_ids] if semantic else [])):
+        if dataset['private']:
+            # Private vectors and text identities stay in memory, outside SQL
+            # cache claims and the shared Volume.
+            started = time.monotonic()
+            unique = list(dict.fromkeys(texts))
+            for start in range(0, len(unique), control_store.LEASE_BATCH_SIZE):
+                chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
+                windows = [direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0]
+                           if mode == 'document' else [text] for text in chunk]
+                pieces = [piece for group in windows for piece in group]
+                before = budget.summary()['confirmed_input_tokens']
+                begin = time.monotonic()
+                vectors = embed(pieces, mode)
+                seconds = time.monotonic() - begin
+                tokens = budget.summary()['confirmed_input_tokens'] - before
+                bound, offset = embeddings.estimate_tokens(pieces), 0
+                for text, group in zip(chunk, windows):
+                    fraction = embeddings.estimate_tokens(group) / bound
+                    entries[(mode, text)] = {'vectors': vectors[offset:offset + len(group)],
+                        'tokens': tokens * fraction, 'embedding_seconds': seconds * fraction}
+                    offset += len(group)
+            if mode == 'document':
+                index_overhead_seconds += max(0, time.monotonic() - started - sum(
+                    e['embedding_seconds'] for (kind, _), e in entries.items() if kind == 'document'))
+            continue
         mode_started = time.monotonic()
         unique = list(dict.fromkeys(texts))
         # Local inference stays serial; hosted requests overlap across a bounded

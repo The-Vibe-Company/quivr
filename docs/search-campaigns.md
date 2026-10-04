@@ -2,7 +2,7 @@
 
 A campaign searches configuration settings over several days, keeping a persistent
 quality/cost/latency Pareto front: candidates for which improving one score means
-worsening another. It measures public development sets on Modal and records evidence
+worsening another. It measures public development and private working sets on Modal and records evidence
 through the [results store](eval-results.md). A lead can submit bounded proposals,
 ingest exact usage receipts and send daily Linear/Slack summaries. Trusted full-stack
 confirmation automatically checks configured finalists before a settings PR opens.
@@ -47,9 +47,17 @@ USD 1 and Modal cap USD 10; total caps are USD 3 and USD 30. They are conservati
 reservation caps, not estimates of total vendor invoices. Unknown charges remain
 reserved. Modal builds, storage and other account charges need separate budgeting.
 
-The initial baseline must explicitly name Cohere-Embed-V5-Pro at 1024 dimensions
-with `dense_weight: 0.5`. Other settings must match the production baseline you
-intend to confirm later. Character windows in exploration do not equal token/byte
+To include a private set, add its encrypted working descriptor to `policy.sets`
+and give every eligible private set a `goal.weights` entry. Follow
+[private working-set setup](eval-private-working.md) to upload only
+working ciphertext to a private Volume and provision its working-key Secret.
+Supply `EVAL_WORKING_RUNTIME` on the supervisor machine for start and resume;
+keep paths and identities outside the YAML. Validation needs no resources and
+refuses held-out descriptors. Private trials expose aggregate paired evidence,
+consume no held-out reads and still need confirmation before promotion.
+
+The baseline must explicitly name Cohere-Embed-V5-Pro at 1024 dimensions with
+`dense_weight: 0.5`. Match the production settings you intend to confirm. Character windows in exploration do not equal token/byte
 windows in the engine. Tier 1 uses direct ranking, not the complete Quivr stack.
 
 This command runs without keys or network:
