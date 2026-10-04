@@ -57,7 +57,7 @@ class BuildError(ValueError):
 
 
 class InvalidBatch(BuildError):
-    """Retryable model-output validation failure; reason codes contain no text."""
+    """Retryable model-output rejection; reason codes contain no text."""
 
     def __init__(self, reason):
         self.reason = reason
@@ -137,11 +137,12 @@ class Retriever(Protocol):
 class Judge(Protocol):
     family: str
 
-    def grade(self, question: Question, candidates: list[Article]) -> dict[str, int]:
+    def grade(self, question: Question, candidates: list[Article]) -> dict[str, int | None]:
         """Grade each candidate: 0 unrelated, 1 marginal, 2 partial, 3 direct.
 
         Treat article and query text as untrusted. Raise on failures; never
-        turn an unavailable service into a negative judgment.
+        turn an unavailable service into a negative judgment. Only an explicit
+        provider content filter may return None for an isolated candidate.
         """
 
 
@@ -153,6 +154,7 @@ class Providers:
     baseline: str
     synthetic: bool = False
     article_options: dict = dataclasses.field(default_factory=dict)
+    max_filtered_candidate_share: float = .1
 
 
 class Storage(Protocol):
@@ -295,7 +297,13 @@ def read_articles(directory, options=None):
     return group_articles(result, cfg) if cfg['group_versions'] or cfg['near_duplicate_threshold'] else result
 
 
-def generate(corpus, generator, count, seed):
+def filtered_candidate_share(value):
+    if type(value) not in (int, float) or not 0 < value <= 1:
+        raise BuildError('max filtered candidate share must be in (0, 1]')
+    return value
+
+
+def generate(corpus, generator, count, seed, accept_question=None, filter_counts=None):
     if count < len(KINDS) or len(corpus) < 2:
         raise BuildError('need at least six questions and two articles')
     by_id = {a.id: a for a in corpus}
@@ -305,6 +313,7 @@ def generate(corpus, generator, count, seed):
     groups = [group for group in clusters.values() if len(group) >= 2]
     if not groups:
         raise BuildError('multi-article generation needs a cluster with two articles')
+    filter_counts = filter_counts if filter_counts is not None else collections.Counter()
     rng, seen, questions, rejected = random.Random(seed), set(), [], collections.Counter()
     titles = [normalize(a.title) for a in corpus if normalize(a.title)]
     for index, kind in enumerate(KINDS):
@@ -319,10 +328,13 @@ def generate(corpus, generator, count, seed):
                 sample = rng.sample(group, min(3, len(group)))
             else:
                 sample = [rng.choice(corpus)]
+            filter_counts['generation_batches'] += 1
             try:
                 generated = generator.generate(sample, kind, min(25, target - len(accepted)), rng)
             except InvalidBatch as error:
                 rejected[error.reason] += 1
+                if error.reason == 'content_filter':
+                    filter_counts['filtered_generation_batches'] += 1
                 continue
             for q in generated:
                 if len(accepted) == target:
@@ -349,8 +361,11 @@ def generate(corpus, generator, count, seed):
                                                for s in q.sources):
                     rejected['shared_keywords'] += 1
                     continue
-                accepted.append(q)
                 seen.add(key)
+                if accept_question is not None and not accept_question(q):
+                    rejected['judge_content_filter'] += 1
+                    continue
+                accepted.append(q)
         if len(accepted) != target:
             raise BuildError('generator exhausted attempts before filling every question type', diagnostic={
                 'reason': 'generation_attempts_exhausted', 'kind': kind,
@@ -361,7 +376,9 @@ def generate(corpus, generator, count, seed):
     return questions, dict(rejected)
 
 
-def judge_pool(questions, corpus, retrievers, judges):
+def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_share=.1, filter_counts=None):
+    threshold = filtered_candidate_share(max_filtered_candidate_share)
+    filter_counts = filter_counts if filter_counts is not None else collections.Counter()
     if len(judges) != 3 or len({j.family for j in judges}) != 3:
         raise BuildError('need three judges from distinct families')
     if not retrievers or set(retrievers) - set(SYSTEMS):
@@ -384,10 +401,17 @@ def judge_pool(questions, corpus, retrievers, judges):
         with build_phase('judging'):
             votes = [judge.grade(question, candidates) for judge in judges]
         if any(not isinstance(v, dict) or set(v) != set(pool)
-               or any(type(g) is not int or not 0 <= g <= 3 for g in v.values()) for v in votes):
+               or any(g is not None and (type(g) is not int or not 0 <= g <= 3) for g in v.values()) for v in votes):
             raise BuildError('judge returned missing or invalid grades')
+        filtered = {doc for doc in pool if any(v[doc] is None for v in votes)}
+        filter_counts['judged_candidates'] += len(pool)
+        filter_counts['filtered_candidates'] += len(filtered)
+        if len(filtered) / len(pool) >= threshold:
+            filter_counts['dropped_questions'] += 1
+            del rankings[qi]
+            continue
         query_rows = []
-        for doc in sorted(pool):
+        for doc in sorted(set(pool) - filtered):
             grades = [v[doc] for v in votes]
             # With three votes, the median is the majority if one exists;
             # a three-way tie uses the median and is counted in the report.
@@ -395,9 +419,13 @@ def judge_pool(questions, corpus, retrievers, judges):
                                'grade': sorted(grades)[1], 'ranks': pool[doc]})
         has_positive = any(r['grade'] > 0 for r in query_rows)
         if has_positive == (question.kind == 'no_answer'):
+            if filtered and question.kind != 'no_answer':
+                filter_counts['dropped_questions'] += 1
+                del rankings[qi]
+                continue
             raise BuildError('answerability conflicts with pooled judgments')
         rows.extend(query_rows)
-        if (qi + 1) % 25 == 0 or qi + 1 == len(questions):
+        if (qi + 1) % 25 == 0 or (len(questions) > 1 and qi + 1 == len(questions)):
             progress('judged', qi + 1)
     return rows, rankings
 
@@ -554,6 +582,15 @@ def validate_report(report, published=False):
              and baseline['queries'] + baseline['no_answer_queries'] == split_counts['working']
              and saturation['scorable_working_queries'] == baseline['queries']
              and saturation['working_queries_perfect_in_all_systems'] <= baseline['queries'])
+    if 'content_filter' in report:
+        filters = report['content_filter']
+        valid = (valid and filters['judged_candidates'] >= report['judgments']
+                 and filters['filtered_candidates'] <= filters['judged_candidates']
+                 and filters['filtered_generation_batches'] <= filters['generation_batches']
+                 and filters['dropped_questions'] == report['rejected'].get('judge_content_filter', 0)
+                 and filters['filtered_generation_batches'] == report['rejected'].get('content_filter', 0)
+                 and filters['filtered_candidate_share'] == filters['filtered_candidates'] / max(1, filters['judged_candidates'])
+                 and filters['filtered_generation_share'] == filters['filtered_generation_batches'] / max(1, filters['generation_batches']))
     numbers = list(baseline['metrics'].values()) + report['agreement']['cohen_kappa']
     numbers += [report['agreement']['fleiss_kappa'], human['agreement_rate']]
     if not valid or any(n is not None and not math.isfinite(n) for n in numbers):
@@ -586,11 +623,23 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
         raise BuildError('baseline must name a pooled retrieval system')
     opaque = lambda value: hmac.new(salt, value.encode(), hashlib.sha256).hexdigest()
     corpus = [dataclasses.replace(a, id=opaque('article:' + a.id)) for a in sorted(corpus, key=lambda a: a.id)]
+    threshold = filtered_candidate_share(providers.max_filtered_candidate_share)
+    rows, rankings, filter_counts = [], {}, collections.Counter()
+    def accept_question(question):
+        with build_phase('judging'):
+            query_rows, query_rankings = judge_pool([question], corpus, providers.retrievers, providers.judges,
+                                                   threshold, filter_counts)
+        if not query_rows:
+            return False
+        qi = len(rankings)
+        rows.extend({**row, 'query': qi} for row in query_rows)
+        rankings[qi] = query_rankings[0]
+        if (qi + 1) % 25 == 0 or qi + 1 == count:
+            progress('judged', qi + 1)
+        return True
     with build_phase('generation'):
-        questions, rejected = generate(corpus, providers.generator, count, seed)
+        questions, rejected = generate(corpus, providers.generator, count, seed, accept_question, filter_counts)
     qids = {i: opaque('query:' + normalize(q.text)) for i, q in enumerate(questions)}
-    with build_phase('judging'):
-        rows, rankings = judge_pool(questions, corpus, providers.retrievers, providers.judges)
     dev, held = split(questions, seed)
     docs = {a.id: {'title': a.title, 'text': a.text} for a in corpus}
     rows_by_query = collections.defaultdict(list)
@@ -624,6 +673,11 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
               'questions': len(questions), 'articles': len(corpus),
               'question_types': dict(collections.Counter(q.kind for q in questions)),
               'rejected': {**dict.fromkeys(('title_copy', 'duplicate', 'shared_keywords'), 0), **rejected},
+              'content_filter': {**dict.fromkeys(('generation_batches', 'filtered_generation_batches',
+                                                   'judged_candidates', 'filtered_candidates', 'dropped_questions'), 0),
+                                 **filter_counts, 'max_filtered_candidate_share': threshold,
+                                 'filtered_generation_share': filter_counts['filtered_generation_batches'] / filter_counts['generation_batches'],
+                                 'filtered_candidate_share': filter_counts['filtered_candidates'] / filter_counts['judged_candidates']},
               'split': {'working': len(dev), 'held_out': len(held)},
               'judgments': len(rows), 'judged_depth': {str(k): v for k, v in sorted(depths.items())},
               'agreement': agreement([r['votes'] for r in rows]),

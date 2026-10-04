@@ -94,6 +94,14 @@
         "invalid_evidence": {
           "type": "integer",
           "minimum": 0
+        },
+        "content_filter": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "judge_content_filter": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -425,6 +433,57 @@
         "retrieval",
         "totals"
       ]
+    },
+    "content_filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "judged_candidates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filtered_candidates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_questions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filtered_candidate_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_filtered_candidate_share": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "generation_batches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filtered_generation_batches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filtered_generation_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "judged_candidates",
+        "filtered_candidates",
+        "dropped_questions",
+        "filtered_candidate_share",
+        "max_filtered_candidate_share",
+        "generation_batches",
+        "filtered_generation_batches",
+        "filtered_generation_share"
+      ]
     }
   },
   "required": [
@@ -510,6 +569,10 @@
               "minimum": 0
             },
             "invalid_grades": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "content_filter": {
               "type": "integer",
               "minimum": 0
             }

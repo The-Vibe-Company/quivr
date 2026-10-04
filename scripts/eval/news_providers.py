@@ -216,6 +216,8 @@ class Chat:
                 code, retry = error.code, error.headers.get('Retry-After', '')
                 diagnostic = news.failure_details(error)
                 error.close()
+                if code == 400 and diagnostic.get('provider_code') == 'content_filter':
+                    raise self.invalid('content_filter') from None
                 if (code != 429 and not 500 <= code <= 599) or attempt == self.cfg['max_retries']:
                     raise AdapterError('chat provider refused the request', diagnostic=diagnostic) from None
                 delay = min(10, float(retry)) if re.fullmatch(r'\d{1,9}', retry) else min(10, 2 ** attempt)
@@ -304,6 +306,16 @@ class ChatJudge(Chat):
                         raise self.invalid('invalid_grades')
                     break
                 except news.InvalidBatch as error:
+                    if error.reason == 'content_filter':
+                        if len(batch) == 1:
+                            result = {'grades': {batch[0].id: None}}
+                        else:
+                            # Isolate refusals without attributing a whole batch
+                            # to one article. Each split still reserves spend.
+                            middle = len(batch) // 2
+                            result = {'grades': {**self.grade(question, batch[:middle]),
+                                                 **self.grade(question, batch[middle:])}}
+                        break
                     if attempt == self.cfg['max_retries']:
                         raise AdapterError('judge exhausted malformed batch retries', diagnostic={
                             'reason': 'judge_attempts_exhausted', 'last_rejection': error.reason,
@@ -404,7 +416,7 @@ class LiveProviders(news.Providers):
 
 @safe
 def validate_config(cfg):
-    if (not isinstance(cfg, dict) or set(cfg) - {'articles'} != {'generator', 'judges', 'jev', 'retrieval', 'baseline', 'build_max_usd'}
+    if (not isinstance(cfg, dict) or set(cfg) - {'articles', 'max_filtered_candidate_share'} != {'generator', 'judges', 'jev', 'retrieval', 'baseline', 'build_max_usd'}
             or not isinstance(cfg['judges'], list) or len(cfg['judges']) != 2
             or cfg['baseline'] not in news.SYSTEMS):
         raise ValueError('invalid provider configuration')
@@ -416,6 +428,7 @@ def validate_config(cfg):
     if len({c['family'] for c in cfg['judges']} | {'jev'}) != 3:
         raise ValueError('judges require three families')
     news.article_options(cfg.get('articles', {}))
+    news.filtered_candidate_share(cfg.get('max_filtered_candidate_share', .1))
     retrieval = cfg['retrieval']
     if (set(retrieval) != {'endpoint_env', 'key_env', 'max_input_tokens', 'max_usd', 'model', 'dimensions', 'usd_per_million', 'dense_weight'}
             or not isinstance(retrieval['model'], str) or not retrieval['model'].startswith('Cohere')
@@ -456,6 +469,7 @@ def providers(config=None):
     judges.append(news.JevJudge(CappedJev(Jev(env(jev['key_env'])), jev_budget), cost_limit_cents=100 * float(number(jev['max_usd']))))
     return LiveProviders(generator, {s: Retriever(indexes, s) for s in news.SYSTEMS}, judges, cfg['baseline'],
                          article_options=news.article_options(cfg.get('articles', {})),
+                         max_filtered_candidate_share=cfg.get('max_filtered_candidate_share', .1),
                          embedding_budget=embedding_budget, jev_budget=jev_budget)
 
 
@@ -470,7 +484,7 @@ def example_config():
             'retrieval': {'endpoint_env': 'AZURE_FOUNDRY_ENDPOINT', 'key_env': 'AZURE_FOUNDRY_KEY',
                           'max_input_tokens': 50000000, 'max_usd': 20, 'model': 'Cohere-Embed-V5-Pro',
                           'dimensions': 1024, 'usd_per_million': .12, 'dense_weight': .5},
-            'baseline': 'hybrid', 'build_max_usd': 300,
+            'baseline': 'hybrid', 'build_max_usd': 300, 'max_filtered_candidate_share': .1,
             'articles': {'group_versions': True, 'near_duplicate_threshold': .9,
                          'representative': 'latest', 'max_previous_versions': 3}}
 
@@ -481,9 +495,15 @@ def estimate(config, count):
         raise ValueError('live estimate requires 1500 questions')
     # Worst bounded generation attempts, including filter rejection; no provider calls.
     generation = sum(max(10, (count // 6 + (i < count % 6)) * 5) for i in range(6))
+    # Replaced questions share generation bounds; a fully filtered pool can
+    # require a binary split tree of 2 * 40 - 1 calls per chat judge.
+    judged_questions = sum(max(10, target * 5) * min(25, target)
+                           for target in (count // 6 + (i < count % 6) for i in range(6)))
     requested = []
-    for cfg, calls in [(config['generator'], generation), *[(c, count * 40) for c in config['judges']]]:
-        calls *= cfg.get('max_retries', 2) + 1
+    for cfg, calls, retry_layers in [(config['generator'], generation, 1),
+                                     *[(c, judged_questions * 79, 2) for c in config['judges']]]:
+        # Judges retry malformed output around complete's transport retries.
+        calls *= (cfg.get('max_retries', 2) + 1) ** retry_layers
         cost = calls * (cfg.get('request_input_tokens', 65536) * number(cfg['input_usd_per_million'])
                         + cfg.get('request_output_tokens', 4096) * number(cfg['output_usd_per_million'])) / 1000000
         requested.append(float(cost))

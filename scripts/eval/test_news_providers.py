@@ -188,6 +188,7 @@ class ChatAdapters(unittest.TestCase):
             ('{"questions":[],"extra":"private-text"}', 'invalid_questions'),
             ('private-text', 'invalid_json'),
             ('truncated', 'invalid_response'),
+            ('http_content_filter', 'content_filter'),
         ]
         for content, reason in cases:
             with self.subTest(reason=reason, content=content):
@@ -195,6 +196,9 @@ class ChatAdapters(unittest.TestCase):
                 def answer(request, **kwargs):
                     data = json.loads(json.loads(request.data)['messages'][1]['content'])
                     if self.opener.open.call_count == 1:
+                        if content == 'http_content_filter':
+                            raise urllib.error.HTTPError('private-url', 400, 'private-body', {},
+                                io.BytesIO(b'{"error":{"code":"content_filter","message":"private-key"}}'))
                         if content == 'truncated':
                             return response('{}', finish='length')
                         if 'discard me' in content:
@@ -218,8 +222,101 @@ class ChatAdapters(unittest.TestCase):
                                  list(result.held_out['queries'].values()))
                 self.assertEqual(providers.generator.summary()['attempts'], 7)
                 self.assertEqual(providers.generator.summary()['rejected'], {reason: 1})
-                self.assertEqual(providers.generator.summary()['confirmed_output_tokens'], 140)
+                self.assertEqual(providers.generator.summary()['confirmed_output_tokens'],
+                                 120 if reason == 'content_filter' else 140)
+                if reason == 'content_filter':
+                    samples = [json.loads(json.loads(call.args[0].data)['messages'][1]['content'])['articles']
+                               for call in self.opener.open.call_args_list[:2]]
+                    self.assertNotEqual(samples[0][0]['id'], samples[1][0]['id'])
+                    self.assertEqual(result.report['content_filter']['filtered_generation_share'], 1 / 7)
                 news.validate_report(result.report)
+
+    def test_judge_filters_are_isolated_union_counted_and_resampled_at_threshold(self):
+        from test_news_set import articles, unavailable_scorer
+        # One union exclusion below the cap; two at the cap; equality with
+        # one; and removal of the last positive below the cap.
+        for filtered_count, cap, filter_source, dropped in [
+                (1, .25, False, 0), (2, .25, False, 1),
+                (1, .125, False, 1), (1, .25, True, 1)]:
+            with self.subTest(filtered_count=filtered_count, cap=cap, filter_source=filter_source):
+                self.opener.open.reset_mock()
+                state = {'first': None, 'question': None, 'filtered': None}
+                def retrieve(question, corpus, limit):
+                    state['question'] = question
+                    if state['first'] is None:
+                        state['first'] = question.text
+                        ids = sorted(a.id for a in corpus if a.id not in question.sources)
+                        state['filtered'] = (list(question.sources) if filter_source else ids[:filtered_count])
+                    return [a.id for a in corpus]
+                def answer(request, **kwargs):
+                    body = json.loads(request.data)
+                    data = json.loads(body['messages'][1]['content'])
+                    ids = [a['id'] for a in data['articles']]
+                    # Two judges filter different candidates in the two-filter
+                    # case: the pool policy must use their union.
+                    index = 0 if body['model'] == 'judge-a' else -1
+                    blocked = state['filtered'][index]
+                    if data['query'] == state['first'] and blocked in ids:
+                        raise urllib.error.HTTPError('private-url', 400, 'private-body', {},
+                            io.BytesIO(b'{"error":{"code":"content_filter","message":"private-key"}}'))
+                    return response(json.dumps({'grades': {
+                        d: 3 if d in state['question'].sources else 0 for d in ids}}))
+                self.opener.open.side_effect = answer
+                providers = news.fake_providers()
+                providers.max_filtered_candidate_share = cap
+                providers.retrievers = {'bm25': mock.Mock(search=retrieve)}
+                providers.baseline = 'bm25'
+                providers.judges[:2] = [live.ChatJudge({**config(), 'model': 'judge-a', 'family': 'a'}),
+                                        live.ChatJudge({**config(), 'model': 'judge-b', 'family': 'b'})]
+                with mock.patch('scoring.score', side_effect=unavailable_scorer):
+                    result = news.build(articles(), providers, 6, 42, salt=b'x' * 32)
+                self.assertEqual(result.report['questions'], 6)
+                self.assertEqual(result.report['question_types'], dict.fromkeys(news.KINDS, 1))
+                filters = result.report['content_filter']
+                self.assertEqual(filters['judged_candidates'], 8 * (6 + dropped))
+                self.assertEqual(filters['filtered_candidates'], filtered_count)
+                self.assertEqual(filters['filtered_candidate_share'], filtered_count / (8 * (6 + dropped)))
+                self.assertEqual(filters['dropped_questions'], dropped)
+                self.assertEqual(filters['max_filtered_candidate_share'], cap)
+                queries = {**result.working['queries'], **result.held_out['queries']}
+                self.assertEqual(state['first'] in queries.values(), not dropped)
+                judgments = result.working['judgments'] + result.held_out['judgments']
+                if not dropped:
+                    qid = next(qid for qid, text in queries.items() if text == state['first'])
+                    self.assertEqual(len([r for r in judgments if r['query'] == qid]), 8 - filtered_count)
+                    self.assertFalse(any(r['query'] == qid and r['doc'] in state['filtered'] for r in judgments))
+                self.assertTrue(all(all(type(v) is int for v in r['votes']) for r in judgments))
+                self.assertGreater(providers.judges[0].summary()['rejected']['content_filter'], 0)
+                news.validate_report(result.report)
+
+    def test_persistent_content_filters_stop_at_attempt_or_spend_bounds(self):
+        from test_news_set import articles, unavailable_scorer
+        for adapter, cap in [('generator', 1000000), ('judge', 1000000), ('judge', 1000)]:
+            with self.subTest(adapter=adapter, cap=cap):
+                self.opener.open.reset_mock()
+                def refuse(*args, **kwargs):
+                    raise urllib.error.HTTPError('private-url', 400, 'private-body', {},
+                        io.BytesIO(b'{"error":{"code":"content_filter"}}'))
+                self.opener.open.side_effect = refuse
+                providers = news.fake_providers()
+                client = (live.ChatGenerator if adapter == 'generator' else live.ChatJudge)(
+                    {**config(), 'max_output_tokens': cap})
+                if adapter == 'generator':
+                    providers.generator = client
+                else:
+                    providers.judges[0] = client
+                with mock.patch('scoring.score', side_effect=unavailable_scorer), \
+                     self.assertRaises(news.BuildError) as caught:
+                    news.build(articles(), providers, 6, 42, salt=b'x' * 32)
+                if cap == 1000:
+                    self.assertEqual(caught.exception.diagnostic['reason'], 'chat_cap_exhausted')
+                    self.assertEqual(self.opener.open.call_count, 1)
+                else:
+                    self.assertEqual(caught.exception.diagnostic['reason'], 'generation_attempts_exhausted')
+                    self.assertEqual(caught.exception.diagnostic['attempts'], 10)
+                    reason = 'content_filter' if adapter == 'generator' else 'judge_content_filter'
+                    self.assertEqual(caught.exception.diagnostic['rejected'][reason], 10)
+                    self.assertEqual(self.opener.open.call_count, 10 if adapter == 'generator' else 150)
 
     def test_generator_rejects_count_evidence_and_extra_fields_before_returning_any_row(self):
         cases = [('{"questions":[]}', 'event', 1, 'invalid_count'),
@@ -284,7 +381,8 @@ class ChatAdapters(unittest.TestCase):
         self.assertAlmostEqual(budget.summary()['cost_upper_bound_usd'], 3 * MAX_TOKENS * .042 / 1000000)
 
     def test_offline_config_rejects_unsafe_caps_and_unknown_fields_without_http(self):
-        for change in [{'build_max_usd': 1}, {'generator': {**config(), 'max_retries': 99}},
+        for change in [{'max_filtered_candidate_share': v} for v in (0, 1.1, float('nan'), True, '0.1')] + [
+                       {'build_max_usd': 1}, {'generator': {**config(), 'max_retries': 99}},
                        {'articles': {'filter': {'field': 'credit', 'values': []}}},
                        {'retrieval': {**live.example_config()['retrieval'], 'key_env': 'literal-secret'}},
                        {'jev': {**live.example_config()['jev'], 'key_env': 123}},

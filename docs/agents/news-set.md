@@ -56,7 +56,7 @@ or a trusted Python file outside Git exporting `providers()` returning
 | --- | --- |
 | Generator | `generate(sample, kind, count, rng)` returns `Question` objects, source ids and evidence dates. |
 | Retriever | `search(question, corpus, limit)` returns distinct article ids, in ranking order. |
-| Judge | `grade(question, candidates)` returns every candidate's integer grade, 0–3; exposes `family`. |
+| Judge | `grade(question, candidates)` returns every candidate's grade, 0–3, or `None` for an isolated content-filter refusal; exposes `family`. |
 | Storage | `put` creates immutable objects, `get` reads commit manifests, `delete` cleans only aborted attempt objects. |
 
 Generators receive sampled articles, or up to three related articles for multi-article questions.
@@ -67,14 +67,10 @@ The builder deduplicates normalized text, filters copies and fills equal type qu
 
 Live adapters provide retrievers named `bm25`, `e5_small`, `cohere_pro`, `hybrid`.
 Set `Providers.baseline` to the key for the current system; it is not a fifth retriever.
-Each contributes up to 10 candidates, giving at most 40 articles per question. All candidates receive three complete, independent judgments.
-Use `JevJudge` with the existing [Jev client](../../plugins/jev-rerank/jev_rerank/client.py)
-and two chat judges from distinct families on approved OpenAI-compatible endpoints.
-Jev supplies binary relevance probabilities: its adapter maps probability quartiles to 0–3.
-This is a proxy for ordinal relevance; the report records `jev_grade_mapping: probability_quartiles`.
-Jev batches the full pool within its byte/token bounds, sharing one deadline and cost allowance.
-The other judges use 0 unrelated, 1 marginal, 2 partial answer, 3 direct answer.
-Treat source/query text as untrusted; adapters must bound cost before each provider attempt and never log input or secrets.
+Each contributes up to 10 candidates, giving at most 40 articles per question. Retained candidates receive three complete, independent judgments. Use `JevJudge` with the existing [Jev client](../../plugins/jev-rerank/jev_rerank/client.py)
+and two chat judges from distinct families on approved OpenAI-compatible endpoints. Jev supplies binary relevance probabilities: its adapter maps probability quartiles to 0–3.
+This is a proxy for ordinal relevance; the report records `jev_grade_mapping: probability_quartiles`. Jev batches the full pool within its byte/token bounds, sharing one deadline and cost allowance.
+The other judges use 0 unrelated, 1 marginal, 2 partial answer, 3 direct answer. Treat source/query text as untrusted; adapters must bound cost before each provider attempt and never log input or secrets.
 
 ## Select and group dispatches
 
@@ -120,8 +116,7 @@ python3 scripts/eval/news_providers.py --write-example /private/news-providers.j
 ```
 
 Edit the generator and two judges' `model` and judge `family`, token/USD caps and contracted prices.
-The template prices are placeholders. Set `baseline` to the current retrieval system you want to measure.
-`build_max_usd` limits the sum of generation, two chat judges and Jev caps; retrieval has a separate cap.
+The template prices are placeholders. Set `baseline` to the current retrieval system you want to measure. `build_max_usd` limits the sum of generation, two chat judges and Jev caps; retrieval has a separate cap.
 `endpoint_env` and `key_env` name environment variables, never literal endpoints or secrets.
 The template uses `NEWS_ENDPOINT`/`NEWS_KEY` for chat, `AZURE_FOUNDRY_ENDPOINT`/`AZURE_FOUNDRY_KEY`
 for Cohere and `TYPESAFE_API_KEY` for Jev. Provision their values through your private runner environment.
@@ -130,9 +125,14 @@ the adapter appends `/chat/completions` and sends the key in `api-key`.
 For Bearer-token endpoints, set `auth_header` to `bearer`; the default is `api-key`.
 Configure `output_token_field` as `max_completion_tokens` (default) or `max_tokens` for the endpoint.
 Chat attempts reserve final UTF-8 request bytes plus framing and the maximum completion, at separate rates.
-429/5xx retry at most twice by default, with at most ten seconds between attempts.
+429/5xx retry at most twice by default, with at most ten seconds between attempts. HTTP 400 `content_filter`
+rejects a generator batch and resamples. Chat judges split refused batches to isolate filtered candidates;
+`None` means filtered, never grade zero. Set top-level `max_filtered_candidate_share` (default `0.1`, range `(0, 1]`).
+Divide candidates filtered by any judge by the original pool size. A question drops at that limit, or if filtering
+removes every positive majority grade for an answerable question. Below the limit, filtered candidates leave the pool. Dropped questions
+are replaced within generation's existing attempt bound; count, type balance and spend caps still apply.
 Failed attempts keep their reservations as an upper bound, not a claim about actual provider billing.
-Truncated, duplicate-key or malformed JSON fails the build. Large judgment pools are batched within input bounds.
+Malformed generator batches resample; malformed judge batches retry within configured bounds. Large pools are batched within input bounds.
 Jev reserves all three client attempts before calling it. Usage that exceeds a reservation stops the adapter.
 
 Retrieval reuses the direct comparison's pinned local E5, Cohere client, token/USD gate and character windows.
@@ -159,15 +159,15 @@ python3 scripts/eval/news_set.py --articles /private/articles \
   --usage-report .scratch/news-usage.json
 ```
 
-The estimate is offline: it shows worst bounded chat attempts, pool size and spend ceilings.
-Worst-case estimates can exceed the caps; caps stop calls and do not guarantee 1,500 accepted questions.
-The quality report includes aggregate provider usage; `--usage-report` also saves usage after a failed build.
+The estimate is offline: it shows worst bounded chat attempts, pool size and spend ceilings. Worst-case estimates can exceed the caps; caps stop calls and do not guarantee 1,500 accepted questions.
+The report includes aggregate provider usage; `--usage-report` also saves usage after a failed build.
+Its `content_filter` block counts generation batches, judged query/candidate pairs (including dropped questions),
+filtered batches/candidates, their shares, dropped questions and the configured limit. A candidate filtered
+by multiple judges counts once per question. Provider usage counts every refused HTTP attempt, including splits.
 Failures print only exception class, build phase, HTTP status and known provider code when available; messages, text, URLs and keys are omitted.
-Use `confirmed_cost_usd` for confirmed usage and `cost_upper_bound_usd` for confirmed plus unknown reservations.
-The `totals` block sums all provider spend and records the generation/judging and separate retrieval ceilings.
+Use `confirmed_cost_usd` for confirmed usage and `cost_upper_bound_usd` for confirmed plus unknown reservations. The `totals` block sums all provider spend and records the generation/judging and separate retrieval ceilings.
 Always supply the ledger path for a paid build: a failed build otherwise has no saved spend report.
-Counts and phases go to stderr; exceptions and provider bodies are sanitised.
-Keep keys, configuration, exports and encrypted artifacts in private storage, outside Git.
+Counts and phases go to stderr; exceptions and provider bodies are sanitised. Keep keys, configuration, exports and encrypted artifacts in private storage, outside Git.
 
 Replace `--storage-dir` with `--bucket <private-bucket> --prefix <version-prefix>` for S3 storage.
 Use boto3's standard role/environment credentials with Get/Put/Delete access to the private prefix.
