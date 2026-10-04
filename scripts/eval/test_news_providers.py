@@ -24,8 +24,8 @@ def config():
                 request_input_tokens=10000, request_output_tokens=1000, max_retries=2)
 
 
-def response(content, prompt=100, completion=20):
-    return io.BytesIO(json.dumps({'choices': [{'finish_reason': 'stop', 'message': {'content': content}}],
+def response(content, prompt=100, completion=20, finish='stop'):
+    return io.BytesIO(json.dumps({'choices': [{'finish_reason': finish, 'message': {'content': content}}],
                                   'usage': {'prompt_tokens': prompt, 'completion_tokens': completion}}).encode())
 
 
@@ -150,14 +150,17 @@ class ChatAdapters(unittest.TestCase):
                  '```json\n{"grades":{"a":3}}\n```', '{"grades":{"a":0},"secret":"private-text"}']
         for content in cases:
             with self.subTest(content=content):
-                self.opener.open.side_effect = None
-                self.opener.open.return_value = response(content)
+                self.opener.open.reset_mock()
+                self.opener.open.side_effect = lambda *args, **kwargs: response(content)
                 with self.assertRaises(live.AdapterError) as caught:
                     live.ChatJudge(config()).grade(news.Question('private-query', 'event', '2026-01-02', ('a',)),
                                                   [news.Article('a', '', 'private-text', '2026-01-02')])
                 self.assertNotIn('private-query', str(caught.exception))
                 self.assertNotIn('private-text', str(caught.exception))
                 self.assertIsNone(caught.exception.__cause__)
+                self.assertEqual(self.opener.open.call_count, 3)
+                self.assertEqual(caught.exception.diagnostic['reason'], 'judge_attempts_exhausted')
+        self.opener.open.side_effect = None
         self.opener.open.return_value = response('{"grades":{"a":3}}', completion=1001)
         client = live.ChatJudge(config())
         with self.assertRaises(live.AdapterError):
@@ -174,22 +177,98 @@ class ChatAdapters(unittest.TestCase):
         self.assertGreaterEqual(judge.summary()['budgeted_input_tokens'], len(request.data))
         self.assertEqual(judge.summary()['confirmed_input_tokens'], 0)
 
-    def test_generator_rejects_wrong_count_unknown_evidence_and_copied_json_fields(self):
-        for content in ['{"questions":[]}', '{"questions":[{"text":"q","sources":["other"]}]}',
-                        '{"questions":[{"text":"q","sources":["a"],"kind":"event"}]}']:
+    def test_generation_recovers_whole_batches_and_reports_fixed_reasons(self):
+        from test_news_set import articles, unavailable_scorer
+        cases = [
+            ('{"questions":[]}', 'invalid_count'),
+            ('{"questions":[{"text":"discard me","sources":[]},'
+             '{"text":"bad","sources":["unknown"]}]}', 'invalid_evidence'),
+            ('{"questions":[{"text":"bad","sources":[],"extra":"private-text"},{}]}', 'invalid_questions'),
+            ('{"questions":null}', 'invalid_questions'),
+            ('{"questions":[],"extra":"private-text"}', 'invalid_questions'),
+            ('private-text', 'invalid_json'),
+            ('truncated', 'invalid_response'),
+        ]
+        for content, reason in cases:
+            with self.subTest(reason=reason, content=content):
+                self.opener.open.reset_mock()
+                def answer(request, **kwargs):
+                    data = json.loads(json.loads(request.data)['messages'][1]['content'])
+                    if self.opener.open.call_count == 1:
+                        if content == 'truncated':
+                            return response('{}', finish='length')
+                        if 'discard me' in content:
+                            malformed = json.loads(content)
+                            malformed['questions'][0]['sources'] = [data['articles'][0]['id']]
+                            return response(json.dumps(malformed))
+                        return response(content)
+                    sources = [] if data['kind'] == 'no_answer' else [a['id'] for a in data['articles']]
+                    return response(json.dumps({'questions': [
+                        {'text': f"Quelle évolution maritime concerne le dossier {data['nonce']} {i} ?",
+                         'sources': sources} for i in range(data['count'])]}))
+                self.opener.open.side_effect = answer
+                providers = news.fake_providers()
+                providers.generator = live.ChatGenerator(config())
+                with mock.patch('scoring.score', side_effect=unavailable_scorer):
+                    result = news.build(articles(), providers, 12, 42, salt=b'x' * 32)
+                self.assertEqual(result.report['questions'], 12)
+                self.assertEqual(result.report['question_types'], dict.fromkeys(news.KINDS, 2))
+                self.assertEqual(result.report['rejected'][reason], 1)
+                self.assertNotIn('discard me', list(result.working['queries'].values()) +
+                                 list(result.held_out['queries'].values()))
+                self.assertEqual(providers.generator.summary()['attempts'], 7)
+                self.assertEqual(providers.generator.summary()['rejected'], {reason: 1})
+                self.assertEqual(providers.generator.summary()['confirmed_output_tokens'], 140)
+                news.validate_report(result.report)
+
+    def test_generator_rejects_count_evidence_and_extra_fields_before_returning_any_row(self):
+        cases = [('{"questions":[]}', 'event', 1, 'invalid_count'),
+                 ('{"questions":[{"text":"q","sources":["a"]},'
+                  '{"text":"q2","sources":["other"]}]}', 'event', 2, 'invalid_evidence'),
+                 ('{"questions":[{"text":"q","sources":["a"]}]}', 'multi_article', 1, 'invalid_evidence'),
+                 ('{"questions":[{"text":"q","sources":["a"],"kind":"event"}]}', 'event', 1, 'invalid_questions'),
+                 ('{"questions":[{"text":"q","sources":["a"]},{"text":"q2","sources":["a"]}]}',
+                  'event', 1, 'invalid_count')]
+        for content, kind, count, reason in cases:
             with self.subTest(content=content):
                 self.opener.open.return_value = response(content)
-                with self.assertRaises(live.AdapterError):
+                with self.assertRaises(news.InvalidBatch) as caught:
                     live.ChatGenerator(config()).generate([news.Article('a', 'title', 'text', '2026-01-02')],
-                                                         'event', 1, random.Random(1))
+                                                         kind, count, random.Random(1))
+                self.assertEqual(caught.exception.reason, reason)
+
+    def test_malformed_retries_stop_at_caps_before_next_http_call(self):
+        from test_news_set import articles
+        for adapter in ('generator', 'judge'):
+            with self.subTest(adapter=adapter):
+                self.opener.open.reset_mock()
+                self.opener.open.side_effect = lambda *args, **kwargs: response('{}')
+                cls = live.ChatGenerator if adapter == 'generator' else live.ChatJudge
+                client = cls({**config(), 'max_output_tokens': 1000})
+                with self.assertRaises(live.AdapterError) as caught:
+                    if adapter == 'generator':
+                        news.generate(articles(), client, 6, 42)
+                    else:
+                        client.grade(news.Question('q', 'event', '2026-01-02', ('a',)),
+                                     [news.Article('a', '', 't', '2026-01-02')])
+                self.assertEqual(self.opener.open.call_count, 1)
+                self.assertTrue(client.summary()['stopped'])
+                self.assertEqual(caught.exception.diagnostic['reason'], 'chat_cap_exhausted')
 
     def test_large_judgment_pools_batch_without_losing_any_vote(self):
         candidates = [news.Article('a', '', 'x' * 1200, '2026-01-02'),
                       news.Article('b', '', 'y' * 1200, '2026-01-02')]
-        self.opener.open.side_effect = [response('{"grades":{"a":3}}'), response('{"grades":{"b":1}}')]
+        self.opener.open.side_effect = [response('{"grades":{"a":3}}'),
+                                        response('{"grades":{"b":true}}'),
+                                        response('{"grades":{"b":1,"b":2}}'),
+                                        response('{"grades":{"b":1}}')]
         judge = live.ChatJudge({**config(), 'request_input_tokens': 2400})
         self.assertEqual(judge.grade(news.Question('q', 'event', '2026-01-02', ('a',)), candidates), {'a': 3, 'b': 1})
-        self.assertEqual(judge.summary()['attempts'], 2)
+        self.assertEqual(judge.summary()['attempts'], 4)
+        self.assertEqual(judge.summary()['rejected'], {'invalid_grades': 1, 'invalid_json': 1})
+        batches = [json.loads(json.loads(call.args[0].data)['messages'][1]['content'])['articles']
+                   for call in self.opener.open.call_args_list]
+        self.assertEqual([[a['id'] for a in batch] for batch in batches], [['a'], ['b'], ['b'], ['b']])
 
     def test_failed_jev_attempts_consume_budget_and_block_next_call(self):
         from jev_rerank.client import MAX_TOKENS, Result
@@ -246,8 +325,13 @@ def providers():
                 '--usage-report', str(root / 'usage.json')], env=environment, capture_output=True, text=True, timeout=10)
             self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
             usage = json.loads((root / 'usage.json').read_text())
-            self.assertEqual(usage['generator']['attempts'], 1)
-            self.assertEqual(usage['generator']['confirmed_cost_usd'], .0002)
+            self.assertEqual(usage['generator']['attempts'], 1250)
+            self.assertEqual(usage['generator']['rejected'], {'invalid_count': 1250})
+            self.assertEqual(json.loads(completed.stdout.split('diagnostic: ', 1)[1]),
+                             {'phase': 'generation', 'reason': 'generation_attempts_exhausted',
+                              'kind': 'entity', 'attempts': 1250, 'accepted': 0, 'target': 250,
+                              'rejected': {'invalid_count': 1250}})
+            self.assertEqual(usage['generator']['confirmed_cost_usd'], .25)
             self.assertFalse((root / 'quality.json').exists())
             self.assertNotIn('fake-key', completed.stdout + completed.stderr)
             (root / 'alias').symlink_to(root, target_is_directory=True)

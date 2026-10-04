@@ -74,6 +74,26 @@
         "shared_keywords": {
           "type": "integer",
           "minimum": 0
+        },
+        "invalid_json": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_response": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_questions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_evidence": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -464,6 +484,36 @@
         },
         "stopped": {
           "type": "boolean"
+        },
+        "rejected": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "invalid_json": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_response": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_questions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_evidence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_grades": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       },
       "required": [

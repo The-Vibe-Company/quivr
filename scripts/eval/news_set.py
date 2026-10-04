@@ -56,6 +56,14 @@ class BuildError(ValueError):
         self.diagnostic = diagnostic
 
 
+class InvalidBatch(BuildError):
+    """Retryable model-output validation failure; reason codes contain no text."""
+
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__('invalid model batch', diagnostic={'reason': reason})
+
+
 def failure_details(error):
     """Copy only bounded diagnostic fields; never stringify a provider exception."""
     if isinstance(error, BuildError) and error.diagnostic is not None:
@@ -311,7 +319,11 @@ def generate(corpus, generator, count, seed):
                 sample = rng.sample(group, min(3, len(group)))
             else:
                 sample = [rng.choice(corpus)]
-            generated = generator.generate(sample, kind, min(25, target - len(accepted)), rng)
+            try:
+                generated = generator.generate(sample, kind, min(25, target - len(accepted)), rng)
+            except InvalidBatch as error:
+                rejected[error.reason] += 1
+                continue
             for q in generated:
                 if len(accepted) == target:
                     break
@@ -340,7 +352,10 @@ def generate(corpus, generator, count, seed):
                 accepted.append(q)
                 seen.add(key)
         if len(accepted) != target:
-            raise BuildError('generator exhausted attempts before filling every question type')
+            raise BuildError('generator exhausted attempts before filling every question type', diagnostic={
+                'reason': 'generation_attempts_exhausted', 'kind': kind,
+                'attempts': max(10, target * 5), 'accepted': len(accepted), 'target': target,
+                'rejected': dict(rejected)})
         questions.extend(accepted)
         progress('generated', len(questions))
     return questions, dict(rejected)
@@ -608,7 +623,7 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
     report = {'schema_version': 1, 'status': 'synthetic' if providers.synthetic else 'built',
               'questions': len(questions), 'articles': len(corpus),
               'question_types': dict(collections.Counter(q.kind for q in questions)),
-              'rejected': {k: rejected.get(k, 0) for k in ('title_copy', 'duplicate', 'shared_keywords')},
+              'rejected': {**dict.fromkeys(('title_copy', 'duplicate', 'shared_keywords'), 0), **rejected},
               'split': {'working': len(dev), 'held_out': len(held)},
               'judgments': len(rows), 'judged_depth': {str(k): v for k, v in sorted(depths.items())},
               'agreement': agreement([r['votes'] for r in rows]),
