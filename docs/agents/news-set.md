@@ -125,13 +125,13 @@ the adapter appends `/chat/completions` and sends the key in `api-key`.
 For Bearer-token endpoints, set `auth_header` to `bearer`; the default is `api-key`.
 Configure `output_token_field` as `max_completion_tokens` (default) or `max_tokens` for the endpoint.
 Chat attempts reserve final UTF-8 request bytes plus framing and the maximum completion, at separate rates.
-429/5xx retry at most twice by default, with at most ten seconds between attempts. HTTP 400 `content_filter`
+429/5xx, timeouts and transient connections retry within `max_retries` (default `2`, range `0`–`5`), with backoff capped at ten seconds. Permanent DNS/certificate failures stop immediately. Set `timeout_seconds` (default `60`, range `1`–`600`) higher for slow reasoning models; reduce `request_input_tokens` for smaller batches. HTTP 400 `content_filter`
 rejects a generator batch and resamples. Chat judges split refused batches to isolate filtered candidates;
 `None` means filtered, never grade zero. Set top-level `max_filtered_candidate_share` (default `0.1`, range `(0, 1]`).
 Divide candidates filtered by any judge by the original pool size. A question drops at that limit, or if filtering
 removes every positive majority grade for an answerable question. Below the limit, filtered candidates leave the pool. Dropped questions
 are replaced within generation's existing attempt bound; count, type balance and spend caps still apply.
-Failed attempts keep their reservations as an upper bound, not a claim about actual provider billing.
+Failed attempts keep their reservations as an upper bound. Each chat adapter counts `timeouts` (including the final failure) and `retries` (additional transport attempts reserved and sent, including HTTP retries). A cap-blocked retry is not counted.
 Malformed generator batches resample; malformed judge batches retry within configured bounds. Large pools are batched within input bounds.
 Jev reserves all three client attempts before calling it. Usage that exceeds a reservation stops the adapter.
 

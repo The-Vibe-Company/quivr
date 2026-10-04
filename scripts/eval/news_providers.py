@@ -9,11 +9,14 @@ import argparse
 import collections
 import dataclasses
 import decimal
+import errno
 import functools
+import http.client
 import json
 import os
 import pathlib
 import re
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -94,7 +97,7 @@ class Chat:
             if type(cfg[key]) is not int or cfg[key] <= 0:
                 raise ValueError('invalid token limit')
         if (type(cfg['max_retries']) is not int or not 0 <= cfg['max_retries'] <= 5
-                or type(cfg['timeout_seconds']) is not int or not 1 <= cfg['timeout_seconds'] <= 120
+                or type(cfg['timeout_seconds']) is not int or not 1 <= cfg['timeout_seconds'] <= 600
                 or cfg['output_token_field'] not in ('max_tokens', 'max_completion_tokens')
                 or cfg['auth_header'] not in ('api-key', 'bearer')):
             raise ValueError('invalid transport limits')
@@ -119,12 +122,14 @@ class Chat:
         self.cap = number(self.cfg['max_usd'], positive=True)
         self.opener = urllib.request.build_opener(embeddings.NoRedirect())
         self.input_tokens = self.output_tokens = self.attempts = self.confirmed_input = self.confirmed_output = 0
+        self.timeouts = self.retries = 0
         self.cost = self.confirmed_cost = decimal.Decimal(0)
         self.stopped = False
         self.rejected = collections.Counter()
 
     def summary(self):
-        return {'attempts': self.attempts, 'budgeted_input_tokens': self.input_tokens,
+        return {'attempts': self.attempts, 'timeouts': self.timeouts, 'retries': self.retries,
+                'budgeted_input_tokens': self.input_tokens,
                 'budgeted_output_tokens': self.output_tokens, 'confirmed_input_tokens': self.confirmed_input,
                 'confirmed_output_tokens': self.confirmed_output, 'confirmed_cost_usd': float(self.confirmed_cost),
                 'cost_upper_bound_usd': float(self.cost), 'max_usd': float(self.cap), 'stopped': self.stopped,
@@ -183,6 +188,8 @@ class Chat:
             raise AdapterError('chat request exceeds the input token bound')
         for attempt in range(self.cfg['max_retries'] + 1):
             reserved = self.reserve(inputs, outputs)
+            if attempt:
+                self.retries += 1
             request = urllib.request.Request(self.url, data=raw, method='POST',
                                              headers={'Content-Type': 'application/json', **(
                                                  {'api-key': self.key} if self.cfg['auth_header'] == 'api-key'
@@ -221,7 +228,22 @@ class Chat:
                 if (code != 429 and not 500 <= code <= 599) or attempt == self.cfg['max_retries']:
                     raise AdapterError('chat provider refused the request', diagnostic=diagnostic) from None
                 delay = min(10, float(retry)) if re.fullmatch(r'\d{1,9}', retry) else min(10, 2 ** attempt)
-                time.sleep(delay)
+            except (urllib.error.URLError, OSError, http.client.IncompleteRead) as error:
+                reason = error.reason if isinstance(error, urllib.error.URLError) else error
+                timed_out = isinstance(reason, (TimeoutError, socket.timeout)) or (
+                    isinstance(reason, OSError) and reason.errno == errno.ETIMEDOUT)
+                if timed_out:
+                    self.timeouts += 1
+                transient = (timed_out or isinstance(reason, (ConnectionError, http.client.IncompleteRead))
+                             or (isinstance(reason, socket.gaierror) and reason.errno == socket.EAI_AGAIN)
+                             or (isinstance(reason, OSError) and reason.errno in (
+                                 errno.ECONNRESET, errno.ECONNABORTED, errno.ECONNREFUSED,
+                                 errno.EPIPE, errno.ENETUNREACH, errno.EHOSTUNREACH)))
+                if not transient or attempt == self.cfg['max_retries']:
+                    raise AdapterError('chat transport failed', diagnostic=news.failure_details(error)) from None
+                # Without usage, this attempt's full reservation stays charged.
+                delay = min(10, 2 ** attempt)
+            time.sleep(delay)
         raise AdapterError('chat retries exhausted')
 
 

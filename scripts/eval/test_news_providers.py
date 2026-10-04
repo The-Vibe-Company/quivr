@@ -1,10 +1,14 @@
 """Owner tests for live adapter transport, spend and prepared retrieval contracts."""
 import contextlib
+import errno
+import http.client
 import importlib.util
 import io
 import json
 import os
 import random
+import socket
+import ssl
 import pathlib
 import subprocess
 import sys
@@ -137,12 +141,100 @@ class ChatAdapters(unittest.TestCase):
             self.assertEqual(client.grade(q, articles), {'a': 2})
         self.assertLessEqual(sleep.call_args.args[0], 10)
         self.assertEqual(client.summary()['attempts'], 2)
+        self.assertEqual(client.summary()['retries'], 1)
+        self.assertEqual(client.summary()['timeouts'], 0)
         self.assertGreater(client.summary()['cost_upper_bound_usd'], client.summary()['confirmed_cost_usd'])
         capped = live.ChatJudge({**config(), 'max_usd': .00001})
         calls = self.opener.open.call_count
         with self.assertRaises(live.AdapterError):
             capped.grade(q, articles)
         self.assertEqual(self.opener.open.call_count, calls)
+
+    def test_transient_transport_failures_retry_and_keep_unknown_reservations(self):
+        failures = [TimeoutError('private-text'), socket.timeout('private-text'),
+                    urllib.error.URLError(socket.timeout('private-text')),
+                    urllib.error.URLError(OSError(errno.ETIMEDOUT, 'private-text')),
+                    urllib.error.URLError(ConnectionResetError('private-text')),
+                    urllib.error.URLError(ConnectionRefusedError('private-text')),
+                    urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, 'private-text')),
+                    ConnectionResetError('private-text'), http.client.RemoteDisconnected('private-text'),
+                    http.client.IncompleteRead(b'private-text', 100)]
+        for error in failures:
+            for stage in ('open', 'read'):
+                with self.subTest(error=type(error).__name__, stage=stage):
+                    self.opener.open.reset_mock()
+                    failed_response = mock.MagicMock()
+                    failed_response.__enter__.return_value.read.side_effect = error
+                    self.opener.open.side_effect = [error if stage == 'open' else failed_response,
+                                                  response('{"answer":42}')]
+                    client = live.Chat({**config(), 'timeout_seconds': 120})
+                    with mock.patch('news_providers.time.sleep') as sleep:
+                        self.assertEqual(client.complete('instruction', {'text': 'private-text'}), {'answer': 42})
+                    self.assertEqual(self.opener.open.call_count, 2)
+                    sleep.assert_called_once_with(1)
+                    summary = client.summary()
+                    self.assertEqual(summary['attempts'], 2)
+                    self.assertEqual(summary['retries'], 1)
+                    self.assertEqual(summary['timeouts'], int(error in failures[:4]))
+                    request = self.opener.open.call_args.args[0]
+                    self.assertEqual(self.opener.open.call_args.kwargs['timeout'], 120)
+                    inputs = len(request.data) + 128
+                    self.assertEqual(summary['budgeted_input_tokens'], inputs + 100)
+                    self.assertEqual(summary['budgeted_output_tokens'], 1020)
+                    self.assertAlmostEqual(summary['cost_upper_bound_usd'], (inputs + 100 + 2 * 1020) / 1000000)
+                    self.assertEqual(summary['confirmed_input_tokens'], 100)
+                    self.assertEqual(summary['confirmed_output_tokens'], 20)
+
+    def test_timeouts_stop_at_retry_or_reservation_bounds_without_leaking_details(self):
+        inputs = live.Chat(config()).input_bound('instruction', {})
+        for limits, attempts in [({}, 3), ({'max_retries': 0}, 1),
+                                 ({'max_input_tokens': inputs}, 1),
+                                 ({'max_output_tokens': 1000}, 1),
+                                 ({'max_usd': (inputs + 2000) / 1000000}, 1)]:
+            with self.subTest(limits=limits):
+                self.opener.open.reset_mock()
+                self.opener.open.side_effect = TimeoutError('private-key private-url private-text')
+                client = live.Chat({**config(), **limits})
+                with mock.patch('news_providers.time.sleep') as sleep, self.assertRaises(live.AdapterError) as caught:
+                    client.complete('instruction', {})
+                self.assertEqual(self.opener.open.call_count, attempts)
+                self.assertEqual(client.summary()['timeouts'], attempts)
+                self.assertEqual(client.summary()['retries'], attempts - 1)
+                self.assertEqual(client.summary()['budgeted_input_tokens'], inputs * attempts)
+                self.assertEqual(client.summary()['budgeted_output_tokens'], 1000 * attempts)
+                self.assertEqual(client.summary()['confirmed_cost_usd'], 0)
+                self.assertEqual(client.summary()['stopped'], bool(set(limits) - {'max_retries'}))
+                if attempts == 3:
+                    self.assertEqual(sleep.call_args_list, [mock.call(1), mock.call(2)])
+                    self.assertEqual(caught.exception.diagnostic, {'exception': 'TimeoutError'})
+                for private in ('private-key', 'private-url', 'private-text'):
+                    self.assertNotIn(private, str(caught.exception) + json.dumps(caught.exception.diagnostic))
+
+    def test_permanent_url_failures_do_not_retry(self):
+        reasons = [socket.gaierror(socket.EAI_NONAME, 'private-url'),
+                   ssl.SSLCertVerificationError('private-key'), ValueError('private-url'),
+                   'private-url', OSError(errno.EINVAL, 'private-text')]
+        for reason in reasons:
+            with self.subTest(reason=type(reason).__name__):
+                self.opener.open.reset_mock()
+                self.opener.open.side_effect = urllib.error.URLError(reason)
+                client = live.Chat(config())
+                with mock.patch('news_providers.time.sleep') as sleep, self.assertRaises(live.AdapterError) as caught:
+                    client.complete('instruction', {})
+                self.assertEqual(self.opener.open.call_count, 1)
+                sleep.assert_not_called()
+                self.assertEqual(client.summary()['timeouts'], 0)
+                self.assertEqual(client.summary()['retries'], 0)
+                self.assertEqual(caught.exception.diagnostic, {'exception': 'URLError'})
+
+    def test_chat_timeout_configuration_accepts_reasoning_models_and_rejects_invalid_bounds(self):
+        for timeout in (1, 120, 121, 600):
+            with self.subTest(timeout=timeout):
+                self.assertEqual(live.Chat.settings({**config(), 'timeout_seconds': timeout})['timeout_seconds'], timeout)
+        for timeout in (0, 601, True, 60.0, '600'):
+            with self.subTest(timeout=timeout), self.assertRaises(live.AdapterError):
+                live.Chat.settings({**config(), 'timeout_seconds': timeout})
+        self.opener.open.assert_not_called()
 
     def test_invalid_provider_output_is_strict_sanitised_and_never_a_negative_vote(self):
         cases = ['{"grades":{"a":true}}', '{"grades":{"a":1,"a":2}}',
