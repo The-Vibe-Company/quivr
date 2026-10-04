@@ -23,6 +23,7 @@ import os
 import pathlib
 import random
 import re
+import signal
 import subprocess
 import sys
 import tarfile
@@ -184,6 +185,9 @@ class Providers:
     article_options: dict = dataclasses.field(default_factory=dict)
     max_filtered_candidate_share: float = .1
     concurrency: int = 1
+    question_targets: dict = dataclasses.field(default_factory=dict)
+    attempt_budgets: dict = dataclasses.field(default_factory=dict)
+    min_questions: int | None = None
 
 
 class Storage(Protocol):
@@ -332,24 +336,47 @@ def filtered_candidate_share(value):
     return value
 
 
-def generate(corpus, generator, count, seed, accept_question=None, filter_counts=None, executor=None, accept_questions=None):
+def question_options(count, question_targets=None, attempt_budgets=None, min_questions=None, *, check_total=True):
+    """Resolve partial per-type overrides without changing default request order."""
+    if type(count) is not int or count < 2:
+        raise BuildError('question count must allow a nonempty 60/40 split')
+    targets = {kind: count // len(KINDS) + (i < count % len(KINDS)) for i, kind in enumerate(KINDS)}
+    for values, name in ((question_targets, 'question targets'), (attempt_budgets, 'attempt budgets')):
+        if values is not None and (not isinstance(values, dict) or set(values) - set(KINDS)
+                or any(type(v) is not int or v < 0 for v in values.values())):
+            raise BuildError('invalid ' + name)
+    targets.update(question_targets or {})
+    budgets = {kind: max(10, target * 5) for kind, target in targets.items()}
+    budgets.update(attempt_budgets or {})
+    minimum = count if min_questions is None else min_questions
+    if type(minimum) is not int or minimum < 2:
+        raise BuildError('min_questions must allow a nonempty 60/40 split')
+    if check_total and sum(targets.values()) < minimum:
+        raise BuildError('question targets total is below min_questions')
+    return targets, budgets, minimum
+
+
+def generate(corpus, generator, count, seed, accept_question=None, filter_counts=None, executor=None, accept_questions=None,
+             question_targets=None, attempt_budgets=None, min_questions=None, type_counts=None):
     """Fill bounded type quotas; acceptance callbacks may return a drop reason."""
-    if count < len(KINDS) or len(corpus) < 2:
-        raise BuildError('need at least six questions and two articles')
+    targets, budgets, minimum = question_options(count, question_targets, attempt_budgets, min_questions)
+    type_counts = type_counts if type_counts is not None else {}
+    if len(corpus) < 2:
+        raise BuildError('need at least two articles')
     by_id = {a.id: a for a in corpus}
     clusters = collections.defaultdict(list)
     for article in corpus:
         clusters[article.cluster or article.date[:7]].append(article)
     groups = [group for group in clusters.values() if len(group) >= 2]
-    if not groups:
+    if targets['multi_article'] and not groups:
         raise BuildError('multi-article generation needs a cluster with two articles')
     filter_counts = filter_counts if filter_counts is not None else collections.Counter()
     rng, seen, questions, rejected = random.Random(seed), set(), [], collections.Counter()
     titles = [normalize(a.title) for a in corpus if normalize(a.title)]
-    for index, kind in enumerate(KINDS):
-        target = count // len(KINDS) + (index < count % len(KINDS))
+    for kind in KINDS:
+        target = targets[kind]
         accepted = []
-        attempts, limit = 0, max(10, target * 5)
+        attempts, limit = 0, budgets[kind]
         while len(accepted) < target and attempts < limit:
             requests, remaining = [], target - len(accepted)
             # Fixed waves make the request sequence independent of worker count.
@@ -423,13 +450,14 @@ def generate(corpus, generator, count, seed, accept_question=None, filter_counts
                 else:
                     accepted.append(q)
             progress('accepted', len(questions) + len(accepted))
-        if len(accepted) != target:
-            raise BuildError('generator exhausted attempts before filling every question type', diagnostic={
-                'reason': 'generation_attempts_exhausted', 'kind': kind,
-                'attempts': max(10, target * 5), 'accepted': len(accepted), 'target': target,
-                'rejected': dict(rejected)})
+        type_counts[kind] = {'target': target, 'accepted': len(accepted), 'shortfall': target - len(accepted),
+                             'attempts': attempts, 'attempt_budget': limit}
         questions.extend(accepted)
         progress('generated', len(questions))
+    if len(questions) < minimum:
+        raise BuildError('accepted questions below minimum', diagnostic={
+            'reason': 'min_questions_not_met', 'accepted': len(questions), 'min_questions': minimum,
+            'question_targets': type_counts, 'rejected': dict(rejected)})
     return questions, dict(rejected)
 
 
@@ -637,9 +665,11 @@ def validate_report(report, published=False):
         raise BuildError('report violates the aggregate-only schema') from None
     types, split_counts, depth = report['question_types'], report['split'], report['judged_depth']
     human, baseline, saturation = report['human_check'], report['baseline'], report['saturation']
-    valid = (report['articles'] >= 2 and min(types.values()) > 0
-             and (report['status'] == 'synthetic' or report['questions'] >= 1500)
-             and sum(types.values()) == report['questions'] and max(types.values()) - min(types.values()) <= 1
+    controls = report.get('question_targets')
+    minimum = report.get('min_questions', 2 if report['status'] == 'synthetic' else 1500)
+    valid = (report['articles'] >= 2 and report['questions'] >= minimum
+             and (controls is not None or (min(types.values()) > 0 and max(types.values()) - min(types.values()) <= 1))
+             and sum(types.values()) == report['questions']
              and sum(split_counts.values()) == report['questions']
              and split_counts['working'] == report['questions'] * 3 // 5
              and sum(depth.values()) == report['questions']
@@ -653,7 +683,16 @@ def validate_report(report, published=False):
              and (human['status'] == 'complete') == (human['reviewed'] == human['sampled'] == 100)
              and baseline['queries'] + baseline['no_answer_queries'] == split_counts['working']
              and saturation['scorable_working_queries'] == baseline['queries']
-             and saturation['working_queries_perfect_in_all_systems'] <= baseline['queries'])
+             and saturation['working_queries_perfect_in_all_systems'] <= baseline['queries']
+             and all((value is None) == (baseline['queries'] == 0) for value in baseline['metrics'].values()))
+    if controls is not None:
+        valid = (valid and 'min_questions' in report
+                 and all(value['accepted'] == types[kind]
+                         and value['shortfall'] == value['target'] - value['accepted']
+                         and value['attempts'] <= value['attempt_budget']
+                         and (value['target'] > 0 or value['attempts'] == 0)
+                         and (value['shortfall'] == 0 or value['attempts'] == value['attempt_budget'])
+                         for kind, value in controls.items()))
     if 'content_filter' in report:
         filters = report['content_filter']
         valid = (valid and filters['judged_candidates'] >= report['judgments']
@@ -699,14 +738,16 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
         raise BuildError('id salt must have at least 32 bytes')
     if not providers.synthetic and set(providers.retrievers) != set(SYSTEMS):
         raise BuildError('live build needs all four retrieval systems')
-    if not providers.synthetic and (count < 1500 or not any(isinstance(j, JevJudge) for j in providers.judges)):
-        raise BuildError('live build needs 1500 questions and the Jev judge adapter')
+    minimum = providers.min_questions if providers.min_questions is not None else (count if providers.synthetic else 1000)
+    targets, budgets, minimum = question_options(count, providers.question_targets, providers.attempt_budgets, minimum)
+    if not providers.synthetic and not any(isinstance(j, JevJudge) for j in providers.judges):
+        raise BuildError('live build needs the Jev judge adapter')
     if providers.baseline not in providers.retrievers:
         raise BuildError('baseline must name a pooled retrieval system')
     opaque = lambda value: hmac.new(salt, value.encode(), hashlib.sha256).hexdigest()
     corpus = [dataclasses.replace(a, id=opaque('article:' + a.id)) for a in sorted(corpus, key=lambda a: a.id)]
     threshold = filtered_candidate_share(providers.max_filtered_candidate_share)
-    rows, rankings, filter_counts = [], {}, collections.Counter()
+    rows, rankings, filter_counts, type_counts = [], {}, collections.Counter(), {}
     assessed_questions = 0
     def accept_questions(batch):
         nonlocal assessed_questions
@@ -734,7 +775,8 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
         with build_phase('generation'):
             questions, rejected = generate(corpus, providers.generator, count, seed,
                                            filter_counts=filter_counts, executor=executor,
-                                           accept_questions=accept_questions)
+                                           accept_questions=accept_questions, question_targets=targets,
+                                           attempt_budgets=budgets, min_questions=minimum, type_counts=type_counts)
     qids = {i: opaque('query:' + normalize(q.text)) for i, q in enumerate(questions)}
     dev, held = split(questions, seed)
     docs = {a.id: {'title': a.title, 'text': a.text} for a in corpus}
@@ -760,14 +802,17 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
     scorable = {q: judgments for q, judgments in working['qrels'].items() if any(judgments.values())}
     # Only working query ids are ever passed to the scorer, including saturation.
     import scoring
-    per_system = {system: scoring.score(scorable, {qids[i]: rankings[i][system] for i in dev})
+    per_system = {system: (scoring.score(scorable, {qids[i]: rankings[i][system] for i in dev}) if scorable else
+                           {'mean': dict.fromkeys(scoring.METRICS),
+                            'per_query': {metric: {} for metric in scoring.METRICS}})
                   for system in providers.retrievers}
     baseline = per_system[providers.baseline]
     depths = collections.Counter(len(rows_by_query[i]) for i in range(len(questions)))
     review = review_sample(rows, questions, corpus, qids, 100, seed)
     report = {'schema_version': 1, 'status': 'synthetic' if providers.synthetic else 'built',
               'questions': len(questions), 'articles': len(corpus),
-              'question_types': dict(collections.Counter(q.kind for q in questions)),
+              'question_types': {kind: type_counts[kind]['accepted'] for kind in KINDS},
+              'question_targets': type_counts, 'min_questions': minimum,
               'rejected': {**dict.fromkeys(('title_copy', 'duplicate', 'shared_keywords'), 0), **rejected},
               'question_quality': {'questions': assessed_questions,
                                    'dropped_questions': sum(rejected.get(reason, 0) for reason in QUESTION_DROP_REASONS),
@@ -776,8 +821,8 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
               'content_filter': {**dict.fromkeys(('generation_batches', 'filtered_generation_batches',
                                                    'judged_candidates', 'filtered_candidates', 'dropped_questions'), 0),
                                  **filter_counts, 'max_filtered_candidate_share': threshold,
-                                 'filtered_generation_share': filter_counts['filtered_generation_batches'] / filter_counts['generation_batches'],
-                                 'filtered_candidate_share': filter_counts['filtered_candidates'] / filter_counts['judged_candidates']},
+                                 'filtered_generation_share': filter_counts['filtered_generation_batches'] / max(1, filter_counts['generation_batches']),
+                                 'filtered_candidate_share': filter_counts['filtered_candidates'] / max(1, filter_counts['judged_candidates'])},
               'split': {'working': len(dev), 'held_out': len(held)},
               'judgments': len(rows), 'judged_depth': {str(k): v for k, v in sorted(depths.items())},
               'agreement': agreement([r['votes'] for r in rows]),
@@ -965,8 +1010,12 @@ def publish(result, storage, working_recipients, held_recipients, review_recipie
         committing = True
         storage.put(marker, receipt)  # atomic immutable marker; contains only public aggregates
         return manifest
-    except BaseException:
+    except BaseException as error:
         if committing:
+            if isinstance(error, BuildInterrupted):
+                # A canceled final PUT may have committed. Keep referenced ciphertext,
+                # but always unwind cancellation instead of reporting success.
+                raise
             try:
                 existing = storage.get(marker)
             except Exception:
@@ -1082,6 +1131,11 @@ def load_providers(path):
     return module.providers()
 
 
+class BuildInterrupted(BaseException):
+    def __init__(self, signum):
+        self.signum = signum
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--articles', type=pathlib.Path)
@@ -1107,8 +1161,8 @@ def main(argv=None):
         parser.error('choose exactly one storage directory or private bucket')
     if args.fake == bool(args.providers):
         parser.error('choose exactly one --fake or --providers')
-    if not args.fake and (not args.articles or args.questions < 1500):
-        parser.error('live builds require articles and at least 1500 questions')
+    if not args.fake and not args.articles:
+        parser.error('live builds require articles')
     if not args.fake and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
         parser.error('live builds are refused in CI')
     if args.response_cache and not args.storage_dir:
@@ -1116,53 +1170,71 @@ def main(argv=None):
     if args.concurrency is not None and not 1 <= args.concurrency <= 8:
         parser.error('concurrency must be from 1 to 8')
     providers = None
+    exit_code, stopped_signal = 2, None
     phase = 'setup'
+    previous_handlers = {}
+    def stop(signum, frame):
+        nonlocal stopped_signal
+        stopped_signal = signum
+        # Ignore repeated interrupts while in-flight calls settle and the ledger is saved.
+        for stopped_by in previous_handlers:
+            signal.signal(stopped_by, signal.SIG_IGN)
+        if phase != 'cleanup':
+            raise BuildInterrupted(signum)
     try:
-        if args.fake:
-            providers = fake_providers()
-            corpus = [Article(str(i), 'Une liaison ouvre au port',
-                              f'Le ferry dessert une île et accueille {i + 10} voyageurs.',
-                              f'2026-{1 + i % 2:02d}-02', 'maritime') for i in range(8)]
-        else:
-            providers = load_providers(args.providers)
-            phase = 'input'
-            corpus = read_articles(args.articles, providers.article_options)
-            if providers.synthetic:
-                raise BuildError('live build cannot use synthetic providers')
-        phase = 'setup'
-        if args.concurrency is not None:
-            providers.concurrency = args.concurrency
-        if args.response_cache:
-            if not hasattr(providers, 'enable_cache'):
-                raise BuildError('response cache requires the built-in live adapters')
-            providers.enable_cache(args.storage_dir / 'responses')
-        recipients = [os.environ.get(k, '').split() for k in
-                      ('QUIVR_NEWS_WORKING_RECIPIENTS', 'QUIVR_NEWS_HOLDOUT_RECIPIENTS', 'QUIVR_NEWS_REVIEW_RECIPIENTS')]
-        if not all(recipients) or set(recipients[0]) & set(recipients[1]):
-            raise BuildError('provide three recipient groups with separate working and held-out keys')
-        phase = 'build'
-        result = build(corpus, providers, args.questions, args.seed)
-        phase = 'publication'
-        store = DirectoryStorage(args.storage_dir) if args.storage_dir else S3Storage(args.bucket, args.prefix, args.s3_endpoint)
-        manifest = publish(result, store, *recipients)
-        phase = 'report'
-        report = {**result.report, 'version': result.version, 'artifacts': manifest}
-        validate_report(report)
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        with args.report.open('x') as output:
-            json.dump(report, output, indent=2, sort_keys=True, allow_nan=False)
-            output.write('\n')
-        print('Encrypted dataset stored; aggregate quality report written. Human review is pending.')
-        return 0
-    except Exception as error:
-        # Provider/SDK exceptions can contain inputs, credentials and URLs.
-        details = failure_details(error)
-        details.setdefault('phase', phase)
-        print('News-set build failed; diagnostic: ' + json.dumps(details, sort_keys=True))
-        return 2
+        try:
+            for stopped_by in (signal.SIGINT, signal.SIGTERM):
+                previous_handlers[stopped_by] = signal.signal(stopped_by, stop)
+            if args.fake:
+                providers = fake_providers()
+                corpus = [Article(str(i), 'Une liaison ouvre au port',
+                                  f'Le ferry dessert une île et accueille {i + 10} voyageurs.',
+                                  f'2026-{1 + i % 2:02d}-02', 'maritime') for i in range(8)]
+            else:
+                providers = load_providers(args.providers)
+                phase = 'input'
+                corpus = read_articles(args.articles, providers.article_options)
+                if providers.synthetic:
+                    raise BuildError('live build cannot use synthetic providers')
+            phase = 'setup'
+            if args.concurrency is not None:
+                providers.concurrency = args.concurrency
+            if args.response_cache:
+                if not hasattr(providers, 'enable_cache'):
+                    raise BuildError('response cache requires the built-in live adapters')
+                providers.enable_cache(args.storage_dir / 'responses')
+            recipients = [os.environ.get(k, '').split() for k in
+                          ('QUIVR_NEWS_WORKING_RECIPIENTS', 'QUIVR_NEWS_HOLDOUT_RECIPIENTS', 'QUIVR_NEWS_REVIEW_RECIPIENTS')]
+            if not all(recipients) or set(recipients[0]) & set(recipients[1]):
+                raise BuildError('provide three recipient groups with separate working and held-out keys')
+            phase = 'build'
+            result = build(corpus, providers, args.questions, args.seed)
+            phase = 'publication'
+            store = DirectoryStorage(args.storage_dir) if args.storage_dir else S3Storage(args.bucket, args.prefix, args.s3_endpoint)
+            manifest = publish(result, store, *recipients)
+            phase = 'report'
+            report = {**result.report, 'version': result.version, 'artifacts': manifest}
+            validate_report(report)
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            with args.report.open('x') as output:
+                json.dump(report, output, indent=2, sort_keys=True, allow_nan=False)
+                output.write('\n')
+            print('Encrypted dataset stored; aggregate quality report written. Human review is pending.')
+            exit_code = 0
+        except Exception as error:
+            # Provider/SDK exceptions can contain inputs, credentials and URLs.
+            details = failure_details(error)
+            details.setdefault('phase', phase)
+            print('News-set build failed; diagnostic: ' + json.dumps(details, sort_keys=True))
+            exit_code = 2
+        # Set cleanup inside the protected block so a signal at the transition
+        # also reaches the handler below. Cleanup records signals without unwinding.
+        phase = 'cleanup'
+    except BuildInterrupted as error:
+        phase = 'cleanup'
+        print('News-set build stopped; signal: ' + str(error.signum), file=sys.stderr)
+        exit_code = 128 + error.signum
     finally:
-        if providers is not None and getattr(providers, 'response_cache', None):
-            providers.response_cache.close()
         if args.usage_report and providers is not None and hasattr(providers, 'usage'):
             try:
                 usage = providers.usage()
@@ -1173,6 +1245,14 @@ def main(argv=None):
                     output.write('\n')
             except Exception:
                 print('Aggregate usage ledger could not be written.', file=sys.stderr)
+        try:
+            if providers is not None and getattr(providers, 'response_cache', None):
+                providers.response_cache.close()
+        finally:
+            for stopped_by, handler in previous_handlers.items():
+                signal.signal(stopped_by, handler)
+
+    return 128 + stopped_signal if stopped_signal is not None else exit_code
 
 
 if __name__ == '__main__':

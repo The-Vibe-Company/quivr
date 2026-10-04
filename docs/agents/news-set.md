@@ -62,7 +62,7 @@ Generators receive sampled articles, or up to three related articles for multi-a
 Generate natural French newsroom searches, with no copied title or paraphrase content keywords.
 Use the six types `entity`, `event`, `recent`, `paraphrase`, `multi_article`, `no_answer`.
 Questions must cite evidence from their sample, with its latest date; no-answer questions cite no evidence.
-The builder deduplicates normalized text, filters copies and fills equal type quotas with bounded attempts.
+The builder deduplicates normalized text, filters copies and targets equal type quotas by default with bounded attempts.
 Malformed questions, evidence or dates are counted as `invalid_questions`, `invalid_evidence` or `invalid_date` and replaced.
 
 Live adapters provide retrievers named `bm25`, `e5_small`, `cohere_pro`, `hybrid`.
@@ -171,8 +171,20 @@ Remove `responses` to discard it and start with new IDs. Failed/unknown transpor
 Generator batches and judge calls share that bound. Seeded samples, nonces and result order are independent of concurrency.
 Concurrent reservations count toward hard caps before dispatch; keep enough headroom for all in-flight requests.
 
-The offline estimate shows bounded attempts, pool size and spend ceilings. Caps do not guarantee 1,500 accepted questions.
-The report includes aggregate provider usage; `--usage-report` also saves usage after a failed build.
+Top-level `question_targets` overrides type counts; omitted types keep their equal `--questions` share.
+Overrides do not redistribute the remaining targets; the total can differ from `--questions`.
+`attempt_budgets` overrides generation-batch limits per type (default `max(10, 5 * target)`).
+Every requested batch counts, including successful, rejected and cached batches.
+Both maps accept nonnegative integers; zero skips a type or its attempts. `min_questions` defaults to
+1000 for live builds, with a floor of 2 for nonempty 60/40 partitions. Targets must total at least the
+minimum; synthetic builds default to the requested count. For example, this partial configuration
+was checked offline at `--questions 1200` (1000 answerable targets); merge it into the full configuration:
+```json
+{"question_targets":{"no_answer":0},"attempt_budgets":{"entity":2,"no_answer":0},"min_questions":1000}
+```
+The estimate shows resolved settings, bounded attempts and spend ceilings; caps do not guarantee completion.
+`--usage-report` saves aggregate usage after failure or SIGINT/SIGTERM (exit 130/143). Queued work is
+canceled; bounded in-flight calls settle before writing the ledger and closing the private cache.
 Its `content_filter` block counts generation batches, judged query/candidate pairs (including dropped questions),
 filtered batches/candidates, their shares, dropped questions and the configured limit. A candidate filtered
 by multiple judges counts once per question. The legacy `content_filter` candidate/drop counts and `rejected.judge_content_filter` include both explicit filters
@@ -193,14 +205,21 @@ Age encryption protects content even if a storage policy is misconfigured.
 
 ## Check it worked
 
-Live builds require at least 1,500 questions and all four retrieval systems plus the Jev adapter.
+Live builds require their configured minimum and all four retrieval systems plus the Jev adapter.
 A judge map with missing entries or invalid grades drops the question; explicit `None` removes a candidate. Empty pools and pooled answerability conflicts also drop the question and trigger replacement.
 `question_quality` reports all assessed questions, dropped questions, reason counts and shares of assessed questions.
 Reasons are `answer_expected_none_found`, `no_answer_but_relevant_found`, `invalid_judge_grades`,
 `empty_candidate_pool` and `judge_content_filter` (the unavailable-candidate threshold).
 The same counts appear in `rejected`; conflicts below the threshold retain their answerability reason even with unavailable candidates.
 Jev malformed or oversized responses become unavailable votes; transport/deadline failures remain fatal.
-If a type cannot fill its quota within bounded attempts, the diagnostic names its accepted/target counts and rejection reasons.
+An exhausted type keeps its accepted questions; others continue. Report `question_targets` records
+`target`, `accepted`, `shortfall`, `attempts` and `attempt_budget` per type; `question_types` includes zeros.
+Below `min_questions`, the build fails (exit 2); its `min_questions_not_met` diagnostic includes
+per-type counts and rejection reasons. No quality report or dataset is published.
+With no answerable working queries, baseline metrics are null and scoring is skipped.
+The same configuration, articles, seed and response cache reproduce accepted questions without new paid
+calls for cached work. Completion settings preserve the corpus salt; keeping `--questions` and earlier
+type targets unchanged preserves their request sequence when finishing a stalled build.
 Configuration, authentication, spend/token caps, invalid retrieval ids, input/cache integrity and publication failures remain fatal.
 The majority grade wins; three-way disagreements use the median and are counted separately.
 The report includes three unweighted Cohen pair kappas and Fleiss' kappa; undefined values are null.

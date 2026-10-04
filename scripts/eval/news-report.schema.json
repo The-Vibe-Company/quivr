@@ -274,17 +274,26 @@
           "additionalProperties": false,
           "properties": {
             "ndcg@10": {
-              "type": "number",
+              "type": [
+                "number",
+                "null"
+              ],
               "minimum": 0,
               "maximum": 1.000000000001
             },
             "recall@10": {
-              "type": "number",
+              "type": [
+                "number",
+                "null"
+              ],
               "minimum": 0,
               "maximum": 1.000000000001
             },
             "mrr@10": {
-              "type": "number",
+              "type": [
+                "number",
+                "null"
+              ],
               "minimum": 0,
               "maximum": 1.000000000001
             }
@@ -607,6 +616,42 @@
         "reasons",
         "shares"
       ]
+    },
+    "min_questions": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "question_targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity",
+        "event",
+        "recent",
+        "paraphrase",
+        "multi_article",
+        "no_answer"
+      ],
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/question_target"
+        },
+        "event": {
+          "$ref": "#/$defs/question_target"
+        },
+        "recent": {
+          "$ref": "#/$defs/question_target"
+        },
+        "paraphrase": {
+          "$ref": "#/$defs/question_target"
+        },
+        "multi_article": {
+          "$ref": "#/$defs/question_target"
+        },
+        "no_answer": {
+          "$ref": "#/$defs/question_target"
+        }
+      }
     }
   },
   "required": [
@@ -882,6 +927,47 @@
         "stopped",
         "reason"
       ]
+    },
+    "question_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "accepted",
+        "shortfall",
+        "attempts",
+        "attempt_budget"
+      ],
+      "properties": {
+        "target": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "accepted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shortfall": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempt_budget": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
+  },
+  "dependentRequired": {
+    "question_targets": [
+      "min_questions"
+    ],
+    "min_questions": [
+      "question_targets"
+    ]
   }
 }

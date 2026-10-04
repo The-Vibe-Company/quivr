@@ -196,8 +196,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   front, daily/total caps, recoverable cleanup and daily summaries. Leads submit bounded
   proposals and exact usage receipts ([guide](docs/search-campaigns.md)).
   Configured campaigns confirm finalists on the full stack before opening settings PRs.
-- **Private news evaluation builder**: pluggable question generation, pooled judgments,
-  separate encrypted working/held-out sets and a human review sheet
+- **Private news evaluation builder**: pluggable generation with configurable targets
+  and attempt budgets, pooled judgments, encrypted working/held-out sets and human review
   ([contributor guide](docs/agents/news-set.md)); real provider runs are operator controlled.
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
