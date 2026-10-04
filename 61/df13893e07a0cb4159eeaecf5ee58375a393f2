@@ -1,0 +1,14 @@
+skills-lock.json
+  h_ecee222750141d 8,15,22,29,36,64,186,199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "61df13893e07a0cb4159eeaecf5ee58375a393f2",
+  "prompts": {},
+  "humans": {
+    "h_ecee222750141d": {
+      "author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
