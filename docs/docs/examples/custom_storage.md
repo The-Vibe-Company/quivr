@@ -1,3 +1,0 @@
-# Transparent Storage
-
-**todo**

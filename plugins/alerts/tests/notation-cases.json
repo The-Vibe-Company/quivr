@@ -1,0 +1,379 @@
+{
+ "valid": [
+  {
+   "query": "grève",
+   "match": {
+    "term": "grève"
+   }
+  },
+  {
+   "query": "\"Marine Le Pen\"",
+   "match": {
+    "term": "Marine Le Pen"
+   }
+  },
+  {
+   "query": "author:\"Jane Doe\"",
+   "match": {
+    "field": "author",
+    "equals": "Jane Doe"
+   }
+  },
+  {
+   "query": "category:sport",
+   "match": {
+    "field": "category",
+    "equals": "sport"
+   }
+  },
+  {
+   "query": "\"say \\\"cheese\\\"\"",
+   "match": {
+    "term": "say \"cheese\""
+   }
+  },
+  {
+   "query": "https://example.com/x",
+   "match": {
+    "term": "https://example.com/x"
+   }
+  },
+  {
+   "query": "\"re:Invent\"",
+   "match": {
+    "term": "re:Invent"
+   }
+  },
+  {
+   "query": "Marine Le Pen",
+   "match": {
+    "all": [
+     {
+      "term": "Marine"
+     },
+     {
+      "term": "Le"
+     },
+     {
+      "term": "Pen"
+     }
+    ]
+   }
+  },
+  {
+   "query": "a OR b AND c",
+   "match": {
+    "any": [
+     {
+      "term": "a"
+     },
+     {
+      "all": [
+       {
+        "term": "b"
+       },
+       {
+        "term": "c"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "query": "a AND b OR c",
+   "match": {
+    "any": [
+     {
+      "all": [
+       {
+        "term": "a"
+       },
+       {
+        "term": "b"
+       }
+      ]
+     },
+     {
+      "term": "c"
+     }
+    ]
+   }
+  },
+  {
+   "query": "NOT a OR b",
+   "match": {
+    "any": [
+     {
+      "not": {
+       "term": "a"
+      }
+     },
+     {
+      "term": "b"
+     }
+    ]
+   }
+  },
+  {
+   "query": "a NOT b",
+   "match": {
+    "all": [
+     {
+      "term": "a"
+     },
+     {
+      "not": {
+       "term": "b"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "query": "(a OR b) AND c",
+   "match": {
+    "all": [
+     {
+      "any": [
+       {
+        "term": "a"
+       },
+       {
+        "term": "b"
+       }
+      ]
+     },
+     {
+      "term": "c"
+     }
+    ]
+   }
+  },
+  {
+   "query": "NOT (a OR b)",
+   "match": {
+    "not": {
+     "any": [
+      {
+       "term": "a"
+      },
+      {
+       "term": "b"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "query": "a AND (b AND c)",
+   "match": {
+    "all": [
+     {
+      "term": "a"
+     },
+     {
+      "term": "b"
+     },
+     {
+      "term": "c"
+     }
+    ]
+   }
+  },
+  {
+   "query": "(a OR b) OR c",
+   "match": {
+    "any": [
+     {
+      "term": "a"
+     },
+     {
+      "term": "b"
+     },
+     {
+      "term": "c"
+     }
+    ]
+   }
+  },
+  {
+   "query": "rock and roll",
+   "match": {
+    "all": [
+     {
+      "term": "rock"
+     },
+     {
+      "term": "and"
+     },
+     {
+      "term": "roll"
+     }
+    ]
+   }
+  },
+  {
+   "query": "\"Airbus\" AND (grève OR strike) NOT sport",
+   "match": {
+    "all": [
+     {
+      "term": "Airbus"
+     },
+     {
+      "any": [
+       {
+        "term": "grève"
+       },
+       {
+        "term": "strike"
+       }
+      ]
+     },
+     {
+      "not": {
+       "term": "sport"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "query": "NOT (a OR (b AND NOT (c OR (d AND e))))",
+   "match": {
+    "not": {
+     "any": [
+      {
+       "term": "a"
+      },
+      {
+       "all": [
+        {
+         "term": "b"
+        },
+        {
+         "not": {
+          "any": [
+           {
+            "term": "c"
+           },
+           {
+            "all": [
+             {
+              "term": "d"
+             },
+             {
+              "term": "e"
+             }
+            ]
+           }
+          ]
+         }
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "query": "((((a))))",
+   "match": {
+    "term": "a"
+   }
+  },
+  {
+   "query": "  orage\tgrêle  ",
+   "match": {
+    "all": [
+     {
+      "term": "orage"
+     },
+     {
+      "term": "grêle"
+     }
+    ]
+   }
+  },
+  {
+   "query": "source:web-demo",
+   "match": {
+    "field": "source",
+    "equals": "web-demo"
+   }
+  },
+  {
+   "query": "connector_kind:rss OR orage",
+   "match": {
+    "any": [
+     {
+      "field": "connector_kind",
+      "equals": "rss"
+     },
+     {
+      "term": "orage"
+     }
+    ]
+   }
+  },
+  {
+   "query": "l'Airbus",
+   "match": {
+    "term": "l'Airbus"
+   }
+  },
+  {
+   "query": "Saint-Denis",
+   "match": {
+    "term": "Saint-Denis"
+   }
+  },
+  {
+   "query": "œuvre",
+   "match": {
+    "term": "œuvre"
+   }
+  },
+  {
+   "query": "a(b)c",
+   "match": {
+    "all": [
+     {
+      "term": "a"
+     },
+     {
+      "term": "b"
+     },
+     {
+      "term": "c"
+     }
+    ]
+   }
+  },
+  {
+   "query": "x:/path",
+   "match": {
+    "term": "x:/path"
+   }
+  }
+ ],
+ "invalid": [
+  "",
+  "   ",
+  "a AND",
+  "(a OR b",
+  "a OR b)",
+  "\"unterminated",
+  "-sport",
+  "!!!",
+  "author:",
+  "OR a",
+  "NOT NOT NOT NOT NOT NOT NOT a",
+  "()",
+  "a OR OR b",
+  "AND",
+  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"",
+  "((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((a))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))"
+ ]
+}

@@ -1,0 +1,21 @@
+{{/* Adapted from oapi-codegen v2.8.0; modifications and Apache-2.0 license: third_party/oapi-codegen/NOTICE.md. */}}// ServerInterfaceWrapper passes transport inputs without eagerly parsing them.
+// Services authorize before invoking the bounded contract validators.
+type ServerInterfaceWrapper struct {
+    Handler ServerInterface
+    HandlerMiddlewares []MiddlewareFunc
+    ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
+}
+type MiddlewareFunc func(http.Handler) http.Handler
+{{range .}}{{if not .IsAlias}}
+func (siw *ServerInterfaceWrapper) {{.OperationId}}(w http.ResponseWriter, r *http.Request) {
+    {{range .PathParams -}}
+        {{.GoVariableName}} := {{.TypeDef}}(r.PathValue("{{.SanitizedParamName}}"))
+    {{end -}}
+    {{if .RequiresParamObject}}var params {{.OperationId}}Params{{end}}
+    handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        siw.Handler.{{.OperationId}}(w, r{{range .PathParams}}, {{.GoVariableName}}{{end}}{{if .RequiresParamObject}}, params{{end}})
+    }))
+    for _, middleware := range siw.HandlerMiddlewares { handler = middleware(handler) }
+    handler.ServeHTTP(w,r)
+}
+{{end}}{{end}}

@@ -1,0 +1,228 @@
+---
+title: "Plugin types"
+description: "The five kinds of plugin Quivr calls: what each decides, when Quivr calls it, its smallest manifest, and the rules every plugin follows."
+keywords: ["normalizer", "connector", "ingestion", "retrieval", "subscription", "alert rule", "contribution"]
+---
+
+A plugin provides one or more Contributions, each of one of five types. Pick the type from the question you want to answer for Quivr.
+
+<CardGroup cols={2}>
+<Card title="Normalizer" icon="file-text" href="#normalizer">
+How do I read this kind of file?
+</Card>
+<Card title="Connector" icon="rss" href="#connector">
+What did this source publish since last time?
+</Card>
+<Card title="Ingestion" icon="scissors" href="#ingestion">
+How do I cut and embed this article?
+</Card>
+<Card title="Retrieval" icon="search" href="#retrieval">
+Which passages answer this search, in what order?
+</Card>
+<Card title="Alert rule" icon="bell" href="#alert-rule">
+Does this article match these alerts?
+</Card>
+</CardGroup>
+
+Every type is served over HTTP under `/v0/contributions/<type>`, and every manifest below passes `quivr plugin inspect`. The [plugin protocol reference](/reference/plugin-protocol) lists every request and response field.
+
+## Normalizer
+
+| | |
+| --- | --- |
+| What it does | Turns one file (a Blob) into the text Parts of a Record Version, with optional structured data. |
+| When Quivr calls it | In the worker, when a file of a media type routed to it is ingested, before the Version is published. |
+| Operation | `POST /v0/contributions/normalizer` |
+| SDK | Go or Python |
+| First-party | `pdf-text`: one Part per PDF page |
+
+```yaml quivr-plugin.yaml
+id: csv-rows
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/csv]
+run:
+  command: [python3, -m, csv_rows]
+```
+
+Quivr never sends the file inline: the request carries a short-lived signed URL, its size and its SHA-256. An answer Quivr rejects, or a `TerminalError`, quarantines the Version with a diagnostic; a plugin that is down only delays it. Walk through one in [Build your first plugin](/plugins/first-plugin).
+
+## Connector
+
+| | |
+| --- | --- |
+| What it does | Adds a kind of Connector Instance: fetches pages of new or changed items from a source after an opaque checkpoint. |
+| When Quivr calls it | In the worker, on each instance's schedule. A push kind is also called when the source sends a webhook. |
+| Operations | `fetch`, `check_credential`; `describe_attachment` and `upload_attachment` for attachments; `receive` for webhooks |
+| SDK | Go or Python |
+| First-party | `rss` (RSS, Atom, JSON Feed), `m365-mail` (Microsoft 365 mailboxes), `x-list` (X lists) |
+
+```yaml quivr-plugin.yaml
+id: acme.feeds
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.3.0 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      acme_feed:
+        config_schema: {type: object, required: [url], properties: {url: {type: string}}}
+        default_interval_seconds: 900
+run:
+  command: [go, run, .]
+```
+
+Quivr keeps the instances, schedules, checkpoints, encrypted credentials and health. The plugin is stateless: it gets its last checkpoint and the decrypted credential in each request, and returns items plus the next checkpoint. Quivr moves the checkpoint only after the items are stored. See [Write a connector](/plugins/write-a-connector) or [receive pushed records](/plugins/push-source).
+
+## Ingestion
+
+| | |
+| --- | --- |
+| What it does | Cuts a Version's text into passages (segments), embeds each one in the vector spaces the plugin owns, and encodes search queries into the same spaces. |
+| When Quivr calls it | In the worker for every new Version, and during rebuilds; in the API for every semantic or hybrid search (`embed_query`), and once per space when the API starts, so the first search does not wait for the plugin to load. |
+| Operations | `segment_and_embed`, `embed_query` |
+| SDK | Go or Python |
+| First-party | `core-ingest`: token windows embedded with `multilingual-e5-small` |
+
+```yaml quivr-plugin.yaml
+id: acme.embedder
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.8.0 <0.9.0"
+contributions:
+  ingestion:
+    spaces:
+      acme.embedder.base:
+        version: "1"
+        model: acme/text-embed-base
+        dimensions: 768
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+run:
+  command: [go, run, .]
+```
+
+A deployment can pin several ingestion plugins and [route source media types](/reference/configuration#ingestion-routing) to them; Quivr does not segment or embed anything itself. See [Write an ingestion plugin](/plugins/write-an-ingestion-plugin).
+
+## Retrieval
+
+| | |
+| --- | --- |
+| What it does | Decides how a search finds and ranks results: asks Quivr for keyword, vector or hybrid candidates, then ranks the ones Quivr served. |
+| When Quivr calls it | In the API, for every search, in up to three rounds. |
+| Operation | `search` |
+| SDK | Go or Python |
+| First-party | `core-retrieve`: keyword, vector or hybrid search, as the index ranks it |
+
+```yaml quivr-plugin.yaml
+id: acme.ranker
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.7.0 <0.8.0"
+contributions:
+  retrieval:
+    profiles:
+      default: {description: Keywords and vectors fused by rank., max_latency_ms: 500, max_cost_cents: 0}
+run:
+  command: [go, run, .]
+```
+
+The plugin never queries the index and never sees a candidate the caller may not read: Quivr applies access control and withdrawals before it serves candidates. See [Write a retrieval plugin](/plugins/write-a-retrieval-plugin).
+
+## Alert rule
+
+| | |
+| --- | --- |
+| What it does | Decides, for one Record Version, whether each alert of a batch is a match, no match, or not ready yet, with evidence for a match. It is the `subscription` Contribution. |
+| When Quivr calls it | In the worker, when a Version becomes searchable and again once it is enriched; in the API, to preview an alert. |
+| Operation | `POST /v0/contributions/subscription` |
+| SDK | Go or Python |
+| First-party | `alerts`: keyword queries and plain-language descriptions |
+
+```yaml quivr-plugin.yaml
+id: acme.phrases
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema:
+      type: object
+      required: [kind, text]
+      properties:
+        kind: {const: phrase}
+        text: {type: string, minLength: 1}
+run:
+  command: [python3, -m, acme_phrases]
+```
+
+`expression_schema` is the shape of the queries your rule understands; Quivr refuses a Saved Query that does not fit it when the alert is created. See [Write an alert rule](/plugins/write-an-alert-rule).
+
+## What every plugin does
+
+Whatever its type, a plugin follows the same few rules. The [plugin protocol reference](/reference/plugin-protocol) states them field by field.
+
+### Ship a manifest
+
+Every plugin ships a `quivr-plugin.yaml` that declares its identity, version, compatibility ranges, Contributions and limits:
+
+```yaml quivr-plugin.yaml
+id: acme.markdown
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown]
+    timeout_ms: 10000
+run:
+  command: [python3, -m, acme_markdown]
+```
+
+The operator gives Quivr the same file when they [pin](/run-quivr/pin) or [register](/run-quivr/upgrade-a-plugin) the plugin. Before each call, Quivr checks that the plugin reports, on `GET /v0/discovery`, the expected identity, version and `manifest_digest`: the SHA-256 of that file. This catches a plugin started with a different manifest; the digest is reported by the plugin, so it does not verify the plugin's code. The [plugin manifest reference](/reference/plugin-manifest) lists every field.
+
+### Version the plugin and the protocol
+
+Two version numbers matter. The plugin's own `version` is SemVer; bump it when its output changes, because documents record which version produced them. The Plugin API version is the version of the protocol itself. A plugin declares the range it supports in `compatibility.plugin_api` and reports the version it implements on `GET /v0/discovery`. Quivr uses that version, provided Quivr supports it and it falls inside the declared range. A minor Plugin API version only adds to the previous one, so a plugin built for an earlier minor keeps working.
+
+### Give the same answer to the same request
+
+Quivr retries calls and replays them during rebuilds, so a plugin must answer the same thing to the same request. Normalizer, `segment_and_embed` and alert rule requests carry an `idempotency_key` that stays the same across retries of the same logical call, so a plugin can recognise a retry. For normalizer and ingestion answers, Quivr keeps the first answer it recorded and flags a different one as a conflict. For alerts, it keeps the first match it recorded for a document version and ignores later decisions about it.
+
+A plugin must not rely on local state to remember Quivr's progress: a connector gets its last checkpoint back in each request, and a normalizer gets a signed link to the file it reads. It may still cache models or results, as `core-ingest` caches the vectors it computed.
+
+### Pass the Contract Runner
+
+`quivr plugin test` is the Contract Runner. It starts your plugin, calls every route over HTTP with the protocol's test cases and your own, and judges each answer with the engine's own validation code. It also replays calls to check determinism, sends invalid requests and enforces the declared deadlines. It looks for fixture credentials and configured secret values in the answers it sees and, when it started the plugin, in the plugin's output. `CERTIFIED` means your plugin speaks the protocol correctly; it does not check that its answers are good for your content. It needs no running Quivr deployment, so it runs in any language's CI, though your plugin may still need its own external services.
+
+### Use an SDK
+
+Any language that serves HTTP can implement the protocol. Two SDKs handle routing, validation, errors and the digest for you:
+
+| SDK | Contributions |
+| --- | --- |
+| Python (`sdks/python`) | All five, including push routes and attachments |
+| Go (`sdks/go`) | All five |
+
+`quivr plugin init` supplies Python normalizer, subscription and pull or push connector starters. There are no Go starters, and no Python ingestion or retrieval starters, because those need a language module setup or a chosen vector model or search strategy; use the SDKs directly.
+
+## Next
+
+<CardGroup cols={2}>
+<Card title="Build your first plugin" icon="hammer" href="/plugins/first-plugin">
+A normalizer from an empty folder to a local Quivr.
+</Card>
+<Card title="Pin a plugin" icon="pin" href="/run-quivr/pin">
+The configuration that makes Quivr call each type.
+</Card>
+</CardGroup>

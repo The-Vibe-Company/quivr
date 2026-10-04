@@ -1,0 +1,854 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Quivr plugin manifest (quivr-plugin.yaml), Plugin API 0.7",
+  "description": "Declares one plugin: identity, compatibility ranges, Contributions, configuration schema, required secrets, owned extension namespaces and a local run command. Written as YAML; validated as the equivalent JSON value. Semantic rules this schema cannot express (satisfiable ranges, compatibility, namespace prefix, schemas that compile) are listed in README.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "compatibility",
+    "contributions"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/PluginId"
+    },
+    "version": {
+      "$ref": "#/$defs/Version"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engine",
+        "plugin_api"
+      ],
+      "properties": {
+        "engine": {
+          "$ref": "#/$defs/Range"
+        },
+        "plugin_api": {
+          "$ref": "#/$defs/Range"
+        }
+      }
+    },
+    "contributions": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Keyed by Contribution name. A manifest declares at least one of normalizer (since Plugin API 0.1), subscription (since 0.2), connector (since 0.3), ingestion (since 0.6) and retrieval (since 0.7). The other names are reserved and rejected.",
+      "properties": {
+        "normalizer": {
+          "$ref": "#/$defs/Normalizer"
+        },
+        "subscription": {
+          "$ref": "#/$defs/Subscription"
+        },
+        "connector": {
+          "$ref": "#/$defs/Connector"
+        },
+        "ingestion": {
+          "$ref": "#/$defs/Ingestion"
+        },
+        "retrieval": {
+          "$ref": "#/$defs/Retrieval"
+        },
+        "enricher": false,
+        "validator": false,
+        "projector": false,
+        "retriever": false
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 for the plugin configuration the installer supplies."
+        }
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "required": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "maxProperties": 32,
+      "description": "Extension namespaces the plugin owns, each mapping schema versions to JSON Schema 2020-12. Every namespace must equal the plugin id or start with the plugin id followed by a dot.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)*$",
+        "maxLength": 128
+      },
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$"
+        },
+        "additionalProperties": {
+          "type": [
+            "object",
+            "boolean"
+          ]
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ],
+      "description": "Language-neutral local development command (argv, no shell).",
+      "properties": {
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "requires": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "description": "Required retrieval plugins and their local profiles. Checked against the complete installation at pin time and activation; cycles and chains deeper than two profile levels are refused.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plugin",
+          "version",
+          "profiles"
+        ],
+        "properties": {
+          "plugin": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/Range"
+          },
+          "profiles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "PluginId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)*$",
+      "maxLength": 64
+    },
+    "Version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+      "maxLength": 128,
+      "description": "SemVer 2.0.0"
+    },
+    "Range": {
+      "type": "string",
+      "pattern": "^\\s*(?:>=|<=|>|<|=)?(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:\\s+(?:>=|<=|>|<|=)?(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*))*\\s*$",
+      "maxLength": 128,
+      "description": "Whitespace-separated comparators that must all hold; operators >=, >, <=, <, = (none means =); versions are MAJOR.MINOR.PATCH."
+    },
+    "Normalizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "media_types"
+      ],
+      "properties": {
+        "media_types": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+            "maxLength": 255
+          },
+          "description": "Exact Blob media types (no wildcards or parameters) this normalizer accepts; startup configuration routes them."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000
+        },
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_attempts"
+          ],
+          "properties": {
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 3
+            }
+          },
+          "description": "Retry intent for plugin-declared retryable errors; the engine may cap it."
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_response_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216,
+              "default": 4194304
+            },
+            "max_parts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256,
+              "default": 256
+            }
+          }
+        }
+      }
+    },
+    "Subscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expression_schema"
+      ],
+      "description": "An alert rule, since Plugin API 0.2: decides whether one Record Version matches each Saved Query expression of a batch.",
+      "properties": {
+        "expression_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 of the Saved Query expression (a JSON object) this rule interprets. The core validates Saved Query Versions against it. Discriminate several alert kinds with a oneOf over a kind property."
+        },
+        "configuration_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 of the per-Subscription evaluator configuration (a JSON object). Absent: any object. Distinct from the installer configuration under configuration.schema."
+        },
+        "max_batch_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "default": 32,
+          "description": "Most evaluations one request carries; the core splits a larger batch into several requests."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000
+        },
+        "retry": {
+          "$ref": "#/$defs/Normalizer/properties/retry"
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_response_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216,
+              "default": 4194304
+            }
+          }
+        },
+        "vectors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "parts": {
+              "type": "boolean"
+            },
+            "query": {
+              "type": "boolean"
+            },
+            "query_text_pointer": {
+              "type": "string",
+              "pattern": "^/",
+              "maxLength": 256
+            },
+            "query_expression_schema": {
+              "type": [
+                "object",
+                "boolean"
+              ],
+              "description": "Optional JSON Schema 2020-12 selecting expressions that need query vectors. Nonmatching expressions do not invoke the query encoder; absent means every valid expression."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "query": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              },
+              "then": {
+                "required": [
+                  "query_text_pointer"
+                ]
+              }
+            }
+          ],
+          "description": "Since Plugin API 0.10. Opt in to canonical Part vectors and saved query vectors. query_text_pointer selects a string in the expression by RFC 6901 JSON Pointer; the core embeds it when the Saved Query Version is created."
+        }
+      }
+    },
+    "Connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kinds"
+      ],
+      "description": "Source collectors, since Plugin API 0.3: fetch pages of new or changed items from a source after an opaque checkpoint. The core keeps Connector Instances, schedules, checkpoints, credentials and health.",
+      "properties": {
+        "kinds": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,31}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/ConnectorKind"
+          },
+          "description": "Connector kinds this plugin provides, by kind name."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000,
+          "default": 30000
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_response_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216,
+              "default": 4194304
+            },
+            "max_items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            },
+            "max_checkpoint_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 1048576,
+              "default": 65536,
+              "description": "Largest checkpoint, serialized as compact JSON, the core accepts from this plugin (since Plugin API 0.3.1)."
+            }
+          }
+        },
+        "attachments": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Since Plugin API 0.4: items may carry attachments. The core asks for each attachment's size and SHA-256 (describe_attachment), issues an upload grant and has the plugin upload the bytes against it (upload_attachment). Without this block a page with attachments is refused.",
+          "properties": {
+            "max_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 26214400,
+              "default": 26214400,
+              "description": "Largest attachment the plugin uploads; it can only lower the engine's 25 MiB cap."
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 120000,
+              "default": 120000,
+              "description": "Deadline of one describe_attachment or upload_attachment invocation."
+            }
+          }
+        }
+      }
+    },
+    "ConnectorKind": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "config_schema",
+        "default_interval_seconds"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "config_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 of the Connector Instance configuration (a JSON object)."
+        },
+        "credential_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "JSON Schema 2020-12 of the Deposited Credential (a JSON object). Absent: the kind takes no credential."
+        },
+        "credential_required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Since Plugin API 0.3.1. Whether an instance needs a Deposited Credential before it runs. false: the credential is optional, and an instance without one is invoked with a null credential. Only meaningful with credential_schema."
+        },
+        "default_interval_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "description": "Polling interval of a new Connector Instance when it does not set one."
+        },
+        "modes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "pull",
+              "push"
+            ]
+          },
+          "default": [
+            "pull"
+          ],
+          "description": "pull: the core schedules fetch. push, since Plugin API 0.5: the core relays the deliveries a source sends to the instance's public webhook route to receive, and returns the plugin's answer to the source. A push kind also declares pull: polling stays the fallback."
+        },
+        "api": {
+          "$ref": "#/$defs/ConnectorAPI"
+        }
+      }
+    },
+    "SpaceId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)*$",
+      "maxLength": 64,
+      "description": "A vector space id: the plugin id, or the plugin id followed by a dot and more segments (foreign_space otherwise)."
+    },
+    "VectorSpace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "model",
+        "dimensions",
+        "metric",
+        "indexes",
+        "query_modalities"
+      ],
+      "description": "One vector space the plugin owns. Its identity is the id and the version together: vectors of another version belong to another space.",
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]{0,31}$",
+          "description": "Bumped whenever the vectors change: a new model, new weights, a new input template."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "The model that produces the vectors, for people and reports."
+        },
+        "dimensions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "metric": {
+          "enum": [
+            "cosine",
+            "dot",
+            "l2"
+          ],
+          "description": "The distance the index uses for this space."
+        },
+        "indexes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "text"
+            ]
+          },
+          "description": "Modalities of the content this space embeds. Plugin API 0.6 knows only text."
+        },
+        "query_modalities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "text"
+            ]
+          },
+          "description": "Modalities of the queries embed_query encodes into this space. Plugin API 0.6 knows only text."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "input_price": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "usd_per_million_tokens"
+          ],
+          "description": "Since Plugin API 0.9: what embedding text in this space costs, for the estimate a backfill shows before it starts. Absent, the cost of a backfill is unknown.",
+          "properties": {
+            "usd_per_million_tokens": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000,
+              "description": "US dollars per million input tokens."
+            }
+          }
+        }
+      }
+    },
+    "Ingestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spaces"
+      ],
+      "description": "Segmentation and embedding, since Plugin API 0.6: cut one Record Version's text Parts into segments and embed each segment in the vector spaces the plugin owns (segment_and_embed), and encode a query into one of those spaces (embed_query). The core keeps the index, the registry of spaces, authorization, withdrawal and projection generations.",
+      "properties": {
+        "spaces": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 8,
+          "propertyNames": {
+            "$ref": "#/$defs/SpaceId"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/VectorSpace"
+          },
+          "description": "The vector spaces this plugin owns, by space id. A deployment enables some of them: one served, the others for evaluation."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000,
+          "description": "Deadline of one segment_and_embed invocation."
+        },
+        "query_timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 10000,
+          "default": 2000,
+          "description": "Deadline of one embed_query invocation; a search waits for it."
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_segments": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024,
+              "default": 256,
+              "description": "Most segments one Record Version yields."
+            },
+            "max_response_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216,
+              "default": 16777216
+            }
+          }
+        }
+      }
+    },
+    "ProfileName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "description": "A search profile name, as clients pass it in POST /v0/search."
+    },
+    "Retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profiles"
+      ],
+      "description": "Search, since Plugin API 0.7: answer one search in rounds. Each round the plugin either asks the core for candidates (keyword, vector on a named space, hybrid) or returns the final ranking, chosen only among candidates the core served in this search. The core keeps the index, encodes queries with each space's owner, and applies authorization, withdrawal and generation routing before serving any candidate.",
+      "properties": {
+        "profiles": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 8,
+          "propertyNames": {
+            "$ref": "#/$defs/ProfileName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/RetrievalProfile"
+          },
+          "description": "The local search profiles this plugin answers. The deployment maps its default alias to one installed plugin/profile."
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_rounds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3,
+              "default": 3,
+              "description": "Most rounds of one search; the last round must return a ranking."
+            },
+            "max_requests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8,
+              "default": 4,
+              "description": "Most candidate requests of one round."
+            },
+            "max_candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50,
+              "description": "Largest k of one candidate request."
+            },
+            "max_response_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 4194304,
+              "default": 1048576
+            }
+          }
+        }
+      }
+    },
+    "RetrievalProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_latency_ms",
+        "max_cost_cents"
+      ],
+      "description": "One search profile and its budgets.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "max_latency_ms": {
+          "type": "integer",
+          "minimum": 50,
+          "maximum": 10000,
+          "description": "Latency objective (p95 target) of one whole search under this profile, every round and every candidate request included. A search that takes longer still answers; the core stops one only at the hard bound, four times this value, at least 2 s and at most 9 s, and answers search_deadline_exceeded."
+        },
+        "max_cost_cents": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Most paid spend one search may report in usage.cost_cents (for example a re-ranking or rewriting API); 0 for a profile without paid calls."
+        }
+      }
+    },
+    "ConnectorAPI": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routes"
+      ],
+      "description": "Since Plugin API 0.11: named ingress routes on push kinds. quivr_key requires connector:push on the instance Corpus; instance_token (since 0.12) accepts only an instance-scoped bearer token; signature (since 0.12) uses provider verification plus engine freshness and replay protection.",
+      "properties": {
+        "routes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/ConnectorAPIRoute"
+          }
+        }
+      }
+    },
+    "ConnectorAPIRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "method",
+        "path",
+        "auth"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^(?:[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*|\\{[a-z][a-z0-9_]*\\})(?:/(?:[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*|\\{[a-z][a-z0-9_]*\\}))*$",
+          "description": "Relative path, without leading or trailing slash. A {name} template matches one nonempty segment. Literal routes take precedence; ambiguous templates are invalid."
+        },
+        "auth": {
+          "default": "quivr_key",
+          "enum": [
+            "quivr_key",
+            "instance_token",
+            "signature"
+          ]
+        },
+        "request_schema": {
+          "type": [
+            "object",
+            "boolean"
+          ],
+          "description": "Optional JSON Schema 2020-12 for the parsed JSON body; external references are forbidden."
+        },
+        "signature": {
+          "$ref": "#/$defs/ConnectorSignature"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "auth": {
+                "const": "signature"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "signature"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "signature"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ConnectorSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "header",
+        "window_seconds"
+      ],
+      "properties": {
+        "header": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$"
+        },
+        "timestamp_header": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$"
+        },
+        "window_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      },
+      "description": "Since Plugin API 0.12: provider signature header, optional signed Unix-seconds timestamp header, and replay window. The plugin verifies the cryptographic signature. GET challenges bypass POST freshness/replay checks."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "requires"
+        ]
+      },
+      "then": {
+        "properties": {
+          "contributions": {
+            "required": [
+              "retrieval"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

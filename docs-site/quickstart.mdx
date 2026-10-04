@@ -1,0 +1,270 @@
+---
+title: "Quickstart"
+description: "Run Quivr on your machine, add an article, search it, and get alerted when a new article matches a topic."
+keywords: ["install", "make dev", "first search", "local stack"]
+---
+
+In about fifteen minutes you run Quivr locally, add a short news article, find it by keyword and by meaning, then save an alert and watch it catch the next matching article. You talk to Quivr's HTTP API with `curl`.
+
+## Before you start
+
+You need Linux on x86_64, or macOS on Apple Silicon (M1 or later). Check each tool:
+
+| Tool | Check | Version |
+| --- | --- | --- |
+| Docker with Compose v2 | `docker compose version` | Compose 2 or later; on a Mac, Docker Desktop |
+| Go | `go version` | the one in `go.mod`, 1.27.1 |
+| Python with `venv` | `python3 -m venv --help` | 3.12 or later |
+| `jq`, `curl`, `git` | `jq --version` | any recent version |
+
+The first start downloads the pinned container images and the embedding model, about 1 GB. On a Mac, Docker Desktop runs the embedding server under its x86_64 emulation, because that image is published for x86_64 only.
+
+## Run Quivr and try it
+
+<Steps>
+<Step title="Start Quivr">
+
+Clone the repository and start the local stack:
+
+```bash
+git clone https://github.com/The-Vibe-Company/quivr-v2.git
+cd quivr-v2
+make dev
+```
+
+`make dev` starts PostgreSQL, Temporal, S3-compatible storage, Weaviate and an embedding server in Docker, builds the `quivr` binary, and runs its API and worker. When it is ready it prints the API address:
+
+```text
+API http://127.0.0.1:41863 — credentials in /home/you/quivr-v2/.scratch/quivr-dev-3f2a9c1b7d/config.json
+Use it from this shell: eval "$(make -s env)"
+```
+
+Point your shell at it. This sets the API address, a local API key and the webhook destination the last step uses:
+
+```bash
+eval "$(make -s env)"
+```
+
+</Step>
+<Step title="Create a Corpus">
+
+A Corpus is a collection of articles you search together. Create one:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/corpora" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "News", "idempotency_key": "quickstart-news"}' | jq '{corpus_id, name}'
+```
+
+{/* output */}
+```json
+{"corpus_id": "{{CORPUS_ID}}", "name": "News"}
+```
+
+Keep its identifier for the next steps:
+
+```bash
+export CORPUS_ID=<the corpus_id above>
+```
+
+Every request that creates something carries an `idempotency_key`. Send the same request again and you get the same Corpus back, never a second one.
+
+</Step>
+<Step title="Add an article">
+
+Each article is a Record. `namespace` says where it comes from and `record_key` is its identity there:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/records" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '{receipt_id}'
+{
+  "idempotency_key": "quickstart-eclipse",
+  "source": {"corpus_id": "$CORPUS_ID", "namespace": "news", "record_key": "eclipse"},
+  "content": {"kind": "text", "text": "A total solar eclipse crossed the Pacific on Tuesday, turning day into night for four minutes."}
+}
+EOF
+```
+
+{/* output */}
+```json
+{"receipt_id": "{{RECEIPT_ID}}"}
+```
+
+```bash
+export RECEIPT_ID=<the receipt_id above>
+```
+
+Quivr answers as soon as the article is stored safely, with an Ingestion Receipt. Processing happens in the background. Read the Receipt until its `state` is `resolved`, usually within a second:
+
+{/* runnable retry */}
+```bash
+curl -s "$QUIVR_API_URL/v0/ingestion-receipts/$RECEIPT_ID" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{state, outcome, record_id}'
+```
+
+{/* output */}
+```json
+{"state": "resolved", "outcome": "created", "record_id": "{{RECORD_ID}}"}
+```
+
+</Step>
+<Step title="Search by keyword">
+
+{/* runnable retry */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/search" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '{items: [.items[] | {record_id, part_key, excerpt: .excerpt.text}]}'
+{"query": "eclipse", "corpus_ids": ["$CORPUS_ID"], "mode": "lexical"}
+EOF
+```
+
+{/* output */}
+```json
+{"items": [{"record_id": "{{RECORD_ID}}", "part_key": "body",
+  "excerpt": "A total solar eclipse crossed the Pacific on Tuesday, turning day into night for four minutes."}]}
+```
+
+Each hit names the Record and the Part it comes from, and its excerpt is an exact slice of the stored text, so you can always cite where a result comes from.
+
+</Step>
+<Step title="Search by meaning">
+
+The worker also turns each article into vectors, a few seconds after it arrives. Search with words the article does not contain:
+
+{/* runnable retry */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/search" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '{items: [.items[] | {record_id}]}'
+{"query": "the moon blocked the sun", "corpus_ids": ["$CORPUS_ID"], "mode": "semantic"}
+EOF
+```
+
+{/* output */}
+```json
+{"items": [{"record_id": "{{RECORD_ID}}"}]}
+```
+
+Without `mode`, a search is `hybrid`: it combines keywords and meaning.
+
+</Step>
+<Step title="Get alerted on a topic">
+
+An alert has two parts. A Saved Query holds what to look for, here any article that mentions a library or a museum:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/saved-queries" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '{saved_query_id, version_id: .current_version.version_id}'
+{
+  "idempotency_key": "quickstart-culture", "name": "Libraries and museums",
+  "definition": {
+    "corpus_ids": ["$CORPUS_ID"], "retrieval_profile": "default", "temporal_policy": "from_activation",
+    "expression": {"kind": "keywords", "match": {"any": [{"term": "library"}, {"term": "museum"}]}}
+  }
+}
+EOF
+```
+
+{/* output */}
+```json
+{"saved_query_id": "{{SAVED_QUERY_ID}}", "version_id": "{{SAVED_QUERY_VERSION_ID}}"}
+```
+
+```bash
+export SAVED_QUERY_ID=<the saved_query_id above> SAVED_QUERY_VERSION_ID=<the version_id above>
+```
+
+A Subscription turns it on. It names the plugin that decides each match, here the keyword rules of the first-party `alerts` plugin, and where to send notifications:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/subscriptions" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '{subscription_id, enabled}'
+{
+  "idempotency_key": "quickstart-culture-alert", "name": "Libraries and museums",
+  "saved_query_id": "$SAVED_QUERY_ID", "saved_query_version_id": "$SAVED_QUERY_VERSION_ID",
+  "evaluator": {"plugin_id": "alerts", "version": "0.3.0", "configuration": {}},
+  "destination_id": "$QUIVR_DESTINATION"
+}
+EOF
+```
+
+{/* output */}
+```json
+{"subscription_id": "{{SUBSCRIPTION_ID}}", "enabled": true}
+```
+
+```bash
+export SUBSCRIPTION_ID=<the subscription_id above>
+```
+
+The alert watches articles that arrive from now on. Add one that matches:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/records" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '{receipt_id}'
+{
+  "idempotency_key": "quickstart-library",
+  "source": {"corpus_id": "$CORPUS_ID", "namespace": "news", "record_key": "library"},
+  "content": {"kind": "text", "text": "A new public library opens downtown next week, with a reading room for children."}
+}
+EOF
+```
+
+{/* output */}
+```json
+{"receipt_id": "..."}
+```
+
+Within seconds the alert catches it. Each catch is a Match, with evidence that says why:
+
+{/* runnable retry */}
+```bash
+curl -s "$QUIVR_API_URL/v0/matches?subscription_id=$SUBSCRIPTION_ID" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{items: [.items[] | {record_id, explanation: .evidence.explanation}]}'
+```
+
+{/* output */}
+```json
+{"items": [{"record_id": "...", "explanation": "Matched \"library\" in body."}]}
+```
+
+Quivr also sends each Match as a signed webhook to the destination. The local stack's destination delivers nowhere, so here you read Matches through the API.
+
+</Step>
+</Steps>
+
+## What you built
+
+You ran the whole engine on your machine: durable ingestion, keyword and semantic search with exact excerpts, and an alert decided by a plugin. `make down` stops the stack and keeps its data; `make reset` deletes it. The requests above use fixed idempotency keys, so to run them again from scratch, `make reset` first.
+
+<CardGroup cols={2}>
+<Card title="Core concepts" icon="book-open" href="/concepts">
+The few ideas behind what you just did: Corpus, Record, Version, search and alerts.
+</Card>
+<Card title="Build your first plugin" icon="puzzle" href="/plugins/first-plugin">
+Teach Quivr to read a new file format, and search it.
+</Card>
+<Card title="Add content" icon="file-plus" href="/guides/add-content">
+Send batches and files, correct and withdraw articles.
+</Card>
+<Card title="Keyword alerts" icon="bell" href="/guides/keyword-alerts">
+Write alert queries and read what matched.
+</Card>
+</CardGroup>

@@ -1,0 +1,14 @@
+{
+  "format": "openai",
+  "base_url": "http://127.0.0.1:8080/v1",
+  "auth": "none",
+  "model": "Snowflake/snowflake-arctic-embed-l-v2.0",
+  "dimensions": 1024,
+  "send_dimensions": false,
+  "model_revision": "ac6544c8a46e00af",
+  "query_prefix": "query: ",
+  "document_prefix": "",
+  "max_tokens_per_segment": 8192,
+  "overlap": 200,
+  "batch_size": 16
+}

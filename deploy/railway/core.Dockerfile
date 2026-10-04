@@ -1,0 +1,62 @@
+FROM golang:1.27.1-bookworm AS build
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+COPY client ./client
+COPY migrations ./migrations
+COPY contracts ./contracts
+RUN CGO_ENABLED=0 go build -trimpath -o /quivr ./cmd/quivr
+
+# First-party Go plugins, always pinned and run beside the worker (and the API
+# for the ones it calls) (core-entrypoint.py CONNECTORS): the connectors and
+# the core.ingest ingestion plugin. Every plugins/<id> with a go.mod is built to
+# /out/bin/quivr-<id>, and its manifest is kept at /out/plugins/<id>. A plugin
+# module builds only on the Go SDK (make plugin-boundary), which it replaces
+# with ../../sdks/go; make image-context builds them from exactly these COPY sources.
+FROM golang:1.27.1-bookworm AS connectors
+WORKDIR /src
+COPY sdks/go ./sdks/go
+COPY plugins ./plugins
+RUN mkdir -p /out/bin /out/plugins \
+ && for mod in plugins/*/go.mod; do \
+      [ -e "$mod" ] || continue; \
+      dir=$(dirname "$mod"); id=$(basename "$dir"); \
+      (cd "$dir" && CGO_ENABLED=0 go build -trimpath -o "/out/bin/quivr-$id" .) || exit 1; \
+      mkdir -p "/out/plugins/$id" && cp "$dir/quivr-plugin.yaml" "/out/plugins/$id/"; \
+    done
+
+# The pinned tokenizer the core.ingest plugin runs (core-entrypoint.py CONNECTORS).
+FROM python:3.12-slim-bookworm AS tokenizer
+WORKDIR /app
+COPY scripts/prepare_tokenizer.py ./scripts/
+COPY third_party/tokenizer ./third_party/tokenizer
+COPY plugins/core-ingest/profile.json ./plugins/core-ingest/profile.json
+RUN python scripts/prepare_tokenizer.py
+
+# First-party Python sidecars: alerts/pdf-text use QUIVR_DEMO_PLUGINS=1;
+# API retrieval uses QUIVR_DEMO_JEV_RERANK=1 and TYPESAFE_API_KEY
+# (core-entrypoint.py). Each plugin reads the manifest next to its package, so
+# they are installed in editable mode at the path the final image keeps.
+FROM python:3.12-slim-bookworm AS plugins
+COPY contracts/http/v0/checks/requirements.txt /tmp/constraints.txt
+COPY sdks/python /tmp/sdk
+COPY plugins/alerts /app/plugins/alerts
+COPY plugins/pdf-text /app/plugins/pdf-text
+COPY plugins/jev-rerank /app/plugins/jev-rerank
+RUN python -m venv /opt/quivr-plugins \
+ && /opt/quivr-plugins/bin/pip install --no-cache-dir --disable-pip-version-check -c /tmp/constraints.txt \
+    /tmp/sdk -e /app/plugins/alerts -e /app/plugins/pdf-text -e /app/plugins/jev-rerank
+
+FROM python:3.12-slim-bookworm
+WORKDIR /app
+COPY --from=build /quivr /usr/local/bin/quivr
+COPY --from=tokenizer /app /app
+COPY --from=plugins /opt/quivr-plugins /opt/quivr-plugins
+COPY --from=plugins /app/plugins /app/plugins
+COPY --from=connectors /out/bin/ /usr/local/bin/
+COPY --from=connectors /out/plugins/ /app/plugins/
+COPY deploy/railway/core-entrypoint.py /app/core-entrypoint.py
+USER 10001:10001
+ENTRYPOINT ["python", "/app/core-entrypoint.py"]

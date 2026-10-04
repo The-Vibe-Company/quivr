@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "record_key": "article-102",
+      "revision": "etag-2",
+      "content": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "body",
+            "role": "body",
+            "content": {
+              "kind": "text",
+              "text": "See the attached report."
+            }
+          }
+        ]
+      },
+      "attachments": [
+        {
+          "key": "photo",
+          "parent_key": "body",
+          "role": "attachment",
+          "media_type": "image/jpeg",
+          "size_bytes": 48213,
+          "ref": "media/9f2c"
+        }
+      ]
+    }
+  ],
+  "checkpoint": {
+    "cursor": "2026-09-29T08:30:00Z"
+  },
+  "more": false
+}

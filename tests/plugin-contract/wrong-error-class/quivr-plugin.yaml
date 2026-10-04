@@ -1,0 +1,12 @@
+# Deliberately broken test plugin for the Contract Runner (tests/plugin-contract).
+# Invalid requests answered 503 with retryable true instead of a terminal error.
+id: broken.wrong-error-class
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown]
+run:
+  command: [quivr-fake-plugin, wrong-error-class]

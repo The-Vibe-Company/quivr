@@ -1,0 +1,82 @@
+{{/* Adapted from oapi-codegen v2.8.0; modifications and Apache-2.0 license: third_party/oapi-codegen/NOTICE.md. */}}type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
+type StrictMiddlewareFunc func(f StrictHandlerFunc, operationID string) StrictHandlerFunc
+
+type StrictHTTPServerOptions struct {
+    RequestErrorHandlerFunc  func(w http.ResponseWriter, r *http.Request, err error)
+    ResponseErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
+}
+
+func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc) ServerInterface {
+    return &strictHandler{ssi: ssi, middlewares: middlewares, options: StrictHTTPServerOptions {
+        RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+            http.Error(w, err.Error(), http.StatusBadRequest)
+        },
+        ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+        },
+    }}
+}
+
+func NewStrictHandlerWithOptions(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc, options StrictHTTPServerOptions) ServerInterface {
+    if options.RequestErrorHandlerFunc == nil {
+        options.RequestErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) {
+            http.Error(w, err.Error(), http.StatusBadRequest)
+        }
+    }
+    if options.ResponseErrorHandlerFunc == nil {
+        options.ResponseErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+        }
+    }
+    return &strictHandler{ssi: ssi, middlewares: middlewares, options: options}
+}
+
+type strictHandler struct {
+    ssi StrictServerInterface
+    middlewares []StrictMiddlewareFunc
+    options StrictHTTPServerOptions
+}
+
+{{range .}}
+    {{$opid := .OperationId}}
+    {{if not .IsAlias}}
+    // {{$opid}} operation middleware
+    func (sh *strictHandler) {{.OperationId}}(w http.ResponseWriter, r *http.Request{{genParamArgs .PathParams}}{{if .RequiresParamObject}}, params {{.OperationId}}Params{{end}}) {
+        var request {{$opid | ucFirst}}RequestObject
+
+        {{range .PathParams -}}
+            request.{{.GoName}} = {{.GoVariableName}}
+        {{end -}}
+
+        {{if .RequiresParamObject -}}
+            request.Params = params
+        {{end -}}
+
+        {{ if .HasMaskedRequestContentTypes -}}
+            request.ContentType = r.Header.Get("Content-Type")
+        {{end -}}
+
+        // Input validation stays inside the service's authorized preparation callback.
+        request.HTTPRequest = r
+
+        handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+            return sh.ssi.{{.OperationId}}(ctx, request.({{$opid | ucFirst}}RequestObject))
+        }
+        for _, middleware := range sh.middlewares {
+            handler = middleware(handler, "{{.OperationId}}")
+        }
+
+        response, err := handler(r.Context(), w, r, request)
+
+        if err != nil {
+            sh.options.ResponseErrorHandlerFunc(w, r, err)
+        } else if validResponse, ok := response.({{$opid | ucFirst}}ResponseObject); ok {
+            if err := validResponse.Visit{{$opid}}Response(w); err != nil {
+                sh.options.ResponseErrorHandlerFunc(w, r, err)
+            }
+        } else if response != nil {
+            sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+        }
+    }
+    {{end}}
+{{end}}

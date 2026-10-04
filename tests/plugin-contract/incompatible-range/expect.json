@@ -1,0 +1,6 @@
+{
+  "description": "A manifest whose engine range excludes this engine.",
+  "certified": false,
+  "check": "compatibility",
+  "code": "incompatible_engine"
+}

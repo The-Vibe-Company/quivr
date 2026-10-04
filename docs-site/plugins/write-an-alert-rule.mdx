@@ -1,0 +1,125 @@
+---
+title: "Write an alert rule"
+description: "Decide which new articles match your users' alerts, with your own logic, in Python."
+keywords: ["alert rule", "subscription", "saved query", "match", "evidence", "python sdk"]
+---
+
+An alert rule is a plugin that decides, for each new article, which alerts it matches. Quivr stores alerts, batches the work, retries and delivers notifications; your rule only answers match, no match or not ready, with evidence for a match. This page starts from the `quivr plugin init` template, a rule that matches a phrase or a metadata value.
+
+## Prerequisites
+
+- Python 3.12 or later, a `quivr-v2` checkout in `$QUIVR_REPO`, and the `quivr` command on your `PATH` ([Build your first plugin](/plugins/first-plugin) shows how).
+
+## How Quivr calls a rule
+
+When a Version becomes searchable, the worker collects every enabled Subscription that names your rule and sends them in batches: one article (its text Parts and metadata) and a list of evaluations, each a Saved Query `expression` and a Subscription `configuration`. Subscriptions that share the same expression and configuration become one evaluation, so a rule that calls a paid service pays once per distinct alert.
+
+Your rule answers one decision per evaluation:
+
+| Decision | Meaning |
+| --- | --- |
+| `match` | The article matches. Evidence is required: an explanation, the Part keys that support it, and optional details. |
+| `no_match` | It does not. |
+| `not_ready` | It cannot be decided yet, for example before the article's vectors are attached. Quivr asks again once it is enriched. |
+
+A decision must depend only on the article, the expression and the configuration. If the rule cannot decide at all, for example because a backend is down, it answers an error: Quivr keeps the evaluations pending and retries. A plugin outage delays alerts; it never turns into a negative decision.
+
+## Steps
+
+<Steps>
+<Step title="Create the rule">
+
+```bash
+quivr plugin init phrase-alerts --kind subscription
+cd phrase-alerts
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e "$QUIVR_REPO/sdks/python" -e .
+python3 -m unittest discover -s tests
+```
+
+</Step>
+<Step title="Define what an alert looks like">
+
+`expression_schema` in `quivr-plugin.yaml` is the JSON Schema of the queries your rule understands. The template offers two kinds, told apart by `kind`:
+
+```json
+{"kind": "substring", "text": "harbour strike"}
+{"kind": "metadata", "pointer": "/source/namespace", "equals": "wire"}
+```
+
+Quivr validates every Saved Query against this schema when a Subscription is created, so a malformed alert is refused with `422 invalid_expression` instead of failing later. `configuration_schema` does the same for the per-Subscription settings, here `case_sensitive`. To offer another kind of alert, add a branch to the `oneOf` and handle it in `phrase_alerts/rule.py`.
+
+</Step>
+<Step title="Decide">
+
+`evaluate` in `phrase_alerts/rule.py` receives the article and the batch, and returns one decision per evaluation, built with the SDK's helpers:
+
+```python phrase_alerts/rule.py (excerpt)
+keys = matching_parts(parts, text, case_sensitive=case_sensitive)
+if not keys:
+    return no_match(evaluation)
+return match(
+    evaluation,
+    f"{text!r} appears in {len(keys)} of {len(parts)} text Parts.",
+    part_keys=keys[:100],
+    details={"kind": "substring", "text": text, "case_sensitive": case_sensitive},
+)
+```
+
+The explanation is at most 4096 characters, `part_keys` at most 100 keys of Parts in the request, and `details` a JSON object of at most 16 KiB. Quivr stores the evidence with the Match and sends it in the webhook.
+
+</Step>
+<Step title="Replay the fixture">
+
+`fixtures/sample.json` holds one article and five evaluations with the decision each one should get:
+
+```bash
+quivr plugin dev --fixture fixtures/sample.json
+```
+
+```text
+quivr plugin dev: response valid: 5 decisions in 1 batches (3 match, 2 no_match, 0 not_ready); the engine's subscription output validation accepts them and they match the fixture's expectations
+```
+
+</Step>
+<Step title="Certify it">
+
+```bash
+quivr plugin test
+```
+
+Besides your fixture's expected decisions, the Contract Runner checks that replaying a batch gives the same decisions and that reversing the order of a batch does not change them.
+
+```text
+CERTIFIED: the engine can safely invoke this plugin (14 passed, 0 failed, 0 skipped)
+```
+
+</Step>
+<Step title="Pin it and use it">
+
+[Pin the plugin](/run-quivr/pin) on the deployment's `api` and `worker` processes: the API calls it too, to preview alerts. A Subscription then names it by id and version:
+
+```json
+"evaluator": {"plugin_id": "phrase-alerts", "version": "0.1.0", "configuration": {"case_sensitive": false}}
+```
+
+</Step>
+</Steps>
+
+## Check it worked
+
+Preview an alert before saving it. `POST /v0/subscription-previews` runs your rule on the most recent articles of a Corpus and returns what it would match, without saving or sending anything:
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/subscription-previews" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{evaluated, matched, explanations: [.matches[].evidence.explanation]}'
+{
+  "definition": {"corpus_ids": ["$CORPUS_ID"], "retrieval_profile": "default", "temporal_policy": "from_activation",
+                 "expression": {"kind": "substring", "text": "library"}},
+  "evaluator": {"plugin_id": "phrase-alerts", "version": "0.1.0", "configuration": {}},
+  "limit": 10
+}
+EOF
+```
+
+Then create the Saved Query and the Subscription as in the [Quickstart](/quickstart), with your `evaluator`.

@@ -1,0 +1,288 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "miracl-fr",
+  "metadata": {
+    "name": "miracl-fr",
+    "language": "fr",
+    "description": "MIRACL French dev queries over Wikipedia passages (MTEB hard-negative pool), native-speaker judgements",
+    "licence": "Apache-2.0 (MIRACL); passages CC BY-SA 4.0 (Wikipedia)",
+    "source": "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives",
+    "version": {
+      "mteb/MIRACLRetrievalHardNegatives": "332a9acb49f5e83d5397683f79d23e588f685916"
+    },
+    "split": "dev",
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives"
+    ],
+    "query_type": "Wikipedia information questions",
+    "known_issues": [
+      "Hard-negative pool and sampled distractors, not full Wikipedia retrieval.",
+      "This sample drops 451 nonpositive judgments for documents absent from the source corpus or exceeding the engine text-size limit; every sampled positive judgment is retained."
+    ],
+    "source_counts": {
+      "documents": 75357,
+      "queries": 343,
+      "judgments": 3429
+    },
+    "sample": {
+      "queries": 343,
+      "documents": 5000,
+      "seed": 775,
+      "max_source_bytes": 262144,
+      "eligible_queries": 343,
+      "judged_documents": 2965,
+      "listed_negatives": 0,
+      "random_distractors": 2035,
+      "judgements_dropped_absent_or_too_long": 451
+    },
+    "fingerprint": "0f86cc8028b8c49ce56d1f2442f21d18bdd05dd62c3da05eb8604bb5955d4e5f",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives/resolve/332a9acb49f5e83d5397683f79d23e588f685916/fr-corpus/dev-00000-of-00001.parquet",
+        "sha256": "521cfb7e34f1dac0ed80c00ddf860f518b15435b656b74f442d7fd82d215a7c8"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives/resolve/332a9acb49f5e83d5397683f79d23e588f685916/fr-queries/dev-00000-of-00001.parquet",
+        "sha256": "cd8448c32adb202e649d94662d1f2827c3f9011ad784611d36e5c95a0f03d44d"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/mteb/MIRACLRetrievalHardNegatives/resolve/332a9acb49f5e83d5397683f79d23e588f685916/fr-qrels/dev-00000-of-00001.parquet",
+        "sha256": "f873ab0be474ee555bf45858b4c51fafaa52e40c7f1af06d37c100771ea0672a"
+      }
+    }
+  },
+  "counts": {
+    "documents": 5000,
+    "queries": 343,
+    "judgments": 2978
+  },
+  "source_counts": {
+    "documents": 75357,
+    "queries": 343,
+    "judgments": 3429
+  },
+  "fingerprint": "0f86cc8028b8c49ce56d1f2442f21d18bdd05dd62c3da05eb8604bb5955d4e5f",
+  "sample": {
+    "queries": 343,
+    "documents": 5000,
+    "seed": 775,
+    "max_source_bytes": 262144,
+    "eligible_queries": 343,
+    "judged_documents": 2965,
+    "listed_negatives": 0,
+    "random_distractors": 2035,
+    "judgements_dropped_absent_or_too_long": 451
+  },
+  "judged_depth": {
+    "count": 343,
+    "min": 1,
+    "max": 10,
+    "mean": 8.682215743440233,
+    "median": 9,
+    "histogram": {
+      "1": 1,
+      "2": 3,
+      "3": 3,
+      "4": 7,
+      "5": 11,
+      "6": 18,
+      "7": 24,
+      "8": 46,
+      "9": 65,
+      "10": 165
+    },
+    "total_judgments": 2978,
+    "queries": 343
+  },
+  "grades": {
+    "counts": {
+      "0": 2247,
+      "1": 731
+    },
+    "positive_judgments": 731,
+    "max_grade": 1
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 343,
+      "min": 16,
+      "max": 83,
+      "mean": 43.883381924198254,
+      "median": 44,
+      "histogram": {
+        "16": 2,
+        "18": 1,
+        "20": 3,
+        "21": 1,
+        "22": 2,
+        "23": 2,
+        "24": 8,
+        "25": 1,
+        "26": 7,
+        "27": 1,
+        "28": 6,
+        "29": 9,
+        "30": 7,
+        "31": 5,
+        "32": 11,
+        "33": 10,
+        "34": 7,
+        "35": 7,
+        "36": 5,
+        "37": 11,
+        "38": 9,
+        "39": 13,
+        "40": 9,
+        "41": 10,
+        "42": 11,
+        "43": 12,
+        "44": 12,
+        "45": 6,
+        "46": 13,
+        "47": 17,
+        "48": 7,
+        "49": 16,
+        "50": 9,
+        "51": 6,
+        "52": 7,
+        "53": 7,
+        "54": 10,
+        "55": 6,
+        "56": 6,
+        "57": 5,
+        "58": 7,
+        "59": 4,
+        "60": 6,
+        "61": 4,
+        "62": 2,
+        "63": 1,
+        "64": 2,
+        "65": 4,
+        "66": 2,
+        "67": 3,
+        "68": 2,
+        "72": 2,
+        "73": 1,
+        "74": 3,
+        "76": 1,
+        "77": 1,
+        "83": 1
+      }
+    },
+    "words": {
+      "count": 343,
+      "min": 3,
+      "max": 14,
+      "mean": 7.169096209912537,
+      "median": 7,
+      "histogram": {
+        "3": 4,
+        "4": 27,
+        "5": 34,
+        "6": 68,
+        "7": 78,
+        "8": 41,
+        "9": 48,
+        "10": 27,
+        "11": 11,
+        "12": 2,
+        "13": 2,
+        "14": 1
+      }
+    }
+  },
+  "query_types": {
+    "source": "Wikipedia information questions",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 343,
+      "statement": 0
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.7115842906447988,
+      "recall@10": 0.9533041788143831,
+      "mrr@10": 0.6762784025174695
+    },
+    "saturation": {
+      "saturated_queries": 79,
+      "queries": 343,
+      "share": 0.2303206997084548
+    },
+    "dims": 384,
+    "pieces": 5053,
+    "index_s": 118.4,
+    "query_ms": 2.4
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T18:55:40.251878+00:00",
+      "status": "complete",
+      "set": "miracl-fr",
+      "fingerprint": "0f86cc8028b8c49ce56d1f2442f21d18bdd05dd62c3da05eb8604bb5955d4e5f",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 79,
+      "queries": 343,
+      "share": 0.2303206997084548
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 343,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 5001,
+    "query_inputs": 343,
+    "input_tokens": 2714516,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 0.32574191999999996,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 5429032,
+      "max_usd": 0.66
+    }
+  },
+  "local_run_sha256": "bd697e4304c91466caa65523e38a42bb14ac0904695c167ec46058aee236d337"
+}

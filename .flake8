@@ -1,4 +1,0 @@
-[flake8]
-; Minimal configuration for Flake8 to work with Black.
-max-line-length = 100
-ignore = E101,E111,E112,E221,E222,E501,E711,E712,W503,W504,F401,BLK100

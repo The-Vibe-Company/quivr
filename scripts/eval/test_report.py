@@ -1,0 +1,147 @@
+"""The Markdown report: readable for a completed run, and still written for a failed one."""
+import unittest
+
+import report
+
+
+def system(ndcg, paid=0):
+    return {'mean': {'ndcg@10': ndcg, 'recall@10': 0.5, 'mrr@10': 0.25}, 'latency_ms': {'p50': 40.0, 'p95': 90.0, 'max': 120.0},
+            'failures': 1, 'paid_calls_per_query': paid, 'per_query': {}}
+
+
+def timed(encoding):
+    """A time_by_limit entry: 9 searches and 1 failure; encoding None when the engine did not report its phases."""
+    p = lambda p50, p95: {'p50': p50, 'p95': p95}  # noqa: E731
+    return {'searches': 9, 'failures': 1, 'client_ms': p(40.0, 90.0), 'elapsed_ms': p(30.0, 70.0), 'query_encoding_ms': p(encoding, encoding),
+            'index_query_ms': p(4.0, 9.0), 'hydration_ms': p(6.0, 12.0), 'plugin_rounds_ms': p(2.0, 3.0),
+            'query_encoding_share': None if encoding is None else 0.4}
+
+
+RUN = {'id': 'r1', 'source_revision': 'abc', 'finished_at': '2026-09-30T00:00:00+00:00', 'duration_seconds': 61, 'target': 'isolated local stack', 'host': {}}
+
+
+class Markdown(unittest.TestCase):
+    def test_matrix_rows_separate_scored_quality_spend_and_warm_cache_statistics(self):
+        value = {**system(.75, 1), 'scored_limit': 10, 'reranker': {'k': 20, 'trim': '128', 'ranking': 'rrf'},
+                 'warm_cache_timing': timed(0),
+                 'accounting': {'scored': {'searches': 2, 'log_records': 2, 'tokens_per_search': 800,
+                                           'cost_cents_per_search': .2, 'paid_calls_per_search': 1,
+                                           'estimated_tokens_per_search': 32768, 'cost_is_upper_bound': True,
+                                           'fallback_rate': .5, 'cache_hit_rate': 0},
+                                'warm_cache': {'searches': 2, 'log_records': 2, 'tokens_per_search': 0,
+                                               'cost_cents_per_search': 0, 'paid_calls_per_search': 0,
+                                               'estimated_tokens_per_search': 0, 'cost_is_upper_bound': False,
+                                               'fallback_rate': 0, 'cache_hit_rate': 1}}}
+        text = '\n'.join(report.accounting_table({'hybrid/deep-k20-t128-rrf': value}))
+        self.assertIn('| cold/scored | 20 | 128 | rrf | 0.7500 | 0.5000 | 40 | 90 | 800.0 | 32768.0 | ≤ 0.2000 | 1.00 | 50.0% | 0.0% | 2/2 |', text)
+        self.assertIn('| bounded-cache replay | 20 | 128 | rrf | — | — | 40 | 90 | 0.0 | 0.0 | 0.0000 | 0.00 | 0.0% | 100.0% | 2/2 |', text)
+        self.assertIn('not an all-hit warm measurement', text)
+        value['accounting']['scored']['fallback_reasons'] = {'HTTP 402': 2}
+        refused = '\n'.join(report.accounting_table({'hybrid/deep-k20-t128-rrf': value}))
+        self.assertIn('provider refused (payment) 2', refused)
+        self.assertIn('Fallback searches measure hybrid order, not Jev quality', refused)
+
+    def test_completed_run_shows_scores_deltas_and_what_was_not_served(self):
+        significant = {'queries': 2, 'delta': -0.125, 'p_value': 0.01, 'significant': True}
+        r = {'status': 'completed', 'run': RUN, 'convention': 'linear gain.', 'test': 'paired t-test', 'baseline_system': 'hybrid/default', 'limit': 50,
+             'baseline_run': {'id': 'r0', 'source_revision': 'old', 'github': {'GITHUB_RUN_ID': '123'}},
+             'sets': {'tiny': {'manifest': {'licence': 'MIT', 'sample': {'seed': 775, 'eligible_queries': 9}}, 'queries': 2, 'documents': 5,
+                               'ingestion': {'searchable_with_vectors_seconds': 3.2},
+                               'profiles': {'refused': {'deep': '422 unsupported_profile'}},
+                               'systems': {'hybrid/default': {**system(0.5), 'time_by_limit': {'50': timed(12.0), '10': timed(None)}},
+                                           'lexical/default': system(0.375, None)},
+                               'against_baseline_system': {'lexical/default': {'ndcg@10': significant, 'recall@10': significant, 'mrr@10': significant}},
+                               'against_baseline_run': {'hybrid/default': {'ndcg@10': significant, 'recall@10': significant, 'mrr@10': significant}}}}}
+        text = report.markdown(r)
+        self.assertIn('All systems are scored at shared cutoffs @10', text)
+        self.assertIn('not a Recall@50 score', text)
+        r['run'] = {**RUN, 'jev_budget': {'max_input_tokens': 5_000_000, 'max_paid_searches': 150,
+                                        'actual_input_tokens': 1000, 'reserved_input_tokens': 65536,
+                                        'actual_cost_cents': .0042, 'cost_upper_bound_cents': .2794512,
+                                        'blocked_searches': 1}}
+        budgeted = report.markdown(r)
+        self.assertIn('Admission cap: 5,000,000 input tokens and 150 searches', budgeted)
+        self.assertIn('Actual input: 1,000; reserved/unconfirmed: 65,536', budgeted)
+        self.assertIn('actual priced cost: 0.0042 cents; cost upper bound: 0.2795 cents', budgeted)
+        self.assertIn('| hybrid/default | 0.5000 | 0.5000 | 0.2500 | baseline | baseline | 40 | 90 | 1/2 | 0 |', text)
+        self.assertIn('| lexical/default | 0.3750 | 0.5000 | 0.2500 | -0.1250 (p 0.010) * | -0.1250 (p 0.010) * | 40 | 90 | 1/2 | — |', text)
+        self.assertIn('| hybrid/default | 50 | 40 / 90 | 30 / 70 | 12 / 12 | 4 / 9 | 6 / 12 | 2 / 3 | 40% | 1/10 |', text)
+        self.assertIn('| hybrid/default | 10 | 40 / 90 | 30 / 70 | — / — | 4 / 9 | 6 / 12 | 2 / 3 | — | 1/10 |', text)
+        self.assertNotIn('| lexical/default | 50 |', text)  # a system from a run before phases were timed
+        self.assertIn('`deep` (422 unsupported_profile)', text)
+        self.assertIn('Against the same system in run 123 (source `old`)', text)
+        self.assertIn('| tiny | 2 | 5 | seed 775, 9 eligible queries | MIT | 3 |', text)
+
+    def test_compared_run_tables_base_branch_and_change_on_one_cpu(self):
+        def timed(p50, p95):
+            return {**system(0.5), 'latency_ms': {'p50': p50, 'p95': p95, 'max': None}}
+        same = {'queries': 2, 'delta': 0.0, 'p_value': None, 'significant': False}
+        r = {'status': 'completed', 'run': {**RUN, 'source_revision': 'b' * 40, 'host': {'cpu_model': 'Example CPU 9000'}}, 'convention': None, 'test': None,
+             'baseline_system': 'hybrid/default', 'limit': 50,
+             'baseline_run': {'ref': 'main', 'source_revision': 'a' * 40},
+             'compare': {'ref': 'main', 'source_revision': 'a' * 40, 'sets': {'tiny': {'systems': {'hybrid/default': timed(200.0, 300.0)}}}},
+             'sets': {'tiny': {'manifest': {}, 'queries': 2, 'documents': 5, 'ingestion': {'searchable_with_vectors_seconds': 3.2}, 'profiles': {},
+                               'systems': {'hybrid/default': timed(100.0, 330.0), 'hybrid/deep': timed(90.0, 120.0)},
+                               'against_baseline_run': {'hybrid/default': {'ndcg@10': same, 'recall@10': same, 'mrr@10': same}}}}}
+        text = report.markdown(r)
+        self.assertIn(f"Base `main` (`{'a' * 12}`) against this checkout (`{'b' * 12}`), both on Example CPU 9000 in one job.", text)
+        self.assertIn('| tiny | hybrid/default | 200 | 100 | -100 (-50%) | 300 | 330 | +30 (+10%) |', text)
+        self.assertNotIn('| tiny | hybrid/deep |', text)  # the base did not serve it: nothing to compare
+        self.assertIn(f"Against the same system at `main` (source `{'a' * 40}`), measured in this run:", text)
+
+    def test_embedding_partial_report_has_price_cost_and_matched_mode_significance(self):
+        usage = {'confirmed_input_tokens': 100, 'reserved_input_tokens': 50,
+                 'budgeted_input_tokens': 150, 'cost_upper_bound_usd': .000018,
+                 'confirmed_cost_usd': .000012, 'admitted_calls': 2, 'blocked_calls': 1,
+                 'max_input_tokens': 200, 'max_usd': 8, 'stopped': True,
+                 'reason': 'input-token budget exhausted'}
+        candidate = {'model': 'neutral-deployment', 'dimensions': 2048, 'segment_tokens': 512,
+                     'price': {'usd_per_million_tokens': .12, 'date': '2026-10-03', 'source': 'https://example.org/pricing'}}
+        paired = {'queries': 2, 'delta': .125, 'p_value': .01, 'significant': True}
+        r = {'status': 'capped', 'error': 'input-token budget exhausted', 'run': RUN,
+             'convention': 'linear gain', 'test': 'paired t-test', 'baseline_system': 'hybrid/default', 'limit': 50,
+             'embedding_campaign': {'kind': 'bakeoff', 'budget': usage, 'candidates': [candidate],
+                                    'prior_cost_upper_bound_usd': 0, 'campaign_cap_usd': 10},
+             'sets': {'neutral/tiny': {'manifest': {}, 'queries': 2, 'documents': 5, 'status': 'searching',
+                          'ingestion': {'paired_vectors_seconds': 3.2}, 'embedding_indexing': usage,
+                          'embedding_total': usage, 'embedding_model': candidate,
+                          'systems': {'semantic/default': system(.5),
+                                      'semantic/evaluation/example.embedding/model@1': system(.625)},
+                          'against_served_mode': {'semantic/evaluation/example.embedding/model@1':
+                                                  {key: paired for key in ('ndcg@10', 'recall@10', 'mrr@10')}}},
+                      'neutral/pending': {'manifest': {}, 'queries': 2, 'documents': 5, 'status': 'indexing',
+                          'ingestion': {'partial_seconds': 1.2}, 'systems': {},
+                          'embedding_indexing': usage, 'embedding_model': candidate}}}
+        text = report.markdown(r)
+        self.assertIn('Status: **capped**', text)
+        self.assertIn('Confirmed input: 100; reserved/unconfirmed: 50', text)
+        self.assertIn('USD / 1,000 documents', text)
+        self.assertIn('0.003600', text)
+        self.assertIn('[2026-10-03](https://example.org/pricing)', text)
+        self.assertIn('Δ MRR@10', text)
+        self.assertIn('| semantic/evaluation/example.embedding/model@1 | semantic/default | +0.1250 (p 0.010) * |', text)
+        self.assertIn('Unfinished set: indexing', text)
+
+    def test_failed_run_before_any_set_names_the_error(self):
+        r = {'status': 'failed', 'error': 'RuntimeError: TEI never ready', 'run': RUN, 'convention': None, 'test': None,
+             'baseline_system': 'hybrid/default', 'limit': 50, 'sets': {}}
+        text = report.markdown(r)
+        self.assertIn('Status: **failed**', text)
+        self.assertIn('Error: `RuntimeError: TEI never ready`', text)
+
+    def test_failed_run_names_the_resource_that_ran_short(self):
+        switch = 'Set READONLY, disk usage currently at 90.02%, threshold set to 90.00%'
+        snapshot = {'label': 'after mldr-fr', 'docker_disk': {'used_percent': 89.6, 'free_gb': 7.5},
+                    'docker_storage': {'Images': '6.1GB', 'Local Volumes': '2.3GB', 'Build Cache': '0B'},
+                    'memory_available_mb': 2048, 'memory': {'weaviate-1': '1.2GiB', 'worker': '300MiB'}}
+        r = {'status': 'failed', 'error': 'RuntimeError: eval-scifact: 935/2000 Records have vectors after 1018 s', 'run': RUN,
+             'convention': None, 'test': None, 'baseline_system': 'hybrid/default', 'limit': 50, 'sets': {},
+             'resources': {'snapshots': [snapshot], 'cause': f'Weaviate turned its shards read-only at 2026-10-01T11:20:11Z: {switch}',
+                           'weaviate': {'quivr-eval-1': [{'action': 'set_shard_read_only', 'time': '2026-10-01T11:20:11Z', 'msg': switch}]}}}
+        text = report.markdown(r)
+        self.assertIn(f'Cause: Weaviate turned its shards read-only at 2026-10-01T11:20:11Z: {switch}.', text)
+        self.assertIn('| after mldr-fr | 89.6% | 7.5 GB | 6.1GB | 2.3GB | 0B | 2048 MB | weaviate-1 1.2GiB, worker 300MiB |', text)
+
+
+if __name__ == '__main__':
+    unittest.main()

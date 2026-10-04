@@ -1,0 +1,13 @@
+{
+  "description": "Without an API key deep still returns the hybrid ranking, never a fabricated Jev score.",
+  "retrieval": {
+    "query": "harbour strike", "mode": "hybrid", "profiles": ["deep"], "limit": 2,
+    "candidates": [
+      {"segment_id": "seg_harbour", "record_id": "rec_harbour", "text": "The harbour is closed during a strike."},
+      {"segment_id": "seg_flower", "record_id": "rec_flower", "text": "Flowers arrived yesterday."},
+      {"segment_id": "seg_ferry", "record_id": "rec_ferry", "text": "The ferry arrives at the harbour."}
+    ],
+    "order": {"profile": ["seg_ferry", "seg_harbour", "seg_flower"]},
+    "expect": {"top": ["seg_ferry", "seg_harbour"]}
+  }
+}

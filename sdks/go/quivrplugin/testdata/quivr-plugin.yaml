@@ -1,0 +1,37 @@
+# Test manifest of the Go SDK unit tests.
+id: sdk-test
+version: 1.2.3
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <1.0.0"
+contributions:
+  connector:
+    kinds:
+      feed:
+        config_schema:
+          type: object
+          required: [url]
+          properties:
+            url: {type: string, pattern: "^https://"}
+        credential_schema:
+          type: object
+          additionalProperties: false
+          required: [token]
+          properties:
+            token: {type: string, pattern: "^tok-"}
+        default_interval_seconds: 600
+      open:
+        config_schema: {type: object}
+        default_interval_seconds: 600
+      optional:
+        config_schema: {type: object}
+        credential_schema:
+          type: object
+          additionalProperties: false
+          required: [token]
+          properties:
+            token: {type: string, pattern: "^tok-"}
+        credential_required: false
+        default_interval_seconds: 600
+    limits:
+      max_items: 2

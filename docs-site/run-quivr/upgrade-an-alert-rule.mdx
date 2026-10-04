@@ -1,0 +1,84 @@
+---
+title: "Upgrade an alert rule"
+description: "Move existing alerts to a new plugin version while old evaluations finish on their pinned rule."
+keywords: ["alert rule", "migration", "drain", "subscription"]
+---
+
+Activate the new rule for future alerts, then migrate existing Subscriptions when you are ready. Keep the exact old implementation running until its Subscriptions and pending work reach zero.
+
+A Subscription is an alert. Its Version fixes the saved query and alert-rule version that judges each document. Migration affects future changes only; queued evaluations keep their original Version and plugin pin.
+
+## Prerequisites
+
+- Both builds run concurrently at separate addresses reachable by Quivr. Retain the old code; do not serve the new build under the old identity.
+- An operator key with `plugins:admin` and grants for the Organization and all Corpora of each Subscription you migrate. A Corpus is a collection of documents.
+- `curl` and `jq` installed (`curl --version`, `jq --version`), `QUIVR_API_URL` set to your API address and `QUIVR_OPERATOR_KEY` set to that key.
+
+The request below is an example, not run here. Replace the plugin id and old version with the rule you are migrating.
+
+## Steps
+
+<Steps>
+<Step title="Activate the new rule">
+
+[Register, check and activate it](/run-quivr/upgrade-a-plugin#steps). New Subscriptions use the served version. An edit must name `evaluator.version`: choose the new served version to move it, or keep the exact version its current Subscription Version pins while that version is still installed. Omitting the version is invalid.
+
+Existing Subscriptions stay on the old rule until migrated. Their evaluations continue there, even while the old registration reads `draining`.
+
+</Step>
+<Step title="Dry-run the migration">
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/admin/subscriptions/evaluator-migrations" \
+  -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" -H "Content-Type: application/json" \
+  -d '{"plugin_id": "alerts", "from_version": "0.2.0", "dry_run": true}' \
+  | jq '{to_version, moved: (.moved | length), refused, next_after}'
+```
+
+`refused` lists saved searches that the new schema rejects, with the first issue. Those Subscriptions keep the old rule until you edit their saved searches. Subscriptions whose Corpora the key does not fully grant are skipped silently; they do not appear in `refused`.
+
+</Step>
+<Step title="Run it for real, then page through the rest">
+
+Send the same request with `"dry_run": false`. A call examines 100 Subscriptions by default. Pass `next_after` as `after` in the next request; continue until no cursor remains.
+
+A moved Subscription gets a new Version, as an edit would. It judges changes from then on; old documents are not evaluated again, and earlier Matches keep the version that decided them.
+
+</Step>
+<Step title="Repeat for each Organization">
+
+Use that Organization's operator key with grants for all affected Corpora. A completed page sequence covers only the Subscriptions visible to its key.
+
+</Step>
+<Step title="Watch the old rule drain">
+
+Read `GET /v0/admin/plugins` and inspect the old version's `subscriptions`, `pinned_work` and `state`. These registry counts cover every Organization, so they can stay nonzero after one Organization's migration is complete.
+
+`subscriptions` counts alerts still pinning the rule. `pinned_work` includes pending evaluations and older document changes that Quivr has not yet turned into evaluations. Counting current Subscriptions alone does not prove the rule drained.
+
+</Step>
+<Step title="Stop the old build">
+
+Stop it only when both counts are zero and its state is `inactive`. Retain its code and address if you may need to restore it.
+
+</Step>
+</Steps>
+
+## Check it worked
+
+The old registration reads `inactive`, with zero `subscriptions` and `pinned_work`, after migration across all affected Organizations and completion of old evaluations.
+
+After rollback, the returning rule serves new Subscriptions again. Subscriptions on the version you left retain that pin; use the same migration procedure to move them back.
+
+## Troubleshooting
+
+| Symptom | Cause and action |
+| --- | --- |
+| Subscriptions appear in `refused` | Edit their saved searches to fit the new schema, then retry. They keep the old rule meanwhile. |
+| Counts remain after migration | Check other Organizations and silently skipped Subscriptions outside the key's Corpus grants; pending old evaluations also count. |
+| `evaluator_unavailable` after stopping the old build | Restore the exact old build. Queued evaluations keep their original pin and retry indefinitely. |
+
+## Next
+
+- [Roll back the plugin plan](/run-quivr/upgrade-a-plugin#roll-back) if the new rule misbehaves.
+- [Retire unavailable evaluations](/run-quivr/retire-alert-evaluations) only when you accept losing their potential Matches.

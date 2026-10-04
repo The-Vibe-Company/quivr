@@ -1,0 +1,321 @@
+name: Text foundation
+# One run per change: pull requests run on their own event, and main runs on push
+# (Railway deploys main). A new push to a pull request cancels its outdated run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+# Required check: `verify`. It passes only when `check`, `adapter-postgres` and every
+# verification part pass, so branch protection needs no change when a part is added.
+jobs:
+  # Everything that needs no Docker stack (make check): the first result, in a few minutes.
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      evaluation-postgres:
+        image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env:
+          POSTGRES_DB: evaluation_tests
+          POSTGRES_USER: evaluation
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U evaluation -d evaluation_tests"
+          --health-interval 2s --health-timeout 2s --health-retries 20
+    env:
+      EVAL_CONTROL_TEST_DSN: postgresql://evaluation@localhost:55433/evaluation_tests
+    steps:
+      # The frozen-docs rule compares with the merge base of this checkout and main,
+      # so it needs full history (about 25 MB); the migration guard reads main's tree.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            contracts/http/v0/checks/requirements.txt
+            scripts/eval/requirements-news.txt
+            scripts/eval/requirements-campaign.txt
+            plugins/jev-rerank/pyproject.toml
+      # PyYAML for `make docs`, which regenerates the documentation site's bundled contract to compare it.
+      - run: pip install -r contracts/http/v0/checks/requirements.txt
+      - run: pip install -r scripts/eval/requirements-news.txt
+      - run: pip install -r scripts/eval/requirements-campaign.txt
+      # Build the OSS runner's SDK and exercise prepared scoring on offline vectors.
+      - run: pip install modal==1.6.1 numpy==2.0.2
+      # The builder reuses this pinned stdlib client, without the plugin runtime dependencies.
+      - run: pip install --no-deps -e plugins/jev-rerank
+      # Private news-set owner tests exercise real encryption with disposable keys and synthetic text.
+      - run: sudo apt-get update -qq && sudo apt-get install -y age
+      - run: make check
+      # Contract Runner reports (scripts/plugin_sdk.sh), under the artifact names the plugin READMEs give.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plugin-contract-report
+          path: .scratch/plugin-sdk/contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: subscription-plugin-contract-report
+          path: .scratch/plugin-sdk/subscription-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-connector-scaffold-contract-report
+          path: .scratch/plugin-sdk/connector-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: push-source-contract-reports
+          path: .scratch/plugin-sdk/push-*-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-connector-contract-report
+          path: .scratch/plugin-sdk/python-static-source-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pdf-text-contract-report
+          path: .scratch/plugin-sdk/pdf-text-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: alerts-contract-report
+          path: .scratch/plugin-sdk/alerts-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-connector-contract-report
+          path: .scratch/plugin-sdk/static-source-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-ingestion-contract-report
+          path: .scratch/plugin-sdk/hash-embedder-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: go-retrieval-contract-report
+          path: .scratch/plugin-sdk/fusion-retriever-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rss-contract-report
+          path: .scratch/plugin-sdk/rss-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: x-list-contract-report
+          path: .scratch/plugin-sdk/x-list-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m365-mail-contract-report
+          path: .scratch/plugin-sdk/m365-mail-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hosted-embedding-contract-reports
+          path: .scratch/plugin-sdk/hosted-embed/hosted-embed-*-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      # The public contracts this commit checked.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contracts
+          path: |
+            contracts/http/v0/openapi.yaml
+            contracts/shared/v0/manifest.schema.json
+          if-no-files-found: warn
+  # Fast signal on the PostgreSQL adapters (THE-699): a bare migrated database, no other
+  # dependency. It proves the suite needs no state left by acceptance scenarios.
+  adapter-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: make adapter-postgres args=-v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adapter-postgres
+          include-hidden-files: true
+          path: |
+            .scratch/quivr-adapter-pg-*/adapter-postgres.log
+            .scratch/quivr-adapter-pg-*/postgres.log
+            .scratch/quivr-adapter-pg-*/services.json
+          if-no-files-found: warn
+  # The stack verification in parallel parts, each on its own isolated stack (THE-755).
+  # The parts are defined in scripts/local.py (parts); scripts/test_ci_output.py checks this list.
+  part:
+    name: verify ${{ matrix.part }}
+    # The one declared supported platform (linux/amd64); see scripts/inventory.py.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [core, monitoring, plugins, connectors, demo]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: contracts/http/v0/checks/requirements.txt
+      # The pinned E5 model and tokenizer; scripts/prepare_*.py check them by digest after a restore.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .scratch/e5-model
+            .scratch/tokenizer
+          key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'plugins/core-ingest/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
+      - if: matrix.part == 'demo'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: quivr-search/package-lock.json
+      - if: matrix.part == 'demo'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('quivr-search/package-lock.json') }}
+      - if: matrix.part == 'demo'
+        run: npx --yes --package=@playwright/test@1.63.0 playwright install-deps chromium
+      # The runner image starts about 84% full and a verification writes several GB more, which
+      # brought the demo stack to Weaviate's 90% read-only threshold (THE-758). Remove preinstalled
+      # toolchains this job never uses (about 17 GB, a few seconds).
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia* && df -h /
+      - run: make verify part=${{ matrix.part }}
+        env:
+          # A missing base (including a first push) runs lifecycle by default.
+          QUIVR_VERIFY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      - uses: actions/upload-artifact@v4
+        id: verification-artifact
+        if: always()
+        with:
+          name: verification-${{ matrix.part }}
+          include-hidden-files: true
+          path: |
+            .scratch/quivr-verify-*/report.json
+            .scratch/quivr-verify-*/report.md
+            .scratch/quivr-verify-*/readiness.json
+            .scratch/quivr-verify-*/services.json
+            .scratch/quivr-verify-*/dependency-inventory.json
+            .scratch/quivr-verify-*/journey-*.json
+            .scratch/quivr-verify-*/lifecycle.json
+            .scratch/quivr-verify-*/delivery-metrics.txt
+            .scratch/quivr-verify-*/metrics-*.txt
+            .scratch/quivr-verify-*/failure-drill.json
+            .scratch/quivr-verify-*/connector-*.json
+            .scratch/quivr-verify-*/m365-restart.json
+            .scratch/quivr-verify-*/*-before-lifecycle.log
+            .scratch/quivr-verify-*/acceptance.log
+            .scratch/quivr-verify-*/adapters*.log
+            .scratch/quivr-verify-*/api*.log*
+            .scratch/quivr-verify-*/worker*.log*
+            .scratch/quivr-verify-*/migrate*.log*
+            .scratch/quivr-verify-*/postgres.log
+            .scratch/quivr-verify-*/temporal.log
+            .scratch/quivr-verify-*/seaweed.log
+            .scratch/quivr-verify-*/weaviate.log
+            .scratch/quivr-verify-*/normalizer-*.log
+            .scratch/quivr-verify-*/bad-pin-*.log
+            .scratch/quivr-verify-*/normalizer-startup.json
+            .scratch/quivr-verify-*/outages.json
+            .scratch/quivr-verify-*/keyless-report.json
+            .scratch/quivr-verify-*/guides.json
+            .scratch/quivr-verify-*/keyless/*.log*
+            .scratch/quivr-verify-*/tokenizer-provenance.json
+            .scratch/quivr-verify-*/embedding-provenance.json
+            .scratch/quivr-verify-*/embedding-outage.json
+            .scratch/quivr-verify-*/hosted-embed.json
+            .scratch/quivr-verify-*/hosted-embed/*.log
+            .scratch/quivr-verify-*/core-ingest*.json
+            .scratch/quivr-verify-*/core-ingest*.log
+            .scratch/quivr-verify-*/rebuild-recovery.json
+            .scratch/quivr-verify-*/operation-control.json
+            .scratch/quivr-verify-*/relevance-report.json
+            .scratch/quivr-verify-*/tei.log
+            .scratch/quivr-verify-*/response-*.json
+            .scratch/quivr-demo-verify-*/demo-report.json
+            .scratch/quivr-demo-verify-*/browser.log
+            .scratch/quivr-demo-verify-*/playwright.json
+            .scratch/quivr-demo-verify-*/browser/**/*.png
+            .scratch/quivr-demo-verify-*/browser/**/trace.zip
+            .scratch/quivr-demo-verify-*/readiness.json
+            .scratch/quivr-demo-verify-*/demo-server.log
+            .scratch/quivr-demo-verify-*/api*.log*
+            .scratch/quivr-demo-verify-*/worker*.log*
+            .scratch/quivr-demo-verify-*/weaviate.log
+          if-no-files-found: warn
+      # Failed tests with their error, slowest tests and step timings on the run page (THE-755).
+      - if: always()
+        run: python3 scripts/ci_summary.py "${{ steps.verification-artifact.outputs.artifact-url }}"
+  # The one check to require: green only when every job above is green.
+  verify:
+    if: always()
+    needs: [check, adapter-postgres, part]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}"
+          exit 1
+      - run: echo "check, adapter-postgres and every verification part passed"

@@ -1,221 +1,377 @@
-# Quivr - Your Second Brain, Empowered by Generative AI
+# Quivr V2
 
-<div align="center">
-    <img src="./logo.png" alt="Quivr-logo" width="31%"  style="border-radius: 50%; padding-bottom: 20px"/>
-</div>
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[![Discord Follow](https://dcbadge.vercel.app/api/server/HUpRgp2HG8?style=flat)](https://discord.gg/HUpRgp2HG8)
-[![GitHub Repo stars](https://img.shields.io/github/stars/quivrhq/quivr?style=social)](https://github.com/quivrhq/quivr)
-[![Twitter Follow](https://img.shields.io/twitter/follow/StanGirard?style=social)](https://twitter.com/_StanGirard)
+**An open-source engine that turns continuous content streams into search and monitoring.**
 
-Quivr, helps you build your second brain, utilizes the power of GenerativeAI to be your personal assistant !
+Quivr V2 ingests content durably, makes it searchable within seconds, enriches it in
+the background and lets you follow a topic over time. The core stays generic: formats,
+AI models and business rules belong in plugins, so you can adapt Quivr to your domain
+without forking the platform.
 
-## Key Features 🎯
+> **Status: evaluation stage.** The API is `v0` and may change without notice. Do not
+> run it in production yet.
 
-- **Opiniated RAG**: We created a RAG that is opinionated, fast and efficient so you can focus on your product
-- **LLMs**: Quivr works with any LLM, you can use it with OpenAI, Anthropic, Mistral, Gemma, etc.
-- **Any File**: Quivr works with any file, you can use it with PDF, TXT, Markdown, etc and even add your own parsers.
-- **Customize your RAG**: Quivr allows you to customize your RAG, add internet search, add tools, etc.
-- **Integrations with Megaparse**: Quivr works with [Megaparse](https://github.com/quivrhq/megaparse), so you can ingest your files with Megaparse and use the RAG with Quivr.
+## Why Quivr V2
 
->We take care of the RAG so you can focus on your product. Simply install quivr-core and add it to your project. You can now ingest your files and ask questions.*
+- **Durable before fast.** A write is acknowledged only once it is committed; outages
+  delay processing, they never lose or silently fail content.
+- **Idempotent everywhere.** Every write carries an idempotency key. Replays return the
+  same result, changed replays are conflicts, and corrections create new immutable
+  Versions instead of overwriting history.
+- **Useful early, richer later.** Text is lexically searchable as soon as it is
+  segmented; embeddings and other enrichments arrive afterwards without blocking it.
+- **Rebuildable indexes.** PostgreSQL and S3 hold the canonical data; the search index
+  is a projection that can be rebuilt from durable artifacts.
+- **Honest search.** Every hit is rehydrated from canonical storage and re-authorized.
+  A dependency outage returns an error, never an empty "success".
+- **Generic core, extensible edges.** Connectors, normalizers, enrichers, retrievers and
+  delivery channels are plugin capabilities, not core code.
 
-**We will be improving the RAG and adding more features, stay tuned!**
+## Architecture at a glance
 
-
-This is the core of Quivr, the brain of Quivr.com.
-
-<!-- ## Demo Highlight 🎥
-
-https://github.com/quivrhq/quivr/assets/19614572/a6463b73-76c7-4bc0-978d-70562dca71f5 -->
-
-## Getting Started 🚀
-
-You can find everything on the [documentation](https://core.quivr.com/).
-
-### Prerequisites 📋
-
-Ensure you have the following installed:
-
-- Python 3.10 or newer
-
-### 30 seconds Installation 💽
-
-
-- **Step 1**: Install the package
-
-  
-
-  ```bash
-  pip install quivr-core # Check that the installation worked
-  ```
-
-
-- **Step 2**: Create a RAG with 5 lines of code
-
-  ```python
-  import tempfile
-
-  from quivr_core import Brain
-
-  if __name__ == "__main__":
-      with tempfile.NamedTemporaryFile(mode="w", suffix=".txt") as temp_file:
-          temp_file.write("Gold is a liquid of blue-like colour.")
-          temp_file.flush()
-
-          brain = Brain.from_files(
-              name="test_brain",
-              file_paths=[temp_file.name],
-          )
-
-          answer = brain.ask(
-              "what is gold? asnwer in french"
-          )
-          print("answer:", answer)
-  ```
-## Configuration
-
-### Workflows
-
-#### Basic RAG
-
-![](docs/docs/workflows/examples/basic_rag.excalidraw.png)
-
-
-Creating a basic RAG workflow like the one above is simple, here are the steps:
-
-
-1. Add your API Keys to your environment variables
-```python
-import os
-os.environ["OPENAI_API_KEY"] = "myopenai_apikey"
-
-```
-Quivr supports APIs from Anthropic, OpenAI, and Mistral. It also supports local models using Ollama.
-
-1. Create the YAML file ``basic_rag_workflow.yaml`` and copy the following content in it
-```yaml
-workflow_config:
-  name: "standard RAG"
-  nodes:
-    - name: "START"
-      edges: ["filter_history"]
-
-    - name: "filter_history"
-      edges: ["rewrite"]
-
-    - name: "rewrite"
-      edges: ["retrieve"]
-
-    - name: "retrieve"
-      edges: ["generate_rag"]
-
-    - name: "generate_rag" # the name of the last node, from which we want to stream the answer to the user
-      edges: ["END"]
-
-# Maximum number of previous conversation iterations
-# to include in the context of the answer
-max_history: 10
-
-# Reranker configuration
-reranker_config:
-  # The reranker supplier to use
-  supplier: "cohere"
-
-  # The model to use for the reranker for the given supplier
-  model: "rerank-multilingual-v3.0"
-
-  # Number of chunks returned by the reranker
-  top_n: 5
-
-# Configuration for the LLM
-llm_config:
-
-  # maximum number of tokens passed to the LLM to generate the answer
-  max_input_tokens: 4000
-
-  # temperature for the LLM
-  temperature: 0.7
+```mermaid
+flowchart LR
+    client[Client / connector] -->|REST v0| api[Go API]
+    api -->|commit receipt + intent| pg[(PostgreSQL<br/>catalog, receipts, changes)]
+    api --> temporal[Temporal]
+    temporal --> worker[Go worker]
+    worker -->|canonical bytes, artifacts| s3[(S3-compatible storage)]
+    worker -->|segments| weaviate[(Weaviate<br/>lexical + vector)]
+    worker -->|text parts| ingest[core.ingest plugin]
+    ingest -->|passages| tei[TEI · E5 embeddings]
+    api -->|search, rehydrate, recheck| weaviate
+    api -->|changes: polling / SSE| client
 ```
 
-3. Create a Brain with the default configuration
-```python
-from quivr_core import Brain
+A single `quivr` binary provides the `api`, `worker` and `migrate` commands.
 
-brain = Brain.from_files(name = "my smart brain",
-                        file_paths = ["./my_first_doc.pdf", "./my_second_doc.txt"],
-                        )
+| Concern | Choice |
+| --- | --- |
+| Core | Go modular monolith (`cmd/quivr`, `internal/…`) |
+| Transactional catalog | PostgreSQL 17 |
+| Canonical bytes and artifacts | S3-compatible storage (SeaweedFS locally) |
+| Durable orchestration | Temporal |
+| Lexical and vector search | Weaviate |
+| Embeddings | Local TEI serving pinned `multilingual-e5-small` (384 dimensions) |
+| Contract | OpenAPI 3.1 in [`contracts/http/v0`](contracts/http/v0/openapi.yaml) |
+| Local runtime | Docker Compose |
 
+## Quickstart
+
+Requirements (Linux x86_64, or macOS on Apple Silicon for `make dev`): Go 1.27.1, Docker with Compose v2, Python 3 with `venv`,
+Node.js 22+ and `jq`. The first run downloads pinned images and the E5 model (~1 GB).
+
+```bash
+make dev      # start dependencies, run migrations, launch API + worker
+make check    # docs, contracts, vet and unit tests without Docker (about 2 min); run before pushing
+make verify   # make check, then end-to-end journeys on an isolated stack
+make down     # stop everything, keep data (make reset also deletes volumes)
 ```
 
-4. Launch a Chat
-```python
-brain.print_info()
+`make verify` runs every feature's acceptance suite and one assembled monitoring
+journey on an isolated stack. It removes only its own project, even after a
+failure or Ctrl+C. It then prints the path of a `report.md` that names any failed
+step, the pinned versions and the dependency inventory. It runs on Linux x86_64
+only, as in CI; see the [remaining limits](docs/quivr-v2-remaining-limits.md).
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.prompt import Prompt
-from quivr_core.config import RetrievalConfig
+`make dev` prints the API address and the path of a generated `config.json` holding
+throwaway local keys; `eval "$(make -s env)"` exports the address, a key and a webhook
+destination. Then follow the [Quickstart](https://docs.quivr.thevibecompany.co/quickstart):
+create a Corpus, add an article, search it and get an alert, with commands that
+`make verify` replays against a real stack.
 
-config_file_name = "./basic_rag_workflow.yaml"
+For a browser UI over the same API, run `make demo` and open http://127.0.0.1:5183
+(see [`quivr-search/`](quivr-search/README.md)).
 
-retrieval_config = RetrievalConfig.from_yaml(config_file_name)
+## What works today
 
-console = Console()
-console.print(Panel.fit("Ask your brain !", style="bold magenta"))
+- **Corpora** with scoped API keys per Organization, action and Corpus.
+- **Durable, idempotent ingestion**: inline text, bounded batches with per-entry
+  outcomes, verified uploads (presigned PUT + checksum confirm), structured Manifests,
+  extensions and relations.
+- **Corrections and withdrawals** with immutable Versions and fenced withdrawn Records.
+- **Search**: lexical, semantic and hybrid, with canonical rehydration and access
+  rechecks on every hit, optionally within chosen Source Namespaces (filtered before
+  ranking).
+- **Change feed** through polling and resumable SSE, plus **catalog resync** after
+  cursor expiry.
+- **Saved Queries and Subscriptions**, pinned and versioned; enabled Subscriptions turn
+  newly searchable Versions into unique **Matches** (`/v0/matches`), each with a
+  Delivery. Matching is decided by a pinned alert-rule plugin (the
+  `subscription` Contribution), batched per article. Both can be renamed without a
+  new Version.
+- **Keyword alerts** through the first-party plugin [`plugins/alerts`](plugins/alerts/README.md),
+  pinned by default in the local stack:
+  - queries such as `"Acme" AND (grève OR strike) NOT sport`, with exact phrases,
+    "any of", "none of" and grouping;
+  - case, accents and punctuation are ignored, and words match whole;
+  - metadata filters such as `source:wire` or `author:"Jane Doe"` (names mapped in the
+    plugin configuration), and a filter alone is a valid alert;
+  - each Match's evidence names the matched terms and the Parts where they matched
+    ([guide](https://docs.quivr.thevibecompany.co/guides/keyword-alerts)).
+  - the browser demo's **Alertes** tab writes these alerts and shows what each one
+    caught, live ([`quivr-search/`](quivr-search/README.md#alertes)).
+- **Described alerts** through the same plugin: a plain-language description such as
+  "Labour strikes at ports and harbours", judged by TypeSafe's Jev classifier, so
+  rephrased and translated articles alert too:
+  - the plugin batches ready checks and asks each distinct description once per batch;
+  - an alert can be limited to chosen sources, whose other articles are never sent;
+  - the Match evidence carries the classifier's score;
+  - they are off without a TypeSafe key, because article text is sent to TypeSafe
+    ([guide](https://docs.quivr.thevibecompany.co/guides/described-alerts));
+  - the browser demo's **Alertes** tab offers them next to keyword alerts when the
+    deployment has a classifier, and shows each caught article's score
+    ([`quivr-search/`](quivr-search/README.md#alertes)).
+- **Local meaning alerts** through the same plugin: the `meaning` kind with
+  `meaning_check: vectors` compares
+  a description with stored embeddings to catch rephrased or translated articles
+  without an external classifier (text stays local only with a local embedding provider). `keywords_or_meaning` and `keywords_and_meaning`
+  combine keyword and meaning checks
+  ([guide](https://docs.quivr.thevibecompany.co/guides/described-alerts#use-the-local-meaning-check)).
+- **Subscription previews** (`POST /v0/subscription-previews`): before saving an alert,
+  see which of the most recent articles it would have caught, judged by the same plugin
+  with the same rules. A preview saves nothing and sends nothing, and it judges at most
+  50 articles; the demo's alert form shows it as you type.
+- **Subscription owners**: an application can create a Subscription for one of its
+  end users (an opaque `owner` such as `user-123`) or a global one, see the owner on
+  the Subscription, its Matches, webhooks and change feed to route each alert, and list
+  a user's active Subscriptions with `GET /v0/subscriptions?owner=…`.
+- **Correction and withdrawal notices** for alerted Records: a correction that still
+  matches gets a linked successor Match (`match.corrected`), one that no longer matches
+  gets `match.no_longer_matches` without a new Match, and a withdrawal gets
+  `match.withdrawn`. Earlier Matches stay readable.
+- **Signed webhook delivery** (Standard Webhooks) to deployment-configured destinations,
+  with append-only attempt history, jittered exponential retries within a bounded
+  delivery window, exhaustion, and no new attempt once a Subscription is disabled.
+  The worker exposes delivery metrics on its probe listener (`/metrics`).
+- **Projection rebuilds** from durable artifacts as recoverable Operations, with cancel
+  and rerun.
+- **Document step times**: each Version reports when it was accepted, materialized, cut
+  into segments, made searchable, given vectors, evaluated by alerts, quarantined or
+  withdrawn (`steps`). A key with `observability:read` lists the latest documents with
+  their steps (`GET /v0/admin/documents`) and reads one document's timeline with each
+  step's duration and plugin.
+- **Typed retrieval mappings** per Corpus (`PUT /v0/corpora/{id}/retrieval`): logical
+  fields pointing into source data take effect only when their rebuilt generation is
+  validated and activated.
+- **Connector Instances**: scheduled pull acquisition into a Corpus, with write-only
+  deposited credentials and health, through the same ingestion path as pushed content.
+  Delivered kinds: `rss` (RSS and Atom feeds), `m365_mail` (Microsoft 365 mailboxes)
+  and `x_list` (first-party plugin `plugins/x-list`), which polls an X list: edits become
+  corrections, deleted or protected posts are withdrawn, and health shows daily reads
+  ([guide](https://docs.quivr.thevibecompany.co/guides/x)). In webhook mode, X posts arrive in near real time
+  through Filtered Stream webhooks relayed by the core to the plugin, with polling as the
+  fallback ([guide](https://docs.quivr.thevibecompany.co/guides/x#real-time-mode)).
+  The deployment `credential_key` is optional. Without it, credential deposits are
+  refused with `503 credentials_unavailable`, and everything else works.
+  `GET /v0/connector-kinds` publishes each enabled kind's config and credential JSON
+  Schemas, `PUT /v0/connectors/{id}/schedule` changes the polling interval,
+  `POST /v0/connectors/{id}/runs` checks a source again now, and validation errors name the offending field as a JSON Pointer.
+- **Secure source API routes** (Plugin API 0.12): connector plugins declare POST push and GET challenge routes at `/v0/connectors/{id}/api/<path>`. The engine checks a collection-scoped `connector:push` key, an instance-scoped bearer token, or provider signature policy, with timestamp and replay protection for signed pushes; accepted pushes return `202` with ingestion Receipts. [Author guide](https://docs.quivr.thevibecompany.co/plugins/push-source#choose-authentication).
+- **Sources page in the web app** (`quivr-search`, **Sources** tab): paste a site
+  or feed address and the web app finds its RSS or Atom feed (refusing private
+  addresses), or add a suggested feed in one click from `DEMO_FEED_SUGGESTIONS`.
+  Each source shows its health and last article, and can be paused, resumed or
+  removed; a failing one can be checked again at once (**Réessayer**). Other kinds keep forms generated from their schemas, so new kinds need
+  no UI change ([guide](quivr-search/README.md#sources)).
+- **Live feed page in the web app** (**Veille** tab): everything entering the demo
+  Corpus, newest first, with source, time, title and excerpt. New items arrive over
+  SSE, which the app's server relays from the change feed, and can be filtered by
+  source ([guide](quivr-search/README.md#fil)).
+- **Operational metrics and correlated logs** on each process's private probe
+  listener (`/metrics`, Prometheus text, bounded labels):
+  - API: accepted commands and the pending-ingestion backlog;
+  - worker: processing outcomes, time from acceptance to searchable, and delivery
+    attempts and durations.
 
-while True:
-    # Get user input
-    question = Prompt.ask("[bold cyan]Question[/bold cyan]")
+  JSON logs link request, Receipt, Record and Version IDs
+  ([harness](docs/quivr-v2-local-harness.md)).
+- **Retrieval measurement** with a frozen workload (`make measure`), and **search
+  quality** on public French and English evaluation sets or a private set, nightly
+  (`make eval`, [guide](docs/agents/evaluation.md)).
+  Share measurements through MLflow with an offline outbox, paired comparisons and a
+  Pareto leaderboard ([results guide](docs/eval-results.md)).
+- **Bounded search campaigns** explore public settings with a persistent Pareto
+  front, daily/total caps, recoverable cleanup and daily summaries. Leads submit bounded
+  proposals and exact usage receipts ([guide](docs/search-campaigns.md)).
+  Configured campaigns confirm finalists on the full stack before opening settings PRs.
+- **Private news evaluation builder**: pluggable question generation, pooled judgments,
+  separate encrypted working/held-out sets and a human review sheet
+  ([contributor guide](docs/agents/news-set.md)); real provider runs are operator controlled.
+- **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
+  which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
+  schemas, secrets and limits.
+- **Plugin registry and activation without restart**: the plugins pinned at startup are
+  recorded in the database, with the active Pipeline Plan saying which plugin serves each role
+  (a media type, an alert rule, a connector kind, ingestion, retrieval). An operator key with
+  `plugins:admin`, which no Organization key gets, registers a plugin version running at an
+  address; Quivr checks it with the Contract Runner, and one call activates it as a new plan
+  that api and worker follow without restarting
+  ([Switch plugins without restarting](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting)).
+  Work already started (a receipt's processing, a connector run, a rebuild) finishes on the
+  plan it started on, even across a worker restart. The replaced version shows `draining`
+  with the count of work still pinned to it, then `inactive`. Work whose pinned plugin
+  disappears is quarantined with a diagnostic naming the plan and the plugin, never moved to
+  the new version. Quivr never starts a plugin process. One call rolls back to the previous
+  plan. A nightly run (`make measure-upgrade`) upgrades, drains, rolls back and backfills
+  under continuous ingestion and checks that no article is lost and the API keeps answering
+  ([Upgrade a plugin with no downtime](https://docs.quivr.thevibecompany.co/plugins/upgrade-a-plugin)).
+- **Backfill and vector space promotion**: an operator fills a new embedding model's
+  evaluation space for a Corpus's past articles, whole or for a window, after a dry run
+  of the volume, duration and cost (`POST /v0/admin/backfills`). The backfill runs paced
+  below live ingestion, can be paused, resumed or cancelled, and resumes from its
+  checkpoint after a restart. One call then makes search use the space, and the same
+  call on the former space goes back
+  ([Fill a new vector space for past articles](https://docs.quivr.thevibecompany.co/plugins/backfill-a-vector-space)).
+- **Plugin and search counters**: each process counts every plugin call, search,
+  processing step, document received (per source namespace) and Match, with errors and
+  latency, and writes the counts to PostgreSQL every few seconds
+  (`observability.flush_interval`, default 5 s, the most a crash can lose). A key with
+  `observability:read` reads its Organization's last hour, day or week from
+  `GET /v0/admin/stats/plugins`, `searches`, `steps`, `received`, `matches` and
+  `top-queries`; nothing is kept beyond 7 days. Top queries need `observability.record_query_text`, off
+  by default because it stores query text. The same counters are on `/metrics`.
+- **External normalizer**: the startup configuration pins one plugin and routes Blob
+  media types to its normalizer. A Blob of a routed type, ingested by reference,
+  becomes searchable through the plugin's Parts, and its Version shows
+  `provenance.normalization`. An unavailable plugin is retried and never blocks the
+  API or other ingestion. A plugin error, invalid output or exhausted retries quarantine
+  the Version with a structured diagnostic, and an `optional` text route falls back to
+  the built-in text path ([guide](https://docs.quivr.thevibecompany.co/plugins/pin)).
+- **Reprocessing quarantined Versions**: after a plugin fix or rollback, an operator
+  lists quarantined Versions, runs a dry run, then reprocesses them with the active
+  plan. The Operation is paced, resumable and keeps each Version's identity
+  ([guide](https://docs.quivr.thevibecompany.co/plugins/reprocess-quarantined-versions)).
+- **Plugin-owned extension namespaces**: the pinned plugin's declared namespaces are
+  registered at startup beside the built-in ones. Its normalizer's extensions are
+  validated against their schemas and published on the Version, clients cannot write
+  them (`422 extension_namespace_owned`), and retrieval mappings can map them into search.
+- **Go and Python Plugin SDKs** serve all five Contributions, with named source route handlers and an offline [push-source sample](plugins/push-source/README.md). Both kits support push
+  routes and attachments. `quivr plugin init` scaffolds normalizers, alert rules and pull or push sources, and `quivr plugin dev`, which runs it locally, checks its
+  discovery digest and replays a fixture through the engine's Manifest validation,
+  without a Quivr stack ([SDK guide](sdks/python/README.md)).
+- **Plugin Contract Runner** (`quivr plugin test`), which certifies a normalizer over
+  the public protocol, launched from its manifest or at `--endpoint <url>`. It runs
+  health, discovery, normative and plugin fixtures, deterministic replay, the declared
+  deadline, terminal errors for invalid requests, and compatibility ranges. It judges
+  output with the engine's own validation: Manifest rules, response size, input-Blob-only
+  Blob Parts and declared namespaces. It writes a JSON report with `--report`, and CI
+  publishes one for the `quivr plugin init` template.
+- **Searchable PDFs** through the reference plugin [`plugins/pdf-text`](plugins/pdf-text/README.md)
+  (pypdf, BSD-3-Clause). An `application/pdf` Blob becomes one `body` Part per page with
+  text, and a phrase is found on its page's Part. Blank or scanned pages give warnings;
+  encrypted or damaged PDFs are quarantined with a diagnostic naming the plugin.
+  `make dev` pins it by default; there is no OCR
+  ([guide](https://docs.quivr.thevibecompany.co/plugins/catalog#pdf-text)).
+- **`quivr search` from the command line**: set `QUIVR_API_URL` and `QUIVR_API_KEY`,
+  then `quivr search --corpus <corpus_id> "query"` prints ranked hits with their
+  excerpt and Record / Version / Part provenance, or the unchanged API response with
+  `--json`. Failures exit with one code per class (rejected key or scope, invalid
+  request, unreachable server). It uses a Go client generated from the contract
+  (package [`client`](client/)) and never touches the stack's storage
+  ([guide](https://docs.quivr.thevibecompany.co/guides/search#search-from-the-command-line)).
+- **AI agents search and cite Quivr over MCP**: `quivr mcp --profile read` serves an
+  agent on stdio with three read-only tools. The agent can list the Corpora its key
+  reaches, search them, and read a hit's Record Version and Manifest, keeping Record,
+  Version, Part and exact excerpt offsets to cite. `--profile ingest` adds text to a
+  Corpus and follows its Ingestion Receipt until it is searchable; retries never
+  duplicate, and no tool deletes. The API key alone decides access
+  ([Connect an AI agent](https://docs.quivr.thevibecompany.co/guides/ai-agents)).
+- **A guide to writing a normalizer**: scaffold, run, certify, pin, ingest and observe
+  your own plugin ([Write a normalizer](https://docs.quivr.thevibecompany.co/plugins/first-plugin)).
+- **Source collectors as plugins, in Go** (Plugin API 0.3): the connector contract
+  (`fetch` a page after an opaque checkpoint, `check_credential`, classified errors),
+  a Go Plugin SDK ([`sdks/go`](sdks/go/README.md)) that redacts credentials, and
+  `quivr plugin test` checks that pages resume from their checkpoint and that no
+  credential leaks. The core calls these plugins for scheduled and on-demand collection.
+- **Protected source pushes**: per-instance token buckets, TTL replay of
+  `Idempotency-Key` answers, optional CIDR allowlists with trusted proxy resolution,
+  and accepted/refused audit events with per-instance admin statistics.
+- **Segmentation and embedding as a plugin** (Plugin API 0.6, the `ingestion`
+  Contribution): a pinned plugin declares the vector spaces it owns, one served and
+  others for evaluation, cuts each article into segments with a vector per space and an
+  optional keyword text, and encodes queries for its spaces. A Corpus moves onto it
+  with a rebuild; `GET /v0/corpora/{id}/vector-spaces` shows each space's owner, role
+  and coverage ([Write an ingestion plugin](https://docs.quivr.thevibecompany.co/plugins/write-an-ingestion-plugin)).
+  The first-party [core.ingest](plugins/core-ingest/README.md) plugin (token windows,
+  E5) is pinned by default; the engine segments and embeds nothing itself.
+  Optional [hosted.embed](plugins/hosted-embed/README.md) selects a hosted model
+  or OpenAI-compatible server by configuration, with OpenAI and Cohere v2 formats.
+- **Search ranked by a plugin** (Plugin API 0.7, the `retrieval` Contribution): a
+  selected plugin answers each search in up to three rounds, asking the engine for
+  keyword, vector or hybrid candidates it has already authorized, then ranking them
+  with an explanation per hit, under named profiles with a latency and cost budget
+  (`GET /v0/search/profiles`). Several retrieval plugins can be pinned together:
+  search accepts full `plugin/profile` names or short names configured in
+  `retrieval.profiles`, including `default` ([Write a retrieval plugin](https://docs.quivr.thevibecompany.co/plugins/write-a-retrieval-plugin)).
+  The first-party [core.retrieve](plugins/core-retrieve/README.md) plugin (keywords,
+  vectors or both) is pinned by default; optional settings select vector weight,
+  candidate depth and relative-score or RRF fusion (defaults: alpha 0.5, search limit,
+  relative score). The engine ranks nothing itself.
 
-    # Check if user wants to exit
-    if question.lower() == "exit":
-        console.print(Panel("Goodbye!", style="bold yellow"))
-        break
+## What comes next
 
-    answer = brain.ask(question, retrieval_config=retrieval_config)
-    # Print the answer with typing effect
-    console.print(f"[bold green]Quivr Assistant[/bold green]: {answer.answer}")
+- Filtering on typed field mappings (filter roles are validated and stored today).
 
-    console.print("-" * console.width)
+## Documentation
 
-brain.print_info()
+The documentation site, [docs.quivr.thevibecompany.co](https://docs.quivr.thevibecompany.co),
+is written for people who use Quivr and write plugins: an introduction, the Quickstart,
+core concepts, plugin guides, task guides and the reference. Its source is
+[`docs-site/`](docs-site/); the HTTP, CLI, MCP and plugin references there are generated
+from the contracts.
+
+This repository keeps the documentation for contributors, listed per reader on the
+start pages generated from [`docs/inventory.toml`](docs/inventory.toml):
+
+- [Using Quivr](docs/start/functional.md): the READMEs of the contracts, the demo and the
+  deployment, and the generated references.
+- [Writing plugins](docs/start/plugin-author.md): the READMEs of the SDKs, the plugin
+  contract and the first-party plugins.
+- [Contributing to Quivr](docs/start/contributor.md): change this repository, as a person
+  or a coding agent.
+
+## Repository layout
+
+```text
+cmd/quivr/          single binary: API, worker, migrations
+internal/           domain modules (content, corpus, retrieval, changes, monitoring…)
+contracts/http/v0/  OpenAPI contract, examples and checks
+contracts/plugins/v0/ Plugin Protocol v0 schemas and normative fixtures
+sdks/go/            Go Plugin SDK for every Contribution
+sdks/python/        Python Plugin SDK
+plugins/pdf-text/   reference normalizer: PDF text, one Part per page
+migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)
+scripts/            local stack, verification and measurement tooling
+quivr-search/       demo web UI
+deploy/             Docker Compose and Railway deployment
+docs-site/          the public documentation site (Mintlify): authored MDX pages and generated references
+docs/               contributor documentation, ADRs (docs/adr/) and dated documents (docs/dated/)
+multimodal-rag/     earlier exploration (submodule), not the target architecture
 ```
 
-5. You are now all set up to talk with your brain and test different retrieval strategies by simply changing the configuration file!
+## Contributing
 
-## Go further
+- Read [`AGENTS.md`](AGENTS.md) and [`CONTEXT.md`](CONTEXT.md) first; use the domain
+  vocabulary in code and docs.
+- Change the contract in `contracts/http/v0/openapi.yaml`, then run `make generate`.
+- Run `make check` before pushing and keep `make verify` green; add tests with
+  every behaviour change.
+- Declare every new living doc page in [`docs/inventory.toml`](docs/inventory.toml)
+  with one line giving its audience and kind (the file's header explains both),
+  then run `make start-pages`; `make docs` fails on an undeclared page, a stale start
+  page, a broken relative link or a missing repository path, and names the fix.
+- Document user-facing behaviour on the site, in `docs-site/`, in the same pull request;
+  run `make docs-site` after a contract change. Show API requests there as
+  [runnable blocks](docs/runnable-guides.md), which `make verify` replays.
+- Never edit an accepted ADR or a dated document under `docs/dated/`: supersede it
+  with a new one ([ADR 0004](docs/adr/0004-documentation-rules-are-enforced-by-ci-only.md));
+  `make docs` compares them with where your branch forked from `origin/main`.
+- Pull request titles follow Commitizen conventions, for example
+  `feat(ingestion): accept record versions`.
+- Keep customer-specific formats and rules out of the core; they belong in plugins.
 
-You can go further with Quivr by adding internet search, adding tools, etc. Check the [documentation](https://core.quivr.com/) for more information.
+## License
 
-
-## Contributors ✨
-
-Thanks go to these wonderful people:
-<a href="https://github.com/quivrhq/quivr/graphs/contributors">
-<img src="https://contrib.rocks/image?repo=quivrhq/quivr" />
-</a>
-
-## Contribute 🤝
-
-Did you get a pull request? Open it, and we'll review it as soon as possible. Check out our project board [here](https://github.com/users/StanGirard/projects/5) to see what we're currently focused on, and feel free to bring your fresh ideas to the table!
-
-- [Open Issues](https://github.com/quivrhq/quivr/issues)
-- [Open Pull Requests](https://github.com/quivrhq/quivr/pulls)
-- [Good First Issues](https://github.com/quivrhq/quivr/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22)
-
-## Partners ❤️
-
-This project would not be possible without the support of our partners. Thank you for your support!
-
-
-<a href="https://ycombinator.com/">
-    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b2/Y_Combinator_logo.svg/1200px-Y_Combinator_logo.svg.png" alt="YCombinator" style="padding: 10px" width="70px">
-</a>
-<a href="https://www.theodo.fr/">
-  <img src="https://avatars.githubusercontent.com/u/332041?s=200&v=4" alt="Theodo" style="padding: 10px" width="70px">
-</a>
-
-## License 📄
-
-This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details
+MIT — see [LICENSE](LICENSE).

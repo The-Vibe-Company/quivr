@@ -1,0 +1,183 @@
+{
+ "runs": [
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "unauthorized",
+    "error_class": "access",
+    "page_in_run": 0,
+    "retry_after_seconds": 0,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 1
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "forbidden",
+    "error_class": "access",
+    "page_in_run": 0,
+    "retry_after_seconds": 0,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 3
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "credits_depleted",
+    "error_class": "access",
+    "page_in_run": 0,
+    "retry_after_seconds": 0,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 5
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "list_not_found",
+    "error_class": "access",
+    "page_in_run": 0,
+    "retry_after_seconds": 0,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 7
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "source_unavailable",
+    "error_class": "transient",
+    "page_in_run": 0,
+    "retry_after_seconds": 0,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 9
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "rate_limited",
+    "error_class": "transient",
+    "page_in_run": 0,
+    "retry_after_seconds": 420,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 11
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "rate_limited",
+    "error_class": "transient",
+    "page_in_run": 0,
+    "retry_after_seconds": 60,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 13
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "rate_limited",
+    "error_class": "transient",
+    "page_in_run": 0,
+    "retry_after_seconds": 900,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 15
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "list_not_found",
+    "error_class": "access",
+    "page_in_run": 0,
+    "retry_after_seconds": 0,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 18
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "forbidden",
+    "error_class": "access",
+    "page_in_run": 0,
+    "retry_after_seconds": 0,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 20
+  },
+  {
+   "checkpoint": null,
+   "error": {
+    "code": "unauthorized",
+    "error_class": "access",
+    "page_in_run": 0,
+    "retry_after_seconds": 0,
+    "x_requests": [
+     "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+    ]
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 22
+  },
+  {
+   "checkpoint": "not a checkpoint",
+   "error": {
+    "code": "invalid_checkpoint",
+    "error_class": "source",
+    "page_in_run": 0,
+    "retry_after_seconds": 0,
+    "x_requests": []
+   },
+   "pages": [],
+   "reads_today": 0,
+   "step": 23
+  }
+ ],
+ "scenario": "source_failures"
+}

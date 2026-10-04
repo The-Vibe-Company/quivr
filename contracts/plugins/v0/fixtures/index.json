@@ -1,0 +1,2308 @@
+{
+  "description": "Normative Plugin Protocol v0 fixtures. schema_valid is the outcome of JSON Schema validation alone; valid is the outcome after the semantic rules in ../README.md. errors lists the exact set of error codes quivr plugin inspect (manifests), the engine Manifest validation (normalizer responses) the engine subscription output validation (subscription responses, judged against the request named by request), the engine connector output validation (connector fetch responses, judged against the request named by request and the manifest named by manifest) or the engine ingestion output validation (segment_and_embed and embed_query answers, judged the same way) reports or the engine retrieval output validation (search answers, judged against the request named by request and the manifest named by manifest) reports.",
+  "cases": [
+    {
+      "file": "manifests/valid/full.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Every Plugin API 0.1 manifest field."
+    },
+    {
+      "file": "manifests/valid/minimal.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Required fields only; defaults apply."
+    },
+    {
+      "file": "manifests/invalid/bad-range.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_range"
+      ],
+      "description": "Caret shorthand is outside the range grammar."
+    },
+    {
+      "file": "manifests/invalid/unsatisfiable-range.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_range"
+      ],
+      "description": "Well-formed but unsatisfiable range."
+    },
+    {
+      "file": "manifests/invalid/incompatible-plugin-api.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "No Plugin API version this engine supports (0.1.0, 0.2.0) is inside the declared range."
+    },
+    {
+      "file": "manifests/invalid/incompatible-engine.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_engine"
+      ],
+      "description": "Engine 0.2.0 is outside the declared range."
+    },
+    {
+      "file": "manifests/invalid/reserved-contribution.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "reserved_contribution"
+      ],
+      "description": "enricher is reserved in Plugin API 0.1."
+    },
+    {
+      "file": "manifests/invalid/foreign-namespace.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "foreign_namespace"
+      ],
+      "description": "Namespace not prefixed by the plugin id followed by a dot."
+    },
+    {
+      "file": "manifests/invalid/invalid-config-schema.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_config_schema"
+      ],
+      "description": "Configuration schema is not valid JSON Schema."
+    },
+    {
+      "file": "manifests/invalid/invalid-extension-schema.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_extension_schema"
+      ],
+      "description": "Extension schema is not valid JSON Schema."
+    },
+    {
+      "file": "manifests/invalid/unknown-field.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Unknown field in the normalizer Contribution."
+    },
+    {
+      "file": "manifests/invalid/duplicate-secret.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_secret"
+      ],
+      "description": "Secret declared twice."
+    },
+    {
+      "file": "requests/signed-url.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Signed GET URL reference with submitted extensions and provenance."
+    },
+    {
+      "file": "requests/file-reference.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Local-development file reference."
+    },
+    {
+      "file": "requests/inline-content.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Bodies are never inline."
+    },
+    {
+      "file": "requests/missing-sha256.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Input checksum is required."
+    },
+    {
+      "file": "requests/missing-record-version.json",
+      "schema": "normalizer-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Record Version identity is required."
+    },
+    {
+      "file": "responses/pages.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Blob Part plus page Parts, Relation, extensions, language, warning."
+    },
+    {
+      "file": "responses/minimal.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "One text Part."
+    },
+    {
+      "file": "responses/duplicate-part-keys.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "description": "Part keys must be unique; schema cannot express it."
+    },
+    {
+      "file": "responses/cyclic-parents.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "description": "Parent references must be acyclic."
+    },
+    {
+      "file": "responses/unknown-parent.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "description": "parent_key must name a Part of the same Manifest."
+    },
+    {
+      "file": "responses/missing-role.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Every Part has a role."
+    },
+    {
+      "file": "responses/wrong-manifest-kind.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "The Manifest kind is manifest."
+    },
+    {
+      "file": "responses/unknown-field.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Unknown response fields are rejected."
+    },
+    {
+      "file": "responses/too-many-warnings.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "At most 32 warnings."
+    },
+    {
+      "file": "responses/no-parts.json",
+      "schema": "normalizer-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "At least one Part."
+    },
+    {
+      "file": "protocol/discovery.json",
+      "schema": "discovery.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Discovery document."
+    },
+    {
+      "file": "protocol/discovery-reserved.json",
+      "schema": "discovery.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Discovery may list only normalizer and subscription in v0."
+    },
+    {
+      "file": "protocol/health-ok.json",
+      "schema": "health.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Healthy plugin."
+    },
+    {
+      "file": "protocol/error-retryable.json",
+      "schema": "error.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Retryable error."
+    },
+    {
+      "file": "protocol/error-terminal.json",
+      "schema": "error.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Terminal error."
+    },
+    {
+      "file": "protocol/error-missing-retryable.json",
+      "schema": "error.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "retryable is mandatory."
+    },
+    {
+      "file": "invocations/markdown.json",
+      "schema": "plugin-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Invocation fixture with a local input file, configuration and source identity."
+    },
+    {
+      "file": "invocations/missing-media-type.json",
+      "schema": "plugin-fixture.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "An invocation fixture must declare the input media type."
+    },
+    {
+      "file": "manifests/valid/subscription.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "An alert-rule plugin: subscription Contribution with a discriminated expression schema, every subscription field."
+    },
+    {
+      "file": "manifests/invalid/subscription-plugin-api-0.1.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "subscription exists since Plugin API 0.2; the declared range admits only 0.1."
+    },
+    {
+      "file": "manifests/invalid/subscription-invalid-schemas.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_config_schema",
+        "invalid_expression_schema"
+      ],
+      "description": "expression_schema and configuration_schema must compile as JSON Schema 2020-12."
+    },
+    {
+      "file": "manifests/invalid/subscription-vectors.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "Vector opt-in requires a range admitting Plugin API 0.10."
+    },
+    {
+      "file": "manifests/invalid/no-contribution.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A manifest declares at least one Contribution."
+    },
+    {
+      "file": "requests/subscription/valid.json",
+      "schema": "subscription-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "One Record Version with its metadata (source, acceptance time, connector provenance, extensions) and two distinct evaluations; the first stands for two Subscriptions."
+    },
+    {
+      "file": "requests/subscription/missing-record.json",
+      "schema": "subscription-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "The evaluated Record Version is mandatory."
+    },
+    {
+      "file": "requests/subscription/empty-evaluations.json",
+      "schema": "subscription-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A request carries at least one evaluation."
+    },
+    {
+      "file": "requests/subscription/reserved-vector.json",
+      "schema": "subscription-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Part vectors are reserved and never sent in Plugin API 0.2."
+    },
+    {
+      "file": "requests/subscription/unknown-origin.json",
+      "schema": "subscription-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Provenance origin is client or connector."
+    },
+    {
+      "file": "responses/subscription/valid.json",
+      "schema": "subscription-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [],
+      "description": "A match with evidence and a no_match."
+    },
+    {
+      "file": "responses/subscription/explanation-at-limit.json",
+      "schema": "subscription-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [],
+      "description": "An explanation of exactly 4096 code points (more than 4096 bytes) and a not_ready."
+    },
+    {
+      "file": "responses/subscription/missing-decision.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "missing_decision"
+      ],
+      "description": "Evaluation e2 is not answered."
+    },
+    {
+      "file": "responses/subscription/duplicate-decision.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "duplicate_decision"
+      ],
+      "description": "Evaluation e1 is answered twice."
+    },
+    {
+      "file": "responses/subscription/unknown-decision.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "unknown_decision"
+      ],
+      "description": "A decision answers an id the request does not carry."
+    },
+    {
+      "file": "responses/subscription/unknown-part-key.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "unknown_part_key"
+      ],
+      "description": "Evidence names a Part key the request does not carry."
+    },
+    {
+      "file": "responses/subscription/match-without-evidence.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "missing_evidence"
+      ],
+      "description": "A match needs evidence with an explanation."
+    },
+    {
+      "file": "responses/subscription/explanation-too-long.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "evidence_too_large"
+      ],
+      "description": "An explanation of 4097 code points."
+    },
+    {
+      "file": "responses/subscription/too-many-part-keys.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "evidence_too_large"
+      ],
+      "description": "101 Part keys."
+    },
+    {
+      "file": "responses/subscription/details-too-large.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "details_too_large"
+      ],
+      "description": "Details over 16 KiB once serialized."
+    },
+    {
+      "file": "responses/subscription/nul-in-evidence.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "invalid_evidence"
+      ],
+      "description": "Evidence with a NUL character, which the engine cannot store."
+    },
+    {
+      "file": "responses/subscription/unknown-decision-value.json",
+      "schema": "subscription-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "request": "requests/subscription/valid.json",
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Decisions are match, no_match or not_ready."
+    },
+    {
+      "file": "subscriptions/strike.json",
+      "schema": "subscription-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Subscription fixture: record Parts and two evaluations with expected decisions."
+    },
+    {
+      "file": "subscriptions/metadata.json",
+      "schema": "subscription-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A subscription fixture carrying record metadata: source, acceptance time, provenance and extensions."
+    },
+    {
+      "file": "subscriptions/missing-expression.json",
+      "schema": "subscription-fixture.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Every fixture evaluation carries an expression."
+    },
+    {
+      "file": "manifests/valid/connector.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A connector Plugin API 0.3 manifest: two kinds, with and without a credential."
+    },
+    {
+      "file": "manifests/invalid/connector-push-mode.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "The push mode needs a plugin_api range that admits 0.5."
+    },
+    {
+      "file": "manifests/invalid/connector-plugin-api-0.2.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "connector needs a plugin_api range that admits 0.3."
+    },
+    {
+      "file": "manifests/invalid/connector-invalid-schemas.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_config_schema",
+        "invalid_credential_schema"
+      ],
+      "description": "Kind config and credential schemas must compile."
+    },
+    {
+      "file": "manifests/invalid/connector-no-kinds.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A connector declares at least one kind."
+    },
+    {
+      "file": "manifests/valid/connector-scoped.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Plugin API 0.3.1: an underscore in the plugin id and extension namespace, and a declared max_checkpoint_bytes."
+    },
+    {
+      "file": "manifests/invalid/connector-checkpoint-bound-too-large.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "max_checkpoint_bytes is at most 1 MiB."
+    },
+    {
+      "file": "requests/connector/fetch.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A fetch resuming after a checkpoint."
+    },
+    {
+      "file": "requests/connector/fetch-first-run.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "The first fetch of a kind without a credential: null checkpoint and credential."
+    },
+    {
+      "file": "requests/connector/fetch-missing-checkpoint.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "checkpoint is required, null on a first run."
+    },
+    {
+      "file": "requests/connector/fetch-negative-page.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "page_in_run counts from 0."
+    },
+    {
+      "file": "requests/connector/fetch-bad-kind.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A kind name is lowercase letters, digits and underscores."
+    },
+    {
+      "file": "requests/connector/check-credential.json",
+      "schema": "connector-check-credential-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A credential check."
+    },
+    {
+      "file": "requests/connector/check-credential-with-checkpoint.json",
+      "schema": "connector-check-credential-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A credential check carries no checkpoint."
+    },
+    {
+      "file": "responses/connector/valid.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Text, a Manifest, a withdrawal, declared extensions, more pages."
+    },
+    {
+      "file": "responses/connector/empty.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Nothing new: no items, the checkpoint unchanged."
+    },
+    {
+      "file": "responses/connector/not-due.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "The source asked not to be polled yet."
+    },
+    {
+      "file": "responses/connector/not-due-moved-checkpoint.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_not_due"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "not_due must return the request's checkpoint unchanged."
+    },
+    {
+      "file": "responses/connector/withdraw-with-content.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "A withdrawal carries no content."
+    },
+    {
+      "file": "responses/connector/no-content.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "An item has content or withdraw: true."
+    },
+    {
+      "file": "responses/connector/duplicate-record-key.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_record_key"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Each Record Key appears once per page."
+    },
+    {
+      "file": "responses/connector/blob-part.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "blob_part_not_allowed"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "A connector Manifest carries no Blob Parts; binary Parts are attachments."
+    },
+    {
+      "file": "responses/connector/attachments-beside-text.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-attachments.yaml",
+      "description": "Attachments are Parts of a Manifest, not of text content."
+    },
+    {
+      "file": "responses/connector/attachment-unknown-parent.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-attachments.yaml",
+      "description": "An attachment's parent_key names a Part of the item."
+    },
+    {
+      "file": "responses/connector/undeclared-namespace.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "undeclared_namespace"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Item extensions use only namespaces the plugin declares."
+    },
+    {
+      "file": "responses/connector/too-many-items.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_items"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "More items than the declared max_items (50)."
+    },
+    {
+      "file": "responses/connector/checkpoint-too-large.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "checkpoint_too_large"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "A checkpoint over 64 KiB."
+    },
+    {
+      "file": "responses/connector/checkpoint-too-large.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-scoped.yaml",
+      "description": "The same checkpoint is accepted from a manifest that declares max_checkpoint_bytes 256 KiB."
+    },
+    {
+      "file": "responses/connector/diagnostics-too-large.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "diagnostics_too_large"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Diagnostics over 16 KiB."
+    },
+    {
+      "file": "responses/connector/missing-checkpoint.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "checkpoint is required; return the request's when nothing moved."
+    },
+    {
+      "file": "responses/connector/unknown-field.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Unknown fields are rejected."
+    },
+    {
+      "file": "responses/connector/credential-ok.json",
+      "schema": "connector-check-credential-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "The source accepts the credential until expires_at."
+    },
+    {
+      "file": "responses/connector/credential-invalid-status.json",
+      "schema": "connector-check-credential-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A refused credential is an error envelope with error_class access, not a status."
+    },
+    {
+      "file": "manifests/valid/connector-attachments.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A connector Plugin API 0.4 manifest that declares attachments."
+    },
+    {
+      "file": "manifests/invalid/connector-attachments-plugin-api-0.3.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "attachments need a plugin_api range that admits 0.4."
+    },
+    {
+      "file": "manifests/invalid/connector-attachments-too-large.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "attachments.max_bytes can only lower the engine's 25 MiB cap."
+    },
+    {
+      "file": "responses/connector/attachments.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-attachments.yaml",
+      "description": "Attachments, one with its exact size and SHA-256, declared by the manifest."
+    },
+    {
+      "file": "responses/connector/attachments-undeclared.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "attachments_unsupported"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Attachments need contributions.connector.attachments."
+    },
+    {
+      "file": "responses/connector/attachment-exact-too-large.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "attachment_too_large"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-attachments.yaml",
+      "description": "An exact size above attachments.max_bytes."
+    },
+    {
+      "file": "responses/connector/attachment-sha256-without-size.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-attachments.yaml",
+      "description": "sha256 needs the exact size_bytes."
+    },
+    {
+      "file": "requests/connector/describe-attachment.json",
+      "schema": "connector-describe-attachment-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The core asks for one attachment's size and SHA-256."
+    },
+    {
+      "file": "requests/connector/describe-attachment-no-item.json",
+      "schema": "connector-describe-attachment-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A describe request names the item."
+    },
+    {
+      "file": "requests/connector/upload-attachment.json",
+      "schema": "connector-upload-attachment-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The core has the plugin upload one attachment to a presigned PUT."
+    },
+    {
+      "file": "requests/connector/upload-attachment-post.json",
+      "schema": "connector-upload-attachment-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A grant is always a PUT."
+    },
+    {
+      "file": "responses/connector/describe-size.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The exact size and SHA-256.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/describe-skip.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A skip that records the skipped attachment in the item's extensions.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/describe-too-large.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "attachment_too_large"
+      ],
+      "description": "A size above attachments.max_bytes is answered as a skip.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/describe-undeclared-namespace.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "undeclared_namespace"
+      ],
+      "description": "item_extensions use only declared namespaces.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/describe-size-and-skip.json",
+      "schema": "connector-describe-attachment-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A describe answer is a size or a skip, not both.",
+      "manifest": "manifests/valid/connector-attachments.yaml"
+    },
+    {
+      "file": "responses/connector/upload-uploaded.json",
+      "schema": "connector-upload-attachment-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The bytes were uploaded."
+    },
+    {
+      "file": "responses/connector/upload-other-status.json",
+      "schema": "connector-upload-attachment-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "The only upload status is uploaded."
+    },
+    {
+      "file": "protocol/error-connector-access.json",
+      "schema": "error.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A connector access error."
+    },
+    {
+      "file": "protocol/error-connector-rate-limited.json",
+      "schema": "error.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A transient connector error with a retry delay."
+    },
+    {
+      "file": "protocol/error-retry-after-without-class.json",
+      "schema": "error.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "retry_after_seconds comes with a class."
+    },
+    {
+      "file": "protocol/error-unknown-class.json",
+      "schema": "error.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "class is access, transient or source."
+    },
+    {
+      "file": "protocol/discovery-connector.json",
+      "schema": "discovery.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Discovery of a connector plugin."
+    },
+    {
+      "file": "connectors/feed.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A connector fixture with expected pages and credential check."
+    },
+    {
+      "file": "connectors/refused-token.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A connector fixture expecting an access error."
+    },
+    {
+      "file": "connectors/missing-kind.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A connector fixture names its kind."
+    },
+    {
+      "file": "manifests/valid/connector-push.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A connector Plugin API 0.5 manifest whose kind declares pull and push."
+    },
+    {
+      "file": "manifests/invalid/connector-push-without-pull.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_modes"
+      ],
+      "description": "A push kind also declares pull, the fallback."
+    },
+    {
+      "file": "requests/connector/fetch-push.json",
+      "schema": "connector-fetch-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A fetch for a push kind carries the instance's public webhook_url."
+    },
+    {
+      "file": "requests/connector/receive.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A relayed signed delivery: raw body in base64, lowercase header names."
+    },
+    {
+      "file": "requests/connector/receive-challenge.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A relayed verification challenge (GET with a query string, no body)."
+    },
+    {
+      "file": "requests/connector/receive-put.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Only GET and POST are relayed."
+    },
+    {
+      "file": "requests/connector/receive-no-request.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A receive request carries the relayed request."
+    },
+    {
+      "file": "requests/connector/receive-uppercase-header.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "Relayed header names are lowercase."
+    },
+    {
+      "file": "responses/connector/receive-accepted.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "An accepted delivery with one item and a read."
+    },
+    {
+      "file": "responses/connector/receive-challenge.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A challenge answered: accepted, no items, the answer in the body."
+    },
+    {
+      "file": "responses/connector/receive-refused.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A delivery refused with a 4xx answer."
+    },
+    {
+      "file": "responses/connector/receive-refused-with-items.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_verdict"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A refused delivery carries no items."
+    },
+    {
+      "file": "responses/connector/receive-accepted-4xx.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_verdict"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "An accepted delivery is answered with a 2xx status."
+    },
+    {
+      "file": "responses/connector/receive-refused-2xx.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_verdict"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A refused delivery is answered with a 4xx status."
+    },
+    {
+      "file": "responses/connector/receive-attachments.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "Items in a delivery carry no attachments."
+    },
+    {
+      "file": "responses/connector/receive-undeclared-namespace.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "undeclared_namespace"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "Delivered items use only declared namespaces."
+    },
+    {
+      "file": "responses/connector/receive-checkpoint.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A receive answer carries no checkpoint: pull runs own it."
+    },
+    {
+      "file": "responses/connector/receive-header-injection.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "content_type is one header value, without line breaks."
+    },
+    {
+      "file": "responses/connector/push-active.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "The push channel is active; pull relaxes to a 15-minute safety net."
+    },
+    {
+      "file": "responses/connector/push-failed.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "The source invalidated the webhook: an access failure, polling carries on."
+    },
+    {
+      "file": "responses/connector/push-pending.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "Push is not set up yet, with the reason."
+    },
+    {
+      "file": "responses/connector/push-failed-without-class.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_push_status"
+      ],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A failed push status carries an error_class and a code."
+    },
+    {
+      "file": "responses/connector/push-active-with-error.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_push_status"
+      ],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "An active push status carries no error."
+    },
+    {
+      "file": "responses/connector/push-pending-with-interval.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_push_status"
+      ],
+      "request": "requests/connector/fetch-push.json",
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "poll_interval_seconds goes only with state active."
+    },
+    {
+      "file": "responses/connector/push-active.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_push_status"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "Only a plugin whose kinds declare push reports a push status."
+    },
+    {
+      "file": "connectors/push.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "A connector fixture with receive cases: a signed delivery, a challenge and a wrong signature."
+    },
+    {
+      "file": "connectors/push-body-twice.json",
+      "schema": "connector-fixture.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "description": "A receive case has a text body or a base64 body, not both."
+    },
+    {
+      "file": "manifests/valid/ingestion.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Two vector spaces of an ingestion plugin (Plugin API 0.6)."
+    },
+    {
+      "file": "manifests/invalid/ingestion-foreign-space.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "foreign_space"
+      ],
+      "description": "A space id must be the plugin id or start with it."
+    },
+    {
+      "file": "manifests/invalid/ingestion-plugin-api-0.5.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "The ingestion Contribution exists since Plugin API 0.6."
+    },
+    {
+      "file": "manifests/invalid/ingestion-price-plugin-api-0.8.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "A vector space's input_price exists since Plugin API 0.9."
+    },
+    {
+      "file": "manifests/invalid/ingestion-bad-space.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Zero dimensions, an unknown metric and an unknown modality."
+    },
+    {
+      "file": "requests/ingestion/segment-and-embed.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A titled Version to embed in two spaces."
+    },
+    {
+      "file": "requests/ingestion/segment-and-embed-body-only.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A Version without a title Part, one space."
+    },
+    {
+      "file": "requests/ingestion/segment-only.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "No space: the segments only, without vectors (since Plugin API 0.8)."
+    },
+    {
+      "file": "requests/ingestion/segment-and-embed-no-parts.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "At least one Part is sent."
+    },
+    {
+      "file": "requests/ingestion/embed-query.json",
+      "schema": "ingestion-embed-query-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Encode a text query in one space."
+    },
+    {
+      "file": "requests/ingestion/embed-query-image.json",
+      "schema": "ingestion-embed-query-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "Plugin API 0.6 queries are text only."
+    },
+    {
+      "file": "requests/ingestion/embed-query-missing-space.json",
+      "schema": "ingestion-embed-query-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "The space is required."
+    },
+    {
+      "file": "responses/ingestion/valid.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Two segments, a vector per requested space, lexical text and provenance."
+    },
+    {
+      "file": "responses/ingestion/segment-only.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-only.json",
+      "description": "Segments without vectors, for a request that asks for no space."
+    },
+    {
+      "file": "responses/ingestion/title-only.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "An empty segment stands for the title alone when the request has a title Part."
+    },
+    {
+      "file": "responses/ingestion/title-only.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "empty_segment",
+        "unrequested_space"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed-body-only.json",
+      "description": "Without a title Part an empty segment is refused; the large space was not requested."
+    },
+    {
+      "file": "responses/ingestion/unknown-part-key.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "unknown_part_key"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A segment cut from a Part the request does not carry."
+    },
+    {
+      "file": "responses/ingestion/offset-out-of-range.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "offset_out_of_range"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "The end is past the Part's last code point."
+    },
+    {
+      "file": "responses/ingestion/start-after-end.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "offset_out_of_range"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "start > end."
+    },
+    {
+      "file": "responses/ingestion/duplicate-segment.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_segment"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "The same Part and offsets twice."
+    },
+    {
+      "file": "responses/ingestion/too-many-segments.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_segments"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Five segments; the manifest declares max_segments 4."
+    },
+    {
+      "file": "responses/ingestion/missing-vector.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "missing_vector"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A requested space without a vector."
+    },
+    {
+      "file": "responses/ingestion/unrequested-space.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "unrequested_space"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A vector for a space the request does not ask for."
+    },
+    {
+      "file": "responses/ingestion/dimension-mismatch.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "dimension_mismatch"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Two numbers in a six-dimension space."
+    },
+    {
+      "file": "responses/ingestion/zero-cosine-vector.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_vector"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "An all-zero vector has no direction under the cosine metric."
+    },
+    {
+      "file": "responses/ingestion/zero-dot-vector.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "An all-zero vector is allowed under the dot metric."
+    },
+    {
+      "file": "responses/ingestion/float32-overflow.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_vector"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "1e39 does not fit a 32-bit float."
+    },
+    {
+      "file": "responses/ingestion/lexical-text-too-large.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "lexical_text_too_large"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "16385 code points of lexical text."
+    },
+    {
+      "file": "responses/ingestion/lexical-text-at-limit.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "16384 code points, counted as code points, not bytes."
+    },
+    {
+      "file": "responses/ingestion/nul-lexical-text.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_lexical_text"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A NUL character in the lexical text."
+    },
+    {
+      "file": "responses/ingestion/provenance-too-large.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "provenance_too_large"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Provenance larger than 4 KiB."
+    },
+    {
+      "file": "responses/ingestion/unknown-field.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "Unknown fields are refused."
+    },
+    {
+      "file": "responses/ingestion/no-segments.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "An answer has at least one segment."
+    },
+    {
+      "file": "responses/ingestion/string-vector.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "A vector is an array of numbers."
+    },
+    {
+      "file": "responses/ingestion/embed-query-valid.json",
+      "schema": "ingestion-embed-query-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/embed-query.json",
+      "description": "One vector of the space's four dimensions."
+    },
+    {
+      "file": "responses/ingestion/embed-query-dimension-mismatch.json",
+      "schema": "ingestion-embed-query-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "dimension_mismatch"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/embed-query.json",
+      "description": "Three numbers in a four-dimension space."
+    },
+    {
+      "file": "responses/ingestion/embed-query-extra.json",
+      "schema": "ingestion-embed-query-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/embed-query.json",
+      "description": "Unknown fields are refused."
+    },
+    {
+      "file": "ingestion/article.json",
+      "schema": "ingestion-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "The normative article every ingestion plugin is certified with."
+    },
+    {
+      "file": "manifests/valid/retrieval.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Two profiles and limits of a retrieval plugin (Plugin API 0.7)."
+    },
+    {
+      "file": "manifests/valid/retrieval-deep-only.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A retrieval plugin may serve only deep; default is a deployment alias."
+    },
+    {
+      "file": "manifests/invalid/retrieval-plugin-api-0.6.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "The retrieval Contribution exists since Plugin API 0.7."
+    },
+    {
+      "file": "manifests/invalid/retrieval-bad-limits.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "More than 3 rounds, k over 100 and a profile name with a capital letter."
+    },
+    {
+      "file": "requests/retrieval/search-round-1.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Round 1: the query, the scope, the profile and one served space."
+    },
+    {
+      "file": "requests/retrieval/search-round-2.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Round 2: the candidates served for two requests of round 1."
+    },
+    {
+      "file": "requests/retrieval/search-round-4.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A search has at most 3 rounds."
+    },
+    {
+      "file": "requests/retrieval/search-missing-spaces.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "The spaces list is always sent, possibly empty."
+    },
+    {
+      "file": "responses/retrieval/requests.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "Round 1 asks for keyword and vector candidates."
+    },
+    {
+      "file": "responses/retrieval/ranking.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "Round 2 ranks served candidates, with an explanation."
+    },
+    {
+      "file": "responses/retrieval/ranking-empty.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "An empty ranking is a valid answer."
+    },
+    {
+      "file": "responses/retrieval/unserved-candidate.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "unserved_candidate"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "A hit the core never served in this search."
+    },
+    {
+      "file": "responses/retrieval/duplicate-hit.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "duplicate_hit"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "A segment ranked twice."
+    },
+    {
+      "file": "responses/retrieval/too-many-hits.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_hits"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "More hits than the search's limit."
+    },
+    {
+      "file": "responses/retrieval/too-many-rounds.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_rounds"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-2.json",
+      "description": "More candidates asked in the manifest's last round (max_rounds 2)."
+    },
+    {
+      "file": "responses/retrieval/too-many-requests.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "too_many_requests"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "Three requests; the manifest allows two per round."
+    },
+    {
+      "file": "responses/retrieval/candidate-limit.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "candidate_limit"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "k over the manifest's max_candidates."
+    },
+    {
+      "file": "responses/retrieval/unknown-space.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "unknown_space"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "A space the search does not offer."
+    },
+    {
+      "file": "responses/retrieval/dimension-mismatch.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "dimension_mismatch"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "A query vector with the wrong dimensions."
+    },
+    {
+      "file": "responses/retrieval/filter-outside-scope.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "filter_outside_scope"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "A filter that widens the search's scope."
+    },
+    {
+      "file": "responses/retrieval/requests-and-ranking.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "Requests and a ranking together."
+    },
+    {
+      "file": "responses/retrieval/bm25-with-space.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "bm25 takes no space."
+    },
+    {
+      "file": "responses/retrieval/near-vector-without-query.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/retrieval.yaml",
+      "request": "requests/retrieval/search-round-1.json",
+      "description": "near_vector needs query_text or a vector."
+    },
+    {
+      "file": "requests/subscription/vectors.json",
+      "schema": "subscription-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "description": "Plugin API 0.10 optional canonical Part segment vectors and immutable query vectors identify their common space."
+    },
+    {
+      "file": "manifests/valid/connector-instance-token.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Plugin API 0.12 routes authenticate an instance token."
+    },
+    {
+      "file": "manifests/invalid/connector-instance-token-old-version.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "Instance token routes require Plugin API 0.12 or later."
+    },
+    {
+      "file": "manifests/valid/connector-api.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true
+    },
+    {
+      "file": "manifests/invalid/connector-api-old-version.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-duplicate-name.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-ambiguous-path.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-bad-schema.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-without-push.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-unsupported-auth.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "manifests/invalid/connector-api-unsafe-path.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ]
+    },
+    {
+      "file": "requests/connector/receive-api.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": true,
+      "schema_valid": true
+    },
+    {
+      "file": "requests/connector/receive-api-no-body.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ]
+    },
+    {
+      "file": "requests/connector/receive-api-challenge.json",
+      "schema": "connector-receive-request.schema.json",
+      "valid": true,
+      "schema_valid": true
+    },
+    {
+      "file": "manifests/valid/connector-api-signature.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Signature routes declare provider header, optional Unix timestamp and replay window."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-missing-metadata.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses missing-metadata."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-bad-window.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses bad-window."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-unsafe-header.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses unsafe-header."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-key-metadata.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses key-metadata."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-reserved-header.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_connector_api"
+      ],
+      "description": "Signature policy refuses reserved-header."
+    },
+    {
+      "file": "manifests/invalid/connector-signature-old-version.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "Signature routes require Plugin API 0.12."
+    },
+    {
+      "file": "manifests/valid/profile-candidates.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Profile dependency declaration; installation is checked separately."
+    },
+    {
+      "file": "manifests/invalid/profile-candidates-old-api.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "requires cannot negotiate a version with profile candidates."
+    },
+    {
+      "file": "manifests/invalid/profile-candidates-range.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_range"
+      ],
+      "description": "Unsatisfiable dependency version range."
+    },
+    {
+      "file": "requests/retrieval/search-profile-budget.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": []
+    },
+    {
+      "file": "responses/retrieval/profile-candidates.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidates.json"
+    },
+    {
+      "file": "responses/retrieval/profile-undeclared.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "plugin_dependency"
+      ],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidates.json"
+    },
+    {
+      "file": "responses/retrieval/profile-with-space.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidates.json"
+    },
+    {
+      "file": "requests/retrieval/search-profile-served.json",
+      "schema": "retrieval-search-request.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": []
+    },
+    {
+      "file": "responses/retrieval/hybrid-with-profile.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidates.json"
+    },
+    {
+      "file": "responses/retrieval/profile-mode.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidate-mode.json",
+      "description": "Profile candidate mode override."
+    },
+    {
+      "file": "responses/retrieval/profile-mode-invalid.json",
+      "schema": "retrieval-search-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/retrieval/search-profile-budget.json",
+      "manifest": "manifests/valid/profile-candidate-mode.json",
+      "description": "Unknown profile candidate mode is refused."
+    },
+    {
+      "file": "manifests/valid/profile-candidate-mode.json",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "A composing plugin speaking profile candidate mode."
+    }
+  ]
+}

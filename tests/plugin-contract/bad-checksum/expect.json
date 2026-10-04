@@ -1,0 +1,6 @@
+{
+  "description": "A Blob Part that names a Blob by the checksum of other bytes instead of the verified input Blob.",
+  "certified": false,
+  "check": "invoke",
+  "code": "foreign_blob"
+}

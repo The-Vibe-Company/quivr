@@ -1,0 +1,55 @@
+{
+  "$schema": "https://skillpack.app/schemas/companion-manifest.v2.schema.json",
+  "name": "design-frontend-dev",
+  "version": "3.2.0",
+  "title": "Design frontend",
+  "description": "Clean agent-only frontend design and UI review skill derived from Impeccable, without CLI, hooks, live mode, install flow, site, or commercial surface.",
+  "notes": "## What it does\n\nImpeccable helps agents design, critique, audit, polish, harden, optimize, adapt, clarify, colorize, animate, and improve frontend interfaces. It covers brand sites, landing pages, dashboards, app shells, components, forms, onboarding, empty states, accessibility, responsive behavior, visual hierarchy, UX copy, motion, design systems, and AI-looking UI cleanup.\n\n## Clean Companion edition\n\nThis package is derived from `pbakaus/impeccable` under Apache-2.0, based on upstream commit `3590bf9e37c84ecbc92f9c205ce1aebf2185a971` from 2026-06-25. It intentionally removes the upstream CLI, hooks, live browser mode, install flow, site, extension, marketing material, and bundled scripts. It keeps the agent-readable design logic and focused references.\n\n## Usage\n\nUse it directly for frontend design work, or as a dependency for review skills that need stronger frontend judgment. When used inside another skill, the owner skill's safety rules still win.",
+  "metadata": {
+    "companionSkillId": "02decff6-b4ac-4d06-a494-abeeb08db9f3",
+    "changelog": [
+      {
+        "version": "3.2.0",
+        "date": "2026-09-23",
+        "changes": [
+          "Include Skillpack activation reporting with optional identity, telemetry opt-out, and non-blocking delivery."
+        ]
+      },
+      {
+        "version": "3.1.1",
+        "date": "2026-07-03",
+        "changes": [
+          "Publish version 3.1.1."
+        ]
+      },
+      {
+        "version": "3.1.0",
+        "date": "2026-06-26",
+        "changes": [
+          "Package clean agent-only Impeccable edition from pbakaus/impeccable upstream 3.1.0.",
+          "Remove CLI, hooks, live mode, install commands, site, extension, scripts, and commercial surface.",
+          "Keep Apache-2.0 attribution and selected frontend design, audit, accessibility, responsive, motion, typography, layout, and UX references."
+        ]
+      }
+    ]
+  },
+  "environment": {
+    "env": {},
+    "secrets": {}
+  },
+  "dependencies": {},
+  "commands": [
+    {
+      "name": "Review frontend quality",
+      "desc": "Audit a UI for accessibility, responsive behavior, design-system drift, UX copy, performance, and AI-looking patterns."
+    },
+    {
+      "name": "Polish a surface",
+      "desc": "Run a final production-quality pass over spacing, typography, states, copy, contrast, edge cases, and responsive behavior."
+    },
+    {
+      "name": "Shape a feature",
+      "desc": "Plan UX and UI direction before implementation."
+    }
+  ]
+}

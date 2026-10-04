@@ -1,0 +1,86 @@
+---
+title: "X lists"
+description: "Collect the posts of an X list, follow edits and deletions, and receive posts in real time."
+keywords: ["x", "twitter", "list", "posts", "x_list", "webhooks", "connector"]
+---
+
+The `x_list` kind collects the posts of one X list through the X API v2. Each post becomes a Record; an edit becomes a new Version, and a post deleted or made protected on X is withdrawn. The kind comes from the first-party `x-list` plugin. [Collect from a source](/guides/connectors) covers what every kind shares.
+
+<Note>
+X bills API reads per post returned. Check your plan's prices and caps in the X Developer Console; Quivr's `max_reads_per_day` below is a guard, the console's spend limit is the hard stop.
+</Note>
+
+## Prerequisites
+
+- An X developer app and its app-only bearer token, able to read the list. For real-time mode, also the app's consumer secret, and a plan that includes Filtered Stream and webhooks.
+- The list's numeric id, from its URL: `https://x.com/i/lists/<list_id>`. An app-only token cannot read another account's private list.
+- A `credential_key` in Quivr's configuration, since the instance stores a secret.
+- The `x-list` plugin pinned. In the local stack it points at a local fake of the X API, so use a real deployment to collect real posts.
+
+## Create an instance
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/connectors" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{connector_id, health: .health.state}'
+{
+  "idempotency_key": "watchlist",
+  "corpus_id": "$CORPUS_ID",
+  "source_namespace": "x-watchlist",
+  "kind": "x_list",
+  "config": {"list_id": "1234567890123456789", "max_reads_per_day": 5000},
+  "schedule": {"interval_seconds": 120},
+  "credential": {"secret": {"bearer_token": "<bearer token>"}}
+}
+EOF
+```
+
+| Config field | Default | Meaning |
+| --- | --- | --- |
+| `list_id` | required | The numeric list id |
+| `backfill_since` | none | Also collect posts created since this instant, at most 7 days before the first poll |
+| `max_reads_per_day` | none | Stop polling for new posts once this many posts were read in the UTC day, at least 100 |
+| `recheck_window_seconds` | `86400` | How long collected posts are checked for deletion, 1 hour to 7 days |
+| `recheck_interval_seconds` | `600` | How often that check runs, at least 60 seconds |
+
+Collection starts at the first poll. Each run reads the list newest first, down to where the previous run stopped, at most 1,000 posts.
+
+## What each post becomes
+
+The Record Key is the id of the original post, so every edit of a post is a Version of the same Record. The `body` Part holds the post's full text. Quoted, replied-to and reposted posts become Relations to other Records of the same Source Namespace. The `connector.x_list` extension holds the author, dates, language, entities, media references and the post URL; media files are not downloaded.
+
+## Deletions
+
+X's developer policy requires removing content deleted or made protected on X. The plugin rechecks recent posts every `recheck_interval_seconds` and withdraws those that are gone, so a deletion is reflected within about 12 minutes with the defaults. It tracks at most 2,000 posts.
+
+<Warning>
+Posts older than `recheck_window_seconds` are not rechecked. If you must honour a removal request for an older post, withdraw its Record yourself with `POST /v0/records/withdrawals`.
+</Warning>
+
+## Spend
+
+`health.usage` estimates the posts read today and yesterday (UTC), counted as X deduplicates them. Roughly, each new post is read once, the top page of the list costs at most about 100 extra reads a day, and each post in the recheck window is read about once more per day. A shorter interval lowers latency without multiplying cost. When `max_reads_per_day` is reached, polling stops until the next UTC day with `last_error.code` `daily_read_cap_reached`; deletion rechecks continue.
+
+## Real-time mode
+
+With webhooks on, posts from the list's members arrive within seconds; polling stays on as the fallback. You need:
+
+1. `public_url` in Quivr's configuration: the address where X reaches the API, such as `https://quivr.example.com`. Each instance's webhook address is `<public_url>/v0/connectors/<connector_id>/api/receive`, shown as `webhook_url`.
+2. The `x-list` plugin pinned on the `api` processes too, since the API relays each delivery to it.
+3. The consumer secret deposited with the token: `{"bearer_token": "…", "consumer_secret": "…"}`.
+4. `"webhook": {"enabled": true}` in the instance's `config`. Set `max_rules` and `max_rule_length` to your plan's limits.
+
+POST deliveries use X's `x-twitter-webhooks-signature` HMAC header. The engine refuses repeated signatures or `Idempotency-Key` values within 300 seconds, and the plugin verifies the signature over the raw body. X does not sign a timestamp, so an identical signed body can be accepted again after that window. Successful pushes return `202` with Receipts. GET CRC challenges still answer synchronously. The old `/v0/connector-webhooks/{connector_id}` address is an alias with the same replay protection until engine 1.0.0.
+
+The plugin turns the list's members into Filtered Stream rules tagged `quivr:<connector_id>`, registers the webhook and keeps both in step at each resync. `health.push.state` is `pending` until then, `active` once deliveries arrive, and `degraded` with an `error` when polling had to take over. A post seen both ways is one Record with one Version. Turning the mode off leaves the rules and the webhook at X until you delete them in the developer console.
+
+## Health codes
+
+| `last_error.code` | Health | Meaning |
+| --- | --- | --- |
+| `unauthorized`, `forbidden` | `access_error` | X refused the token, or the app may not read the list |
+| `list_not_found` | `access_error` | The list id does not exist |
+| `credits_depleted` | `access_error` | Credits or the spend limit are exhausted in the X console |
+| `rate_limited` | unchanged | X answered 429; the next run waits for the reset |
+| `daily_read_cap_reached` | unchanged | `max_reads_per_day` was reached |
+| `source_unavailable` | unchanged | Network error, timeout or 5xx |
+| `invalid_config` | unchanged | `backfill_since` is more than 7 days before the first poll |

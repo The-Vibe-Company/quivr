@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/graph.js && node --check src/export.js"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "format": "openai",
+  "base_url": "http://127.0.0.1:8080/v1",
+  "auth": "none",
+  "model": "ibm-granite/granite-embedding-311m-multilingual-r2",
+  "dimensions": 768,
+  "send_dimensions": false,
+  "model_revision": "4439955993036521",
+  "query_prefix": "",
+  "document_prefix": "",
+  "max_tokens_per_segment": 8192,
+  "overlap": 200,
+  "batch_size": 16
+}

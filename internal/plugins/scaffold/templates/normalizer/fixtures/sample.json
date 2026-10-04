@@ -1,0 +1,10 @@
+{
+  "description": "A Markdown report with a title, an introduction and two sections.",
+  "input": {
+    "path": "sample.md",
+    "media_type": "text/markdown"
+  },
+  "configuration": {
+    "max_sections": 20
+  }
+}

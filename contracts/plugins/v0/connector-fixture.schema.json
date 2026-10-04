@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector fixture, v0",
+  "description": "A local test input that tools turn into connector requests: quivr plugin test fetches pages from checkpoint, feeding each returned checkpoint back, checks the credential and, for a push kind, relays each receive case. A file is a connector fixture when it has a top-level connector property. Fixture credentials are test values; the Contract Runner checks they never appear in responses or plugin logs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "connector"
+  ],
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "config"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$"
+        },
+        "config": {
+          "type": "object"
+        }
+      }
+    },
+    "credential": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "default": null,
+      "description": "Validated against the kind's credential_schema."
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Plugin configuration; defaults to {}."
+    },
+    "checkpoint": {
+      "description": "Starting checkpoint; defaults to null (a first run)."
+    },
+    "now": {
+      "type": "string",
+      "format": "date-time",
+      "default": "2026-01-01T00:00:00Z"
+    },
+    "max_pages": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10,
+      "description": "Most pages fetched in one run, like the core's page bound."
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "record_keys"
+            ],
+            "properties": {
+              "record_keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "more": {
+                "type": "boolean"
+              }
+            }
+          },
+          "description": "Expected pages of the run, in order: the Record Keys of each page and optionally its more flag."
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error_class"
+          ],
+          "properties": {
+            "error_class": {
+              "enum": [
+                "access",
+                "transient",
+                "source"
+              ]
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "maxLength": 64
+            }
+          },
+          "description": "The first fetch is expected to fail with this error class."
+        },
+        "check_credential": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "not": {
+            "required": [
+              "status",
+              "error_class"
+            ]
+          },
+          "description": "The expected credential check: status ok, or an error_class (and optionally its code).",
+          "properties": {
+            "status": {
+              "const": "ok"
+            },
+            "error_class": {
+              "enum": [
+                "access",
+                "transient",
+                "source"
+              ]
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "maxLength": 64
+            }
+          }
+        }
+      }
+    },
+    "receive": {
+      "type": "array",
+      "maxItems": 32,
+      "description": "Since Plugin API 0.5, for a push kind: deliveries the Contract Runner relays to receive, in order, with the fixture's config, credential and checkpoint. Signatures in headers are computed by the fixture author over the exact body.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "method"
+            ],
+            "not": {
+              "required": [
+                "body",
+                "body_base64"
+              ]
+            },
+            "properties": {
+              "method": {
+                "enum": [
+                  "GET",
+                  "POST"
+                ]
+              },
+              "query": {
+                "type": "string",
+                "maxLength": 8192,
+                "description": "Raw query string, without the leading ?."
+              },
+              "headers": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Header values by name; names are lowercased when relayed."
+              },
+              "body": {
+                "type": "string",
+                "description": "A UTF-8 body."
+              },
+              "body_base64": {
+                "type": "string",
+                "contentEncoding": "base64",
+                "description": "A binary body, standard base64."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "description": "Relative API path, for example events/news. Required with route."
+              }
+            }
+          },
+          "expect": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "accepted",
+                  "refused"
+                ]
+              },
+              "status": {
+                "type": "integer",
+                "minimum": 200,
+                "maximum": 499
+              },
+              "record_keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The Record Keys of the items, in order."
+              },
+              "body_contains": {
+                "type": "string",
+                "description": "A substring of the answer body, such as a challenge response."
+              },
+              "error": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "error_class"
+                ],
+                "properties": {
+                  "error_class": {
+                    "enum": [
+                      "access",
+                      "transient",
+                      "source"
+                    ]
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$",
+                    "maxLength": 64
+                  }
+                },
+                "description": "The delivery is expected to fail with this error class instead of a verdict."
+              }
+            }
+          },
+          "route": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "description": "Declared API route name. With route, request.path is required and the exact request body is parsed as JSON (empty GET becomes null). This certifies plugin handling, not engine authentication."
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "route"
+              ]
+            },
+            "then": {
+              "properties": {
+                "request": {
+                  "required": [
+                    "path"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

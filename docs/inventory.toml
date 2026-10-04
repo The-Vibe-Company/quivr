@@ -1,0 +1,148 @@
+# Documentation inventory: the single list of living documentation pages.
+#
+# `make docs` (scripts/docs.py, first step of `make verify`) fails when a
+# Markdown file is neither declared here nor matched by `dated` or `excluded`,
+# when a declared page is missing, or when a living page has a broken relative
+# link or names a repository path that does not exist.
+#
+# Add a living page with one line under [pages], in path order so that
+# parallel additions land in different places (`make docs` prints the line to
+# paste for an undeclared page):
+#
+#   "docs/path/to/page.md" = { audience = "functional", kind = "guide", summary = "what a reader finds there" }
+#
+# summary is optional: one line shown after the page title on its audience's
+# start page. Then run `make start-pages`: `make docs` fails with
+# `stale-start-page` until the start pages match this list. The public
+# documentation site is not listed here: its pages are the MDX files of
+# docs-site/ and its navigation is docs-site/docs.json (scripts/mintlify_site.py).
+#
+# audience: who reads it
+#   functional     integrators and non-developers learning what Quivr does
+#   plugin-author  people extending Quivr with plugins
+#   contributor    people and coding agents changing this repository
+# kind: what it is
+#   guide                 task-oriented steps a reader follows
+#   concept               explanation of how and why something works
+#   generated-reference   output of a generator; edit the source, not the page
+#   index                 entry point that mostly links to other pages
+#   start-page            the generated start page of its audience (one each),
+#                         listing every other page of that audience by kind
+#
+# Globs use fnmatch: `*` also matches across folders.
+#
+# [budgets] caps the number of lines of AGENTS.md, CONTEXT.md and every guide
+# (`make docs` fails with `missing-budget` or `over-budget`). A budget is set
+# about 5% above the page's size when it is added. Shorten a page before
+# raising its budget; see docs/agents/documentation.md.
+
+# Dated documents (ADRs, design records, evidence, research) keep their date and
+# status and are not link-checked. They are frozen: `make docs` fails when a
+# branch edits or removes one (compared with its merge base with origin/main),
+# unless its status there is `proposed`, and when a new one has no `Date:` or
+# `Status:` line near the top.
+# Supersede a dated document with a new one; see docs/adr/0004.
+dated = [
+    "docs/adr/*.md",
+    "docs/dated/*/*",
+]
+
+# Markdown that is not Quivr documentation.
+excluded = [
+    ".agents/skills/*",                                    # vendored coding-agent skills
+    "internal/plugins/scaffold/templates/*",               # files copied into new plugins
+    "contracts/plugins/v0/fixtures/*",                     # protocol test fixtures
+    "internal/reference/*/testdata/*",                     # reference generator test fixtures
+    "third_party/*/NOTICE.md",                             # upstream notices
+    "third_party/*/MODEL_CARD.md",                         # upstream model card
+    "docs-site/*",                                         # the documentation site (MDX; scripts/mintlify_site.py)
+]
+
+[pages]
+"AGENTS.md" = { audience = "contributor", kind = "guide", summary = "rules every contributor and coding agent follows in this repository" }
+"CONTEXT.md" = { audience = "contributor", kind = "concept", summary = "the domain language: Corpus, Record, Version, Manifest and the other terms" }
+"README.md" = { audience = "functional", kind = "index", summary = "the project overview: why Quivr, architecture, quickstart and what works today" }
+"contracts/http/v0/README.md" = { audience = "functional", kind = "concept", summary = "how the HTTP API contract is organised and checked" }
+"contracts/plugins/v0/README.md" = { audience = "plugin-author", kind = "concept", summary = "the plugin manifest, routes, schemas and fixtures" }
+"deploy/mlflow/README.md" = { audience = "functional", kind = "guide", summary = "deploy an authenticated shared search measurement store" }
+"deploy/railway/README.md" = { audience = "functional", kind = "guide", summary = "run a hosted single-node evaluation demo" }
+"deploy/railway/hosted-embeddings.md" = { audience = "functional", kind = "guide", summary = "evaluate, fill and switch hosted text embeddings with rollback" }
+"docs/agents/documentation.md" = { audience = "contributor", kind = "guide", summary = "living and dated documents, the inventory, budgets and when docs may change" }
+"docs/agents/domain.md" = { audience = "contributor", kind = "guide", summary = "how the domain documentation is laid out" }
+"docs/agents/evaluation.md" = { audience = "contributor", kind = "guide", summary = "measure how well search ranks results on public and private evaluation sets" }
+"docs/agents/oss-embeddings.md" = { audience = "contributor", kind = "guide", summary = "preview and measure open-source embedding models on ephemeral CPU and GPU jobs" }
+"docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide", summary = "how parallel agents claim, plan and ship tickets" }
+"docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide", summary = "how specs and tickets are written and tracked" }
+"docs/agents/news-set.md" = { audience = "contributor", kind = "guide", summary = "build an encrypted French news search set and validate its human review" }
+"docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
+"docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide", summary = "the five triage labels" }
+"docs/dated/README.md" = { audience = "contributor", kind = "index", summary = "frozen design records, evidence and research, as decided at their date" }
+"docs/eval-engine-confirmation.md" = { audience = "contributor", kind = "guide", summary = "confirm finalists with aggregate held-out measurements on the full engine" }
+"docs/eval-engine-smoke.md" = { audience = "contributor", kind = "guide", summary = "run and stop a temporary full-stack Modal smoke" }
+"docs/eval-modal.md" = { audience = "contributor", kind = "guide", summary = "measure configurations on Modal with shared caps and gates" }
+"docs/search-campaign-reporting.md" = { audience = "contributor", kind = "guide", summary = "report exact usage, propose bounded candidates and review campaign promotion" }
+"docs/search-campaigns.md" = { audience = "contributor", kind = "guide", summary = "start, resume and stop a bounded configuration search campaign" }
+"docs/eval-results.md" = { audience = "contributor", kind = "guide", summary = "log, sync, compare and query shared search measurements" }
+"docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept", summary = "how `make dev` and `make verify` work" }
+"docs/quivr-v2-remaining-limits.md" = { audience = "functional", kind = "concept", summary = "known limits and what is not claimed" }
+"docs/reference/cli.md" = { audience = "functional", kind = "generated-reference", summary = "every `quivr` command, what it needs to run, its flags and exit codes" }
+"docs/reference/http-api.md" = { audience = "functional", kind = "generated-reference", summary = "every endpoint, field and example, generated from the contract" }
+"docs/reference/mcp.md" = { audience = "functional", kind = "generated-reference", summary = "every MCP profile and tool an AI agent can use, with its arguments" }
+"docs/runnable-guides.md" = { audience = "contributor", kind = "guide", summary = "write guide blocks that `make verify` replays" }
+"docs/start/contributor.md" = { audience = "contributor", kind = "start-page" }
+"docs/start/functional.md" = { audience = "functional", kind = "start-page" }
+"docs/start/plugin-author.md" = { audience = "plugin-author", kind = "start-page" }
+"plugins/alerts/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party keyword alert plugin" }
+"plugins/alerts/calibration/README.md" = { audience = "plugin-author", kind = "concept", summary = "the local E5 alert threshold measurements and their limits" }
+"plugins/core-ingest/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party ingestion plugin: token windows and E5 embeddings, and its parity with the engine" }
+"plugins/core-retrieve/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine" }
+"plugins/hosted-embed/README.md" = { audience = "plugin-author", kind = "concept", summary = "configure hosted text embeddings in OpenAI and Cohere formats" }
+"plugins/jev-rerank/README.md" = { audience = "plugin-author", kind = "concept", summary = "optional Jev reranking, bounded pair caching and hybrid fallback" }
+"plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
+"plugins/push-source/README.md" = { audience = "plugin-author", kind = "guide", summary = "an offline instance-token push source and its certification" }
+"plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
+"plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
+"quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources, live feed and the admin view" }
+"sdks/go/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and certify every kind of plugin in Go" }
+"sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run Python plugins" }
+"tests/acceptance/README.md" = { audience = "contributor", kind = "guide", summary = "the public acceptance suite and how to run it" }
+"tests/fakes/README.md" = { audience = "contributor", kind = "guide", summary = "run shared provider fakes for Go and Python tests" }
+"tests/fakes/graph/fixtures/README.md" = { audience = "contributor", kind = "concept", summary = "the sanitized official examples used by the Graph fake" }
+"tests/fakes/x/fixtures/README.md" = { audience = "contributor", kind = "concept", summary = "the sanitized official examples used by the X fake" }
+"third_party/README.md" = { audience = "contributor", kind = "index", summary = "dependency notices and inventory" }
+
+# Maximum number of lines per page, in path order.
+[budgets]
+"docs/search-campaigns.md" = 138
+"docs/search-campaign-reporting.md" = 138
+"deploy/mlflow/README.md" = 68
+"docs/eval-engine-confirmation.md" = 174
+"docs/eval-engine-smoke.md" = 149
+"docs/eval-results.md" = 160
+"docs/eval-modal.md" = 176
+"AGENTS.md" = 45
+"CONTEXT.md" = 327
+"deploy/railway/README.md" = 250
+"deploy/railway/hosted-embeddings.md" = 107
+"docs/agents/documentation.md" = 55
+"docs/agents/domain.md" = 45
+"docs/agents/evaluation.md" = 169
+"docs/agents/fleet-workflow.md" = 65
+"docs/agents/issue-tracker.md" = 110
+"docs/agents/news-set.md" = 252
+"docs/agents/testing.md" = 85
+"docs/agents/triage-labels.md" = 15
+"docs/runnable-guides.md" = 85
+"plugins/core-ingest/README.md" = 60
+"plugins/core-retrieve/README.md" = 60
+"plugins/pdf-text/README.md" = 120
+"plugins/push-source/README.md" = 21
+"plugins/rss/README.md" = 60
+"plugins/x-list/README.md" = 60
+"quivr-search/README.md" = 117
+"sdks/go/README.md" = 212
+"sdks/python/README.md" = 166
+"tests/acceptance/README.md" = 50
+"tests/fakes/README.md" = 60
+
+"docs/agents/oss-embeddings.md" = 85

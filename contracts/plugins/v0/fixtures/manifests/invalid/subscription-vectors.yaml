@@ -1,0 +1,10 @@
+# Vector opt-in requires Plugin API 0.10.
+id: example-alerts
+version: 0.3.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema: {type: object}
+    vectors: {parts: true, query: true, query_text_pointer: /text}

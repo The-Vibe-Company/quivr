@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "__PLUGIN_ID__"
+version = "0.1.0"
+description = "A Quivr push source plugin."
+requires-python = ">=3.12"
+dependencies = ["quivr-plugin-sdk>=0.6,<0.7"]
+
+[tool.setuptools]
+packages = ["__PLUGIN_MODULE__"]

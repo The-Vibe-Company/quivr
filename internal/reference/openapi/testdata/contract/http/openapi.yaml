@@ -1,0 +1,119 @@
+openapi: 3.1.0
+info:
+  title: Notes API
+  version: 1.2.0
+  description: Store and find notes.
+security:
+- Key: []
+paths:
+  /v1/notes/{note_id}:
+    get:
+      operationId: getNote
+      description: Read one note.
+      parameters:
+      - name: note_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: The note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        default:
+          description: |-
+            Structured error.
+            404 absent | hidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-required-permissions:
+      - notes:read
+  /v1/search:
+    post:
+      operationId: searchNotes
+      description: Find notes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+      responses:
+        '200':
+          description: Hits
+          headers:
+            Location:
+              description: Where to read more.
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Note'
+webhooks:
+  noteChanged:
+    post:
+      operationId: receiveNoteChanged
+      security: []
+      responses:
+        2XX:
+          description: Accepted.
+components:
+  securitySchemes:
+    Key:
+      type: http
+      scheme: bearer
+      description: API key.
+  schemas:
+    Label:
+      $ref: ../shared/common.json#/$defs/Label
+    Note:
+      type: object
+      description: A note.
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          description: Opaque identifier.
+        body:
+          oneOf:
+          - $ref: '#/components/schemas/Label'
+          - type: string
+        tags:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                enum: [red, blue]
+          maxItems: 3
+        meta:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              score:
+                type: number
+      required: [id]
+      if:
+        required: [tags]
+      then:
+        required: [body]
+    Error:
+      type: object
+      properties:
+        code:
+          type: string

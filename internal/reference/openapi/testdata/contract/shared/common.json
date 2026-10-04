@@ -1,0 +1,1 @@
+{"$defs": {"Label": {"type": "object", "properties": {"text": {"type": "string"}, "next": {"$ref": "#/$defs/Label"}}}}}

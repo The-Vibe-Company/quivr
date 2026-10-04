@@ -1,0 +1,104 @@
+---
+title: Record search measurements
+description: Share evaluation results, compare candidates and recover offline measurements.
+keywords: [evaluation, MLflow, search quality, leaderboard]
+---
+
+Store search measurements in a shared MLflow server so you can compare runs from
+several machines. The results CLI keeps a local outbox when that server is offline.
+
+## Prerequisites
+
+Use Python 3.9+ in a Quivr repository checkout. Your operator supplies an HTTPS
+tracking URL and HTTP Basic credentials through `MLFLOW_TRACKING_URI`,
+`MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD`. Keep them in a secret
+manager. Paired comparisons need `scipy` from `scripts/eval/requirements.txt`.
+
+Measurements need the code commit, plugin digest, full configuration, dataset
+name/version/split/fingerprint, tier (`direct` or `engine`), machine, duration,
+provider cost, aggregate metrics and optional per-query scores. Use `null` for
+unmeasured values. Configuration contains no credentials; query scores contain
+opaque ids and numbers, never query or document text.
+
+The complete JSON fields and Python helper are in the repository's
+[results guide](https://github.com/The-Vibe-Company/quivr-v2/blob/main/docs/eval-results.md).
+
+## Log and compare
+
+For your measurement files, examples requiring your tracking credentials:
+
+```sh
+scripts/eval/results log measurement.json
+scripts/eval/results log candidate.json --baseline <baseline-result-key>
+scripts/eval/results compare <candidate-result-key> <baseline-result-key>
+```
+
+The log receipt supplies a content `result_key`, `status` (`synced` or `pending`)
+and, when uploaded, the MLflow `run_id`. Use `--baseline` before the candidate's
+first log to store paired statistics. Listing returns aggregates and lineage;
+query arrays are artifacts. Comparisons pair identical query ids on the same
+dataset fingerprint, split and tier. The paired Student t-test is two-sided, alpha 0.05, with no
+multiple-comparison correction.
+
+For a completed `make eval` report, use `log-engine report.json --experiment
+public/engine --lineage lineage.json --public-set miracl-fr`. Repeat `--public-set`
+for each known public set; all others default to private. The optional lineage
+JSON supplies `machine`, `plugin_digest` and full `config` settings absent from
+older reports. Direct bakeoff files use `log-direct <file> --experiment <name>`.
+Private rows follow the [separate credential rules](#restrict-private-query-scores).
+Both `--compare-to` sides import; `lineage.baseline` supplies the baseline's own settings.
+
+## Check the leaderboard
+
+These commands were exercised locally with the imported public evidence:
+
+```sh
+scripts/eval/results list --experiment public/embedding-comparison-2026-10-03
+scripts/eval/results leaderboard --experiment public/embedding-comparison-2026-10-03
+```
+
+For your experiment, for example:
+
+```sh
+scripts/eval/results leaderboard --experiment public/my-experiment \
+  --pareto quality,cost,latency
+```
+
+Pareto keeps trade-offs between nDCG@10, USD/search and p95 latency. A run is
+removed only when another comparable run beats or equals it in every objective
+and beats it in at least one. Runs missing a chosen metric are excluded. Different dataset versions or tiers
+are compared separately. All commands emit JSON.
+
+## Recover pending uploads
+
+Once credentials and the server are available, replay your outbox:
+
+```sh
+scripts/eval/results sync
+```
+
+The outbox is `.scratch/eval/results`; set `--directory` before the command to
+choose another public directory. Preserve it when retiring a worker. Listing
+uses cached aggregates when offline and marks them `source=local`. Authorization
+and input errors fail the command. Repeated logging retains the first result
+with the same experiment/config/dataset/code/plugin/tier key; incomplete uploads
+resume. Simultaneous writers can race on MLflow's search-before-create, and MLflow
+records remain mutable.
+
+## Restrict private query scores
+
+Set `dataset.private=true`. Aggregates stay in the ordinary experiment. Query
+arrays require a pre-provisioned `private/<experiment>` and separate credentials:
+`MLFLOW_PRIVATE_TRACKING_URI`, `MLFLOW_PRIVATE_TRACKING_USERNAME`,
+`MLFLOW_PRIVATE_TRACKING_PASSWORD`. Its owner grants ordinary agents access only
+to aggregates. The wrapper never creates private experiments.
+
+Private offline arrays stay outside the repository, by default in
+`~/.local/share/quivr/eval-private`. Keep that location on a private measurement
+machine; agents sharing its OS account can read its files. Without private
+credentials, sync refuses private arrays and compare shows aggregate deltas only.
+
+## Next
+
+- [Try and switch vector models](/run-quivr/switch-a-vector-model).
+- [Deploy the results store](https://github.com/The-Vibe-Company/quivr-v2/blob/main/deploy/mlflow/README.md).

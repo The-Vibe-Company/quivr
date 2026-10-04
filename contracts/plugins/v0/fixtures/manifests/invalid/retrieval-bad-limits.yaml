@@ -1,0 +1,22 @@
+id: example.fusion
+version: 0.1.0
+description: Normative retrieval plugin with two profiles.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.7.0 <0.8.0"
+contributions:
+  retrieval:
+    profiles:
+      default:
+        description: Keywords and vectors fused by rank.
+        max_latency_ms: 500
+        max_cost_cents: 0
+      Deep:
+        description: The default candidates, re-ranked.
+        max_latency_ms: 3000
+        max_cost_cents: 1
+    limits:
+      max_rounds: 4
+      max_requests: 2
+      max_candidates: 500
+      max_response_bytes: 65536

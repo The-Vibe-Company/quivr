@@ -1,0 +1,216 @@
+---
+title: "Write a connector"
+description: "Add a new kind of source to Quivr with the Go SDK: fetch pages of items, keep a checkpoint, certify it."
+keywords: ["connector", "go sdk", "fetch", "checkpoint", "source collector"]
+---
+
+A connector plugin adds a kind of Connector Instance, so Quivr can collect from a source it does not know yet. This page builds `folder_notes`, a kind that collects the `.txt` files of a folder, one Record per file.
+
+## Prerequisites
+
+- Go 1.24 or later, a `quivr-v2` checkout in `$QUIVR_REPO`, and the `quivr` command on your `PATH` ([Build your first plugin](/plugins/first-plugin) shows how).
+- Read [How plugins work](/plugins/overview) for what Quivr keeps and what the plugin decides.
+
+## How a run works
+
+On each instance's schedule, the Quivr worker calls `fetch` with the instance's configuration, its decrypted credential and the checkpoint the plugin returned last (`null` on the first run). The plugin answers a page of items and a new checkpoint. Quivr stores the items through the normal ingestion path and only then saves the checkpoint, so a crash never loses an item. With `more: true` Quivr asks for the next page at once, up to 10 pages per run.
+
+The plugin keeps no state. Anything it must remember between runs, such as a cursor or the revisions it already returned, goes in the checkpoint, up to 64 KiB.
+
+## Steps
+
+<Steps>
+<Step title="Create the module">
+
+The Go SDK is not published as a separate module yet, so point Go at your checkout:
+
+```bash
+mkdir folder-notes && cd folder-notes
+go mod init example.com/folder-notes
+go mod edit -replace github.com/The-Vibe-Company/quivr-v2/sdks/go="$QUIVR_REPO/sdks/go"
+```
+
+</Step>
+<Step title="Declare the kind">
+
+Each kind declares the JSON Schema of its instance configuration, and of its credential when the source needs one. Quivr validates both when an instance is created, and shows them to clients through `GET /v0/connector-kinds`.
+
+```yaml quivr-plugin.yaml
+id: acme.folder-notes
+version: 0.1.0
+description: Collects the text files of a folder.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.3.0 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      folder_notes:
+        description: Every .txt file of one folder, one Record per file.
+        config_schema:
+          type: object
+          additionalProperties: false
+          required: [path]
+          properties:
+            path: {type: string, minLength: 1}
+        default_interval_seconds: 300
+run:
+  command: [go, run, .]
+```
+
+</Step>
+<Step title="Implement fetch">
+
+The checkpoint maps each file name to the revision already returned, so a run returns only new or changed files. Each item has a stable `RecordKey`; a new `Revision` for the same key becomes a correction, a new Version of the same Record.
+
+```go main.go
+// Command folder-notes is a Quivr connector: each .txt file of a folder becomes a Record.
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"log"
+	"os"
+	"path/filepath"
+	"sort"
+
+	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+)
+
+type folder struct{}
+
+// Fetch returns the files whose content changed since the checkpoint, which maps
+// each file name to the revision Quivr already has.
+func (folder) Fetch(_ context.Context, req *quivrplugin.FetchRequest) (*quivrplugin.Page, error) {
+	var cfg struct {
+		Path string `json:"path"`
+	}
+	if err := req.Connector.DecodeConfig(&cfg); err != nil {
+		return nil, quivrplugin.SourceError("invalid_config", err.Error())
+	}
+	seen := map[string]string{}
+	if err := req.DecodeCheckpoint(&seen); err != nil {
+		return nil, quivrplugin.SourceError("invalid_checkpoint", "the checkpoint is not a map of revisions")
+	}
+	names, err := filepath.Glob(filepath.Join(cfg.Path, "*.txt"))
+	if err != nil || names == nil {
+		return nil, quivrplugin.TransientError("folder_unavailable", "the folder cannot be listed")
+	}
+	sort.Strings(names)
+	page := &quivrplugin.Page{Checkpoint: seen}
+	for _, name := range names {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			return nil, quivrplugin.TransientError("file_unavailable", "a file cannot be read")
+		}
+		sum := sha256.Sum256(data)
+		key, revision := filepath.Base(name), hex.EncodeToString(sum[:])
+		if seen[key] == revision {
+			continue
+		}
+		if len(page.Items) == 100 {
+			page.More = true
+			break
+		}
+		seen[key] = revision
+		page.Items = append(page.Items, quivrplugin.Item{RecordKey: key, Revision: revision, Content: quivrplugin.Text(string(data))})
+	}
+	return page, nil
+}
+
+// CheckCredential accepts: this kind takes no credential.
+func (folder) CheckCredential(context.Context, *quivrplugin.CredentialRequest) (*quivrplugin.CredentialStatus, error) {
+	return &quivrplugin.CredentialStatus{}, nil
+}
+
+func main() {
+	plugin, err := quivrplugin.New("")
+	if err == nil {
+		err = plugin.Connector("folder_notes", folder{})
+	}
+	if err == nil {
+		err = plugin.Serve()
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+The error type tells Quivr what to show operators in the instance's health:
+
+| Return | Meaning | Health |
+| --- | --- | --- |
+| `AccessError(code, message)` | The source refuses the credential or the access | `access_error` until a later run succeeds |
+| `TransientError(code, message)` | An outage, a timeout or a rate limit; add `.WithRetryAfter(d)` when the source says when | unchanged; retried at the next run |
+| `SourceError(code, message)` | The source returned data the plugin cannot use | the run fails |
+
+A kind with a credential receives it decrypted in `req.Credential`. The SDK redacts it from logs and error messages, and the Contract Runner fails a plugin that echoes it.
+
+</Step>
+<Step title="Add a fixture">
+
+A connector fixture names the kind, the configuration and what each page should return:
+
+```bash
+mkdir -p fixtures/notes
+printf 'The harbour opens on Monday.\n' > fixtures/notes/harbour.txt
+printf 'The market moves to Saturday.\n' > fixtures/notes/market.txt
+```
+
+```json fixtures/notes.json
+{
+  "description": "Two notes in one page, then nothing new when resumed.",
+  "connector": {"kind": "folder_notes", "config": {"path": "fixtures/notes"}},
+  "credential": null,
+  "expect": {"pages": [{"record_keys": ["harbour.txt", "market.txt"], "more": false}]}
+}
+```
+
+</Step>
+<Step title="Certify it">
+
+```bash
+go mod tidy
+quivr plugin test --startup-timeout 120s .
+```
+
+The first start compiles the plugin, hence the longer timeout. The runner fetches every page, feeding each checkpoint back, then starts a new run from the final checkpoint and fails if an unchanged item comes back:
+
+```text
+  PASS  resume           [connector] fixtures/notes.json: a new run from the final checkpoint returns no item already returned (0 ms)
+CERTIFIED: the engine can safely invoke this plugin (17 passed, 0 failed, 1 skipped)
+```
+
+</Step>
+</Steps>
+
+## Check it worked
+
+[Pin the plugin](/run-quivr/pin) in your deployment, then look for the new kind:
+
+```bash
+curl -s "$QUIVR_API_URL/v0/connector-kinds" -H "Authorization: Bearer $QUIVR_API_KEY" | jq '[.items[].kind]'
+```
+
+`folder_notes` is listed next to the other kinds. Create an instance as for any kind, with `"kind": "folder_notes"` and `"config": {"path": "/srv/notes"}`: see [Collect from a source](/guides/connectors).
+
+To add the plugin to a deployment that is already running, register it with its `fixtures/` folder instead of pinning it: Quivr runs the same checks, and you activate it without a restart. See [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
+
+## Receive data through a Quivr key
+
+[Write a push source](/plugins/push-source#choose-authentication) to declare a `quivr_key` route and implement its handler. [Operate the instance](/run-quivr/receive-pushes) for admission, retries and audit.
+
+## Receive data through an instance token
+
+[Write a push source](/plugins/push-source#choose-authentication) to declare an `instance_token` route. [Manage tokens](/run-quivr/receive-pushes#manage-tokens) for issuance, rotation and revocation.
+
+## Go further
+
+A kind can also store binary attachments next to an item: declare `contributions.connector.attachments` and implement `OpenAttachment`, and Quivr asks for each file's size and checksum, then gives the plugin a one-time upload URL. A kind with `modes: [pull, push]` also receives the webhooks a source sends to Quivr, through `receive`; the X list connector works this way. The [plugin protocol](/reference/plugin-protocol#connector) lists every field of `fetch` and its answer, and the first-party `plugins/rss` is a complete connector built on this SDK.
+
+## Verify provider signatures
+
+[Verify signatures in your push handler](/plugins/push-source#verify-provider-signatures) and [answer synchronous challenges](/plugins/push-source#answer-provider-challenges). The [push-checks diagram](/plugins/push-source#push-checks) shows the engine's exact check order and your plugin's responsibilities.

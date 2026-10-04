@@ -1,0 +1,1442 @@
+{
+  "status": "completed",
+  "workload": "quivr-text-retrieval-baseline-v1",
+  "host": {
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "logical_cpus": 2,
+    "python": "3.12.14",
+    "go": "go version go1.27.1 linux/amd64",
+    "docker": "28.0.4",
+    "docker_resources": "2 CPUs, 8323969024 bytes",
+    "github_runner": {
+      "RUNNER_OS": "Linux",
+      "RUNNER_ARCH": "X64",
+      "RUNNER_NAME": "GitHub Actions 1000028547",
+      "ImageOS": "ubuntu24",
+      "ImageVersion": "20260920.314.1"
+    },
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "memory_total": "8128876 kB"
+  },
+  "pins": {
+    "source_revision": "d5669a422a71d4c9685ad5812c9b9a3a05454488",
+    "source_dirty": false,
+    "images": [
+      "chrislusf/seaweedfs:4.45@sha256:fc9f76fa993ad69966ffeb2f65d0318fcae39c6f8e20cf68ef7b3a5cb97769e5",
+      "cr.weaviate.io/semitechnologies/weaviate:1.37.15@sha256:cede92f9f43f9b4be25a9f453e756173bbe171d2e88210a0e5b7ab72e8b96d96",
+      "ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07",
+      "postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
+      "temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d"
+    ],
+    "model_lock": {
+      "model_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+      "tei_image": "ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07",
+      "files": {
+        "config.json": "69137736cab8b8903a07fe8afaafdda25aac55415a12a55d1bffa9f581abf959",
+        "tokenizer.json": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+        "tokenizer_config.json": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b",
+        "special_tokens_map.json": "d05497f1da52c5e09554c0cd874037a083e1dc1b9cfd48034d1c717f1afc07a7",
+        "model.safetensors": "1a55775f53449dac10a2bcbc312469fac40b96d53198c407081a831f81c98477",
+        "1_Pooling/config.json": "987f7a67a38fa564c849bb5d277c52ab9088a84368fc0be31a354125aebb12a0",
+        "onnx/model.onnx": "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665"
+      }
+    },
+    "processing_profile_sha256": "83f98a1ab0c6f65c36d0bc6e1ce4f1eb69208b6622d061d2c2f1f84bd72509db",
+    "tokenizer_requirements_sha256": "af3a37f49c7caa3ed57b325530dd49623af55b7a60d301679be8336fce634491",
+    "workload_sha256": "95fc3c96d6a8ef8ae56b1eee9838b7966e8de0063b71e3dc91f76ec3d7b2304f",
+    "hybrid_recipe_source": "internal/adapters/weaviate/projection.go (unchanged by this measurement)"
+  },
+  "phases_seconds": {
+    "prepare_tokenizer": 3.924,
+    "prepare_model": 7.725,
+    "go_build": 2.905,
+    "image_pull": 19.96,
+    "cold_start": 9.233,
+    "cold_model_ready": 0.867,
+    "warm_start": 10.512,
+    "warm_model_ready": 0.884,
+    "fixture_ingest_to_vectors": 66.989
+  },
+  "fixture_sha256": "3f015b13413f89787b4fec242c7e6c86dc3bcd7d1c3667b8787124439badf2fa",
+  "embedding_preparation": {
+    "model_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+    "tei_image": "ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07",
+    "files": {
+      "config.json": "69137736cab8b8903a07fe8afaafdda25aac55415a12a55d1bffa9f581abf959",
+      "tokenizer.json": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+      "tokenizer_config.json": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b",
+      "special_tokens_map.json": "d05497f1da52c5e09554c0cd874037a083e1dc1b9cfd48034d1c717f1afc07a7",
+      "model.safetensors": "1a55775f53449dac10a2bcbc312469fac40b96d53198c407081a831f81c98477",
+      "1_Pooling/config.json": "987f7a67a38fa564c849bb5d277c52ab9088a84368fc0be31a354125aebb12a0",
+      "onnx/model.onnx": "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665"
+    },
+    "downloaded_bytes": 957994305,
+    "prepare_seconds": 7.725,
+    "architecture": "linux/amd64",
+    "device": "CPU",
+    "dtype": "float32",
+    "backend": "ONNX"
+  },
+  "retrieval_profile": {
+    "name": "balanced",
+    "version": "balanced.e5-token-windows.v1"
+  },
+  "quality": {
+    "lexical": {
+      "queries": 24,
+      "mrr_at_10": 0.720138888888889,
+      "recall_at_3": 0.8333333333333334,
+      "recall_at_10": 0.9166666666666666,
+      "per_query": [
+        {
+          "query_id": "fr-flood",
+          "rank": 1,
+          "top10": [
+            "fr-flood",
+            "fr-vaccine",
+            "fr-fishing",
+            "fr-port",
+            "fr-election",
+            "fr-museum",
+            "fr-train",
+            "en-flood",
+            "fr-avalanche",
+            "fr-maritime"
+          ]
+        },
+        {
+          "query_id": "fr-museum",
+          "rank": 1,
+          "top10": [
+            "fr-museum",
+            "fr-port",
+            "fr-vaccine",
+            "fr-wind",
+            "fr-flood",
+            "fr-fishing",
+            "fr-maritime",
+            "fr-election",
+            "fr-train",
+            "fr-avalanche"
+          ]
+        },
+        {
+          "query_id": "fr-port",
+          "rank": 1,
+          "top10": [
+            "fr-port",
+            "fr-flood",
+            "fr-fishing",
+            "fr-solar",
+            "fr-vaccine",
+            "fr-train",
+            "fr-museum",
+            "fr-election",
+            "fr-maritime",
+            "fr-wind"
+          ]
+        },
+        {
+          "query_id": "fr-solar",
+          "rank": 1,
+          "top10": [
+            "fr-solar",
+            "fr-flood",
+            "fr-maritime",
+            "fr-fishing",
+            "fr-port",
+            "fr-train",
+            "fr-museum",
+            "fr-avalanche",
+            "fr-wind",
+            "fr-vaccine"
+          ]
+        },
+        {
+          "query_id": "fr-fishing",
+          "rank": 1,
+          "top10": [
+            "fr-fishing",
+            "fr-maritime",
+            "fr-museum",
+            "fr-flood",
+            "fr-solar",
+            "fr-port",
+            "fr-train",
+            "fr-avalanche",
+            "fr-wind",
+            "fr-vaccine"
+          ]
+        },
+        {
+          "query_id": "fr-vaccine",
+          "rank": 1,
+          "top10": [
+            "fr-vaccine",
+            "fr-flood",
+            "fr-maritime",
+            "fr-port",
+            "fr-fishing",
+            "fr-solar",
+            "fr-train",
+            "fr-museum",
+            "fr-avalanche",
+            "fr-election"
+          ]
+        },
+        {
+          "query_id": "fr-satellite",
+          "rank": 2,
+          "top10": [
+            "en-satellite",
+            "fr-satellite",
+            "en-fishing",
+            "en-avalanche",
+            "en-museum",
+            "en-port",
+            "en-solar",
+            "en-election",
+            "en-train",
+            "en-flood"
+          ]
+        },
+        {
+          "query_id": "fr-avalanche",
+          "rank": 2,
+          "top10": [
+            "en-avalanche",
+            "fr-avalanche",
+            "en-election",
+            "en-fishing",
+            "en-satellite",
+            "en-museum",
+            "en-solar",
+            "en-flood",
+            "en-wind"
+          ]
+        },
+        {
+          "query_id": "fr-election",
+          "rank": 3,
+          "top10": [
+            "en-election",
+            "en-museum",
+            "fr-election",
+            "en-fishing",
+            "en-satellite"
+          ]
+        },
+        {
+          "query_id": "fr-maritime",
+          "rank": 2,
+          "top10": [
+            "en-museum2",
+            "fr-maritime",
+            "en-vaccine",
+            "en-museum"
+          ]
+        },
+        {
+          "query_id": "fr-wind",
+          "rank": 2,
+          "top10": [
+            "en-wind",
+            "fr-wind",
+            "en-fishing",
+            "en-solar",
+            "en-election",
+            "en-avalanche",
+            "en-flood",
+            "en-satellite",
+            "en-museum"
+          ]
+        },
+        {
+          "query_id": "fr-train",
+          "rank": 2,
+          "top10": [
+            "en-train",
+            "fr-train",
+            "en-port",
+            "en-avalanche",
+            "en-fishing",
+            "en-satellite",
+            "en-museum"
+          ]
+        },
+        {
+          "query_id": "en-flood",
+          "rank": 1,
+          "top10": [
+            "en-flood",
+            "en-avalanche",
+            "en-fishing",
+            "en-solar",
+            "en-election",
+            "en-satellite",
+            "en-wind",
+            "en-museum"
+          ]
+        },
+        {
+          "query_id": "en-museum",
+          "rank": 1,
+          "top10": [
+            "en-museum",
+            "en-solar",
+            "en-port",
+            "en-flood",
+            "en-avalanche",
+            "en-fishing",
+            "en-satellite",
+            "en-train"
+          ]
+        },
+        {
+          "query_id": "en-port",
+          "rank": 1,
+          "top10": [
+            "en-port",
+            "fr-port",
+            "en-solar",
+            "en-fishing",
+            "en-avalanche",
+            "en-satellite",
+            "en-museum",
+            "en-election",
+            "en-train",
+            "en-flood"
+          ]
+        },
+        {
+          "query_id": "en-solar",
+          "rank": 1,
+          "top10": [
+            "en-solar",
+            "en-fishing",
+            "en-election",
+            "en-avalanche",
+            "en-flood",
+            "en-satellite",
+            "en-wind",
+            "en-museum"
+          ]
+        },
+        {
+          "query_id": "en-fishing",
+          "rank": 1,
+          "top10": [
+            "en-fishing",
+            "fr-fishing",
+            "en-train"
+          ]
+        },
+        {
+          "query_id": "en-vaccine",
+          "rank": 1,
+          "top10": [
+            "en-vaccine",
+            "en-port",
+            "en-avalanche",
+            "en-fishing",
+            "en-satellite",
+            "en-train",
+            "en-museum"
+          ]
+        },
+        {
+          "query_id": "en-satellite",
+          "rank": 1,
+          "top10": [
+            "en-satellite",
+            "fr-avalanche",
+            "fr-satellite",
+            "fr-maritime",
+            "fr-vaccine",
+            "fr-flood",
+            "fr-election",
+            "fr-fishing",
+            "fr-port",
+            "fr-wind"
+          ]
+        },
+        {
+          "query_id": "en-avalanche",
+          "rank": 4,
+          "top10": [
+            "fr-avalanche",
+            "fr-port",
+            "fr-maritime",
+            "en-avalanche",
+            "fr-train",
+            "fr-museum",
+            "fr-vaccine",
+            "fr-flood",
+            "fr-fishing",
+            "fr-solar"
+          ]
+        },
+        {
+          "query_id": "en-election",
+          "rank": 0,
+          "top10": [
+            "fr-election",
+            "fr-vaccine",
+            "fr-port",
+            "fr-flood",
+            "fr-maritime",
+            "fr-fishing",
+            "fr-museum",
+            "fr-avalanche",
+            "fr-satellite",
+            "fr-wind"
+          ]
+        },
+        {
+          "query_id": "en-museum2",
+          "rank": 5,
+          "top10": [
+            "fr-maritime",
+            "fr-museum",
+            "fr-flood",
+            "fr-fishing",
+            "en-museum2",
+            "fr-vaccine",
+            "fr-port",
+            "fr-solar",
+            "fr-avalanche",
+            "fr-train"
+          ]
+        },
+        {
+          "query_id": "en-wind",
+          "rank": 0,
+          "top10": [
+            "fr-wind",
+            "fr-maritime",
+            "fr-fishing",
+            "fr-election",
+            "fr-museum",
+            "fr-avalanche",
+            "fr-solar",
+            "fr-flood",
+            "fr-satellite",
+            "fr-port"
+          ]
+        },
+        {
+          "query_id": "en-train",
+          "rank": 1,
+          "top10": [
+            "en-train",
+            "fr-train",
+            "fr-port",
+            "fr-satellite",
+            "fr-solar",
+            "fr-flood",
+            "fr-wind",
+            "fr-election",
+            "fr-vaccine"
+          ]
+        }
+      ]
+    },
+    "semantic": {
+      "queries": 24,
+      "mrr_at_10": 0.9583333333333334,
+      "recall_at_3": 1.0,
+      "recall_at_10": 1.0,
+      "per_query": [
+        {
+          "query_id": "fr-flood",
+          "rank": 1,
+          "top10": [
+            "fr-flood",
+            "fr-train",
+            "en-flood",
+            "fr-port",
+            "fr-maritime",
+            "fr-avalanche",
+            "fr-museum",
+            "fr-wind",
+            "fr-satellite",
+            "fr-fishing"
+          ]
+        },
+        {
+          "query_id": "fr-museum",
+          "rank": 1,
+          "top10": [
+            "fr-museum",
+            "fr-maritime",
+            "fr-flood",
+            "fr-solar",
+            "fr-train",
+            "fr-avalanche",
+            "fr-satellite",
+            "en-museum2",
+            "fr-election",
+            "fr-port"
+          ]
+        },
+        {
+          "query_id": "fr-port",
+          "rank": 1,
+          "top10": [
+            "fr-port",
+            "en-port",
+            "fr-flood",
+            "fr-wind",
+            "fr-maritime",
+            "en-flood",
+            "fr-avalanche",
+            "fr-train",
+            "fr-fishing",
+            "fr-museum"
+          ]
+        },
+        {
+          "query_id": "fr-solar",
+          "rank": 1,
+          "top10": [
+            "fr-solar",
+            "fr-satellite",
+            "en-solar",
+            "fr-wind",
+            "fr-flood",
+            "fr-fishing",
+            "fr-museum",
+            "fr-maritime",
+            "en-wind",
+            "fr-election"
+          ]
+        },
+        {
+          "query_id": "fr-fishing",
+          "rank": 1,
+          "top10": [
+            "fr-fishing",
+            "en-fishing",
+            "fr-wind",
+            "fr-port",
+            "fr-flood",
+            "fr-maritime",
+            "fr-avalanche",
+            "fr-satellite",
+            "fr-vaccine",
+            "fr-election"
+          ]
+        },
+        {
+          "query_id": "fr-vaccine",
+          "rank": 1,
+          "top10": [
+            "fr-vaccine",
+            "en-vaccine",
+            "fr-avalanche",
+            "fr-fishing",
+            "fr-maritime",
+            "fr-solar",
+            "fr-satellite",
+            "fr-wind",
+            "fr-flood",
+            "fr-museum"
+          ]
+        },
+        {
+          "query_id": "fr-satellite",
+          "rank": 1,
+          "top10": [
+            "fr-satellite",
+            "en-satellite",
+            "en-museum2",
+            "fr-solar",
+            "fr-fishing",
+            "en-fishing",
+            "fr-wind",
+            "en-port",
+            "en-avalanche",
+            "en-solar"
+          ]
+        },
+        {
+          "query_id": "fr-avalanche",
+          "rank": 1,
+          "top10": [
+            "fr-avalanche",
+            "en-avalanche",
+            "en-satellite",
+            "fr-flood",
+            "fr-satellite",
+            "fr-wind",
+            "en-flood",
+            "en-vaccine",
+            "en-wind",
+            "en-port"
+          ]
+        },
+        {
+          "query_id": "fr-election",
+          "rank": 1,
+          "top10": [
+            "fr-election",
+            "en-election",
+            "fr-flood",
+            "en-flood",
+            "fr-museum",
+            "fr-wind",
+            "fr-fishing",
+            "en-solar",
+            "fr-vaccine",
+            "en-avalanche"
+          ]
+        },
+        {
+          "query_id": "fr-maritime",
+          "rank": 1,
+          "top10": [
+            "fr-maritime",
+            "en-museum2",
+            "en-museum",
+            "fr-museum",
+            "en-flood",
+            "fr-flood",
+            "fr-satellite",
+            "en-wind",
+            "en-avalanche",
+            "en-port"
+          ]
+        },
+        {
+          "query_id": "fr-wind",
+          "rank": 2,
+          "top10": [
+            "en-wind",
+            "fr-wind",
+            "en-solar",
+            "en-flood",
+            "en-satellite",
+            "en-avalanche",
+            "en-election",
+            "en-museum2",
+            "en-fishing",
+            "fr-solar"
+          ]
+        },
+        {
+          "query_id": "fr-train",
+          "rank": 1,
+          "top10": [
+            "fr-train",
+            "en-train",
+            "en-port",
+            "en-flood",
+            "en-avalanche",
+            "en-museum",
+            "en-satellite",
+            "fr-museum",
+            "fr-flood",
+            "fr-fishing"
+          ]
+        },
+        {
+          "query_id": "en-flood",
+          "rank": 1,
+          "top10": [
+            "en-flood",
+            "en-port",
+            "en-avalanche",
+            "fr-wind",
+            "en-wind",
+            "fr-flood",
+            "fr-avalanche",
+            "fr-port",
+            "en-election",
+            "en-museum2"
+          ]
+        },
+        {
+          "query_id": "en-museum",
+          "rank": 1,
+          "top10": [
+            "en-museum",
+            "en-museum2",
+            "en-port",
+            "fr-maritime",
+            "en-flood",
+            "fr-museum",
+            "en-train",
+            "en-solar",
+            "en-election",
+            "en-satellite"
+          ]
+        },
+        {
+          "query_id": "en-port",
+          "rank": 1,
+          "top10": [
+            "en-port",
+            "en-train",
+            "en-flood",
+            "fr-port",
+            "en-fishing",
+            "en-wind",
+            "en-avalanche",
+            "fr-avalanche",
+            "fr-fishing",
+            "fr-wind"
+          ]
+        },
+        {
+          "query_id": "en-solar",
+          "rank": 1,
+          "top10": [
+            "en-solar",
+            "fr-solar",
+            "en-wind",
+            "fr-wind",
+            "en-satellite",
+            "en-avalanche",
+            "fr-flood",
+            "en-flood",
+            "en-port",
+            "fr-election"
+          ]
+        },
+        {
+          "query_id": "en-fishing",
+          "rank": 1,
+          "top10": [
+            "en-fishing",
+            "fr-fishing",
+            "en-election",
+            "en-port",
+            "en-avalanche",
+            "en-flood",
+            "en-museum2",
+            "en-train",
+            "en-solar",
+            "fr-avalanche"
+          ]
+        },
+        {
+          "query_id": "en-vaccine",
+          "rank": 1,
+          "top10": [
+            "en-vaccine",
+            "fr-vaccine",
+            "en-wind",
+            "fr-avalanche",
+            "en-fishing",
+            "fr-fishing",
+            "en-election",
+            "en-museum2",
+            "en-satellite",
+            "en-avalanche"
+          ]
+        },
+        {
+          "query_id": "en-satellite",
+          "rank": 1,
+          "top10": [
+            "en-satellite",
+            "fr-satellite",
+            "fr-fishing",
+            "fr-flood",
+            "fr-vaccine",
+            "fr-wind",
+            "fr-avalanche",
+            "fr-solar",
+            "en-avalanche",
+            "fr-port"
+          ]
+        },
+        {
+          "query_id": "en-avalanche",
+          "rank": 1,
+          "top10": [
+            "en-avalanche",
+            "fr-avalanche",
+            "fr-flood",
+            "fr-satellite",
+            "fr-wind",
+            "fr-fishing",
+            "en-satellite",
+            "fr-train",
+            "en-fishing",
+            "en-flood"
+          ]
+        },
+        {
+          "query_id": "en-election",
+          "rank": 1,
+          "top10": [
+            "en-election",
+            "fr-election",
+            "fr-wind",
+            "fr-fishing",
+            "fr-avalanche",
+            "fr-museum",
+            "fr-port",
+            "fr-maritime",
+            "fr-train",
+            "fr-vaccine"
+          ]
+        },
+        {
+          "query_id": "en-museum2",
+          "rank": 1,
+          "top10": [
+            "en-museum2",
+            "fr-maritime",
+            "fr-museum",
+            "fr-wind",
+            "fr-port",
+            "fr-flood",
+            "fr-satellite",
+            "fr-solar",
+            "en-museum",
+            "fr-avalanche"
+          ]
+        },
+        {
+          "query_id": "en-wind",
+          "rank": 2,
+          "top10": [
+            "fr-wind",
+            "en-wind",
+            "fr-solar",
+            "fr-fishing",
+            "fr-port",
+            "fr-maritime",
+            "fr-avalanche",
+            "fr-election",
+            "fr-satellite",
+            "fr-flood"
+          ]
+        },
+        {
+          "query_id": "en-train",
+          "rank": 1,
+          "top10": [
+            "en-train",
+            "fr-train",
+            "fr-port",
+            "fr-fishing",
+            "en-port",
+            "fr-avalanche",
+            "fr-flood",
+            "fr-wind",
+            "fr-satellite",
+            "fr-maritime"
+          ]
+        }
+      ]
+    },
+    "hybrid": {
+      "queries": 24,
+      "mrr_at_10": 0.7760416666666666,
+      "recall_at_3": 0.9583333333333334,
+      "recall_at_10": 1.0,
+      "per_query": [
+        {
+          "query_id": "fr-flood",
+          "rank": 1,
+          "top10": [
+            "fr-flood",
+            "fr-port",
+            "fr-train",
+            "fr-fishing",
+            "en-flood",
+            "fr-museum",
+            "fr-maritime",
+            "fr-vaccine",
+            "fr-avalanche",
+            "fr-election"
+          ]
+        },
+        {
+          "query_id": "fr-museum",
+          "rank": 1,
+          "top10": [
+            "fr-museum",
+            "fr-port",
+            "fr-maritime",
+            "fr-flood",
+            "fr-wind",
+            "fr-vaccine",
+            "fr-election",
+            "fr-train",
+            "fr-fishing",
+            "fr-solar"
+          ]
+        },
+        {
+          "query_id": "fr-port",
+          "rank": 1,
+          "top10": [
+            "fr-port",
+            "fr-flood",
+            "fr-fishing",
+            "en-port",
+            "fr-maritime",
+            "fr-train",
+            "fr-wind",
+            "fr-solar",
+            "fr-museum",
+            "en-flood"
+          ]
+        },
+        {
+          "query_id": "fr-solar",
+          "rank": 1,
+          "top10": [
+            "fr-solar",
+            "fr-flood",
+            "fr-satellite",
+            "en-solar",
+            "fr-wind",
+            "fr-fishing",
+            "fr-maritime",
+            "fr-museum",
+            "fr-port",
+            "fr-train"
+          ]
+        },
+        {
+          "query_id": "fr-fishing",
+          "rank": 1,
+          "top10": [
+            "fr-fishing",
+            "fr-maritime",
+            "fr-flood",
+            "en-fishing",
+            "fr-port",
+            "fr-wind",
+            "fr-museum",
+            "fr-avalanche",
+            "fr-solar",
+            "fr-train"
+          ]
+        },
+        {
+          "query_id": "fr-vaccine",
+          "rank": 1,
+          "top10": [
+            "fr-vaccine",
+            "fr-flood",
+            "fr-maritime",
+            "fr-fishing",
+            "fr-avalanche",
+            "fr-solar",
+            "en-vaccine",
+            "fr-museum",
+            "fr-train",
+            "fr-port"
+          ]
+        },
+        {
+          "query_id": "fr-satellite",
+          "rank": 2,
+          "top10": [
+            "en-satellite",
+            "fr-satellite",
+            "en-fishing",
+            "en-avalanche",
+            "en-port",
+            "en-solar",
+            "en-museum2",
+            "fr-solar",
+            "fr-fishing",
+            "en-museum"
+          ]
+        },
+        {
+          "query_id": "fr-avalanche",
+          "rank": 2,
+          "top10": [
+            "en-avalanche",
+            "fr-avalanche",
+            "en-satellite",
+            "en-election",
+            "en-fishing",
+            "fr-flood",
+            "fr-satellite",
+            "fr-wind",
+            "en-flood",
+            "en-vaccine"
+          ]
+        },
+        {
+          "query_id": "fr-election",
+          "rank": 2,
+          "top10": [
+            "en-election",
+            "fr-election",
+            "fr-flood",
+            "en-flood",
+            "fr-museum",
+            "fr-wind",
+            "en-museum",
+            "fr-fishing",
+            "en-solar",
+            "fr-vaccine"
+          ]
+        },
+        {
+          "query_id": "fr-maritime",
+          "rank": 2,
+          "top10": [
+            "en-museum2",
+            "fr-maritime",
+            "en-museum",
+            "fr-museum",
+            "en-flood",
+            "fr-flood",
+            "fr-satellite",
+            "en-wind",
+            "en-avalanche",
+            "en-port"
+          ]
+        },
+        {
+          "query_id": "fr-wind",
+          "rank": 2,
+          "top10": [
+            "en-wind",
+            "fr-wind",
+            "en-solar",
+            "en-fishing",
+            "en-election",
+            "en-flood",
+            "en-satellite",
+            "en-avalanche",
+            "en-museum2",
+            "fr-solar"
+          ]
+        },
+        {
+          "query_id": "fr-train",
+          "rank": 2,
+          "top10": [
+            "en-train",
+            "fr-train",
+            "en-port",
+            "en-flood",
+            "en-avalanche",
+            "en-museum",
+            "en-satellite",
+            "fr-museum",
+            "fr-flood",
+            "fr-fishing"
+          ]
+        },
+        {
+          "query_id": "en-flood",
+          "rank": 1,
+          "top10": [
+            "en-flood",
+            "en-avalanche",
+            "en-port",
+            "fr-wind",
+            "en-wind",
+            "fr-flood",
+            "en-election",
+            "fr-avalanche",
+            "fr-port",
+            "en-museum2"
+          ]
+        },
+        {
+          "query_id": "en-museum",
+          "rank": 1,
+          "top10": [
+            "en-museum",
+            "en-port",
+            "en-museum2",
+            "en-flood",
+            "fr-maritime",
+            "en-solar",
+            "fr-museum",
+            "en-train",
+            "en-election",
+            "en-satellite"
+          ]
+        },
+        {
+          "query_id": "en-port",
+          "rank": 1,
+          "top10": [
+            "en-port",
+            "fr-port",
+            "en-train",
+            "en-fishing",
+            "en-solar",
+            "en-flood",
+            "en-avalanche",
+            "en-wind",
+            "fr-avalanche",
+            "en-satellite"
+          ]
+        },
+        {
+          "query_id": "en-solar",
+          "rank": 1,
+          "top10": [
+            "en-solar",
+            "fr-solar",
+            "en-wind",
+            "fr-wind",
+            "en-satellite",
+            "en-avalanche",
+            "fr-flood",
+            "en-flood",
+            "en-port",
+            "en-fishing"
+          ]
+        },
+        {
+          "query_id": "en-fishing",
+          "rank": 1,
+          "top10": [
+            "en-fishing",
+            "fr-fishing",
+            "en-election",
+            "en-port",
+            "en-avalanche",
+            "en-flood",
+            "en-museum2",
+            "en-train",
+            "en-solar",
+            "fr-avalanche"
+          ]
+        },
+        {
+          "query_id": "en-vaccine",
+          "rank": 1,
+          "top10": [
+            "en-vaccine",
+            "fr-vaccine",
+            "en-wind",
+            "fr-avalanche",
+            "en-fishing",
+            "fr-fishing",
+            "en-election",
+            "en-port",
+            "en-satellite",
+            "en-museum2"
+          ]
+        },
+        {
+          "query_id": "en-satellite",
+          "rank": 1,
+          "top10": [
+            "en-satellite",
+            "fr-satellite",
+            "fr-avalanche",
+            "fr-maritime",
+            "fr-vaccine",
+            "fr-flood",
+            "fr-fishing",
+            "fr-election",
+            "fr-port",
+            "fr-wind"
+          ]
+        },
+        {
+          "query_id": "en-avalanche",
+          "rank": 2,
+          "top10": [
+            "fr-avalanche",
+            "en-avalanche",
+            "fr-port",
+            "fr-flood",
+            "fr-train",
+            "fr-fishing",
+            "fr-maritime",
+            "fr-satellite",
+            "fr-museum",
+            "fr-vaccine"
+          ]
+        },
+        {
+          "query_id": "en-election",
+          "rank": 2,
+          "top10": [
+            "fr-election",
+            "en-election",
+            "fr-port",
+            "fr-wind",
+            "fr-fishing",
+            "fr-vaccine",
+            "fr-maritime",
+            "fr-museum",
+            "fr-avalanche",
+            "fr-flood"
+          ]
+        },
+        {
+          "query_id": "en-museum2",
+          "rank": 2,
+          "top10": [
+            "fr-maritime",
+            "en-museum2",
+            "fr-museum",
+            "fr-flood",
+            "fr-fishing",
+            "fr-port",
+            "fr-vaccine",
+            "fr-solar",
+            "fr-wind",
+            "fr-avalanche"
+          ]
+        },
+        {
+          "query_id": "en-wind",
+          "rank": 8,
+          "top10": [
+            "fr-wind",
+            "fr-fishing",
+            "fr-maritime",
+            "fr-election",
+            "fr-avalanche",
+            "fr-solar",
+            "fr-museum",
+            "en-wind",
+            "fr-port",
+            "fr-satellite"
+          ]
+        },
+        {
+          "query_id": "en-train",
+          "rank": 1,
+          "top10": [
+            "en-train",
+            "fr-train",
+            "fr-port",
+            "fr-fishing",
+            "fr-satellite",
+            "en-port",
+            "fr-avalanche",
+            "fr-flood",
+            "fr-wind",
+            "fr-maritime"
+          ]
+        }
+      ]
+    }
+  },
+  "warmup_failures": {
+    "semantic": 0,
+    "lexical": 0,
+    "hybrid": 0
+  },
+  "latency": {
+    "sequential": {
+      "lexical": {
+        "samples": 120,
+        "failures": 0,
+        "errors": [],
+        "p50_ms": 855.31,
+        "p95_ms": 898.54,
+        "max_ms": 956.72,
+        "target_p95_ms_below": 1000,
+        "target_met": true
+      },
+      "semantic": {
+        "samples": 120,
+        "failures": 0,
+        "errors": [],
+        "p50_ms": 881.71,
+        "p95_ms": 918.82,
+        "max_ms": 953.23,
+        "target_p95_ms_below": 1000,
+        "target_met": true
+      },
+      "hybrid": {
+        "samples": 120,
+        "failures": 0,
+        "errors": [],
+        "p50_ms": 886.24,
+        "p95_ms": 928.07,
+        "max_ms": 980.1,
+        "target_p95_ms_below": 1000,
+        "target_met": true
+      },
+      "_condition": {
+        "name": "sequential",
+        "concurrency": 1,
+        "ingestion": false,
+        "wall_seconds": 314.999
+      }
+    },
+    "concurrent-4": {
+      "lexical": {
+        "samples": 120,
+        "failures": 0,
+        "errors": [],
+        "p50_ms": 2721.08,
+        "p95_ms": 3031.41,
+        "max_ms": 3254.79,
+        "target_p95_ms_below": 1000,
+        "target_met": false
+      },
+      "semantic": {
+        "samples": 120,
+        "failures": 0,
+        "errors": [],
+        "p50_ms": 2765.0,
+        "p95_ms": 3136.62,
+        "max_ms": 3299.44,
+        "target_p95_ms_below": 1000,
+        "target_met": false
+      },
+      "hybrid": {
+        "samples": 120,
+        "failures": 0,
+        "errors": [],
+        "p50_ms": 2792.88,
+        "p95_ms": 3104.95,
+        "max_ms": 3289.54,
+        "target_p95_ms_below": 1000,
+        "target_met": false
+      },
+      "_condition": {
+        "name": "concurrent-4",
+        "concurrency": 4,
+        "ingestion": false,
+        "wall_seconds": 247.089
+      }
+    },
+    "ingesting": {
+      "lexical": {
+        "samples": 120,
+        "failures": 0,
+        "errors": [],
+        "p50_ms": 3741.84,
+        "p95_ms": 4369.29,
+        "max_ms": 4642.96,
+        "target_p95_ms_below": 1000,
+        "target_met": false
+      },
+      "semantic": {
+        "samples": 120,
+        "failures": 1,
+        "errors": [
+          "RuntimeError: POST /v0/search returned 503: {'code': 'search_unavailable', 'message': 'search unavailable', 'retryable': True}"
+        ],
+        "p50_ms": 3874.75,
+        "p95_ms": 4471.71,
+        "max_ms": 4967.74,
+        "target_p95_ms_below": 1000,
+        "target_met": false
+      },
+      "hybrid": {
+        "samples": 120,
+        "failures": 0,
+        "errors": [],
+        "p50_ms": 3946.1,
+        "p95_ms": 4374.51,
+        "max_ms": 4652.15,
+        "target_p95_ms_below": 1000,
+        "target_met": false
+      },
+      "_condition": {
+        "name": "ingesting",
+        "concurrency": 1,
+        "ingestion": true,
+        "wall_seconds": 1385.662,
+        "distractor_records_accepted": 2776,
+        "distractor_errors": []
+      }
+    }
+  },
+  "resources": {
+    "sampling_interval_seconds": 2,
+    "samples": 417,
+    "peaks": {
+      "seaweed": {
+        "cpu_percent_peak": 4.5,
+        "memory_mib_peak": 250.5
+      },
+      "tei": {
+        "cpu_percent_peak": 24.0,
+        "memory_mib_peak": 1198.1
+      },
+      "postgres": {
+        "cpu_percent_peak": 18.9,
+        "memory_mib_peak": 75.8
+      },
+      "weaviate": {
+        "cpu_percent_peak": 3.5,
+        "memory_mib_peak": 104.7
+      },
+      "temporal": {
+        "cpu_percent_peak": 30.3,
+        "memory_mib_peak": 226.1
+      },
+      "quivr-api": {
+        "cpu_percent_peak": 1.1,
+        "memory_mib_peak": 40.7
+      },
+      "quivr-worker": {
+        "cpu_percent_peak": 0.9,
+        "memory_mib_peak": 130.7
+      }
+    },
+    "sampling_errors": [],
+    "note": "containers: docker stats instantaneous CPU and memory; quivr-api/worker: ps RSS and lifetime-average CPU"
+  },
+  "findings": {
+    "hybrid_deficit": {
+      "reproduced": true,
+      "semantic_mrr_at_10": 0.9583,
+      "hybrid_mrr_at_10": 0.776,
+      "semantic_recall_at_3": 1.0,
+      "hybrid_recall_at_3": 0.9583,
+      "prior": {
+        "source": "prototype 1e4446a public-search-report.md",
+        "semantic": {
+          "mrr_at_10": 0.9583,
+          "recall_at_3": 1.0
+        },
+        "hybrid": {
+          "mrr_at_10": 0.7969,
+          "recall_at_3": 0.9583
+        }
+      },
+      "tracked_by": "https://linear.app/thevibecompany/issue/THE-641",
+      "note": "measurement only; weights and fixture unchanged, relevance investigation belongs to THE-641"
+    },
+    "p95_target_simple_search": {
+      "target_ms_below": 1000,
+      "condition": "sequential",
+      "met_by_mode": {
+        "lexical": true,
+        "semantic": true,
+        "hybrid": true
+      },
+      "all_met": true
+    },
+    "p95_target_other_conditions": {
+      "concurrent-4": {
+        "lexical": false,
+        "semantic": false,
+        "hybrid": false
+      },
+      "ingesting": {
+        "lexical": false,
+        "semantic": false,
+        "hybrid": false
+      }
+    }
+  },
+  "limits": [
+    "24 short single-segment documents; no large-scale, multi-architecture or production relevance claim",
+    "one run on shared hardware; no stability claim across runs",
+    "relevance weights and fixture are not tuned here; hybrid relevance belongs to THE-641"
+  ],
+  "duration_seconds": 2206.02,
+  "finished_at": "2026-09-28T10:04:31+00:00"
+}

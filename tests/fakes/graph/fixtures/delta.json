@@ -1,0 +1,8 @@
+{
+  "value": [
+    {
+      "id": "message-1"
+    }
+  ],
+  "@odata.nextLink": "http://127.0.0.1/v1.0/users/mailbox/mailFolders/inbox/messages/delta?$skiptoken=example"
+}

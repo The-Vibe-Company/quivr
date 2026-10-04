@@ -1,0 +1,316 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "fiqa",
+  "metadata": {
+    "name": "fiqa",
+    "language": "en",
+    "description": "financial questions",
+    "licence": "cc-by-sa-4.0",
+    "source": "https://huggingface.co/datasets/BeIR/fiqa",
+    "version": {
+      "BeIR/fiqa": "979c07a7cb5ccc6ca009792241fa1250b98055dd",
+      "BeIR/fiqa-qrels": "252958f2d646e22cab6d0c72dd3f0d5de6d0655a"
+    },
+    "split": "test",
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/BeIR/fiqa/blob/979c07a7cb5ccc6ca009792241fa1250b98055dd/README.md"
+    ],
+    "query_type": "financial questions",
+    "known_issues": [
+      "Sparse financial question/answer judgments; unjudged answers treated as nonrelevant."
+    ],
+    "source_counts": {
+      "documents": 57638,
+      "queries": 6648,
+      "judgments": 1706
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2000,
+      "seed": 991,
+      "max_source_bytes": 262144,
+      "eligible_queries": 648,
+      "judged_documents": 530,
+      "listed_negatives": 0,
+      "random_distractors": 1470,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "5b350679b929743fa0a2d33420d1e1c54e2bbe2d1269ad6d7f9bc29d29f6611b",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/BeIR/fiqa/resolve/979c07a7cb5ccc6ca009792241fa1250b98055dd/corpus/corpus-00000-of-00001.parquet",
+        "sha256": "b36bb07dab3bfad488190818828e749a52faf5ba391c1d51dac8b06064576f99"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/BeIR/fiqa/resolve/979c07a7cb5ccc6ca009792241fa1250b98055dd/queries/queries-00000-of-00001.parquet",
+        "sha256": "e9b3863724ffd538d8efff19684ef8ae495bdbddd96b35e81bdc39e3e22860d6"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/BeIR/fiqa-qrels/resolve/252958f2d646e22cab6d0c72dd3f0d5de6d0655a/test.tsv",
+        "sha256": "6adc2a640dcdd22bb8b3858f89107adef2a7c3db20a63550dfa7a0f71e379e44"
+      }
+    }
+  },
+  "counts": {
+    "documents": 2000,
+    "queries": 200,
+    "judgments": 530
+  },
+  "source_counts": {
+    "documents": 57638,
+    "queries": 6648,
+    "judgments": 1706
+  },
+  "fingerprint": "5b350679b929743fa0a2d33420d1e1c54e2bbe2d1269ad6d7f9bc29d29f6611b",
+  "sample": {
+    "queries": 200,
+    "documents": 2000,
+    "seed": 991,
+    "max_source_bytes": 262144,
+    "eligible_queries": 648,
+    "judged_documents": 530,
+    "listed_negatives": 0,
+    "random_distractors": 1470,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 200,
+    "min": 1,
+    "max": 12,
+    "mean": 2.65,
+    "median": 2.0,
+    "histogram": {
+      "1": 65,
+      "2": 56,
+      "3": 40,
+      "4": 13,
+      "5": 7,
+      "6": 7,
+      "7": 5,
+      "8": 1,
+      "9": 2,
+      "10": 2,
+      "11": 1,
+      "12": 1
+    },
+    "total_judgments": 530,
+    "queries": 200
+  },
+  "grades": {
+    "counts": {
+      "1": 530
+    },
+    "positive_judgments": 530,
+    "max_grade": 1
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 200,
+      "min": 18,
+      "max": 147,
+      "mean": 62.86,
+      "median": 61.5,
+      "histogram": {
+        "18": 1,
+        "23": 1,
+        "27": 1,
+        "28": 2,
+        "30": 1,
+        "31": 2,
+        "33": 3,
+        "34": 2,
+        "35": 2,
+        "36": 3,
+        "37": 5,
+        "38": 2,
+        "39": 1,
+        "40": 3,
+        "41": 7,
+        "42": 4,
+        "43": 3,
+        "44": 5,
+        "45": 4,
+        "46": 2,
+        "47": 2,
+        "48": 1,
+        "49": 2,
+        "50": 5,
+        "51": 7,
+        "52": 1,
+        "53": 2,
+        "54": 3,
+        "55": 4,
+        "56": 4,
+        "57": 2,
+        "58": 7,
+        "59": 2,
+        "61": 4,
+        "62": 3,
+        "63": 3,
+        "64": 3,
+        "65": 3,
+        "66": 3,
+        "67": 6,
+        "68": 5,
+        "69": 2,
+        "70": 4,
+        "71": 2,
+        "72": 4,
+        "73": 1,
+        "74": 2,
+        "75": 1,
+        "76": 6,
+        "77": 3,
+        "78": 3,
+        "79": 2,
+        "80": 4,
+        "82": 1,
+        "83": 2,
+        "84": 2,
+        "85": 6,
+        "86": 1,
+        "87": 3,
+        "88": 4,
+        "89": 2,
+        "90": 2,
+        "91": 3,
+        "92": 2,
+        "95": 1,
+        "97": 1,
+        "103": 2,
+        "104": 1,
+        "107": 1,
+        "109": 1,
+        "110": 2,
+        "112": 1,
+        "140": 1,
+        "147": 1
+      }
+    },
+    "words": {
+      "count": 200,
+      "min": 2,
+      "max": 31,
+      "mean": 11.095,
+      "median": 11.0,
+      "histogram": {
+        "2": 1,
+        "3": 2,
+        "4": 4,
+        "5": 9,
+        "6": 16,
+        "7": 12,
+        "8": 18,
+        "9": 14,
+        "10": 18,
+        "11": 20,
+        "12": 10,
+        "13": 17,
+        "14": 16,
+        "15": 16,
+        "16": 7,
+        "17": 11,
+        "18": 1,
+        "19": 4,
+        "20": 1,
+        "24": 1,
+        "27": 1,
+        "31": 1
+      }
+    }
+  },
+  "query_types": {
+    "source": "financial questions",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 155,
+      "statement": 45
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.6420658678665209,
+      "recall@10": 0.6956406926406926,
+      "mrr@10": 0.7256785714285714
+    },
+    "saturation": {
+      "saturated_queries": 57,
+      "queries": 200,
+      "share": 0.285
+    },
+    "dims": 384,
+    "pieces": 2236,
+    "index_s": 90.3,
+    "query_ms": 3.0
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T19:11:34.373753+00:00",
+      "status": "complete",
+      "set": "fiqa",
+      "fingerprint": "5b350679b929743fa0a2d33420d1e1c54e2bbe2d1269ad6d7f9bc29d29f6611b",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 57,
+      "queries": 200,
+      "share": 0.285
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 200,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 2004,
+    "query_inputs": 200,
+    "input_tokens": 1767103,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 0.21205236,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 3534206,
+      "max_usd": 0.43
+    }
+  },
+  "local_run_sha256": "d490978c1b3566220c987ea5d9105bec2961d5e1eb0c82e6e5d21e807cfef7a8"
+}

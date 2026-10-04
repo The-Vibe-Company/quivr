@@ -1,0 +1,121 @@
+{
+  "compatibility": {
+    "engine": ">=0.1.0 <0.3.0",
+    "plugin_api": ">=0.13.0 <0.14.0"
+  },
+  "configuration": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "const": "none"
+        },
+        "base_url": {
+          "const": "http://127.0.0.1:8080/v1"
+        },
+        "batch_size": {
+          "const": 16
+        },
+        "call_budget_ms": {
+          "const": 30000
+        },
+        "dimensions": {
+          "const": 384
+        },
+        "document_input_type": {
+          "const": "search_document"
+        },
+        "document_prefix": {
+          "const": ""
+        },
+        "format": {
+          "const": "openai"
+        },
+        "max_batch_tokens": {
+          "const": 8192
+        },
+        "max_retries": {
+          "const": 2
+        },
+        "max_tokens_per_segment": {
+          "const": 512
+        },
+        "metric": {
+          "const": "cosine"
+        },
+        "model": {
+          "const": "embedding-model"
+        },
+        "model_revision": {
+          "const": "1"
+        },
+        "overlap": {
+          "const": 48
+        },
+        "plugin_version": {
+          "const": "1.0.0"
+        },
+        "query_input_type": {
+          "const": "search_query"
+        },
+        "query_prefix": {
+          "const": ""
+        },
+        "request_timeout_ms": {
+          "const": 4000
+        },
+        "send_dimensions": {
+          "const": true
+        }
+      },
+      "required": [
+        "format",
+        "base_url",
+        "auth",
+        "model",
+        "dimensions"
+      ],
+      "type": "object"
+    }
+  },
+  "contributions": {
+    "ingestion": {
+      "limits": {
+        "max_segments": 256
+      },
+      "query_timeout_ms": 10000,
+      "spaces": {
+        "hosted.embed.embedding-model-384-af75b432c5e7aea0": {
+          "dimensions": 384,
+          "indexes": [
+            "text"
+          ],
+          "metric": "cosine",
+          "model": "embedding-model",
+          "query_modalities": [
+            "text"
+          ],
+          "version": "1"
+        }
+      },
+      "timeout_ms": 120000
+    }
+  },
+  "description": "Text windows embedded with a configured hosted or OpenAI-compatible model.",
+  "id": "hosted.embed",
+  "run": {
+    "command": [
+      "go",
+      "run",
+      "."
+    ]
+  },
+  "secrets": [
+    {
+      "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration.",
+      "name": "AZURE_FOUNDRY_KEY",
+      "required": false
+    }
+  ],
+  "version": "1.0.0"
+}

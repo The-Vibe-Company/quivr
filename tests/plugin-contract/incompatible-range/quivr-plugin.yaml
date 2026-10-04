@@ -1,0 +1,12 @@
+# Deliberately broken test plugin for the Contract Runner (tests/plugin-contract).
+# A manifest whose engine range excludes this engine.
+id: broken.incompatible-range
+version: 0.1.0
+compatibility:
+  engine: ">=9.0.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown]
+run:
+  command: [quivr-fake-plugin, ok]

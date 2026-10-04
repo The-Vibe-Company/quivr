@@ -1,0 +1,12 @@
+# Deliberately broken test plugin for the Contract Runner (tests/plugin-contract).
+# A Part whose text contains NUL, which content.CheckManifest rejects.
+id: broken.malformed-part
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown]
+run:
+  command: [quivr-fake-plugin, malformed-part]

@@ -1,0 +1,158 @@
+{
+  "name": "no_backfill_starts_now",
+  "now": "2026-09-28T12:00:00Z",
+  "config": {
+    "tenant_id": "00000000-0000-0000-0000-000000000000",
+    "mailbox": "monitoring@example.org",
+    "folder": "archive"
+  },
+  "credential": {
+    "client_id": "11111111-1111-1111-1111-111111111111",
+    "client_secret": "test-secret-not-real"
+  },
+  "ops": [
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003eearly\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-early",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "early",
+        "internetMessageId": "\u003cearly@example.org\u003e",
+        "receivedDateTime": "2026-09-28T11:00:00Z",
+        "sentDateTime": "2026-09-28T11:00:00Z",
+        "subject": "Subject early",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "fetch",
+      "want": {
+        "checkpoint": {
+          "link": "http://graph.invalid/v1.0/users/monitoring@example.org/mailFolders/archive/messages/delta?%24deltatoken=1\u0026%24filter=receivedDateTime+ge+2026-09-28T12%3A00%3A00Z",
+          "since": "2026-09-28T12:00:00Z"
+        }
+      }
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003elate\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-late",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "late",
+        "internetMessageId": "\u003clate@example.org\u003e",
+        "receivedDateTime": "2026-09-28T12:30:00Z",
+        "sentDateTime": "2026-09-28T12:30:00Z",
+        "subject": "Subject late",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "fetch",
+      "checkpoint": "previous",
+      "want": {
+        "items": [
+          {
+            "record_key": "\u003clate@example.org\u003e",
+            "revision": "sha256:6cfb7e5335d276b49b9a65afd9cd80208e2b9631dfe691cbe1be245aae0e792b",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "title",
+                  "role": "title",
+                  "content": {
+                    "kind": "text",
+                    "text": "Subject late"
+                  }
+                },
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Hello late"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [],
+                  "cc": [],
+                  "cc_count": 0,
+                  "conversation_id": "conv-late",
+                  "folder": "archive",
+                  "from": {
+                    "address": "desk@example.org",
+                    "name": "Desk"
+                  },
+                  "graph_id": "late",
+                  "internet_message_id": "\u003clate@example.org\u003e",
+                  "received_at": "2026-09-28T12:30:00Z",
+                  "sent_at": "2026-09-28T12:30:00Z",
+                  "subject": "Subject late",
+                  "to": [
+                    {
+                      "address": "monitoring@example.org",
+                      "name": "Monitor"
+                    }
+                  ],
+                  "to_count": 1
+                }
+              }
+            },
+            "attachments": [
+              {
+                "key": "original_body",
+                "role": "original_body",
+                "media_type": "text/html",
+                "size": 70,
+                "sha256": "6272b7024802cf376038ee2b90013e066c2b920d2383eebadce85d1a22fdf0e0"
+              }
+            ]
+          }
+        ],
+        "checkpoint": {
+          "link": "http://graph.invalid/v1.0/users/monitoring@example.org/mailFolders/archive/messages/delta?%24deltatoken=2\u0026%24filter=receivedDateTime+ge+2026-09-28T12%3A00%3A00Z",
+          "since": "2026-09-28T12:00:00Z"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "invocation_id": "inv-7f3d",
+  "idempotency_key": "gen-1:subscription:version-45:batch-1",
+  "contribution": "subscription",
+  "organization_id": "org-1",
+  "record": {
+    "corpus_id": "news",
+    "record_id": "record-45",
+    "record_version_id": "version-45",
+    "enriched": true,
+    "parts": [
+      {"key": "body", "role": "body", "text": "A short note.", "vector": [0.1, 0.2]}
+    ]
+  },
+  "evaluations": [
+    {
+      "id": "e1",
+      "expression": {"kind": "substring", "text": "note"},
+      "configuration": {},
+      "subscriptions": [
+        {"subscription_id": "sub-1", "subscription_version_id": "subv-1", "saved_query_id": "sq-1", "saved_query_version_id": "sqv-1"}
+      ]
+    }
+  ],
+  "configuration": {}
+}

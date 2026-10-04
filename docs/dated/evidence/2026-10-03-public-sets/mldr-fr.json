@@ -1,0 +1,367 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "mldr-fr",
+  "metadata": {
+    "name": "mldr-fr",
+    "language": "fr",
+    "description": "MLDR French test queries over long Wikipedia and mC4 documents, one positive each, with their listed negatives first among distractors",
+    "licence": "MIT",
+    "source": "https://huggingface.co/datasets/Shitao/MLDR",
+    "version": {
+      "Shitao/MLDR": "d67138e705d963e346253a80e59676ddb418810a"
+    },
+    "split": "test",
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/Shitao/MLDR"
+    ],
+    "query_type": "synthetic long-document questions",
+    "known_issues": [
+      "GPT-3.5 generated queries; one positive per query; document sampling and e5 character windows change task difficulty."
+    ],
+    "source_counts": {
+      "documents": 10000,
+      "queries": 200,
+      "judgments": 200
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 600,
+      "seed": 775,
+      "max_source_bytes": 262144,
+      "eligible_queries": 200,
+      "judged_documents": 200,
+      "listed_negatives": 400,
+      "random_distractors": 0,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "d607d8439c9e6a8279b996ab08983f65666f17cd3a3bd8b4c458ce7fe8c2bdad",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/Shitao/MLDR/resolve/d67138e705d963e346253a80e59676ddb418810a/mldr-v1.0-fr/corpus.jsonl.gz",
+        "sha256": "99e1966e8bc52b5bed73796d86cb097590e7ec9009c8c9b0e2f34d8134c36639"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/Shitao/MLDR/resolve/d67138e705d963e346253a80e59676ddb418810a/mldr-v1.0-fr/test.jsonl.gz",
+        "sha256": "3adccbec08b75d7b84cadaca1690049d5efa1e32d36df02f84d14995248b254c"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/Shitao/MLDR/resolve/d67138e705d963e346253a80e59676ddb418810a/qrels/qrels.mldr-v1.0-fr-test.tsv",
+        "sha256": "cc05a6a8bd66b0ca56cede3ea7014954b2ba2622f634c5445672def1c6f5e148"
+      }
+    }
+  },
+  "counts": {
+    "documents": 600,
+    "queries": 200,
+    "judgments": 200
+  },
+  "source_counts": {
+    "documents": 10000,
+    "queries": 200,
+    "judgments": 200
+  },
+  "fingerprint": "d607d8439c9e6a8279b996ab08983f65666f17cd3a3bd8b4c458ce7fe8c2bdad",
+  "sample": {
+    "queries": 200,
+    "documents": 600,
+    "seed": 775,
+    "max_source_bytes": 262144,
+    "eligible_queries": 200,
+    "judged_documents": 200,
+    "listed_negatives": 400,
+    "random_distractors": 0,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 200,
+    "min": 1,
+    "max": 1,
+    "mean": 1.0,
+    "median": 1.0,
+    "histogram": {
+      "1": 200
+    },
+    "total_judgments": 200,
+    "queries": 200
+  },
+  "grades": {
+    "counts": {
+      "1": 200
+    },
+    "positive_judgments": 200,
+    "max_grade": 1
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 200,
+      "min": 33,
+      "max": 2589,
+      "mean": 149.795,
+      "median": 118.0,
+      "histogram": {
+        "33": 1,
+        "44": 1,
+        "45": 1,
+        "49": 1,
+        "50": 1,
+        "51": 1,
+        "57": 2,
+        "58": 1,
+        "60": 2,
+        "61": 1,
+        "62": 1,
+        "68": 3,
+        "69": 1,
+        "70": 2,
+        "75": 3,
+        "76": 1,
+        "77": 1,
+        "78": 3,
+        "79": 1,
+        "81": 3,
+        "82": 1,
+        "83": 1,
+        "85": 1,
+        "86": 3,
+        "88": 4,
+        "89": 1,
+        "90": 2,
+        "91": 1,
+        "92": 4,
+        "93": 5,
+        "94": 1,
+        "95": 4,
+        "97": 2,
+        "98": 3,
+        "99": 1,
+        "100": 3,
+        "101": 1,
+        "102": 2,
+        "104": 1,
+        "105": 4,
+        "107": 4,
+        "108": 1,
+        "109": 2,
+        "110": 1,
+        "114": 3,
+        "115": 5,
+        "116": 3,
+        "117": 4,
+        "118": 3,
+        "119": 1,
+        "120": 2,
+        "121": 2,
+        "122": 2,
+        "123": 2,
+        "124": 1,
+        "125": 1,
+        "126": 1,
+        "127": 3,
+        "128": 2,
+        "129": 3,
+        "130": 4,
+        "131": 2,
+        "133": 1,
+        "135": 2,
+        "136": 2,
+        "137": 1,
+        "138": 3,
+        "139": 3,
+        "140": 1,
+        "141": 3,
+        "142": 3,
+        "143": 3,
+        "145": 1,
+        "147": 2,
+        "148": 1,
+        "150": 1,
+        "151": 1,
+        "152": 1,
+        "153": 1,
+        "154": 1,
+        "155": 2,
+        "158": 1,
+        "159": 1,
+        "160": 1,
+        "162": 1,
+        "163": 1,
+        "164": 1,
+        "167": 2,
+        "169": 1,
+        "171": 1,
+        "172": 2,
+        "182": 1,
+        "186": 1,
+        "190": 1,
+        "191": 2,
+        "199": 1,
+        "201": 1,
+        "211": 1,
+        "217": 1,
+        "219": 2,
+        "233": 1,
+        "237": 1,
+        "246": 1,
+        "256": 1,
+        "265": 1,
+        "271": 1,
+        "287": 1,
+        "300": 1,
+        "356": 1,
+        "432": 1,
+        "453": 1,
+        "512": 1,
+        "527": 1,
+        "603": 1,
+        "984": 1,
+        "2589": 1
+      }
+    },
+    "words": {
+      "count": 200,
+      "min": 6,
+      "max": 377,
+      "mean": 24.32,
+      "median": 20.0,
+      "histogram": {
+        "6": 3,
+        "7": 1,
+        "8": 1,
+        "9": 2,
+        "10": 1,
+        "11": 6,
+        "12": 6,
+        "13": 8,
+        "14": 5,
+        "15": 6,
+        "16": 11,
+        "17": 16,
+        "18": 14,
+        "19": 19,
+        "20": 14,
+        "21": 10,
+        "22": 14,
+        "23": 8,
+        "24": 7,
+        "25": 8,
+        "26": 6,
+        "27": 4,
+        "28": 3,
+        "29": 3,
+        "30": 2,
+        "31": 1,
+        "32": 2,
+        "34": 1,
+        "36": 2,
+        "37": 1,
+        "39": 2,
+        "40": 2,
+        "42": 1,
+        "44": 1,
+        "49": 1,
+        "50": 1,
+        "57": 1,
+        "67": 1,
+        "72": 1,
+        "81": 1,
+        "94": 1,
+        "166": 1,
+        "377": 1
+      }
+    }
+  },
+  "query_types": {
+    "source": "synthetic long-document questions",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 188,
+      "statement": 12
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.9166962063761926,
+      "recall@10": 0.96,
+      "mrr@10": 0.9026666666666666
+    },
+    "saturation": {
+      "saturated_queries": 174,
+      "queries": 200,
+      "share": 0.87
+    },
+    "dims": 384,
+    "pieces": 5767,
+    "index_s": 508.5,
+    "query_ms": 29.7
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T18:58:04.314910+00:00",
+      "status": "complete",
+      "set": "mldr-fr",
+      "fingerprint": "d607d8439c9e6a8279b996ab08983f65666f17cd3a3bd8b4c458ce7fe8c2bdad",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 174,
+      "queries": 200,
+      "share": 0.87
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 200,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 1781,
+    "query_inputs": 200,
+    "input_tokens": 9443691,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 1.1332429199999998,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 18887382,
+      "max_usd": 2.27
+    }
+  },
+  "local_run_sha256": "32f234dd19054c9773b2e4061c9434b91ef5b7487b2cf20e0cd7f410059af79c"
+}

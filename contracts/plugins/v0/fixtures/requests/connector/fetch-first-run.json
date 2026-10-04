@@ -1,0 +1,12 @@
+{
+  "invocation_id": "inv-feed-0",
+  "contribution": "connector",
+  "organization_id": "org-1",
+  "configuration": {},
+  "connector": {"instance_id": "connector-8", "kind": "public_feed", "config": {"feed_url": "https://feeds.example.com/public"}},
+  "credential": null,
+  "checkpoint": null,
+  "now": "2026-09-29T09:00:00Z",
+  "page_in_run": 0,
+  "reads_today": 0
+}

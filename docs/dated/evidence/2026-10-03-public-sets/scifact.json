@@ -1,0 +1,350 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "scifact",
+  "metadata": {
+    "name": "scifact",
+    "language": "en",
+    "description": "SciFact (BEIR) test claims over scientific abstracts",
+    "licence": "claims CC BY 4.0, abstracts ODC-By 1.0",
+    "source": "https://github.com/allenai/scifact",
+    "version": {
+      "BEIR": "scifact archive sha256 536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165"
+    },
+    "split": "test",
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://github.com/allenai/scifact"
+    ],
+    "query_type": "scientific claims",
+    "known_issues": [
+      "Sparse claims-to-abstract judgments; unjudged documents treated as nonrelevant."
+    ],
+    "source_counts": {
+      "documents": 5183,
+      "queries": 1109,
+      "judgments": 339
+    },
+    "sample": {
+      "queries": 300,
+      "documents": 2000,
+      "seed": 775,
+      "max_source_bytes": 262144,
+      "eligible_queries": 300,
+      "judged_documents": 283,
+      "listed_negatives": 0,
+      "random_distractors": 1717,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "55c00c954b6f7997aabbc8de46f72276a0bd5aad3d57ff9f5a01de6692bf4a13",
+    "files": {
+      "archive": {
+        "url": "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/scifact.zip",
+        "sha256": "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165"
+      }
+    }
+  },
+  "counts": {
+    "documents": 2000,
+    "queries": 300,
+    "judgments": 339
+  },
+  "source_counts": {
+    "documents": 5183,
+    "queries": 1109,
+    "judgments": 339
+  },
+  "fingerprint": "55c00c954b6f7997aabbc8de46f72276a0bd5aad3d57ff9f5a01de6692bf4a13",
+  "sample": {
+    "queries": 300,
+    "documents": 2000,
+    "seed": 775,
+    "max_source_bytes": 262144,
+    "eligible_queries": 300,
+    "judged_documents": 283,
+    "listed_negatives": 0,
+    "random_distractors": 1717,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 300,
+    "min": 1,
+    "max": 5,
+    "mean": 1.13,
+    "median": 1.0,
+    "histogram": {
+      "1": 277,
+      "2": 14,
+      "3": 4,
+      "4": 3,
+      "5": 2
+    },
+    "total_judgments": 339,
+    "queries": 300
+  },
+  "grades": {
+    "counts": {
+      "1": 339
+    },
+    "positive_judgments": 339,
+    "max_grade": 1
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 300,
+      "min": 28,
+      "max": 204,
+      "mean": 90.34666666666666,
+      "median": 81.5,
+      "histogram": {
+        "28": 1,
+        "31": 1,
+        "35": 2,
+        "37": 2,
+        "38": 2,
+        "40": 3,
+        "41": 2,
+        "42": 1,
+        "43": 3,
+        "44": 2,
+        "45": 2,
+        "46": 1,
+        "47": 2,
+        "48": 4,
+        "49": 4,
+        "50": 5,
+        "51": 1,
+        "52": 3,
+        "53": 7,
+        "54": 1,
+        "55": 6,
+        "57": 4,
+        "58": 2,
+        "59": 4,
+        "60": 1,
+        "61": 1,
+        "62": 2,
+        "63": 3,
+        "64": 3,
+        "65": 1,
+        "66": 8,
+        "67": 5,
+        "68": 3,
+        "69": 3,
+        "70": 9,
+        "71": 3,
+        "72": 3,
+        "73": 6,
+        "74": 2,
+        "75": 4,
+        "76": 7,
+        "77": 2,
+        "78": 4,
+        "79": 3,
+        "80": 7,
+        "81": 5,
+        "82": 2,
+        "83": 2,
+        "84": 5,
+        "85": 1,
+        "87": 3,
+        "88": 4,
+        "89": 3,
+        "90": 2,
+        "91": 1,
+        "92": 2,
+        "93": 2,
+        "94": 2,
+        "95": 6,
+        "96": 6,
+        "97": 4,
+        "98": 2,
+        "99": 2,
+        "100": 4,
+        "101": 3,
+        "102": 3,
+        "103": 6,
+        "104": 2,
+        "105": 1,
+        "106": 2,
+        "107": 5,
+        "108": 4,
+        "109": 2,
+        "110": 1,
+        "111": 2,
+        "115": 1,
+        "118": 2,
+        "119": 1,
+        "120": 2,
+        "122": 1,
+        "123": 1,
+        "125": 1,
+        "126": 2,
+        "127": 1,
+        "128": 2,
+        "129": 2,
+        "130": 3,
+        "131": 1,
+        "132": 1,
+        "133": 1,
+        "134": 1,
+        "135": 3,
+        "136": 1,
+        "137": 1,
+        "139": 1,
+        "142": 1,
+        "145": 1,
+        "147": 2,
+        "148": 1,
+        "149": 2,
+        "151": 2,
+        "152": 3,
+        "153": 2,
+        "155": 3,
+        "156": 1,
+        "158": 1,
+        "159": 2,
+        "161": 3,
+        "162": 1,
+        "163": 1,
+        "166": 1,
+        "169": 2,
+        "170": 1,
+        "172": 1,
+        "174": 1,
+        "183": 1,
+        "194": 1,
+        "196": 1,
+        "200": 1,
+        "204": 1
+      }
+    },
+    "words": {
+      "count": 300,
+      "min": 4,
+      "max": 29,
+      "mean": 12.506666666666666,
+      "median": 12.0,
+      "histogram": {
+        "4": 3,
+        "5": 9,
+        "6": 9,
+        "7": 28,
+        "8": 22,
+        "9": 21,
+        "10": 32,
+        "11": 24,
+        "12": 23,
+        "13": 27,
+        "14": 17,
+        "15": 18,
+        "16": 12,
+        "17": 5,
+        "18": 5,
+        "19": 7,
+        "20": 6,
+        "21": 13,
+        "22": 2,
+        "23": 3,
+        "24": 6,
+        "25": 3,
+        "26": 2,
+        "27": 1,
+        "28": 1,
+        "29": 1
+      }
+    }
+  },
+  "query_types": {
+    "source": "scientific claims",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 0,
+      "statement": 300
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.7525982533239942,
+      "recall@10": 0.8552222222222224,
+      "mrr@10": 0.726111111111111
+    },
+    "saturation": {
+      "saturated_queries": 185,
+      "queries": 300,
+      "share": 0.6166666666666667
+    },
+    "dims": 384,
+    "pieces": 2556,
+    "index_s": 166.8,
+    "query_ms": 5.7
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T19:07:03.070669+00:00",
+      "status": "complete",
+      "set": "scifact",
+      "fingerprint": "55c00c954b6f7997aabbc8de46f72276a0bd5aad3d57ff9f5a01de6692bf4a13",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 185,
+      "queries": 300,
+      "share": 0.6166666666666667
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 300,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 2003,
+    "query_inputs": 300,
+    "input_tokens": 3097293,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 0.37167515999999995,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 6194586,
+      "max_usd": 0.75
+    }
+  },
+  "local_run_sha256": "b125e966d12803a6c50c0d5be07c01bd40b5c7aa3936cef066021e4eacc9015f"
+}

@@ -1,0 +1,389 @@
+{
+  "query": "Pourquoi le port est-il fermé?",
+  "space": "core.ingest.e5-small@1",
+  "candidate_count": 30,
+  "candidates": [
+    {
+      "segment_id": "seg28",
+      "record_id": "record-seg28",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg26",
+      "record_id": "record-seg26",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg24",
+      "record_id": "record-seg24",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg22",
+      "record_id": "record-seg22",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg20",
+      "record_id": "record-seg20",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg18",
+      "record_id": "record-seg18",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg16",
+      "record_id": "record-seg16",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg14",
+      "record_id": "record-seg14",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg12",
+      "record_id": "record-seg12",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg10",
+      "record_id": "record-seg10",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg08",
+      "record_id": "record-seg08",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg06",
+      "record_id": "record-seg06",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg04",
+      "record_id": "record-seg04",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg02",
+      "record_id": "record-seg02",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg00",
+      "record_id": "record-seg00",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg29",
+      "record_id": "record-seg29",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg27",
+      "record_id": "record-seg27",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg25",
+      "record_id": "record-seg25",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg23",
+      "record_id": "record-seg23",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg21",
+      "record_id": "record-seg21",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg19",
+      "record_id": "record-seg19",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg17",
+      "record_id": "record-seg17",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg15",
+      "record_id": "record-seg15",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg13",
+      "record_id": "record-seg13",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg11",
+      "record_id": "record-seg11",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg09",
+      "record_id": "record-seg09",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg07",
+      "record_id": "record-seg07",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg05",
+      "record_id": "record-seg05",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg03",
+      "record_id": "record-seg03",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg01",
+      "record_id": "record-seg01",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg30",
+      "record_id": "record-seg30",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg31",
+      "record_id": "record-seg31",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg32",
+      "record_id": "record-seg32",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg33",
+      "record_id": "record-seg33",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    },
+    {
+      "segment_id": "seg34",
+      "record_id": "record-seg34",
+      "version_id": "v1",
+      "part_key": "body",
+      "start": 0,
+      "end": 42,
+      "text": "Le port est fermé pendant la grève.",
+      "score": 0.5
+    }
+  ],
+  "legacy_hybrid_top": [
+    "seg00",
+    "seg01",
+    "seg02",
+    "seg03",
+    "seg04",
+    "seg05",
+    "seg06",
+    "seg07",
+    "seg08",
+    "seg09",
+    "seg10",
+    "seg11",
+    "seg12",
+    "seg13",
+    "seg14",
+    "seg15",
+    "seg16",
+    "seg17",
+    "seg18",
+    "seg19",
+    "seg20",
+    "seg21",
+    "seg22",
+    "seg23",
+    "seg24",
+    "seg25",
+    "seg26",
+    "seg27",
+    "seg28",
+    "seg29"
+  ]
+}

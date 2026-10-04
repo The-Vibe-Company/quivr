@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ingestion embed_query response, v0",
+  "description": "200 answer of embed_query.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "vector"
+  ],
+  "properties": {
+    "vector": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {
+        "type": "number"
+      },
+      "description": "One vector, exactly as many numbers as the space's dimensions. Values must be finite as 32-bit floats; under the cosine metric the vector must not be all zeros."
+    }
+  }
+}

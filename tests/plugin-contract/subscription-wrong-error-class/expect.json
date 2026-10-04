@@ -1,0 +1,6 @@
+{
+  "description": "Invalid subscription requests answered with retryable true.",
+  "certified": false,
+  "check": "invalid_request",
+  "code": "wrong_error_class"
+}

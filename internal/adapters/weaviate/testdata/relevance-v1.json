@@ -1,0 +1,170 @@
+[
+  [
+    "fr-flood",
+    "Crue de la Somme à Amiens",
+    "La préfecture ferme deux routes départementales après une montée de 45 centimètres. Les écoles restent ouvertes vendredi.",
+    "fr",
+    "Quelles routes sont fermées après la crue à Amiens ?"
+  ],
+  [
+    "fr-museum",
+    "Le musée de Lyon prolonge son exposition Monet",
+    "L'établissement ajoute trois nocturnes en septembre. La réservation demeure obligatoire après 20 heures.",
+    "fr",
+    "Combien de nocturnes sont ajoutées pour l'exposition Monet à Lyon ?"
+  ],
+  [
+    "fr-port",
+    "Grève de vingt-quatre heures au port de Marseille",
+    "Les terminaux à conteneurs interrompront les opérations mardi. Les ferries pour la Corse ne sont pas concernés.",
+    "fr",
+    "Les ferries corses sont-ils touchés par la grève du port de Marseille ?"
+  ],
+  [
+    "fr-solar",
+    "Nantes équipe dix-huit écoles de panneaux solaires",
+    "La ville prévoit une production annuelle de 1,2 gigawattheure. Les premiers chantiers commencent en octobre.",
+    "fr",
+    "Quelle production solaire annuelle Nantes attend-elle de ses écoles ?"
+  ],
+  [
+    "fr-fishing",
+    "La Bretagne réduit le quota de sardines",
+    "La limite baisse de 12 % pour la prochaine campagne. Une révision scientifique est prévue en janvier.",
+    "fr",
+    "De combien baisse le quota breton de sardines ?"
+  ],
+  [
+    "fr-vaccine",
+    "Essai vaccinal respiratoire lancé à Lille",
+    "Le centre hospitalier recrute 600 volontaires âgés de 60 à 75 ans. Les premiers résultats sont attendus au printemps.",
+    "fr",
+    "Combien de volontaires participent à l'essai vaccinal de Lille ?"
+  ],
+  [
+    "fr-satellite",
+    "Un satellite toulousain surveillera le méthane",
+    "L'instrument cartographiera les émissions industrielles tous les quatre jours. Son lancement est prévu depuis Kourou.",
+    "fr",
+    "How often will the Toulouse satellite map industrial methane emissions?"
+  ],
+  [
+    "fr-avalanche",
+    "Risque d'avalanche relevé en Savoie",
+    "Le niveau passe de trois à quatre au-dessus de 2 000 mètres. Trois cols ferment jusqu'à lundi matin.",
+    "fr",
+    "At what altitude does the avalanche warning in Savoie apply?"
+  ],
+  [
+    "fr-election",
+    "Participation municipale en hausse à Rouen",
+    "À 17 heures, le taux atteint 58 %, contre 51 % lors du scrutin précédent. Les bureaux ferment à 20 heures.",
+    "fr",
+    "What was voter turnout in Rouen at 5 p.m.?"
+  ],
+  [
+    "fr-maritime",
+    "Le musée maritime de Bordeaux rouvre",
+    "Après huit mois de travaux, le parcours présente 140 objets restaurés. L'entrée sera gratuite le premier dimanche.",
+    "fr",
+    "How many restored objects are shown when Bordeaux's maritime museum reopens?"
+  ],
+  [
+    "fr-wind",
+    "Feu vert pour soixante-deux éoliennes en Normandie",
+    "Le parc offshore doit alimenter 450 000 foyers à partir de 2030. Les travaux préparatoires dureront dix-huit mois.",
+    "fr",
+    "How many homes should the Normandy offshore wind farm supply?"
+  ],
+  [
+    "fr-train",
+    "Signalisation remplacée près de Dijon",
+    "Aucun train ne circulera entre Dijon et Dole samedi soir. Des autocars assureront la liaison jusqu'à dimanche midi.",
+    "fr",
+    "When will buses replace trains between Dijon and Dole?"
+  ],
+  [
+    "en-flood",
+    "River Ouse flooding closes York footbridges",
+    "The council shut three pedestrian crossings after water rose 30 centimetres. Bus services continue on their normal routes.",
+    "en",
+    "How many York footbridges closed because of the River Ouse flood?"
+  ],
+  [
+    "en-museum",
+    "Bristol sculpture show adds late openings",
+    "The museum will stay open late on four Fridays in October. Advance booking is required after 7 p.m.",
+    "en",
+    "On how many October Fridays will Bristol's sculpture show open late?"
+  ],
+  [
+    "en-port",
+    "Liverpool dock workers call a 48-hour strike",
+    "Container handling will stop on Wednesday and Thursday. Passenger sailings to Belfast will operate normally.",
+    "en",
+    "Will Belfast passenger sailings run during the Liverpool port strike?"
+  ],
+  [
+    "en-solar",
+    "Leeds installs solar panels on twelve schools",
+    "The council expects the roofs to generate 900 megawatt-hours each year. Installation starts during the autumn break.",
+    "en",
+    "How much electricity should the Leeds school roofs generate annually?"
+  ],
+  [
+    "en-fishing",
+    "Cornwall sets a lower mackerel catch limit",
+    "The seasonal quota falls by 8 percent following the stock survey. Officials will review the limit in February.",
+    "en",
+    "By what percentage does Cornwall's mackerel quota fall?"
+  ],
+  [
+    "en-vaccine",
+    "Oxford begins a dengue vaccine trial",
+    "Researchers are enrolling 420 adults aged 18 to 45. Initial safety findings are due next summer.",
+    "en",
+    "How many adults will join Oxford's dengue vaccine trial?"
+  ],
+  [
+    "en-satellite",
+    "Glasgow satellite tracks wildfire smoke",
+    "The sensor will revisit affected regions every six days. Engineers plan to launch it from California in November.",
+    "en",
+    "À quelle fréquence le satellite de Glasgow observera-t-il les fumées d'incendie ?"
+  ],
+  [
+    "en-avalanche",
+    "Cairngorm avalanche warning raised",
+    "The hazard level increases to four above 900 metres. Two mountain roads will remain closed through Tuesday.",
+    "en",
+    "Au-dessus de quelle altitude l'alerte avalanche des Cairngorms s'applique-t-elle ?"
+  ],
+  [
+    "en-election",
+    "Norwich council election turnout reaches 64 percent",
+    "The 6 p.m. figure is nine points higher than at the previous vote. Polling stations close at 10 p.m.",
+    "en",
+    "Quel est le taux de participation à Norwich à 18 heures ?"
+  ],
+  [
+    "en-museum2",
+    "Manchester industry museum reopens",
+    "A renovated gallery displays 85 working machines after a six-month closure. Admission is free throughout opening week.",
+    "en",
+    "Combien de machines fonctionnelles le musée de Manchester expose-t-il à sa réouverture ?"
+  ],
+  [
+    "en-wind",
+    "North Sea project wins consent for eighty turbines",
+    "The offshore development is designed to power 600,000 homes from 2031. Survey vessels begin work this winter.",
+    "en",
+    "Combien de foyers le nouveau parc éolien en mer du Nord doit-il alimenter ?"
+  ],
+  [
+    "en-train",
+    "Birmingham signalling upgrade halts Sunday trains",
+    "Services between Birmingham and Coventry will be replaced by coaches all day Sunday. Normal trains resume Monday morning.",
+    "en",
+    "Quand les autocars remplaceront-ils les trains entre Birmingham et Coventry ?"
+  ]
+]

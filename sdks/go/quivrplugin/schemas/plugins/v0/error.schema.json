@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plugin Protocol error envelope, v0",
+  "description": "Body of every non-2xx plugin response. retryable is authoritative: true asks the engine to retry within the declared retry intent; false is terminal. Connector errors (since Plugin API 0.3) also carry error_class, and optionally retry_after_seconds.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "message",
+    "retryable"
+  ],
+  "properties": {
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "maxLength": 64
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "error_class": {
+      "enum": [
+        "access",
+        "transient",
+        "source"
+      ],
+      "description": "Connector error class: access (the source refuses the credential or the access; retryable false), transient (an outage or a rate limit; retryable true) or source (the source returned unusable data; retryable false). Required on connector errors: the core maps it to Connector Health."
+    },
+    "retry_after_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400,
+      "description": "The source accepts requests again after this delay, such as a rate-limit reset. It defers the next run and never shortens the configured interval. Only with error_class."
+    }
+  },
+  "dependentRequired": {
+    "retry_after_seconds": [
+      "error_class"
+    ]
+  }
+}

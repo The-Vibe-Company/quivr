@@ -1,0 +1,21 @@
+# Test manifest of the Go SDK push tests: one kind that pulls and pushes.
+id: sdk-push-test
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.5.0 <0.6.0"
+contributions:
+  connector:
+    kinds:
+      alerts:
+        config_schema: {type: object}
+        credential_schema:
+          type: object
+          additionalProperties: false
+          required: [token]
+          properties:
+            token: {type: string, pattern: "^tok-"}
+        default_interval_seconds: 600
+        modes: [pull, push]
+    limits:
+      max_items: 2

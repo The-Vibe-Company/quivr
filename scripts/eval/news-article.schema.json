@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Input news article",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "published_at": {
+      "type": "string",
+      "anyOf": [
+        {
+          "format": "date"
+        },
+        {
+          "format": "date-time"
+        }
+      ]
+    },
+    "cluster": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "credit": {
+      "type": "string"
+    },
+    "story_id": {
+      "type": "string"
+    },
+    "updated_at": {
+      "type": "string",
+      "anyOf": [
+        {
+          "format": "date"
+        },
+        {
+          "format": "date-time"
+        }
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "text",
+    "published_at"
+  ]
+}

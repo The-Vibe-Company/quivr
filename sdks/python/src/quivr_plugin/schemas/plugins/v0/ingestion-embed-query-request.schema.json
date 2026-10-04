@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ingestion embed_query request, v0",
+  "description": "POST /v0/contributions/ingestion/embed_query, since Plugin API 0.6. Encode one query into one of the plugin's spaces, so a query vector always comes from the model that produced the document vectors.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "contribution",
+    "organization_id",
+    "configuration",
+    "space",
+    "query"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per attempt; correlate logs with it."
+    },
+    "contribution": {
+      "const": "ingestion"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration": {
+      "type": "object",
+      "description": "The validated plugin (installer) configuration."
+    },
+    "space": {
+      "$ref": "plugin-manifest.schema.json#/$defs/SpaceId"
+    },
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "modality",
+        "text"
+      ],
+      "properties": {
+        "modality": {
+          "enum": [
+            "text"
+          ],
+          "description": "One of the space's query_modalities. Plugin API 0.6 knows only text."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32768,
+          "description": "The query, trimmed, with line breaks normalized to LF."
+        }
+      }
+    }
+  }
+}

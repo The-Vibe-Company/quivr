@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1284 646" width="1284" height="646" role="img" aria-label="2 — Ajouter un plugin sans modifier le cœur">
+<title>2 — Ajouter un plugin sans modifier le cœur</title>
+<desc>Le SDK définit le contrat, OCI distribue le package, le gestionnaire l’active et Temporal lui confie les nouveaux documents.</desc>
+<style>text{font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif}.lanebox{fill:#f6f8fa}.lanelabel{font-size:10px;font-weight:700;letter-spacing:.12em;fill:#59636e}.card{fill:#ffffff;stroke:#d1d9e0;stroke-width:1}.card-added{stroke:#1a7f37;stroke-opacity:.55}.card-modified{stroke:#9a6700;stroke-opacity:.5}.ghost{opacity:.55}.ghost .card{stroke:#d1242f;stroke-dasharray:4 3;stroke-opacity:.6}.context{opacity:.82}.ntitle{font-weight:600;fill:#1f2328}.strike{text-decoration:line-through}.nsub{font-size:9.5px;fill:#59636e;font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace}.chip{fill:#f6f8fa}.glyph{fill:#59636e}.glyph-stroke{stroke:#59636e;stroke-width:1.4;fill:none}.bdg text{font-size:8.5px;font-weight:700;letter-spacing:.06em}.bdg rect{stroke-width:1}.bdg-added rect{fill:#dafbe1;stroke:rgba(31,136,61,.4)}.bdg-added text{fill:#1a7f37}.bdg-modified rect{fill:#fff8c5;stroke:rgba(154,103,0,.35)}.bdg-modified text{fill:#9a6700}.bdg-removed rect{fill:#ffebe9;stroke:rgba(209,36,47,.35)}.bdg-removed text{fill:#d1242f}.bdg-neutral rect{fill:#f6f8fa;stroke:#d1d9e0}.bdg-neutral text{fill:#59636e}.edge{fill:none;stroke-width:1.5}.edge-added{stroke:#1a7f37}.edge-modified{stroke:#9a6700}.edge-removed{stroke:#d1242f;stroke-dasharray:5 4;opacity:.7}.edge-neutral{stroke:#8c959f}.hero{stroke-width:2.25}.faded{opacity:.45}.glow{fill:none;stroke-width:7;opacity:.14}.msg-self{font-size:11px;fill:#1f2328}.lpill{fill:#ffffff;stroke:#d8dee4;stroke-width:1}.ltext{font-size:9.5px;font-weight:600;fill:#59636e}.ltext-added{fill:#1a7f37}.ltext-modified{fill:#9a6700}.ltext-removed{fill:#d1242f}.cardsh{filter:drop-shadow(0 1px 2px rgba(31,35,40,.14))}.lifeline{stroke:#d1d9e0;stroke-width:1;stroke-dasharray:3 4}.actbar{fill:#dafbe1;stroke:rgba(31,136,61,.4)}.msg{fill:none;stroke-width:1.5}.msg-return{stroke-dasharray:4 3;opacity:.8}.msg-strong{stroke-width:2.25}</style>
+<defs><pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1" fill="rgba(140,149,159,.35)"/></pattern><marker id="mk-added" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1a7f37"/></marker><marker id="mko-added" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#1a7f37" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-modified" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9a6700"/></marker><marker id="mko-modified" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#9a6700" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-removed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d1242f"/></marker><marker id="mko-removed" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#d1242f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="mk-neutral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8c959f"/></marker><marker id="mko-neutral" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M2,1 L10,5 L2,9" fill="none" stroke="#8c959f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect x="0" y="0" width="1284" height="646" rx="12" fill="#ffffff"/>
+<rect x="0" y="0" width="1284" height="646" rx="12" fill="url(#dots)"/>
+<g><rect class="lanebox" x="16" y="44" width="404" height="586" rx="12"/>
+<text class="lanelabel" x="32" y="68">2 · ENTRÉE QUIVR · CONTRAT STABLE</text>
+<rect class="lanebox" x="440" y="44" width="404" height="586" rx="12"/>
+<text class="lanelabel" x="456" y="68">3 · ORCHESTRATION · LE CŒUR DURABLE</text>
+<rect class="lanebox" x="864" y="44" width="404" height="586" rx="12"/>
+<text class="lanelabel" x="880" y="68">4 · PLUGINS · CAPACITÉS EXTERNES</text></g>
+<g><path class="edge edge-added" d="M404,123 L417,123 C424.18,123 430,128.82 430,136 L430,151.5 C430,167.24 442.76,180 458.5,180 L809.5,180 C823.03,180 834,190.97 834,204.5 L834,206 C834,218.7 844.3,229 857,229 L880,229" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#1a7f37"><animateMotion dur="1.6s" repeatCount="indefinite" path="M404,123 L417,123 C424.18,123 430,128.82 430,136 L430,151.5 C430,167.24 442.76,180 458.5,180 L809.5,180 C823.03,180 834,190.97 834,204.5 L834,206 C834,218.7 844.3,229 857,229 L880,229"/></circle>
+<path class="edge edge-added" d="M880,245 L862,245 C852.06,245 844,253.06 844,263 L844,335 C844,339.42 840.42,343 836,343 L828,343" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#1a7f37"><animateMotion dur="1.6s" repeatCount="indefinite" path="M880,245 L862,245 C852.06,245 844,253.06 844,263 L844,335 C844,339.42 840.42,343 836,343 L828,343"/></circle>
+<path class="glow" stroke="#1a7f37" d="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449"/>
+<path class="edge edge-added hero" d="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449" marker-end="url(#mk-added)"/>
+<circle r="3" fill="#1a7f37"><animateMotion dur="2.1s" repeatCount="indefinite" path="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449"/></circle>
+<circle r="3" fill="#1a7f37"><animateMotion dur="2.1s" begin="-1.4s" repeatCount="indefinite" path="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449"/></circle>
+<circle r="3" fill="#1a7f37"><animateMotion dur="2.1s" begin="-0.7s" repeatCount="indefinite" path="M828,359 L841,359 C848.18,359 854,364.82 854,372 L854,436 C854,443.18 859.82,449 867,449 L880,449"/></circle>
+<path class="edge edge-added" d="M828,571 L851,571 C863.7,571 874,560.7 874,548 L874,468 C874,466.34 875.34,465 877,465 L880,465" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#1a7f37"><animateMotion dur="1.6s" repeatCount="indefinite" path="M828,571 L851,571 C863.7,571 874,560.7 874,548 L874,468 C874,466.34 875.34,465 877,465 L880,465"/></circle>
+<path class="edge edge-added" d="M880,481 L872,481 C867.58,481 864,484.58 864,489 L864,569 C864,578.94 855.94,587 846,587 L828,587" marker-end="url(#mk-added)"/>
+<circle r="2.6" fill="#1a7f37"><animateMotion dur="1.6s" repeatCount="indefinite" path="M880,481 L872,481 C867.58,481 864,484.58 864,489 L864,569 C864,578.94 855.94,587 846,587 L828,587"/></circle></g>
+<g><g class="cardsh context"><rect class="card" x="32" y="92" width="372" height="62" rx="10"/>
+<rect class="chip" x="46" y="110" width="26" height="26" rx="7"/><g><path class="glyph-stroke" d="M59,116 l6.5,3.5 v7 l-6.5,3.5 l-6.5,-3.5 v-7 Z"/>
+<path class="glyph-stroke" d="M52.5,119.5 l6.5,3.5 l6.5,-3.5"/>
+<path class="glyph-stroke" d="M59,123 v7"/></g>
+<text class="ntitle" x="82" y="119" font-size="13">Contrat plugin</text>
+<text class="nsub" x="82" y="137">SDK · schémas · SemVer</text>
+<g class="bdg bdg-neutral"><rect x="330.34" y="84" width="66.66" height="16" rx="8"/><text x="363.67" y="95" text-anchor="middle">compatible</text></g></g>
+<g class="cardsh context"><rect class="card" x="456" y="320" width="372" height="62" rx="10"/>
+<rect class="chip" x="470" y="338" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="476.5" y="344.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="483" cy="351" r="2"/></g>
+<text class="ntitle" x="506" y="347" font-size="13">Gestionnaire de plugins</text>
+<text class="nsub" x="506" y="365">Installe · valide · active</text>
+<g class="bdg bdg-neutral"><rect x="767.88" y="312" width="53.12" height="16" rx="8"/><text x="794.44" y="323" text-anchor="middle">rollback</text></g></g>
+<g class="cardsh context"><rect class="card" x="456" y="548" width="372" height="62" rx="10"/>
+<rect class="chip" x="470" y="566" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="476.5" y="572.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="483" cy="579" r="2"/></g>
+<text class="ntitle" x="506" y="575" font-size="13">Workflow durable</text>
+<text class="nsub" x="506" y="593">Temporal</text>
+<g class="bdg bdg-neutral"><rect x="727.33" y="540" width="38.57" height="16" rx="8"/><text x="746.62" y="551" text-anchor="middle">retry</text></g>
+<g class="bdg bdg-neutral"><rect x="771.9" y="540" width="49.1" height="16" rx="8"/><text x="796.45" y="551" text-anchor="middle">reprise</text></g></g>
+<g class="cardsh"><rect class="card card-added" x="880" y="206" width="372" height="62" rx="10"/>
+<rect class="chip" x="894" y="224" width="26" height="26" rx="7"/><g><path class="glyph-stroke" d="M907,230 l6.5,3.5 v7 l-6.5,3.5 l-6.5,-3.5 v-7 Z"/>
+<path class="glyph-stroke" d="M900.5,233.5 l6.5,3.5 l6.5,-3.5"/>
+<path class="glyph-stroke" d="M907,237 v7"/></g>
+<text class="ntitle" x="930" y="233" font-size="13">Package OCI</text>
+<text class="nsub" x="930" y="251">Image figée par digest</text>
+<g class="bdg bdg-neutral"><rect x="1136.41" y="198" width="62.04" height="16" rx="8"/><text x="1167.43" y="209" text-anchor="middle">versionné</text></g>
+<g class="bdg bdg-added"><rect x="1204.45" y="198" width="40.55" height="16" rx="8"/><text x="1224.73" y="209" text-anchor="middle">NEW</text></g></g>
+<g class="cardsh"><rect class="card card-added" x="880" y="434" width="372" height="62" rx="10"/>
+<rect class="chip" x="894" y="452" width="26" height="26" rx="7"/><g><rect class="glyph-stroke" x="900.5" y="458.5" width="13" height="13" rx="3"/>
+<circle class="glyph" cx="907" cy="465" r="2"/></g>
+<text class="ntitle" x="930" y="461" font-size="13">Nouveau plugin</text>
+<text class="nsub" x="930" y="479">OCR · transcription · règle métier</text>
+<g class="bdg bdg-neutral"><rect x="1152.45" y="426" width="46" height="16" rx="8"/><text x="1175.45" y="437" text-anchor="middle">ajouté</text></g>
+<g class="bdg bdg-added"><rect x="1204.45" y="426" width="40.55" height="16" rx="8"/><text x="1224.73" y="437" text-anchor="middle">NEW</text></g></g></g>
+<g><g><rect class="lpill" x="584.58" y="172.5" width="98.84" height="15" rx="7.5"/><text class="ltext ltext-added" x="634" y="183.5" text-anchor="middle">respecte le contrat</text></g>
+<g><rect class="lpill" x="795.15" y="291.5" width="97.71" height="15" rx="7.5"/><text class="ltext ltext-added" x="844" y="302.5" text-anchor="middle">installer par digest</text></g>
+<g><rect class="lpill" x="800.22" y="396.5" width="107.56" height="15" rx="7.5"/><text class="ltext ltext-added" x="854" y="407.5" text-anchor="middle">activer la génération</text></g>
+<g><rect class="lpill" x="818.14" y="500.5" width="111.72" height="15" rx="7.5"/><text class="ltext ltext-added" x="874" y="511.5" text-anchor="middle">nouveaux documents</text></g>
+<g><rect class="lpill" x="815.82" y="521.5" width="96.36" height="15" rx="7.5"/><text class="ltext ltext-added" x="864" y="532.5" text-anchor="middle">résultat versionné</text></g></g>
+</svg>

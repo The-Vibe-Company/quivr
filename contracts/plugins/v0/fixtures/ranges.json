@@ -1,0 +1,85 @@
+{
+  "description": "Normative version-range cases. satisfied: whether version satisfies range. invalid: ranges that are malformed or unsatisfiable.",
+  "cases": [
+    {
+      "range": ">=0.1.0 <0.2.0",
+      "version": "0.1.0",
+      "satisfied": true
+    },
+    {
+      "range": ">=0.1.0 <0.2.0",
+      "version": "0.1.9",
+      "satisfied": true
+    },
+    {
+      "range": ">=0.1.0 <0.2.0",
+      "version": "0.2.0",
+      "satisfied": false
+    },
+    {
+      "range": ">=0.1.0 <0.2.0",
+      "version": "0.0.9",
+      "satisfied": false
+    },
+    {
+      "range": "0.1.0",
+      "version": "0.1.0",
+      "satisfied": true
+    },
+    {
+      "range": "=0.1.0",
+      "version": "0.1.1",
+      "satisfied": false
+    },
+    {
+      "range": ">0.1.0",
+      "version": "0.1.0",
+      "satisfied": false
+    },
+    {
+      "range": ">0.1.0",
+      "version": "0.10.0",
+      "satisfied": true
+    },
+    {
+      "range": "<=1.0.0",
+      "version": "1.0.0",
+      "satisfied": true
+    },
+    {
+      "range": "  >=1.2.3   <=1.2.3 ",
+      "version": "1.2.3",
+      "satisfied": true
+    },
+    {
+      "range": ">=0.1.0",
+      "version": "0.2.0-rc.1",
+      "satisfied": true
+    },
+    {
+      "range": "<0.2.0",
+      "version": "0.2.0-rc.1",
+      "satisfied": true
+    },
+    {
+      "range": ">=0.2.0",
+      "version": "0.2.0-rc.1",
+      "satisfied": false
+    }
+  ],
+  "invalid": [
+    "",
+    "   ",
+    "^0.1.0",
+    "~0.1.0",
+    ">=0.1",
+    "0.1.0 || 0.2.0",
+    ">=01.0.0",
+    ">= 0.1.0",
+    ">=0.1.0-rc.1",
+    "x",
+    ">=0.3.0 <0.2.0",
+    ">0.1.0 <0.1.1",
+    "<0.0.0"
+  ]
+}

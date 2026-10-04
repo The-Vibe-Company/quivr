@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "retrieval search response, v0",
+  "description": "The answer to one round: either candidate requests (the core serves them and calls the next round) or the final ranking, never both.",
+  "type": "object",
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "required": [
+        "requests"
+      ]
+    },
+    {
+      "required": [
+        "ranking"
+      ]
+    }
+  ],
+  "not": {
+    "required": [
+      "requests",
+      "ranking"
+    ]
+  },
+  "properties": {
+    "requests": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "$ref": "retrieval-search-request.schema.json#/$defs/CandidateRequest"
+      },
+      "description": "At most limits.max_requests; refused in the last round."
+    },
+    "ranking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hits"
+      ],
+      "properties": {
+        "hits": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "segment_id",
+              "score"
+            ],
+            "properties": {
+              "segment_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "A candidate the core served in this search."
+              },
+              "score": {
+                "type": "number",
+                "description": "The plugin's score; hits are in rank order."
+              },
+              "explanation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "description": "Why this hit ranks here, returned to the client with it."
+              }
+            }
+          },
+          "description": "Best first, at most the request's limit, each segment once."
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paid_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Paid calls made for this round (for example a re-ranking API)."
+        },
+        "cost_cents": {
+          "type": "number",
+          "minimum": 0,
+          "description": "What those calls cost; a search's total stays within the profile's max_cost_cents."
+        }
+      }
+    }
+  }
+}

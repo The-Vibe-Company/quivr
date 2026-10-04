@@ -1,0 +1,13 @@
+{
+  "requests": [
+    {
+      "primitive": "near_vector",
+      "space": "example.words.small@1",
+      "vector": [
+        0.1,
+        0.2
+      ],
+      "k": 2
+    }
+  ]
+}

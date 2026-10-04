@@ -1,0 +1,17 @@
+{
+  "description": "Described alerts against the fake System One server (python3 -m alerts.fake_system_one): a translated article fits, an unrelated description does not, and identical descriptions are asked once. scripts/plugin_sdk.sh passes it to quivr plugin test with the fake's URL and test key.",
+  "record": {
+    "enriched": true,
+    "parts": [
+      {"key": "title", "role": "title", "text": "Les dockers votent la grève au port"},
+      {"key": "body", "role": "body", "text": "Au port de Portval, les dockers ont voté une grève de 48 heures."}
+    ],
+    "source": {"namespace": "wire", "record_key": "story-7"}
+  },
+  "evaluations": [
+    {"description": "A rephrased, translated description fits.", "expression": {"kind": "described", "description": "Dock workers going on strike at a harbour"}, "expect": "match"},
+    {"description": "The same description with a stricter threshold.", "expression": {"kind": "described", "description": "Dock workers going on strike at a harbour"}, "configuration": {"threshold": 0.95}, "expect": "no_match"},
+    {"description": "An unrelated description.", "expression": {"kind": "described", "description": "Diplomatic tensions over visas"}, "expect": "no_match"},
+    {"description": "A keyword alert in the same batch is decided without the classifier.", "expression": {"kind": "keywords", "match": {"term": "grève"}}, "expect": "match"}
+  ]
+}

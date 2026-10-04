@@ -1,0 +1,18 @@
+{
+  "description": "One segment per Part, lexical text on every segment.",
+  "ingestion": {
+    "parts": [
+      {"key": "title", "role": "title", "text": "Weekly memo"},
+      {"key": "body", "role": "body", "text": "The café reopens on Monday."}
+    ],
+    "spaces": ["certified.ingestion-valid.small"],
+    "queries": ["café reopening"],
+    "expect": {
+      "segments": [
+        {"part_key": "title", "start": 0, "end": 11},
+        {"part_key": "body", "start": 0, "end": 27}
+      ],
+      "lexical_text": true
+    }
+  }
+}

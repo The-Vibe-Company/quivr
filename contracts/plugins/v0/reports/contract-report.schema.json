@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plugin Contract Runner report, v1",
+  "description": "JSON report written by `quivr plugin test --report <file>`. certified is true when no check failed: the engine can safely invoke every Contribution the plugin declares. Tools may rely on report_version, certified, the check ids and the issue codes; titles, notes and messages are for humans.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_version",
+    "certified",
+    "plugin",
+    "target",
+    "engine_version",
+    "plugin_api_version",
+    "compatibility",
+    "checks",
+    "summary"
+  ],
+  "properties": {
+    "report_version": {
+      "const": "1"
+    },
+    "certified": {
+      "type": "boolean"
+    },
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_path"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "manifest_path": {
+          "type": "string"
+        },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "launch",
+            "endpoint"
+          ],
+          "description": "launch: the runner started run.command; endpoint: --endpoint targeted a running plugin."
+        },
+        "base_url": {
+          "type": "string"
+        }
+      }
+    },
+    "engine_version": {
+      "type": "string"
+    },
+    "plugin_api_version": {
+      "type": "string"
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "$ref": "#/$defs/RangeCheck"
+        },
+        "plugin_api": {
+          "$ref": "#/$defs/RangeCheck"
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Check"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "passed",
+        "failed",
+        "skipped"
+      ],
+      "properties": {
+        "passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "RangeCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "range",
+        "version",
+        "compatible"
+      ],
+      "properties": {
+        "range": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "compatible": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "status",
+        "duration_ms",
+        "issues"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "manifest",
+            "compatibility",
+            "health",
+            "discovery",
+            "fixtures",
+            "invoke",
+            "replay",
+            "invalid_request",
+            "batch",
+            "resume",
+            "check_credential",
+            "credentials",
+            "attachments",
+            "receive",
+            "embed_query",
+            "segments_only"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "contribution": {
+          "enum": [
+            "normalizer",
+            "subscription",
+            "connector",
+            "ingestion",
+            "retrieval"
+          ],
+          "description": "Contribution the check exercises; absent for checks of the whole plugin."
+        },
+        "status": {
+          "enum": [
+            "pass",
+            "fail",
+            "skip"
+          ]
+        },
+        "fixture": {
+          "type": "string",
+          "description": "Fixture or request case the check ran on. Normative contract fixtures are prefixed with contracts:."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          }
+        }
+      }
+    },
+    "Issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "path",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "path": {
+          "type": "string",
+          "description": "JSON Pointer into the manifest, the response or the protocol route the issue concerns; empty when global."
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

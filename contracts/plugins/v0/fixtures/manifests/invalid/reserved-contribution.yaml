@@ -1,0 +1,11 @@
+# enricher is a reserved Contribution name that Plugin API 0.1 rejects.
+id: example-pdf
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [application/pdf]
+  enricher:
+    media_types: [application/pdf]

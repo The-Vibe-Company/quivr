@@ -1,0 +1,9 @@
+# Targets a future Plugin API this engine does not implement.
+id: example-pdf
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=1.0.0 <2.0.0"
+contributions:
+  normalizer:
+    media_types: [application/pdf]

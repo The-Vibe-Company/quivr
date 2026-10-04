@@ -1,0 +1,25 @@
+{
+  "verdict": "accepted",
+  "response": {
+    "status": 200
+  },
+  "items": [
+    {
+      "record_key": "alert-7",
+      "revision": "alert-7",
+      "content": {
+        "kind": "text",
+        "text": "Harbour closed by fog."
+      },
+      "extensions": {
+        "example-alerts": {
+          "schema_version": "1",
+          "data": {
+            "severity": "high"
+          }
+        }
+      }
+    }
+  ],
+  "reads": 1
+}

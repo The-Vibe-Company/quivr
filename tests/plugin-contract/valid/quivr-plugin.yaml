@@ -1,0 +1,22 @@
+# Baseline test plugin for the Contract Runner (tests/plugin-contract): a
+# well-behaved Go fake that returns the input Blob as a Part, a text Part and
+# an extension in its declared namespace. It must be certified.
+id: certified.fake
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown, text/plain]
+    timeout_ms: 5000
+extensions:
+  certified.fake.stats:
+    "1":
+      type: object
+      additionalProperties: false
+      required: [characters]
+      properties:
+        characters: {type: integer, minimum: 0}
+run:
+  command: [quivr-fake-plugin, ok]

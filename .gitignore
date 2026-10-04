@@ -1,106 +1,20 @@
-docker-compose.override.yml
-secondbrain/
-.env
-env.sh
-.streamlit/secrets.toml
-**/*.pyc
-toto.txt
-log.txt
-
-backend/venv
-backend/.env
-backend/*.deb
-backend/.python-version
-
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-**/node_modules
-**/.pnp
-.pnp.js
-
-Pipfile
-
-# testing
-**/coverage
-
-# next.js
-**/.next/
-**/out/
-
-# production
-**/build
-
-# misc
 .DS_Store
-*.pem
+*.swp
+*.swo
+.env
+.env.*
+!.env.example
+# PR Lens writes its previews here. They are rebuilt on demand.
+.pr-lens/
+# Local worktrees and disposable investigation artifacts.
+.scratch/
+# Ship PR and review skill run artifacts.
+plans/
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+__pycache__/
+*.egg-info/
 
-# local env files
-.env*.local
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-quivr/*
-streamlit-demo/.streamlit/secrets.toml
-.backend_env
-.frontend_env
-backend/core/pandoc-*
-**/.pandoc-*
-backend/core/application_default_credentials.json
-
-#local models
-backend/core/local_models/*
-
-## scripts
-package-lock.json
-celerybeat-schedule
-frontend/public/robots.txt
-frontend/public/sitemap*
-
-pyfiles/*
-backend/bin/*
-backend/lib/*
-backend/pyvenv.cfg
-backend/share/*
-backend/slim.report.json
-volumes/db/data/
-volumes/storage/stub/stub/quivr/*
-supabase/migrations/20240103191539_private.sql
-supabase/20240103191539_private.sql
-paulgraham.py
-.env_test
-supabase/seed-airwallex.sql
-airwallexpayouts.py
-**/application.log*
-backend/celerybeat-schedule.db
-
-backend/application.log.*
-backend/score.json
-backend/modules/assistant/ito/utils/simple.pdf
-backend/modules/sync/controller/credentials.json
-backend/.env.test
-
-**/*.egg-info
-
-.coverage
-backend/core/examples/chatbot/.files/*
-backend/core/examples/chatbot/.python-version
-backend/core/examples/chatbot/.chainlit/config.toml
-backend/core/examples/chatbot/.chainlit/translations/en-US.json
-
-*.log
-
-# Tox
-.tox
-Pipfile
-*.pkl
-backend/docs/site/*
+# Binaries that `go build` writes into a first-party connector plugin's directory.
+/plugins/rss/rss
+/plugins/x-list/x-list
+/plugins/m365-mail/m365-mail

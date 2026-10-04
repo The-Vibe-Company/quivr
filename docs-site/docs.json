@@ -1,0 +1,308 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Quivr",
+  "description": "An open-source engine that turns continuous content streams into search and alerts.",
+  "colors": {
+    "primary": "#5b3fd6",
+    "light": "#b29aff",
+    "dark": "#4b31be"
+  },
+  "api": {
+    "playground": {
+      "display": "interactive"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "index",
+              "quickstart",
+              "concepts"
+            ]
+          },
+          {
+            "group": "Plugins",
+            "pages": [
+              "plugins/overview",
+              "plugins/types",
+              "plugins/first-plugin",
+              {
+                "group": "Write a plugin",
+                "pages": [
+                  "plugins/write-a-connector",
+                  "plugins/push-source",
+                  "plugins/write-an-ingestion-plugin",
+                  "plugins/write-a-retrieval-plugin",
+                  "plugins/write-an-alert-rule"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Run Quivr",
+            "pages": [
+              "run-quivr/catalog",
+              "run-quivr/pin",
+              "run-quivr/receive-pushes",
+              "run-quivr/upgrade-a-plugin",
+              "run-quivr/upgrade-an-alert-rule",
+              "run-quivr/retire-alert-evaluations",
+              "run-quivr/configure-alert-fields",
+              "run-quivr/switch-a-vector-model",
+              "run-quivr/record-search-measurements",
+              "run-quivr/run-search-campaign",
+              "run-quivr/backfill-a-vector-space",
+              "run-quivr/reprocess-quarantined-versions",
+              "run-quivr/search-profiles",
+              "guides/rerank-with-jev"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/add-content",
+              "guides/search",
+              {
+                "group": "Alerts",
+                "pages": [
+                  "guides/alerts",
+                  "guides/keyword-alerts",
+                  "guides/described-alerts"
+                ]
+              },
+              "guides/follow-changes",
+              {
+                "group": "Collect from sources",
+                "pages": [
+                  "guides/connectors",
+                  "guides/rss",
+                  "guides/microsoft-365",
+                  "guides/x"
+                ]
+              },
+              "guides/ai-agents"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "HTTP API",
+            "pages": [
+              "api-reference/overview"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "openapi": "openapi.yaml"
+          },
+          {
+            "group": "Command line",
+            "pages": [
+              "reference/cli",
+              "reference/mcp"
+            ]
+          },
+          {
+            "group": "Plugins",
+            "pages": [
+              "reference/plugin-manifest",
+              "reference/plugin-protocol"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "reference/configuration"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "redirects": [
+    {
+      "source": "/first-search",
+      "destination": "/quickstart"
+    },
+    {
+      "source": "/what-quivr-can-do",
+      "destination": "/"
+    },
+    {
+      "source": "/api-walkthrough",
+      "destination": "/guides/add-content"
+    },
+    {
+      "source": "/connect-an-ai-agent",
+      "destination": "/guides/ai-agents"
+    },
+    {
+      "source": "/keyword-alerts",
+      "destination": "/guides/keyword-alerts"
+    },
+    {
+      "source": "/described-alerts",
+      "destination": "/guides/described-alerts"
+    },
+    {
+      "source": "/connectors",
+      "destination": "/guides/connectors"
+    },
+    {
+      "source": "/connectors/rss",
+      "destination": "/guides/rss"
+    },
+    {
+      "source": "/connectors/microsoft-365",
+      "destination": "/guides/microsoft-365"
+    },
+    {
+      "source": "/connectors/x",
+      "destination": "/guides/x"
+    },
+    {
+      "source": "/connectors/x-webhooks",
+      "destination": "/guides/x"
+    },
+    {
+      "source": "/plugins/write-a-normalizer",
+      "destination": "/plugins/first-plugin"
+    },
+    {
+      "source": "/plugins/run-a-connector-plugin",
+      "destination": "/run-quivr/pin"
+    },
+    {
+      "source": "/plugins/alerts",
+      "destination": "/run-quivr/catalog"
+    },
+    {
+      "source": "/plugins/core-ingest",
+      "destination": "/run-quivr/catalog"
+    },
+    {
+      "source": "/plugins/pdf-text",
+      "destination": "/run-quivr/catalog"
+    },
+    {
+      "source": "/plugins/rss",
+      "destination": "/run-quivr/catalog"
+    },
+    {
+      "source": "/plugins/x-list",
+      "destination": "/run-quivr/catalog"
+    },
+    {
+      "source": "/sdks/go",
+      "destination": "/plugins/write-a-connector"
+    },
+    {
+      "source": "/sdks/python",
+      "destination": "/plugins/first-plugin"
+    },
+    {
+      "source": "/contracts/plugins/v0",
+      "destination": "/reference/plugin-protocol"
+    },
+    {
+      "source": "/contracts/http/v0",
+      "destination": "/api-reference/overview"
+    },
+    {
+      "source": "/reference/http-api",
+      "destination": "/api-reference/overview"
+    },
+    {
+      "source": "/start/:slug*",
+      "destination": "/"
+    },
+    {
+      "source": "/agents/:slug*",
+      "destination": "/"
+    },
+    {
+      "source": "/agents",
+      "destination": "/"
+    },
+    {
+      "source": "/context",
+      "destination": "/concepts"
+    },
+    {
+      "source": "/dated",
+      "destination": "/"
+    },
+    {
+      "source": "/deploy/railway",
+      "destination": "/"
+    },
+    {
+      "source": "/quivr-search",
+      "destination": "/"
+    },
+    {
+      "source": "/quivr-v2-local-harness",
+      "destination": "/"
+    },
+    {
+      "source": "/quivr-v2-remaining-limits",
+      "destination": "/"
+    },
+    {
+      "source": "/runnable-guides",
+      "destination": "/"
+    },
+    {
+      "source": "/tests/acceptance",
+      "destination": "/"
+    },
+    {
+      "source": "/third_party",
+      "destination": "/"
+    },
+    {
+      "source": "/plugins/pin",
+      "destination": "/run-quivr/pin"
+    },
+    {
+      "source": "/plugins/upgrade-a-plugin",
+      "destination": "/run-quivr/upgrade-a-plugin"
+    },
+    {
+      "source": "/plugins/backfill-a-vector-space",
+      "destination": "/run-quivr/backfill-a-vector-space"
+    },
+    {
+      "source": "/plugins/reprocess-quarantined-versions",
+      "destination": "/run-quivr/reprocess-quarantined-versions"
+    },
+    {
+      "source": "/plugins/catalog",
+      "destination": "/run-quivr/catalog"
+    },
+    {
+      "source": "/plugins/switch-plugins-without-restarting",
+      "destination": "/run-quivr/upgrade-a-plugin"
+    }
+  ]
+}

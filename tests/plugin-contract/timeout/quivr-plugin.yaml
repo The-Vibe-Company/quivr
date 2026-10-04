@@ -1,0 +1,13 @@
+# Deliberately broken test plugin for the Contract Runner (tests/plugin-contract).
+# A normalizer that answers after its declared timeout_ms.
+id: broken.timeout
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown]
+    timeout_ms: 1000
+run:
+  command: [quivr-fake-plugin, slow]

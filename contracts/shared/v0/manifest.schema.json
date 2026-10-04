@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Quivr shared Manifest schemas, v0",
+  "description": "Single source of the Manifest, Part, Extensions, Relation, SourceIdentity and Provenance shapes. Consumed by contracts/http/v0/openapi.yaml (components alias these $defs) and by the Plugin Protocol schemas in contracts/plugins/v0. Edit here only.",
+  "$defs": {
+    "SourceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "corpus_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record_key": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "corpus_id",
+        "namespace",
+        "record_key"
+      ]
+    },
+    "Extensions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "schema_version",
+          "data"
+        ]
+      },
+      "description": "Keys are plugin namespaces. Data is validated against the installed schema version; source data is not a computed Annotation."
+    },
+    "TextContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "text"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ]
+    },
+    "BlobContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "blob"
+          ]
+        },
+        "blob_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "blob_id",
+        "media_type"
+      ]
+    },
+    "Part": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/TextContent"
+            },
+            {
+              "$ref": "#/$defs/BlobContent"
+            }
+          ]
+        },
+        "extensions": {
+          "$ref": "#/$defs/Extensions"
+        }
+      },
+      "required": [
+        "key",
+        "role",
+        "content"
+      ]
+    },
+    "RelationInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "$ref": "#/$defs/SourceIdentity"
+        },
+        "source_target_revision": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "type",
+        "target"
+      ],
+      "description": "Source-provided link to an independently identified Record in the same Organization. Optional source revision preserves provenance; ordinary expansion resolves the current eligible target. Missing targets do not block readiness. Every expansion reauthorizes the target. Precise Part-target syntax remains outside this initial draft."
+    },
+    "ManifestContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "manifest"
+          ]
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Part"
+          },
+          "minItems": 1
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RelationInput"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "parts"
+      ],
+      "description": "Unique Part keys, acyclic parent references within this Manifest, and verified same-Organization Blobs are checked before atomic publication. These semantic constraints need server validation in addition to JSON Schema."
+    },
+    "Provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_blob_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "producer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "producer_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "normalization": {
+          "$ref": "#/$defs/NormalizationProvenance"
+        }
+      },
+      "required": []
+    },
+    "NormalizationProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Engine-owned record of the external normalizer invocation whose output a Record Version publishes. Present only on read; a submission that sets it is rejected. producer and producer_version keep naming the acquirer, and source_blob_ids keeps the input Blob.",
+      "properties": {
+        "plugin_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "plugin_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "plugin_api": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Plugin API version the engine invoked."
+        },
+        "contribution": {
+          "type": "string",
+          "enum": [
+            "normalizer"
+          ]
+        },
+        "invocation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "input_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "fallback": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Present when the route is optional and the normalizer failed: the published Manifest comes from the built-in text path, and invocation_id names the failed invocation.",
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ]
+        }
+      },
+      "required": [
+        "plugin_id",
+        "plugin_version",
+        "plugin_api",
+        "contribution",
+        "invocation_id",
+        "idempotency_key",
+        "input_sha256"
+      ]
+    }
+  }
+}

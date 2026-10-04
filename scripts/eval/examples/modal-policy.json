@@ -1,0 +1,15 @@
+{
+  "experiment": "public/search-exploration",
+  "profile": "default",
+  "price_revision": "2026-10-03",
+  "provider_daily_usd": 1,
+  "modal_daily_usd": 10,
+  "modal_usd_per_second": 0.001,
+  "max_seconds": 1800,
+  "startup_seconds": 300,
+  "sets": {
+    "scifact": {"split": "dev"},
+    "miracl-fr": {"split": "dev"}
+  },
+  "baseline": {}
+}

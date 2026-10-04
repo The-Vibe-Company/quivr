@@ -1,0 +1,60 @@
+# Shared provider fakes
+
+Go plugin tests, Python certification helpers and the local acceptance stack
+use the same binaries from this standalone module. Provider behavior lives
+here; launchers in `process` and `scripts/fake_api.py` only build, start and
+stop a process. `make check` runs this module's owners too.
+
+Run the fake from this directory:
+
+```sh
+go run ./cmd/x
+```
+
+It binds an ephemeral loopback port and prints one JSON readiness line with
+the actual `url`. `-listen 127.0.0.1:PORT` chooses a port; `-token TOKEN`
+requires a specific test bearer. The default accepts nonempty test bearers,
+except `x-revoked*`. No real credentials or provider calls are used.
+
+X supports list timelines, ID lookup, list members, stream rules, webhook
+registration/validation and stream links. Responses use embedded sanitized
+[official examples](x/fixtures/README.md). Timeline and member page sizes are
+configurable so unit goldens and acceptance scenarios retain their boundaries.
+
+Controls are local HTTP requests:
+
+| Endpoint | Input or result |
+| --- | --- |
+| `POST /_control/lists/{id}` | `posts`, `delete`, `protect`, `members`, `list_error`, `fail` |
+| `POST /_control/app` | `consumer_secret`, `crc_fails`, `page_size`, `member_page_size`, `user`, `lang`, additional `media`, global `fail` |
+| `POST /_control/webhooks` | `invalidate: true` marks registered webhooks invalid |
+| `GET /_control/state` | Posts, rules, webhooks and links for test observations |
+| `GET /_control/requests` | Provider request paths in order; drains the observation queue |
+
+A failure takes `status`, optional absolute `reset` or relative `reset_in`,
+and optional `times`; `null` clears it. Posts use provider field names and
+can set `push: true` or `push: "forged"`; the control reply reports each
+delivery URL and status. A forged post is delivered without entering timelines.
+Registration sends a real CRC callback; linked, valid webhooks receive signed
+posts matching their author rules. All callbacks and redirects stay on loopback.
+
+Each test gets isolated state and reaps its own process. Builds are reused
+within each suite, and startup waits on the readiness line rather than a sleep
+or a reserved port.
+
+Graph runs with `go run ./cmd/graph` and the same `-listen`/readiness protocol.
+It serves client-secret/certificate token requests, mailbox message delta,
+message hydration, attachment listings and raw bytes using [official examples](graph/fixtures/README.md).
+Its controls under `/_fake/` accept JSON: `apps` configures `client_id`, `secret`,
+`expired`, `certificate` or `token_error`; `messages` seeds a mailbox with a
+message and attachments; `update`/`delete` change it; `partial`/`removed` inject
+one-page delta entries. `mailbox` configures `page_size` and `attachments_next`;
+`delete-attachment` removes bytes; `fail` queues path/status/code/retry_after
+failures; `clear-failures`, `expire-delta` and `delay` drive recovery scenarios.
+`GET /_fake/stats?mailbox=...&client_id=...` observes request/token counts and
+the last token form. Mailbox state is isolated, and delays release the lock.
+
+## Embeddings
+
+`go run ./cmd/embedding -listen 127.0.0.1:0` serves OpenAI `/embeddings` and Cohere v2 `/embed` at any base path, with `fake-key` bearer or `api-key` authentication. It validates request modes and returns word-hash vectors and token usage; it never calls upstream.
+`POST /_control` with `{"statuses":[429,503,200]}` scripts responses with `Retry-After: 0`; `GET /_fake/stats` lists calls. Go consumers use `embedding.New()` with an HTTP test server. The Go kit certifies both hosted embedding formats; the plugins stack lane pins and searches them.

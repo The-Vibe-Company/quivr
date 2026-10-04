@@ -1,0 +1,59 @@
+{
+  "items": [
+    {
+      "record_key": "<m1@example.org>",
+      "revision": "sha256:rev-1",
+      "content": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "body",
+            "role": "body",
+            "content": {
+              "kind": "text",
+              "text": "See the attached report."
+            }
+          }
+        ]
+      },
+      "extensions": {
+        "example-mail": {
+          "schema_version": "1",
+          "data": {
+            "skipped": []
+          }
+        }
+      },
+      "attachments": [
+        {
+          "key": "original_body",
+          "role": "original_body",
+          "media_type": "text/html",
+          "size_bytes": 11,
+          "sha256": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+          "ref": "body:m1"
+        },
+        {
+          "key": "attachment-01",
+          "parent_key": "body",
+          "role": "attachment",
+          "media_type": "application/pdf",
+          "size_bytes": 48213,
+          "extensions": {
+            "example-mail.attachment": {
+              "schema_version": "1",
+              "data": {
+                "name": "report.pdf"
+              }
+            }
+          },
+          "ref": "att:m1/a1"
+        }
+      ]
+    }
+  ],
+  "checkpoint": {
+    "link": "delta-2"
+  },
+  "more": false
+}

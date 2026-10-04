@@ -1,0 +1,56 @@
+id: jev.rerank
+version: 1.0.0
+description: Jev reranking of core.retrieve's hybrid ranking, with an unpaid hybrid fallback.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.13.0 <0.14.0"
+requires:
+  - plugin: core.retrieve
+    version: ">=1.1.0 <2.0.0"
+    profiles: [default]
+contributions:
+  retrieval:
+    profiles:
+      deep:
+        description: Hybrid candidates re-ranked by pinned Jev probabilities, or hybrid order when Jev is unavailable.
+        max_latency_ms: 3000
+        max_cost_cents: 1
+    limits:
+      max_rounds: 2
+      max_requests: 1
+      max_candidates: 50
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      candidate_count:
+        type: integer
+        enum: [20, 30, 50]
+        description: Hybrid shortlist size; default 30. The returned page may be shorter than limit.
+      trim_tokens:
+        type: string
+        enum: ["128", "256", full]
+        description: Passage prefix in the configured tokenizer's tokens, not TypeSafe billing tokens; default full.
+      tokenizer_path:
+        type: string
+        description: Local tokenizer.json for token trimming, loaded once and verified by its SHA-256.
+      tokenizer_sha256:
+        type: string
+        pattern: "^[a-f0-9]{64}$"
+        description: Tokenizer digest; default is core.ingest's pinned E5 tokenizer.
+      ranking:
+        type: string
+        enum: [noul, rrf]
+        description: Sort by Noul probability or fuse Noul and hybrid ranks with RRF (constant 60); default noul.
+      cache_entries:
+        type: integer
+        minimum: 0
+        maximum: 16384
+        description: Bounded in-process pair cache; default 4096. Zero disables it.
+secrets:
+  - name: TYPESAFE_API_KEY
+    required: false
+    description: Read from the plugin environment only. Without it deep falls back to hybrid order.
+run:
+  command: [python3, -m, jev_rerank]

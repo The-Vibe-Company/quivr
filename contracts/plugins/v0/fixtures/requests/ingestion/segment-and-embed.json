@@ -1,0 +1,29 @@
+{
+  "invocation_id": "inv-1",
+  "idempotency_key": "ingest:org-1:version-1",
+  "contribution": "ingestion",
+  "organization_id": "org-1",
+  "configuration": {},
+  "version": {
+    "corpus_id": "corpus-1",
+    "record_id": "record-1",
+    "record_version_id": "version-1"
+  },
+  "language": "en",
+  "parts": [
+    {
+      "key": "title",
+      "role": "title",
+      "text": "Harbour strike"
+    },
+    {
+      "key": "body",
+      "role": "body",
+      "text": "Dockers stopped work at dawn. The port is closed."
+    }
+  ],
+  "spaces": [
+    "example.words.small",
+    "example.words.large"
+  ]
+}

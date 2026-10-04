@@ -1,0 +1,8 @@
+{
+  "items": [
+    {"record_key": "article-101", "content": {"kind": "text", "text": "First"}},
+    {"record_key": "article-101", "content": {"kind": "text", "text": "Second"}}
+  ],
+  "checkpoint": null,
+  "more": false
+}

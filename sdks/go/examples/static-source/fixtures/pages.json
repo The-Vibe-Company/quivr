@@ -1,0 +1,19 @@
+{
+  "description": "Five items in pages of two, then nothing new when resumed.",
+  "connector": {"kind": "static", "config": {"page_size": 2, "items": [
+    {"key": "note-1", "title": "Harbour opens", "body": "The harbour opened on Monday.", "author": "Desk"},
+    {"key": "note-2", "title": "Ferry resumes", "body": "The ferry resumed its service."},
+    {"key": "note-3", "title": "Market day", "body": "The market moves to Saturday."},
+    {"key": "note-4", "title": "Road works", "body": "The coast road closes at night."},
+    {"key": "note-5", "title": "Library hours", "body": "The library opens later in winter."}
+  ]}},
+  "credential": {"token": "test-token-static-source"},
+  "expect": {
+    "pages": [
+      {"record_keys": ["note-1", "note-2"], "more": true},
+      {"record_keys": ["note-3", "note-4"], "more": true},
+      {"record_keys": ["note-5"], "more": false}
+    ],
+    "check_credential": {"status": "ok"}
+  }
+}

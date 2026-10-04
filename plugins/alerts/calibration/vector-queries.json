@@ -1,0 +1,8 @@
+{
+  "ports_fr": {"description": "Grèves des travailleurs dans les ports", "fits_as": "ports"},
+  "visas_fr": {"description": "Tensions diplomatiques entre deux pays à propos des règles de visa", "fits_as": "visas"},
+  "floods_fr": {"description": "Inondations causées par de fortes pluies", "fits_as": "floods"},
+  "transfers_fr": {"description": "Actualités des transferts de joueurs de football", "fits_as": "transfers"},
+  "rates_fr": {"description": "Décisions des banques centrales sur les taux d'intérêt", "fits_as": "rates"},
+  "scooters_fr": {"description": "Nouvelles règles sur les trottinettes électriques en ville", "fits_as": "scooters"}
+}

@@ -1,0 +1,12 @@
+# connector exists since Plugin API 0.3; a range limited to 0.2 cannot declare it.
+id: example-feeds
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  connector:
+    kinds:
+      feed:
+        config_schema: {type: object}
+        default_interval_seconds: 900

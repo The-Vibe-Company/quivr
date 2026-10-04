@@ -1,0 +1,13 @@
+# The config and credential schemas of a kind must compile as JSON Schema 2020-12.
+id: example-feeds
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.3.0 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      feed:
+        config_schema: {type: 12}
+        credential_schema: {required: token}
+        default_interval_seconds: 900

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plugin Protocol health, v0",
+  "description": "GET /v0/health returns 200 with this body when the plugin can accept invocations; otherwise 503 with the error envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status"
+  ],
+  "properties": {
+    "status": {
+      "const": "ok"
+    }
+  }
+}

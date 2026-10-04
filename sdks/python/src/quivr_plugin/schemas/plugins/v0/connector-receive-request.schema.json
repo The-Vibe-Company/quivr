@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector receive request, v0",
+  "description": "POST /v0/contributions/connector/receive for a push kind. Since Plugin API 0.5 the core relays public webhook requests for the plugin to verify and answer. Since 0.11 a declared API route adds route, parsed body and request.path after engine authorization. The core ingests accepted POST items and returns Receipts for declared routes; legacy webhooks and GET challenges keep the plugin answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "contribution",
+    "organization_id",
+    "configuration",
+    "connector",
+    "credential",
+    "checkpoint",
+    "now",
+    "reads_today",
+    "request"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per delivery; correlate logs with it."
+    },
+    "contribution": {
+      "const": "connector"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration": {
+      "type": "object",
+      "description": "The plugin configuration the installer supplies, valid against configuration.schema."
+    },
+    "connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instance_id",
+        "kind",
+        "config",
+        "corpus_id",
+        "source_namespace"
+      ],
+      "description": "The Connector Instance the delivery is addressed to.",
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$"
+        },
+        "corpus_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Corpus the instance writes to; Relation targets bind to it."
+        },
+        "source_namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "config": {
+          "type": "object",
+          "description": "The Connector Instance configuration, already valid against the kind's config_schema."
+        }
+      }
+    },
+    "credential": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The decrypted Deposited Credential, for verifying the delivery. Sent only for this invocation: never log, echo or persist it."
+    },
+    "checkpoint": {
+      "description": "The current Acquisition Checkpoint, read-only: a receive answer carries no checkpoint, because pull runs own it. Null before the first run."
+    },
+    "now": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The core's clock (RFC 3339, UTC)."
+    },
+    "reads_today": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Source resources read during the current UTC day, by pull runs and deliveries."
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "query",
+        "headers",
+        "body_base64"
+      ],
+      "description": "The relayed request, bounded by the core: a body of at most 1 MiB, at most 64 header names. Hop-by-hop headers and Cookie are not relayed; declared API routes also remove Authorization.",
+      "properties": {
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ]
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 8192,
+          "description": "The raw query string, without the leading ?."
+        },
+        "headers": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "pattern": "^[a-z0-9!#$%&'*+.^_`|~-]{1,128}$"
+          },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "maxLength": 8192
+            }
+          },
+          "description": "Header values by lowercase name, in arrival order."
+        },
+        "body_base64": {
+          "type": "string",
+          "maxLength": 1398104,
+          "contentEncoding": "base64",
+          "description": "The exact body bytes, standard base64 (signatures cover the raw bytes); empty for no body."
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 8192,
+          "description": "Since 0.11: actual relative API path, with template segments filled in. Absent for legacy webhooks."
+        }
+      }
+    },
+    "route": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "description": "Since 0.11: declared API route name. Absent for legacy webhooks."
+    },
+    "body": {
+      "description": "Since 0.11: parsed JSON body for a declared route; null for a bodyless GET challenge."
+    }
+  },
+  "dependentRequired": {
+    "route": [
+      "body"
+    ]
+  }
+}

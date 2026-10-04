@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel rdf:about="https://journal.example.org/rss">
+    <title>Example Journal</title>
+    <link>https://journal.example.org/</link>
+    <description>Neutral RSS 1.0 example</description>
+    <items>
+      <rdf:Seq>
+        <rdf:li rdf:resource="https://journal.example.org/a"/>
+      </rdf:Seq>
+    </items>
+  </channel>
+  <item rdf:about="https://journal.example.org/a">
+    <title>RDF item</title>
+    <link>https://journal.example.org/a</link>
+    <description>RDF item description.</description>
+    <dc:date>2026-09-02T08:30:00Z</dc:date>
+    <dc:creator>Sam Editor</dc:creator>
+    <dc:subject>Science</dc:subject>
+  </item>
+</rdf:RDF>

@@ -1,0 +1,13 @@
+{
+  "description": "Seven posts of a list backfilled from the day before, in pages of five, then nothing new when resumed. scripts/plugin_sdk_go.sh seeds the posts in the local fake X API and points configuration.api_endpoint at it.",
+  "connector": {"kind": "x_list", "config": {"list_id": "77", "backfill_since": "2025-12-31T00:00:00Z"}},
+  "credential": {"bearer_token": "test-token-x-list"},
+  "now": "2026-01-01T00:00:00Z",
+  "expect": {
+    "pages": [
+      {"record_keys": ["1800000000000000007", "1800000000000000006", "1800000000000000005", "1800000000000000004", "1800000000000000003"], "more": true},
+      {"record_keys": ["1800000000000000002", "1800000000000000001"], "more": false}
+    ],
+    "check_credential": {"status": "ok"}
+  }
+}

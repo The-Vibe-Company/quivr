@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector describe_attachment response, v0",
+  "description": "200 body of POST /v0/contributions/connector/describe_attachment: the exact size and SHA-256 of the bytes the plugin will upload, or a skip that leaves the attachment out of the item.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "size_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Exact size, at most attachments.max_bytes."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lowercase hex SHA-256 of the exact bytes."
+    },
+    "skip": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "maxLength": 64,
+      "description": "Why the attachment is left out, for example too_large when the bytes exceed attachments.max_bytes."
+    },
+    "item_extensions": {
+      "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
+      "description": "Replaces the item's extensions, for example to record the skipped attachment; only in namespaces the plugin declares."
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "size_bytes",
+        "sha256"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "skip"
+            ]
+          },
+          {
+            "required": [
+              "item_extensions"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "required": [
+        "skip"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "size_bytes"
+            ]
+          },
+          {
+            "required": [
+              "sha256"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

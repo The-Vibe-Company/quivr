@@ -1,0 +1,67 @@
+{
+  "manifest": {
+    "kind": "manifest",
+    "parts": [
+      {
+        "key": "document",
+        "role": "document",
+        "content": {
+          "kind": "blob",
+          "blob_id": "blob-0001",
+          "media_type": "application/pdf"
+        }
+      },
+      {
+        "key": "page-1",
+        "parent_key": "missing",
+        "role": "page",
+        "content": {
+          "kind": "text",
+          "text": "Annual report — première page."
+        },
+        "extensions": {
+          "example-pdf.page": {
+            "schema_version": "1",
+            "data": {
+              "number": 1
+            }
+          }
+        }
+      },
+      {
+        "key": "page-2",
+        "parent_key": "document",
+        "role": "page",
+        "content": {
+          "kind": "text",
+          "text": "Second page."
+        }
+      }
+    ],
+    "relations": [
+      {
+        "type": "supersedes",
+        "target": {
+          "corpus_id": "corpus-example",
+          "namespace": "example-files",
+          "record_key": "reports/2025/annual.pdf"
+        }
+      }
+    ]
+  },
+  "extensions": {
+    "example-pdf.document": {
+      "schema_version": "1",
+      "data": {
+        "page_count": 2
+      }
+    }
+  },
+  "language": "fr-FR",
+  "warnings": [
+    {
+      "code": "font_substituted",
+      "message": "A missing font was substituted on page 2."
+    }
+  ]
+}

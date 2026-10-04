@@ -1,0 +1,33 @@
+{
+  "description": "Four segments about a harbour strike; keyword and vector candidates agree on the first.",
+  "retrieval": {
+    "query": "harbour strike",
+    "limit": 3,
+    "candidates": [
+      {
+        "segment_id": "seg_harbour",
+        "record_id": "rec_harbour",
+        "source_namespace": "wire",
+        "text": "Dockers went on strike and the harbour stayed closed."
+      },
+      {
+        "segment_id": "seg_rail",
+        "record_id": "rec_rail",
+        "source_namespace": "wire",
+        "text": "The strike spread to the rail network by noon."
+      },
+      {
+        "segment_id": "seg_ferry",
+        "record_id": "rec_ferry",
+        "source_namespace": "local",
+        "text": "Ferries stayed in the harbour all day."
+      },
+      {
+        "segment_id": "seg_market",
+        "record_id": "rec_market",
+        "source_namespace": "local",
+        "text": "The flower market opened early."
+      }
+    ]
+  }
+}

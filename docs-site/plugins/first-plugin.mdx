@@ -1,0 +1,281 @@
+---
+title: "Build your first plugin"
+description: "Write a plugin that makes CSV files searchable row by row, certify it, and run it in a local Quivr."
+keywords: ["tutorial", "normalizer", "python sdk", "quivr plugin init", "quivr plugin test"]
+---
+
+You will write a normalizer: a plugin that turns a file into the text Parts Quivr indexes. Yours reads CSV files and makes each row a Part, so a search hit says which row it came from. You start from an empty folder, certify the plugin with `quivr plugin test`, then run it in the local Quivr from the [Quickstart](/quickstart) and search a CSV file through it. It takes about twenty minutes.
+
+## Before you start
+
+- The Quickstart works on your machine, in a `quivr-v2` checkout. The last part of this tutorial uses that local stack, so it needs Linux x86_64 or an Apple Silicon Mac; the plugin itself runs anywhere.
+- Python 3.12 or later with `venv`: `python3 --version`.
+
+Work in the folder that contains your `quivr-v2` checkout.
+
+<Steps>
+<Step title="Install the quivr command">
+
+The `quivr` binary has the plugin tools. Build it from your checkout, and remember where the checkout is:
+
+```bash
+cd quivr-v2
+go install ./cmd/quivr
+export PATH="$(go env GOPATH)/bin:$PATH" QUIVR_REPO="$PWD"
+cd ..
+```
+
+Check it by inspecting the manifest of a first-party plugin. The report starts with:
+
+```bash
+quivr plugin inspect "$QUIVR_REPO/plugins/pdf-text"
+```
+
+```text
+Plugin pdf-text 0.1.0: valid
+```
+
+</Step>
+<Step title="Create the plugin">
+
+`quivr plugin init` writes a working plugin to start from. Create one, then install the Python SDK, which is not on PyPI yet, from your checkout:
+
+```bash
+quivr plugin init csv-rows
+cd csv-rows
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e "$QUIVR_REPO/sdks/python" -e .
+```
+
+The template reads Markdown. You replace its manifest, its code and its test file, so remove the Markdown sample and its tests:
+
+```bash
+rm fixtures/sample.json fixtures/sample.md tests/test_normalizer.py
+```
+
+</Step>
+<Step title="Declare what the plugin does">
+
+Replace `quivr-plugin.yaml` with this manifest. It says the plugin is a normalizer for `text/csv` files, which versions of Quivr and of the plugin protocol it works with, and how to start it:
+
+```yaml quivr-plugin.yaml
+id: csv-rows
+version: 0.1.0
+description: Makes CSV files searchable, one Part per row.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/csv]
+    timeout_ms: 10000
+run:
+  command: [python3, -m, csv_rows]
+```
+
+Check it:
+
+```bash
+quivr plugin inspect .
+```
+
+```text
+Plugin csv-rows 0.1.0: valid
+```
+
+</Step>
+<Step title="Write the normalizer">
+
+Replace `csv_rows/normalizer.py`. The SDK calls `normalize` with the invocation; `read_input()` downloads the file and checks its size and checksum. The function returns one `body` Part per row, keyed `row-1`, `row-2` and so on:
+
+```python csv_rows/normalizer.py
+"""Turn a CSV file into one searchable Part per row."""
+import csv
+import io
+from pathlib import Path
+
+from quivr_plugin import Invocation, ManifestContent, NormalizerResponse, Part, Plugin, TerminalError, TextContent
+
+plugin = Plugin(Path(__file__).resolve().parent.parent / "quivr-plugin.yaml")
+
+
+@plugin.normalizer
+def normalize(invocation: Invocation) -> NormalizerResponse:
+    try:
+        text = invocation.read_input().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise TerminalError("invalid_encoding", "the file is not UTF-8")
+    rows = list(csv.DictReader(io.StringIO(text)))
+    if not rows:
+        raise TerminalError("empty_file", "the file has a header but no rows")
+    if len(rows) > 256:
+        raise TerminalError("too_many_rows", f"{len(rows)} rows; at most 256 are supported")
+    parts = []
+    for number, row in enumerate(rows, start=1):
+        lines = [f"{column}: {value}" for column, value in row.items() if column and value]
+        parts.append(Part(key=f"row-{number}", role="body", content=TextContent(text="\n".join(lines))))
+    return NormalizerResponse(manifest=ManifestContent(parts=parts))
+```
+
+A `TerminalError` tells Quivr the file can never be read, so it stops retrying and records why. Quivr indexes Parts whose role is `title` or `body`.
+
+</Step>
+<Step title="Try it on a sample file">
+
+Add a CSV file and a fixture that describes it. Fixtures are the test inputs the plugin tools replay:
+
+```csv fixtures/events.csv
+date,title,description
+2026-10-03,Book fair,Local publishers present their new novels in the main hall.
+2026-10-10,Chess club,Beginners learn classic openings with the city champion.
+2026-10-17,Film night,A restored silent comedy with a live piano.
+```
+
+```json fixtures/events.json
+{
+  "description": "Three events of a city library, one per row.",
+  "input": {"path": "events.csv", "media_type": "text/csv"}
+}
+```
+
+`quivr plugin dev` starts the plugin, checks that it serves this exact manifest, sends it the fixture and validates the answer the way Quivr will:
+
+```bash
+quivr plugin dev --fixture fixtures/events.json
+```
+
+It prints the plugin's answer, then:
+
+```text
+quivr plugin dev: response valid: 3 Parts, 0 Relations, 0 warnings; the engine's Manifest validation accepts it
+```
+
+</Step>
+<Step title="Certify it">
+
+The Contract Runner checks everything Quivr relies on: discovery, deadlines, replays that must give the same answer, and refusal of invalid requests.
+
+```bash
+quivr plugin test
+```
+
+```text
+CERTIFIED: the engine can safely invoke this plugin (12 passed, 0 failed, 0 skipped)
+```
+
+</Step>
+<Step title="Run it in Quivr">
+
+In the terminal you used so far, still in the plugin folder, serve the plugin on port 9900. It keeps running and restarts when you edit a file:
+
+```bash
+quivr plugin dev --port 9900 .
+```
+
+Open a second terminal in the folder that contains your checkout, and restart the local stack with your plugin pinned. `QUIVR_NORMALIZER` points at the plugin folder; Quivr then sends every `text/csv` file to it:
+
+```bash
+cd quivr-v2
+QUIVR_NORMALIZER="$(cd ../csv-rows && pwd)" make dev
+eval "$(make -s env)"
+```
+
+`make dev` prints `External normalizer: …/csv-rows, pinned at http://127.0.0.1:9900`. Running `make dev` again without the variable goes back to the default PDF plugin.
+
+</Step>
+<Step title="Upload a CSV file">
+
+Files go through an upload session: Quivr gives you a URL to send the bytes to, then checks them. Sending the same request again returns the same session, already verified, so the `PUT` runs only once. In the second terminal, create a Corpus and upload the sample file:
+
+```bash
+FILE=../csv-rows/fixtures/events.csv
+CORPUS_ID=$(curl -s -X POST "$QUIVR_API_URL/v0/corpora" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d '{"name": "Events", "idempotency_key": "tutorial-events"}' | jq -r .corpus_id)
+
+curl -s -X POST "$QUIVR_API_URL/v0/uploads" -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"size_bytes": '"$(wc -c < "$FILE")"', "sha256": "'"$(sha256sum "$FILE" | cut -d' ' -f1)"'", "media_type": "text/csv"}' > upload.json
+if [ "$(jq -r .state upload.json)" = awaiting_upload ]; then
+  curl -s -X PUT "$(jq -r .upload_url upload.json)" --data-binary @"$FILE" \
+    $(jq -r '.upload_headers | to_entries[] | "-H \(.key):\(.value)"' upload.json)
+fi
+BLOB_ID=$(curl -s -X POST "$QUIVR_API_URL/v0/uploads/$(jq -r .upload_id upload.json)/confirm" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq -r .blob_id)
+echo "$BLOB_ID"
+```
+
+The last line prints the verified Blob's identifier, such as `blob_…`. Now add it as a Record:
+
+```bash
+RECEIPT_ID=$(curl -s -X POST "$QUIVR_API_URL/v0/records" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq -r .receipt_id
+{
+  "idempotency_key": "tutorial-events-october",
+  "source": {"corpus_id": "$CORPUS_ID", "namespace": "library", "record_key": "events-october"},
+  "content": {"kind": "blob", "blob_id": "$BLOB_ID", "media_type": "text/csv"}
+}
+EOF
+)
+```
+
+</Step>
+<Step title="Search it">
+
+Quivr calls your plugin in the background. After a second or two, the Receipt is resolved; if its `state` is still `pending`, run the command again:
+
+```bash
+curl -s "$QUIVR_API_URL/v0/ingestion-receipts/$RECEIPT_ID" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  | jq '{state, outcome, record_id, version_id}'
+```
+
+```json
+{"state": "resolved", "outcome": "created", "record_id": "record_…", "version_id": "version_…"}
+```
+
+Search for a word from the second row:
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/search" -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"query": "chess", "corpus_ids": ["'"$CORPUS_ID"'"], "mode": "lexical"}' | jq '.items[] | {part_key, excerpt: .excerpt.text}'
+```
+
+```json
+{
+  "part_key": "row-2",
+  "excerpt": "date: 2026-10-10\ntitle: Chess club\ndescription: Beginners learn classic openings with the city champion."
+}
+```
+
+The hit names `row-2`: the row your plugin produced. The Version also records which plugin made it:
+
+```bash
+VERSION_ID=$(curl -s "$QUIVR_API_URL/v0/ingestion-receipts/$RECEIPT_ID" -H "Authorization: Bearer $QUIVR_API_KEY" | jq -r .version_id)
+RECORD_ID=$(curl -s "$QUIVR_API_URL/v0/ingestion-receipts/$RECEIPT_ID" -H "Authorization: Bearer $QUIVR_API_KEY" | jq -r .record_id)
+curl -s "$QUIVR_API_URL/v0/records/$RECORD_ID/versions/$VERSION_ID" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  | jq '.provenance.normalization | {plugin_id, plugin_version, contribution}'
+```
+
+```json
+{"plugin_id": "csv-rows", "plugin_version": "0.1.0", "contribution": "normalizer"}
+```
+
+</Step>
+</Steps>
+
+## What you built
+
+A certified normalizer that Quivr calls for every CSV file, and a Record whose rows are searchable one by one. If your plugin is down, Quivr keeps the file and retries until it is back; if it raises a `TerminalError`, Quivr quarantines that Version and shows your error code in its `diagnostics`.
+
+<CardGroup cols={2}>
+<Card title="Pin a plugin" icon="pin" href="/run-quivr/pin">
+Pin your plugin in a real deployment's configuration.
+</Card>
+<Card title="Plugin types" icon="shapes" href="/plugins/types">
+Connectors, ingestion, retrieval and alert rules.
+</Card>
+<Card title="Plugin manifest" icon="file-code" href="/reference/plugin-manifest">
+Every field of `quivr-plugin.yaml`.
+</Card>
+<Card title="Plugin protocol" icon="network" href="/reference/plugin-protocol">
+The routes and fields, to write a plugin in another language.
+</Card>
+</CardGroup>

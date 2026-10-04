@@ -1,0 +1,31 @@
+id: example.words
+version: 0.1.0
+description: Normative ingestion plugin with two vector spaces.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.8.0 <0.9.0"
+contributions:
+  ingestion:
+    spaces:
+      example.words.small:
+        version: "1"
+        model: example/words-4
+        dimensions: 4
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+      example.words.large:
+        version: "2"
+        model: example/words-6
+        dimensions: 6
+        metric: dot
+        indexes: [text]
+        query_modalities: [text]
+        description: The larger space, for evaluation.
+        input_price:
+          usd_per_million_tokens: 0.05
+    timeout_ms: 10000
+    query_timeout_ms: 500
+    limits:
+      max_segments: 4
+      max_response_bytes: 65536

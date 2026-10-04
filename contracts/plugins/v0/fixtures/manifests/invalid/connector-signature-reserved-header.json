@@ -1,0 +1,61 @@
+{
+  "id": "example-push",
+  "version": "1.0.0",
+  "compatibility": {
+    "engine": ">=0.1.0 <0.3.0",
+    "plugin_api": ">=0.12.0 <0.13.0"
+  },
+  "contributions": {
+    "connector": {
+      "kinds": {
+        "events": {
+          "config_schema": {
+            "type": "object"
+          },
+          "default_interval_seconds": 300,
+          "modes": [
+            "pull",
+            "push"
+          ],
+          "api": {
+            "routes": [
+              {
+                "name": "push",
+                "method": "POST",
+                "path": "events/{category}",
+                "auth": "signature",
+                "request_schema": {
+                  "type": "object",
+                  "required": [
+                    "text"
+                  ],
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "signature": {
+                  "header": "Authorization",
+                  "timestamp_header": "x-timestamp",
+                  "window_seconds": 300
+                }
+              },
+              {
+                "name": "challenge",
+                "method": "GET",
+                "path": "challenge",
+                "auth": "signature",
+                "signature": {
+                  "header": "x-signature",
+                  "timestamp_header": "x-timestamp",
+                  "window_seconds": 300
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

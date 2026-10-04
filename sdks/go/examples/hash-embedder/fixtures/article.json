@@ -1,0 +1,17 @@
+{
+  "description": "Two paragraphs become two segments with folded lexical text, in both spaces.",
+  "ingestion": {
+    "parts": [
+      {"key": "title", "role": "title", "text": "Harbour strike"},
+      {"key": "body", "role": "body", "text": "Dockers stopped work at dawn.\n\nThe café by the port stayed closed."}
+    ],
+    "queries": ["port closed", "strike at dawn"],
+    "expect": {
+      "segments": [
+        {"part_key": "body", "start": 0, "end": 29},
+        {"part_key": "body", "start": 31, "end": 66}
+      ],
+      "lexical_text": true
+    }
+  }
+}

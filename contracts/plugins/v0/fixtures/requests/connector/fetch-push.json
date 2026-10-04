@@ -1,0 +1,26 @@
+{
+  "invocation_id": "inv-feed-1",
+  "contribution": "connector",
+  "organization_id": "org-1",
+  "configuration": {},
+  "connector": {
+    "instance_id": "connector-9",
+    "kind": "alerts",
+    "corpus_id": "corpus-3",
+    "source_namespace": "alerts.example.com",
+    "webhook_url": "https://quivr.example.com/v0/connector-webhooks/connector-9",
+    "config": {
+      "account": "desk"
+    }
+  },
+  "credential": {
+    "token": "test-token-0000",
+    "signing_secret": "test-signing-0000"
+  },
+  "checkpoint": {
+    "cursor": "2026-09-29T08:00:00Z"
+  },
+  "now": "2026-09-29T09:00:00Z",
+  "page_in_run": 0,
+  "reads_today": 12
+}

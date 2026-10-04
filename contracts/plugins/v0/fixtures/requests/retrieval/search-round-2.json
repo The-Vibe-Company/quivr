@@ -1,0 +1,112 @@
+{
+  "invocation_id": "inv-search-2",
+  "contribution": "retrieval",
+  "organization_id": "org_example",
+  "configuration": {},
+  "profile": "default",
+  "round": 2,
+  "query": {
+    "text": "harbour strike",
+    "mode": "hybrid"
+  },
+  "limit": 2,
+  "scope": {
+    "corpus_ids": [
+      "corpus_news"
+    ],
+    "source_namespaces": [
+      "wire",
+      "local"
+    ]
+  },
+  "spaces": [
+    {
+      "id": "example.words.small@1",
+      "owner": {
+        "kind": "plugin",
+        "plugin_id": "example.words",
+        "plugin_version": "0.1.0"
+      },
+      "model": "example/words-4",
+      "dimensions": 4,
+      "metric": "cosine",
+      "indexes": [
+        "text"
+      ],
+      "query_modalities": [
+        "text"
+      ],
+      "role": "served",
+      "coverage": {
+        "segments": 3,
+        "total": 3
+      }
+    }
+  ],
+  "served": [
+    {
+      "round": 1,
+      "request_index": 0,
+      "request": {
+        "primitive": "bm25",
+        "field": "source",
+        "query_text": "harbour strike",
+        "k": 2
+      },
+      "candidates": [
+        {
+          "segment_id": "seg_harbour",
+          "record_id": "rec_harbour",
+          "version_id": "ver_harbour",
+          "part_key": "body",
+          "text": "Dockers stopped work at the harbour.",
+          "start": 0,
+          "end": 36,
+          "score": 2.4
+        },
+        {
+          "segment_id": "seg_strike",
+          "record_id": "rec_strike",
+          "version_id": "ver_strike",
+          "part_key": "body",
+          "text": "The strike spread to the rail network.",
+          "start": 0,
+          "end": 38,
+          "score": 1.1
+        }
+      ]
+    },
+    {
+      "round": 1,
+      "request_index": 1,
+      "request": {
+        "primitive": "near_vector",
+        "space": "example.words.small@1",
+        "query_text": "harbour strike",
+        "k": 2
+      },
+      "candidates": [
+        {
+          "segment_id": "seg_harbour",
+          "record_id": "rec_harbour",
+          "version_id": "ver_harbour",
+          "part_key": "body",
+          "text": "Dockers stopped work at the harbour.",
+          "start": 0,
+          "end": 36,
+          "score": 0.91
+        },
+        {
+          "segment_id": "seg_ferry",
+          "record_id": "rec_ferry",
+          "version_id": "ver_ferry",
+          "part_key": "body",
+          "text": "Ferries stayed in port all day.",
+          "start": 0,
+          "end": 31,
+          "score": 0.62
+        }
+      ]
+    }
+  ]
+}

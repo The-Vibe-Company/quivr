@@ -1,0 +1,17 @@
+{
+  "connector": {
+    "kind": "alerts",
+    "config": {
+      "account": "desk"
+    }
+  },
+  "receive": [
+    {
+      "request": {
+        "method": "POST",
+        "body": "{}",
+        "body_base64": "e30="
+      }
+    }
+  ]
+}

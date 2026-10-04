@@ -1,0 +1,78 @@
+---
+title: "Pin a plugin"
+description: "Make a Quivr deployment call a plugin you run: the configuration for each plugin type."
+keywords: ["QUIVR_CONFIG", "plugins", "pin", "routes", "deployment"]
+---
+
+You run the plugin yourself, then add it to the `plugins` list of Quivr's configuration file so Quivr calls it.
+
+## Prerequisites
+
+- The plugin runs at an address Quivr's processes can reach, and `quivr plugin test` certifies it.
+- You can edit the JSON configuration file that `QUIVR_CONFIG` names, and restart Quivr. In the local stack, `make dev` writes that file for you; see [Build your first plugin](/plugins/first-plugin) for the local shortcut.
+
+A plugin that reads or uploads files must also reach Quivr’s file storage, because files travel through short-lived links.
+
+## Steps
+
+<Steps>
+<Step title="Copy the manifest next to Quivr">
+
+Quivr reads the plugin's `quivr-plugin.yaml` at startup, so it needs the exact file the plugin was built from. Copy it where every Quivr process can read it, for example `/etc/quivr/plugins/acme-markdown/quivr-plugin.yaml`.
+
+</Step>
+<Step title="Add the pin">
+
+Add one object per plugin to `plugins` in the configuration of every `api`, `worker` and `migrate` process:
+
+```json QUIVR_CONFIG
+{
+  "plugins": [
+    {
+      "manifest": "/etc/quivr/plugins/acme-markdown/quivr-plugin.yaml",
+      "endpoint": "http://127.0.0.1:9900",
+      "configuration": {"max_sections": 32},
+      "routes": [{"media_type": "text/markdown", "mode": "required"}]
+    }
+  ]
+}
+```
+
+`manifest` and `endpoint` are always required. `configuration` is validated against the schema the manifest declares under `configuration.schema`. The other fields depend on the plugin's type:
+
+| Type | Add | Rule |
+| --- | --- | --- |
+| Normalizer | `routes`: the media types Quivr sends to it | Each is one the manifest declares, and a media type goes to one plugin only. `mode` is `required` (the default) or `optional`, which lets a `text/*` file fall back to plain text when the plugin fails. |
+| Connector | nothing | Every kind the manifest declares becomes available. A kind has one provider. The endpoint must use `https://` unless it is on loopback, because requests carry credentials. |
+| Ingestion | `spaces`: `{"<space id>": "served"}`, plus any `"evaluation"` spaces | Each plugin serves exactly one space. Several ingestion plugins can run together; [source media routes](/reference/configuration#ingestion-routing) choose one per Version. |
+| Retrieval | nothing | Several plugins can serve searches; [Search profiles](/reference/configuration#search-profiles) maps short names to full `plugin/profile` names. |
+| Alert rule | optionally `kinds`: the alert kinds this deployment accepts | Subscriptions name the plugin by `plugin_id` and `version`. |
+
+The [configuration reference](/reference/configuration) lists every field of a pin.
+
+</Step>
+<Step title="Restart Quivr">
+
+Restart the `api` and `worker` processes. Each validates every pin before it serves: the manifest, the compatibility ranges, the configuration, routes and conflicts between pins. An invalid pin stops startup and lists every problem with its path, for example `/plugins/0/configuration`. Quivr does not contact the plugin at startup, so a plugin that is down does not stop Quivr.
+
+</Step>
+</Steps>
+
+## Check it worked
+
+An operator key with the `plugins:admin` action reads what the deployment registered:
+
+```bash
+curl -s "$QUIVR_API_URL/v0/admin/plugins" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY"
+```
+
+Each registration shows the plugin's id, version, endpoint, manifest digest, the roles it serves and its state. `GET /v0/admin/plugins/plan` shows the active Pipeline Plan: which plugin serves each media type, alert rule, connector kind, ingestion and retrieval. Then exercise the plugin: ingest a file of a routed type, create an instance of a new connector kind, or run a search. To change plugins later without a restart, see [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Work waits with `plugin_unavailable` | Quivr cannot reach the plugin, or the plugin serves a different manifest than the pinned one | Start the plugin at `endpoint`. After editing `quivr-plugin.yaml`, restart the plugin and Quivr so both use the same file. |
+| Startup fails with `incompatible_plugin_api` | The manifest's `plugin_api` range does not admit the version its Contributions need | Widen the range, for example `>=0.3.0 <0.4.0` for a connector |
+| Startup fails with `kind_conflict` or `space_owner_conflict` | Two pins provide the same connector kind or vector space | Keep one provider per kind or space |
+| A Subscription is refused with `422 unsupported_evaluator` | No pinned alert rule has that `plugin_id` and `version` | Pin it, or fix the Subscription's `evaluator` |

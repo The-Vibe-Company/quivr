@@ -1,0 +1,66 @@
+# Harness-only plugin. Never pinned by a production deployment.
+id: quivr.fixture
+version: 1.0.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.11.0 <0.12.0"
+contributions:
+  subscription:
+    expression_schema: {type: object}
+    configuration_schema: {type: object}
+    max_batch_size: 256
+    timeout_ms: 5000
+  connector:
+    limits: {max_items: 100}
+    kinds:
+      fixture:
+        default_interval_seconds: 300
+        modes: [pull]
+        credential_required: false
+        config_schema:
+          title: Test fixture
+          description: Each poll collects the next step of a deterministic script.
+          type: object
+          additionalProperties: false
+          required: [script]
+          properties:
+            requires_credential:
+              type: boolean
+              title: Requires a credential
+              description: Refuse polls without a valid token.
+            script:
+              type: array
+              maxItems: 100
+              title: Script
+              description: One entry per poll, each listing the items it returns.
+              examples: [[{items: [{record_key: item-1, text: First example item}]}]]
+              items:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 100
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [record_key]
+                      properties:
+                        record_key: {type: string, minLength: 1}
+                        text: {type: string}
+                        revision: {type: string}
+                        withdraw: {type: boolean}
+        credential_schema:
+          type: object
+          additionalProperties: false
+          required: [token]
+          properties:
+            token:
+              type: string
+              minLength: 1
+              title: Token
+              description: Tokens starting with fixture-revoked are refused.
+              writeOnly: true
+run:
+  command: [quivr-fake-plugin, fixture]

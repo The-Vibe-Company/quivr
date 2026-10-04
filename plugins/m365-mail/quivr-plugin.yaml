@@ -1,0 +1,140 @@
+# Microsoft 365 mail collector: one mailbox folder through Microsoft Graph
+# with an app-only registration. Attachments are uploaded through
+# core-issued grants (Plugin API 0.4).
+id: connector.m365_mail
+version: 1.0.0
+description: Collects the messages and attachments of a Microsoft 365 mailbox folder through Microsoft Graph.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.4.0 <0.5.0"
+contributions:
+  connector:
+    kinds:
+      m365_mail:
+        description: Messages and attachments of one Microsoft 365 mailbox folder.
+        config_schema:
+          title: Microsoft 365 mailbox
+          description: Collects the messages and attachments of a mailbox folder through Microsoft Graph.
+          type: object
+          additionalProperties: false
+          required: [tenant_id, mailbox]
+          properties:
+            tenant_id:
+              type: string
+              pattern: "^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$"
+              title: Tenant ID
+              description: Directory (tenant) ID or verified domain.
+              examples: [example.onmicrosoft.com]
+            mailbox:
+              type: string
+              minLength: 1
+              maxLength: 320
+              pattern: "^[^/\\\\?#\\s]+$"
+              title: Mailbox
+              description: User principal name or ID of the mailbox.
+              examples: [shared-inbox@example.org]
+            folder:
+              type: string
+              minLength: 1
+              maxLength: 512
+              pattern: "^[^/\\\\?#\\s]+$"
+              title: Folder
+              description: Well-known folder name or folder ID. Defaults to the inbox.
+              examples: [inbox]
+            backfill_since:
+              type: string
+              minLength: 20
+              maxLength: 40
+              title: Backfill since
+              description: RFC 3339 timestamp of the oldest message to collect, at most 7 days before the first poll.
+              examples: ["2026-01-01T00:00:00Z"]
+        credential_schema:
+          title: Application credential
+          description: "App registration with Mail.Read application permission: a client secret, or a certificate and its private key."
+          type: object
+          additionalProperties: false
+          required: [client_id]
+          properties:
+            client_id: {type: string, minLength: 1, maxLength: 128, title: Client ID}
+            client_secret: {type: string, minLength: 1, maxLength: 1024, title: Client secret, writeOnly: true}
+            certificate_pem: {type: string, minLength: 1, maxLength: 16384, title: Certificate (PEM)}
+            private_key_pem: {type: string, minLength: 1, maxLength: 16384, title: Private key (PEM), writeOnly: true}
+          oneOf:
+            - title: Client secret
+              required: [client_secret]
+              not: {anyOf: [{required: [certificate_pem]}, {required: [private_key_pem]}]}
+            - title: Certificate
+              required: [certificate_pem, private_key_pem]
+              not: {required: [client_secret]}
+        default_interval_seconds: 60
+        modes: [pull]
+    timeout_ms: 30000
+    limits:
+      max_response_bytes: 16777216
+    attachments:
+      max_bytes: 26214400
+      timeout_ms: 120000
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      login_endpoint:
+        type: string
+        pattern: "^https?://"
+        description: Microsoft identity platform endpoint. Defaults to https://login.microsoftonline.com; set it for a national cloud or a local fake.
+      graph_endpoint:
+        type: string
+        pattern: "^https?://"
+        description: Microsoft Graph endpoint including its version. Defaults to https://graph.microsoft.com/v1.0.
+extensions:
+  # Source headers of a mail.
+  connector.m365_mail:
+    "1":
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      $defs:
+        address:
+          type: object
+          properties: {name: {type: string}, address: {type: string}}
+          additionalProperties: false
+      properties:
+        graph_id: {type: string}
+        internet_message_id: {type: string}
+        conversation_id: {type: string}
+        subject: {type: string}
+        from: {$ref: "#/$defs/address"}
+        sender: {$ref: "#/$defs/address"}
+        to: {type: array, items: {$ref: "#/$defs/address"}}
+        cc: {type: array, items: {$ref: "#/$defs/address"}}
+        to_count: {type: integer, minimum: 0}
+        cc_count: {type: integer, minimum: 0}
+        sent_at: {type: string}
+        received_at: {type: string}
+        folder: {type: string}
+        attachments_skipped:
+          type: array
+          items:
+            type: object
+            required: [reason]
+            properties:
+              name: {type: string}
+              media_type: {type: string}
+              size: {type: integer}
+              reason: {enum: [too_large, reference_attachment, empty]}
+            additionalProperties: false
+      required: [graph_id]
+      additionalProperties: false
+  # Attachment metadata of a Blob Part.
+  connector.m365_mail.attachment:
+    "1":
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        name: {type: string}
+        size: {type: integer}
+        is_inline: {type: boolean}
+        attachment_type: {enum: [file, item]}
+      additionalProperties: false
+run:
+  command: [go, run, .]

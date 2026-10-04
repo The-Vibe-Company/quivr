@@ -1,0 +1,23 @@
+{
+  "invocation_id": "inv-search-1",
+  "contribution": "retrieval",
+  "organization_id": "org_example",
+  "configuration": {},
+  "profile": "default",
+  "round": 1,
+  "query": {
+    "text": "harbour strike",
+    "mode": "hybrid"
+  },
+  "limit": 2,
+  "scope": {
+    "corpus_ids": [
+      "corpus_news"
+    ],
+    "source_namespaces": [
+      "wire",
+      "local"
+    ]
+  },
+  "served": []
+}

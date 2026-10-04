@@ -1,0 +1,5 @@
+{
+  "code": "encrypted_pdf",
+  "message": "The PDF is encrypted and cannot be read.",
+  "retryable": false
+}

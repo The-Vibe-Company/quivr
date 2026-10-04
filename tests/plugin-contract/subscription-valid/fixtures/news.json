@@ -1,0 +1,34 @@
+{
+  "description": "A news item and two saved searches: one appears in the text, one does not.",
+  "record": {
+    "enriched": false,
+    "parts": [
+      {
+        "key": "title",
+        "role": "title",
+        "text": "Harbour workers vote to strike"
+      },
+      {
+        "key": "body",
+        "role": "body",
+        "text": "Dock workers at the northern harbour voted on Tuesday to strike over pay."
+      }
+    ]
+  },
+  "evaluations": [
+    {
+      "expression": {
+        "kind": "substring",
+        "text": "Strike"
+      },
+      "expect": "match"
+    },
+    {
+      "expression": {
+        "kind": "substring",
+        "text": "election"
+      },
+      "expect": "no_match"
+    }
+  ]
+}

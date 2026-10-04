@@ -1,0 +1,75 @@
+---
+title: "RSS and Atom feeds"
+description: "Collect the articles of an RSS, Atom or JSON Feed into a Corpus."
+keywords: ["rss", "atom", "json feed", "feed", "connector"]
+---
+
+The `rss` kind polls one feed and turns each item into a Record. It reads RSS 0.9x, 2.0 and 1.0 (RDF), Atom and JSON Feed. The kind comes from the first-party `rss` plugin, which the local stack pins. [Collect from a source](/guides/connectors) covers what every kind shares: health, schedule, credentials and disabling.
+
+## Create an instance
+
+Use one instance per feed:
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/connectors" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{connector_id, health: .health.state}'
+{
+  "idempotency_key": "tech-news-feed",
+  "corpus_id": "$CORPUS_ID",
+  "source_namespace": "tech-news",
+  "kind": "rss",
+  "config": {"url": "https://news.example.org/rss.xml", "honor_ttl": true},
+  "schedule": {"interval_seconds": 300}
+}
+EOF
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `config.url` | required | The feed's `http` or `https` URL, at most 2048 characters. Credentials inside the URL are refused; deposit them instead. |
+| `config.honor_ttl` | `true` | Skip polls until the feed's `<ttl>` has passed, capped at 60 minutes. |
+| `schedule.interval_seconds` | `300` | How often to poll, never below the deployment's floor. |
+
+The first run collects every item currently in the feed. Only the feed document is fetched: linked pages and enclosures are never downloaded.
+
+## Protected feeds
+
+Deposit the feed's credential as the instance's `credential.secret`. `{"username": "…", "password": "…"}` is sent as HTTP Basic authentication, and `{"token": "…"}` as a bearer token. The credential is only sent to the feed's host and its subdomains, and a redirect from `https` to `http` is refused (`insecure_redirect`). Never use it to collect paid content or to bypass a publisher's access controls.
+
+## What each item becomes
+
+| Part key | Role | Content |
+| --- | --- | --- |
+| `title` | `title` | The item title as text |
+| `body` | `body` | The full content, or the summary when there is no full content, as text |
+| `summary` | `summary` | The summary, when it differs from the body |
+| `body_html`, `summary_html` | `source_html` | The original markup, when the source had HTML |
+
+Only `title` and `body` are searched. The `connector.rss` extension holds the item's `guid`, `link`, authors, dates, categories and enclosure references, and the feed's title and link.
+
+The Record Key is the item's `guid` (RSS) or `id` (Atom), else its link, else a hash of its title and text. An edited item becomes a new Version of the same Record. An item that drops out of the feed is not withdrawn, since feeds only list their latest items.
+
+## Polling
+
+Each poll sends `If-None-Match` and `If-Modified-Since`, so an unchanged feed costs one `304 Not Modified`. A request times out after 20 seconds, follows at most 5 redirects and reads at most 10 MiB. At most the first 1,000 items of a feed are considered.
+
+The plugin refuses private, loopback and link-local addresses, including cloud metadata endpoints, after DNS resolution and on every redirect (`address_not_allowed`).
+
+## Health codes
+
+| `last_error.code` | Health | Meaning |
+| --- | --- | --- |
+| `unauthorized`, `forbidden`, `gone` | `access_error` | The feed answered 401, 403 or 410 |
+| `not_found`, `http_status` | unchanged | The feed answered 404 or another 4xx |
+| `server_error`, `rate_limited` | unchanged | The feed answered 5xx or 429; retried at the next run |
+| `timeout`, `dns_error`, `tls_error`, `connection_error` | unchanged | The feed could not be reached |
+| `malformed_feed` | unchanged | Not a feed, or unreadable XML; nothing from it is stored |
+| `response_too_large`, `too_many_redirects`, `address_not_allowed` | unchanged | The feed broke a bound above |
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `malformed_feed` | The URL may point at an HTML page. Look for `<link rel="alternate" type="application/rss+xml">` in the page and use that URL. |
+| `gone` | The publisher retired the feed. Disable the instance and create one for the new URL, on the same Source Namespace only if the new feed keeps the same item ids. |
+| Items arrive late | Check `interval_seconds` and the feed's `<ttl>`, or set `honor_ttl` to `false`. |

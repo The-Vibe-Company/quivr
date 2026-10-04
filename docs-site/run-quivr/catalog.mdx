@@ -1,0 +1,105 @@
+---
+title: "First-party plugins"
+description: "The plugins that ship with Quivr: what each provides, its configuration, and where it runs."
+keywords: ["pdf-text", "alerts", "core-ingest", "hosted-embed", "core-retrieve", "jev-rerank", "rss", "m365-mail", "x-list", "push-source", "catalog"]
+---
+
+These plugins live in the `plugins/` folder of the repository. They use the same public protocol as your own plugins, and none is compiled into the engine. `make dev` runs the default set; optional plugins are pinned explicitly.
+
+| Plugin | Id | Type | Provides |
+| --- | --- | --- | --- |
+| `pdf-text` | `pdf-text` 0.1.0 | Normalizer | `application/pdf`: one Part per page |
+| `alerts` | `alerts` 0.3.0 | Alert rule | keyword and meaning alerts, alone or combined |
+| `core-ingest` | `core.ingest` 1.0.0 | Ingestion | token windows embedded with `multilingual-e5-small` |
+| `hosted-embed` | `hosted.embed` 1.0.0 | Ingestion | a configured hosted or OpenAI-compatible text model |
+| `core-retrieve` | `core.retrieve` 1.2.0 | Retrieval | `default` and `deep`: keyword, vector or hybrid search, with configurable weight, depth and fusion |
+| `jev-rerank` | `jev.rerank` 1.0.0 | Retrieval | `deep`: Jev re-ranking of a hybrid shortlist, with an unpaid hybrid fallback |
+| `rss` | `connector.rss` 1.0.0 | Connector | kind `rss`: RSS, Atom and JSON Feed |
+| `m365-mail` | `connector.m365_mail` 1.0.0 | Connector | kind `m365_mail`: a Microsoft 365 mailbox folder |
+| `x-list` | `connector.x_list` 1.1.0 | Connector | kind `x_list`: the posts of an X list |
+| `push-source` | `push-source` 0.1.0 | Connector | kind `events`: versioned text records received through an instance-token route |
+
+## pdf-text
+
+Turns a PDF into one `body` Part per page with text, keyed `page-1`, `page-2`…, plus a `source` Part that references the PDF. The Version's `pdf-text.document` extension holds `page_count` and `text_pages`. Pages without text, such as scans, are skipped with an `empty_pages` warning: there is no OCR. An encrypted or damaged PDF is quarantined with the code `encrypted_pdf` or `corrupt_pdf`.
+
+| Configuration | Default | Meaning |
+| --- | --- | --- |
+| `max_page_parts` | `64` | Page Parts kept, 1 to 64; later pages join the last one |
+| `max_text_bytes` | `131072` | UTF-8 bytes of page text kept in total, up to 262144 |
+| `include_source` | `true` | Add the `source` Part that references the PDF |
+
+Pin it with a route for `application/pdf`. See [Add content](/guides/add-content#upload-a-file) to upload a PDF.
+
+## alerts
+
+Keyword and local-vector checks need no classifier key. Jev checks need a `TYPESAFE_API_KEY` in the plugin's environment.
+
+| Kind | Checks | Sends text to Jev? |
+| --- | --- | --- |
+| `keywords` | Boolean query and metadata filters | No |
+| `meaning` | Local stored vectors; requires `meaning_check: vectors` | No |
+| `described` | Jev by default, local vectors with `meaning_check: vectors` | Yes, unless `meaning_check: vectors` |
+| `keywords_or_meaning` / `keywords_and_meaning` | Keyword and meaning checks, with an explicit `meaning_check` | With `meaning_check: jev` |
+
+Vector checks embed the description with the deployment's embedding provider, which also embeds every article. With the default `core-ingest` and an embedding server you run, that text stays inside the installation; with a hosted provider, it goes to that provider.
+
+The pin's `kinds` lists the alert kinds the deployment accepts. For keyword and local meaning checks without a TypeSafe key, pin `"kinds": ["keywords", "meaning", "keywords_or_meaning", "keywords_and_meaning"]`, as `make dev` does. Use `kind: meaning` for a local description, and `meaning_check: vectors` for every meaning check. This pin excludes `described`, so that kind is refused with `422 invalid_expression` even when it selects vectors. The kind list alone does not prevent a mixed expression from selecting Jev.
+
+To offer Jev checks:
+
+1. Put the key in the `alerts` plugin's environment: `TYPESAFE_API_KEY=<your key>`. Never put it in Quivr's configuration, in logs or in a repository.
+2. Add `described` to the pin's `kinds`, keeping the kinds already offered: `"kinds": ["keywords", "meaning", "keywords_or_meaning", "keywords_and_meaning", "described"]`. A kind missing from the list is refused for new alerts.
+3. Restart the plugin and Quivr. The plugin logs at startup whether described alerts are enabled.
+
+`make dev` adds `described` only when `TYPESAFE_API_KEY` is set in its environment. Meaning kinds need `alerts` `0.3.0`; existing Subscriptions keep the version they name until you [migrate them](/run-quivr/upgrade-an-alert-rule).
+
+| Configuration | Default | Meaning |
+| --- | --- | --- |
+| `fields` | `{}` | Filter names mapped to JSON Pointers into article metadata, such as `{"author": "/extensions/example.news/data/author"}` |
+| `text_roles` | `["title", "body"]` | Part roles that keyword terms search and Jev checks; local meaning checks use all supplied vectors |
+| `described.threshold` | `0.5` | Default Jev probability threshold, 0.2 to 0.95 |
+| `vectors.threshold` | `0.8` | Default local-vector cosine similarity threshold, 0.2 to 0.95 |
+
+See [How alerts work](/guides/alerts), [Keyword alerts](/guides/keyword-alerts) and [Meaning alerts](/guides/described-alerts).
+
+## core-ingest
+
+The default ingestion plugin. It cuts the `title` and `body` Parts of each Version into windows of at most 384 tokens that overlap by 48 and prefer paragraph and sentence ends, then embeds each window in the space `core.ingest.e5-small@1` (384 dimensions, cosine) through a Text Embeddings Inference server. A Version with a title and no body, such as a feed item without a description, gets one segment: its title. It refuses a Version with no title or body text, more than 256 KiB of text, 64 Parts or 256 windows, which is then blocked with `ingestion_refused` and a diagnostic that names the reason, and a query longer than 256 tokens.
+
+| Configuration | Meaning |
+| --- | --- |
+| `tei_url` | The Text Embeddings Inference server that serves the pinned E5 model |
+| `tokenizer` | `python` and `model`: the pinned tokenizer helper and its `tokenizer.json` |
+
+## hosted-embed
+
+The optional hosted ingestion plugin selects a model, dimensions and input templates by configuration. It supports OpenAI-compatible `/embeddings` and Cohere v2 `/embed` APIs, with bearer, `api-key` or no authentication. Its key is a declared `AZURE_FOUNDRY_KEY` secret in the plugin process environment. It cuts bounded text windows, batches requests and resumes completed batches after a retryable provider failure.
+
+Generate an immutable manifest from the configuration before installing it. Each model, dimension, revision or template change creates a new vector space; evaluation, backfill and promotion use the usual engine operations. Each provider attempt logs input-token usage for cost accounting. See the [configuration examples and package commands](https://github.com/The-Vibe-Company/quivr-v2/blob/main/plugins/hosted-embed/README.md).
+
+## core-retrieve
+
+The default retrieval plugin follows the search mode: `bm25` on the title and body for `lexical`, `near_vector` in every served space for `semantic`, and `hybrid` in every served space for `hybrid`. It merges candidates by score, keeps each segment once and breaks score ties by segment id. Optional pin settings select `dense_weight`, `candidate_count` and `hybrid_fusion`; defaults remain alpha 0.5, the search limit and relative-score fusion. See [Core retrieval settings](/run-quivr/search-profiles#core-retrieval-settings) for bounds and an example.
+
+It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent). Its `deep` ranks like `default`; to re-rank, install `jev.rerank` and map the short name `deep` to `jev.rerank/deep` in `retrieval.profiles`. See [Re-rank with Jev](/guides/rerank-with-jev) for that configuration. The api refuses to start without a retrieval plugin.
+
+## jev-rerank
+
+The optional `jev.rerank` retrieval plugin declares only `deep`. It asks `core.retrieve/default` for a hybrid shortlist, then scores it in one batch with Jev, TypeSafe's paid model. A `deep` search can make paid calls; usage reports the calls and cost, and each re-ranked hit explains its probability. Without a TypeSafe key, or on errors and deadlines, it returns the original hybrid order without a Jev score. It can shorten passages, drop overlapping hits and cache scores. See [Re-rank with Jev](/guides/rerank-with-jev) for configuration and settings, and [Search profiles](/run-quivr/search-profiles) for how it builds on `core.retrieve/default`.
+
+## rss
+
+Polls one feed per Connector Instance, with conditional requests and the feed's `ttl`. Each item becomes a Record keyed by its `guid` or `id`; an edited item becomes a new Version. It refuses private and loopback addresses unless `allow_private_addresses` is `true`, which only a local test deployment should set. See [RSS and Atom feeds](/guides/rss).
+
+## m365-mail
+
+Collects one folder of one Microsoft 365 mailbox through Microsoft Graph: subject and body as text, attachments up to 25 MB as stored files. `login_endpoint` and `graph_endpoint` override Microsoft's global endpoints, for a national cloud. See [Microsoft 365 mail](/guides/microsoft-365).
+
+## x-list
+
+Polls the posts of one X list, turns edits into corrections, and withdraws posts deleted or made protected on X within a recheck window. It can also receive posts in real time through X webhooks. `api_endpoint` overrides the X API origin, for a test fake only. See [X lists](/guides/x).
+
+## push-source
+
+The offline Python sample accepts versioned text records at `POST records`, secured by a Quivr instance token. Its `events` kind maps each record into title and body Parts, preserving the sender's key and revision. It has no upstream credential or configuration, and its scheduled fetch only reports channel health. [Write a push source](/plugins/push-source) explains its route; [Receive and secure pushes](/run-quivr/receive-pushes) walks through access and tokens.

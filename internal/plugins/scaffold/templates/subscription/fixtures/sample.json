@@ -1,0 +1,19 @@
+{
+  "description": "A news article and five saved searches.",
+  "record": {
+    "enriched": false,
+    "parts": [
+      {"key": "title", "role": "title", "text": "Harbour workers vote to strike"},
+      {"key": "body", "role": "body", "text": "Dock workers at the northern harbour voted on Tuesday to strike over pay. The Strike could start next week."}
+    ],
+    "source": {"namespace": "wire", "record_key": "story-42"},
+    "provenance": {"origin": "client", "producer": "newsdesk"}
+  },
+  "evaluations": [
+    {"description": "Appears in the title and the body, case ignored.", "expression": {"kind": "substring", "text": "STRIKE"}, "expect": "match"},
+    {"description": "Absent from the article.", "expression": {"kind": "substring", "text": "election"}, "expect": "no_match"},
+    {"description": "Only the body has the exact case.", "expression": {"kind": "substring", "text": "Strike"}, "configuration": {"case_sensitive": true}, "expect": "match"},
+    {"description": "Every article the newsdesk produced.", "expression": {"kind": "metadata", "pointer": "/provenance/producer", "equals": "newsdesk"}, "expect": "match"},
+    {"description": "Another source namespace.", "expression": {"kind": "metadata", "pointer": "/source/namespace", "equals": "blogs"}, "expect": "no_match"}
+  ]
+}

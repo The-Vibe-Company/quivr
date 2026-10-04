@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ingestion segment_and_embed request, v0",
+  "description": "POST /v0/contributions/ingestion/segment_and_embed, since Plugin API 0.6. One Record Version's text Parts and the enabled vector spaces to embed each segment in.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "idempotency_key",
+    "contribution",
+    "organization_id",
+    "configuration",
+    "version",
+    "parts",
+    "spaces"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per attempt; correlate logs with it."
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Opaque, stable across retries of the same logical invocation. The same key must yield the same segments, vectors, lexical text and provenance."
+    },
+    "contribution": {
+      "const": "ingestion"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration": {
+      "type": "object",
+      "description": "The validated plugin (installer) configuration."
+    },
+    "version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "corpus_id",
+        "record_id",
+        "record_version_id"
+      ],
+      "description": "The Record Version being ingested. Informational: the answer must depend only on the Parts, the language, the spaces and the configuration.",
+      "properties": {
+        "corpus_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record_version_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "language": {
+      "type": "string",
+      "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$",
+      "description": "BCP 47 language hint, when the core knows one."
+    },
+    "parts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "description": "The Version's canonical text Parts, in Manifest order, with unique keys. Blob Parts are not sent. Segment offsets address these texts.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "role",
+          "text"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "spaces": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "plugin-manifest.schema.json#/$defs/SpaceId"
+      },
+      "description": "The declared spaces to embed, among those this deployment enables. Every segment carries exactly one vector for each of them. Empty (since Plugin API 0.8) asks for the segments only, without vectors: the core segments a Version first and embeds it later, and the segments must then be the same."
+    }
+  }
+}

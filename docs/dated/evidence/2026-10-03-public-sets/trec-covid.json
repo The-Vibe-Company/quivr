@@ -1,0 +1,224 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "trec-covid",
+  "metadata": {
+    "name": "trec-covid",
+    "language": "en",
+    "description": "COVID research topics",
+    "licence": "cc-by-sa-4.0",
+    "source": "https://huggingface.co/datasets/BeIR/trec-covid",
+    "version": {
+      "BeIR/trec-covid": "7e16fde3016c639c7f856e803f4bab92645562c4",
+      "BeIR/trec-covid-qrels": "532ac68ee6756ac22c9346eebf65bd3c6a042e10"
+    },
+    "split": "test",
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/BeIR/trec-covid/blob/7e16fde3016c639c7f856e803f4bab92645562c4/README.md"
+    ],
+    "query_type": "COVID research topics",
+    "known_issues": [
+      "Only five seeded topics to preserve deep judgments within document budget; inadequate alone for significance.",
+      "Pooled graded judgments retain explicit nonrelevant documents; sampled corpus differs from full CORD-19."
+    ],
+    "source_counts": {
+      "documents": 171332,
+      "queries": 50,
+      "judgments": 66336
+    },
+    "sample": {
+      "queries": 5,
+      "documents": 10000,
+      "seed": 991,
+      "max_source_bytes": 262144,
+      "eligible_queries": 50,
+      "judged_documents": 5862,
+      "listed_negatives": 0,
+      "random_distractors": 4138,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "d2941377d1cf93df296d84bcfe41ccda90837bf9dee9480e6bc1aab3ceff4b12",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/BeIR/trec-covid/resolve/7e16fde3016c639c7f856e803f4bab92645562c4/corpus/corpus-00000-of-00001.parquet",
+        "sha256": "d76cea1b2304dbe67a1a54f7376a61de294976682a1d7d58d82de27141f3ba4a"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/BeIR/trec-covid/resolve/7e16fde3016c639c7f856e803f4bab92645562c4/queries/queries-00000-of-00001.parquet",
+        "sha256": "80bd564b1218a519ef0a396fa7b874941b7188d8240933e8d6fa867d7db59d6f"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/BeIR/trec-covid-qrels/resolve/532ac68ee6756ac22c9346eebf65bd3c6a042e10/test.tsv",
+        "sha256": "10669ab7d526cb04f52079139fd88c3d467a0776441b046567f540582798982b"
+      }
+    }
+  },
+  "counts": {
+    "documents": 10000,
+    "queries": 5,
+    "judgments": 6301
+  },
+  "source_counts": {
+    "documents": 171332,
+    "queries": 50,
+    "judgments": 66336
+  },
+  "fingerprint": "d2941377d1cf93df296d84bcfe41ccda90837bf9dee9480e6bc1aab3ceff4b12",
+  "sample": {
+    "queries": 5,
+    "documents": 10000,
+    "seed": 991,
+    "max_source_bytes": 262144,
+    "eligible_queries": 50,
+    "judged_documents": 5862,
+    "listed_negatives": 0,
+    "random_distractors": 4138,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 5,
+    "min": 979,
+    "max": 1657,
+    "mean": 1260.2,
+    "median": 1251,
+    "histogram": {
+      "979": 1,
+      "1147": 1,
+      "1251": 1,
+      "1267": 1,
+      "1657": 1
+    },
+    "total_judgments": 6301,
+    "queries": 5
+  },
+  "grades": {
+    "counts": {
+      "0": 3550,
+      "1": 723,
+      "2": 2028
+    },
+    "positive_judgments": 2751,
+    "max_grade": 2
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 5,
+      "min": 42,
+      "max": 64,
+      "mean": 55.8,
+      "median": 58,
+      "histogram": {
+        "42": 1,
+        "54": 1,
+        "58": 1,
+        "61": 1,
+        "64": 1
+      }
+    },
+    "words": {
+      "count": 5,
+      "min": 7,
+      "max": 10,
+      "mean": 9.2,
+      "median": 10,
+      "histogram": {
+        "7": 1,
+        "9": 1,
+        "10": 3
+      }
+    }
+  },
+  "query_types": {
+    "source": "COVID research topics",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 5,
+      "statement": 0
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.86289899938687,
+      "recall@10": 0.018672786759443432,
+      "mrr@10": 0.9
+    },
+    "saturation": {
+      "saturated_queries": 2,
+      "queries": 5,
+      "share": 0.4
+    },
+    "dims": 384,
+    "pieces": 12661,
+    "index_s": 669.5,
+    "query_ms": 5.4
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T19:13:10.549347+00:00",
+      "status": "complete",
+      "set": "trec-covid",
+      "fingerprint": "d2941377d1cf93df296d84bcfe41ccda90837bf9dee9480e6bc1aab3ceff4b12",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 2,
+      "queries": 5,
+      "share": 0.4
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 5,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 10043,
+    "query_inputs": 5,
+    "input_tokens": 12817889,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 1.5381466799999999,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 25635778,
+      "max_usd": 3.08
+    }
+  },
+  "local_run_sha256": "3b68e14fcf51d30469f6b32b8965c1f5038745f9eee3ae97dabf0c5f60d46056"
+}

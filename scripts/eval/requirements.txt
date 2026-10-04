@@ -1,0 +1,4 @@
+# Packages of the search quality harness (scripts/eval, THE-775). make check does not need them:
+# the scoring tests skip without ranx; the Search quality workflow installs this file.
+ranx==0.3.21        # MIT; metrics, with scipy for the paired t-test
+pyarrow==25.0.1     # Apache-2.0; reads the MIRACL parquet files

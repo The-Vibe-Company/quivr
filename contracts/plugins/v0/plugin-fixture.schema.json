@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plugin invocation fixture, v0",
+  "description": "A language-neutral local test input for a normalizer. Tools (quivr plugin dev, the Contract Runner, SDK test helpers) turn it into a normalizer request: they read input.path relative to the fixture file, compute its size and SHA-256, reference it through an absolute file:// URL, and fill the identity fields with deterministic development values.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "input"
+  ],
+  "properties": {
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "media_type"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Input file, relative to the directory of the fixture file (an absolute path is used as is). Tools resolve symbolic links before building the file:// URL."
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+          "maxLength": 255
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Plugin configuration for this invocation; validated against the manifest configuration schema. Defaults to an empty object."
+    },
+    "source": {
+      "$ref": "../../shared/v0/manifest.schema.json#/$defs/SourceIdentity",
+      "description": "Source identity to send. Defaults to the development Corpus, namespace dev and the input path as Record Key."
+    },
+    "extensions": {
+      "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions"
+    },
+    "provenance": {
+      "$ref": "../../shared/v0/manifest.schema.json#/$defs/Provenance"
+    }
+  }
+}

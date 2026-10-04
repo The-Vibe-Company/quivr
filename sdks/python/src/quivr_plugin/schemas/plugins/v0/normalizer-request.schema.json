@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "normalizer invocation request, v0",
+  "description": "POST /v0/contributions/normalizer. Immutable invocation context plus a reference to the input Blob; bodies are never inline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invocation_id",
+    "idempotency_key",
+    "contribution",
+    "organization_id",
+    "corpus_id",
+    "record_id",
+    "record_version_id",
+    "source",
+    "input",
+    "configuration"
+  ],
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Unique per attempt; correlate logs with it."
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Opaque, stable across retries of the same logical invocation. The same key must yield the same logical output."
+    },
+    "contribution": {
+      "const": "normalizer"
+    },
+    "organization_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "corpus_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "record_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "record_version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "$ref": "../../shared/v0/manifest.schema.json#/$defs/SourceIdentity",
+      "description": "Source namespace and Record Key of the Record."
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "blob_id",
+        "media_type",
+        "size_bytes",
+        "sha256",
+        "reference"
+      ],
+      "properties": {
+        "blob_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$",
+          "maxLength": 255
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "reference": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "url",
+                "expires_at"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "signed_url"
+                },
+                "url": {
+                  "type": "string",
+                  "pattern": "^https?://",
+                  "format": "uri"
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "description": "Short-lived signed GET URL for the input Blob."
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "url"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "file"
+                },
+                "url": {
+                  "type": "string",
+                  "pattern": "^file://",
+                  "format": "uri"
+                }
+              },
+              "description": "Local development only: a file URL readable by the plugin."
+            }
+          ]
+        }
+      }
+    },
+    "extensions": {
+      "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
+      "description": "Extensions submitted with the Record Version."
+    },
+    "provenance": {
+      "$ref": "../../shared/v0/manifest.schema.json#/$defs/Provenance",
+      "description": "Provenance submitted with the Record Version."
+    },
+    "configuration": {
+      "type": "object",
+      "description": "Installer configuration, already validated against the manifest configuration schema."
+    }
+  }
+}

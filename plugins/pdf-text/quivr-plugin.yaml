@@ -1,0 +1,54 @@
+# Quivr plugin manifest (Plugin API 0.1). Check it with: quivr plugin inspect .
+# Reference: contracts/plugins/v0/README.md in the Quivr repository.
+id: pdf-text
+version: 0.1.0
+description: Extracts the text of PDF documents into one body Part per page.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [application/pdf]
+    timeout_ms: 60000
+    retry:
+      max_attempts: 3
+    limits:
+      # 64 page Parts and one source Part at most (see README.md, Limits).
+      max_parts: 65
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      max_page_parts:
+        type: integer
+        minimum: 1
+        maximum: 64
+        description: Page Parts beyond this number are merged into the last one. Quivr indexes at most 64 text Parts per Version.
+      max_text_bytes:
+        type: integer
+        minimum: 1024
+        maximum: 262144
+        description: UTF-8 bytes of page text kept in total (default 131072); later text is dropped. Quivr indexes at most 256 KiB of text and 256 segments per Version.
+      include_source:
+        type: boolean
+        description: Add a `source` Blob Part that references the input PDF (default true).
+# Published on the Version as extensions."pdf-text.document"; retrieval mappings
+# may point at /extensions/pdf-text.document/data/page_count.
+extensions:
+  pdf-text.document:
+    "1":
+      type: object
+      additionalProperties: false
+      required: [page_count, text_pages]
+      properties:
+        page_count:
+          type: integer
+          minimum: 0
+          description: Pages in the PDF.
+        text_pages:
+          type: integer
+          minimum: 0
+          description: Pages with extractable text.
+run:
+  command: [python3, -m, pdf_text]

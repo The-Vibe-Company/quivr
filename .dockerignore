@@ -1,0 +1,10 @@
+.git
+.scratch
+.agents
+.codex
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+.env
+.env.*

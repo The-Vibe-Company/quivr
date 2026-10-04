@@ -1,0 +1,296 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "xpqa-fr",
+  "metadata": {
+    "name": "xpqa-fr",
+    "language": "fr",
+    "description": "product questions",
+    "licence": "cdla-sharing-1.0",
+    "source": "https://huggingface.co/datasets/mteb/XPQARetrieval",
+    "version": {
+      "mteb/XPQARetrieval": "fc4624be978945a0ceebbc4b85737258fe26330b"
+    },
+    "split": "test",
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/XPQARetrieval/blob/fc4624be978945a0ceebbc4b85737258fe26330b/README.md"
+    ],
+    "query_type": "product questions",
+    "known_issues": [
+      "French-to-French product question/evidence pairs; sparse judgments; no manual query-intent annotations."
+    ],
+    "source_counts": {
+      "documents": 1548,
+      "queries": 749,
+      "judgments": 1550
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 1548,
+      "seed": 991,
+      "max_source_bytes": 262144,
+      "eligible_queries": 749,
+      "judged_documents": 410,
+      "listed_negatives": 0,
+      "random_distractors": 1138,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "577c2fd4b1522fd742e9c48afcdbda6c1d32842b125865513ebe9744f64a0446",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/mteb/XPQARetrieval/resolve/fc4624be978945a0ceebbc4b85737258fe26330b/fra-fra-corpus/test-00000-of-00001.parquet",
+        "sha256": "df8246facd7c6c7f329bef352c3093df6c5ef0d1f47df7a061cb51fa824fab7a"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/mteb/XPQARetrieval/resolve/fc4624be978945a0ceebbc4b85737258fe26330b/fra-fra-queries/test-00000-of-00001.parquet",
+        "sha256": "555b8ee516b67642ec193903b936babe4e330482fdf0755bb3050b431bb3605f"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/mteb/XPQARetrieval/resolve/fc4624be978945a0ceebbc4b85737258fe26330b/fra-fra-qrels/test-00000-of-00001.parquet",
+        "sha256": "9a221de5ad9547fad349b5597e46f0daf594eaa091b409dcc7f057661d7ebf4e"
+      }
+    }
+  },
+  "counts": {
+    "documents": 1548,
+    "queries": 200,
+    "judgments": 410
+  },
+  "source_counts": {
+    "documents": 1548,
+    "queries": 749,
+    "judgments": 1550
+  },
+  "fingerprint": "577c2fd4b1522fd742e9c48afcdbda6c1d32842b125865513ebe9744f64a0446",
+  "sample": {
+    "queries": 200,
+    "documents": 1548,
+    "seed": 991,
+    "max_source_bytes": 262144,
+    "eligible_queries": 749,
+    "judged_documents": 410,
+    "listed_negatives": 0,
+    "random_distractors": 1138,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 200,
+    "min": 1,
+    "max": 5,
+    "mean": 2.05,
+    "median": 2.0,
+    "histogram": {
+      "1": 96,
+      "2": 44,
+      "3": 26,
+      "4": 22,
+      "5": 12
+    },
+    "total_judgments": 410,
+    "queries": 200
+  },
+  "grades": {
+    "counts": {
+      "1": 410
+    },
+    "positive_judgments": 410,
+    "max_grade": 1
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 200,
+      "min": 16,
+      "max": 107,
+      "mean": 57.83,
+      "median": 57.0,
+      "histogram": {
+        "16": 1,
+        "23": 1,
+        "24": 1,
+        "25": 1,
+        "26": 1,
+        "27": 2,
+        "28": 1,
+        "30": 3,
+        "31": 1,
+        "32": 3,
+        "33": 4,
+        "34": 3,
+        "35": 4,
+        "36": 4,
+        "37": 2,
+        "38": 3,
+        "39": 2,
+        "40": 4,
+        "41": 2,
+        "42": 2,
+        "43": 4,
+        "44": 6,
+        "45": 2,
+        "46": 6,
+        "47": 1,
+        "48": 2,
+        "49": 7,
+        "50": 6,
+        "52": 2,
+        "54": 7,
+        "55": 8,
+        "56": 3,
+        "57": 3,
+        "58": 5,
+        "59": 3,
+        "60": 6,
+        "61": 6,
+        "62": 3,
+        "63": 3,
+        "64": 3,
+        "65": 2,
+        "66": 6,
+        "67": 3,
+        "68": 1,
+        "69": 4,
+        "70": 2,
+        "71": 2,
+        "72": 4,
+        "73": 5,
+        "75": 1,
+        "76": 3,
+        "77": 2,
+        "78": 2,
+        "79": 1,
+        "80": 2,
+        "82": 2,
+        "83": 4,
+        "84": 3,
+        "86": 3,
+        "87": 2,
+        "88": 4,
+        "89": 1,
+        "90": 2,
+        "91": 1,
+        "93": 1,
+        "94": 3,
+        "100": 1,
+        "102": 1,
+        "107": 1
+      }
+    },
+    "words": {
+      "count": 200,
+      "min": 2,
+      "max": 17,
+      "mean": 10.375,
+      "median": 10.0,
+      "histogram": {
+        "2": 1,
+        "4": 5,
+        "5": 4,
+        "6": 17,
+        "7": 20,
+        "8": 20,
+        "9": 20,
+        "10": 18,
+        "11": 16,
+        "12": 22,
+        "13": 19,
+        "14": 11,
+        "15": 10,
+        "16": 9,
+        "17": 8
+      }
+    }
+  },
+  "query_types": {
+    "source": "product questions",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 134,
+      "statement": 66
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.5553396074781964,
+      "recall@10": 0.6464166666666666,
+      "mrr@10": 0.5689186507936508
+    },
+    "saturation": {
+      "saturated_queries": 59,
+      "queries": 200,
+      "share": 0.295
+    },
+    "dims": 384,
+    "pieces": 1548,
+    "index_s": 13.8,
+    "query_ms": 3.2
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T18:54:36.172241+00:00",
+      "status": "complete",
+      "set": "xpqa-fr",
+      "fingerprint": "577c2fd4b1522fd742e9c48afcdbda6c1d32842b125865513ebe9744f64a0446",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 59,
+      "queries": 200,
+      "share": 0.295
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 200,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 1548,
+    "query_inputs": 200,
+    "input_tokens": 146667,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 0.01760004,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 293334,
+      "max_usd": 0.04
+    }
+  },
+  "local_run_sha256": "cbf378abf74717839cb49e43942fc7f57e6aaf2200bbb5864a7c20a92cdc5906"
+}

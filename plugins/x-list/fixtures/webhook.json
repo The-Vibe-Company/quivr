@@ -1,0 +1,68 @@
+{
+  "description": "Webhook mode: X's CRC check answered with the consumer secret, a signed Filtered Stream delivery accepted as the item polling returns for the same post, and an unsigned one refused. The pull run also works with webhook mode on; its webhook setup fails against the fake X, which cannot reach the Runner's webhook_url, and pull carries on.",
+  "connector": {
+    "kind": "x_list",
+    "config": {
+      "list_id": "77",
+      "webhook": {
+        "enabled": true
+      }
+    }
+  },
+  "credential": {
+    "bearer_token": "test-token-x-list",
+    "consumer_secret": "test-consumer-x-list"
+  },
+  "now": "2026-01-01T00:00:00Z",
+  "expect": {
+    "check_credential": {
+      "status": "ok"
+    }
+  },
+  "receive": [
+    {
+      "description": "X's CRC check.",
+      "request": {
+        "method": "GET",
+        "query": "crc_token=crc-dev-token&nonce=n1"
+      },
+      "expect": {
+        "verdict": "accepted",
+        "status": 200,
+        "body_contains": "sha256=wlGudtLLR+FWWxj6AnJUtku35ALwU3faBFl7n56LnvY="
+      }
+    },
+    {
+      "description": "A signed delivery.",
+      "request": {
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Twitter-Webhooks-Signature": "sha256=6WkwltAGCeGRkB/DzmtBG/QirHnij1AiDc0qIWQs9jA="
+        },
+        "body": "{\"data\":{\"id\":\"1800000000000000009\",\"text\":\"Pushed post\",\"created_at\":\"2026-01-01T00:00:00.000Z\",\"author_id\":\"4242\",\"edit_history_tweet_ids\":[\"1800000000000000009\"]},\"includes\":{\"users\":[{\"id\":\"4242\",\"username\":\"example_desk\",\"name\":\"Example Desk\"}]}}"
+      },
+      "expect": {
+        "verdict": "accepted",
+        "status": 200,
+        "record_keys": [
+          "1800000000000000009"
+        ]
+      }
+    },
+    {
+      "description": "An unsigned delivery is refused.",
+      "request": {
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\"data\":{\"id\":\"1800000000000000009\",\"text\":\"Pushed post\",\"created_at\":\"2026-01-01T00:00:00.000Z\",\"author_id\":\"4242\",\"edit_history_tweet_ids\":[\"1800000000000000009\"]},\"includes\":{\"users\":[{\"id\":\"4242\",\"username\":\"example_desk\",\"name\":\"Example Desk\"}]}}"
+      },
+      "expect": {
+        "verdict": "refused",
+        "status": 401
+      }
+    }
+  ]
+}

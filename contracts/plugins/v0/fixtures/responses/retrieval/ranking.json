@@ -1,0 +1,18 @@
+{
+  "ranking": {
+    "hits": [
+      {
+        "segment_id": "seg_harbour",
+        "score": 0.0328,
+        "explanation": "rank 1 by keywords, rank 1 by the served space"
+      },
+      {
+        "segment_id": "seg_ferry",
+        "score": 0.0161
+      }
+    ]
+  },
+  "usage": {
+    "paid_calls": 0
+  }
+}

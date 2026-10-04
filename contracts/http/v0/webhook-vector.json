@@ -1,0 +1,8 @@
+{
+  "description": "Public interoperability vector; not a real credential. Verify raw body before JSON parsing.",
+  "secret": "whsec_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "timestamp": "1789387200",
+  "event_id": "event_match_1",
+  "body": "{\"event_id\":\"event_match_1\",\"type\":\"match.created\",\"schema_version\":\"1\",\"occurred_at\":\"2026-09-14T12:00:00Z\",\"references\":{\"match_id\":\"match_1\",\"record_id\":\"record_1\",\"record_version_id\":\"version_1\",\"subscription_id\":\"subscription_1\",\"subscription_version_id\":\"subscription_version_1\",\"delivery_id\":\"delivery_1\"}}",
+  "signature": "v1,BnnPrUKCWQU4KpEvhD5TkT8aIYoRWeLsezki59vHQLA="
+}

@@ -1,0 +1,296 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "webfaq-fr",
+  "metadata": {
+    "name": "webfaq-fr",
+    "language": "fr",
+    "description": "web frequently asked questions",
+    "licence": "cc-by-4.0",
+    "source": "https://huggingface.co/datasets/mteb/WebFAQRetrieval",
+    "version": {
+      "mteb/WebFAQRetrieval": "f64f483ad0f31d2e78209d524c14a4a867965959"
+    },
+    "split": "test",
+    "tier": "default",
+    "promotion_eligible": true,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/WebFAQRetrieval/blob/f64f483ad0f31d2e78209d524c14a4a867965959/README.md"
+    ],
+    "query_type": "web frequently asked questions",
+    "known_issues": [
+      "Web-scraped question/answer pairs; sparse relevance and possible duplicate answers; sampled corpus is easier than full corpus."
+    ],
+    "source_counts": {
+      "documents": 569505,
+      "queries": 10000,
+      "judgments": 10000
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2500,
+      "seed": 991,
+      "max_source_bytes": 262144,
+      "eligible_queries": 10000,
+      "judged_documents": 200,
+      "listed_negatives": 0,
+      "random_distractors": 2300,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "d66f4e1617d06d566722696fab1061062f13c38a9e00dd54c04bc9ba21a76b96",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/mteb/WebFAQRetrieval/resolve/f64f483ad0f31d2e78209d524c14a4a867965959/fra-corpus/test-00000-of-00001.parquet",
+        "sha256": "a425f2d4365c6a631e1737f0997a7597aed1ef013422c417dcc369cddab1a988"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/mteb/WebFAQRetrieval/resolve/f64f483ad0f31d2e78209d524c14a4a867965959/fra-queries/test-00000-of-00001.parquet",
+        "sha256": "0476313f4cf135bdbe26eb2be083dc1fccda86058583ed09394bc5f60175bf90"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/mteb/WebFAQRetrieval/resolve/f64f483ad0f31d2e78209d524c14a4a867965959/fra-qrels/test-00000-of-00001.parquet",
+        "sha256": "e9c6604202d14b5b8be99eb9383680dab538dadd34193e13e7ae3f145c0f2865"
+      }
+    }
+  },
+  "counts": {
+    "documents": 2500,
+    "queries": 200,
+    "judgments": 200
+  },
+  "source_counts": {
+    "documents": 569505,
+    "queries": 10000,
+    "judgments": 10000
+  },
+  "fingerprint": "d66f4e1617d06d566722696fab1061062f13c38a9e00dd54c04bc9ba21a76b96",
+  "sample": {
+    "queries": 200,
+    "documents": 2500,
+    "seed": 991,
+    "max_source_bytes": 262144,
+    "eligible_queries": 10000,
+    "judged_documents": 200,
+    "listed_negatives": 0,
+    "random_distractors": 2300,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 200,
+    "min": 1,
+    "max": 1,
+    "mean": 1.0,
+    "median": 1.0,
+    "histogram": {
+      "1": 200
+    },
+    "total_judgments": 200,
+    "queries": 200
+  },
+  "grades": {
+    "counts": {
+      "1": 200
+    },
+    "positive_judgments": 200,
+    "max_grade": 1
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 200,
+      "min": 17,
+      "max": 133,
+      "mean": 57.445,
+      "median": 54.0,
+      "histogram": {
+        "17": 1,
+        "26": 3,
+        "27": 3,
+        "28": 1,
+        "29": 2,
+        "31": 1,
+        "32": 1,
+        "33": 6,
+        "34": 3,
+        "35": 3,
+        "36": 1,
+        "37": 6,
+        "38": 4,
+        "39": 4,
+        "40": 3,
+        "41": 3,
+        "42": 6,
+        "43": 6,
+        "44": 4,
+        "45": 6,
+        "47": 1,
+        "48": 6,
+        "49": 4,
+        "50": 8,
+        "51": 7,
+        "52": 3,
+        "53": 2,
+        "54": 3,
+        "55": 6,
+        "56": 3,
+        "57": 5,
+        "58": 4,
+        "59": 7,
+        "60": 2,
+        "61": 5,
+        "62": 1,
+        "63": 6,
+        "64": 4,
+        "65": 3,
+        "66": 2,
+        "68": 1,
+        "69": 5,
+        "70": 2,
+        "71": 2,
+        "72": 1,
+        "73": 2,
+        "74": 1,
+        "75": 1,
+        "76": 2,
+        "77": 3,
+        "78": 3,
+        "79": 2,
+        "80": 2,
+        "83": 1,
+        "84": 1,
+        "85": 2,
+        "86": 1,
+        "89": 2,
+        "90": 1,
+        "91": 2,
+        "93": 2,
+        "98": 3,
+        "99": 1,
+        "105": 1,
+        "108": 2,
+        "115": 1,
+        "126": 1,
+        "130": 1,
+        "132": 1,
+        "133": 1
+      }
+    },
+    "words": {
+      "count": 200,
+      "min": 3,
+      "max": 24,
+      "mean": 9.625,
+      "median": 9.0,
+      "histogram": {
+        "3": 1,
+        "4": 2,
+        "5": 11,
+        "6": 17,
+        "7": 32,
+        "8": 15,
+        "9": 23,
+        "10": 29,
+        "11": 23,
+        "12": 15,
+        "13": 10,
+        "14": 8,
+        "15": 7,
+        "17": 2,
+        "18": 2,
+        "19": 1,
+        "23": 1,
+        "24": 1
+      }
+    }
+  },
+  "query_types": {
+    "source": "web frequently asked questions",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 191,
+      "statement": 9
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.9254125283227185,
+      "recall@10": 0.975,
+      "mrr@10": 0.908638888888889
+    },
+    "saturation": {
+      "saturated_queries": 172,
+      "queries": 200,
+      "share": 0.86
+    },
+    "dims": 384,
+    "pieces": 2526,
+    "index_s": 41.0,
+    "query_ms": 3.6
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T19:10:15.832010+00:00",
+      "status": "complete",
+      "set": "webfaq-fr",
+      "fingerprint": "d66f4e1617d06d566722696fab1061062f13c38a9e00dd54c04bc9ba21a76b96",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 172,
+      "queries": 200,
+      "share": 0.86
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 200,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 2500,
+    "query_inputs": 200,
+    "input_tokens": 955384,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 0.11464608,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 1910768,
+      "max_usd": 0.23
+    }
+  },
+  "local_run_sha256": "bbe57e64c209c0b9f3f2ad8bf3e388192a1b19dee11b49bb90d39e1cd7e4720b"
+}

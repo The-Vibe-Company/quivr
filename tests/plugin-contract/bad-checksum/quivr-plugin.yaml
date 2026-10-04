@@ -1,0 +1,12 @@
+# Deliberately broken test plugin for the Contract Runner (tests/plugin-contract).
+# A Blob Part that names a Blob by the checksum of other bytes instead of the verified input Blob.
+id: broken.bad-checksum
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types: [text/markdown]
+run:
+  command: [quivr-fake-plugin, bad-checksum]

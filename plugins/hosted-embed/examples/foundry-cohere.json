@@ -1,0 +1,9 @@
+{
+  "format": "cohere",
+  "base_url": "https://resource.example.org/providers/cohere/v2",
+  "auth": "api-key",
+  "model": "Cohere-Embed-V5-Pro",
+  "dimensions": 1024,
+  "max_tokens_per_segment": 2048,
+  "max_batch_tokens": 32768
+}

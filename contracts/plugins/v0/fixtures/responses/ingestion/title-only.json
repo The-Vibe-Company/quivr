@@ -1,0 +1,25 @@
+{
+  "segments": [
+    {
+      "part_key": "body",
+      "start": 0,
+      "end": 0,
+      "vectors": {
+        "example.words.small": [
+          0.5,
+          0.5,
+          0.5,
+          0.5
+        ],
+        "example.words.large": [
+          0.1,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.6
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,247 @@
+---
+title: "Receive and secure pushes"
+description: "Give a sender access to one source, control admission, and inspect pushed deliveries."
+keywords: ["push source", "instance token", "rotation", "replay", "audit"]
+---
+
+A push is an HTTP request in which a third party sends records to Quivr as they change, instead of waiting for the next scheduled fetch. You give the sender access to one source instance; Quivr answers accepted record deliveries with Receipts, acknowledgements used to follow processing.
+
+A Corpus is a collection of Records. A Connector Instance selects the source plugin's kind, configuration and destination. Its Source Namespace groups the stable Record Keys; a changed source `revision` creates a new Version of that Record.
+
+## Prerequisites
+
+- A running Quivr and a pinned push plugin. [Pin a plugin](/run-quivr/pin) or [activate a registered plugin](/run-quivr/upgrade-a-plugin); [write a push source](/plugins/push-source) if you need a new kind.
+- For the offline example below, the Quivr checkout and local stack (`make dev`). It pins `plugins/push-source`, which declares the `events` kind. Export its address and key with `eval "$(make -s env)"`.
+- `curl` (`curl --version`) and `jq` (`jq --version`). The key needs `corpora:write`, `connectors:write`, `connectors:admin` and `content:read` on the example's Corpus. Audit counters need `observability:read` on all Corpora.
+- For a provider-signed source, its provider account and signing secret. Deposit the secret as the instance's credential, following the kind's guide, such as [X lists](/guides/x). Those external steps are examples, not replayed by the local stack.
+
+
+## Steps
+
+The following requests use the offline sample and are replayed by `make verify`.
+
+### Create a collection and source instance
+
+{/* runnable */}
+```bash
+curl -fsS -X POST "$QUIVR_API_URL/v0/corpora" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"name":"Pushed records","idempotency_key":"push-guide-corpus"}' | jq '{corpus_id}'
+```
+
+{/* output */}
+```json
+{"corpus_id":"{{PUSH_CORPUS_ID}}"}
+```
+
+```bash
+export PUSH_CORPUS_ID=<the corpus_id above>
+```
+
+{/* runnable */}
+```bash
+curl -fsS -X POST "$QUIVR_API_URL/v0/connectors" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '{connector_id, kind}'
+{
+  "idempotency_key": "push-guide-instance",
+  "corpus_id": "$PUSH_CORPUS_ID",
+  "source_namespace": "incoming",
+  "kind": "events",
+  "config": {},
+  "schedule": {"interval_seconds": 900}
+}
+EOF
+```
+
+{/* output */}
+```json
+{"connector_id":"{{PUSH_CONNECTOR_ID}}","kind":"events"}
+```
+
+```bash
+export PUSH_CONNECTOR_ID=<the connector_id above>
+```
+
+### Issue a token and push
+
+Save the once-only `secret` in a private file, then use it for the sender's authorization header. Give it to the third party through your secret-delivery channel. Keep the token ID for [rotation and revocation](#manage-tokens).
+
+{/* runnable */}
+```bash
+umask 077
+curl -fsS -X POST "$QUIVR_API_URL/v0/connectors/$PUSH_CONNECTOR_ID/tokens" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d '{}' > push-token.json
+jq '{token_id: .token.token_id}' push-token.json
+```
+
+{/* output */}
+```json
+{"token_id":"{{PUSH_TOKEN_ID}}"}
+```
+
+{/* runnable */}
+```bash
+curl -fsS -X POST "$QUIVR_API_URL/v0/connectors/$PUSH_CONNECTOR_ID/api/records" \
+  -H "Authorization: Bearer $(jq -r .secret push-token.json)" \
+  -H "Content-Type: application/json" -H "Idempotency-Key: push-guide-note-1" \
+  -d '{"key":"note-1","revision":"1","title":"Library opens","text":"The library opens on Monday."}' \
+  | jq '{receipt_id: .receipts[0].receipt_id}'
+```
+
+{/* output */}
+```json
+{"receipt_id":"{{PUSH_RECEIPT_ID}}"}
+```
+
+```bash
+export PUSH_RECEIPT_ID=<the receipt_id above>
+```
+
+The push answers `202`. Retrying the same idempotency key returns the cached answer while it is retained. Keep the request unchanged; the cache does not compare bodies. A correction uses a new revision and idempotency key.
+
+## Check it worked
+
+Read the Receipt with your Quivr key until processing resolves:
+
+{/* runnable retry */}
+```bash
+curl -fsS "$QUIVR_API_URL/v0/ingestion-receipts/$PUSH_RECEIPT_ID" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{state, outcome, record_id, version_id}'
+```
+
+{/* output */}
+```json
+{"state":"resolved","outcome":"created","record_id":"{{PUSH_RECORD_ID}}","version_id":"{{PUSH_VERSION_ID}}"}
+```
+
+```bash
+export PUSH_RECORD_ID=<the record_id above> PUSH_VERSION_ID=<the version_id above>
+```
+
+{/* runnable */}
+```bash
+curl -fsS "$QUIVR_API_URL/v0/records/$PUSH_RECORD_ID" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{record_id, source}'
+```
+
+{/* output */}
+```json
+{"record_id":"{{PUSH_RECORD_ID}}","source":{"corpus_id":"{{PUSH_CORPUS_ID}}","namespace":"incoming","record_key":"note-1"}}
+```
+
+Read the stored title and body:
+
+{/* runnable */}
+```bash
+curl -fsS "$QUIVR_API_URL/v0/records/$PUSH_RECORD_ID/versions/$PUSH_VERSION_ID" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{parts: [.manifest.parts[] | {key, text: .content.text}]}'
+```
+
+{/* output */}
+```json
+{"parts":[{"key":"title","text":"Library opens"},{"key":"body","text":"The library opens on Monday."}]}
+```
+
+Use [Add content](/guides/add-content) for the Record's Parts and Versions. When the sender no longer needs access, [revoke its token](#manage-tokens).
+
+## Give access
+
+The route declares its authentication mode. For `quivr_key`, grant the sender's API key `connector:push` on the instance's Corpus in the [API key configuration](/reference/configuration#api-keys). For `instance_token`, issue an instance token as above and manage it below. For `signature`, the sender signs requests and you deposit the provider credential following the kind's guide.
+
+## Manage tokens
+
+An instance token permits pushes to one instance's `auth: instance_token` routes. It cannot authorize another instance, a `quivr_key` route, token administration or a normal API read. The operator's Quivr key needs `connectors:admin` on the instance's Organization and Corpus; other connector permissions do not grant token administration.
+
+Quivr shows the secret once, stores only its hash and sends `Cache-Control: no-store`.
+
+| Action | Endpoint and result |
+| --- | --- |
+| List | `GET /v0/connectors/{id}/tokens`: IDs, display prefixes and lifecycle timestamps, including expired and revoked tokens; no secrets or hashes. |
+| Rotate | `POST /v0/connectors/{id}/tokens/{token_id}/rotate`: a replacement's ID and once-only secret; the old token overlaps for five minutes. |
+| Revoke | `DELETE /v0/connectors/{id}/tokens/{token_id}`: new authentications fail after commit; already admitted deliveries may finish. |
+
+For example, rotate token A at 12:00 UTC and give replacement B to the sender. A works until its `valid_until` at 12:05 UTC. A revoked or already-rotated token cannot rotate again (`409 token_inactive`); retrying cannot recover B's secret or extend A's overlap.
+
+Revoking A leaves B valid: revoke every token ID that should lose access. If an issuance or rotation response is lost, list tokens, revoke the token whose secret you lost and create another.
+
+Disabled instances refuse issuance and rotation; you can still list and revoke their tokens. Quivr removes bearer secrets and cookies before calling the plugin.
+
+## Set admission limits
+
+Set `push_policy` when you create the instance, separate from the plugin's `config`. There is no policy-update endpoint. To replace the policy, disable the old instance first, create another on the same Corpus and Source Namespace, issue a new instance token if needed and deposit the provider credential again if needed, then give the sender the new URL. Only one instance can be enabled for that Corpus and namespace; pushes return `404` during the gap. The replacement has a new `connector_id`, so its URL changes and the old instance's tokens cannot authorize it. It can override `rate_per_second` and `burst`, and restrict callers with `allowed_cidrs`. An empty allowlist allows any address. The deployment's `connector_push` settings supply defaults and `trusted_proxy_cidrs`; see [Configuration](/reference/configuration#top-level-fields).
+
+For example, not run: an instance policy admitting one documentation address range and a burst of ten requests:
+
+```json
+{
+  "push_policy": {
+    "rate_per_second": 2,
+    "burst": 10,
+    "allowed_cidrs": ["192.0.2.0/24"]
+  }
+}
+```
+
+Replace the range with your sender's network. Quivr uses the socket peer unless it belongs to a configured trusted proxy network. It walks `X-Forwarded-For` backwards through trusted hops to the first untrusted address. Malformed chains fail closed when an allowlist applies; trusting a sender-controlled proxy can defeat that allowlist.
+
+Quivr bounds the body to 1 MiB, and the query and relative path to 8192 bytes each, before calling the plugin. Oversized requests return `413`.
+
+Quivr resolves the route before checking its instance token. Authentication and, for signed POSTs, freshness and replay checks run before JSON/schema validation. Schema validation precedes the IP allowlist. On bearer routes (`quivr_key` and `instance_token`), a cached answer is then returned before rate admission; other admitted requests consume the instance's shared rate bucket. [The push-checks diagram](/plugins/push-source#push-checks) shows the complete order.
+
+<span id="choose-retry-behaviour" />
+
+## How retries behave
+
+An `Idempotency-Key` is a sender-chosen identifier for one delivery, called the delivery key below. Send one value, up to 256 bytes, nonblank and without line breaks. Use a new value for a new delivery.
+
+On `quivr_key` and `instance_token` routes, Quivr caches a completed answer per instance and delivery key for `connector_push.idempotency_ttl` (24 hours by default). A completed plugin or processing 5xx answer is cached with its key like a success, including `Retry-After`; waiting does not clear it. After fixing the cause, retry with a new delivery key and the same item revisions.
+
+| Retry | API key or token | Signed POST |
+| --- | --- | --- |
+| Same key after success | Cached `202` with original Receipts. | `409` until the window ends. |
+| Same key after completed failure | Cached failure; fix the cause and use a new key. | Reservation normally released; retry allowed. |
+| Same key, changed body | Old answer returned. | `409` while the fingerprint is reserved. |
+
+For example, retry `push-guide-note-1` above with the same body: while cached, it returns the original Receipts without calling the plugin or consuming the rate bucket. Reusing that key for changed content also returns the old answer. Authentication, schema, IP and rate refusals leave no completed cached answer.
+
+On `signature` POST routes, Quivr reserves fingerprints of the signature and, if present, the delivery key before schema validation. Repeating either during `window_seconds` returns `409 push_replayed`. For example, after a successful signed delivery with a 300-second window, an immediate retry with the same signature is refused even if you change its delivery key.
+
+Signature routes never use the response cache, including GET challenges. A refusal or failed processing normally releases the reservation. If cleanup fails or the request deadline expires, it remains until the window expires; retries return `409` meanwhile. After the reservation expires, a request with a signed timestamp is still refused once that timestamp is older than the window. Without a signed timestamp, the engine only prevents replay during the reservation window.
+
+Stable Record Keys and revisions make already accepted items converge on their Receipts when processing is retried. A push may have stored some items before failing; a `202` Receipt tracks processing, not immediate search availability. Follow [the life of a document](/concepts#the-life-of-a-document) for the path after acceptance.
+
+## Inspect attempts
+
+Every attempt on an existing instance, including cached replies and GET challenges, records `connector.push.received` for a 2xx answer or `connector.push.refused` otherwise. Audit events and counters commit together before Quivr sends the answer; audit failure returns `503`. It does not undo items already accepted, so retry using stable item keys and revisions. No payload, client IP, raw key or credential enters that journal.
+
+Read events with `GET /v0/changes`, or read `GET /v0/admin/stats/connector-pushes` with `observability:read` on all Corpora. It lists the largest 100 instance/outcome pairs and totals across all pairs. Use `limit` (1–100) to shorten that list or `connector_id` to read both outcomes of one instance; you cannot combine the filters.
+
+## Troubleshooting
+
+| Answer | Check or action |
+| --- | --- |
+| `401 invalid_api_key` | Supply a valid Quivr API key for a `quivr_key` route. |
+| `403` (API key permission) | Grant `connector:push` on the instance's Corpus in the [API key configuration](/reference/configuration#api-keys). |
+| `401 invalid_instance_token` | Check the instance, route auth, revocation and `valid_until`. |
+| `401 invalid_signature` | Check one signature header and a fresh declared timestamp. Signed POST also refuses repeated or blank/whitespace `Idempotency-Key` headers; plugin verification can refuse. |
+| `404` or `405` | Check the enabled instance, path, method and, for a Quivr key, Corpus scope. `405` includes `Allow`. |
+| `400 invalid_idempotency_key` | Send one nonblank delivery key, at most 256 bytes without line breaks. On signed POST, blank or repeated headers return `401` instead. |
+| `400` or `422 invalid_schema` | Send valid JSON matching the declared route schema. GET with no body is validated as `null`. |
+| `413` | Reduce the body to at most 1 MiB and the query/path to at most 8192 bytes each. |
+| `403 ip_not_allowed` | Check the allowlist and trusted proxy chain. |
+| `429` | Wait for `Retry-After`; the plugin was not called. |
+| `409 push_replayed` | A signed fingerprint is reserved; follow the retry rules above. |
+| `422 item_rejected` | Fix the rejected item; retain keys/revisions for unchanged items already stored. |
+| `503` | Check storage, plugin availability and audit. After fixing the cause and respecting `Retry-After`, use a new `Idempotency-Key` on key-based routes. Keep item revisions; some items may already be accepted. |
+
+## Clean up
+
+Revoke the example's token when the sender no longer needs access, then remove `push-token.json`. [Disable the instance](/guides/connectors#disable-an-instance) to stop it. Records already collected remain searchable; disabling is permanent, so replacing the instance requires creating another on the same Source Namespace.
+
+## Next
+
+- [Write a push source](/plugins/push-source) for route declarations and provider challenges.
+- [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin) for plugin operations.
+- [API key configuration](/reference/configuration#api-keys) for operator and sender permissions.

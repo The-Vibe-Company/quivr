@@ -1,0 +1,47 @@
+{
+  "invocation_id": "inv-7f3a",
+  "idempotency_key": "gen-1:subscription:version-42:batch-1",
+  "contribution": "subscription",
+  "organization_id": "org-1",
+  "record": {
+    "corpus_id": "news",
+    "record_id": "record-42",
+    "record_version_id": "version-42",
+    "enriched": false,
+    "parts": [
+      {"key": "title", "role": "title", "text": "Harbour workers vote to strike"},
+      {"key": "body", "role": "body", "text": "Dock workers at the northern harbour voted on Tuesday to strike over pay."}
+    ],
+    "source": {"namespace": "wire", "record_key": "story-42", "position": "2026-09-29T08:00:00Z"},
+    "accepted_at": "2026-09-29T08:00:03Z",
+    "provenance": {
+      "origin": "connector",
+      "producer": "connector-7",
+      "producer_version": "rss/1",
+      "connector": {"instance_id": "connector-7", "kind": "rss"}
+    },
+    "extensions": {
+      "example.editorial": {"schema_version": "1", "data": {"author": "Jane Doe", "section": "economy", "categories": ["labour"]}}
+    }
+  },
+  "evaluations": [
+    {
+      "id": "e1",
+      "expression": {"kind": "substring", "text": "strike"},
+      "configuration": {},
+      "subscriptions": [
+        {"subscription_id": "sub-1", "subscription_version_id": "subv-1", "saved_query_id": "sq-1", "saved_query_version_id": "sqv-1", "owner": "user-123"},
+        {"subscription_id": "sub-2", "subscription_version_id": "subv-2", "saved_query_id": "sq-1", "saved_query_version_id": "sqv-1"}
+      ]
+    },
+    {
+      "id": "e2",
+      "expression": {"kind": "substring", "text": "election"},
+      "configuration": {},
+      "subscriptions": [
+        {"subscription_id": "sub-3", "subscription_version_id": "subv-3", "saved_query_id": "sq-2", "saved_query_version_id": "sqv-2"}
+      ]
+    }
+  ],
+  "configuration": {}
+}

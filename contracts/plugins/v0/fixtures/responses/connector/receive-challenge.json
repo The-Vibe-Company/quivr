@@ -1,0 +1,8 @@
+{
+  "verdict": "accepted",
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": "{\"response_token\":\"sha256=Q2hhbGxlbmdlIGFuc3dlcg==\"}"
+  }
+}

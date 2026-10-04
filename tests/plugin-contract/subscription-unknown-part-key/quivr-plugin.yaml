@@ -1,0 +1,19 @@
+# Deliberately broken subscription test plugin for the Contract Runner (tests/plugin-contract).
+# Match evidence names a Part the Record Version does not have.
+id: broken.subscription-unknown-part-key
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema:
+      type: object
+      additionalProperties: false
+      required: [kind, text]
+      properties:
+        kind: {const: substring}
+        text: {type: string, minLength: 1}
+    timeout_ms: 5000
+run:
+  command: [quivr-fake-plugin, unknown-part-key]

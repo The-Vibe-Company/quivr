@@ -1,0 +1,30 @@
+{
+  "description": "A wire story about a strike vote, with an author and categories in an extension, and eight keyword alerts.",
+  "configuration": {
+    "fields": {
+      "author": "/extensions/example.news/data/author",
+      "category": "/extensions/example.news/data/categories"
+    }
+  },
+  "record": {
+    "enriched": false,
+    "parts": [
+      {"key": "title", "role": "title", "text": "Harbour workers vote to strike"},
+      {"key": "body", "role": "body", "text": "Dock workers at the northern harbour voted on Tuesday to go on strike over pay. The Élysée has not commented."},
+      {"key": "caption", "role": "caption", "text": "Football fans outside the stadium"}
+    ],
+    "source": {"namespace": "wire", "record_key": "story-42"},
+    "provenance": {"origin": "client", "producer": "newsdesk"},
+    "extensions": {"example.news": {"schema_version": "1", "data": {"author": "Jane Doe", "categories": ["Economy", "Labour"]}}}
+  },
+  "evaluations": [
+    {"description": "A word in the title and the body; case is ignored.", "expression": {"kind": "keywords", "match": {"term": "STRIKE"}}, "expect": "match"},
+    {"description": "Accents are ignored: elysee finds Élysée.", "expression": {"kind": "keywords", "match": {"term": "elysee"}}, "expect": "match"},
+    {"description": "Words match whole: harbor is not harbour.", "expression": {"kind": "keywords", "match": {"term": "harbor"}}, "expect": "no_match"},
+    {"description": "\"harbour\" AND (strike OR walkout) NOT football: the caption is not searched.", "expression": {"kind": "keywords", "match": {"all": [{"term": "harbour"}, {"any": [{"term": "strike"}, {"term": "walkout"}]}, {"not": {"term": "football"}}]}}, "expect": "match"},
+    {"description": "An exact phrase, in order.", "expression": {"kind": "keywords", "match": {"term": "on strike over pay"}}, "expect": "match"},
+    {"description": "author:\"jane doe\" AND category:labour, mapped by the plugin configuration.", "expression": {"kind": "keywords", "match": {"all": [{"field": "author", "equals": "jane doe"}, {"field": "category", "equals": "labour"}]}}, "expect": "match"},
+    {"description": "Every new article from another source: a filter alone.", "expression": {"kind": "keywords", "match": {"field": "source", "equals": "blogs"}}, "expect": "no_match"},
+    {"description": "Waits for enrichment: the article is not enriched yet.", "expression": {"kind": "keywords", "match": {"term": "strike"}}, "configuration": {"wait_for_enrichment": true}, "expect": "not_ready"}
+  ]
+}

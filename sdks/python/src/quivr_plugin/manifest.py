@@ -1,0 +1,237 @@
+"""Loading quivr-plugin.yaml and validating plugin configuration against it."""
+from __future__ import annotations
+
+import datetime
+import hashlib
+import json
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from .api_versions import PLUGIN_API_VERSION, SUPPORTED_PLUGIN_API_VERSIONS
+from .errors import ConfigurationError
+from .models import PluginManifest
+from .schema import protocol_errors, schema_errors
+
+MANIFEST_FILE = "quivr-plugin.yaml"
+DEFAULT_MAX_RESPONSE_BYTES = 4 << 20
+DEFAULT_MAX_BATCH_SIZE = 32
+DEFAULT_MAX_INGESTION_RESPONSE_BYTES = 16 << 20
+DEFAULT_MAX_INGESTION_SEGMENTS = 256
+DEFAULT_MAX_CONNECTOR_ITEMS = 100
+DEFAULT_MAX_CHECKPOINT_BYTES = 64 << 10
+MAX_DECLARED_CHECKPOINT_BYTES = 1 << 20
+MAX_ENGINE_RESPONSE_BYTES = 16 << 20
+MAX_ATTACHMENT_BYTES = 25 << 20
+DEFAULT_ATTACHMENT_TIMEOUT_MS = 120000
+
+_COMPARATOR = re.compile(r"^(>=|<=|>|<|=)?(\d+)\.(\d+)\.(\d+)$")
+
+
+def negotiate_plugin_api(declared_range: str) -> str | None:
+    """Return the highest supported Plugin API version a manifest range admits, or None.
+
+    The range grammar is the one of contracts/plugins/v0/README.md: whitespace-separated
+    comparators (>=, >, <=, <, =, none meaning =) over MAJOR.MINOR.PATCH, all of which must hold.
+    """
+    comparators = []
+    for token in declared_range.split():
+        match = _COMPARATOR.match(token)
+        if not match:
+            return None
+        comparators.append((match.group(1) or "=", tuple(int(g) for g in match.group(2, 3, 4))))
+    tests = {">=": lambda a, b: a >= b, ">": lambda a, b: a > b, "<=": lambda a, b: a <= b,
+             "<": lambda a, b: a < b, "=": lambda a, b: a == b}
+    for version in reversed(SUPPORTED_PLUGIN_API_VERSIONS):
+        candidate = tuple(int(n) for n in version.split("."))
+        if comparators and all(tests[op](candidate, bound) for op, bound in comparators):
+            return version
+    return None
+
+
+class ManifestError(ValueError):
+    """quivr-plugin.yaml is unreadable or does not match the manifest schema."""
+
+
+@dataclass(frozen=True)
+class LoadedManifest:
+    """A parsed plugin manifest together with the digest of its exact bytes."""
+
+    path: Path
+    raw: bytes
+    model: PluginManifest
+
+    @property
+    def digest(self) -> str:
+        """``sha256:<hex>`` of the raw manifest bytes, as served by discovery."""
+        return "sha256:" + hashlib.sha256(self.raw).hexdigest()
+
+    @property
+    def contributions(self) -> list[str]:
+        """Declared Contributions in protocol order, as discovery lists them."""
+        declared = self.model.contributions
+        return [name for name in ("normalizer", "subscription", "connector", "ingestion", "retrieval") if getattr(declared, name) is not None]
+
+    @property
+    def plugin_api(self) -> str:
+        """The Plugin API version discovery reports: the highest supported one the range admits."""
+        return negotiate_plugin_api(self.model.compatibility.plugin_api) or PLUGIN_API_VERSION
+
+    @property
+    def media_types(self) -> list[str]:
+        normalizer = self.model.contributions.normalizer
+        return list(normalizer.media_types) if normalizer else []
+
+    @property
+    def max_response_bytes(self) -> int:
+        """Declared max_response_bytes of the normalizer."""
+        normalizer = self.model.contributions.normalizer
+        limits = normalizer and normalizer.limits
+        return (limits and limits.max_response_bytes) or DEFAULT_MAX_RESPONSE_BYTES
+
+    @property
+    def subscription_max_response_bytes(self) -> int:
+        subscription = self.model.contributions.subscription
+        limits = subscription and subscription.limits
+        return (limits and limits.max_response_bytes) or DEFAULT_MAX_RESPONSE_BYTES
+
+    @property
+    def max_batch_size(self) -> int:
+        subscription = self.model.contributions.subscription
+        return (subscription and subscription.max_batch_size) or DEFAULT_MAX_BATCH_SIZE
+
+    @property
+    def ingestion_max_response_bytes(self) -> int:
+        """Effective ``segment_and_embed`` response bound."""
+        ingestion = self.model.contributions.ingestion
+        limits = ingestion and ingestion.limits
+        return min((limits and limits.max_response_bytes) or DEFAULT_MAX_INGESTION_RESPONSE_BYTES,
+                   MAX_ENGINE_RESPONSE_BYTES)
+
+    @property
+    def ingestion_max_segments(self) -> int:
+        """Effective maximum number of segments in one answer."""
+        ingestion = self.model.contributions.ingestion
+        limits = ingestion and ingestion.limits
+        return (limits and limits.max_segments) or DEFAULT_MAX_INGESTION_SEGMENTS
+
+    @property
+    def connector_max_response_bytes(self) -> int:
+        """Effective connector response bound."""
+        connector = self.model.contributions.connector
+        limits = connector and connector.limits
+        return min((limits and limits.max_response_bytes) or DEFAULT_MAX_RESPONSE_BYTES,
+                   MAX_ENGINE_RESPONSE_BYTES)
+
+    @property
+    def connector_max_items(self) -> int:
+        """Effective maximum number of items in a connector answer."""
+        connector = self.model.contributions.connector
+        limits = connector and connector.limits
+        return (limits and limits.max_items) or DEFAULT_MAX_CONNECTOR_ITEMS
+
+    @property
+    def connector_max_checkpoint_bytes(self) -> int:
+        """Effective serialized checkpoint bound."""
+        connector = self.model.contributions.connector
+        limits = connector and connector.limits
+        return min((limits and limits.max_checkpoint_bytes) or DEFAULT_MAX_CHECKPOINT_BYTES,
+                   MAX_DECLARED_CHECKPOINT_BYTES)
+
+    @property
+    def attachment_max_bytes(self) -> int:
+        """Effective attachment size bound, or zero when attachments are absent."""
+        connector = self.model.contributions.connector
+        attachments = connector and connector.attachments
+        if attachments is None:
+            return 0
+        return min(attachments.max_bytes or MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_BYTES)
+
+    @property
+    def attachment_timeout_ms(self) -> int:
+        """Effective attachment invocation timeout."""
+        connector = self.model.contributions.connector
+        attachments = connector and connector.attachments
+        return min((attachments and attachments.timeout_ms) or DEFAULT_ATTACHMENT_TIMEOUT_MS,
+                   DEFAULT_ATTACHMENT_TIMEOUT_MS)
+
+    def validate_expression(self, expression: Any) -> list[str]:
+        """Problems of a Saved Query expression against the declared expression_schema."""
+        subscription = self.model.contributions.subscription
+        return _object_problems(subscription.expression_schema if subscription else None, expression)
+
+    def validate_subscription_configuration(self, configuration: Any) -> list[str]:
+        """Problems of a Subscription evaluator configuration against the declared configuration_schema."""
+        subscription = self.model.contributions.subscription
+        return _object_problems(subscription.configuration_schema if subscription else None, configuration)
+
+    @property
+    def configuration_schema(self) -> Any:
+        return self.model.configuration.schema if self.model.configuration else None
+
+    def validate_configuration(self, configuration: Any) -> None:
+        """Raise ConfigurationError when configuration violates the manifest configuration schema."""
+        validate_configuration(self.configuration_schema, configuration)
+
+
+def _jsonable(value: Any) -> Any:
+    # YAML-only scalars (timestamps) become strings, as quivr plugin inspect does.
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
+    return value
+
+
+def load_manifest(path: str | Path) -> LoadedManifest:
+    """Read and schema-check a manifest file, or quivr-plugin.yaml inside a directory.
+
+    Semantic checks (ranges, compatibility, namespace prefixes) belong to
+    ``quivr plugin inspect``; this only guarantees the shape the SDK relies on.
+    """
+    path = Path(path)
+    if path.is_dir():
+        path = path / MANIFEST_FILE
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ManifestError(f"cannot read {path}: {exc}") from exc
+    try:
+        document = _jsonable(yaml.safe_load(raw))
+    except yaml.YAMLError as exc:
+        raise ManifestError(f"{path} is not valid YAML: {exc}") from exc
+    problems = protocol_errors("plugin-manifest.schema.json", document)
+    if problems:
+        raise ManifestError(f"{path} does not match the plugin manifest schema: " + "; ".join(problems))
+    connector = (document.get("contributions") or {}).get("connector")
+    if connector:
+        for kind in connector["kinds"].values():
+            for name in ("config_schema", "credential_schema"):
+                if kind.get(name) is not None:
+                    schema_errors(kind[name], {})
+    return LoadedManifest(path=path.resolve(), raw=raw, model=PluginManifest.from_dict(document))
+
+
+def _object_problems(schema: Any, value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        return [f"/: expected an object, got {json.dumps(value)[:64]}"]
+    return [] if schema is None else schema_errors(schema, value)
+
+
+def validate_configuration(schema: Any, configuration: Any) -> None:
+    """Validate configuration against a manifest configuration schema (None accepts any object).
+
+    Raises ConfigurationError listing every problem as "<JSON pointer>: <message>".
+    """
+    if not isinstance(configuration, dict):
+        raise ConfigurationError([f"/: expected an object, got {json.dumps(configuration)[:64]}"])
+    if schema is None:
+        return
+    problems = schema_errors(schema, configuration)
+    if problems:
+        raise ConfigurationError(problems)

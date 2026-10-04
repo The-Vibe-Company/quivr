@@ -1,0 +1,27 @@
+{
+  "description": "Synthetic two-dimensional vectors exercise local meaning decisions and fixture forwarding, not model calibration. No classifier key or network call is needed.",
+  "record": {
+    "enriched": true,
+    "vector_space_id": "text-space-1",
+    "vectors_ready": true,
+    "parts": [
+      {"key": "title", "role": "title", "text": "Harbour staff stop work"},
+      {"key": "body", "role": "body", "text": "Dock workers stopped unloading ships after wage talks failed.",
+       "vectors": [{"segment_id": "body-1", "vector": [1, 0]}]}
+    ]
+  },
+  "evaluations": [
+    {
+      "description": "A same-space query vector matches the article segment locally.",
+      "expression": {"kind": "meaning", "description": "Dock workers going on strike at a harbour", "meaning_check": "vectors"},
+      "query_vector": {"vector_space_id": "text-space-1", "vector": [1, 0]},
+      "expect": "match"
+    },
+    {
+      "description": "An orthogonal same-space query vector does not match.",
+      "expression": {"kind": "meaning", "description": "A new library opens downtown", "meaning_check": "vectors"},
+      "query_vector": {"vector_space_id": "text-space-1", "vector": [0, 1]},
+      "expect": "no_match"
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+version: 1
+name: public-search-pilot
+ticket: campaign-ticket
+parallelism: 2
+max_trials: 40
+seed: 42
+goal:
+  metric: ndcg@10
+  weights:
+    scifact: 1
+    miracl-fr: 1
+    fiqa: 1
+space:
+  model:
+    choices: [Cohere-Embed-V5-Pro, Cohere-Embed-V5-Fast]
+  dense_weight:
+    low: 0.2
+    high: 0.8
+    step: 0.1
+  candidate_count:
+    low: 10
+    high: 50
+    step: 10
+  reranker:
+    choices: [none, jev]
+policy:
+  experiment: public/search-campaign
+  profile: default
+  price_revision: '2026-10-03'
+  provider_daily_usd: 1
+  modal_daily_usd: 10
+  provider_total_usd: 3
+  modal_total_usd: 30
+  # Replace this example timestamp with the operator's actual end date.
+  end_at: '2099-01-01T00:00:00Z'
+  confirmation_limit: 10
+  modal_usd_per_second: 0.001
+  max_seconds: 1800
+  startup_seconds: 300
+  sets:
+    scifact: {split: dev}
+    miracl-fr: {split: dev}
+    fiqa: {split: dev}
+  baseline:
+    model: Cohere-Embed-V5-Pro
+    revision: '1'
+    dimensions: 1024
+    window_chars: 6000
+    overlap_chars: 200
+    dense_weight: 0.5
+    candidate_count: 10
+    reranker: none

@@ -1,0 +1,12 @@
+{
+  "items": [],
+  "checkpoint": {
+    "since": "alert-6"
+  },
+  "more": false,
+  "push": {
+    "state": "active",
+    "error_class": "transient",
+    "code": "rate_limited"
+  }
+}

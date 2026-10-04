@@ -1,0 +1,8 @@
+{
+  "verdict": "refused",
+  "response": {
+    "status": 401,
+    "content_type": "text/plain",
+    "body": "invalid signature"
+  }
+}

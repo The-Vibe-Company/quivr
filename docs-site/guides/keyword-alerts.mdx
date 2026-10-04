@@ -1,0 +1,284 @@
+---
+title: "Keyword alerts"
+description: "Get notified when a new article matches a keyword query, and read why it matched."
+keywords: ["alerts", "keywords", "saved query", "subscription", "match", "webhook", "boolean query"]
+---
+
+A keyword alert fires when a new article matches a query such as `"harbour strike" AND (ferry OR port) NOT football`. Quivr records each catch as a Match with the words that matched, and sends it to your webhook. The first-party `alerts` plugin decides the matches. [How alerts work](/guides/alerts) explains the objects this page creates.
+
+## Prerequisites
+
+- The `alerts` plugin pinned. The local stack pins it; elsewhere see [Pin a plugin](/run-quivr/pin).
+- `QUIVR_API_URL` and a `QUIVR_API_KEY` with `monitoring:read` and `monitoring:write`, plus `content:write` to add the test article below. The first request creates a Corpus, which needs `corpora:write` and a key not limited to some Corpora; with another key, use an existing Corpus id instead. The local stack's `make env` key has all of these.
+- `QUIVR_DESTINATION`: the id of a webhook destination the operator configured for your Organization. Destinations live in Quivr's configuration, never in API requests. The local stack's `make env` sets one that delivers nowhere.
+
+## Write the query
+
+| You want | Write |
+| --- | --- |
+| A word | `strike` |
+| An exact phrase | `"harbour strike"` |
+| All of several words, anywhere | `harbour strike` or `harbour AND strike` |
+| Any of several words | `strike OR walkout` |
+| Not this word | `strike NOT football` |
+| Grouping | `(harbour OR port) AND (strike OR walkout)` |
+| Articles from one source | `source:wire` |
+
+- Operators are written in capitals; `and`, `or` and `not` in lower case are ordinary words. `NOT` binds tighter than `AND`, which binds tighter than `OR`.
+- Case, accents and punctuation are ignored: `greve` finds "Grève".
+- Words match whole, and there is no stemming: `strike` does not find "strikes". List the forms you need, `strike OR strikes`.
+- Terms search the `title` and `body` Parts.
+- `source:`, `origin:` (`client` or `connector`), `producer:`, `connector:` and `connector_kind:` filter on metadata Quivr always has. Other names, such as `author:`, work once the operator maps them ([below](#filter-on-your-own-metadata)).
+
+## Turn it into an expression
+
+Quivr stores a query as a JSON tree, which it validates when you save the alert, so a malformed query is refused at once. An unmapped metadata field is still valid syntax but never matches (see [Filter on your own metadata](#filter-on-your-own-metadata)). The plugin ships the parser. From a `quivr-v2` checkout:
+
+```bash
+cd plugins/alerts && python3 -m alerts.notation '"harbour strike" AND (ferry OR port) NOT football'
+```
+
+```json
+{
+  "kind": "keywords",
+  "match": {
+    "all": [
+      {"term": "harbour strike"},
+      {"any": [{"term": "ferry"}, {"term": "port"}]},
+      {"not": {"term": "football"}}
+    ]
+  }
+}
+```
+
+An application can also build the tree from a form: `all`, `any` and `not` map to "all of these words", "any of these words" and "none of these words".
+
+## Save the alert
+
+These requests use a Corpus of their own:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/corpora" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d '{"name": "Port news", "idempotency_key": "guide-keyword-alerts"}' | jq '{corpus_id}'
+```
+
+{/* output */}
+```json
+{"corpus_id": "{{CORPUS_ID}}"}
+```
+
+```bash
+export CORPUS_ID=<the corpus_id above>
+```
+
+The Saved Query holds the expression and the Corpora it watches:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/saved-queries" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{saved_query_id, version_id: .current_version.version_id}'
+{
+  "idempotency_key": "harbour-strikes", "name": "Harbour strikes",
+  "definition": {
+    "corpus_ids": ["$CORPUS_ID"], "retrieval_profile": "default", "temporal_policy": "from_activation",
+    "expression": {"kind": "keywords", "match": {"all": [
+      {"term": "harbour strike"}, {"any": [{"term": "ferry"}, {"term": "port"}]}, {"not": {"term": "football"}}]}}
+  }
+}
+EOF
+```
+
+{/* output */}
+```json
+{"saved_query_id": "{{SAVED_QUERY_ID}}", "version_id": "{{SAVED_QUERY_VERSION_ID}}"}
+```
+
+```bash
+export SAVED_QUERY_ID=<the saved_query_id above> SAVED_QUERY_VERSION_ID=<the version_id above>
+```
+
+The Subscription turns it on, with the `alerts` plugin as evaluator. Give it an `owner` when the alert belongs to one of your application's users: Quivr echoes it on every Match and webhook, so you can route each alert, and `GET /v0/subscriptions?owner=user-123` lists that user's alerts.
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/subscriptions" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{subscription_id, owner}'
+{
+  "idempotency_key": "harbour-strikes-user-123", "name": "Harbour strikes",
+  "saved_query_id": "$SAVED_QUERY_ID", "saved_query_version_id": "$SAVED_QUERY_VERSION_ID",
+  "evaluator": {"plugin_id": "alerts", "version": "0.3.0", "configuration": {}},
+  "destination_id": "$QUIVR_DESTINATION",
+  "owner": "user-123"
+}
+EOF
+```
+
+{/* output */}
+```json
+{"subscription_id": "{{SUBSCRIPTION_ID}}", "owner": "user-123"}
+```
+
+```bash
+export SUBSCRIPTION_ID=<the subscription_id above>
+```
+
+The alert judges articles that become searchable from now on. Earlier articles are never judged; to see what a query would have caught before saving it, use `POST /v0/subscription-previews`.
+
+## Read what matched
+
+Add an article that matches:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/records" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{receipt_id}'
+{
+  "idempotency_key": "guide-alerts-strike",
+  "source": {"corpus_id": "$CORPUS_ID", "namespace": "wire", "record_key": "strike-2026-10-03"},
+  "content": {"kind": "manifest", "parts": [
+    {"key": "title", "role": "title", "content": {"kind": "text", "text": "Harbour strike halts the ferry"}},
+    {"key": "body", "role": "body", "content": {"kind": "text", "text": "The harbour strike stopped every ferry to the island on Friday."}}
+  ]}
+}
+EOF
+```
+
+{/* output */}
+```json
+{"receipt_id": "..."}
+```
+
+Within seconds a Match appears, with its evidence:
+
+{/* runnable retry */}
+```bash
+curl -s "$QUIVR_API_URL/v0/matches?subscription_id=$SUBSCRIPTION_ID" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  | jq '{items: [.items[] | {owner, explanation: .evidence.explanation, part_keys: .evidence.part_keys}]}'
+```
+
+{/* output */}
+```json
+{"items": [{"owner": "user-123", "explanation": "Matched \"harbour strike\" in title, body; \"ferry\" in title, body.", "part_keys": ["title", "body"]}]}
+```
+
+The explanation lists the terms that made the article match and the Parts where each was found. Terms under `NOT` are never listed. `evidence.details` has the same facts as JSON.
+
+## Receive the webhook
+
+For each Match, Quivr sends a `POST` to the destination's URL. The body only references what happened; fetch the Match with `GET /v0/matches/{match_id}` to read its evidence:
+
+```json
+{"event_id": "…", "type": "match.created", "schema_version": "1", "occurred_at": "2026-10-03T09:12:44Z",
+ "references": {"match_id": "…", "subscription_id": "…", "subscription_version_id": "…",
+                "record_id": "…", "record_version_id": "…", "delivery_id": "…", "owner": "user-123"}}
+```
+
+Answer with a 2xx status within 10 seconds to acknowledge it. Timeouts, connection failures, `408`, `429` and `5xx` answers are retried with growing delays, from 1 second up to 5 minutes, for 24 hours; any other answer stops the retries. These are defaults the operator can change, and a `Retry-After` header on a `429` or `503` sets the next delay. `GET /v0/deliveries/{delivery_id}` shows a delivery's state and its attempts.
+
+When an article that matched is corrected or withdrawn, the same receiver gets a follow-up: `match.corrected`, `match.no_longer_matches` or `match.withdrawn`. [Corrections and withdrawals](/guides/alerts#corrections-and-withdrawals) says which ones store a new Match.
+
+## Verify the signature
+
+Check the signature on the raw body before you parse it. Requests follow [Standard Webhooks](https://www.standardwebhooks.com/): the `webhook-signature` header holds `v1,` and a base64 HMAC-SHA256 of `webhook-id`, `webhook-timestamp` and the raw body, joined by dots. The key is the destination's secret, `whsec_` followed by base64. The operator sets it in [Quivr's configuration](/reference/configuration#webhook-destinations) and gives it to you. The header can hold several signatures separated by spaces; accept the request when one of them matches.
+
+This Python function takes the headers as a dictionary with lower-case names. It accepts only `v1` signatures, skips malformed ones, and refuses a request whose timestamp is more than five minutes old; every retry carries a fresh timestamp. It was run by hand against Quivr's [public test vector](https://github.com/The-Vibe-Company/quivr-v2/blob/main/contracts/http/v0/webhook-vector.json) and against altered copies of it.
+
+```python
+import base64, binascii, hashlib, hmac, time
+
+def verify(secret: str, headers: dict, body: bytes, tolerance: int = 300) -> bool:
+    key = base64.b64decode(secret.removeprefix("whsec_"))
+    msg_id = headers.get("webhook-id", "")
+    ts = headers.get("webhook-timestamp", "")
+    if not msg_id or not (ts.isascii() and ts.isdigit()):
+        return False
+    if abs(time.time() - int(ts)) > tolerance:
+        return False
+    signed = f"{msg_id}.{ts}.".encode() + body
+    expected = hmac.new(key, signed, hashlib.sha256).digest()
+    for token in headers.get("webhook-signature", "").split():
+        version, _, value = token.partition(",")
+        if version != "v1" or not value.isascii():
+            continue
+        try:
+            candidate = base64.b64decode(value, validate=True)
+        except binascii.Error:
+            continue
+        if hmac.compare_digest(candidate, expected):
+            return True
+    return False
+```
+
+Answer `401` when it returns `False`. That answer is permanent, so Quivr stops retrying that webhook. With a wrong secret, every webhook is refused this way; the Matches stay listable through the API.
+
+## Deduplicate
+
+Delivery is at least once: a webhook can arrive twice, for example when your answer is lost on the way back. A retry sends the same `webhook-id`, which is the body's `event_id`, and the same body. Each event, follow-ups included, has its own id. Store the ids you have handled for at least the retry window, 24 hours by default, and answer 2xx without acting again when one comes back. Record an id only after you have acted on the event, so a crash before then gets the webhook again.
+
+<Accordion title="A complete receiver in Python">
+
+This receiver uses only the standard library. It verifies each webhook with the `verify` function above, acts on each event once, and acknowledges with `204`. It was run by hand with signed test requests: a valid one, a repeat and a forged one. Quivr refuses loopback and private addresses by default, so put the receiver behind the public URL of the destination the operator configured. Keep the handled ids in your database rather than in memory, so they survive a restart, and give them a unique constraint if two copies can arrive at the same time.
+
+```python
+import json, os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# Paste the verify function from above here.
+
+SECRET = os.environ["QUIVR_WEBHOOK_SECRET"]  # the destination's whsec_ secret
+handled = set()
+
+
+class Receiver(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        headers = {name.lower(): value for name, value in self.headers.items()}
+        if not verify(SECRET, headers, body):
+            self.send_response(401)
+            self.end_headers()
+            return
+        event_id = headers["webhook-id"]
+        if event_id not in handled:
+            event = json.loads(body)
+            print(event["type"], event["references"]["match_id"])  # your own handling
+            handled.add(event_id)
+        self.send_response(204)
+        self.end_headers()
+
+
+HTTPServer(("127.0.0.1", 8787), Receiver).serve_forever()
+```
+
+</Accordion>
+
+A receiver that stays down past the retry window misses those webhooks. List Matches with `GET /v0/matches?subscription_id=…` to recover first matches and corrections that still matched. Corrections that no longer match and withdrawals create notices without new Matches: an application that already follows the [change feed](https://docs.quivr.thevibecompany.co/api-reference/changes/poll-changes) from a saved position, with a key that has `changes:read`, finds them there for as long as the operator keeps events, 7 days by default.
+
+## Change or stop an alert
+
+| To | Send, with an `idempotency_key` in the body | Effect |
+| --- | --- | --- |
+| Change the query | `POST /v0/saved-queries/{id}/versions`, then `POST /v0/subscriptions/{id}/versions` pointing at the new Version | The new query judges articles that arrive afterwards |
+| Rename | `POST /v0/subscriptions/{id}/rename` | No new Version |
+| Pause, resume | `POST /v0/subscriptions/{id}/disable`, `…/enable` | Articles that arrive during the pause are not judged |
+| Delete | `POST /v0/subscriptions/{id}/delete` | Permanent; earlier Matches stay readable |
+
+## Filter on your own metadata
+
+Ask your operator to [map the metadata fields](/run-quivr/configure-alert-fields) your alerts use, such as `author` or `category`. A list field matches when one of its values does. A name the operator has not mapped never matches.
+
+## Timing
+
+A keyword alert is decided as soon as the article becomes searchable, before its vectors are computed. Set `{"wait_for_enrichment": true}` in the Subscription's `evaluator.configuration` to wait for them.
+
+## For operators
+
+<span id="upgrade-the-alert-rule-without-losing-alerts" />
+<span id="retire-evaluations-you-cannot-finish" />
+
+Moving existing alerts to a new version of the alert rule, and abandoning evaluations whose old rule cannot be restored, are operator tasks: see [Upgrade an alert rule](/run-quivr/upgrade-an-alert-rule) and [Retire alert evaluations](/run-quivr/retire-alert-evaluations).
+
+## Next
+
+- [Meaning alerts](/guides/described-alerts): match articles by subject rather than by words.
+- [How alerts work](/guides/alerts): what happens between a new article and your webhook.

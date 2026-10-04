@@ -1,0 +1,870 @@
+{
+ "runs": [
+  {
+   "checkpoint": null,
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "watermark": "1000000000000000002"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 0,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": false,
+     "notice": "",
+     "page_in_run": 0,
+     "reads": 2,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    }
+   ],
+   "reads_today": 0,
+   "step": 2
+  },
+  {
+   "checkpoint": {
+    "floor": "2026-09-28T12:00:00Z",
+    "watermark": "1000000000000000002",
+    "last_recheck_at": "2026-09-28T12:00:00Z",
+    "list_read_day": "2026-09-28"
+   },
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:09Z",
+        "latest": "1000000000000000009",
+        "read": "2026-09-28",
+        "root": "1000000000000000009"
+       },
+       {
+        "at": "2026-09-28T12:00:08Z",
+        "latest": "1000000000000000008",
+        "read": "2026-09-28",
+        "root": "1000000000000000008"
+       },
+       {
+        "at": "2026-09-28T12:00:07Z",
+        "latest": "1000000000000000007",
+        "read": "2026-09-28",
+        "root": "1000000000000000007"
+       }
+      ],
+      "sweep": {
+       "token": "p3",
+       "top": "1000000000000000009"
+      },
+      "watermark": "1000000000000000002"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 3,
+      "recheck_window_seconds": 86400
+     },
+     "items": [
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 9"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T12:00:09Z",
+          "edit_history_post_ids": [
+           "1000000000000000009"
+          ],
+          "lang": "fr",
+          "post_id": "1000000000000000009",
+          "url": "https://x.com/newsdesk/status/1000000000000000009"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "1000000000000000009",
+       "revision": "1000000000000000009",
+       "source_position": "1000000000000000009"
+      },
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 8"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T12:00:08Z",
+          "edit_history_post_ids": [
+           "1000000000000000008"
+          ],
+          "lang": "fr",
+          "post_id": "1000000000000000008",
+          "url": "https://x.com/newsdesk/status/1000000000000000008"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "1000000000000000008",
+       "revision": "1000000000000000008",
+       "source_position": "1000000000000000008"
+      },
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 7"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T12:00:07Z",
+          "edit_history_post_ids": [
+           "1000000000000000007"
+          ],
+          "lang": "fr",
+          "post_id": "1000000000000000007",
+          "url": "https://x.com/newsdesk/status/1000000000000000007"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "1000000000000000007",
+       "revision": "1000000000000000007",
+       "source_position": "1000000000000000007"
+      }
+     ],
+     "more": true,
+     "notice": "",
+     "page_in_run": 0,
+     "reads": 3,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:09Z",
+        "latest": "1000000000000000009",
+        "read": "2026-09-28",
+        "root": "1000000000000000009"
+       },
+       {
+        "at": "2026-09-28T12:00:08Z",
+        "latest": "1000000000000000008",
+        "read": "2026-09-28",
+        "root": "1000000000000000008"
+       },
+       {
+        "at": "2026-09-28T12:00:07Z",
+        "latest": "1000000000000000007",
+        "read": "2026-09-28",
+        "root": "1000000000000000007"
+       },
+       {
+        "at": "2026-09-28T12:00:06Z",
+        "latest": "1000000000000000006",
+        "read": "2026-09-28",
+        "root": "1000000000000000006"
+       },
+       {
+        "at": "2026-09-28T12:00:05Z",
+        "latest": "1000000000000000005",
+        "read": "2026-09-28",
+        "root": "1000000000000000005"
+       },
+       {
+        "at": "2026-09-28T12:00:04Z",
+        "latest": "1000000000000000004",
+        "read": "2026-09-28",
+        "root": "1000000000000000004"
+       }
+      ],
+      "sweep": {
+       "token": "p6",
+       "top": "1000000000000000009"
+      },
+      "watermark": "1000000000000000002"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 6,
+      "recheck_window_seconds": 86400
+     },
+     "items": [
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 6"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T12:00:06Z",
+          "edit_history_post_ids": [
+           "1000000000000000006"
+          ],
+          "lang": "fr",
+          "post_id": "1000000000000000006",
+          "url": "https://x.com/newsdesk/status/1000000000000000006"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "1000000000000000006",
+       "revision": "1000000000000000006",
+       "source_position": "1000000000000000006"
+      },
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 5"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T12:00:05Z",
+          "edit_history_post_ids": [
+           "1000000000000000005"
+          ],
+          "lang": "fr",
+          "post_id": "1000000000000000005",
+          "url": "https://x.com/newsdesk/status/1000000000000000005"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "1000000000000000005",
+       "revision": "1000000000000000005",
+       "source_position": "1000000000000000005"
+      },
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 4"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T12:00:04Z",
+          "edit_history_post_ids": [
+           "1000000000000000004"
+          ],
+          "lang": "fr",
+          "post_id": "1000000000000000004",
+          "url": "https://x.com/newsdesk/status/1000000000000000004"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "1000000000000000004",
+       "revision": "1000000000000000004",
+       "source_position": "1000000000000000004"
+      }
+     ],
+     "more": true,
+     "notice": "",
+     "page_in_run": 1,
+     "reads": 3,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026pagination_token=p3\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:09Z",
+        "latest": "1000000000000000009",
+        "read": "2026-09-28",
+        "root": "1000000000000000009"
+       },
+       {
+        "at": "2026-09-28T12:00:08Z",
+        "latest": "1000000000000000008",
+        "read": "2026-09-28",
+        "root": "1000000000000000008"
+       },
+       {
+        "at": "2026-09-28T12:00:07Z",
+        "latest": "1000000000000000007",
+        "read": "2026-09-28",
+        "root": "1000000000000000007"
+       },
+       {
+        "at": "2026-09-28T12:00:06Z",
+        "latest": "1000000000000000006",
+        "read": "2026-09-28",
+        "root": "1000000000000000006"
+       },
+       {
+        "at": "2026-09-28T12:00:05Z",
+        "latest": "1000000000000000005",
+        "read": "2026-09-28",
+        "root": "1000000000000000005"
+       },
+       {
+        "at": "2026-09-28T12:00:04Z",
+        "latest": "1000000000000000004",
+        "read": "2026-09-28",
+        "root": "1000000000000000004"
+       },
+       {
+        "at": "2026-09-28T12:00:03Z",
+        "latest": "1000000000000000003",
+        "read": "2026-09-28",
+        "root": "1000000000000000003"
+       }
+      ],
+      "watermark": "1000000000000000009"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 7,
+      "recheck_window_seconds": 86400
+     },
+     "items": [
+      {
+       "content": {
+        "kind": "manifest",
+        "parts": [
+         {
+          "content": {
+           "kind": "text",
+           "text": "Post 3"
+          },
+          "key": "body",
+          "role": "body"
+         }
+        ]
+       },
+       "extensions": {
+        "connector.x_list": {
+         "data": {
+          "author": {
+           "id": "42",
+           "name": "News Desk",
+           "username": "newsdesk"
+          },
+          "created_at": "2026-09-28T12:00:03Z",
+          "edit_history_post_ids": [
+           "1000000000000000003"
+          ],
+          "lang": "fr",
+          "post_id": "1000000000000000003",
+          "url": "https://x.com/newsdesk/status/1000000000000000003"
+         },
+         "schema_version": "1"
+        }
+       },
+       "record_key": "1000000000000000003",
+       "revision": "1000000000000000003",
+       "source_position": "1000000000000000003"
+      }
+     ],
+     "more": false,
+     "notice": "",
+     "page_in_run": 2,
+     "reads": 1,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026pagination_token=p6\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    }
+   ],
+   "reads_today": 2,
+   "step": 10
+  },
+  {
+   "checkpoint": {
+    "floor": "2026-09-28T12:00:00Z",
+    "watermark": "1000000000000000009",
+    "recent": [
+     {
+      "root": "1000000000000000009",
+      "latest": "1000000000000000009",
+      "at": "2026-09-28T12:00:09Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000008",
+      "latest": "1000000000000000008",
+      "at": "2026-09-28T12:00:08Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000007",
+      "latest": "1000000000000000007",
+      "at": "2026-09-28T12:00:07Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000006",
+      "latest": "1000000000000000006",
+      "at": "2026-09-28T12:00:06Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000005",
+      "latest": "1000000000000000005",
+      "at": "2026-09-28T12:00:05Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000004",
+      "latest": "1000000000000000004",
+      "at": "2026-09-28T12:00:04Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000003",
+      "latest": "1000000000000000003",
+      "at": "2026-09-28T12:00:03Z",
+      "read": "2026-09-28"
+     }
+    ],
+    "last_recheck_at": "2026-09-28T12:00:00Z",
+    "list_read_day": "2026-09-28"
+   },
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-28",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:09Z",
+        "latest": "1000000000000000009",
+        "read": "2026-09-28",
+        "root": "1000000000000000009"
+       },
+       {
+        "at": "2026-09-28T12:00:08Z",
+        "latest": "1000000000000000008",
+        "read": "2026-09-28",
+        "root": "1000000000000000008"
+       },
+       {
+        "at": "2026-09-28T12:00:07Z",
+        "latest": "1000000000000000007",
+        "read": "2026-09-28",
+        "root": "1000000000000000007"
+       },
+       {
+        "at": "2026-09-28T12:00:06Z",
+        "latest": "1000000000000000006",
+        "read": "2026-09-28",
+        "root": "1000000000000000006"
+       },
+       {
+        "at": "2026-09-28T12:00:05Z",
+        "latest": "1000000000000000005",
+        "read": "2026-09-28",
+        "root": "1000000000000000005"
+       },
+       {
+        "at": "2026-09-28T12:00:04Z",
+        "latest": "1000000000000000004",
+        "read": "2026-09-28",
+        "root": "1000000000000000004"
+       },
+       {
+        "at": "2026-09-28T12:00:03Z",
+        "latest": "1000000000000000003",
+        "read": "2026-09-28",
+        "root": "1000000000000000003"
+       }
+      ],
+      "watermark": "1000000000000000009"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 7,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": false,
+     "notice": "",
+     "page_in_run": 0,
+     "reads": 0,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    }
+   ],
+   "reads_today": 9,
+   "step": 11
+  },
+  {
+   "checkpoint": {
+    "floor": "2026-09-28T12:00:00Z",
+    "watermark": "1000000000000000009",
+    "recent": [
+     {
+      "root": "1000000000000000009",
+      "latest": "1000000000000000009",
+      "at": "2026-09-28T12:00:09Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000008",
+      "latest": "1000000000000000008",
+      "at": "2026-09-28T12:00:08Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000007",
+      "latest": "1000000000000000007",
+      "at": "2026-09-28T12:00:07Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000006",
+      "latest": "1000000000000000006",
+      "at": "2026-09-28T12:00:06Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000005",
+      "latest": "1000000000000000005",
+      "at": "2026-09-28T12:00:05Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000004",
+      "latest": "1000000000000000004",
+      "at": "2026-09-28T12:00:04Z",
+      "read": "2026-09-28"
+     },
+     {
+      "root": "1000000000000000003",
+      "latest": "1000000000000000003",
+      "at": "2026-09-28T12:00:03Z",
+      "read": "2026-09-28"
+     }
+    ],
+    "last_recheck_at": "2026-09-28T12:00:00Z",
+    "list_read_day": "2026-09-28"
+   },
+   "pages": [
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-29",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:09Z",
+        "latest": "1000000000000000009",
+        "read": "2026-09-28",
+        "root": "1000000000000000009"
+       },
+       {
+        "at": "2026-09-28T12:00:08Z",
+        "latest": "1000000000000000008",
+        "read": "2026-09-28",
+        "root": "1000000000000000008"
+       },
+       {
+        "at": "2026-09-28T12:00:07Z",
+        "latest": "1000000000000000007",
+        "read": "2026-09-28",
+        "root": "1000000000000000007"
+       },
+       {
+        "at": "2026-09-28T12:00:06Z",
+        "latest": "1000000000000000006",
+        "read": "2026-09-28",
+        "root": "1000000000000000006"
+       },
+       {
+        "at": "2026-09-28T12:00:05Z",
+        "latest": "1000000000000000005",
+        "read": "2026-09-28",
+        "root": "1000000000000000005"
+       },
+       {
+        "at": "2026-09-28T12:00:04Z",
+        "latest": "1000000000000000004",
+        "read": "2026-09-28",
+        "root": "1000000000000000004"
+       },
+       {
+        "at": "2026-09-28T12:00:03Z",
+        "latest": "1000000000000000003",
+        "read": "2026-09-28",
+        "root": "1000000000000000003"
+       }
+      ],
+      "watermark": "1000000000000000009"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 7,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": true,
+     "notice": "",
+     "page_in_run": 0,
+     "reads": 3,
+     "x_requests": [
+      "/2/lists/77/tweets?expansions=author_id%2Cattachments.media_keys\u0026max_results=100\u0026media.fields=type%2Curl%2Cpreview_image_url%2Calt_text\u0026tweet.fields=id%2Ctext%2Ccreated_at%2Cauthor_id%2Clang%2Centities%2Creferenced_tweets%2Cattachments%2Cedit_history_tweet_ids%2Cconversation_id%2Cnote_tweet\u0026user.fields=username%2Cname"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "list_read_day": "2026-09-29",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:09Z",
+        "latest": "1000000000000000009",
+        "read": "2026-09-29",
+        "root": "1000000000000000009"
+       },
+       {
+        "at": "2026-09-28T12:00:08Z",
+        "latest": "1000000000000000008",
+        "read": "2026-09-29",
+        "root": "1000000000000000008"
+       },
+       {
+        "at": "2026-09-28T12:00:07Z",
+        "latest": "1000000000000000007",
+        "read": "2026-09-29",
+        "root": "1000000000000000007"
+       },
+       {
+        "at": "2026-09-28T12:00:06Z",
+        "latest": "1000000000000000006",
+        "read": "2026-09-29",
+        "root": "1000000000000000006"
+       },
+       {
+        "at": "2026-09-28T12:00:05Z",
+        "latest": "1000000000000000005",
+        "read": "2026-09-29",
+        "root": "1000000000000000005"
+       },
+       {
+        "at": "2026-09-28T12:00:04Z",
+        "latest": "1000000000000000004",
+        "read": "2026-09-29",
+        "root": "1000000000000000004"
+       },
+       {
+        "at": "2026-09-28T12:00:03Z",
+        "latest": "1000000000000000003",
+        "read": "2026-09-29",
+        "root": "1000000000000000003"
+       }
+      ],
+      "recheck": {
+       "after": "1000000000000000009",
+       "started": "2026-09-29T01:00:00Z"
+      },
+      "watermark": "1000000000000000009"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-28T12:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 7,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": true,
+     "notice": "",
+     "page_in_run": 1,
+     "reads": 7,
+     "x_requests": [
+      "/2/tweets?ids=1000000000000000003%2C1000000000000000004%2C1000000000000000005%2C1000000000000000006%2C1000000000000000007%2C1000000000000000008%2C1000000000000000009\u0026tweet.fields=id%2Cedit_history_tweet_ids"
+     ]
+    },
+    {
+     "checkpoint": {
+      "floor": "2026-09-28T12:00:00Z",
+      "last_recheck_at": "2026-09-29T01:00:00Z",
+      "list_read_day": "2026-09-29",
+      "recent": [
+       {
+        "at": "2026-09-28T12:00:09Z",
+        "latest": "1000000000000000009",
+        "read": "2026-09-29",
+        "root": "1000000000000000009"
+       },
+       {
+        "at": "2026-09-28T12:00:08Z",
+        "latest": "1000000000000000008",
+        "read": "2026-09-29",
+        "root": "1000000000000000008"
+       },
+       {
+        "at": "2026-09-28T12:00:07Z",
+        "latest": "1000000000000000007",
+        "read": "2026-09-29",
+        "root": "1000000000000000007"
+       },
+       {
+        "at": "2026-09-28T12:00:06Z",
+        "latest": "1000000000000000006",
+        "read": "2026-09-29",
+        "root": "1000000000000000006"
+       },
+       {
+        "at": "2026-09-28T12:00:05Z",
+        "latest": "1000000000000000005",
+        "read": "2026-09-29",
+        "root": "1000000000000000005"
+       },
+       {
+        "at": "2026-09-28T12:00:04Z",
+        "latest": "1000000000000000004",
+        "read": "2026-09-29",
+        "root": "1000000000000000004"
+       },
+       {
+        "at": "2026-09-28T12:00:03Z",
+        "latest": "1000000000000000003",
+        "read": "2026-09-29",
+        "root": "1000000000000000003"
+       }
+      ],
+      "watermark": "1000000000000000009"
+     },
+     "diagnostics": {
+      "last_recheck_at": "2026-09-29T01:00:00Z",
+      "recheck_dropped_posts": 0,
+      "recheck_interval_seconds": 600,
+      "recheck_tracked_posts": 7,
+      "recheck_window_seconds": 86400
+     },
+     "items": [],
+     "more": false,
+     "notice": "",
+     "page_in_run": 2,
+     "reads": 0,
+     "x_requests": []
+    }
+   ],
+   "reads_today": 0,
+   "step": 12
+  }
+ ],
+ "scenario": "start_now_then_watermark"
+}

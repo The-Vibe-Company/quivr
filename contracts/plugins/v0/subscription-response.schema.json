@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "subscription invocation response, v0",
+  "description": "200 body of POST /v0/contributions/subscription, since Plugin API 0.2. Exactly one decision per requested evaluation id. A match carries evidence; the core stores it with the Match. Bounds this schema cannot express (one decision per id, Part keys that exist in the request, details of at most 16 KiB) are listed in README.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decisions"
+  ],
+  "properties": {
+    "decisions": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "decision"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "The id of the evaluation this decision answers."
+          },
+          "decision": {
+            "enum": [
+              "match",
+              "no_match",
+              "not_ready"
+            ],
+            "description": "match: the Record Version satisfies the expression. no_match: it does not. not_ready: it cannot be decided yet (for example before enrichment); the core evaluates again on a later trigger. A plugin that cannot decide at all answers with the error envelope instead."
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "explanation"
+            ],
+            "description": "Required for match, optional otherwise.",
+            "properties": {
+              "explanation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "description": "Human explanation of the decision, at most 4096 Unicode code points."
+              },
+              "part_keys": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Keys of the request Parts that support the decision; each must exist in the request."
+              },
+              "details": {
+                "type": "object",
+                "description": "Plugin-defined structured evidence; at most 16 KiB once serialized as JSON."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

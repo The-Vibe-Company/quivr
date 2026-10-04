@@ -1,0 +1,34 @@
+# Sample ingestion plugin built with the Go SDK, used by tests only. It cuts
+# each Part into paragraphs and embeds them by hashing their words into two
+# vector spaces, so texts that share words point the same way. It needs no
+# model, so the Contract Runner and the acceptance stack run it offline.
+id: example.hash_embedder
+version: 0.1.0
+description: Paragraph segments embedded by hashing their words, in two vector spaces.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.9.0 <0.10.0"
+contributions:
+  ingestion:
+    spaces:
+      example.hash_embedder.small:
+        version: "1"
+        model: hashed-words-16
+        dimensions: 16
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+      example.hash_embedder.large:
+        version: "1"
+        model: hashed-words-32
+        dimensions: 32
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+        # A made-up price, so a backfill into this space shows a cost.
+        input_price:
+          usd_per_million_tokens: 0.02
+    timeout_ms: 10000
+    query_timeout_ms: 1000
+run:
+  command: [go, run, .]

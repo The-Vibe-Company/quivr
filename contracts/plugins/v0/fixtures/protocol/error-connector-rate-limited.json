@@ -1,0 +1,1 @@
+{"code": "rate_limited", "message": "the feed service asks to wait", "retryable": true, "error_class": "transient", "retry_after_seconds": 900}

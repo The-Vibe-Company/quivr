@@ -1,0 +1,98 @@
+---
+title: "Microsoft 365 mail"
+description: "Collect the mail of a Microsoft 365 mailbox folder, with its attachments, through Microsoft Graph."
+keywords: ["microsoft 365", "outlook", "exchange", "mailbox", "graph", "m365_mail", "connector"]
+---
+
+The `m365_mail` kind collects one folder of one Microsoft 365 mailbox, for example a shared mailbox that receives press releases or newsletters. Each mail becomes a Record; attachments are stored with it. The kind comes from the first-party `m365-mail` plugin. [Collect from a source](/guides/connectors) covers what every kind shares.
+
+## Prerequisites
+
+- A tenant administrator who can register an application in Microsoft Entra ID and run Exchange Online PowerShell.
+- A `credential_key` in Quivr's configuration, since the instance stores a secret.
+- The `m365-mail` plugin pinned, with outbound HTTPS to Microsoft and to Quivr's object storage. In the local stack it points at a local fake of Microsoft Graph, so use a real deployment to collect real mail.
+
+## Steps
+
+<Steps>
+<Step title="Register an application">
+
+In the Microsoft Entra admin center, open **App registrations**, then **New registration**. Choose a single-tenant application with no redirect URI. Note its **Directory (tenant) ID** and **Application (client) ID**.
+
+Under **Certificates & secrets**, add a certificate (recommended) or a client secret, and note its expiry date.
+
+</Step>
+<Step title="Limit it to the monitored mailboxes">
+
+Quivr needs the `Mail.Read` application permission, which reads every mailbox of the tenant unless you scope it. Scope it with RBAC for Applications in Exchange Online:
+
+```powershell
+New-ServicePrincipal -AppId <application-client-id> -ObjectId <service-principal-object-id> -DisplayName "Quivr mail collection"
+New-ManagementScope -Name "Quivr monitored mailboxes" -RecipientRestrictionFilter "MemberOfGroup -eq '<group distinguished name>'"
+New-ManagementRoleAssignment -App <service-principal-object-id> -Role "Application Mail.Read" -CustomResourceScope "Quivr monitored mailboxes"
+Test-ServicePrincipalAuthorization -Identity <service-principal-object-id> -Resource monitoring@example.org
+```
+
+`InScope` must be `True` for a monitored mailbox and `False` for any other. With this method, do not also grant `Mail.Read` in Entra ID: grants add up, and a tenant-wide grant cancels the scope. Exchange applies changes within 30 minutes to 2 hours; until then Quivr may report `mailbox_access_denied`.
+
+</Step>
+<Step title="Create the instance">
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/connectors" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{connector_id, health: .health.state}'
+{
+  "idempotency_key": "monitoring-mailbox",
+  "corpus_id": "$CORPUS_ID",
+  "source_namespace": "monitoring-mailbox",
+  "kind": "m365_mail",
+  "config": {"tenant_id": "00000000-0000-0000-0000-000000000000", "mailbox": "monitoring@example.org", "folder": "inbox"},
+  "credential": {
+    "secret": {"client_id": "11111111-1111-1111-1111-111111111111", "client_secret": "<secret value>"},
+    "expires_at": "2027-06-30T00:00:00Z"
+  }
+}
+EOF
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `config.tenant_id` | required | The Directory (tenant) ID, or a verified domain of the tenant |
+| `config.mailbox` | required | The mailbox's user principal name or object ID |
+| `config.folder` | `inbox` | A well-known folder name or a folder ID; subfolders are not included |
+| `config.backfill_since` | none | Also collect mail received since this instant, at most 7 days before the first poll |
+| `credential.secret` | required | `{client_id, client_secret}`, or `{client_id, certificate_pem, private_key_pem}` with an RSA key |
+| `credential.expires_at` | recommended | The secret's or certificate's expiry, which turns on the expiry warning |
+
+The instance polls every 60 seconds by default and collects mail received from its creation.
+
+</Step>
+</Steps>
+
+## What each mail becomes
+
+| Part key | Role | Content |
+| --- | --- | --- |
+| `title` | `title` | The subject |
+| `body` | `body` | The body as text; HTML is converted |
+| `original_body` | `original_body` | The original HTML body, stored as a file |
+| `attachment-01`, … | `attachment` | Each attachment of 25 MB or less, stored as a file |
+
+Search covers the subject and body; attachment text is not extracted. The `connector.m365_mail` extension holds the sender, recipients, dates, conversation id and the attachments that were skipped, with why. The Record Key is the mail's `internetMessageId`. Read flags do not create Versions, and moving or deleting a mail in the mailbox leaves its Record untouched.
+
+## Rotate the secret
+
+Add a new secret or certificate in Entra ID while the old one is valid, deposit it with `PUT /v0/connectors/{connector_id}/credential`, and delete the old one once health is `active` again. The next run uses the new secret.
+
+## Health codes
+
+| `last_error.code` | Cause | Fix |
+| --- | --- | --- |
+| `invalid_client_credential`, `secret_expired`, `invalid_certificate` | The secret or certificate is wrong, expired or unreadable | Deposit a valid one |
+| `app_not_found`, `tenant_not_found` | Wrong `client_id` or `tenant_id` | Fix the credential, or create an instance with the right tenant |
+| `consent_missing` | The permission was never granted, or was revoked | Redo step 2 |
+| `mailbox_access_denied` | The mailbox is outside the scope | Fix the scope and allow for Exchange's delay |
+| `mailbox_not_found`, `folder_not_found` | Unknown mailbox or folder | Fix `config` in a new instance |
+| `throttled`, `source_unavailable` | Graph answered 429 or was unreachable | Nothing; the next run retries |
+
+All but the last row set the `access_error` health state until a later run succeeds. Secrets, tokens, addresses and subjects are never logged.

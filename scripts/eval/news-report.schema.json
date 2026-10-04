@@ -1,0 +1,887 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aggregate news-set quality report",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "synthetic",
+        "built"
+      ]
+    },
+    "questions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "articles": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "question_types": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "event": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paraphrase": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "multi_article": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "no_answer": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "entity",
+        "event",
+        "recent",
+        "paraphrase",
+        "multi_article",
+        "no_answer"
+      ]
+    },
+    "rejected": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title_copy": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shared_keywords": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_json": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_response": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_questions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_evidence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content_filter": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "judge_content_filter": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "request_refused": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "answer_expected_none_found": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "no_answer_but_relevant_found": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_judge_grades": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "empty_candidate_pool": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_date": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_bound": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "title_copy",
+        "duplicate",
+        "shared_keywords"
+      ]
+    },
+    "split": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "working": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "held_out": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "working",
+        "held_out"
+      ]
+    },
+    "judgments": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "judged_depth": {
+      "type": "object",
+      "patternProperties": {
+        "^[0-9]+$": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "agreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cohen_kappa": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "fleiss_kappa": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "cohen_kappa",
+        "fleiss_kappa"
+      ]
+    },
+    "jev_grade_mapping": {
+      "enum": [
+        "not_used",
+        "probability_quartiles"
+      ]
+    },
+    "three_way_ties": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hard_negatives": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "human_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "pending",
+            "complete"
+          ]
+        },
+        "sampled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reviewed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "agreement_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "status",
+        "sampled",
+        "reviewed",
+        "agreement_rate"
+      ]
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "enum": [
+            "bm25",
+            "e5_small",
+            "cohere_pro",
+            "hybrid"
+          ]
+        },
+        "queries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "no_answer_queries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ndcg@10": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1.000000000001
+            },
+            "recall@10": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1.000000000001
+            },
+            "mrr@10": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1.000000000001
+            }
+          },
+          "required": [
+            "ndcg@10",
+            "recall@10",
+            "mrr@10"
+          ]
+        }
+      },
+      "required": [
+        "system",
+        "queries",
+        "no_answer_queries",
+        "metrics"
+      ]
+    },
+    "saturation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "working_queries_perfect_in_all_systems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scorable_working_queries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "working_queries_perfect_in_all_systems",
+        "scorable_working_queries"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "working": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "object": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}-[0-9a-f]{32}-working\\.tar\\.gz\\.age$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plaintext_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "object",
+            "sha256",
+            "plaintext_sha256"
+          ]
+        },
+        "held_out": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "object": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}-[0-9a-f]{32}-held_out\\.tar\\.gz\\.age$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plaintext_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "object",
+            "sha256",
+            "plaintext_sha256"
+          ]
+        },
+        "review": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "object": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}-[0-9a-f]{32}-review\\.csv\\.age$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "plaintext_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "object",
+            "sha256",
+            "plaintext_sha256"
+          ]
+        }
+      },
+      "required": [
+        "working",
+        "held_out",
+        "review"
+      ]
+    },
+    "provider_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "generator": {
+          "$ref": "#/$defs/chat_usage"
+        },
+        "judge_1": {
+          "$ref": "#/$defs/chat_usage"
+        },
+        "judge_2": {
+          "$ref": "#/$defs/chat_usage"
+        },
+        "jev": {
+          "$ref": "#/$defs/embedding_usage"
+        },
+        "retrieval": {
+          "$ref": "#/$defs/embedding_usage"
+        },
+        "totals": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "confirmed_cost_usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "cost_upper_bound_usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "generation_judging_max_usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "retrieval_max_usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "cached_cost_usd": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "confirmed_cost_usd",
+            "cost_upper_bound_usd",
+            "generation_judging_max_usd",
+            "retrieval_max_usd"
+          ]
+        }
+      },
+      "required": [
+        "generator",
+        "judge_1",
+        "judge_2",
+        "jev",
+        "retrieval",
+        "totals"
+      ]
+    },
+    "content_filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "judged_candidates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filtered_candidates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_questions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filtered_candidate_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_filtered_candidate_share": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "generation_batches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filtered_generation_batches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filtered_generation_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "judged_candidates",
+        "filtered_candidates",
+        "dropped_questions",
+        "filtered_candidate_share",
+        "max_filtered_candidate_share",
+        "generation_batches",
+        "filtered_generation_batches",
+        "filtered_generation_share"
+      ]
+    },
+    "question_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "questions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_questions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasons": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "answer_expected_none_found": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "no_answer_but_relevant_found": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_judge_grades": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "empty_candidate_pool": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "judge_content_filter": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "answer_expected_none_found",
+            "no_answer_but_relevant_found",
+            "invalid_judge_grades",
+            "empty_candidate_pool",
+            "judge_content_filter"
+          ]
+        },
+        "shares": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "answer_expected_none_found": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "no_answer_but_relevant_found": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "invalid_judge_grades": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "empty_candidate_pool": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "judge_content_filter": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "answer_expected_none_found",
+            "no_answer_but_relevant_found",
+            "invalid_judge_grades",
+            "empty_candidate_pool",
+            "judge_content_filter"
+          ]
+        }
+      },
+      "required": [
+        "questions",
+        "dropped_questions",
+        "reasons",
+        "shares"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "questions",
+    "articles",
+    "question_types",
+    "rejected",
+    "split",
+    "judgments",
+    "judged_depth",
+    "agreement",
+    "jev_grade_mapping",
+    "three_way_ties",
+    "hard_negatives",
+    "human_check",
+    "baseline",
+    "saturation"
+  ],
+  "$defs": {
+    "chat_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budgeted_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budgeted_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cost_upper_bound_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stopped": {
+          "type": "boolean"
+        },
+        "rejected": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "invalid_json": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_response": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_questions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_evidence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_grades": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "missing_ids": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unknown_ids": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bad_values": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "extra_fields": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "content_filter": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "request_refused": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "input_bound": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "timeouts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "refusals": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[45][0-9]{2}:(unknown|invalid_request_error|invalid_value|unsupported_value|invalid_api_key|context_length_exceeded|model_not_found|rate_limit_exceeded|insufficient_quota|content_filter|content_policy_violation|server_error|service_unavailable|BadRequest|InvalidRequest|Unauthorized|DeploymentNotFound|InternalServerError)$": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "cached_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cached_refusals": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[45][0-9]{2}:(unknown|invalid_request_error|invalid_value|unsupported_value|invalid_api_key|context_length_exceeded|model_not_found|rate_limit_exceeded|insufficient_quota|content_filter|content_policy_violation|server_error|service_unavailable|BadRequest|InvalidRequest|Unauthorized|DeploymentNotFound|InternalServerError)$": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "required": [
+        "attempts",
+        "budgeted_input_tokens",
+        "budgeted_output_tokens",
+        "confirmed_input_tokens",
+        "confirmed_output_tokens",
+        "confirmed_cost_usd",
+        "cost_upper_bound_usd",
+        "max_usd",
+        "stopped"
+      ]
+    },
+    "embedding_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reserved_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budgeted_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "admitted_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blocked_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cost_upper_bound_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stopped": {
+          "type": "boolean"
+        },
+        "reason": {
+          "enum": [
+            null,
+            "run embedding input-token or USD budget exhausted",
+            "provider usage exceeded conservative input-token reservation"
+          ]
+        },
+        "cached_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "refusals": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[45][0-9]{2}:(unknown|invalid_request_error|invalid_value|unsupported_value|invalid_api_key|context_length_exceeded|model_not_found|rate_limit_exceeded|insufficient_quota|content_filter|content_policy_violation|server_error|service_unavailable|BadRequest|InvalidRequest|Unauthorized|DeploymentNotFound|InternalServerError)$": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "cached_refusals": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[45][0-9]{2}:(unknown|invalid_request_error|invalid_value|unsupported_value|invalid_api_key|context_length_exceeded|model_not_found|rate_limit_exceeded|insufficient_quota|content_filter|content_policy_violation|server_error|service_unavailable|BadRequest|InvalidRequest|Unauthorized|DeploymentNotFound|InternalServerError)$": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "required": [
+        "max_input_tokens",
+        "confirmed_input_tokens",
+        "reserved_input_tokens",
+        "budgeted_input_tokens",
+        "admitted_calls",
+        "blocked_calls",
+        "confirmed_cost_usd",
+        "cost_upper_bound_usd",
+        "max_usd",
+        "stopped",
+        "reason"
+      ]
+    }
+  }
+}

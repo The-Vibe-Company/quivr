@@ -1,0 +1,71 @@
+{
+  "workload": "quivr-text-retrieval-baseline-v1",
+  "ticket": "https://linear.app/thevibecompany/issue/THE-661",
+  "frozen": "2026-09-28, before any result of this protocol was observed",
+  "fixture": {
+    "path": "internal/adapters/weaviate/testdata/relevance-v1.json",
+    "sha256": "3f015b13413f89787b4fec242c7e6c86dc3bcd7d1c3667b8787124439badf2fa",
+    "description": "Original CC0 FR/EN news briefs from THE-553; rows are [id, title, body, language, query]",
+    "queries": 24,
+    "judgments": "binary; each query has exactly one relevant Record, the fixture row with the same id",
+    "ingestion": "public POST /v0/records, Manifest with Parts title(role title) and body(role body), one fresh Corpus, no other Records in that Corpus"
+  },
+  "declared_hardware": {
+    "reference": "GitHub-hosted ubuntu-24.04 standard runner (linux/amd64)",
+    "inference": "local TEI, CPU, float32, pinned E5 small snapshot",
+    "note": "Actual CPU, memory and Docker resources are recorded per run; results apply only to the recorded run"
+  },
+  "search": {
+    "endpoint": "POST /v0/search",
+    "modes": ["lexical", "semantic", "hybrid"],
+    "profile": "balanced",
+    "limit": 10,
+    "request_timeout_seconds": 10
+  },
+  "quality": {
+    "passes": 1,
+    "metrics": {
+      "mrr_at_10": "mean over queries of 1/rank of the relevant Record in the top 10, 0 when absent",
+      "recall_at_3": "fraction of queries whose relevant Record ranks 1..3",
+      "recall_at_10": "fraction of queries whose relevant Record ranks 1..10"
+    }
+  },
+  "latency": {
+    "warmup_passes": 1,
+    "measured_passes": 5,
+    "order": "for each pass, the 24 queries in a seeded shuffle; for each query, the three modes in a seeded shuffle",
+    "seed": 661,
+    "measure": "client wall time from request start to parsed JSON body, milliseconds",
+    "percentiles": "nearest-rank over successful samples; non-200 responses and timeouts are counted as failures and never dropped",
+    "conditions": [
+      {"name": "sequential", "concurrency": 1, "ingestion": false},
+      {"name": "concurrent-4", "concurrency": 4, "ingestion": false},
+      {"name": "ingesting", "concurrency": 1, "ingestion": true}
+    ],
+    "target": {
+      "p95_ms_below": 1000,
+      "primary": "each mode under the sequential condition (simple search)",
+      "secondary": "concurrent-4 and ingesting cells are compared with the same target for this workload only"
+    }
+  },
+  "concurrent_ingestion": {
+    "corpus": "a second fresh Corpus, so fixture scope and judgments are unchanged",
+    "records": 48,
+    "rate_per_second": 2,
+    "text_template": "Bulletin synthétique {i} : la commune de Testville publie son relevé hebdomadaire numéro {i}, sans lien avec les autres dépêches.",
+    "text_source": "self-authored synthetic distractor, rights-clear",
+    "repeat_until": "all measured latency samples of the ingesting condition are collected; the stream restarts with new record keys if it finishes first"
+  },
+  "phases": [
+    "prepare: tokenizer, pinned model files, go build and image pull (cold only when caches are empty)",
+    "cold_start: compose up --wait, migrations, API and worker readiness",
+    "cold_model_ready: first successful semantic search on the cold stack",
+    "warm_start: same start after removing the project and its volumes, with cached images and model",
+    "warm_model_ready: first successful semantic search on the warm stack"
+  ],
+  "limits": [
+    "24 short single-segment documents; no large-scale, multi-architecture or production relevance claim",
+    "one run on shared hardware; no stability claim across runs",
+    "relevance weights and fixture are not tuned here; hybrid relevance belongs to THE-641"
+  ]
+}

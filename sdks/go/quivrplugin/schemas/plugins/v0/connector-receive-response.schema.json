@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "connector receive response, v0",
+  "description": "200 body of POST /v0/contributions/connector/receive: the plugin's verdict on one relayed delivery and the answer the core returns to the source. accepted: the delivery is authentic; the core ingests its items (the fetch item shape, without attachments) before answering, so an item a pull run also returns converges on the same Receipt. refused: the delivery is not authentic or not addressed to this instance; the core returns the answer and changes nothing. Since Plugin API 0.11, an accepted POST on a declared API route returns 202 with ingestion Receipts instead of the plugin response; GET challenges keep the plugin response and must carry no items.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "response"
+  ],
+  "properties": {
+    "verdict": {
+      "enum": [
+        "accepted",
+        "refused"
+      ]
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "description": "What the core answers the source: a 2xx status for accepted, a 4xx status for refused. A challenge (such as a CRC check) is an accepted delivery with no items whose body is the challenge answer.",
+      "properties": {
+        "status": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 499
+        },
+        "content_type": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[\\x21-\\x7e][\\x20-\\x7e]*$"
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 65536,
+          "description": "Text body returned to the source."
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "$ref": "connector-fetch-response.schema.json#/$defs/Item"
+      },
+      "description": "Items the delivery carries, at most the declared max_items. Only with verdict accepted; attachments are not supported in a delivery."
+    },
+    "reads": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Source resources the delivery counts as read; feeds the per-UTC-day usage counters."
+    }
+  }
+}

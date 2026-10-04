@@ -1,0 +1,71 @@
+---
+title: "Retire alert evaluations you cannot finish"
+description: "Inspect and explicitly abandon bounded batches of evaluations whose old alert-rule implementation cannot be restored."
+keywords: ["retirement", "evaluation backlog", "evaluator unavailable", "alert rule"]
+---
+
+Retirement closes unavailable alert evaluations as `evaluator_retired` without judging the documents. Use it only when you cannot restore their pinned rule and accept losing potential Matches.
+
+A Match records a document meeting an alert; a Delivery sends that Match to the alert's destination.
+
+## Prerequisites
+
+- An operator key with `plugins:admin` and grants for the Organization and Corpora you inspect or retire. A Corpus is a collection of documents; those grants bound the work and receipts you can see.
+- The exact plugin id and version from [the plugin registry](/run-quivr/upgrade-a-plugin#steps), and a reason for abandoning its evaluations.
+- `curl` and `jq` installed (`curl --version`, `jq --version`), your API address in `QUIVR_API_URL`, and that key in `QUIVR_OPERATOR_KEY`.
+
+The requests below are examples, not run here. Replace the plugin version and reason with your operational decision.
+
+<Warning>
+Retirement creates no Match or Delivery. Restore the exact old implementation when possible to preserve potential Matches. Earlier Matches and Delivery history stay unchanged.
+</Warning>
+
+## Steps
+
+1. Inspect the backlog:
+
+   ```bash
+   curl -s "$QUIVR_API_URL/v0/admin/subscriptions/evaluation-backlog" \
+     -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" | jq '{items, next_after}'
+   ```
+
+   Each item names `plugin_id`, `version`, `pending`, `erroring`, `unavailable` and `retired`. Request `limit` up to 500; pass `next_after` as `after` for the next page. This cursor is the last `plugin_id@version` returned. Counts describe recorded work, not current endpoint health: a restored endpoint can have recorded errors until evaluation runs again.
+
+2. Dry-run a bounded retirement:
+
+   ```bash
+   curl -s -X POST "$QUIVR_API_URL/v0/admin/subscriptions/evaluation-retirements" \
+     -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" -H "Content-Type: application/json" \
+     -d @- <<'JSON' | jq
+   {"key": "retire-alerts-batch-1", "plugin_id": "alerts", "version": "0.2.0",
+    "reason": "The old implementation cannot be restored; accept losing potential matches",
+    "dry_run": true, "limit": 100}
+   JSON
+   ```
+
+3. Inspect the selected `items` and `leased` count. Only pending evaluations whose latest error is `evaluator_unavailable` and whose leases have expired can close. A lease is Quivr's temporary reservation for a worker: live leases, other errors and work not yet dispatched are excluded.
+4. Send the same request with `dry_run: false` when you accept the loss. A dry run changes nothing, stores no receipt and reserves no key, so its key may be reused. The batch limit defaults to 100 and cannot exceed 500.
+5. Read `GET /v0/admin/subscriptions/evaluation-retirements/{retirement_id}` and preserve the receipt. It requires grants covering the original request's Corpus scope, even for an empty batch; a missing or hidden receipt returns `404`.
+6. Let Quivr turn older document changes into evaluations for the Subscriptions they affect, and let live leases expire. Repeat preview/real batches with new keys until `pending` and `unavailable` are zero. Resolve other errors separately, and check the registry's `subscriptions` and `pinned_work` before removing the old build. Retirement is a batch, not a permanent policy against that version.
+
+## Check it worked
+
+Read the receipt and inspect the backlog again. Selected items have `evaluator_retired`; unrelated work retains its history. A new arrival needs a new batch and key.
+
+| Receipt or count | Meaning |
+| --- | --- |
+| Request fields | `key`, `plugin_id`, `version`, `reason`, `dry_run` and the normalized `limit`. |
+| `retirement_id`, `outcome` | The receipt identifier and `evaluator_retired` outcome. |
+| `items` | Original identifiers for each selected evaluation: Subscription, Subscription Version, sequence, Corpus, Record and Record Version. |
+| `remaining` | Unavailable evaluations left after this batch, including live leases counted by `leased`; a preview reports the hypothetical remainder. |
+| `leased` | Unavailable evaluations with a live worker lease, excluded from retirement. |
+| `created_at`, item `event_id` | Present for real retirements only. Dry runs have neither. |
+
+Each item retains `subscription_id`, `subscription_version_id`, `sequence`, `corpus_id`, `record_id` and `record_version_id`. A real item's event is `evaluation.retired`, with `resource.kind=evaluation_retirement` and `resource.id=retirement_id`.
+
+Within an Organization, replaying a real key with the same normalized request and Corpus scope returns the original receipt and counts. Changing the request or scope returns `409 idempotency_conflict`. Even an empty real batch reserves its key; later arrivals need a new key.
+
+## Next
+
+- [Upgrade an alert rule](/run-quivr/upgrade-an-alert-rule) to move Subscriptions still pinning the old version.
+- [Check the drain](/run-quivr/upgrade-a-plugin#work-finishes-on-the-version-it-started-with) before stopping the old process.

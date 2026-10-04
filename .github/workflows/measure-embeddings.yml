@@ -1,0 +1,39 @@
+name: Embedding quality
+# Paid measurements run on a developer's machine. This manual job previews only
+# the existing engine-path campaign plan, without credentials or provider calls.
+on:
+  workflow_dispatch:
+    inputs:
+      max_input_tokens:
+        description: Run-wide input-token cap for the offline plan
+        required: true
+        default: '15000000'
+      max_usd:
+        description: Run USD cap for the offline plan
+        required: true
+        default: '8'
+permissions:
+  contents: read
+jobs:
+  embedding-plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Preview campaign without provider calls
+        env:
+          TOKEN_CAP: ${{ inputs.max_input_tokens }}
+          USD_CAP: ${{ inputs.max_usd }}
+        run: |
+          mkdir -p .scratch/eval
+          python3 scripts/eval/campaign.py --dry-run --max-input-tokens "$TOKEN_CAP" --max-usd "$USD_CAP" > .scratch/eval/embedding-plan.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: embedding-plan
+          include-hidden-files: true
+          path: .scratch/eval/embedding-plan.json
+      - name: Show offline plan
+        run: cat .scratch/eval/embedding-plan.json >> "$GITHUB_STEP_SUMMARY"

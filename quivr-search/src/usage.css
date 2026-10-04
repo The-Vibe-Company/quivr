@@ -1,0 +1,563 @@
+/* The Admin tab's usage section (THE-798), in the tokens of styles.css and
+   dashboard.css. Four blocks share one panel, split by hairlines rather than
+   nested cards. Series colours are five categorical slots validated for
+   colour-blind separation on each surface (the dataviz six checks), in the
+   order they stack; "Autres" is a neutral. */
+
+/* The usage tab and the day at a glance beside the Admin flow. */
+.usage-grid,
+.glance {
+  --series-1: #5b3fd6;
+  --series-2: #1baf7a;
+  --series-3: #eb6834;
+  --series-4: #2a78d6;
+  --series-5: #e87ba4;
+  --series-other: #c3c4cf;
+  --series-hot: color-mix(in oklab, var(--hot) 88%, var(--panel));
+}
+.usage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: -16px -22px -20px;
+}
+/* Dark theme: follows the system unless a theme was chosen in the rail
+   (data-theme on <html>). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :is(.usage-grid, .glance) {
+    --series-1: #9085e9;
+    --series-2: #199e70;
+    --series-3: #d95926;
+    --series-4: #3987e5;
+    --series-5: #d55181;
+    --series-other: #4a4b5a;
+  }
+}
+:root[data-theme="dark"] :is(.usage-grid, .glance) {
+  --series-1: #9085e9;
+  --series-2: #199e70;
+  --series-3: #d95926;
+  --series-4: #3987e5;
+  --series-5: #d55181;
+  --series-other: #4a4b5a;
+}
+
+.usage-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 18px 22px 20px;
+  transition: opacity 150ms var(--ease);
+}
+.usage-block:nth-child(even) {
+  border-left: 1px solid var(--line-soft);
+}
+.usage-block:nth-child(n + 3) {
+  border-top: 1px solid var(--line-soft);
+}
+.usage-block[data-stale] {
+  opacity: 0.5;
+}
+.usage-block h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.usage-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* The block's number: the count, then what it counts, then its scope. */
+.usage-figure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  margin: -4px 0 0;
+}
+.usage-figure-value {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.6px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.usage-figure-unit {
+  font-size: 14px;
+  font-weight: 600;
+}
+.usage-figure-detail {
+  flex-basis: 100%;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.usage-figure-alert {
+  color: var(--error);
+}
+
+/* Stacked columns: each column's segments carry a 2px surface gap, a 3px
+   rounded top and a square baseline. */
+.usage-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.usage-columns {
+  position: relative;
+  display: grid;
+  align-items: end;
+  gap: 2px;
+  height: 112px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 2px;
+  outline-offset: 4px;
+}
+.usage-slot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+  min-width: 0;
+  border-radius: 3px 3px 0 0;
+}
+.usage-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  width: 100%;
+  max-width: 22px;
+  min-height: 3px;
+  transition: height 220ms var(--ease-out);
+}
+.usage-segment {
+  flex-basis: 0;
+  min-height: 2px;
+  background: var(--series-1);
+  transition: opacity 120ms var(--ease);
+}
+.usage-segment:last-child {
+  border-radius: 3px 3px 0 0;
+}
+.usage-segment[data-slot="2"] {
+  background: var(--series-2);
+}
+.usage-segment[data-slot="3"] {
+  background: var(--series-3);
+}
+.usage-segment[data-slot="4"] {
+  background: var(--series-4);
+}
+.usage-segment[data-slot="5"] {
+  background: var(--series-5);
+}
+.usage-segment[data-slot="0"] {
+  background: var(--series-other);
+}
+.usage-chart[data-tone="hot"] .usage-segment {
+  background: var(--series-hot);
+}
+.usage-chart[data-tone="hot"] .usage-columns {
+  height: 84px;
+}
+/* The column in focus stands out; the others step back. */
+.usage-columns:has(.usage-slot[data-point])
+  .usage-slot:not([data-point])
+  .usage-segment {
+  opacity: 0.45;
+}
+.usage-slot[data-point] {
+  background: var(--hover);
+}
+
+.usage-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  z-index: 2;
+  min-width: 150px;
+  max-width: 220px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 6px 20px #17132d1f;
+  transform: translateX(-50%);
+  pointer-events: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-tip p {
+  margin: 0;
+}
+.usage-tip-range {
+  margin-bottom: 4px !important;
+  color: var(--ink-faint);
+}
+.usage-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.6;
+}
+.usage-tip-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.usage-tip-total {
+  font-weight: 600;
+}
+.usage-tip-row + .usage-tip-total {
+  margin-top: 4px !important;
+  padding-top: 4px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.usage-axis {
+  display: grid;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-swatch {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--series-1);
+}
+.usage-swatch[data-slot="2"] {
+  background: var(--series-2);
+}
+.usage-swatch[data-slot="3"] {
+  background: var(--series-3);
+}
+.usage-swatch[data-slot="4"] {
+  background: var(--series-4);
+}
+.usage-swatch[data-slot="5"] {
+  background: var(--series-5);
+}
+.usage-swatch[data-slot="0"] {
+  background: var(--series-other);
+}
+.usage-swatch[data-slot="none"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* The legend is also the ranking: name, count, share. */
+.usage-legend {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 3.2em;
+  column-gap: 8px;
+  row-gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.usage-legend li {
+  display: contents;
+}
+.usage-legend .usage-swatch {
+  align-self: center;
+}
+.usage-legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-legend li[data-muted] .usage-legend-label {
+  color: var(--ink-soft);
+}
+.usage-legend-value {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.usage-legend-share {
+  text-align: right;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Searches per mode. */
+.usage-modes {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-modes th,
+.usage-modes td {
+  padding: 6px 0;
+  text-align: right;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.usage-modes thead th {
+  padding-top: 0;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.usage-modes tbody tr + tr > * {
+  border-top: 1px solid var(--line-soft);
+}
+.usage-modes th:first-child {
+  text-align: left;
+}
+.usage-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.usage-modes td:not(:last-child),
+.usage-modes thead th:not(:first-child):not(:last-child) {
+  padding-left: 14px;
+}
+.usage-modes td:nth-child(4) {
+  font-weight: 600;
+}
+.usage-modes-trend,
+.usage-modes thead th:last-child {
+  width: 1%;
+  padding-left: 16px !important;
+}
+.usage-hint {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+/* A row's trend: micro-columns on a hairline, scaled to the row's peak. */
+.usage-trend {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 64px;
+  height: 18px;
+  vertical-align: middle;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.usage-trend span {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in oklab, var(--accent) 60%, var(--panel));
+}
+.usage-trend span[data-empty] {
+  background: none;
+}
+
+/* A latency's trend: a line in its mode's colour. */
+.usage-sparkline {
+  display: block;
+  overflow: visible;
+}
+.usage-sparkline polyline {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.usage-sparkline circle {
+  fill: var(--series-1);
+}
+.usage-sparkline[data-slot="2"] polyline {
+  stroke: var(--series-2);
+}
+.usage-sparkline[data-slot="2"] circle {
+  fill: var(--series-2);
+}
+.usage-sparkline[data-slot="3"] polyline {
+  stroke: var(--series-3);
+}
+.usage-sparkline[data-slot="3"] circle {
+  fill: var(--series-3);
+}
+
+/* The most frequent queries, ranked. */
+.usage-queries {
+  display: grid;
+  grid-template-columns: 2em minmax(0, 1fr) auto 3.5em;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+}
+.usage-queries li {
+  display: contents;
+}
+.usage-queries li > * {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+}
+.usage-queries li + li > * {
+  border-top: 1px solid var(--line-soft);
+}
+.usage-queries li > :not(:last-child) {
+  padding-right: 12px;
+}
+.usage-rank {
+  justify-content: flex-end;
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-query {
+  display: block !important;
+  line-height: 34px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-query-count {
+  justify-content: flex-end;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recording is off: a calm explanation, not a problem. */
+.usage-recording {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--subtle);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.usage-recording p {
+  margin: 0;
+  max-width: 60ch;
+  text-wrap: pretty;
+}
+.usage-recording p + p {
+  margin-top: 6px;
+}
+.usage-recording-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--ink-faint);
+}
+.usage-recording-title {
+  font-weight: 600;
+  color: var(--ink);
+}
+.usage-recording-why {
+  color: var(--ink-faint);
+  font-size: 12.5px;
+}
+.usage-recording code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.usage-empty,
+.usage-note,
+.usage-foot {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  text-wrap: pretty;
+}
+.usage-empty {
+  max-width: 46ch;
+}
+.usage-foot {
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Loading: the block's shapes, still. */
+.usage-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.usage-skeleton span {
+  display: block;
+  border-radius: 6px;
+  background: var(--line-soft);
+  animation: skeleton-breathe 1.2s ease-in-out infinite alternate;
+}
+.usage-skeleton-figure {
+  width: 45%;
+  height: 30px;
+}
+.usage-skeleton-chart {
+  display: flex !important;
+  align-items: flex-end;
+  gap: 4px;
+  height: 112px;
+  background: none !important;
+  animation: none !important;
+}
+.usage-skeleton-chart span {
+  flex: 1;
+  border-radius: 3px 3px 0 0;
+}
+.usage-skeleton-row {
+  height: 22px;
+}
+
+@media (max-width: 900px) {
+  .usage-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .usage-block:nth-child(even) {
+    border-left: 0;
+  }
+  .usage-block:nth-child(n + 2) {
+    border-top: 1px solid var(--line-soft);
+  }
+}
+@media (max-width: 520px) {
+  .usage-block {
+    padding-inline: 16px;
+  }
+  .usage-modes .usage-hint,
+  .usage-modes-trend,
+  .usage-modes thead th:last-child {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .usage-block,
+  .usage-stack,
+  .usage-segment {
+    transition: none;
+  }
+  .usage-skeleton span {
+    animation: none;
+  }
+}
+@media (forced-colors: active) {
+  .usage-segment,
+  .usage-swatch,
+  .usage-trend span {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
+}

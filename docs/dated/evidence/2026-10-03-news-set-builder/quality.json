@@ -1,0 +1,76 @@
+{
+  "agreement": {
+    "cohen_kappa": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "fleiss_kappa": 1.0
+  },
+  "articles": 8,
+  "artifacts": {
+    "held_out": {
+      "object": "75dac60c7650d6e867d5f6d828cf287bd9590615157ed51ce13afb551eac2682-7eae576a3ea448158e0876e35c52de1d-held_out.tar.gz.age",
+      "plaintext_sha256": "80f40967ea0f85aea61961a9ec6114f62d4f8c047d9e13101cd0115ffd376272",
+      "sha256": "291bf2e19ee47dfd360fd4cd5b3eeb143a862f04a4b47f0590b99b2a03bae12f"
+    },
+    "review": {
+      "object": "75dac60c7650d6e867d5f6d828cf287bd9590615157ed51ce13afb551eac2682-7eae576a3ea448158e0876e35c52de1d-review.csv.age",
+      "plaintext_sha256": "7b81d1069902b7fb096afef6e16fb1fae9b2d259745e7729fe2ba3e17a77f99b",
+      "sha256": "20a7bcc5519bbe0efee6f5f507e8067b73a97530f91527529552e267af47862d"
+    },
+    "working": {
+      "object": "75dac60c7650d6e867d5f6d828cf287bd9590615157ed51ce13afb551eac2682-7eae576a3ea448158e0876e35c52de1d-working.tar.gz.age",
+      "plaintext_sha256": "cac4f862e354e249a747c5d9d66680236804b244b8422693ffc7e2ddc2766818",
+      "sha256": "e341bdae0c086df22de437ca4c70b2b8b65881fc106225a2bd50972e208970df"
+    }
+  },
+  "baseline": {
+    "metrics": {
+      "mrr@10": 1.0,
+      "ndcg@10": 1.0,
+      "recall@10": 1.0
+    },
+    "no_answer_queries": 150,
+    "queries": 750,
+    "system": "hybrid"
+  },
+  "hard_negatives": 10250,
+  "human_check": {
+    "agreement_rate": null,
+    "reviewed": 0,
+    "sampled": 100,
+    "status": "pending"
+  },
+  "jev_grade_mapping": "not_used",
+  "judged_depth": {
+    "8": 1500
+  },
+  "judgments": 12000,
+  "question_types": {
+    "entity": 250,
+    "event": 250,
+    "multi_article": 250,
+    "no_answer": 250,
+    "paraphrase": 250,
+    "recent": 250
+  },
+  "questions": 1500,
+  "rejected": {
+    "duplicate": 0,
+    "shared_keywords": 0,
+    "title_copy": 0
+  },
+  "saturation": {
+    "scorable_working_queries": 750,
+    "working_queries_perfect_in_all_systems": 750
+  },
+  "schema_version": 1,
+  "split": {
+    "held_out": 600,
+    "working": 900
+  },
+  "status": "synthetic",
+  "three_way_ties": 0,
+  "version": "75dac60c7650d6e867d5f6d828cf287bd9590615157ed51ce13afb551eac2682"
+}

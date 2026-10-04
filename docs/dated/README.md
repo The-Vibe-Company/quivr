@@ -1,0 +1,68 @@
+# Dated documents
+
+These documents record what was decided, measured or researched on a given
+date. They do not describe current behaviour, which is defined by the code, the
+[OpenAPI contract](../../contracts/http/v0/openapi.yaml), the
+[domain language](../../CONTEXT.md) and the living pages in
+[`docs/inventory.toml`](../inventory.toml).
+
+Each dated document carries a `Date:` and a `Status:` line under its title and is
+frozen: `make docs` fails when a branch edits or removes one (compared with
+where the branch forked from `origin/main`). To change a past decision, add a
+new document or [ADR](../adr/) that supersedes it and links to it. Only a
+document whose status is `proposed` may still be edited. The rules and their trade-offs are recorded in
+[ADR 0004](../adr/0004-documentation-rules-are-enforced-by-ci-only.md).
+
+Dated documents keep their original language.
+
+## Adding one
+
+1. Put it in the folder for its kind below. Give it a stable file name.
+2. Start it with its title, then `Date: YYYY-MM-DD` and `Status: <status>` lines
+   (for example `proposed`, `accepted`, `final` or `historical`).
+3. Add it to the list here.
+
+Architecture decisions go in [`docs/adr/`](../adr/) with the next number.
+
+## Design records
+
+Specifications and decision records from the design phase. Contract facts in
+them may since have changed; the contract and the code are authoritative.
+
+- [Project and architecture overview](design/quivr-v2-architecture-overview.md) (French)
+- [Backend MVP scope](design/quivr-v2-backend-mvp-scope.md) (French)
+- [Canonical data model and lifecycle invariants](design/quivr-v2-canonical-data-model.md)
+- [Module ownership and repository design](design/quivr-v2-module-boundaries.md)
+- [Public ingestion contracts](design/quivr-v2-ingestion-contracts.md)
+- [Public text search and projection rebuild](design/quivr-v2-search-contracts.md)
+- [Thin monitoring tracer and public change feed](design/quivr-v2-monitoring-tracer.md)
+
+## Evidence
+
+- [2026-10-03: direct embedding comparison](evidence/2026-10-03-embedding-comparison/summary.md)
+- [2026-10-03: synthetic private news-set builder validation](evidence/2026-10-03-news-set-builder/summary.md)
+
+Measurements and verification reports tied to a commit.
+
+- [THE-661: text retrieval baseline](evidence/the-661-retrieval-baseline.md)
+- [THE-662: Spec 1 obligation map](evidence/the-662-spec1-closure.md)
+- [THE-663: demo interface evidence](evidence/the-663-ui.md)
+- [THE-664: deployment evidence](evidence/the-664-deployment.md)
+- [THE-675: removing the per-query floor from public search](evidence/the-675-query-floor.md)
+
+## Research
+
+Technology comparisons behind the stack.
+
+- [Cloudflare Forge as the generation pipeline](research/forge-generation-pipeline.md)
+- [DeepSeek Harness plugin architecture](research/deepseek-harness-plugin-architecture.md) (French)
+- [Event runtime developer experience](research/event-runtime-devx.md) (French)
+- [Herdr plugin model](research/herd-plugin-architecture.md) (French)
+- [Meilisearch](research/meilisearch-for-quivr.md) (French)
+- [Modern search developer experience](research/modern-search-devx.md) (French)
+- [Recent durable runtimes](research/new-durable-runtime-systems.md) (French)
+- [Open-source vector engines](research/new-oss-vector-systems.md) (French)
+- [Pi extensions and Chord](research/pi-plugin-architecture.md) (French)
+- [Isolated plugin runtime](research/plugin-isolation-runtime.md) (French)
+- [Storage and search stack](research/storage-search-stack.md) (French)
+- [Windmill as ingestion and plugin runtime](research/windmill-for-quivr.md) (French)

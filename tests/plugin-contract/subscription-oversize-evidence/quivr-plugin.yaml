@@ -1,0 +1,19 @@
+# Deliberately broken subscription test plugin for the Contract Runner (tests/plugin-contract).
+# A match explanation of 4097 code points, over the engine bound of 4096.
+id: broken.subscription-oversize-evidence
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.2.0 <0.3.0"
+contributions:
+  subscription:
+    expression_schema:
+      type: object
+      additionalProperties: false
+      required: [kind, text]
+      properties:
+        kind: {const: substring}
+        text: {type: string, minLength: 1}
+    timeout_ms: 5000
+run:
+  command: [quivr-fake-plugin, oversize-evidence]

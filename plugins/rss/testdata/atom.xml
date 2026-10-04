@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+  <title>Example Atom Feed</title>
+  <link href="https://blog.example.org/"/>
+  <updated>2026-09-03T12:00:00Z</updated>
+  <id>urn:uuid:60a76c80-d399-11d9-b93C-0003939e0af6</id>
+  <entry>
+    <title type="html">Atom &lt;i&gt;entry&lt;/i&gt;</title>
+    <link rel="alternate" href="https://blog.example.org/entry"/>
+    <id>urn:uuid:1225c695-cfb8-4ebb-aaaa-80da344efa6a</id>
+    <published>2026-09-03T11:00:00Z</published>
+    <updated>2026-09-03T12:00:00Z</updated>
+    <author><name>Alex Writer</name><email>alex@example.org</email></author>
+    <category term="Technology"/>
+    <summary>Entry summary.</summary>
+    <content type="html">&lt;div&gt;Entry &lt;strong&gt;content&lt;/strong&gt;.&lt;/div&gt;</content>
+  </entry>
+</feed>

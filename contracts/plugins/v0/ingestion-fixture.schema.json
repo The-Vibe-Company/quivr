@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ingestion fixture, v0",
+  "description": "A local test input for an ingestion plugin (since Plugin API 0.6): the text Parts of one Record Version, the queries to encode and what to expect. quivr plugin test turns it into segment_and_embed and embed_query requests.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ingestion"
+  ],
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "ingestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parts"
+      ],
+      "properties": {
+        "parts": {
+          "$ref": "ingestion-segment-and-embed-request.schema.json#/properties/parts"
+        },
+        "language": {
+          "$ref": "ingestion-segment-and-embed-request.schema.json#/properties/language"
+        },
+        "configuration": {
+          "type": "object",
+          "description": "Plugin configuration; default {}."
+        },
+        "spaces": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "plugin-manifest.schema.json#/$defs/SpaceId"
+          },
+          "description": "Spaces to request; default every declared space."
+        },
+        "queries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Queries to encode in every requested space; default the first 200 code points of the first non-empty Part."
+        },
+        "expect": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "segments": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "part_key",
+                  "start",
+                  "end"
+                ],
+                "properties": {
+                  "part_key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "start": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "end": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "description": "The exact segments, in order."
+            },
+            "lexical_text": {
+              "type": "boolean",
+              "description": "Whether every segment carries lexical text (true) or none does (false)."
+            }
+          }
+        }
+      }
+    }
+  }
+}

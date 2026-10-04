@@ -1,0 +1,8 @@
+{
+  "items": [
+    {"record_key": "article-101", "content": {"kind": "manifest", "parts": [{"key": "body", "role": "body", "content": {"kind": "text", "text": "Body"}}]},
+     "attachments": [{"key": "photo", "parent_key": "gallery", "role": "attachment", "media_type": "image/jpeg", "ref": "media/1"}]}
+  ],
+  "checkpoint": null,
+  "more": false
+}

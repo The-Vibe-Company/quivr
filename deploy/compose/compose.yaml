@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    environment:
+      POSTGRES_USER: quivr
+      POSTGRES_DB: quivr
+      POSTGRES_PASSWORD: ${QUIVR_DB_PASSWORD:?}
+    ports:
+      - "127.0.0.1::5432"
+    volumes:
+      - data:/var/lib/postgresql/data
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "3"
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U quivr -d quivr]
+      interval: 1s
+      timeout: 2s
+      retries: 40
+  temporal:
+    image: temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d
+    command: [server, start-dev, --ip, 0.0.0.0, --headless, --db-filename, /home/temporal/temporal.db]
+    ports:
+      - "127.0.0.1::7233"
+    volumes:
+      - temporal-data:/home/temporal
+    healthcheck:
+      test: [CMD, temporal, operator, cluster, health, --address, '127.0.0.1:7233']
+      interval: 1s
+      timeout: 2s
+      retries: 40
+    logging:
+      driver: json-file
+      options: {max-size: 1m, max-file: '3'}
+  seaweed:
+    image: chrislusf/seaweedfs:4.45@sha256:fc9f76fa993ad69966ffeb2f65d0318fcae39c6f8e20cf68ef7b3a5cb97769e5
+    command: [mini, '-dir=/data', '-s3.config=/etc/seaweedfs/s3.json']
+    ports:
+      - "127.0.0.1::8333"
+    volumes:
+      - ${QUIVR_LOCAL_ROOT:?}/s3.json:/etc/seaweedfs/s3.json:ro
+      - seaweed-data:/data
+    logging:
+      driver: json-file
+      options: {max-size: 1m, max-file: '3'}
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.37.15@sha256:cede92f9f43f9b4be25a9f453e756173bbe171d2e88210a0e5b7ab72e8b96d96
+    environment:
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      AUTOSCHEMA_ENABLED: 'false'
+      CLUSTER_HOSTNAME: quivr-local
+      DEFAULT_VECTORIZER_MODULE: none
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+    ports:
+      - "127.0.0.1::8080"
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    logging:
+      driver: json-file
+      options: {max-size: 1m, max-file: '3'}
+
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
+    command: [--model-id, /model, --dtype, float32, --pooling, mean, --max-client-batch-size, '32', --max-batch-tokens, '8192', --auto-truncate, 'false', --tokenization-workers, '2']
+    environment:
+      HF_HUB_OFFLINE: '1'
+    volumes:
+      - ${QUIVR_MODEL_ROOT:?}:/model:ro
+    networks: [inference]
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost/health]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+    logging:
+      driver: json-file
+      options: {max-size: 1m, max-file: '3'}
+
+networks:
+  inference:
+    internal: true
+
+volumes:
+  data:
+  temporal-data:
+  seaweed-data:
+  weaviate-data:

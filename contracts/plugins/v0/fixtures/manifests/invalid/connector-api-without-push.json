@@ -1,0 +1,50 @@
+{
+  "id": "example-push",
+  "version": "1.0.0",
+  "compatibility": {
+    "engine": ">=0.1.0 <0.3.0",
+    "plugin_api": ">=0.11.0 <0.12.0"
+  },
+  "contributions": {
+    "connector": {
+      "kinds": {
+        "events": {
+          "config_schema": {
+            "type": "object"
+          },
+          "default_interval_seconds": 300,
+          "modes": [
+            "pull"
+          ],
+          "api": {
+            "routes": [
+              {
+                "name": "push",
+                "method": "POST",
+                "path": "events/{category}",
+                "auth": "quivr_key",
+                "request_schema": {
+                  "type": "object",
+                  "required": [
+                    "text"
+                  ],
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "challenge",
+                "method": "GET",
+                "path": "challenge",
+                "auth": "quivr_key"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

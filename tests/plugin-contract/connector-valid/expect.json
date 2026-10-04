@@ -1,0 +1,4 @@
+{
+  "description": "A well-behaved connector: pages fed back through the checkpoint, classified errors, no credential echoed.",
+  "certified": true
+}

@@ -1,0 +1,272 @@
+// Package changes exposes the Organization commit-ordered journal as a
+// resumable public change feed with opaque, scope-bound Change Cursors.
+package changes
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"net/url"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+)
+
+var (
+	// ErrCursorInvalid reports a malformed, tampered or unknown Change Cursor.
+	ErrCursorInvalid = publicerr.InvalidCursor
+	// ErrCursorScope reports a cursor issued for another Corpus or authorization scope.
+	ErrCursorScope = publicerr.CursorScopeChanged
+	// ErrCursorExpired reports that unconsumed positions aged out of retention.
+	ErrCursorExpired = publicerr.CursorExpired
+)
+
+// DefaultRetention is the public event-retention window.
+const DefaultRetention = 7 * 24 * time.Hour
+
+// ResyncURL is the API-relative reference from which a client restarts
+// resynchronization of a Corpus: the first page of its authorized Record catalog.
+func ResyncURL(corpusID string) string {
+	return "/v0/records?" + url.Values{"corpus_id": {corpusID}}.Encode()
+}
+
+// Event is one committed journal fact visible to a Corpus.
+type Event struct {
+	Position     int64
+	ID           string
+	Type         string
+	CorpusID     string
+	ResourceKind string
+	ResourceID   string
+	OccurredAt   time.Time
+	// Monitoring carries the references of a monitoring notice event; it is
+	// nil for every other event.
+	Monitoring *References
+}
+
+// References are the reference-only identifiers a monitoring notice shares
+// with its webhook body. They confer no access by themselves.
+type References struct {
+	MatchID, RecordID, RecordVersionID, SubscriptionID, SubscriptionVersionID, DeliveryID, PreviousMatchID string
+	// Owner is the Subscription Owner ("" for a global Subscription).
+	Owner string
+}
+
+// Window is one consistent scan of the journal.
+type Window struct {
+	// Events are the visible events in (after, Through], in commit order.
+	Events []Event
+	// Through is the last committed position that was fully scanned.
+	Through int64
+	// Head is the committed head at scan time.
+	Head int64
+	// Expired is true when the cursor precedes the pruned watermark, or when
+	// the first position after it is older than retention.
+	Expired bool
+}
+
+// Journal reads committed positions in one snapshot. It returns at most
+// limit visible events; when more exist, Through is the last returned one.
+type Journal interface {
+	ReadChanges(ctx context.Context, organization, corpusID string, after int64, limit int, retention time.Duration) (Window, error)
+}
+
+// Change is an Event paired with the cursor that resumes after it.
+type Change struct {
+	Event
+	Cursor string
+}
+
+// Page is a batch of changes and the position to resume from.
+type Page struct {
+	Items    []Change
+	Next     string
+	Position int64
+	HasMore  bool
+}
+
+// Service reads the journal for one authorized Corpus.
+type Service struct {
+	Corpora   corpus.Store
+	Journal   Journal
+	Key       []byte
+	Retention time.Duration
+}
+
+// Start resolves an optional cursor to a position. An empty cursor means start
+// now at the committed head. Expiry of a supplied cursor is detected here, so
+// transports can reject it before a stream begins.
+func (s Service) Start(ctx context.Context, scope corpus.Scope, corpusID, token string) (int64, error) {
+
+	if err := scope.Require(corpus.ActionChangesStart); err != nil {
+		return 0, err
+	}
+	if err := s.authorize(ctx, scope, corpusID); err != nil {
+		return 0, err
+	}
+	return s.start(ctx, scope, corpusID, token)
+}
+
+func (s Service) start(ctx context.Context, scope corpus.Scope, corpusID, token string) (int64, error) {
+	if token == "" {
+		w, err := s.Journal.ReadChanges(ctx, scope.Organization, corpusID, 0, 0, s.retention())
+		return w.Head, err
+	}
+	position, err := s.decode(scope, corpusID, token)
+	if err != nil {
+		return 0, err
+	}
+	w, err := s.Journal.ReadChanges(ctx, scope.Organization, corpusID, position, 0, s.retention())
+	if err != nil {
+		return 0, err
+	}
+	if position > w.Head {
+		return 0, ErrCursorInvalid
+	}
+	if w.Expired {
+		return 0, ErrCursorExpired
+	}
+	return position, nil
+}
+
+// Read returns up to limit visible changes after position.
+func (s Service) Read(ctx context.Context, scope corpus.Scope, corpusID string, position int64, limit int) (Page, error) {
+
+	if err := scope.Require(corpus.ActionChangesRead); err != nil {
+		return Page{}, err
+	}
+	if err := s.authorize(ctx, scope, corpusID); err != nil {
+		return Page{}, err
+	}
+	return s.read(ctx, scope, corpusID, position, limit)
+}
+
+func (s Service) read(ctx context.Context, scope corpus.Scope, corpusID string, position int64, limit int) (Page, error) {
+	w, err := s.Journal.ReadChanges(ctx, scope.Organization, corpusID, position, limit, s.retention())
+	if err != nil {
+		return Page{}, err
+	}
+	if position > w.Head {
+		return Page{}, ErrCursorInvalid
+	}
+	if w.Expired {
+		return Page{}, ErrCursorExpired
+	}
+	page := Page{Items: make([]Change, 0, len(w.Events)), Position: w.Through, HasMore: w.Through < w.Head}
+	for _, e := range w.Events {
+		page.Items = append(page.Items, Change{Event: e, Cursor: s.Cursor(scope, corpusID, e.Position)})
+	}
+	page.Next = s.Cursor(scope, corpusID, w.Through)
+	return page, nil
+}
+
+// Poll implements start-now polling: without a cursor it returns no events
+// and the committed head as the next cursor.
+func (s Service) Poll(ctx context.Context, scope corpus.Scope, corpusID, token string, limit int, prepare ...func() (int, error)) (Page, error) {
+
+	if err := scope.Require(corpus.ActionChangesPoll); err != nil {
+		return Page{}, err
+	}
+	if err := s.authorize(ctx, scope, corpusID); err != nil {
+		return Page{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		limit, err = load()
+		if err != nil {
+			return Page{}, err
+		}
+	}
+	return s.poll(ctx, scope, corpusID, token, limit)
+}
+
+func (s Service) poll(ctx context.Context, scope corpus.Scope, corpusID, token string, limit int) (Page, error) {
+	if token == "" {
+		position, err := s.start(ctx, scope, corpusID, "")
+		if err != nil {
+			return Page{}, err
+		}
+		return Page{Items: []Change{}, Next: s.Cursor(scope, corpusID, position), Position: position}, nil
+	}
+	position, err := s.decode(scope, corpusID, token)
+	if err != nil {
+		return Page{}, err
+	}
+	return s.read(ctx, scope, corpusID, position, limit)
+}
+
+type cursorPayload struct {
+	Version  int    `json:"v"`
+	Corpus   string `json:"c"`
+	Scope    string `json:"s"`
+	Position int64  `json:"p"`
+}
+
+// Cursor encodes an opaque Change Cursor bound to scope and Corpus.
+func (s Service) Cursor(scope corpus.Scope, corpusID string, position int64) string {
+	b, _ := json.Marshal(cursorPayload{1, corpusID, digest(scope), position})
+	return base64.RawURLEncoding.EncodeToString(b) + "." + base64.RawURLEncoding.EncodeToString(s.sign(b))
+}
+
+func (s Service) decode(scope corpus.Scope, corpusID, token string) (int64, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return 0, ErrCursorInvalid
+	}
+	b, e1 := base64.RawURLEncoding.DecodeString(parts[0])
+	sig, e2 := base64.RawURLEncoding.DecodeString(parts[1])
+	var c cursorPayload
+	if e1 != nil || e2 != nil || !hmac.Equal(sig, s.sign(b)) || json.Unmarshal(b, &c) != nil || c.Version != 1 || c.Position < 0 {
+		return 0, ErrCursorInvalid
+	}
+	if c.Corpus != corpusID || c.Scope != digest(scope) {
+		return 0, ErrCursorScope
+	}
+	return c.Position, nil
+}
+
+func (s Service) sign(b []byte) []byte {
+	h := hmac.New(sha256.New, s.Key)
+	h.Write([]byte("change-cursor\x00"))
+	h.Write(b)
+	return h.Sum(nil)
+}
+
+func (s Service) retention() time.Duration {
+	if s.Retention <= 0 {
+		return DefaultRetention
+	}
+	return s.Retention
+}
+
+func digest(s corpus.Scope) string {
+	s.Actions = append([]string{}, s.Actions...)
+	s.Corpora = append([]string{}, s.Corpora...)
+	sort.Strings(s.Actions)
+	sort.Strings(s.Corpora)
+	b, _ := json.Marshal(s)
+	h := sha256.Sum256(b)
+	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// ErrInvalidCorpus refuses a missing change-feed collection after permission.
+var ErrInvalidCorpus = publicerr.InvalidQuery
+
+func (s Service) authorize(ctx context.Context, scope corpus.Scope, id string) error {
+	if id == "" {
+		return ErrInvalidCorpus
+	}
+	if !scope.Contains(id) {
+		return corpus.ErrNotFound
+	}
+	if s.Corpora != nil {
+		_, err := s.Corpora.Read(ctx, scope.Organization, id)
+		return err
+	}
+	return nil
+}

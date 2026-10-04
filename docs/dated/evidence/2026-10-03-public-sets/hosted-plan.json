@@ -1,0 +1,589 @@
+{
+  "date": "2026-10-03",
+  "status": "coordinator hand-off; no hosted run performed by worker",
+  "model": "Cohere-Embed-V5-Pro",
+  "prices_usd_per_million": 0.12,
+  "price_reference_date": "2026-10-03",
+  "default_max_usd": 9.82,
+  "including_restricted_max_usd": 13.48,
+  "sets": [
+    {
+      "set": "miracl-fr",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "0f86cc8028b8c49ce56d1f2442f21d18bdd05dd62c3da05eb8604bb5955d4e5f",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 5001,
+        "query_inputs": 343,
+        "input_tokens": 2714516,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.32574191999999996,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 5429032,
+          "max_usd": 0.66
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "miracl-fr",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "5429032",
+        "--max-usd",
+        "0.66",
+        "--out",
+        ".scratch/eval/cohere/default/miracl-fr.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "miracl-fr",
+        "--e5-run",
+        ".scratch/eval/cohere/default/miracl-fr.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "mldr-fr",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "d607d8439c9e6a8279b996ab08983f65666f17cd3a3bd8b4c458ce7fe8c2bdad",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 1781,
+        "query_inputs": 200,
+        "input_tokens": 9443691,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 1.1332429199999998,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 18887382,
+          "max_usd": 2.27
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "mldr-fr",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "18887382",
+        "--max-usd",
+        "2.27",
+        "--out",
+        ".scratch/eval/cohere/default/mldr-fr.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "mldr-fr",
+        "--e5-run",
+        ".scratch/eval/cohere/default/mldr-fr.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "scifact",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "55c00c954b6f7997aabbc8de46f72276a0bd5aad3d57ff9f5a01de6692bf4a13",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 2003,
+        "query_inputs": 300,
+        "input_tokens": 3097293,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.37167515999999995,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 6194586,
+          "max_usd": 0.75
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "scifact",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "6194586",
+        "--max-usd",
+        "0.75",
+        "--out",
+        ".scratch/eval/cohere/default/scifact.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "scifact",
+        "--e5-run",
+        ".scratch/eval/cohere/default/scifact.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "xpqa-fr",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "577c2fd4b1522fd742e9c48afcdbda6c1d32842b125865513ebe9744f64a0446",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 1548,
+        "query_inputs": 200,
+        "input_tokens": 146667,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.01760004,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 293334,
+          "max_usd": 0.04
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "xpqa-fr",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "293334",
+        "--max-usd",
+        "0.04",
+        "--out",
+        ".scratch/eval/cohere/default/xpqa-fr.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "xpqa-fr",
+        "--e5-run",
+        ".scratch/eval/cohere/default/xpqa-fr.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "webfaq-fr",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "d66f4e1617d06d566722696fab1061062f13c38a9e00dd54c04bc9ba21a76b96",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 2500,
+        "query_inputs": 200,
+        "input_tokens": 955384,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.11464608,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 1910768,
+          "max_usd": 0.23
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "webfaq-fr",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "1910768",
+        "--max-usd",
+        "0.23",
+        "--out",
+        ".scratch/eval/cohere/default/webfaq-fr.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "webfaq-fr",
+        "--e5-run",
+        ".scratch/eval/cohere/default/webfaq-fr.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "mkqa-fr",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "208a8e4a385677bd1d731ce61b34bf8425a557422fd6e0e84d71295259d3e9d4",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 2000,
+        "query_inputs": 200,
+        "input_tokens": 54552,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.00654624,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 109104,
+          "max_usd": 0.02
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "mkqa-fr",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "109104",
+        "--max-usd",
+        "0.02",
+        "--out",
+        ".scratch/eval/cohere/default/mkqa-fr.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "mkqa-fr",
+        "--e5-run",
+        ".scratch/eval/cohere/default/mkqa-fr.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "fiqa",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "5b350679b929743fa0a2d33420d1e1c54e2bbe2d1269ad6d7f9bc29d29f6611b",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 2004,
+        "query_inputs": 200,
+        "input_tokens": 1767103,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.21205236,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 3534206,
+          "max_usd": 0.43
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "fiqa",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "3534206",
+        "--max-usd",
+        "0.43",
+        "--out",
+        ".scratch/eval/cohere/default/fiqa.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "fiqa",
+        "--e5-run",
+        ".scratch/eval/cohere/default/fiqa.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "trec-covid",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "d2941377d1cf93df296d84bcfe41ccda90837bf9dee9480e6bc1aab3ceff4b12",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 10043,
+        "query_inputs": 5,
+        "input_tokens": 12817889,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 1.5381466799999999,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 25635778,
+          "max_usd": 3.08
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "trec-covid",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "25635778",
+        "--max-usd",
+        "3.08",
+        "--out",
+        ".scratch/eval/cohere/default/trec-covid.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "trec-covid",
+        "--e5-run",
+        ".scratch/eval/cohere/default/trec-covid.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "arguana",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "de0f0e659ed9a61eacdef0916352612a930608886c4e9479870bda7d776a5426",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 2000,
+        "query_inputs": 200,
+        "input_tokens": 2333983,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.28007795999999996,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 4667966,
+          "max_usd": 0.57
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "arguana",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "4667966",
+        "--max-usd",
+        "0.57",
+        "--out",
+        ".scratch/eval/cohere/default/arguana.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "arguana",
+        "--e5-run",
+        ".scratch/eval/cohere/default/arguana.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "scidocs",
+      "tier": "default",
+      "promotion_eligible": true,
+      "fingerprint": "4aa61a6cc3210a8ccee30c54f885d1f3a2bc5e84c5f47518f8701d243bed80fb",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 6025,
+        "query_inputs": 200,
+        "input_tokens": 7344613,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.88135356,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 14689226,
+          "max_usd": 1.77
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "scidocs",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "14689226",
+        "--max-usd",
+        "1.77",
+        "--out",
+        ".scratch/eval/cohere/default/scidocs.json"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "scidocs",
+        "--e5-run",
+        ".scratch/eval/cohere/default/scidocs.json",
+        "--out",
+        ".scratch/eval/cohere-quality/default"
+      ]
+    },
+    {
+      "set": "alloprof",
+      "tier": "restricted",
+      "promotion_eligible": false,
+      "fingerprint": "8a496391f5862c7bd59a26c5afbdf8d93c054e8bd716cadd075ffd71eb0040e6",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 2424,
+        "query_inputs": 200,
+        "input_tokens": 7473914,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.8968696799999999,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 14947828,
+          "max_usd": 1.8
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "alloprof",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "14947828",
+        "--max-usd",
+        "1.8",
+        "--out",
+        ".scratch/eval/cohere/restricted/alloprof.json",
+        "--include-restricted"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "alloprof",
+        "--e5-run",
+        ".scratch/eval/cohere/restricted/alloprof.json",
+        "--out",
+        ".scratch/eval/cohere-quality/restricted",
+        "--include-restricted"
+      ]
+    },
+    {
+      "set": "bsard",
+      "tier": "restricted",
+      "promotion_eligible": false,
+      "fingerprint": "a97b69da3c499a7af75e1716f34192d341afb5883857423da3b2e37dbc443230",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 2026,
+        "query_inputs": 200,
+        "input_tokens": 1958099,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.23497188,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 3916198,
+          "max_usd": 0.47
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "bsard",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "3916198",
+        "--max-usd",
+        "0.47",
+        "--out",
+        ".scratch/eval/cohere/restricted/bsard.json",
+        "--include-restricted"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "bsard",
+        "--e5-run",
+        ".scratch/eval/cohere/restricted/bsard.json",
+        "--out",
+        ".scratch/eval/cohere-quality/restricted",
+        "--include-restricted"
+      ]
+    },
+    {
+      "set": "nfcorpus",
+      "tier": "restricted",
+      "promotion_eligible": false,
+      "fingerprint": "17c5fec9d0636ddce6e5b9f9a479bf181a3df228a57c086669111cdefe312f02",
+      "single_pass_estimate": {
+        "window_chars": 6000,
+        "overlap_chars": 200,
+        "document_windows": 3606,
+        "query_inputs": 200,
+        "input_tokens": 5772420,
+        "price_usd_per_million": 0.12,
+        "estimated_usd": 0.6926904,
+        "estimate_only": true,
+        "per_set_caps": {
+          "max_input_tokens": 11544840,
+          "max_usd": 1.39
+        }
+      },
+      "direct_command": [
+        "python3",
+        "scripts/eval/direct_bakeoff.py",
+        "--set",
+        "nfcorpus",
+        "--models",
+        "Cohere-Embed-V5-Pro",
+        "--max-input-tokens",
+        "11544840",
+        "--max-usd",
+        "1.39",
+        "--out",
+        ".scratch/eval/cohere/restricted/nfcorpus.json",
+        "--include-restricted"
+      ],
+      "saturation_command": [
+        "python3",
+        "scripts/eval/quality_reports.py",
+        "--set",
+        "nfcorpus",
+        "--e5-run",
+        ".scratch/eval/cohere/restricted/nfcorpus.json",
+        "--out",
+        ".scratch/eval/cohere-quality/restricted",
+        "--include-restricted"
+      ]
+    }
+  ]
+}

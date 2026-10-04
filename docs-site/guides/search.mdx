@@ -1,0 +1,179 @@
+---
+title: "Search"
+description: "Find articles by keyword or by meaning, narrow results to some sources, and cite exactly where a passage comes from."
+keywords: ["search", "lexical", "semantic", "hybrid", "profile", "excerpt", "quivr search"]
+---
+
+`POST /v0/search` returns the passages that best answer a query, across up to 16 Corpora, with the exact excerpt of each. This page covers the options you will use; the [API reference](/api-reference/overview) lists every endpoint and field.
+
+## Prerequisites
+
+- `QUIVR_API_URL` and a `QUIVR_API_KEY` with `content:read` and `search:query` on the Corpora you search ([Quickstart](/quickstart)). The setup below also creates a Corpus and articles, which needs `corpora:write` and `content:write` on every Corpus, as the key `eval "$(make -s env)"` exports does.
+- Some articles. These examples use a Corpus with two, from two sources:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/corpora" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d '{"name": "Harbour news", "idempotency_key": "guide-search"}' | jq '{corpus_id}'
+```
+
+{/* output */}
+```json
+{"corpus_id": "{{CORPUS_ID}}"}
+```
+
+```bash
+export CORPUS_ID=<the corpus_id above>
+```
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/records/batch" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '[.items[].receipt.state]'
+{"items": [
+  {"idempotency_key": "guide-search-storm", "source": {"corpus_id": "$CORPUS_ID", "namespace": "wire", "record_key": "storm"},
+   "content": {"kind": "text", "text": "A storm closed the harbour and cancelled every ferry."}},
+  {"idempotency_key": "guide-search-festival", "source": {"corpus_id": "$CORPUS_ID", "namespace": "blog", "record_key": "festival"},
+   "content": {"kind": "text", "text": "The harbour festival returns with boat races and music."}}
+]}
+EOF
+```
+
+{/* output */}
+```json
+["...", "..."]
+```
+
+Quivr indexes the articles in the background, usually within seconds, so a search sent at once can miss them. Each batch item's `receipt` has a `receipt_id`: read `GET /v0/ingestion-receipts/{receipt_id}` until `availability.searchable` is `true`, as [Add content](/guides/add-content#send-an-article-with-a-title) shows. If `availability.state` reads `quarantined` instead, the article is on hold until an operator reprocesses it; [If you can't find it](/concepts#if-you-cant-find-it) lists the other cases.
+
+## Choose a mode
+
+| `mode` | Use it when | Needs |
+| --- | --- | --- |
+| `lexical` | the words matter: names, codes, exact terms | nothing: available as soon as a Version is indexed |
+| `semantic` | the meaning matters, in other words or another language | the passages' vectors, computed seconds after ingestion |
+| `hybrid` | you want both, ranked together. This is the default. | as `semantic`; keyword results appear first |
+
+{/* runnable retry */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/search" -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '{items: [.items[] | {rank, part_key, text: .excerpt.text}], profile: .retrieval_profile.name}'
+{"query": "ferry", "corpus_ids": ["$CORPUS_ID"], "mode": "lexical", "limit": 5}
+EOF
+```
+
+{/* output */}
+```json
+{"items": [{"rank": 1, "part_key": "body", "text": "A storm closed the harbour and cancelled every ferry."}], "profile": "default"}
+```
+
+`limit` is 10 by default and 50 at most. There is no pagination: ask for what you will show.
+
+A query has at most 8,192 characters. For `semantic` and `hybrid`, the embedding model also caps its length (256 tokens with the first-party model); a longer query is refused with `422 query_too_long`, never truncated.
+
+## Narrow to some sources
+
+`filter.source_namespaces` keeps only Records from those Source Namespaces. The filter applies before ranking, so you get a source's best matches even when other sources would outrank them:
+
+{/* runnable retry */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/search" -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '[.items[].excerpt.text]'
+{"query": "harbour", "corpus_ids": ["$CORPUS_ID"], "mode": "lexical", "filter": {"source_namespaces": ["blog"]}}
+EOF
+```
+
+{/* output */}
+```json
+["The harbour festival returns with boat races and music."]
+```
+
+## Cite a result
+
+Each hit carries what a citation needs:
+
+| Field | Meaning |
+| --- | --- |
+| `record_id`, `version_id` | The Record and the exact Version the passage comes from |
+| `part_key` | The Part of that Version, such as `body`, `title` or `page-3` |
+| `excerpt.text` | The passage, an exact slice of the Part's text |
+| `excerpt.start`, `excerpt.end` | Where the slice starts and ends, counted in Unicode code points |
+| `rank` | Position in this result list, 1 first |
+
+`GET /v0/records/{record_id}/versions/{version_id}` returns the whole Version, so you can show the passage in context. Every hit is re-read from storage and re-checked against the caller's access before it is returned. A search never returns a withdrawn Record, a Version that is no longer current, or a Corpus outside the key's scope; a Corpus you may not read makes the whole search fail with `403`.
+
+## Choose a profile
+
+A profile names how results are found and ranked. Each installed retrieval plugin declares profiles. The deployment maps short names such as `default` and `deep` to full names such as `core.retrieve/default`; [Search profiles](/run-quivr/search-profiles) explains the names and how one profile can re-rank another's results. With one plugin and no map, its existing short names keep working. List them:
+
+{/* runnable */}
+```bash
+curl -s "$QUIVR_API_URL/v0/search/profiles" -H "Authorization: Bearer $QUIVR_API_KEY" | jq '{names: [.items[].name]}'
+```
+
+{/* output */}
+```json
+{"names": ["default", "..."]}
+```
+
+The profile list includes `full_name`, `aliases` and `provider` for every profile.
+
+Pass a short name in `profile`. `retrieval_profile.name` echoes the name you sent, and `usage.profiles` lists the full name of each profile that ran:
+
+{/* runnable retry */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/search" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF \
+  | jq -c '{asked: .retrieval_profile.name, ran: [.usage.profiles[].profile], hits: (.items | length)}'
+{"query": "ferry", "corpus_ids": ["$CORPUS_ID"], "mode": "lexical", "profile": "deep"}
+EOF
+```
+
+{/* output */}
+```json
+{"asked": "deep", "ran": ["core.retrieve/deep"], "hits": 1}
+```
+
+A full name selects a profile without the deployment's map, here the same one:
+
+{/* runnable */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/search" -H "Authorization: Bearer $QUIVR_API_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF \
+  | jq -c '{asked: .retrieval_profile.name, ran: [.usage.profiles[].profile], hits: (.items | length)}'
+{"query": "ferry", "corpus_ids": ["$CORPUS_ID"], "mode": "lexical", "profile": "core.retrieve/deep"}
+EOF
+```
+
+{/* output */}
+```json
+{"asked": "core.retrieve/deep", "ran": ["core.retrieve/deep"], "hits": 1}
+```
+
+These outputs come from the `make dev` stack, where `deep` maps to `core.retrieve/deep`. An unknown profile is refused with `422 unsupported_profile`.
+
+## Search from the command line
+
+`quivr search` sends the same request from a terminal, with the same `QUIVR_API_URL` and `QUIVR_API_KEY`:
+
+```bash
+quivr search --corpus "$CORPUS_ID" --mode lexical "ferry"
+```
+
+```text
+1 hit (profile default, version …)
+
+1. record record_…  version version_…  part body  [0,53)
+   A storm closed the harbour and cancelled every ferry.
+```
+
+Add `--json` to print the API response unchanged, and `--source` to filter by Source Namespace. The [CLI reference](/reference/cli#quivr-search) lists every flag and exit code.
+
+## When a search fails
+
+| Status | Cause |
+| --- | --- |
+| `403 forbidden` | The key may not search one of the requested Corpora. |
+| `422 query_too_long`, `422 unsupported_profile` | The query or the profile is refused. The message says why. |
+| `422 source_filter_unavailable` | The Corpus was indexed before source filtering existed; rebuild it once. |
+| `503` | A dependency, such as the search index or the embedding service, is unavailable. Retry later: Quivr never answers an empty list instead. |

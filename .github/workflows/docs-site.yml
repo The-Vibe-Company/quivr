@@ -1,0 +1,28 @@
+name: Documentation site
+# The public documentation site (THE-719). Mintlify builds it from docs-site/ on main,
+# which scripts/mintlify_site.py generates and `make docs` keeps in step with the
+# living pages. This job runs Mintlify's own checks on the committed site. Node stays
+# in this job only.
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: docs-site-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+env:
+  MINTLIFY_TELEMETRY_DISABLED: '1'
+jobs:
+  site:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.21.0'
+      # `mint validate` (pages Mintlify cannot render, the OpenAPI reference) and
+      # `mint broken-links --check-anchors`, with the CLI pinned in the Makefile.
+      - run: make docs-site-check

@@ -1,0 +1,325 @@
+# Quivr plugin manifest (Plugin API 0.10). Check it with: quivr plugin inspect .
+# Reference: contracts/plugins/v0/README.md in the Quivr repository, and
+# README.md here for the expression reference.
+id: alerts
+version: 0.3.0
+description: Keyword and meaning alerts, alone or combined. Meaning checks use local stored vectors or TypeSafe's Jev classifier.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.10.0 <0.11.0"
+contributions:
+  subscription:
+    vectors:
+      parts: true
+      query: true
+      query_text_pointer: /description
+      query_expression_schema:
+        type: object
+        required: [meaning_check]
+        properties:
+          meaning_check: {const: vectors}
+    # A saved search's expression. Each alert kind is one oneOf branch told
+    # apart by "kind". Local vectors need no TYPESAFE_API_KEY; omitted
+    # meaning_check preserves the existing Jev backend.
+    expression_schema:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, match]
+          properties:
+            kind:
+              const: keywords
+              description: A boolean keyword query over the title and body, with optional metadata filters.
+            match:
+              $ref: "#/$defs/node1"
+              description: The query tree. Groups nest at most 6 levels deep.
+        - type: object
+          additionalProperties: false
+          required: [kind, description]
+          properties:
+            kind:
+              const: described
+              description: A plain-language description of the articles to alert on, checked by local vectors or Jev.
+            description:
+              $ref: "#/$defs/description"
+            meaning_check:
+              $ref: "#/$defs/meaning_check"
+              default: jev
+            sources:
+              $ref: "#/$defs/sources"
+        - type: object
+          additionalProperties: false
+          required: [kind, description, meaning_check]
+          properties:
+            kind:
+              const: meaning
+              description: Local meaning check using the core's stored vectors. Never sends text to a classifier.
+            description:
+              $ref: "#/$defs/description"
+            meaning_check:
+              const: vectors
+            sources:
+              $ref: "#/$defs/sources"
+        - type: object
+          additionalProperties: false
+          required: [kind, match, description, meaning_check]
+          properties:
+            kind:
+              const: keywords_or_meaning
+              description: Either check suffices. A positive keyword check runs before enrichment or meaning.
+            match:
+              $ref: "#/$defs/node1"
+            description:
+              $ref: "#/$defs/description"
+            meaning_check:
+              $ref: "#/$defs/meaning_check"
+            sources:
+              $ref: "#/$defs/sources"
+        - type: object
+          additionalProperties: false
+          required: [kind, match, description, meaning_check]
+          properties:
+            kind:
+              const: keywords_and_meaning
+              description: Both checks must pass. A negative keyword check runs before enrichment or meaning.
+            match:
+              $ref: "#/$defs/node1"
+            description:
+              $ref: "#/$defs/description"
+            meaning_check:
+              $ref: "#/$defs/meaning_check"
+            sources:
+              $ref: "#/$defs/sources"
+      $defs:
+        description:
+          type: string
+          minLength: 3
+          maxLength: 1000
+          pattern: "\\S"
+          description: What the articles are about, in plain language, for example "Tensions between two countries over visa rules".
+        meaning_check:
+          type: string
+          enum: [jev, vectors]
+          description: Jev sends text to TypeSafe; vectors compares stored embeddings locally without calling a classifier. Required for mixed kinds; omitted on described means Jev.
+        sources:
+          type: array
+          minItems: 1
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: "\\S"
+          description: Optional source restriction applied before either check. Compared without case or accents; absent means every source.
+        term:
+          type: object
+          additionalProperties: false
+          required: [term]
+          properties:
+            term:
+              type: string
+              minLength: 1
+              maxLength: 256
+              pattern: "\\S"
+              description: A word or an exact phrase. Case, accents and punctuation between words are ignored; words match whole.
+        field:
+          type: object
+          additionalProperties: false
+          required: [field, equals]
+          properties:
+            field:
+              type: string
+              maxLength: 256
+              pattern: "^([a-z][a-z0-9_]{0,63}|/(source|provenance|extensions|accepted_at)(/.*)?)$"
+              description: A field name (built in, or mapped in the plugin configuration) or a JSON Pointer into the article's metadata.
+            equals:
+              type: [string, number, boolean]
+              maxLength: 256
+              description: The value the field must have. Strings compare without case or accents; a list field matches when one element does.
+        node1:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node2"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node2"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node2"}
+        node2:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node3"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node3"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node3"}
+        node3:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node4"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node4"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node4"}
+        node4:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node5"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node5"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node5"}
+        node5:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node6"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/node6"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/node6"}
+        node6:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+            - type: object
+              additionalProperties: false
+              required: [all]
+              properties:
+                all: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/leaf"}}
+            - type: object
+              additionalProperties: false
+              required: [any]
+              properties:
+                any: {type: array, minItems: 1, maxItems: 64, items: {$ref: "#/$defs/leaf"}}
+            - type: object
+              additionalProperties: false
+              required: [not]
+              properties:
+                not: {$ref: "#/$defs/leaf"}
+        leaf:
+          oneOf:
+            - $ref: "#/$defs/term"
+            - $ref: "#/$defs/field"
+    # Per-Subscription settings, validated by the core when a Subscription is created.
+    configuration_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        wait_for_enrichment:
+          type: boolean
+          description: Answer not_ready until enriched. Default false for keywords, true for meaning checks; decisive mixed-mode keywords bypass the wait. Vectors always need ready same-space embeddings.
+        threshold:
+          type: number
+          minimum: 0.2
+          maximum: 0.95
+          description: Meaning threshold, inclusive. Jev uses the installer's described.threshold or 0.5; vectors uses vectors.threshold or 0.8. These scores are not interchangeable.
+    max_batch_size: 64
+    # A described batch makes one classifier call, split only past its request size limit.
+    timeout_ms: 20000
+    retry:
+      max_attempts: 3
+# Installer configuration: set in the plugin pin's `configuration`.
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      fields:
+        type: object
+        maxProperties: 64
+        description: Field names usable in field filters, each mapped to a JSON Pointer into the article's metadata, for example author -> /extensions/<namespace>/data/author. They add to or replace the built-in names.
+        propertyNames:
+          pattern: "^[a-z][a-z0-9_]{0,63}$"
+        additionalProperties:
+          type: string
+          maxLength: 256
+          pattern: "^/(source|provenance|extensions|accepted_at)(/.*)?$"
+      text_roles:
+        type: array
+        minItems: 1
+        maxItems: 16
+        uniqueItems: true
+        items:
+          type: string
+          minLength: 1
+          maxLength: 64
+        description: Part roles whose text keyword terms search and Jev sees (default title and body). Local meaning checks use all supplied vectors.
+      described:
+        type: object
+        additionalProperties: false
+        properties:
+          threshold:
+            type: number
+            minimum: 0.2
+            maximum: 0.95
+            description: Default score threshold of described alerts (default 0.5). A Subscription may override it.
+      vectors:
+        type: object
+        additionalProperties: false
+        properties:
+          threshold:
+            type: number
+            minimum: 0.2
+            maximum: 0.95
+            description: Default local-vector cosine threshold (default 0.8). A Subscription may override it.
+secrets:
+  - name: TYPESAFE_API_KEY
+    description: TypeSafe API key for Jev meaning checks. Not required for keyword or local-vector decisions; an unresolved Jev check without it is unavailable.
+    required: false
+run:
+  command: [python3, -m, alerts]

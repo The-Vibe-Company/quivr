@@ -1,0 +1,6 @@
+# Salted SHA-256 digests of terms that must not appear in this repository.
+# Add one with: python3 scripts/denylist.py --hash "term". Never commit the term itself.
+ab4bb9909c83eb8191068ac3fb385d95088330a8748f7aa567bfd0abe8b5f993
+cc682f321e9530309af7bd0f35a18a31e3823485192c4021ae251935e30f5a66
+d5378a34676f9fdebc73eb1d1532502f87aa25d0ec0573d79c11459e6b7ee498
+bd18893c58a8ea270e077539d35d62784ab78aeb2bcb66489d18e1a88cdd6558

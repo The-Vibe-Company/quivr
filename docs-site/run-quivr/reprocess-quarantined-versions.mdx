@@ -1,0 +1,128 @@
+---
+title: "Reprocess articles stuck in quarantine"
+description: "After you fix a plugin or roll one back, run the articles it quarantined through the plan now active, so they become searchable."
+keywords: ["quarantine", "reprocess", "retry", "failed articles", "plugin fix"]
+---
+
+A plugin that refuses an article, or stops while processing it, leaves its Version quarantined: Quivr keeps the article and its reason but withholds it from search. Once a fixed plugin version is active, or a rollback restored a working one, a reprocess runs those articles again and makes the ones that succeed searchable. It follows a rollback in [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
+
+## Prerequisites
+
+- The plan that should process the articles is active: the fixed plugin version is activated (see [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin)), or the plan was rolled back.
+- A key of the Organization that owns the Corpus with the actions `plugins:admin`, `operations:read` (to follow the reprocess) and `operations:write` (to pause, resume or cancel it), in `QUIVR_OPERATOR_KEY`.
+
+## Steps
+
+<Steps>
+<Step title="List the stuck articles">
+
+```bash
+curl -s "$QUIVR_API_URL/v0/admin/quarantine" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
+  | jq '.items[] | {corpus_id, version_id, stage, code: .reason.code, plugin: .reason.plugin, quarantined_at}'
+```
+
+```json
+{"corpus_id": "corpus_…", "version_id": "version_…", "stage": "ingestion", "code": "ingestion_refused", "plugin": "core.ingest", "quarantined_at": "2026-09-30T08:12:03Z"}
+```
+
+`stage` is the step that failed: `normalization` (the normalizer failed, so the article was kept as submitted) or `ingestion` (segmenting or embedding it was refused or stopped). Filter with `corpus_id`, `plugin`, `code`, `quarantined_after` and `quarantined_before`; `page_cursor` returns the next page. An article quarantined before Quivr recorded structured reasons has only its code and no `plugin`. An article whose Record got a newer revision, or was withdrawn, is not listed: it can never become current.
+
+Keep the Corpus id and the code you want to reprocess:
+
+```bash
+export CORPUS_ID=<the corpus_id above>
+```
+
+</Step>
+<Step title="Count them">
+
+A dry run is required. It counts the articles the reprocess would take, by stage and by code:
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/admin/quarantine/reprocess" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq
+{"idempotency_key": "reprocess-2026-09-30", "corpus_id": "$CORPUS_ID", "code": "ingestion_refused", "dry_run": true}
+EOF
+```
+
+```json
+{"versions": 11, "stages": {"normalization": 0, "ingestion": 11}, "codes": {"ingestion_refused": 11}}
+```
+
+Leave out `code` to take every stuck article of the Corpus, or narrow with `plugin`, `quarantined_after` and `quarantined_before`.
+
+</Step>
+<Step title="Start it">
+
+Send the same body with `dry_run` set to `false`:
+
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/admin/quarantine/reprocess" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
+  -H "Content-Type: application/json" -d @- <<EOF | jq '{operation_id, state}'
+{"idempotency_key": "reprocess-2026-09-30", "corpus_id": "$CORPUS_ID", "code": "ingestion_refused", "dry_run": false}
+EOF
+```
+
+```json
+{"operation_id": "operation_…", "state": "queued"}
+```
+
+The answer is an Operation, Quivr's record of a long-running administrative task. It takes the articles in scope at this moment and runs them with the plan active now. The same key and body return the same Operation. Keep its id:
+
+```bash
+export OPERATION_ID=<the operation_id above>
+```
+
+</Step>
+<Step title="Follow it">
+
+```bash
+curl -s "$QUIVR_API_URL/v0/operations/$OPERATION_ID" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" | jq '{state, counters}'
+```
+
+```json
+{"state": "succeeded", "counters": {"versions_in_scope": 11, "versions_recovered": 11, "versions_quarantined": 0, "versions_skipped": 0}}
+```
+
+`versions_recovered` are searchable now. `versions_quarantined` failed again and stay quarantined with their new reason. `versions_skipped` counts the articles it left as they were, each under `skipped_<reason>`:
+
+| Reason | Meaning |
+| --- | --- |
+| `withdrawn`, `superseded` | The Record was withdrawn, or got a newer revision, meanwhile |
+| `not_quarantined` | The article left quarantine meanwhile |
+| `canceled` | The reprocess was canceled while it processed the article, which keeps or gets back its previous reason |
+| `not_republishable` | Its normalizer succeeded, but it could not be published again; it stays quarantined |
+| `not_settled` | Its processing ended neither searchable nor quarantined; it gets back its previous reason |
+
+Pause, resume or cancel it with `POST /v0/operations/{id}/pause`, `/resume` or `/cancel`, each with an `idempotency_key` body. `POST /v0/operations/{id}/rerun` on a finished reprocess takes what is still stuck in the same scope, with the plan active then.
+
+</Step>
+</Steps>
+
+## Check it worked
+
+List the Corpus again: the recovered articles are gone, and those that failed again show their new reason.
+
+```bash
+curl -s "$QUIVR_API_URL/v0/admin/quarantine?corpus_id=$CORPUS_ID" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
+  | jq '[.items[] | {version_id, code: .reason.code, message: .reason.message}]'
+```
+
+## What a reprocess does
+
+- **Normalization stage.** The normalizer of the active plan runs again. When it answers, the article is published with the normalized content, as it would have been the first time, and processed. The change feed announces it with `record.materialized`.
+- **Ingestion stage.** The ingestion plugin of the active plan segments and embeds the article again.
+- **As a first success.** A recovered article becomes its Record's current Version if the Record still wants it, is searchable, is evaluated by the alerts of its Corpus, and appears in the change feed with `record.retrieval_ready` and `record.enrichment_available`.
+- **Pace.** It runs on the backfill queue, at most `backfill.rate` articles per second (see [Configuration](/reference/configuration#backfill)), so live ingestion keeps its capacity. One reprocess of a Corpus runs at a time.
+- **Plan.** It is pinned to the plan active when it was accepted, like other work. A plugin of that plan that becomes unreachable quarantines the article again with `pinned_plugin_unavailable`.
+- **Interruptions.** A restart resumes the article it was processing. Canceling it puts an article it had started back in quarantine with its previous reason.
+
+## Troubleshooting
+
+| Answer | Cause | Fix |
+| --- | --- | --- |
+| `409 dry_run_required` | No dry run with this key and body | Send it with `"dry_run": true` first |
+| `409 idempotency_conflict` | The key was used with another scope | Use a new key |
+| `409 reprocess_in_progress` | Another reprocess of the Corpus has not finished | Wait for it, or cancel it |
+| `422 invalid_reprocess` | `quarantined_after` is not before `quarantined_before` | Fix the window |
+| Every article fails again with the same code | The active plan still runs the plugin that refused them | Activate the fixed version, then reprocess with a new key |

@@ -1,0 +1,76 @@
+{
+  "invocation_id": "inv-search-1",
+  "contribution": "retrieval",
+  "organization_id": "org_example",
+  "configuration": {},
+  "profile": "default",
+  "round": 2,
+  "query": {
+    "text": "harbour strike",
+    "mode": "hybrid"
+  },
+  "limit": 2,
+  "scope": {
+    "corpus_ids": [
+      "corpus_news"
+    ],
+    "source_namespaces": [
+      "wire",
+      "local"
+    ]
+  },
+  "spaces": [
+    {
+      "id": "example.words.small@1",
+      "owner": {
+        "kind": "plugin",
+        "plugin_id": "example.words",
+        "plugin_version": "0.1.0"
+      },
+      "model": "example/words-4",
+      "dimensions": 4,
+      "metric": "cosine",
+      "indexes": [
+        "text"
+      ],
+      "query_modalities": [
+        "text"
+      ],
+      "role": "served",
+      "coverage": {
+        "segments": 3,
+        "total": 3
+      }
+    }
+  ],
+  "served": [
+    {
+      "round": 1,
+      "request_index": 0,
+      "request": {
+        "primitive": "profile",
+        "profile": {
+          "name": "core.retrieve/default",
+          "limit": 10
+        }
+      },
+      "candidates": [
+        {
+          "segment_id": "segment-a",
+          "record_id": "record-a",
+          "version_id": "version-a",
+          "part_key": "body",
+          "text": "An example",
+          "start": 0,
+          "end": 10,
+          "score": 0.9,
+          "explanation": "Inner ranking"
+        }
+      ]
+    }
+  ],
+  "budget": {
+    "remaining_time_ms": 1000,
+    "remaining_cost_cents": 0.5
+  }
+}

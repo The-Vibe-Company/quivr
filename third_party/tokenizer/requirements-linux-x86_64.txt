@@ -1,0 +1,2 @@
+# CPython >=3.10 abi3, manylinux x86_64. No optional Hugging Face Hub/network client.
+tokenizers==0.23.2 --hash=sha256:41c2f84d172449b4dadb9cdc508e3e364076613c35b16e76ecfe47a60d1e3305

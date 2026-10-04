@@ -1,0 +1,1259 @@
+/* The Admin tab (THE-796), in the tokens of styles.css and dashboard.css:
+   the health of the last hour first, then the live flow, then one
+   document's timeline beside it. Later slices (bottlenecks, plugins, usage)
+   add panels below the flow. */
+
+.admin-board {
+  flex-direction: column;
+  gap: 16px;
+}
+.admin-board > *,
+.admin-skeleton > * {
+  flex: none;
+}
+.admin-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.admin-head h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.4px;
+}
+.admin-scope {
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+.admin-board > .notice {
+  margin: 0;
+}
+
+/* The live indicator: steady while connected, a ring while updates arrive. */
+.admin-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  background: var(--subtle);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  transition-property: color, background-color, box-shadow;
+  transition-duration: 200ms;
+}
+.admin-live[data-state="live"],
+.admin-live[data-state="active"] {
+  color: var(--success);
+  background: color-mix(in oklab, var(--success) 8%, var(--panel));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--success) 24%, transparent);
+}
+.admin-live-dot {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.admin-live[data-state="polling"] .admin-live-dot {
+  background: var(--warn-line);
+}
+.admin-live[data-state="active"] .admin-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: currentColor;
+  animation: live-pulse 1.2s var(--ease-out) infinite;
+}
+
+/* The loading shapes' first row. */
+.admin-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+  gap: 16px;
+}
+
+/* The flow, and the timeline panel beside it once a row is open. */
+.admin-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.admin-main[data-open] {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+}
+.admin-flow {
+  display: flex;
+  flex-direction: column;
+}
+.admin-flow .panel-head {
+  padding: 14px 22px;
+}
+
+.admin-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 22px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--subtle);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+.admin-banner[data-tone="busy"] {
+  background: var(--warn-bg);
+  color: var(--warning);
+  font-weight: 550;
+}
+.admin-banner-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--idle-dot);
+  animation: banner-breathe 1.6s ease-in-out infinite alternate;
+}
+@keyframes banner-breathe {
+  to {
+    opacity: 0.35;
+  }
+}
+.admin-empty {
+  padding: 48px 24px 56px;
+}
+
+.flow-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1fr) repeat(5, minmax(60px, 88px))
+    minmax(72px, 96px);
+  gap: 8px;
+  align-items: center;
+  padding-inline: 22px;
+}
+
+.flow-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* A new document slides in at the top and pushes the others down. */
+.flow-rows > li {
+  display: grid;
+  grid-template-rows: 1fr;
+  border-bottom: 1px solid var(--line-soft);
+  transition:
+    grid-template-rows 280ms var(--ease-out),
+    opacity 220ms var(--ease-out);
+}
+@starting-style {
+  .flow-rows > li[data-fresh] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+.flow-row {
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding-block: 10px;
+  border: 0;
+  background: var(--panel);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 1.6s var(--ease-out);
+}
+.flow-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .flow-row:hover {
+    background: color-mix(in srgb, var(--hover) 60%, var(--panel));
+    transition-duration: 120ms;
+  }
+}
+li[data-fresh] > .flow-row {
+  background: var(--fresh);
+  transition-duration: 0s;
+}
+.flow-row[data-selected] {
+  background: var(--selected);
+  box-shadow: inset 0 0 0 1.5px
+    color-mix(in oklab, var(--accent) 45%, transparent);
+  transition-duration: 120ms;
+}
+.flow-row[data-state="withdrawn"] .flow-doc,
+.flow-row[data-state="withdrawn"] .cell {
+  opacity: 0.55;
+}
+.flow-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.flow-title {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 550;
+  line-height: 20px;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flow-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 18px;
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.flow-source {
+  overflow: hidden;
+  max-width: 16ch;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+}
+.flow-badge {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.flow-badge[data-tone="bad"] {
+  background: color-mix(in oklab, var(--error) 10%, var(--panel));
+  color: var(--error);
+}
+.flow-total {
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.flow-total-value {
+  font-weight: 620;
+}
+.flow-total-note {
+  color: var(--ink-faint);
+}
+.flow-total-note[data-tone="bad"] {
+  color: var(--error);
+  font-weight: 600;
+}
+
+/* A step cell. Each state has a colour and a word or an icon; a finished
+   step's colour sweeps in from the left. */
+.cell,
+.legend-swatch {
+  --cell-fill: transparent;
+  --cell-line: transparent;
+  --cell-ink: var(--ink-faint);
+}
+.cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  overflow: hidden;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--cell-ink);
+  font-size: 12px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  transition: color 200ms var(--ease);
+}
+.cell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--cell-fill);
+  box-shadow: inset 0 0 0 1px var(--cell-line);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition:
+    transform 320ms var(--ease-out),
+    background-color 200ms var(--ease);
+}
+.cell[data-state="done"]::after,
+.cell[data-state="slow"]::after,
+.cell[data-state="error"]::after,
+.cell[data-state="run"]::after {
+  transform: scaleX(1);
+}
+.cell-body {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+/* A duration fades in when its step finishes. */
+.cell-text {
+  transition:
+    opacity 180ms var(--ease-out),
+    translate 180ms var(--ease-out);
+}
+@starting-style {
+  .cell-text {
+    opacity: 0;
+    translate: 0 2px;
+  }
+}
+:is(.cell, .legend-swatch)[data-state="done"] {
+  --cell-fill: color-mix(in oklab, var(--success) 9%, var(--panel));
+  --cell-line: color-mix(in oklab, var(--success) 18%, transparent);
+  --cell-ink: color-mix(in oklab, var(--success) 55%, var(--ink));
+}
+:is(.cell, .legend-swatch)[data-state="run"] {
+  --cell-fill: var(--tint);
+  --cell-line: color-mix(in oklab, var(--accent) 26%, transparent);
+  --cell-ink: var(--accent);
+}
+:is(.cell, .legend-swatch)[data-state="slow"] {
+  --cell-fill: var(--warn-bg);
+  --cell-line: var(--warn-line);
+  --cell-ink: var(--warning);
+}
+:is(.cell, .legend-swatch)[data-state="error"] {
+  --cell-fill: color-mix(in oklab, var(--error) 10%, var(--panel));
+  --cell-line: color-mix(in oklab, var(--error) 30%, transparent);
+  --cell-ink: var(--error);
+}
+/* Dark theme: follows the system unless a theme was chosen in the rail
+   (data-theme on <html>). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :is(.cell, .legend-swatch)[data-state="done"] {
+    --cell-fill: color-mix(in oklab, var(--success) 14%, var(--panel));
+    --cell-line: color-mix(in oklab, var(--success) 26%, transparent);
+  }
+}
+:root[data-theme="dark"] :is(.cell, .legend-swatch)[data-state="done"] {
+  --cell-fill: color-mix(in oklab, var(--success) 14%, var(--panel));
+  --cell-line: color-mix(in oklab, var(--success) 26%, transparent);
+}
+.cell[data-state="todo"] {
+  box-shadow: none;
+  outline: 1px dashed color-mix(in oklab, var(--ink-faint) 45%, transparent);
+  outline-offset: -1px;
+}
+.cell[data-state="none"] {
+  box-shadow: none;
+}
+/* A running step: a slow sheen crosses it. */
+.cell[data-running]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--cell-ink) 14%, transparent),
+    transparent
+  );
+  translate: -100% 0;
+  animation: cell-sheen 1.6s linear infinite;
+}
+@keyframes cell-sheen {
+  to {
+    translate: 100% 0;
+  }
+}
+.cell-pulse {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--cell-fill);
+  box-shadow: inset 0 0 0 1px var(--cell-line);
+}
+
+/* One document's timeline, beside the flow. */
+.timeline-panel {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh / var(--scale) - var(--bar-height) - 40px);
+  transition:
+    opacity 220ms var(--ease-out),
+    translate 240ms var(--ease-out);
+}
+@starting-style {
+  .timeline-panel {
+    opacity: 0;
+    translate: 12px 0;
+  }
+}
+.timeline-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px 8px 20px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.timeline-kicker {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.timeline-scroll {
+  overflow-y: auto;
+  padding: 18px 20px 22px;
+}
+.timeline-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: -0.25px;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+.timeline-title:focus {
+  outline: none;
+}
+.timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.timeline-key {
+  margin: 16px 0 18px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.timeline-key strong {
+  margin-left: 2px;
+  font-size: 22px;
+  font-weight: 640;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.timeline-key[data-tone="bad"] {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.gantt {
+  --label-w: 128px;
+  --ms-w: 76px;
+  position: relative;
+}
+.gantt-axis {
+  position: relative;
+  height: 18px;
+  margin: 0 var(--ms-w) 0 var(--label-w);
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.gantt-axis span {
+  position: absolute;
+  translate: -50% 0;
+  white-space: nowrap;
+}
+.gantt-axis span:first-child {
+  translate: 0 0;
+}
+.gantt-grid {
+  position: absolute;
+  top: 18px;
+  bottom: 0;
+  left: var(--label-w);
+  right: var(--ms-w);
+  pointer-events: none;
+}
+.gantt-grid span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-soft);
+}
+.gantt-rows {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gantt-row {
+  display: grid;
+  grid-template-columns: var(--label-w) minmax(0, 1fr) var(--ms-w);
+  align-items: center;
+  min-height: 42px;
+  border-radius: 8px;
+  outline-offset: -2px;
+}
+.gantt-row:focus-visible {
+  outline: 2px solid var(--accent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .gantt-row:hover {
+    background: color-mix(in srgb, var(--hover) 55%, transparent);
+  }
+}
+.gantt-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.gantt-plugin {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gantt-track {
+  position: relative;
+  height: 10px;
+}
+.gantt-bar,
+.gantt-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--success) 70%, var(--panel));
+  transition:
+    width 320ms var(--ease-out),
+    background-color 200ms var(--ease);
+}
+.gantt-mark {
+  width: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+}
+.gantt-row[data-state="slow"] :is(.gantt-bar, .gantt-mark) {
+  background: var(--warning);
+}
+.gantt-row[data-state="error"] :is(.gantt-bar, .gantt-mark) {
+  background: var(--error);
+}
+.gantt-row[data-state="mark"] .gantt-mark {
+  background: var(--ink-faint);
+}
+.gantt-row[data-state="run"] .gantt-bar {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--accent) 0 5px,
+    color-mix(in oklab, var(--accent) 55%, var(--panel)) 5px 10px
+  );
+}
+.gantt-row[data-state="todo"] {
+  color: var(--ink-faint);
+}
+.gantt-tip {
+  position: absolute;
+  bottom: calc(100% + 5px);
+  left: 0;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--strong-button);
+  color: var(--strong-button-text);
+  font-size: 11.5px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0;
+  translate: 0 2px;
+  pointer-events: none;
+  transition:
+    opacity 120ms var(--ease),
+    translate 120ms var(--ease);
+}
+.gantt-row:is(:hover, :focus-visible) .gantt-tip {
+  opacity: 1;
+  translate: 0 0;
+}
+.gantt-row[data-state="todo"] .gantt-tip {
+  display: none;
+}
+.gantt-ms {
+  padding-right: 8px;
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.gantt-row[data-state="slow"] .gantt-ms {
+  color: var(--warning);
+}
+.gantt-row[data-state="todo"] .gantt-ms {
+  font-weight: 400;
+}
+.timeline-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* A section below the flow (AdminSection). */
+.admin-section .panel-head {
+  padding: 14px 22px;
+}
+.admin-section-aside {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.admin-section-body {
+  padding: 16px 22px 20px;
+}
+.admin-section-note {
+  margin: 0;
+  padding: 20px 22px 22px;
+  color: var(--ink-soft);
+  font-size: 13.5px;
+}
+.admin-section-loading {
+  display: grid;
+  gap: 10px;
+  padding: 18px 22px 22px;
+}
+.admin-section-loading span {
+  height: 18px;
+  border-radius: 6px;
+  background: var(--line-soft);
+  animation: skeleton-breathe 1.2s ease-in-out infinite alternate;
+}
+.admin-section-loading span:last-child {
+  width: 60%;
+}
+.admin-window button {
+  min-width: 44px;
+}
+
+/* Loading: the page's shapes, still. */
+.admin-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.skeleton-block {
+  min-height: 158px;
+}
+.skeleton-rows {
+  padding: 8px 0;
+}
+.skeleton-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(5, 72px);
+  gap: 8px;
+  padding: 14px 22px;
+}
+.skeleton-row span,
+.skeleton-block {
+  animation: skeleton-breathe 1.2s ease-in-out infinite alternate;
+}
+.skeleton-row span {
+  height: 22px;
+  border-radius: 7px;
+  background: var(--line-soft);
+}
+.skeleton-row span:first-child {
+  width: 70%;
+}
+@keyframes skeleton-breathe {
+  to {
+    opacity: 0.55;
+  }
+}
+
+@media (min-width: 1000px) {
+  .admin-board {
+    overflow-y: auto;
+  }
+}
+/* Below 1100 px the timeline covers the page's right side instead. */
+@media (max-width: 1099px) {
+  .admin-main[data-open] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .timeline-panel {
+    position: fixed;
+    top: var(--bar-height);
+    right: 0;
+    bottom: 0;
+    z-index: 15;
+    width: min(460px, 100%);
+    max-height: none;
+    border-radius: 0;
+    border-width: 0 0 0 1px;
+    box-shadow: var(--shadow);
+  }
+}
+/* On a phone the rail is a bar at the bottom: the timeline covers it while open. */
+@media (max-width: 760px) {
+  .timeline-panel {
+    z-index: 31;
+  }
+}
+@media (max-width: 999px) {
+  .admin-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .flow-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+    padding-inline: 14px;
+  }
+  .flow-doc {
+    grid-column: 1 / -1;
+  }
+  .flow-total {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-live[data-state="active"] .admin-live-dot::after,
+  .cell[data-running]::before,
+  .admin-banner-dot,
+  .skeleton-row span,
+  .skeleton-block,
+  .admin-section-loading span {
+    animation: none;
+  }
+}
+
+/* The page on one screen: the state on one line, the pipeline, then what
+   goes through it (the flow, or the plugins or the usage) with the day at a
+   glance beside; the flow scrolls inside. */
+.admin-status {
+  min-height: 36px;
+  margin: 0 230px 12px 0;
+}
+.admin-status-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  min-height: 36px;
+  font-size: 13.5px;
+}
+.admin-status-line svg {
+  flex: none;
+  color: var(--success);
+}
+.admin-status[data-tone="warn"] svg {
+  color: var(--warning);
+}
+.admin-status[data-tone="bad"] svg {
+  color: var(--error);
+}
+.admin-status[data-tone="quiet"] svg {
+  color: var(--ink-faint);
+}
+.admin-status-line b {
+  color: var(--success);
+  font-size: 15px;
+  font-weight: 650;
+}
+.admin-status[data-tone="warn"] b {
+  color: var(--warning);
+}
+.admin-status[data-tone="bad"] b {
+  color: var(--error);
+}
+.admin-status[data-tone="quiet"] b {
+  color: var(--ink-soft);
+}
+.admin-status-rest {
+  color: var(--ink);
+}
+.admin-status-figures {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  color: var(--ink-soft);
+}
+.admin-status-figures > span + span::before {
+  content: "·";
+  margin: 0 8px;
+  color: var(--ink-faint);
+}
+.admin-status-figures [data-tone="warn"] {
+  color: var(--warning);
+  font-weight: 600;
+}
+.admin-status-figures [data-tone="bad"] {
+  color: var(--error);
+  font-weight: 600;
+}
+.admin-board > .admin-lower {
+  flex: 1 0 360px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 26vw, 380px);
+  gap: 14px;
+  min-height: 360px;
+}
+.admin-tabs {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 0;
+  border-radius: 16px;
+  box-shadow: var(--raise);
+}
+.admin-tabs-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px 8px;
+}
+.admin-tabs-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.admin-tabs-count {
+  color: var(--ink-faint);
+  font-size: 12.5px;
+}
+.admin-tablist.segmented {
+  margin-left: auto;
+}
+.admin-tablist.segmented button {
+  flex: none;
+  height: 28px;
+  padding: 0 11px;
+}
+.admin-tabpanel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.admin-tabpanel .admin-main {
+  align-items: stretch;
+}
+.admin-tabpanel .flow-row {
+  padding-inline: 18px;
+}
+/* On the panel's own surface; hover, fresh and selected rows still tint. */
+:where(.admin-tabpanel) .flow-row {
+  background: transparent;
+}
+/* The flow's columns shrink with its panel (narrower once a document's
+   timeline opens beside it); too narrow, a row keeps its title and total,
+   and its steps stay in its label and in the timeline. */
+.admin-tabpanel .admin-flow {
+  container: admin-flow / inline-size;
+}
+.admin-tabpanel .flow-grid {
+  grid-template-columns: minmax(140px, 1fr) repeat(5, minmax(52px, 84px)) minmax(56px, 84px);
+}
+@container admin-flow (max-width: 560px) {
+  .admin-tabpanel .flow-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .admin-tabpanel .flow-row .cell {
+    display: none;
+  }
+}
+/* The page-wide narrow layout (the steps on a line under the title) does not
+   apply here: the title keeps its column and the total stays. */
+@media (max-width: 700px) {
+  .admin-tabpanel .flow-doc {
+    grid-column: auto;
+  }
+  .admin-tabpanel .flow-total {
+    display: block;
+  }
+}
+.admin-tabpanel .flow-rows > li:first-child .flow-row {
+  border-top: 1px solid var(--line-soft);
+}
+.flow-doc {
+  display: grid !important;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 1px;
+  align-items: center;
+}
+.flow-logo {
+  grid-row: 1 / 3;
+  display: flex;
+}
+/* A tab's own controls (its window, its count) sit left of the switch. */
+.admin-tabpanel .admin-section[data-bare] > .panel-head {
+  position: absolute;
+  top: 9px;
+  right: 270px;
+  padding: 0;
+  border: 0;
+}
+.admin-tabpanel .admin-section[data-bare] .admin-window button {
+  height: 28px;
+}
+.admin-section[data-bare] .admin-section-body {
+  padding-top: 8px;
+}
+
+/* The day at a glance, beside the flow. */
+.glance {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+.glance-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px 16px;
+  border: 0;
+  border-radius: 16px;
+  box-shadow: var(--raise);
+}
+.glance-card:last-child {
+  flex: 1;
+}
+.glance-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink-faint);
+  font-size: 12.5px;
+}
+.glance-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.glance-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+.glance-link:hover {
+  color: var(--accent);
+}
+.glance-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+}
+.glance-modes li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.glance-modes b {
+  margin-left: auto;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.glance-foot,
+.glance-empty {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 12.5px;
+}
+.glance-foot {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glance-card .usage-columns {
+  min-height: 70px;
+}
+
+/* The pipeline: the verdict, then one card per step, the window beside. */
+.admin-section[data-section="bottlenecks"] {
+  position: relative;
+}
+.admin-section[data-section="bottlenecks"] > .panel-head {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 0;
+}
+.admin-section[data-section="bottlenecks"] > .admin-section-body,
+.admin-section[data-section="bottlenecks"] > .admin-section-note,
+.admin-section[data-section="bottlenecks"] > .admin-section-loading {
+  padding: 0;
+}
+.admin-section[data-section="bottlenecks"] .neck-verdict:not(.visually-hidden) {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+}
+.admin-section[data-section="bottlenecks"] .neck-legend {
+  display: none;
+}
+.pipe {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity 200ms;
+}
+.pipe[data-refreshing] {
+  opacity: 0.7;
+}
+.stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--raise);
+}
+/* The pipe between two steps. */
+.stage + .stage::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -14px;
+  width: 14px;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+.stage[data-state="slow"],
+.stage[data-state="queue"] {
+  background: linear-gradient(var(--hot-bg), var(--panel) 60%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--hot) 30%, transparent);
+}
+.stage-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.stage-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+}
+.stage-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--tint);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.stage[data-state="slow"] .stage-n,
+.stage[data-state="queue"] .stage-n {
+  background: color-mix(in oklab, var(--hot) 14%, var(--panel));
+  color: var(--hot-text);
+}
+.stage-hint {
+  margin: -4px 0 0;
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-times {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin: 0;
+}
+.stage-times > div {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.stage-times dt {
+  order: 2;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+}
+.stage-times dd {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.stage-times .stage-p50 dd {
+  color: var(--ink);
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.6px;
+}
+.stage-times .neck-recent {
+  display: inline;
+}
+.stage-dots {
+  display: flex;
+  gap: 4px;
+}
+.stage-dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+}
+.stage-dots i[data-on] {
+  background: var(--accent);
+}
+.stage[data-state="slow"] .stage-dots i[data-on],
+.stage[data-state="queue"] .stage-dots i[data-on] {
+  background: var(--hot);
+}
+.stage-plugins {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.stage-plugins li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-plugins i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+.stage-plugins [data-state="degraded"] i {
+  background: var(--warning);
+}
+.stage-plugins [data-state="down"] i {
+  background: var(--error);
+}
+.stage-plugins [data-state="idle"] i {
+  background: var(--idle-dot);
+}
+.stage-wait {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+.stage-wait[data-waiting] {
+  color: var(--hot-text);
+}
+.stage-wait b {
+  font-weight: 700;
+}
+@media (max-width: 1180px) {
+  .pipe {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .stage:nth-child(4)::before {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  /* On a phone the steps slide sideways, the page itself never does. */
+  .pipe {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 78%;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scroll-snap-type: x mandatory;
+  }
+  .stage {
+    scroll-snap-align: start;
+  }
+  .stage:nth-child(4)::before {
+    display: block;
+  }
+  .admin-section[data-section="bottlenecks"] > .panel-head {
+    position: static;
+    justify-content: flex-start;
+    margin-bottom: 8px;
+  }
+  .admin-section[data-section="bottlenecks"] .neck-verdict {
+    margin-right: 0;
+  }
+  .admin-board > .admin-lower {
+    flex: none;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .admin-tabs-head {
+    flex-wrap: wrap;
+  }
+  .admin-tabpanel .admin-section[data-bare] > .panel-head {
+    position: static;
+    padding: 10px 16px 0;
+  }
+  .admin-status {
+    margin-right: 0;
+  }
+  .admin-tabpanel {
+    overflow: visible;
+  }
+}
+

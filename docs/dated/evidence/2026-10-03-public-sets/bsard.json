@@ -1,0 +1,361 @@
+{
+  "date": "2026-10-03",
+  "status": "evidence",
+  "set": "bsard",
+  "metadata": {
+    "name": "bsard",
+    "language": "fr",
+    "description": "legal questions to statutory articles",
+    "licence": "cc-by-nc-sa-4.0",
+    "source": "https://huggingface.co/datasets/mteb/BSARDRetrieval",
+    "version": {
+      "mteb/BSARDRetrieval": "8c492add6a14ac188f2debdaf6cbdfb406fd6be3"
+    },
+    "split": "test",
+    "tier": "restricted",
+    "promotion_eligible": false,
+    "licence_checked": "2026-10-03",
+    "licence_sources": [
+      "https://huggingface.co/datasets/mteb/BSARDRetrieval/blob/8c492add6a14ac188f2debdaf6cbdfb406fd6be3/README.md"
+    ],
+    "query_type": "legal questions to statutory articles",
+    "known_issues": [
+      "Noncommercial-only: diagnostic use must comply with upstream terms; excluded from promotion gates.",
+      "Expert legal judgments are sparse and cannot represent all relevant articles."
+    ],
+    "source_counts": {
+      "documents": 22633,
+      "queries": 222,
+      "judgments": 222
+    },
+    "sample": {
+      "queries": 200,
+      "documents": 2000,
+      "seed": 991,
+      "max_source_bytes": 262144,
+      "eligible_queries": 222,
+      "judged_documents": 135,
+      "listed_negatives": 0,
+      "random_distractors": 1865,
+      "judgements_dropped_absent_or_too_long": 0
+    },
+    "fingerprint": "a97b69da3c499a7af75e1716f34192d341afb5883857423da3b2e37dbc443230",
+    "files": {
+      "corpus": {
+        "url": "https://huggingface.co/datasets/mteb/BSARDRetrieval/resolve/8c492add6a14ac188f2debdaf6cbdfb406fd6be3/corpus/test-00000-of-00001.parquet",
+        "sha256": "cc232c76567a1474b1002d890a8fde86134ec91b1f40a424df0a7a1d537399e8"
+      },
+      "queries": {
+        "url": "https://huggingface.co/datasets/mteb/BSARDRetrieval/resolve/8c492add6a14ac188f2debdaf6cbdfb406fd6be3/queries/test-00000-of-00001.parquet",
+        "sha256": "7687d8fcb5f197703bc1bfb2965a8c728518dd74afd442a88fd1473f667a9444"
+      },
+      "qrels": {
+        "url": "https://huggingface.co/datasets/mteb/BSARDRetrieval/resolve/8c492add6a14ac188f2debdaf6cbdfb406fd6be3/qrels/test-00000-of-00001.parquet",
+        "sha256": "78f38df874f89718442ef80f86574e06daed3c3372f8c81c8984a57fa2f15b6a"
+      }
+    }
+  },
+  "counts": {
+    "documents": 2000,
+    "queries": 200,
+    "judgments": 200
+  },
+  "source_counts": {
+    "documents": 22633,
+    "queries": 222,
+    "judgments": 222
+  },
+  "fingerprint": "a97b69da3c499a7af75e1716f34192d341afb5883857423da3b2e37dbc443230",
+  "sample": {
+    "queries": 200,
+    "documents": 2000,
+    "seed": 991,
+    "max_source_bytes": 262144,
+    "eligible_queries": 222,
+    "judged_documents": 135,
+    "listed_negatives": 0,
+    "random_distractors": 1865,
+    "judgements_dropped_absent_or_too_long": 0
+  },
+  "judged_depth": {
+    "count": 200,
+    "min": 1,
+    "max": 1,
+    "mean": 1.0,
+    "median": 1.0,
+    "histogram": {
+      "1": 200
+    },
+    "total_judgments": 200,
+    "queries": 200
+  },
+  "grades": {
+    "counts": {
+      "1": 200
+    },
+    "positive_judgments": 200,
+    "max_grade": 1
+  },
+  "query_lengths": {
+    "chars": {
+      "count": 200,
+      "min": 36,
+      "max": 275,
+      "mean": 144.69,
+      "median": 140.0,
+      "histogram": {
+        "36": 1,
+        "50": 1,
+        "58": 1,
+        "61": 1,
+        "62": 1,
+        "66": 1,
+        "68": 1,
+        "69": 1,
+        "73": 1,
+        "80": 1,
+        "84": 2,
+        "85": 1,
+        "87": 1,
+        "88": 1,
+        "91": 1,
+        "92": 1,
+        "93": 3,
+        "96": 2,
+        "97": 1,
+        "98": 2,
+        "99": 5,
+        "100": 2,
+        "101": 2,
+        "102": 1,
+        "103": 2,
+        "104": 2,
+        "105": 1,
+        "106": 1,
+        "107": 1,
+        "108": 5,
+        "109": 2,
+        "110": 1,
+        "111": 3,
+        "113": 1,
+        "114": 2,
+        "115": 1,
+        "118": 3,
+        "119": 1,
+        "120": 3,
+        "121": 1,
+        "122": 5,
+        "123": 1,
+        "124": 4,
+        "125": 2,
+        "126": 2,
+        "127": 2,
+        "128": 1,
+        "129": 3,
+        "130": 1,
+        "131": 1,
+        "133": 1,
+        "134": 1,
+        "135": 1,
+        "136": 2,
+        "137": 3,
+        "138": 2,
+        "139": 1,
+        "140": 3,
+        "141": 3,
+        "142": 1,
+        "143": 3,
+        "144": 3,
+        "145": 2,
+        "147": 1,
+        "148": 1,
+        "149": 4,
+        "150": 1,
+        "151": 1,
+        "152": 1,
+        "153": 3,
+        "154": 2,
+        "155": 1,
+        "156": 1,
+        "157": 1,
+        "158": 1,
+        "159": 3,
+        "161": 1,
+        "162": 2,
+        "163": 1,
+        "164": 1,
+        "165": 3,
+        "168": 3,
+        "169": 2,
+        "171": 2,
+        "173": 5,
+        "175": 1,
+        "176": 2,
+        "181": 2,
+        "182": 2,
+        "185": 1,
+        "186": 2,
+        "188": 3,
+        "191": 1,
+        "193": 2,
+        "194": 1,
+        "197": 3,
+        "199": 1,
+        "202": 1,
+        "206": 1,
+        "207": 1,
+        "208": 2,
+        "210": 1,
+        "213": 1,
+        "214": 2,
+        "215": 1,
+        "217": 1,
+        "219": 1,
+        "220": 1,
+        "229": 1,
+        "230": 1,
+        "232": 1,
+        "237": 1,
+        "241": 2,
+        "242": 1,
+        "243": 1,
+        "247": 1,
+        "259": 1,
+        "267": 1,
+        "275": 1
+      }
+    },
+    "words": {
+      "count": 200,
+      "min": 7,
+      "max": 47,
+      "mean": 23.11,
+      "median": 22.0,
+      "histogram": {
+        "7": 2,
+        "10": 2,
+        "11": 4,
+        "12": 2,
+        "13": 4,
+        "14": 2,
+        "15": 10,
+        "16": 11,
+        "17": 7,
+        "18": 14,
+        "19": 5,
+        "20": 14,
+        "21": 11,
+        "22": 18,
+        "23": 12,
+        "24": 9,
+        "25": 6,
+        "26": 10,
+        "27": 13,
+        "28": 5,
+        "29": 3,
+        "30": 3,
+        "31": 8,
+        "32": 1,
+        "34": 5,
+        "35": 5,
+        "36": 4,
+        "37": 3,
+        "38": 1,
+        "40": 2,
+        "41": 2,
+        "44": 1,
+        "47": 1
+      }
+    }
+  },
+  "query_types": {
+    "source": "legal questions to statutory articles",
+    "heuristic": "question if text ends '?' or starts with a recognized lexical question marker; statement otherwise",
+    "counts": {
+      "question": 56,
+      "statement": 144
+    },
+    "manual_labels": null,
+    "judge_agreement": null,
+    "notes": "No manual query-type labels or judge-agreement information supplied."
+  },
+  "e5": {
+    "model": "multilingual-e5-small (current)",
+    "mean": {
+      "ndcg@10": 0.3112221285632089,
+      "recall@10": 0.465,
+      "mrr@10": 0.26307738095238103
+    },
+    "saturation": {
+      "saturated_queries": 34,
+      "queries": 200,
+      "share": 0.17
+    },
+    "dims": 384,
+    "pieces": 2399,
+    "index_s": 92.9,
+    "query_ms": 5.7
+  },
+  "cohere_pro": {
+    "model": "Cohere-Embed-V5-Pro",
+    "mean": null,
+    "saturation": null,
+    "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+  },
+  "runs": {
+    "e5": {
+      "date": "2026-10-03T19:37:23.731737+00:00",
+      "status": "complete",
+      "set": "bsard",
+      "fingerprint": "a97b69da3c499a7af75e1716f34192d341afb5883857423da3b2e37dbc443230",
+      "settings": {
+        "models": [
+          "multilingual-e5-small (current)"
+        ],
+        "e5_model": "intfloat/multilingual-e5-small",
+        "e5_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "e5_window_chars": 1800,
+        "hosted_window_chars": 6000,
+        "overlap_chars": 200,
+        "retrieval": "exact cosine, best piece, top 10",
+        "prices_usd_per_million": {
+          "Cohere-Embed-V5-Pro": 0.12,
+          "Cohere-Embed-V5-Fast": 0.08,
+          "text-embedding-3-large": 0.13
+        },
+        "price_reference_date": "2026-10-03",
+        "scoring": "nDCG@10 uses linear gain (gain = relevance grade) and a log2(rank + 1) discount, the Järvelin-Kekäläinen form of trec_eval ndcg_cut_10 and ranx \"ndcg\"; the ideal ranking holds every judged document. Recall@10 and MRR@10 count grades above 0 as relevant. A query with no result scores 0.",
+        "paired_test": "two-sided paired Student t-test on per-query scores, alpha 0.05, no correction for multiple comparisons"
+      }
+    },
+    "cohere_pro": null
+  },
+  "saturation": {
+    "e5": {
+      "saturated_queries": 34,
+      "queries": 200,
+      "share": 0.17
+    },
+    "joint_e5_cohere_pro": {
+      "saturated_queries": null,
+      "queries": 200,
+      "share": null,
+      "reason": "awaiting coordinator hosted Cohere-Embed-V5-Pro run"
+    }
+  },
+  "hosted_input_estimate": {
+    "window_chars": 6000,
+    "overlap_chars": 200,
+    "document_windows": 2026,
+    "query_inputs": 200,
+    "input_tokens": 1958099,
+    "price_usd_per_million": 0.12,
+    "estimated_usd": 0.23497188,
+    "estimate_only": true,
+    "per_set_caps": {
+      "max_input_tokens": 3916198,
+      "max_usd": 0.47
+    }
+  },
+  "local_run_sha256": "f3d8ea68d24976b9569e5f0fcfbb829db49cb19830139bc9b4b833f1569d957b"
+}

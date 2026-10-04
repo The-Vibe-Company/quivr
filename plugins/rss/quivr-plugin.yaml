@@ -1,0 +1,111 @@
+# First-party connector plugin for RSS and Atom feeds. Check it with:
+# quivr plugin inspect . && quivr plugin test .
+# The id owns the connector.rss extension namespace that Records collected by
+# the connector built into earlier cores already carry.
+id: connector.rss
+version: 1.0.0
+description: Collects the entries of RSS 2.0, RSS 1.0 (RDF), Atom and JSON Feed documents, with conditional polling and the feed's ttl.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.3.1 <0.4.0"
+contributions:
+  connector:
+    kinds:
+      rss:
+        description: An RSS, Atom or JSON Feed document polled over http or https.
+        config_schema:
+          title: RSS or Atom feed
+          description: Collects the entries of an RSS 2.0, RSS 1.0, Atom or JSON Feed document.
+          type: object
+          additionalProperties: false
+          required: [url]
+          properties:
+            url:
+              type: string
+              maxLength: 2048
+              pattern: "^[hH][tT][tT][pP][sS]?://[^/?#@\\s]+([/?#][^\\s]*)?$"
+              title: Feed URL
+              description: http or https address of the feed, without embedded credentials.
+              examples: ["https://example.org/feed.xml"]
+            honor_ttl:
+              type: boolean
+              title: Honor the feed's TTL
+              description: Poll no more often than the feed's ttl element asks.
+        credential_schema:
+          title: Feed credential
+          description: Only for feeds that require authentication.
+          oneOf:
+            - title: Username and password
+              type: object
+              additionalProperties: false
+              required: [username, password]
+              properties:
+                username: {type: string, minLength: 1, title: Username}
+                password: {type: string, minLength: 1, title: Password, writeOnly: true}
+            - title: Bearer token
+              type: object
+              additionalProperties: false
+              required: [token]
+              properties:
+                token: {type: string, minLength: 1, title: Token, writeOnly: true}
+        # Public feeds need none: the core then sends a null credential.
+        credential_required: false
+        default_interval_seconds: 300
+    timeout_ms: 30000
+    limits:
+      max_items: 250
+      max_response_bytes: 16777216
+      # The revisions of up to 2000 items (about 90 KiB), as the built-in connector kept.
+      max_checkpoint_bytes: 131072
+# Installer configuration: set in the plugin pin's `configuration`.
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      allow_private_addresses:
+        type: boolean
+        description: Fetch feeds on loopback, private and link-local addresses (default false). Local and CI stacks only.
+extensions:
+  connector.rss:
+    "1":
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      required: [item, feed]
+      additionalProperties: false
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          properties:
+            guid: {type: string}
+            link: {type: string}
+            links: {type: array, maxItems: 20, items: {type: string}}
+            authors:
+              type: array
+              maxItems: 20
+              items: {type: object, additionalProperties: false, properties: {name: {type: string}, email: {type: string}}}
+            published: {type: string, format: date-time}
+            updated: {type: string, format: date-time}
+            categories: {type: array, maxItems: 50, items: {type: string}}
+            enclosures:
+              type: array
+              maxItems: 20
+              items:
+                type: object
+                required: [url]
+                additionalProperties: false
+                properties: {url: {type: string}, type: {type: string}, length: {type: string}}
+            truncated: {type: boolean}
+        feed:
+          type: object
+          required: [format]
+          additionalProperties: false
+          properties:
+            format: {type: string}
+            version: {type: string}
+            title: {type: string}
+            link: {type: string}
+            language: {type: string}
+run:
+  command: [go, run, .]

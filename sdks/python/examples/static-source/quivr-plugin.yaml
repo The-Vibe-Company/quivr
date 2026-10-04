@@ -1,0 +1,48 @@
+id: example.python-static-source
+version: 0.1.0
+description: Pages through the items listed in its configuration.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.3.0 <1.0.0"
+contributions:
+  connector:
+    kinds:
+      static:
+        description: Items listed in the instance config, returned page by page.
+        config_schema:
+          type: object
+          additionalProperties: false
+          required: [items]
+          properties:
+            items:
+              type: array
+              maxItems: 1000
+              items:
+                type: object
+                additionalProperties: false
+                required: [key, title, body]
+                properties:
+                  key: {type: string, minLength: 1, maxLength: 256}
+                  title: {type: string, minLength: 1}
+                  body: {type: string, minLength: 1}
+                  author: {type: string, minLength: 1}
+            page_size: {type: integer, minimum: 1, maximum: 50}
+        credential_schema:
+          type: object
+          additionalProperties: false
+          required: [token]
+          properties:
+            token: {type: string, minLength: 8}
+        default_interval_seconds: 900
+    timeout_ms: 5000
+    limits:
+      max_items: 50
+extensions:
+  example.python-static-source.source:
+    "1":
+      type: object
+      additionalProperties: false
+      properties:
+        author: {type: string}
+run:
+  command: [python3, -m, static_source]

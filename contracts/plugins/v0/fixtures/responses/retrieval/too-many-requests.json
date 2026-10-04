@@ -1,0 +1,22 @@
+{
+  "requests": [
+    {
+      "primitive": "bm25",
+      "field": "source",
+      "query_text": "harbour strike",
+      "k": 2
+    },
+    {
+      "primitive": "near_vector",
+      "space": "example.words.small@1",
+      "query_text": "harbour strike",
+      "k": 2
+    },
+    {
+      "primitive": "bm25",
+      "field": "source",
+      "query_text": "harbour strike",
+      "k": 2
+    }
+  ]
+}

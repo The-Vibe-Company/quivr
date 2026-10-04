@@ -1,0 +1,27 @@
+# Sample retrieval plugin built with the Go SDK, used by tests and as a
+# starting point. It asks for keyword and vector candidates and fuses them by
+# reciprocal rank; its deep profile adds a round that looks for passages close
+# to the best keyword hit. It needs no model and no paid call.
+id: example.fusion_retriever
+version: 0.1.0
+description: Keyword and vector candidates fused by reciprocal rank.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.7.0 <0.8.0"
+contributions:
+  retrieval:
+    profiles:
+      default:
+        description: Keywords and the served vector space, fused by reciprocal rank.
+        max_latency_ms: 5000
+        max_cost_cents: 0
+      deep:
+        description: The default candidates plus passages close to the best keyword hit, fused by reciprocal rank.
+        max_latency_ms: 8000
+        max_cost_cents: 0
+    limits:
+      max_rounds: 3
+      max_requests: 2
+      max_candidates: 30
+run:
+  command: [go, run, .]

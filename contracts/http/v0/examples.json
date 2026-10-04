@@ -1,0 +1,1612 @@
+[
+  {
+    "name": "structured_inline",
+    "schema": "IngestCommand",
+    "value": {
+      "idempotency_key": "import-42:item-7",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "source_revision": "2",
+      "content": {
+        "kind": "text",
+        "text": "Le texte de la dépêche…"
+      },
+      "extensions": {
+        "example.editorial": {
+          "schema_version": "1",
+          "data": {
+            "headline": "Titre échantillon",
+            "subjects": [
+              {
+                "code": "science",
+                "score": 0.75
+              }
+            ],
+            "flags": {
+              "urgent": true
+            },
+            "extra": null
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "structured_manifest",
+    "schema": "IngestCommand",
+    "value": {
+      "idempotency_key": "import-42:item-7",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "source_revision": "2",
+      "content": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "body",
+            "role": "body",
+            "content": {
+              "kind": "text",
+              "text": "Texte"
+            },
+            "extensions": {
+              "example.editorial": {
+                "schema_version": "1",
+                "data": {
+                  "headline": "Titre échantillon",
+                  "subjects": [
+                    {
+                      "code": "science",
+                      "score": 0.75
+                    }
+                  ],
+                  "flags": {
+                    "urgent": true
+                  },
+                  "extra": null
+                }
+              }
+            }
+          },
+          {
+            "key": "source",
+            "role": "source",
+            "content": {
+              "kind": "blob",
+              "blob_id": "blob_original",
+              "media_type": "application/xml"
+            }
+          }
+        ],
+        "relations": [
+          {
+            "type": "illustrated_by",
+            "target": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "photo-8"
+            },
+            "source_target_revision": "1"
+          }
+        ]
+      },
+      "extensions": {
+        "example.editorial": {
+          "schema_version": "1",
+          "data": {
+            "headline": "Titre échantillon",
+            "subjects": [
+              {
+                "code": "science",
+                "score": 0.75
+              }
+            ],
+            "flags": {
+              "urgent": true
+            },
+            "extra": null
+          }
+        }
+      },
+      "provenance": {
+        "source_blob_ids": [
+          "blob_original"
+        ],
+        "producer": "example.plugin",
+        "producer_version": "sha256:pinned"
+      }
+    }
+  },
+  {
+    "name": "blob_input",
+    "schema": "IngestCommand",
+    "value": {
+      "idempotency_key": "import-42:item-7",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "source_revision": "2",
+      "content": {
+        "kind": "blob",
+        "blob_id": "blob_text",
+        "media_type": "text/plain"
+      },
+      "extensions": {
+        "example.editorial": {
+          "schema_version": "1",
+          "data": {
+            "headline": "Titre échantillon",
+            "subjects": [
+              {
+                "code": "science",
+                "score": 0.75
+              }
+            ],
+            "flags": {
+              "urgent": true
+            },
+            "extra": null
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "pending_receipt",
+    "schema": "Receipt",
+    "value": {
+      "receipt_id": "receipt_1",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "state": "pending",
+      "processing": {
+        "state": "queued",
+        "phase": "materialization"
+      },
+      "diagnostics": []
+    }
+  },
+  {
+    "name": "resolved_receipt",
+    "schema": "Receipt",
+    "value": {
+      "receipt_id": "receipt_1",
+      "source": {
+        "corpus_id": "corpus_news",
+        "namespace": "example-feed",
+        "record_key": "article-123"
+      },
+      "state": "resolved",
+      "processing": {
+        "state": "running",
+        "phase": "baseline"
+      },
+      "diagnostics": [],
+      "outcome": "created",
+      "record_id": "record_1",
+      "version_id": "version_2",
+      "availability": {
+        "state": "building_baseline",
+        "is_current": false,
+        "searchable": false
+      }
+    }
+  },
+  {
+    "name": "mixed_batch_input",
+    "schema": "BatchRequest",
+    "value": {
+      "items": [
+        {
+          "idempotency_key": "import-42:item-7",
+          "source": {
+            "corpus_id": "corpus_news",
+            "namespace": "example-feed",
+            "record_key": "article-123"
+          },
+          "source_revision": "2",
+          "content": {
+            "kind": "text",
+            "text": "Le texte de la dépêche…"
+          },
+          "extensions": {
+            "example.editorial": {
+              "schema_version": "1",
+              "data": {
+                "headline": "Titre échantillon",
+                "subjects": [
+                  {
+                    "code": "science",
+                    "score": 0.75
+                  }
+                ],
+                "flags": {
+                  "urgent": true
+                },
+                "extra": null
+              }
+            }
+          }
+        },
+        {
+          "source": {
+            "corpus_id": "corpus_news",
+            "namespace": "example-feed",
+            "record_key": "article-123"
+          }
+        },
+        42
+      ]
+    }
+  },
+  {
+    "name": "mixed_batch_result",
+    "schema": "BatchResult",
+    "value": {
+      "items": [
+        {
+          "index": 0,
+          "receipt": {
+            "receipt_id": "receipt_1",
+            "source": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "article-123"
+            },
+            "state": "pending",
+            "processing": {
+              "state": "queued",
+              "phase": "materialization"
+            },
+            "diagnostics": []
+          }
+        },
+        {
+          "index": 1,
+          "error": {
+            "code": "invalid_schema",
+            "message": "invalid schema",
+            "retryable": false
+          }
+        },
+        {
+          "index": 2,
+          "error": {
+            "code": "invalid_schema",
+            "message": "invalid schema",
+            "retryable": false
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "verified_upload",
+    "schema": "Upload",
+    "value": {
+      "upload_id": "upload_1",
+      "state": "verified",
+      "blob_id": "blob_text"
+    }
+  },
+  {
+    "name": "version_relations",
+    "schema": "Version",
+    "value": {
+      "record_id": "record_1",
+      "version_id": "version_2",
+      "accepted_at": "2026-09-29T10:00:00Z",
+      "manifest": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "body",
+            "role": "body",
+            "content": {
+              "kind": "text",
+              "text": "Texte"
+            },
+            "extensions": {
+              "example.editorial": {
+                "schema_version": "1",
+                "data": {
+                  "headline": "Titre échantillon",
+                  "subjects": [
+                    {
+                      "code": "science",
+                      "score": 0.75
+                    }
+                  ],
+                  "flags": {
+                    "urgent": true
+                  },
+                  "extra": null
+                }
+              }
+            }
+          },
+          {
+            "key": "source",
+            "role": "source",
+            "content": {
+              "kind": "blob",
+              "blob_id": "blob_original",
+              "media_type": "application/xml"
+            }
+          }
+        ],
+        "relations": [
+          {
+            "type": "illustrated_by",
+            "target": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "photo-8"
+            },
+            "source_target_revision": "1"
+          }
+        ]
+      },
+      "extensions": {
+        "example.editorial": {
+          "schema_version": "1",
+          "data": {
+            "headline": "Titre échantillon",
+            "subjects": [
+              {
+                "code": "science",
+                "score": 0.75
+              }
+            ],
+            "flags": {
+              "urgent": true
+            },
+            "extra": null
+          }
+        }
+      },
+      "availability": {
+        "state": "retrieval_ready",
+        "is_current": true,
+        "searchable": true
+      },
+      "processing": {
+        "state": "idle"
+      },
+      "relations": [
+        {
+          "source_reference": {
+            "type": "illustrated_by",
+            "target": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "photo-8"
+            },
+            "source_target_revision": "1"
+          },
+          "status": "available",
+          "target_record_id": "photo_record",
+          "target_version_id": "photo_version_2"
+        },
+        {
+          "source_reference": {
+            "type": "illustrated_by",
+            "target": {
+              "corpus_id": "corpus_news",
+              "namespace": "example-feed",
+              "record_key": "photo-missing"
+            },
+            "source_target_revision": "1"
+          },
+          "status": "unavailable"
+        }
+      ]
+    }
+  },
+  {
+    "name": "quarantined_version",
+    "schema": "Version",
+    "value": {
+      "record_id": "record_2",
+      "version_id": "version_3",
+      "manifest": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "source",
+            "role": "source",
+            "content": {
+              "kind": "blob",
+              "blob_id": "blob_markdown",
+              "media_type": "text/markdown"
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "source_blob_ids": [
+          "blob_markdown"
+        ]
+      },
+      "availability": {
+        "state": "quarantined",
+        "is_current": false,
+        "searchable": false
+      },
+      "processing": {
+        "state": "blocked",
+        "phase": "baseline"
+      },
+      "relations": [],
+      "diagnostics": [
+        {
+          "code": "normalizer_invalid_output",
+          "message": "invalid normalizer output: duplicate Part key",
+          "retryable": false,
+          "plugin": "example.markdown",
+          "contribution": "normalizer",
+          "invocation_id": "inv_1"
+        }
+      ]
+    }
+  },
+  {
+    "name": "fallback_version",
+    "schema": "Version",
+    "value": {
+      "record_id": "record_3",
+      "version_id": "version_4",
+      "manifest": {
+        "kind": "manifest",
+        "parts": [
+          {
+            "key": "body",
+            "role": "body",
+            "content": {
+              "kind": "text",
+              "text": "# Title\n\nBody"
+            }
+          }
+        ]
+      },
+      "provenance": {
+        "source_blob_ids": [
+          "blob_markdown_2"
+        ],
+        "normalization": {
+          "plugin_id": "example.markdown",
+          "plugin_version": "1.0.0",
+          "plugin_api": "0.1.0",
+          "contribution": "normalizer",
+          "invocation_id": "inv_2",
+          "idempotency_key": "nk_1",
+          "input_sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+          "fallback": {
+            "code": "normalizer_failed",
+            "message": "The normalizer refused the input with unreadable: cannot read"
+          }
+        }
+      },
+      "availability": {
+        "state": "retrieval_ready",
+        "is_current": true,
+        "searchable": true
+      },
+      "processing": {
+        "state": "idle"
+      },
+      "relations": [],
+      "diagnostics": [
+        {
+          "code": "normalizer_failed",
+          "message": "The normalizer refused the input with unreadable: cannot read",
+          "retryable": false,
+          "plugin": "example.markdown",
+          "contribution": "normalizer",
+          "invocation_id": "inv_2"
+        }
+      ]
+    }
+  },
+  {
+    "name": "administrative_operation",
+    "schema": "Operation",
+    "value": {
+      "operation_id": "op_1",
+      "kind": "projection_rebuild",
+      "state": "cancel_requested",
+      "counters": {
+        "processed": 42
+      },
+      "errors": [],
+      "corpus_id": "corpus_news"
+    }
+  },
+  {
+    "name": "saved_query_create",
+    "schema": "SavedQueryCreate",
+    "value": {
+      "idempotency_key": "create-query-1",
+      "name": "Example query",
+      "definition": {
+        "corpus_ids": [
+          "corpus_news"
+        ],
+        "expression": {
+          "fixture": "positive"
+        },
+        "retrieval_profile": "default",
+        "temporal_policy": "from_activation"
+      }
+    }
+  },
+  {
+    "name": "saved_query",
+    "schema": "SavedQuery",
+    "value": {
+      "saved_query_id": "query_1",
+      "name": "Example query",
+      "deleted": false,
+      "current_version": {
+        "saved_query_id": "query_1",
+        "version_id": "query_version_1",
+        "definition": {
+          "corpus_ids": [
+            "corpus_news"
+          ],
+          "expression": {
+            "fixture": "positive"
+          },
+          "retrieval_profile": "default",
+          "temporal_policy": "from_activation"
+        }
+      }
+    }
+  },
+  {
+    "name": "saved_query_version_create",
+    "schema": "SavedQueryVersionCreate",
+    "value": {
+      "idempotency_key": "edit-query-1",
+      "definition": {
+        "corpus_ids": [
+          "corpus_news"
+        ],
+        "expression": {
+          "fixture": "negative"
+        },
+        "retrieval_profile": "default",
+        "temporal_policy": "from_activation"
+      }
+    }
+  },
+  {
+    "name": "subscription_create",
+    "schema": "SubscriptionCreate",
+    "value": {
+      "idempotency_key": "create-subscription-1",
+      "name": "Example subscription",
+      "saved_query_id": "query_1",
+      "saved_query_version_id": "query_version_1",
+      "evaluator": {
+        "plugin_id": "fixture-evaluator",
+        "version": "1",
+        "configuration": {
+          "scenario": "positive",
+          "parameters": {
+            "sample": true
+          }
+        }
+      },
+      "destination_id": "fixture_webhook"
+    }
+  },
+  {
+    "name": "subscription",
+    "schema": "Subscription",
+    "value": {
+      "subscription_id": "subscription_1",
+      "name": "Example subscription",
+      "enabled": true,
+      "deleted": false,
+      "current_version": {
+        "subscription_id": "subscription_1",
+        "version_id": "subscription_version_1",
+        "saved_query_id": "query_1",
+        "saved_query_version_id": "query_version_1",
+        "evaluator": {
+          "plugin_id": "fixture-evaluator",
+          "version": "1",
+          "configuration": {
+            "scenario": "positive",
+            "parameters": {
+              "sample": true
+            }
+          }
+        },
+        "destination_id": "fixture_webhook"
+      }
+    }
+  },
+  {
+    "name": "subscription_version_create",
+    "schema": "SubscriptionVersionCreate",
+    "value": {
+      "idempotency_key": "edit-subscription-1",
+      "saved_query_version_id": "query_version_2",
+      "evaluator": {
+        "plugin_id": "fixture-evaluator",
+        "version": "1",
+        "configuration": {
+          "scenario": "negative"
+        }
+      },
+      "destination_id": "fixture_webhook"
+    }
+  },
+  {
+    "name": "positive_match",
+    "schema": "Match",
+    "value": {
+      "match_id": "match_1",
+      "subscription_id": "subscription_1",
+      "subscription_version_id": "subscription_version_1",
+      "saved_query_id": "query_1",
+      "saved_query_version_id": "query_version_1",
+      "record_id": "record_1",
+      "record_version_id": "version_1",
+      "evidence": {
+        "evaluator": {
+          "plugin_id": "fixture-evaluator",
+          "version": "1",
+          "configuration": {
+            "scenario": "positive",
+            "parameters": {
+              "sample": true
+            }
+          }
+        },
+        "explanation": "Résultat déterministe de la fixture",
+        "part_keys": [
+          "body"
+        ],
+        "details": {
+          "fixture": true,
+          "values": [
+            1,
+            false,
+            null
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "reference_webhook",
+    "schema": "WebhookEvent",
+    "value": {
+      "event_id": "event_match_1",
+      "type": "match.created",
+      "schema_version": "1",
+      "occurred_at": "2026-09-14T12:00:00Z",
+      "references": {
+        "match_id": "match_1",
+        "record_id": "record_1",
+        "record_version_id": "version_1",
+        "subscription_id": "subscription_1",
+        "subscription_version_id": "subscription_version_1",
+        "delivery_id": "delivery_1"
+      }
+    }
+  },
+  {
+    "name": "delivery",
+    "schema": "Delivery",
+    "value": {
+      "delivery_id": "delivery_1",
+      "match_id": "match_1",
+      "destination_id": "fixture_webhook",
+      "state": "pending",
+      "event": {
+        "event_id": "event_match_1",
+        "type": "match.created",
+        "schema_version": "1",
+        "occurred_at": "2026-09-14T12:00:00Z",
+        "references": {
+          "match_id": "match_1",
+          "record_id": "record_1",
+          "record_version_id": "version_1",
+          "subscription_id": "subscription_1",
+          "subscription_version_id": "subscription_version_1",
+          "delivery_id": "delivery_1"
+        }
+      },
+      "attempt_count": 1,
+      "admission": {
+        "allowed": false,
+        "reason": "subscription_disabled"
+      }
+    }
+  },
+  {
+    "name": "attempt_page",
+    "schema": "DeliveryAttemptPage",
+    "value": {
+      "items": [
+        {
+          "attempt_id": "attempt_1",
+          "delivery_id": "delivery_1",
+          "number": 1,
+          "outcome": "retryable_error",
+          "http_status": 503,
+          "error": {
+            "code": "receiver_unavailable",
+            "message": "HTTP 503",
+            "retryable": true
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "monitoring_change",
+    "schema": "ChangeEvent",
+    "value": {
+      "event_id": "event_match_1",
+      "type": "match.created",
+      "schema_version": "1",
+      "occurred_at": "2026-09-14T12:00:00Z",
+      "resource": {
+        "kind": "match",
+        "id": "match_1",
+        "corpus_id": "corpus_news"
+      },
+      "cursor": "opaque_cursor",
+      "monitoring": {
+        "match_id": "match_1",
+        "record_id": "record_1",
+        "record_version_id": "version_1",
+        "subscription_id": "subscription_1",
+        "subscription_version_id": "subscription_version_1",
+        "delivery_id": "delivery_1"
+      }
+    }
+  },
+  {
+    "name": "text_search",
+    "schema": "SearchRequest",
+    "value": {
+      "query": "énergie solaire 🌞",
+      "corpus_ids": [
+        "corpus_news"
+      ],
+      "mode": "hybrid",
+      "profile": "default",
+      "limit": 10
+    }
+  },
+  {
+    "name": "canonical_search_results",
+    "schema": "SearchResponse",
+    "value": {
+      "items": [
+        {
+          "record_id": "record_1",
+          "version_id": "version_1",
+          "part_key": "body",
+          "segment_id": "segment_1",
+          "segmentation_id": "segmentation_1",
+          "projection_generation_id": "generation_1",
+          "embedding_artifact_id": "embedding_1",
+          "vector_space_id": "vectorspace_1",
+          "rank": 1,
+          "excerpt": {
+            "text": "énergie 🌞",
+            "start": 3,
+            "end": 12,
+            "coordinate_system": "unicode_codepoint"
+          },
+          "availability": {
+            "state": "retrieval_ready",
+            "is_current": true,
+            "searchable": true
+          }
+        }
+      ],
+      "retrieval_profile": {
+        "name": "default",
+        "version": "quivr.text.fixture.v1"
+      }
+    }
+  },
+  {
+    "name": "lexical_search_without_embedding",
+    "schema": "SearchResponse",
+    "value": {
+      "items": [
+        {
+          "record_id": "record_2",
+          "version_id": "version_2",
+          "part_key": "body",
+          "segment_id": "segment_2",
+          "segmentation_id": "segmentation_2",
+          "projection_generation_id": "generation_1",
+          "rank": 1,
+          "excerpt": {
+            "text": "lune",
+            "start": 0,
+            "end": 4,
+            "coordinate_system": "unicode_codepoint"
+          },
+          "availability": {
+            "state": "retrieval_ready",
+            "is_current": true,
+            "searchable": true
+          }
+        }
+      ],
+      "retrieval_profile": {
+        "name": "default",
+        "version": "quivr.text.fixture.v1"
+      }
+    }
+  },
+  {
+    "name": "plugin_ranked_search_results",
+    "schema": "SearchResponse",
+    "value": {
+      "items": [
+        {
+          "record_id": "record_1",
+          "version_id": "version_1",
+          "part_key": "body",
+          "segment_id": "segment_1",
+          "segmentation_id": "segmentation_1",
+          "projection_generation_id": "generation_1",
+          "rank": 1,
+          "excerpt": {
+            "text": "énergie 🌞",
+            "start": 3,
+            "end": 12,
+            "coordinate_system": "unicode_codepoint"
+          },
+          "availability": {
+            "state": "retrieval_ready",
+            "is_current": true,
+            "searchable": true
+          },
+          "explanation": "rank 1 by keywords, rank 2 by the served space"
+        }
+      ],
+      "retrieval_profile": {
+        "name": "deep",
+        "version": "plugin:example.fusion@0.1.0/deep"
+      },
+      "usage": {
+        "rounds": 2,
+        "elapsed_ms": 84,
+        "paid_calls": 0,
+        "cost_cents": 0,
+        "phases": {
+          "routing_ms": 2,
+          "coverage_ms": 3,
+          "plugin_rounds_ms": 9,
+          "query_encoding_ms": 21,
+          "index_query_ms": 18,
+          "hydration_ms": 27
+        }
+      }
+    }
+  },
+  {
+    "name": "search_profiles",
+    "schema": "SearchProfileList",
+    "value": {
+      "items": [
+        {
+          "name": "default",
+          "full_name": "example.fusion/default",
+          "aliases": ["default"],
+          "description": "Keywords and vectors fused by rank.",
+          "max_latency_ms": 500,
+          "max_cost_cents": 0,
+          "provider": {
+            "kind": "plugin",
+            "plugin_id": "example.fusion",
+            "plugin_version": "0.1.0"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "rebuild_queued",
+    "schema": "Operation",
+    "value": {
+      "operation_id": "operation_1",
+      "kind": "projection_rebuild",
+      "corpus_id": "corpus_news",
+      "state": "queued",
+      "counters": {},
+      "errors": []
+    }
+  },
+  {
+    "name": "rebuild_succeeded",
+    "schema": "Operation",
+    "value": {
+      "operation_id": "operation_1",
+      "kind": "projection_rebuild",
+      "corpus_id": "corpus_news",
+      "state": "succeeded",
+      "counters": {
+        "indexed": 24
+      },
+      "errors": [],
+      "result": {
+        "projection_generation_id": "generation_2"
+      }
+    }
+  },
+  {
+    "name": "connector_create",
+    "schema": "ConnectorCreate",
+    "value": {
+      "idempotency_key": "newsroom-wire-feed",
+      "corpus_id": "corpus_news",
+      "source_namespace": "newsroom-wire",
+      "kind": "fixture",
+      "config": {
+        "script": []
+      },
+      "push_policy": {
+        "rate_per_second": 2.5,
+        "burst": 10,
+        "allowed_cidrs": ["192.0.2.0/24"]
+      },
+      "schedule": {
+        "interval_seconds": 300
+      },
+      "health_policy": {
+        "silent_after_seconds": 86400,
+        "credential_warning_seconds": 1209600
+      },
+      "credential": {
+        "secret": {
+          "token": "fixture-test-token"
+        },
+        "expires_at": "2027-01-01T00:00:00Z"
+      }
+    }
+  },
+  {
+    "name": "connector",
+    "schema": "Connector",
+    "value": {
+      "connector_id": "connector_1",
+      "corpus_id": "corpus_news",
+      "source_namespace": "newsroom-wire",
+      "kind": "fixture",
+      "config": {
+        "script": []
+      },
+      "push_policy": {
+        "rate_per_second": 2.5,
+        "burst": 10,
+        "allowed_cidrs": ["192.0.2.0/24"]
+      },
+      "schedule": {
+        "interval_seconds": 300
+      },
+      "health_policy": {
+        "silent_after_seconds": 86400,
+        "credential_warning_seconds": 1209600
+      },
+      "enabled": true,
+      "created_at": "2026-09-28T10:00:00Z",
+      "credential": {
+        "version": 1,
+        "deposited_at": "2026-09-28T10:00:00Z",
+        "expires_at": "2027-01-01T00:00:00Z"
+      },
+      "health": {
+        "state": "access_error",
+        "evaluated_at": "2026-09-28T10:05:00Z",
+        "last_success_at": "2026-09-28T10:01:00Z",
+        "last_item_at": "2026-09-28T10:01:00Z",
+        "last_error": {
+          "code": "unauthorized",
+          "at": "2026-09-28T10:05:00Z"
+        }
+      }
+    }
+  },
+  {
+    "name": "connector_x_list",
+    "schema": "Connector",
+    "value": {
+      "connector_id": "connector_2",
+      "corpus_id": "corpus_news",
+      "source_namespace": "x-watchlist",
+      "kind": "x_list",
+      "config": {
+        "list_id": "1234567890123456789",
+        "recheck_window_seconds": 86400
+      },
+      "schedule": {
+        "interval_seconds": 120
+      },
+      "health_policy": {
+        "silent_after_seconds": 86400,
+        "credential_warning_seconds": 1209600
+      },
+      "enabled": true,
+      "created_at": "2026-09-28T10:00:00Z",
+      "credential": {
+        "version": 1,
+        "deposited_at": "2026-09-28T10:00:00Z",
+        "expires_at": "2027-06-01T00:00:00Z"
+      },
+      "health": {
+        "state": "active",
+        "evaluated_at": "2026-09-28T10:06:00Z",
+        "last_success_at": "2026-09-28T10:06:00Z",
+        "last_item_at": "2026-09-28T10:04:00Z",
+        "last_error": {
+          "code": "rate_limited",
+          "at": "2026-09-28T10:02:00Z"
+        },
+        "usage": {
+          "day": "2026-09-28",
+          "items_read": 412,
+          "previous_day_items_read": 1830
+        },
+        "diagnostics": {
+          "recheck_window_seconds": 86400,
+          "recheck_interval_seconds": 600,
+          "recheck_tracked_posts": 37,
+          "recheck_dropped_posts": 0,
+          "last_recheck_at": "2026-09-28T10:00:00Z"
+        }
+      }
+    }
+  },
+  {
+    "name": "connector_schedule_change",
+    "schema": "ScheduleChange",
+    "value": {
+      "interval_seconds": 600
+    }
+  },
+  {
+    "name": "connector_kinds",
+    "schema": "ConnectorKindCatalog",
+    "value": {
+      "credential_deposits": "available",
+      "min_interval_seconds": 30,
+      "items": [
+        {
+          "kind": "rss",
+          "title": "RSS or Atom feed",
+          "description": "Collects the entries of an RSS 2.0, RSS 1.0, Atom or JSON Feed document.",
+          "config_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "title": "Feed URL",
+                "examples": [
+                  "https://example.org/feed.xml"
+                ]
+              },
+              "honor_ttl": {
+                "type": "boolean",
+                "title": "Honor the feed's TTL"
+              }
+            }
+          },
+          "credential_schema": {
+            "oneOf": [
+              {
+                "title": "Bearer token",
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "writeOnly": true
+                  }
+                }
+              }
+            ]
+          },
+          "credential": "optional",
+          "default_interval_seconds": 300
+        }
+      ]
+    }
+  },
+  {
+    "name": "owned_subscription_create",
+    "schema": "SubscriptionCreate",
+    "value": {
+      "idempotency_key": "create-subscription-user-123",
+      "name": "Alert for one end user",
+      "saved_query_id": "query_1",
+      "saved_query_version_id": "query_version_1",
+      "evaluator": {
+        "plugin_id": "fixture-evaluator",
+        "version": "1",
+        "configuration": {
+          "scenario": "positive",
+          "parameters": {
+            "sample": true
+          }
+        }
+      },
+      "destination_id": "fixture_webhook",
+      "owner": "user-123"
+    }
+  },
+  {
+    "name": "owned_subscription_page",
+    "schema": "SubscriptionPage",
+    "value": {
+      "items": [
+        {
+          "subscription_id": "subscription_2",
+          "name": "Alert for one end user",
+          "enabled": true,
+          "deleted": false,
+          "current_version": {
+            "subscription_id": "subscription_2",
+            "version_id": "subscription_version_2",
+            "saved_query_id": "query_1",
+            "saved_query_version_id": "query_version_1",
+            "evaluator": {
+              "plugin_id": "fixture-evaluator",
+              "version": "1",
+              "configuration": {
+                "scenario": "positive",
+                "parameters": {
+                  "sample": true
+                }
+              }
+            },
+            "destination_id": "fixture_webhook",
+            "owner": "user-123"
+          },
+          "owner": "user-123"
+        }
+      ],
+      "next_page_cursor": "opaque_page_cursor"
+    }
+  },
+  {
+    "name": "owned_reference_webhook",
+    "schema": "WebhookEvent",
+    "value": {
+      "event_id": "event_match_2",
+      "type": "match.created",
+      "schema_version": "1",
+      "occurred_at": "2026-09-14T12:00:00Z",
+      "references": {
+        "match_id": "match_2",
+        "record_id": "record_1",
+        "record_version_id": "version_1",
+        "subscription_id": "subscription_2",
+        "subscription_version_id": "subscription_version_2",
+        "delivery_id": "delivery_2",
+        "owner": "user-123"
+      }
+    }
+  },
+  {
+    "name": "rename",
+    "schema": "RenameRequest",
+    "value": {
+      "idempotency_key": "rename-1",
+      "name": "Storms and hail"
+    }
+  },
+  {
+    "name": "plugin_registrations",
+    "schema": "PluginRegistrationList",
+    "value": {
+      "items": [
+        {
+          "registration_id": "plugin_registration_3f1c",
+          "plugin_id": "pdf-text",
+          "version": "0.1.0",
+          "endpoint": "http://127.0.0.1:9900",
+          "manifest_digest": "sha256:5b2e",
+          "contributions": [
+            "normalizer"
+          ],
+          "roles": [
+            "normalizer:application/pdf"
+          ],
+          "state": "active",
+          "pinned_work": 4,
+          "subscriptions": 0,
+          "created_at": "2026-09-30T10:00:00Z",
+          "updated_at": "2026-09-30T10:00:00Z"
+        },
+        {
+          "registration_id": "plugin_registration_9a7d",
+          "plugin_id": "connector.rss",
+          "version": "1.0.0",
+          "endpoint": "http://127.0.0.1:9920",
+          "manifest_digest": "sha256:c41a",
+          "artifact_digest": "sha256:0d9e",
+          "contributions": [
+            "connector"
+          ],
+          "roles": [
+            "connector:rss"
+          ],
+          "state": "draining",
+          "pinned_work": 1,
+          "subscriptions": 0,
+          "created_at": "2026-09-30T10:00:00Z",
+          "updated_at": "2026-09-30T10:00:00Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "pipeline_plan",
+    "schema": "PipelinePlan",
+    "value": {
+      "plan_id": "plan_6e0b",
+      "created_at": "2026-09-30T10:00:00Z",
+      "activated_at": "2026-09-30T10:00:00Z",
+      "roles": [
+        {
+          "role": "connector:rss",
+          "registration_id": "plugin_registration_9a7d",
+          "plugin_id": "connector.rss",
+          "version": "1.0.0"
+        },
+        {
+          "role": "normalizer:application/pdf",
+          "registration_id": "plugin_registration_3f1c",
+          "plugin_id": "pdf-text",
+          "version": "0.1.0"
+        }
+      ],
+      "source": "configuration"
+    }
+  },
+  {
+    "name": "plugin_registration_request",
+    "schema": "PluginRegistrationRequest",
+    "value": {
+      "idempotency_key": "register-embedder-2",
+      "endpoint": "http://127.0.0.1:9960",
+      "manifest": "id: example.embedder\nversion: 0.2.0\n...",
+      "spaces": {
+        "example.embedder.small": "served"
+      }
+    }
+  },
+  {
+    "name": "plugin_registration_checked",
+    "schema": "PluginRegistration",
+    "value": {
+      "registration_id": "plugin_registration_7c2e",
+      "plugin_id": "example.embedder",
+      "version": "0.2.0",
+      "endpoint": "http://127.0.0.1:9960",
+      "manifest_digest": "sha256:9d41",
+      "contributions": [
+        "ingestion"
+      ],
+      "roles": [
+        "ingestion"
+      ],
+      "state": "rejected",
+      "pinned_work": 0,
+      "subscriptions": 0,
+      "check": {
+        "certified": false,
+        "checked_at": "2026-09-30T13:00:00Z",
+        "passed": 2,
+        "failed": 1,
+        "skipped": 0,
+        "checks": [
+          {
+            "id": "manifest",
+            "title": "quivr-plugin.yaml is valid (quivr plugin inspect)",
+            "status": "pass",
+            "issues": []
+          },
+          {
+            "id": "health",
+            "title": "GET /v0/health answers 200",
+            "status": "pass",
+            "issues": []
+          },
+          {
+            "id": "discovery",
+            "title": "GET /v0/discovery matches quivr-plugin.yaml",
+            "status": "fail",
+            "issues": [
+              {
+                "code": "discovery_mismatch",
+                "path": "/manifest_digest",
+                "message": "discovery serves another manifest digest; the running plugin was built from a different quivr-plugin.yaml"
+              }
+            ]
+          }
+        ]
+      },
+      "created_at": "2026-09-30T13:00:00Z",
+      "updated_at": "2026-09-30T13:00:01Z"
+    }
+  },
+  {
+    "name": "document_timeline",
+    "schema": "DocumentTimeline",
+    "value": {
+      "document": {
+        "version_id": "version_7c2e",
+        "record_id": "record_41ab",
+        "corpus_id": "corpus_9f10",
+        "source_namespace": "news",
+        "record_key": "article-1042",
+        "title": "Harbour reopens after the storm",
+        "state": "retrieval_ready",
+        "is_current": true,
+        "steps": {
+          "accepted_at": "2026-09-30T10:00:00Z",
+          "materialized_at": "2026-09-30T10:00:01Z",
+          "segmented_at": "2026-09-30T10:00:03Z",
+          "retrieval_ready_at": "2026-09-30T10:00:04Z",
+          "enriched_at": "2026-09-30T10:00:09Z"
+        }
+      },
+      "steps": [
+        {
+          "step": "accepted",
+          "at": "2026-09-30T10:00:00Z"
+        },
+        {
+          "step": "materialized",
+          "at": "2026-09-30T10:00:01Z",
+          "since": "accepted",
+          "duration_ms": 1000
+        },
+        {
+          "step": "segmented",
+          "at": "2026-09-30T10:00:03Z",
+          "since": "materialized",
+          "duration_ms": 2000,
+          "plugin_id": "core.ingest",
+          "plugin_version": "1.0.0"
+        },
+        {
+          "step": "retrieval_ready",
+          "at": "2026-09-30T10:00:04Z",
+          "since": "segmented",
+          "duration_ms": 1000,
+          "plugin_id": "core.ingest",
+          "plugin_version": "1.0.0"
+        },
+        {
+          "step": "enriched",
+          "at": "2026-09-30T10:00:09Z",
+          "since": "retrieval_ready",
+          "duration_ms": 5000,
+          "plugin_id": "core.ingest",
+          "plugin_version": "1.0.0"
+        }
+      ]
+    }
+  },
+  {
+    "name": "plugin_call_stats",
+    "schema": "PluginCallStatsList",
+    "value": {
+      "window": "1h",
+      "resolution_seconds": 60,
+      "from": "2026-09-30T09:00:00Z",
+      "to": "2026-09-30T10:00:12Z",
+      "items": [
+        {
+          "plugin_id": "core.ingest",
+          "plugin_version": "1.0.0",
+          "operation": "embed_query",
+          "summary": {
+            "count": 42,
+            "errors": 1,
+            "p50_ms": 18.5,
+            "p95_ms": 61,
+            "mean_ms": 24.2,
+            "last_error_code": "plugin_unavailable",
+            "last_error_at": "2026-09-30T09:41:07Z"
+          },
+          "points": [
+            {
+              "start": "2026-09-30T09:41:00Z",
+              "count": 12,
+              "errors": 1,
+              "p50_ms": 17,
+              "p95_ms": 48.75
+            },
+            {
+              "start": "2026-09-30T09:59:00Z",
+              "count": 30,
+              "errors": 0,
+              "p50_ms": 19.2,
+              "p95_ms": 62.5
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "received_stats",
+    "schema": "ReceivedStatsList",
+    "value": {
+      "window": "24h",
+      "resolution_seconds": 900,
+      "from": "2026-09-29T10:00:00Z",
+      "to": "2026-09-30T10:00:12Z",
+      "total": 57,
+      "sources": 3,
+      "items": [
+        {
+          "source_namespace": "news-feed",
+          "count": 41,
+          "points": [
+            {
+              "start": "2026-09-30T08:15:00Z",
+              "count": 17
+            },
+            {
+              "start": "2026-09-30T09:45:00Z",
+              "count": 24
+            }
+          ]
+        },
+        {
+          "source_namespace": "api-uploads",
+          "count": 12,
+          "points": [
+            {
+              "start": "2026-09-30T09:00:00Z",
+              "count": 12
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "match_stats",
+    "schema": "MatchStatsList",
+    "value": {
+      "window": "7d",
+      "resolution_seconds": 7200,
+      "from": "2026-09-23T10:00:00Z",
+      "to": "2026-09-30T10:00:12Z",
+      "total": 9,
+      "items": [
+        {
+          "evaluator": "keywords",
+          "count": 9,
+          "points": [
+            {
+              "start": "2026-09-29T14:00:00Z",
+              "count": 4
+            },
+            {
+              "start": "2026-09-30T08:00:00Z",
+              "count": 5
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "top_queries",
+    "schema": "TopQueryList",
+    "value": {
+      "window": "24h",
+      "resolution_seconds": 3600,
+      "recording": true,
+      "items": [
+        {
+          "query": "solar energy",
+          "count": 14,
+          "points": [
+            {
+              "start": "2026-09-30T08:00:00Z",
+              "count": 5
+            },
+            {
+              "start": "2026-09-30T09:00:00Z",
+              "count": 9
+            }
+          ]
+        },
+        {
+          "query": "storm warning",
+          "count": 6,
+          "points": [
+            {
+              "start": "2026-09-30T09:00:00Z",
+              "count": 6
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "connector_token_issued",
+    "schema": "ConnectorTokenCreated",
+    "value": {
+      "token": {
+        "token_id": "token_example_active",
+        "prefix": "qit_example",
+        "created_at": "2026-10-01T10:00:00Z"
+      },
+      "secret": "illustrative-secret-shown-once"
+    }
+  },
+  {
+    "name": "connector_token_page",
+    "schema": "ConnectorTokenList",
+    "value": {
+      "items": [
+        {
+          "token_id": "token_example_active",
+          "prefix": "qit_example",
+          "created_at": "2026-10-01T10:00:00Z"
+        },
+        {
+          "token_id": "token_example_rotated",
+          "prefix": "qit_example",
+          "created_at": "2026-10-01T10:00:00Z",
+          "rotated_at": "2026-10-02T10:00:00Z",
+          "valid_until": "2026-10-02T10:05:00Z",
+          "revoked_at": "2026-10-02T10:02:00Z"
+        }
+      ],
+      "next_after": "token_example_rotated"
+    }
+  },
+  {
+    "name": "connector_token_revoked",
+    "schema": "ConnectorToken",
+    "value": {
+      "token_id": "token_example_rotated",
+      "prefix": "qit_example",
+      "created_at": "2026-10-01T10:00:00Z",
+      "rotated_at": "2026-10-02T10:00:00Z",
+      "valid_until": "2026-10-02T10:05:00Z",
+      "revoked_at": "2026-10-02T10:02:00Z"
+    }
+  }
+]

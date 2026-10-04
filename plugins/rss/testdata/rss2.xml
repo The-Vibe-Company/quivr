@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Example Newsroom</title>
+    <link>https://news.example.org/</link>
+    <description>Neutral example feed</description>
+    <language>fr</language>
+    <ttl>15</ttl>
+    <item>
+      <title>Second story</title>
+      <link>https://news.example.org/second</link>
+      <guid isPermaLink="false">example-2</guid>
+      <pubDate>Tue, 01 Sep 2026 10:00:00 GMT</pubDate>
+      <dc:creator>Jane Reporter</dc:creator>
+      <category>Economy</category>
+      <category>Europe</category>
+      <description>&lt;p&gt;Short &lt;b&gt;summary&lt;/b&gt; of the story.&lt;/p&gt;</description>
+      <content:encoded><![CDATA[<p>Full <em>body</em> text &amp; details.</p><script>alert(1)</script><p>Second paragraph.</p>]]></content:encoded>
+      <enclosure url="https://news.example.org/audio.mp3" length="1234" type="audio/mpeg"/>
+    </item>
+    <item>
+      <title>First story</title>
+      <link>https://news.example.org/first</link>
+      <pubDate>Mon, 31 Aug 2026 09:00:00 GMT</pubDate>
+      <description>Plain first story text.</description>
+    </item>
+  </channel>
+</rss>

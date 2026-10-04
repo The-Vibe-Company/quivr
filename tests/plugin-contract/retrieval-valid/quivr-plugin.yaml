@@ -1,0 +1,30 @@
+# Baseline retrieval test plugin for the Contract Runner (tests/plugin-contract).
+# Keyword and vector candidates in round 1, fused by reciprocal rank in round 2.
+# TestContractRunnerJudgesRetrieval runs the same plugin in each broken
+# retrieval mode (QUIVR_FAKE_PLUGIN_MODE).
+id: certified.retrieval-valid
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.7.0 <0.8.0"
+contributions:
+  retrieval:
+    profiles:
+      default:
+        description: Keywords and vectors fused by reciprocal rank.
+        max_latency_ms: 500
+        max_cost_cents: 0
+      deep:
+        description: The same, with a paid re-ranker budget and a tighter deadline.
+        max_latency_ms: 300
+        max_cost_cents: 1
+    limits:
+      max_rounds: 2
+      max_requests: 2
+      max_candidates: 20
+secrets:
+  - name: QUIVR_TEST_RERANKER_KEY
+    description: Key of the re-ranking backend.
+    required: false
+run:
+  command: [quivr-fake-plugin]

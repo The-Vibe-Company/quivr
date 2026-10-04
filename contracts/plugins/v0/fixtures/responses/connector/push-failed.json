@@ -1,0 +1,12 @@
+{
+  "items": [],
+  "checkpoint": {
+    "since": "alert-6"
+  },
+  "more": false,
+  "push": {
+    "state": "failed",
+    "error_class": "access",
+    "code": "webhook_invalid"
+  }
+}

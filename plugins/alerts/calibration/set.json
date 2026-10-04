@@ -1,0 +1,26 @@
+{
+  "description": "A small neutral FR/EN set to calibrate the default threshold of described alerts. Every article is judged against every description; fits lists the descriptions it fits. Fictional places and people.",
+  "descriptions": {
+    "ports": "Labour strikes at ports and harbours",
+    "visas": "Diplomatic tensions between two countries over visa rules",
+    "floods": "Floods caused by heavy rain",
+    "transfers": "Football transfer news",
+    "rates": "Central bank interest rate decisions",
+    "scooters": "New rules on electric scooters in cities"
+  },
+  "articles": [
+    {"lang": "en", "fits": ["ports"], "title": "Harbour staff walk out over pay", "text": "Dockers at the northern harbour of Porthaven stopped work on Tuesday after talks on wages broke down. Unloading has halted and ships are waiting offshore. The union says the walkout will last until management makes a new offer."},
+    {"lang": "fr", "fits": ["ports"], "title": "Les dockers de Portval votent la grève", "text": "Réunis en assemblée générale, les dockers du port de Portval ont voté une grève de 48 heures contre la réforme de leur statut. Les navires sont déroutés vers d'autres ports. La direction appelle à reprendre le dialogue."},
+    {"lang": "en", "fits": [], "title": "Container traffic hits a record at Porthaven", "text": "The port of Porthaven handled more containers this quarter than ever before. New cranes and a deeper channel explain most of the growth. Last year's brief strike is now a distant memory, the port authority said."},
+    {"lang": "fr", "fits": [], "title": "Grève dans les trains régionaux", "text": "Les conducteurs de trains régionaux de la région Sud sont en grève depuis lundi. Un train sur trois circule. Les syndicats réclament des embauches et une revalorisation des salaires."},
+    {"lang": "fr", "fits": ["visas"], "title": "Norland réduit les visas accordés aux ressortissants d'Estavia", "text": "Le gouvernement de Norland a annoncé une réduction de moitié des visas délivrés aux citoyens d'Estavia. Estavia a convoqué l'ambassadeur de Norland et dénonce une mesure de rétorsion. Les deux capitales s'accusent mutuellement de bloquer les expulsions."},
+    {"lang": "en", "fits": ["visas"], "title": "Estavia summons envoy as visa row deepens", "text": "Estavia's foreign ministry summoned Norland's ambassador on Friday after Norland's consulates stopped processing student visas. Officials on both sides traded accusations of bad faith. Analysts expect the dispute to weigh on trade talks."},
+    {"lang": "en", "fits": [], "title": "Visa-free travel boosts tourism", "text": "Since visitors no longer need a visa, hotel bookings on the coast have risen by a fifth. Airlines are adding routes for the summer season. Local restaurants report their best spring in a decade."},
+    {"lang": "fr", "fits": ["floods"], "title": "Inondations après des pluies torrentielles", "text": "Des pluies d'une intensité exceptionnelle ont fait déborder la rivière dans la nuit. Plusieurs quartiers sont sous l'eau et des centaines d'habitants ont été évacués. Les secours restent mobilisés."},
+    {"lang": "en", "fits": [], "title": "Heatwave and drought strain farms", "text": "Weeks without rain and record temperatures have dried out fields across the plain. Farmers are asking for emergency aid. Water use is restricted in forty towns."},
+    {"lang": "en", "fits": ["transfers"], "title": "Rovers sign striker for club-record fee", "text": "Rovers have completed the signing of forward Alex Moreau from City on a five-year contract. The fee is a club record. Moreau scored twenty goals last season."},
+    {"lang": "fr", "fits": [], "title": "Victoire de Rovers en championnat", "text": "Rovers ont battu City deux buts à un samedi soir. Le match a été serré jusqu'aux dernières minutes. L'équipe remonte à la troisième place du classement."},
+    {"lang": "fr", "fits": ["rates"], "title": "La banque centrale relève ses taux", "text": "La banque centrale a relevé son taux directeur d'un quart de point pour freiner l'inflation. C'est la troisième hausse de l'année. Les crédits immobiliers devraient encore renchérir."},
+    {"lang": "en", "fits": ["scooters"], "title": "City bans rental e-scooters from its centre", "text": "The city council voted to ban rental electric scooters from the historic centre from next month. Private scooters must now keep to cycle lanes and a speed limit of 20 km/h. Operators say they will appeal."}
+  ]
+}

@@ -1,0 +1,2286 @@
+{
+  "name": "bodies_and_headers",
+  "now": "2026-09-28T12:00:00Z",
+  "config": {
+    "tenant_id": "00000000-0000-0000-0000-000000000000",
+    "mailbox": "monitoring@example.org",
+    "backfill_since": "2026-09-28T09:00:00Z"
+  },
+  "credential": {
+    "client_id": "11111111-1111-1111-1111-111111111111",
+    "client_secret": "test-secret-not-real"
+  },
+  "ops": [
+    {
+      "op": "page_size",
+      "n": 10
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "  Plain\ttext body  ",
+          "contentType": "text"
+        },
+        "conversationId": "conv-t1",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "t1",
+        "internetMessageId": "\u003ct1@example.org\u003e",
+        "receivedDateTime": "2026-09-28T10:00:00Z",
+        "sentDateTime": "2026-09-28T10:00:00Z",
+        "subject": "Subject t1",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003cp\u003e \u003c/p\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-b1",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "b1",
+        "internetMessageId": "\u003cb1@example.org\u003e",
+        "receivedDateTime": "2026-09-28T10:01:00Z",
+        "sentDateTime": "2026-09-28T10:01:00Z",
+        "subject": "",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003en1\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "conversationId": "conv-n1",
+        "from": {
+          "emailAddress": {
+            "address": "desk@example.org",
+            "name": "Desk"
+          }
+        },
+        "hasAttachments": false,
+        "id": "n1",
+        "internetMessageId": "",
+        "receivedDateTime": "2026-09-28T10:02:00Z",
+        "sentDateTime": "2026-09-28T10:02:00Z",
+        "subject": "Subject n1",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "monitoring@example.org",
+              "name": "Monitor"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "message": {
+        "body": {
+          "content": "\u003chtml\u003e\u003cbody\u003e\u003cp\u003eHello \u003cb\u003ed1\u003c/b\u003e\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e\u003c/body\u003e\u003c/html\u003e",
+          "contentType": "html"
+        },
+        "ccRecipients": [
+          {
+            "emailAddress": {
+              "address": "cc@example.org",
+              "name": "Copy"
+            }
+          }
+        ],
+        "conversationId": "conv-d1",
+        "from": null,
+        "hasAttachments": false,
+        "id": "d1",
+        "internetMessageId": "\u003cd1@example.org\u003e",
+        "receivedDateTime": "2026-09-28T10:03:00Z",
+        "sender": {
+          "emailAddress": {
+            "address": "relay@example.org",
+            "name": "Relay"
+          }
+        },
+        "sentDateTime": "2026-09-28T10:03:00Z",
+        "subject": "Alerte\u0000 urgente �",
+        "toRecipients": [
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          },
+          {
+            "emailAddress": {
+              "address": "r@example.org",
+              "name": "Nom\u0000"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "fetch",
+      "want": {
+        "items": [
+          {
+            "record_key": "\u003ct1@example.org\u003e",
+            "revision": "sha256:1bfbef954f42c138558261feb92084f030da1ea9b0198beee3a038ce62b9e0f2",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "title",
+                  "role": "title",
+                  "content": {
+                    "kind": "text",
+                    "text": "Subject t1"
+                  }
+                },
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Plain\ttext body"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [],
+                  "cc": [],
+                  "cc_count": 0,
+                  "conversation_id": "conv-t1",
+                  "folder": "inbox",
+                  "from": {
+                    "address": "desk@example.org",
+                    "name": "Desk"
+                  },
+                  "graph_id": "t1",
+                  "internet_message_id": "\u003ct1@example.org\u003e",
+                  "received_at": "2026-09-28T10:00:00Z",
+                  "sent_at": "2026-09-28T10:00:00Z",
+                  "subject": "Subject t1",
+                  "to": [
+                    {
+                      "address": "monitoring@example.org",
+                      "name": "Monitor"
+                    }
+                  ],
+                  "to_count": 1
+                }
+              }
+            },
+            "attachments": []
+          },
+          {
+            "record_key": "\u003cb1@example.org\u003e",
+            "revision": "sha256:c466ae9ccb2bb2304bfde7e6f4ca0bfd4d13d82be8a0a48b26376bf7027ece2f",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Mail received 2026-09-28T10:01:00Z from desk@example.org"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [],
+                  "cc": [],
+                  "cc_count": 0,
+                  "conversation_id": "conv-b1",
+                  "folder": "inbox",
+                  "from": {
+                    "address": "desk@example.org",
+                    "name": "Desk"
+                  },
+                  "graph_id": "b1",
+                  "internet_message_id": "\u003cb1@example.org\u003e",
+                  "received_at": "2026-09-28T10:01:00Z",
+                  "sent_at": "2026-09-28T10:01:00Z",
+                  "subject": "",
+                  "to": [
+                    {
+                      "address": "monitoring@example.org",
+                      "name": "Monitor"
+                    }
+                  ],
+                  "to_count": 1
+                }
+              }
+            },
+            "attachments": [
+              {
+                "key": "original_body",
+                "role": "original_body",
+                "media_type": "text/html",
+                "size": 8,
+                "sha256": "a81ced9f4a932e0d99413b8e5649a45181c30152e4a73a2023c226a6b26fe160"
+              }
+            ]
+          },
+          {
+            "record_key": "graph:n1",
+            "revision": "sha256:4a8642f14206fd5a54f7027e8b58874fd8ad02cdb5268c487a02f4e1e60e2e90",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "title",
+                  "role": "title",
+                  "content": {
+                    "kind": "text",
+                    "text": "Subject n1"
+                  }
+                },
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Hello n1"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [],
+                  "cc": [],
+                  "cc_count": 0,
+                  "conversation_id": "conv-n1",
+                  "folder": "inbox",
+                  "from": {
+                    "address": "desk@example.org",
+                    "name": "Desk"
+                  },
+                  "graph_id": "n1",
+                  "internet_message_id": "",
+                  "received_at": "2026-09-28T10:02:00Z",
+                  "sent_at": "2026-09-28T10:02:00Z",
+                  "subject": "Subject n1",
+                  "to": [
+                    {
+                      "address": "monitoring@example.org",
+                      "name": "Monitor"
+                    }
+                  ],
+                  "to_count": 1
+                }
+              }
+            },
+            "attachments": [
+              {
+                "key": "original_body",
+                "role": "original_body",
+                "media_type": "text/html",
+                "size": 68,
+                "sha256": "a8fec68dbcb1bd27d14b181a960f4be6b005f081a5d35163c61b9e919b16e1b2"
+              }
+            ]
+          },
+          {
+            "record_key": "\u003cd1@example.org\u003e",
+            "revision": "sha256:46fce55b3b7e8aa7bce616fb0c4f8f23ed7c9ea5b1448ba88fc2ad6f531c827e",
+            "content": {
+              "kind": "manifest",
+              "parts": [
+                {
+                  "key": "title",
+                  "role": "title",
+                  "content": {
+                    "kind": "text",
+                    "text": "Alerte urgente �"
+                  }
+                },
+                {
+                  "key": "body",
+                  "role": "body",
+                  "content": {
+                    "kind": "text",
+                    "text": "Hello d1"
+                  }
+                }
+              ]
+            },
+            "extensions": {
+              "connector.m365_mail": {
+                "schema_version": "1",
+                "data": {
+                  "attachments_skipped": [],
+                  "cc": [
+                    {
+                      "address": "cc@example.org",
+                      "name": "Copy"
+                    }
+                  ],
+                  "cc_count": 1,
+                  "conversation_id": "conv-d1",
+                  "folder": "inbox",
+                  "graph_id": "d1",
+                  "internet_message_id": "\u003cd1@example.org\u003e",
+                  "received_at": "2026-09-28T10:03:00Z",
+                  "sender": {
+                    "address": "relay@example.org",
+                    "name": "Relay"
+                  },
+                  "sent_at": "2026-09-28T10:03:00Z",
+                  "subject": "Alerte urgente �",
+                  "to": [
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    },
+                    {
+                      "address": "r@example.org",
+                      "name": "Nom"
+                    }
+                  ],
+                  "to_count": 250
+                }
+              }
+            },
+            "attachments": [
+              {
+                "key": "original_body",
+                "role": "original_body",
+                "media_type": "text/html",
+                "size": 68,
+                "sha256": "b2c84634e5bc169e13ac125aa996d79683aef21a22f68f3805dfcb2daaecfe2b"
+              }
+            ]
+          }
+        ],
+        "checkpoint": {
+          "link": "http://graph.invalid/v1.0/users/monitoring@example.org/mailFolders/inbox/messages/delta?%24deltatoken=4\u0026%24filter=receivedDateTime+ge+2026-09-28T09%3A00%3A00Z",
+          "since": "2026-09-28T09:00:00Z"
+        }
+      }
+    }
+  ]
+}

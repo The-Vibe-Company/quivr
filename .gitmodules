@@ -1,0 +1,3 @@
+[submodule "multimodal-rag"]
+	path = multimodal-rag
+	url = https://github.com/QuivrHQ/multimodal-rag.git

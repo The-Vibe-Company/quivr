@@ -1,0 +1,9 @@
+{
+  "decisions": [
+    {
+      "id": "e1",
+      "decision": "match",
+      "evidence": {"explanation": "\"strike\" appears in the title.", "part_keys": ["title"]}
+    }
+  ]
+}

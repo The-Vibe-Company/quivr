@@ -1,0 +1,27 @@
+{
+  "id": "example.rerank",
+  "version": "1.0.0",
+  "compatibility": {
+    "engine": ">=0.1.0 <0.3.0",
+    "plugin_api": ">=0.12.0 <0.13.0"
+  },
+  "contributions": {
+    "retrieval": {
+      "profiles": {
+        "default": {
+          "max_latency_ms": 100,
+          "max_cost_cents": 1
+        }
+      }
+    }
+  },
+  "requires": [
+    {
+      "plugin": "core.retrieve",
+      "version": ">=1.0.0 <2.0.0",
+      "profiles": [
+        "default"
+      ]
+    }
+  ]
+}

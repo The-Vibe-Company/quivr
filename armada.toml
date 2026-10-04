@@ -1,0 +1,44 @@
+# Armada configuration: one project = one repository + one tracker program root.
+# No secrets here: keys come from the environment or `armada auth login`.
+
+[project]
+name = "Quivr V2"
+slug = "quivr-v2"          # stable id: lowercase letters, digits and dashes
+
+[tracker]
+program_root = "THE-531"  # Linear issue at the root of the program
+language = "en"          # language of owner-facing output
+ready_label = "ready-for-agent"
+
+[tracker.labels]
+phase_group = "Agent phase"
+runtime_group = "Agent runtime"
+runtimes = ["Claude Code", "Codex", "Conductor"]
+
+[github]
+repository = "The-Vibe-Company/quivr-v2"
+
+[gates]
+# required_checks = ["test"]  # CI checks that must be green before a hand-back (default: every check)
+
+[policy]
+silence_minutes = 15     # a worker with no report for longer than this shows as silent
+
+# How `armada brief` launches workers on Conductor. Every value is passed explicitly;
+# `conductor model` lists each agent's model ids and effort levels.
+[conductor]
+default_profile = "codex"   # backend work runs on Sol; tickets labelled Frontend run on Opus
+
+[conductor.profiles.opus]
+agent = "claude"
+model = "opus-5-5-1m"
+effort = "high"
+
+[conductor.profiles.codex]
+agent = "codex"
+model = "gpt-6.1-sol"
+effort = "high"
+
+[[conductor.routing]]
+labels = ["Frontend"]
+profile = "opus"

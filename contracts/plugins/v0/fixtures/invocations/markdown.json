@@ -1,0 +1,15 @@
+{
+  "description": "Normalize a local Markdown file with an explicit configuration and source identity.",
+  "input": {
+    "path": "notes.md",
+    "media_type": "text/markdown"
+  },
+  "configuration": {
+    "max_sections": 10
+  },
+  "source": {
+    "corpus_id": "corpus-example",
+    "namespace": "example-files",
+    "record_key": "notes/field-notes.md"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "set": "miracl-fr",
+  "documents": 5000,
+  "queries": 343,
+  "results": {
+    "multilingual-e5-small (current)": {
+      "mean": {
+        "ndcg@10": 0.7115842906447989,
+        "recall@10": 0.9533041788143829,
+        "mrr@10": 0.6762784025174695
+      },
+      "dims": 384,
+      "pieces": 5053,
+      "index_s": 35.2,
+      "query_ms": 0.7
+    },
+    "Cohere-Embed-V5-Pro-1024": {
+      "mean": {
+        "ndcg@10": 0.7744650293751387,
+        "recall@10": 0.9638483965014578,
+        "mrr@10": 0.7510551159239206
+      },
+      "dims": 1024,
+      "pieces": 5001,
+      "index_s": 70.5,
+      "query_ms": 11.6,
+      "vs_current": {
+        "ndcg@10": {
+          "queries": 343,
+          "delta": 0.06288073873033978,
+          "p_value": 3.693064769708849e-07,
+          "significant": true
+        },
+        "recall@10": {
+          "queries": 343,
+          "delta": 0.010544217687074831,
+          "p_value": 0.2593433271403134,
+          "significant": false
+        }
+      }
+    },
+    "Cohere-Embed-V5-Pro": {
+      "mean": {
+        "ndcg@10": 0.7775898278583603,
+        "recall@10": 0.9648202137998056,
+        "mrr@10": 0.7565215882271277
+      },
+      "dims": 2048,
+      "pieces": 5001,
+      "index_s": 83.9,
+      "query_ms": 15.2,
+      "vs_current": {
+        "ndcg@10": {
+          "queries": 343,
+          "delta": 0.06600553721356148,
+          "p_value": 8.284457678086208e-08,
+          "significant": true
+        },
+        "recall@10": {
+          "queries": 343,
+          "delta": 0.011516034985422741,
+          "p_value": 0.21286522196293436,
+          "significant": false
+        }
+      }
+    }
+  },
+  "tokens": {
+    "tokens": 1241560,
+    "by_model": {
+      "Cohere-Embed-V5-Pro": 1241560
+    }
+  },
+  "usd": {
+    "Cohere-Embed-V5-Pro": 0.149
+  }
+}

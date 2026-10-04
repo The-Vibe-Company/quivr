@@ -1,0 +1,7 @@
+{
+  "verdict": "accepted",
+  "response": {
+    "status": 200,
+    "content_type": "text/plain\r\nSet-Cookie: a=b"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "decisions": [
+    {
+      "id": "e1",
+      "decision": "match",
+      "evidence": {
+        "explanation": "\"strike\" appears in the title and the body.",
+        "part_keys": ["title", "body"],
+        "details": {"matched": ["strike"]}
+      }
+    },
+    {
+      "id": "e2",
+      "decision": "no_match"
+    }
+  ]
+}

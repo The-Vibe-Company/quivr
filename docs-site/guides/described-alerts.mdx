@@ -1,0 +1,124 @@
+---
+title: "Meaning alerts"
+description: "Alert on a subject described in plain language, even when articles use other words or another language."
+keywords: ["meaning alerts", "described alerts", "vectors", "classifier", "jev", "semantic alerts"]
+---
+
+A meaning alert fires when a new article is about a subject you describe in plain words, such as "Labour strikes at ports and harbours". It can find related articles that use different wording or languages; results depend on the model and the threshold. The first-party `alerts` plugin checks it in one of two ways: by comparing the article's stored vectors with your description, or with TypeSafe's Jev classifier, an external service.
+
+[Choose a check](/guides/alerts#choose-a-check) compares them with keyword alerts. You create the alert the same way as a [keyword alert](/guides/keyword-alerts#save-the-alert): a Saved Query holds the expression, and a Subscription names the `alerts` rule, version `0.3.0`, and your destination. Only the expression and the rule configuration change.
+
+## Prerequisites
+
+- Everything the [keyword alerts](/guides/keyword-alerts#prerequisites) guide needs: an API key with `monitoring:read` and `monitoring:write`, and a webhook destination.
+- The check enabled by the operator. The local stack offers the local check by default. The external check needs a TypeSafe key, which the operator sets up ([First-party plugins](/run-quivr/catalog#alerts)).
+
+## Write a description
+
+Describe the subject of the articles you want in one or two plain sentences, 3 to 1000 characters.
+
+| Good | Why |
+| --- | --- |
+| `Labour strikes at ports and harbours` | One subject, stated directly |
+| `New rules on electric scooters in cities` | Specific enough to leave out other transport news |
+
+Write one alert per subject, and say what fits rather than what does not.
+
+## Use the local meaning check
+
+<span id="keep-the-meaning-check-inside-the-installation" />
+
+The local check compares the article's vectors with a vector of your description. A vector is a list of numbers that summarises meaning; Quivr computes the article's vectors after it becomes searchable, with the same embedding provider as meaning search. The description's vector is computed once, when you save the Saved Query Version. The check needs no TypeSafe key and never calls Jev.
+
+The comparison itself runs in the `alerts` plugin, but the article and description text go to whatever embedding provider the operator configured. To keep that text inside your installation, the operator must use a local embedding provider, such as the default `core-ingest` plugin, which calls an embedding server the operator runs (the local stack starts one).
+
+Use this expression in your Saved Query. For example, not run:
+
+```json
+{
+  "kind": "meaning",
+  "meaning_check": "vectors",
+  "description": "Labour strikes at ports and harbours"
+}
+```
+
+To combine it with a keyword tree, use `keywords_or_meaning` or `keywords_and_meaning`, and always state `meaning_check`: `vectors` compares vectors, while `jev` calls the external classifier. For example, not run:
+
+```json
+{
+  "kind": "keywords_and_meaning",
+  "meaning_check": "vectors",
+  "description": "Labour strikes at ports and harbours",
+  "match": {"term": "port"}
+}
+```
+
+The plugin compares your description with each passage of the article and keeps the highest similarity score. The Match's evidence names that passage (its Part and segment), the vector space, the score and the threshold. The article matches when the similarity reaches the threshold, **0.80** by default; set `threshold` in the Subscription's `evaluator.configuration` to change it, between 0.2 and 0.95.
+
+The similarity is closeness, not a probability, and the default has known limits. It was measured on 156 pairs of neutral French and English articles and descriptions, translations included: 16 related pairs and 140 unrelated ones. At 0.80 it matched all 16 related pairs, and also 11 of the 140 unrelated ones. An English paraphrase scored 0.89, a French translation 0.82 and an unrelated football article 0.77. Related and unrelated scores overlap, and these examples cover only French and English, so tune the threshold on your own examples. The [calibration notes](https://github.com/The-Vibe-Company/quivr-v2/tree/main/plugins/alerts/calibration) list every pair, the model revision and the command that reproduces the measurement.
+
+The check needs the article's vectors. Until they are attached, the rule answers not ready, and Quivr asks again when they arrive ([Not ready](/guides/alerts#not-ready)); this happens even with `wait_for_enrichment: false`.
+
+The description's vector stays fixed with its Saved Query Version. When the operator switches a collection to another vector model, vectors from the two models cannot be compared: create a new Saved Query Version, then point each Subscription at it, as in [Change or stop an alert](/guides/keyword-alerts#change-or-stop-an-alert).
+
+## Use the external classifier
+
+The `described` expression sends each new article to TypeSafe's Jev classifier, which scores how well it fits your description. English descriptions work best, and they can also find articles in other languages. Jev reads negations literally, which is one more reason to say what fits.
+
+<Warning>
+To judge an article, the plugin sends its title, its text (up to about 48 KB), its Source Namespace and any mapped metadata to TypeSafe's API. Without a TypeSafe key, the external check is off and nothing is sent.
+</Warning>
+
+Use this expression in your Saved Query. `sources` is optional: it limits the alert to some Source Namespaces, and articles from other sources are never sent to the classifier. For example, not run:
+
+```json
+{
+  "kind": "described",
+  "description": "Labour strikes at ports and harbours",
+  "sources": ["wire"]
+}
+```
+
+The classifier returns a score from 0 to 1, the probability that the article fits. The article matches when its score reaches the threshold: 0.5 by default, between 0.2 and 0.95. Set it in the Subscription's `evaluator`, and raise it for fewer, surer alerts. For example, not run:
+
+```json Subscription (excerpt)
+{
+  "evaluator": {
+    "plugin_id": "alerts",
+    "version": "0.3.0",
+    "configuration": {"threshold": 0.6}
+  }
+}
+```
+
+The Match's evidence names the classifier, its model, the score and the Parts it read. For example:
+
+```json
+{
+  "explanation": "Jev (jev-1.13.0) judged that the article fits the description: score 0.97, threshold 0.60.",
+  "part_keys": ["title", "body"],
+  "details": {
+    "kind": "described",
+    "classifier": "Jev",
+    "model": "jev-1.13.0",
+    "score": 0.97,
+    "threshold": 0.6,
+    "truncated": false
+  }
+}
+```
+
+`truncated: true` means the article was longer than what is sent, so the classifier saw only its beginning.
+
+### Timing and cost
+
+The external check waits until the article's vectors are attached, a few seconds after it is searchable. Set `{"wait_for_enrichment": false}` in the Subscription's configuration to decide at once, and on a deployment that never computes vectors.
+
+Quivr sends an article's alerts to the plugin in batches. For each batch, the plugin sends one TypeSafe request that carries the article once and each distinct description once, so alerts with the same description share a question. The number of requests per article therefore grows with the number of alerts, much more slowly than one per alert; a request that would exceed TypeSafe's size limit is split, and retries add requests. When a keyword part already settles a combined expression, the plugin does not call Jev for it.
+
+When TypeSafe is down or rate-limited, the checks stay pending and are retried; keyword alerts on the same article wait too. When the key is refused, only the external checks wait, and the plugin log says why. Classifier failures are never recorded as no match.
+
+## Next
+
+- [How alerts work](/guides/alerts): what happens between a new article and your webhook.
+- [Keyword alerts](/guides/keyword-alerts#receive-the-webhook): receive, verify and deduplicate the webhooks.

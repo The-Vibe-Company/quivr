@@ -1,0 +1,34 @@
+# Baseline ingestion test plugin for the Contract Runner (tests/plugin-contract).
+# One segment per text Part, a hashed vector in each of two spaces, lower-cased
+# lexical text. TestContractRunnerJudgesIngestion runs the same plugin in each
+# broken ingestion mode (QUIVR_FAKE_PLUGIN_MODE).
+id: certified.ingestion-valid
+version: 0.1.0
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.6.0 <0.9.0"
+contributions:
+  ingestion:
+    spaces:
+      certified.ingestion-valid.small:
+        version: "1"
+        model: fake/hash-8
+        dimensions: 8
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+      certified.ingestion-valid.large:
+        version: "1"
+        model: fake/hash-12
+        dimensions: 12
+        metric: dot
+        indexes: [text]
+        query_modalities: [text]
+    timeout_ms: 5000
+    query_timeout_ms: 1000
+secrets:
+  - name: QUIVR_TEST_EMBEDDER_KEY
+    description: Key of the embedding backend.
+    required: false
+run:
+  command: [quivr-fake-plugin]
