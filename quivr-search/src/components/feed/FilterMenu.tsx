@@ -8,12 +8,15 @@ import { CheckIcon, ChevronDownIcon } from "../RailIcons";
 export function FilterMenu({
   title,
   summary,
+  placeholder,
   icon,
   children,
 }: {
   title: string;
   /** What is picked, shown in place of the title; none when nothing is. */
   summary?: string;
+  /** What the button says when nothing is picked, if not the title. */
+  placeholder?: string;
   icon?: ReactNode;
   children: ReactNode;
 }) {
@@ -47,12 +50,12 @@ export function FilterMenu({
         data-active={summary ? true : undefined}
         aria-expanded={open}
         aria-controls={id}
-        aria-label={summary ? `${title} : ${summary}` : title}
-        title={summary || title}
+        aria-label={summary || placeholder ? `${title} : ${summary || placeholder}` : title}
+        title={summary || placeholder || title}
         onClick={() => setOpen(!open)}
       >
         {icon && <span className="menu-icon">{icon}</span>}
-        <span className="menu-summary">{summary || title}</span>
+        <span className="menu-summary">{summary || placeholder || title}</span>
         <span className="menu-chevron">
           <ChevronDownIcon />
         </span>

@@ -30,13 +30,14 @@ import {
   ChevronDownIcon,
   EyeIcon,
   EyeOffIcon,
+  ChecksIcon,
   SourcesIcon,
 } from "../RailIcons";
 import { EmptyState, LoadingState, Notice } from "../ui";
 import { groupSources } from "../connectors/SourceList";
 import { Reader } from "./Reader";
 import { SideColumn } from "./SideColumn";
-import { SourceLogo } from "./SourceLogo";
+import { SourceLogo, logoIds } from "./SourceLogo";
 import { FilterMenu, MenuOption } from "./FilterMenu";
 
 /**
@@ -258,15 +259,7 @@ export function FeedPage({
   );
 
   // The connector whose site gives each source its logo.
-  const logoOf = useMemo(
-    () =>
-      new Map(
-        groupSources(connectors)
-          .filter((c) => c.kind === "rss")
-          .map((c) => [c.source_namespace, c.connector_id]),
-      ),
-    [connectors],
-  );
+  const logoOf = useMemo(() => logoIds(connectors), [connectors]);
 
   const base: Row[] = useMemo(() => {
     if (!query) return feed.items.map((item) => ({ item }));
@@ -745,6 +738,21 @@ export function FeedPage({
                 Tout effacer
               </button>
             )}
+            {readable.some((i) => reading.isUnread(i)) && (
+              <button
+                type="button"
+                className="mark-read"
+                title="Marquer comme lus les articles affichés"
+                onClick={() => {
+                  reading.markAllRead(readable.filter((i) => reading.isUnread(i)));
+                  // The button goes once all is read: the focus moves to the filters.
+                  document.querySelector<HTMLElement>(".filters .chip")?.focus();
+                }}
+              >
+                <ChecksIcon />
+                Tout marquer comme lu
+              </button>
+            )}
           </div>
         </div>
         <div
@@ -1022,7 +1030,7 @@ function FeedRow({
                     onClick={() => onAlert(a.alert_id)}
                   >
                     <AlertsIcon size={13} />
-                    {a.name}
+                    <span className="row-tag-name">{a.name}</span>
                   </button>
                 </li>
               ))}

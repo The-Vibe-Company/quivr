@@ -52,8 +52,8 @@ async function addText(page: Page, text: string) {
 
 const alertRow = (page: Page, name: string) =>
   page
-    .getByRole("list", { name: "Alertes" })
-    .getByRole("listitem")
+    .getByRole("table", { name: "Alertes" })
+    .getByRole("row")
     .filter({ hasText: name });
 
 test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pause, se modifie et se supprime", async ({
@@ -61,6 +61,8 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
 }, info) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/?view=alerts");
+  // The form opens in a panel from the page's button.
+  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   await expect(
     page.getByRole("heading", { name: "Nouvelle alerte" }),
   ).toBeVisible();
@@ -91,8 +93,9 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
   });
   await page.getByRole("button", { name: "Créer l’alerte" }).click();
   const row = alertRow(page, name);
-  await expect(row.getByTestId("alert-count")).toHaveText("Aucun article");
-  await expect(page.getByLabel("Mots à surveiller")).toHaveValue("");
+  await expect(row.getByTestId("alert-count")).toHaveText("0");
+  // Saving closes the panel.
+  await expect(page.getByRole("form", { name: "Nouvelle alerte" })).toHaveCount(0);
 
   // Only articles arriving after the alert count: a text without the words,
   // then one with them, then an RSS source with one article of each kind.
@@ -116,7 +119,7 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
 
   // Both matches show live on the list, then on the alert's page, with the
   // words that matched and where.
-  await expect(row.getByTestId("alert-count")).toHaveText("2 articles", {
+  await expect(row.getByTestId("alert-count")).toHaveText("2", {
     timeout: 120000,
   });
   await row.getByRole("button", { name, exact: true }).click();
@@ -145,8 +148,8 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
     fullPage: true,
   });
 
-  // Opening an article shows the whole text in the feed's reader, with why
-  // the alert caught it.
+  // Opening an article shows the whole text in the reader, over the alert's
+  // page, with why the alert caught it.
   await fed.getByRole("button").first().click();
   const reader = page.getByRole("complementary", {
     name: new RegExp(`Grêle et orage sur le vignoble ${run}`),
@@ -155,7 +158,13 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
   await expect(
     reader.getByRole("list", { name: "Pourquoi cet article" }),
   ).toContainText(`Attrapé par votre alerte « ${name} »`);
+  await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(reader).toHaveCount(0);
+  await page
+    .getByRole("navigation", { name: "Sections" })
+    .getByRole("link", { name: /^Fil/ })
+    .click();
 
   // In the feed, the caught articles carry the alert; the others do not.
   const feed = page.getByRole("list", { name: "Derniers éléments" });
@@ -187,25 +196,27 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
 
   // Pause, resume, edit (applies to later articles) and delete.
   const actions = page.getByRole("group", { name: "Actions de l’alerte" });
-  const badge = page.locator(".alert-detail-head .health-badge");
-  await actions.getByRole("button", { name: "Mettre en pause" }).click();
-  await expect(badge).toHaveText("En pause");
-  await page.getByRole("button", { name: "Toutes les alertes" }).click();
+  const active = actions.getByRole("switch", { name: "Alerte active" });
+  await active.click();
+  await expect(active).toHaveAttribute("aria-checked", "false");
   await expect(row.locator(".alert-state")).toHaveText("En pause");
-  await row.getByRole("button", { name, exact: true }).click();
-  await actions.getByRole("button", { name: "Reprendre" }).click();
-  await expect(badge).toHaveText("Active");
+  await active.click();
+  await expect(row.locator(".alert-state")).toHaveText("Active");
 
   await actions.getByRole("button", { name: "Modifier" }).click();
-  const edit = page.getByRole("form", { name: "Modifier la requête" });
-  await edit.getByLabel("Nouvelle requête").fill(`${run} AND tempête`);
+  const edit = page.getByRole("form", { name: "Modifier l’alerte" });
+  await edit.getByLabel("Requête avancée").fill(`${run} AND tempête`);
   await edit.getByRole("button", { name: "Enregistrer" }).click();
-  await expect(page.locator(".alert-detail-head .alert-query")).toHaveText(
-    `${run} AND tempête`,
-  );
+  await expect(page.locator(".alert-sheet .sheet-rule .kw")).toHaveText([
+    run,
+    "tempête",
+  ]);
   await expect(caught.locator(".caught")).toHaveCount(2);
 
-  await actions.getByRole("button", { name: "Supprimer" }).click();
+  await actions
+    .getByRole("button", { name: `Plus d’actions pour ${name}` })
+    .click();
+  await actions.getByRole("menuitem", { name: "Supprimer" }).click();
   await page
     .getByRole("group", { name: "Confirmer la suppression" })
     .getByRole("button", { name: "Supprimer définitivement" })
@@ -221,6 +232,7 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
 }, info) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/?view=alerts");
+  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   await page
     .getByRole("group", { name: "Type d’alerte" })
     .getByRole("button", { name: "Un sujet décrit" })
@@ -239,8 +251,9 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
   });
   await page.getByRole("button", { name: "Créer l’alerte" }).click();
   const row = alertRow(page, name);
-  await expect(row.locator(".alert-item-rule")).toHaveText(
-    "Décrite : « Des grèves dans les ports »",
+  // The new alert is selected: its sheet says what it looks for.
+  await expect(page.locator(".alert-sheet .rule-quote")).toHaveText(
+    "« Des grèves dans les ports »",
   );
 
   // No shared keyword: the classifier judges the meaning of each new article.
@@ -255,10 +268,12 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
   const item = caught
     .locator(".caught")
     .filter({ hasText: `Les dockers cessent le travail au port ${run}` });
-  await expect(item.getByTestId("caught-score")).toHaveText(
-    /score 0,92\s*seuil 0,50/,
-    { timeout: 120000 },
-  );
+  await expect(item.getByTestId("caught-score")).toHaveText("Score 0,92", {
+    timeout: 120000,
+  });
+  // What the score means, and the alert's threshold, on hover or focus.
+  await expect(item.getByRole("tooltip")).toContainText("Très pertinent");
+  await expect(item.getByRole("tooltip")).toContainText("dépasse 0,50");
   await expect(caught).not.toContainText(`marché aux fleurs ${run}`);
   await page.screenshot({
     path: info.outputPath("alerts-described-detail.png"),
@@ -268,15 +283,18 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
   // A described alert is edited and deleted like a keyword alert.
   const actions = page.getByRole("group", { name: "Actions de l’alerte" });
   await actions.getByRole("button", { name: "Modifier" }).click();
-  const edit = page.getByRole("form", { name: "Modifier la description" });
+  const edit = page.getByRole("form", { name: "Modifier l’alerte" });
   await edit
-    .getByLabel("Nouvelle description")
+    .getByLabel("Décrivez le sujet en une phrase")
     .fill("Des inondations après de fortes pluies");
   await edit.getByRole("button", { name: "Enregistrer" }).click();
-  await expect(page.locator(".alert-detail-head .alert-query")).toHaveText(
-    "Des inondations après de fortes pluies",
+  await expect(page.locator(".alert-sheet .rule-quote")).toHaveText(
+    "« Des inondations après de fortes pluies »",
   );
-  await actions.getByRole("button", { name: "Supprimer" }).click();
+  await actions
+    .getByRole("button", { name: `Plus d’actions pour ${name}` })
+    .click();
+  await actions.getByRole("menuitem", { name: "Supprimer" }).click();
   await page
     .getByRole("group", { name: "Confirmer la suppression" })
     .getByRole("button", { name: "Supprimer définitivement" })
@@ -296,6 +314,7 @@ test("sans classifieur, la page ne propose que les mots-clés et dit pourquoi", 
     });
   });
   await page.goto("/?view=alerts");
+  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   await expect(page.getByLabel("Mots à surveiller")).toBeVisible();
   await expect(page.getByRole("group", { name: "Type d’alerte" })).toHaveCount(
     0,
@@ -312,12 +331,13 @@ test("la page des alertes tient sur mobile, en mode clair et sombre", async ({
 }, info) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/?view=alerts");
+  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   const words = page.getByLabel("Mots à surveiller");
   await words.fill("marché aux fleurs");
   await words.press("Enter");
-  await expect(page.locator(".form-preview .keyword")).toHaveText(
-    "marché aux fleurs",
-  );
+  await expect(
+    page.getByRole("list", { name: "Mots surveillés" }).getByRole("listitem"),
+  ).toHaveText(["marché aux fleurs×"]);
   for (const scheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     expect(

@@ -4,7 +4,9 @@
    colour-blind separation on each surface (the dataviz six checks), in the
    order they stack; "Autres" is a neutral. */
 
-.usage-grid {
+/* The usage tab and the day at a glance beside the Admin flow. */
+.usage-grid,
+.glance {
   --series-1: #5b3fd6;
   --series-2: #1baf7a;
   --series-3: #eb6834;
@@ -12,6 +14,8 @@
   --series-5: #e87ba4;
   --series-other: #c3c4cf;
   --series-hot: color-mix(in oklab, var(--hot) 88%, var(--panel));
+}
+.usage-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: -16px -22px -20px;
@@ -19,7 +23,7 @@
 /* Dark theme: follows the system unless a theme was chosen in the rail
    (data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .usage-grid {
+  :root:not([data-theme="light"]) :is(.usage-grid, .glance) {
     --series-1: #9085e9;
     --series-2: #199e70;
     --series-3: #d95926;
@@ -28,7 +32,7 @@
     --series-other: #4a4b5a;
   }
 }
-:root[data-theme="dark"] .usage-grid {
+:root[data-theme="dark"] :is(.usage-grid, .glance) {
   --series-1: #9085e9;
   --series-2: #199e70;
   --series-3: #d95926;

@@ -186,7 +186,8 @@ test("la pause arrête la collecte, la reprise la relance, le retrait masque la 
   await expect(page.getByRole("button", { name, exact: true })).toHaveCount(1);
 
   // Removing asks first, stops collection and survives a reload.
-  await source.getByRole("button", { name: `Retirer ${name}` }).click();
+  await source.getByRole("button", { name: `Plus d’actions pour ${name}` }).click();
+  await source.getByRole("menuitem", { name: "Retirer" }).click();
   await source
     .getByRole("group", { name: `Retirer ${name}` })
     .getByRole("button", { name: "Oui, retirer" })

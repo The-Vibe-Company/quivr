@@ -24,6 +24,7 @@ import { duration, short } from "../../lib/admin";
 import { APIError, request } from "../../lib/search";
 import { useConnectorList } from "../../lib/workspace";
 import { longTime } from "../../lib/format";
+import { displayName } from "../../lib/sourceNames";
 import type { Connector } from "../../lib/connectors";
 import {
   byConcern,
@@ -47,7 +48,7 @@ const STATES: Record<PluginState, { label: string; Icon: typeof CheckCircle }> =
 const PLUGINS_MS = 30000;
 
 /** The active plan's plugins through the facade, reread every 30 s. */
-function useActivePlugins(onUnauthorized: () => void) {
+export function useActivePlugins(onUnauthorized: () => void) {
   const [items, setItems] = useState<ActivePlugin[] | null>(null);
   const [status, setStatus] = useState<StatsStatus>("loading");
   const [error, setError] = useState("");
@@ -105,7 +106,7 @@ const perMinute = (n: number) =>
       ? "< 0,1"
       : n.toLocaleString("fr-FR", { maximumFractionDigits: n < 10 ? 1 : 0 });
 
-export function Plugins({ onUnauthorized }: SectionProps) {
+export function Plugins({ onUnauthorized, bare }: SectionProps) {
   const [window, setWindow] = useState<StatsWindow>("1h");
   const [open, setOpen] = useState<string | null>(null);
   const active = useActivePlugins(onUnauthorized);
@@ -132,6 +133,7 @@ export function Plugins({ onUnauthorized }: SectionProps) {
     <AdminSection
       id="plugins"
       title="Plugins"
+      bare={bare}
       status={status}
       error={active.status !== "ready" ? active.error : stats.error}
       onRetry={active.status !== "ready" ? active.reload : stats.reload}
@@ -389,7 +391,7 @@ function PluginLine({
           >
             {sources.map((c) => (
               <li key={c.connector_id}>
-                <span className="plug-source-name">{c.source_namespace}</span>
+                <span className="plug-source-name">{displayName(c.source_namespace)}</span>
                 <HealthBadge state={displayState(c)} />
                 <span className="plug-source-meta">
                   <span className="plug-when">

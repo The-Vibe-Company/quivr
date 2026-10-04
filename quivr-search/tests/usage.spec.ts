@@ -254,6 +254,7 @@ test("l’utilisation montre les documents par source, les recherches, les alert
   });
   await page.setViewportSize({ width: 1440, height: 1600 });
   await page.goto("/?view=admin");
+  await page.getByRole("tab", { name: "Utilisation" }).click();
 
   const documents = block(page, "Documents reçus");
   const day = received("24h", 20);
@@ -368,6 +369,7 @@ test("sans enregistrement du texte, les requêtes fréquentes disent comment l�
   await usageEngine(page, { recording: false });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/?view=admin");
+  await page.getByRole("tab", { name: "Utilisation" }).click();
   const queries = block(page, "Requêtes fréquentes");
   await expect(queries.getByRole("status")).toContainText(
     "Le texte des recherches n’est pas enregistré",
@@ -392,6 +394,7 @@ test("un bloc vide ou en échec ne cache pas les autres, et se relit sur Réessa
   await usageEngine(page, { failing, empty: new Set(["received"]) });
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto("/?view=admin");
+  await page.getByRole("tab", { name: "Utilisation" }).click();
   await expect(block(page, "Documents reçus")).toContainText(
     "0 document en 24 h",
   );

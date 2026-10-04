@@ -1,8 +1,10 @@
-// The Admin tab (THE-796): is everything healthy right now, then the live
-// flow of the latest documents through their steps, then one document's
-// timeline in a side panel. Read-only. Later slices add bottlenecks, plugins
-// and usage below the flow.
-import { useCallback, useEffect, useState, type ComponentType } from "react";
+// The Admin tab (THE-796): one line on whether all is well, the pipeline
+// (where documents spend their time, step by step, and the plugins running
+// each), then what goes through it: the live flow of the latest documents
+// (one document's timeline opens beside it), with the plugins and the usage
+// a click away, and the day at a glance beside. The page holds on one
+// screen; the flow scrolls inside. Read-only.
+import { useCallback, useEffect, useState } from "react";
 import {
   CheckCircle,
   Pulse,
@@ -25,16 +27,22 @@ import {
   type AdminStats,
   type Cell,
 } from "../../lib/admin";
-import { Throughput } from "./Throughput";
 import { TimelinePanel } from "./TimelinePanel";
+import { Glance } from "./Glance";
+import { SourceLogo, logoIds } from "../feed/SourceLogo";
+import type { Connector } from "../../lib/connectors";
 import { Bottlenecks } from "./Bottlenecks";
 import { Plugins } from "./Plugins";
-import type { SectionProps } from "./AdminSection";
 import { Usage } from "./Usage";
 
-// The sections below the flow, in reading order: each is one component in
-// its own file under admin/, built on AdminSection (THE-797, THE-798).
-const SECTIONS: ComponentType<SectionProps>[] = [Bottlenecks, Plugins, Usage];
+// The tabs of the panel under the pipeline. Plugins and usage are sections
+// of their own (admin/, built on AdminSection), shown without their frame.
+const TABS = [
+  { key: "flow", label: "Flux", title: "Ce qui passe dans le tuyau" },
+  { key: "plugins", label: "Plugins", title: "Plugins" },
+  { key: "usage", label: "Utilisation", title: "Utilisation" },
+] as const;
+type Tab = (typeof TABS)[number]["key"];
 
 const clock = new Intl.DateTimeFormat("fr-FR", {
   hour: "2-digit",
@@ -49,6 +57,7 @@ const BANNER_DELAY_MS = 4000;
 
 export function AdminView({
   titles,
+  connectors,
   selected,
   onSelect,
   onOpen,
@@ -58,6 +67,8 @@ export function AdminView({
 }: {
   /** Titles the Fil already knows, for documents without a title Part. */
   titles: Map<string, string>;
+  /** The sources, for their logos. */
+  connectors: Connector[];
   selected: string | null;
   onSelect: (version: string | null) => void;
   onOpen: (record: string, version: string) => void;
@@ -74,6 +85,12 @@ export function AdminView({
     BANNER_DELAY_MS,
   );
   const row = admin.rows.find((r) => r.version_id === selected);
+  const logoOf = logoIds(connectors);
+  // A document opened from elsewhere (its timeline) shows in the flow's tab.
+  const [tab, setTab] = useState<Tab>("flow");
+  useEffect(() => {
+    if (selected) setTab("flow");
+  }, [selected]);
 
   const close = useCallback(() => {
     const version = selected;
@@ -133,109 +150,131 @@ export function AdminView({
         </Notice>
       ) : (
         <>
-          <div className="admin-top">
-            {admin.stats && <Health stats={admin.stats} />}
-            {admin.stats && <Throughput stats={admin.stats} now={now} />}
-          </div>
-          <div className="admin-main" data-open={selected ? "" : undefined}>
-            <section className="panel admin-flow" aria-labelledby="flow-title">
-              <div className="panel-head">
-                <h2 id="flow-title" tabIndex={-1}>
-                  Flux en direct
-                </h2>
-                <span className="list-count">
-                  {admin.rows.length > 0 &&
-                    `${admin.rows.length} dernier${admin.rows.length > 1 ? "s" : ""} document${admin.rows.length > 1 ? "s" : ""}`}
+          <Bottlenecks
+            onUnauthorized={onUnauthorized}
+            stats={admin.stats}
+            bare
+            lead={admin.stats && <StatusLine stats={admin.stats} />}
+          />
+          <div className="admin-lower">
+          <div className="panel admin-tabs">
+            <div className="admin-tabs-head">
+              <h2 id="admin-tabs-title">{TABS.find((t) => t.key === tab)?.title}</h2>
+              {tab === "flow" && admin.rows.length > 0 && (
+                <span className="admin-tabs-count">
+                  {admin.rows.length} dernier{admin.rows.length > 1 ? "s" : ""} document
+                  {admin.rows.length > 1 ? "s" : ""}
                 </span>
-                {admin.rows.length > 0 && <Legend />}
+              )}
+              <div className="admin-tablist segmented" role="tablist" aria-label="Que montrer">
+                {TABS.map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="tab"
+                    id={`admin-tab-${t.key}`}
+                    aria-selected={tab === t.key}
+                    aria-controls={`admin-panel-${t.key}`}
+                    tabIndex={tab === t.key ? 0 : -1}
+                    onClick={() => setTab(t.key)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+                      event.preventDefault();
+                      const at = TABS.findIndex((x) => x.key === tab);
+                      const next = TABS[(at + (event.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+                      setTab(next.key);
+                      document.getElementById(`admin-tab-${next.key}`)?.focus();
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                ))}
               </div>
-              {offline && (
-                <p className="admin-banner" role="status">
-                  <span className="admin-banner-dot" aria-hidden="true" />
-                  {!admin.connected
-                    ? "Connexion au suivi perdue. Reconnexion automatique…"
-                    : "Le flux des changements est coupé : la liste se met à jour toutes les 5 s en attendant."}
-                </p>
-              )}
-              {admin.busy > 0 && (
-                <p className="admin-banner" data-tone="busy" role="status">
-                  Débit élevé : {admin.busy} documents en 10 s. La liste garde
-                  les 50 plus récents, sans animation.
-                </p>
-              )}
-              {admin.rows.length === 0 ? (
-                <EmptyState
-                  className="admin-empty"
-                  icon={<Pulse size={26} aria-hidden="true" />}
-                  title="Aucun document pour l’instant"
-                  actions={
-                    <>
-                      <button
-                        type="button"
-                        className="button primary"
-                        onClick={onAdd}
+            </div>
+            <div
+              className="admin-tabpanel"
+              role="tabpanel"
+              id={`admin-panel-${tab}`}
+              aria-labelledby={`admin-tab-${tab}`}
+            >
+              {tab === "plugins" && <Plugins onUnauthorized={onUnauthorized} stats={admin.stats} bare />}
+              {tab === "usage" && <Usage onUnauthorized={onUnauthorized} stats={admin.stats} bare />}
+              {tab === "flow" && (
+                <div className="admin-main" data-open={selected ? "" : undefined}>
+                  <section className="admin-flow" aria-labelledby="flow-title">
+                    <h2 id="flow-title" className="visually-hidden" tabIndex={-1}>
+                      Flux en direct
+                    </h2>
+                    {offline && (
+                      <p className="admin-banner" role="status">
+                        <span className="admin-banner-dot" aria-hidden="true" />
+                        {!admin.connected
+                          ? "Connexion au suivi perdue. Reconnexion automatique…"
+                          : "Le flux des changements est coupé : la liste se met à jour toutes les 5 s en attendant."}
+                      </p>
+                    )}
+                    {admin.busy > 0 && (
+                      <p className="admin-banner" data-tone="busy" role="status">
+                        Débit élevé : {admin.busy} documents en 10 s. La liste garde les 50 plus récents, sans
+                        animation.
+                      </p>
+                    )}
+                    {admin.rows.length === 0 ? (
+                      <EmptyState
+                        className="admin-empty"
+                        icon={<Pulse size={26} aria-hidden="true" />}
+                        title="Aucun document pour l’instant"
+                        actions={
+                          <>
+                            <button type="button" className="button primary" onClick={onAdd}>
+                              Ajouter du texte
+                            </button>
+                            <button type="button" className="button" onClick={onSources}>
+                              Ajouter une source
+                            </button>
+                          </>
+                        }
                       >
-                        Ajouter du texte
-                      </button>
-                      <button
-                        type="button"
-                        className="button"
-                        onClick={onSources}
-                      >
-                        Ajouter une source
-                      </button>
-                    </>
-                  }
-                >
-                  Chaque document apparaît ici dès sa réception, puis avance
-                  étape par étape : lu, découpé, trouvable, vecteurs, alertes.
-                  Ajoutez un texte pour le voir passer.
-                </EmptyState>
-              ) : (
-                <div className="flow-table">
-                  <div className="flow-grid flow-columns" aria-hidden="true">
-                    <span>Document</span>
-                    {STEPS.map((s) => (
-                      <span key={s.key}>{s.label}</span>
-                    ))}
-                    <span>Trouvable en</span>
-                  </div>
-                  <ol className="flow-rows" aria-label="Derniers documents">
-                    {admin.rows.map((r) => (
-                      <FlowRow
-                        key={r.version_id}
-                        row={r}
-                        title={titleOf(r, titles)}
-                        fresh={admin.fresh.has(r.version_id)}
-                        selected={r.version_id === selected}
-                        now={now}
-                        onSelect={onSelect}
-                      />
-                    ))}
-                  </ol>
+                        Chaque document apparaît ici dès sa réception, puis avance étape par étape : lu, découpé,
+                        trouvable, vecteurs, alertes. Ajoutez un texte pour le voir passer.
+                      </EmptyState>
+                    ) : (
+                      <div className="flow-table">
+                        <ol className="flow-rows" aria-label="Derniers documents">
+                          {admin.rows.map((r) => (
+                            <FlowRow
+                              key={r.version_id}
+                              row={r}
+                              title={titleOf(r, titles)}
+                              fresh={admin.fresh.has(r.version_id)}
+                              selected={r.version_id === selected}
+                              now={now}
+                              logo={logoOf.get(r.source_namespace)}
+                              onSelect={onSelect}
+                            />
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+                  </section>
+                  {selected && (
+                    <TimelinePanel
+                      key={selected}
+                      version={selected}
+                      row={row}
+                      titles={titles}
+                      now={now}
+                      onClose={close}
+                      onOpen={onOpen}
+                      onUnauthorized={onUnauthorized}
+                    />
+                  )}
                 </div>
               )}
-            </section>
-            {selected && (
-              <TimelinePanel
-                key={selected}
-                version={selected}
-                row={row}
-                titles={titles}
-                now={now}
-                onClose={close}
-                onOpen={onOpen}
-                onUnauthorized={onUnauthorized}
-              />
-            )}
+            </div>
           </div>
-          {SECTIONS.map((Section, index) => (
-            <Section
-              key={index}
-              onUnauthorized={onUnauthorized}
-              stats={admin.stats}
-            />
-          ))}
+          <Glance onUnauthorized={onUnauthorized} onDetail={() => setTab("usage")} />
+          </div>
         </>
       )}
     </main>
@@ -284,85 +323,47 @@ const HEALTH_ICONS = {
   bad: XCircle,
 };
 
-function Health({ stats }: { stats: AdminStats }) {
+/**
+ * The page's state on one line: the verdict, then the hour's numbers
+ * (received to searchable, documents per minute, waiting, errors).
+ */
+function StatusLine({ stats }: { stats: AdminStats }) {
   const { tone, text } = verdict(stats);
   const Icon = HEALTH_ICONS[tone];
-  const perMinute = stats.per_minute.toLocaleString("fr-FR", {
-    maximumFractionDigits: 1,
-  });
+  const cut = text.indexOf(" : ");
+  const head = cut > 0 ? text.slice(0, cut) : text.replace(/\.$/, "");
+  // All well, the numbers say the rest; otherwise the sentence does.
+  const rest = cut > 0 && tone !== "ok" ? text.slice(cut + 3) : "";
+  const perMinute = stats.per_minute.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
   return (
-    <section className="panel admin-health" aria-labelledby="health-title">
+    <section className="admin-status" data-tone={tone} aria-labelledby="health-title">
       <h2 id="health-title" className="visually-hidden">
         État de la dernière heure
       </h2>
-      <p className="health-verdict" data-tone={tone}>
+      <p className="admin-status-line">
         <Icon size={20} weight="fill" aria-hidden="true" />
-        <span>{text}</span>
+        <b>{head}</b>
+        {rest && <span className="admin-status-rest">{rest}</span>}
+        <span className="admin-status-figures">
+          {stats.searchable_p95_ms !== null && (
+            <span data-tone={slower(stats) ? "warn" : undefined}>
+              Reçu → trouvable en {short(stats.searchable_p95_ms)} (p95
+              {stats.searchable_day_p95_ms !== null && `, ${short(stats.searchable_day_p95_ms)} sur 24\u00a0h`})
+            </span>
+          )}
+          <span>
+            {perMinute} document{stats.per_minute >= 2 ? "s" : ""}/min
+          </span>
+          <span data-tone={stats.stuck ? "warn" : undefined}>
+            {stats.waiting} en attente
+            {stats.stuck ? ` dont ${stats.stuck} plus lent${stats.stuck > 1 ? "s" : ""} que d’habitude` : ""}
+          </span>
+          <span data-tone={stats.errors ? "bad" : undefined}>
+            {stats.errors} erreur{stats.errors > 1 ? "s" : ""}
+          </span>
+        </span>
       </p>
-      <dl className="admin-kpis">
-        <Kpi
-          label="Documents / min"
-          value={perMinute}
-          note={
-            stats.per_minute_window === "1h"
-              ? "moyenne sur 1\u00a0h"
-              : "moyenne sur 10\u00a0min"
-          }
-        />
-        <Kpi
-          label="Reçu → trouvable"
-          value={
-            stats.searchable_p95_ms === null
-              ? "—"
-              : short(stats.searchable_p95_ms)
-          }
-          note={
-            stats.searchable_day_p95_ms === null
-              ? "p95 sur 1\u00a0h"
-              : `p95 sur 1\u00a0h · ${short(stats.searchable_day_p95_ms)} sur 24\u00a0h`
-          }
-          tone={slower(stats) ? "warn" : undefined}
-        />
-        <Kpi
-          label="En attente"
-          value={String(stats.waiting)}
-          note={
-            stats.stuck
-              ? `dont ${stats.stuck} plus lent${stats.stuck > 1 ? "s" : ""} que d’habitude`
-              : "pas encore trouvables"
-          }
-          tone={stats.stuck ? "warn" : undefined}
-        />
-        <Kpi
-          label="Erreurs"
-          value={String(stats.errors)}
-          note={"en quarantaine (1\u00a0h)"}
-          tone={stats.errors ? "bad" : undefined}
-        />
-      </dl>
     </section>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  note,
-  tone,
-}: {
-  label: string;
-  value: string;
-  note: string;
-  tone?: "warn" | "bad";
-}) {
-  return (
-    <div className="admin-kpi" data-tone={tone}>
-      <dt>{label}</dt>
-      <dd>
-        <span className="admin-kpi-value">{value}</span>
-        <span className="admin-kpi-note">{note}</span>
-      </dd>
-    </div>
   );
 }
 
@@ -372,6 +373,7 @@ function FlowRow({
   fresh,
   selected,
   now,
+  logo,
   onSelect,
 }: {
   row: AdminRow;
@@ -379,6 +381,8 @@ function FlowRow({
   fresh: boolean;
   selected: boolean;
   now: number;
+  /** The connector whose site gives the source its logo. */
+  logo?: string;
   onSelect: (version: string) => void;
 }) {
   const at = acceptedAt(row);
@@ -404,11 +408,12 @@ function FlowRow({
         onClick={() => onSelect(row.version_id)}
       >
         <span className="flow-doc">
+          <span className="flow-logo" title={sourceName(row.source_namespace)}>
+            <SourceLogo namespace={row.source_namespace} connectorId={logo} size="small" />
+          </span>
           <span className="flow-title">{title}</span>
           <span className="flow-meta">
-            <span className="flow-source" title={row.source_namespace}>
-              {sourceName(row.source_namespace)}
-            </span>
+            <span className="flow-source visually-hidden">{sourceName(row.source_namespace)}</span>
             {at && (
               <time
                 dateTime={at}
@@ -506,30 +511,6 @@ function StepCell({
         {cell.state === "none" && <span className="cell-text">—</span>}
       </span>
     </span>
-  );
-}
-
-function Legend() {
-  return (
-    <ul className="flow-legend" aria-label="Légende">
-      {(
-        [
-          ["done", "terminé"],
-          ["run", "en cours"],
-          ["slow", "plus lent que d’habitude"],
-          ["error", "erreur"],
-        ] as const
-      ).map(([state, label]) => (
-        <li key={state}>
-          <span
-            className="legend-swatch"
-            data-state={state}
-            aria-hidden="true"
-          />
-          {label}
-        </li>
-      ))}
-    </ul>
   );
 }
 

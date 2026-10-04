@@ -1,24 +1,7 @@
-import type { Alert } from "../../lib/alerts";
-import { keywordRule, sourceName } from "../../lib/alertForm";
 import { plural } from "../../lib/format";
 import type { FeedItem } from "../../lib/feed";
 import { daily, dayLabel, hourly, shortDay } from "../../lib/moments";
 import { topics } from "../../lib/topics";
-
-/** How an alert reads in a list: its words, or its description. */
-export function alertRule(alert: Alert, withState = true) {
-  const rule =
-    alert.kind === "described"
-      ? `Décrite : « ${alert.expression.description} »${
-          alert.expression.sources?.length
-            ? ` · ${alert.expression.sources.map(sourceName).join(", ")}`
-            : ""
-        }`
-      : alert.kind === "keywords"
-        ? keywordRule(alert.expression.match)
-        : "Alerte d’un autre type";
-  return alert.enabled || !withState ? rule : `En pause · ${rule}`;
-}
 
 /** "christa pike" reads "Christa Pike"; acronyms keep their capitals. */
 const titleCase = (text: string) =>

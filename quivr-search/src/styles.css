@@ -1696,14 +1696,7 @@ fieldset[data-invalid="true"] > legend {
     box-shadow: 0 0 0 12px transparent;
   }
 }
-.source-actions {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
+
 /* Wide screens: actions sit right of the facts, under the badge, so each
    source stays two lines tall; a removal confirmation takes the full row. */
 @media (min-width: 641px) {
@@ -1711,21 +1704,8 @@ fieldset[data-invalid="true"] > legend {
     grid-column: 1;
     align-self: center;
   }
-  .source-row .source-actions {
-    grid-column: 2;
-    justify-content: flex-end;
-    margin-top: 0;
-  }
-  .source-row .source-actions:has(.remove-confirm, .error-text) {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-    margin-top: 6px;
-  }
 }
-.source-actions .error-text {
-  flex-basis: 100%;
-  margin-top: 2px;
-}
+
 .button.small {
   min-height: 38px;
   padding: 6px 12px;

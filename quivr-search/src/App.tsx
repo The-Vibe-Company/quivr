@@ -28,6 +28,7 @@ import { APIError, login, searchProfiles, session } from "./lib/search";
 import { offersDeep } from "./lib/deep";
 import { useAlertList, useConnectorList, useFeedStream } from "./lib/workspace";
 import { useReadState } from "./lib/readState";
+import { rememberSourceNames } from "./lib/sourceNames";
 import { groupSources } from "./components/connectors/SourceList";
 import { displayState } from "./components/connectors/HealthBadge";
 import { needsCheck } from "./lib/format";
@@ -224,6 +225,8 @@ function Dashboard({
   const feed = useFeedStream(hold, onUnauthorized);
   const alerts = useAlertList(onUnauthorized);
   const sources = useConnectorList(onUnauthorized);
+  // Before any child renders: every label of a source reads these names.
+  useMemo(() => rememberSourceNames(sources.connectors), [sources.connectors]);
   const reading = useReadState();
   const titles = useMemo(
     () => new Map(feed.items.map((item) => [item.record_id, item.title])),
@@ -300,8 +303,9 @@ function Dashboard({
     return () => window.removeEventListener("keydown", listener);
   }, [adding]);
 
+  // Articles an alert caught that this browser has not read yet.
   const alertCount = alerts.list?.available
-    ? Object.keys(alerts.list.matched).length
+    ? feed.items.filter((item) => alerts.list!.matched[item.record_id]?.length && reading.isUnread(item)).length
     : 0;
   const toCheck = groupSources(sources.connectors).filter((c) =>
     needsCheck(displayState(c)),
@@ -315,7 +319,7 @@ function Dashboard({
   const badgeLabels: Record<View, string> = {
     feed: "",
     admin: "",
-    alerts: `${alertCount} article${alertCount > 1 ? "s" : ""} attrapé${alertCount > 1 ? "s" : ""} par vos alertes`,
+    alerts: `${alertCount} article${alertCount > 1 ? "s" : ""} non lu${alertCount > 1 ? "s" : ""} attrapé${alertCount > 1 ? "s" : ""} par vos alertes`,
     sources: `${toCheck} source${toCheck > 1 ? "s" : ""} à vérifier`,
   };
   const liveLabel = paused ? "En pause" : feed.live ? "En direct" : "Reconnexion…";
@@ -354,6 +358,7 @@ function Dashboard({
               onClick={(event) => {
                 event.preventDefault();
                 if (target === "alerts") setAlert(null);
+                if (target !== view) setDoc(null);
                 setView(target);
               }}
             >
@@ -509,8 +514,12 @@ function Dashboard({
           reading={reading}
           scroller={scroller}
           onAdd={() => setAdding(true)}
-          onAlerts={() => setView("alerts")}
+          onAlerts={() => {
+            setDoc(null);
+            setView("alerts");
+          }}
           onSources={(id) => {
+            setDoc(null);
             setOpenSource(id || null);
             setView("sources");
           }}
@@ -519,11 +528,24 @@ function Dashboard({
         />
       ) : view === "alerts" ? (
         <AlertsView
+          corpus={corpus}
           selected={alert}
           onSelect={setAlert}
-          onOpen={open}
+          doc={doc}
+          // Articles open in the reader over the page; the open one closes it.
+          onOpen={(record, version) => setDoc(doc?.record === record ? null : { record, version })}
+          onCloseDoc={() => setDoc(null)}
+          onSimilar={(text) => {
+            setInput(text);
+            setNear(true);
+            setFilter(ALL);
+            setDoc(null);
+            setView("feed");
+          }}
           connectors={sources.connectors}
           feedItems={feed.items}
+          isUnread={reading.isUnread}
+          onMarkAllRead={reading.markAllRead}
           onChanged={() => void alerts.reload()}
           notify={notify}
           onUnauthorized={onUnauthorized}
@@ -531,6 +553,7 @@ function Dashboard({
       ) : view === "admin" ? (
         <AdminView
           titles={titles}
+          connectors={sources.connectors}
           selected={version}
           onSelect={setVersion}
           onOpen={(record, target) => {

@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { NotePencil } from "@phosphor-icons/react";
 import { HAND_NAMESPACE } from "../../lib/feed";
+import type { Connector } from "../../lib/connectors";
+import { groupSources } from "../connectors/SourceList";
+import { displayName } from "../../lib/sourceNames";
 
 // Deep tones for the initial shown until a logo loads, or instead of one.
 const TONES = ["#0a3d62", "#b4232c", "#1f2321", "#0f6e8a", "#5b3a8c", "#9a4b16", "#2c6b3f", "#7a2848"];
@@ -16,6 +19,14 @@ function tone(name: string) {
   for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
   return TONES[hash % TONES.length];
 }
+
+/** The connector whose site gives each source its logo: RSS sources only. */
+export const logoIds = (connectors: Connector[]) =>
+  new Map(
+    groupSources(connectors)
+      .filter((c) => c.kind === "rss")
+      .map((c) => [c.source_namespace, c.connector_id]),
+  );
 
 /** The first letter of a name, past a leading article. */
 export function initial(name: string) {
@@ -125,7 +136,7 @@ export function SourceLogo({
       style={{ background: tone(namespace) }}
       aria-hidden="true"
     >
-      {initial(namespace)}
+      {initial(displayName(namespace))}
       {logo && <img src={logo} alt="" />}
       {connectorId && logo === undefined && (
         <img

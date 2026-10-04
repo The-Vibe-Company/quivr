@@ -36,13 +36,6 @@
   color: var(--text);
   font-weight: 600;
 }
-.alert-query[data-kind="described"] {
-  font-style: italic;
-}
-.alert-query[data-kind="described"] svg {
-  vertical-align: -2px;
-  color: var(--accent);
-}
 .query-preview {
   display: flex;
   align-items: flex-start;
@@ -184,171 +177,10 @@
 .alert-help p {
   line-height: 1.6;
 }
-.alert-list,
-.caught-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.alert-list {
-  margin: 0 calc(-1 * var(--space-3));
-}
-.alert-row {
-  border-bottom: 1px solid var(--border);
-}
-.alert-row[data-highlight] {
-  animation: source-arrive 2.4s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.alert-open {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--space-2) var(--space-4);
-  padding: var(--row-pad) var(--space-3);
-  border: 0;
-  background: transparent;
-  text-align: left;
-  border-radius: 0;
-}
-.alert-open:not(:disabled):active {
-  transform: none;
-}
-.alert-row-main {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-.alert-row-name {
-  font-size: var(--text-title);
-  font-weight: 600;
-  overflow-wrap: anywhere;
-  letter-spacing: -0.2px;
-}
 .alert-query {
   color: var(--muted);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
-}
-.alert-row[data-enabled="false"] .alert-row-name {
-  color: var(--muted);
-}
-.alert-row-side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-}
-.alert-count {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.alert-caret {
-  color: var(--muted);
-}
-.alert-detail .back-button {
-  margin-bottom: 8px;
-}
-.alert-detail-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-.alert-detail-head h1 {
-  font-size: 26px;
-  letter-spacing: -0.7px;
-  margin-bottom: 6px;
-  overflow-wrap: anywhere;
-}
-.alert-detail-head h1:focus {
-  outline: none;
-}
-.alert-detail-head .alert-query {
-  font-size: var(--text-md);
-}
-.alert-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-}
-.alert-edit {
-  margin-top: 18px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--subtle);
-}
-.alert-edit .field-label {
-  margin-top: 0;
-}
-.alert-edit .field-help {
-  margin: 10px 4px 0;
-}
-.caught {
-  display: grid;
-  gap: 6px;
-  padding: var(--row-pad) 0;
-  border-bottom: 1px solid var(--border);
-}
-.caught[data-fresh] {
-  animation: source-arrive 2.4s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.caught-source {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--text-xs);
-  color: var(--muted);
-}
-.new-badge {
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--tint);
-  color: var(--accent);
-  font-weight: 650;
-}
-.caught-title {
-  justify-self: start;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  font-size: var(--text-title);
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--accent);
-  overflow-wrap: anywhere;
-  letter-spacing: -0.2px;
-}
-.caught-title[data-unavailable] {
-  color: var(--muted);
-}
-.caught-excerpt {
-  font-size: var(--text-md);
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-.caught-excerpt mark {
-  color: var(--text);
-}
-.caught-why {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 10px;
-  font-size: var(--text-sm);
-}
-.caught-why ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
 }
 /* Veille: articles a keyword alert caught. */
 .feed-item[data-alerted] {
@@ -380,37 +212,17 @@
     text-decoration: underline;
     text-underline-offset: 2px;
   }
-  .alert-open:hover {
-    background: var(--subtle);
-  }
   .example-chip:hover {
     border-color: var(--accent);
     background: var(--tint);
   }
-  .caught-title:not([data-unavailable]):hover {
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
 }
 @media (max-width: 640px) {
-  .alert-open {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .alert-caret {
-    display: none;
-  }
-  .alert-detail-head {
-    flex-direction: column-reverse;
-    gap: 10px;
-  }
   .alert-help dl div {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
   }
   .alert-field .button.primary {
     padding: 10px 12px;
-  }
-  .alert-edit {
-    padding: 14px;
   }
 }

@@ -11,6 +11,7 @@ import {
   fetchSuggestions,
   pollChanges,
   removeSource,
+  renameSource,
   requestRun,
   type Connector,
   type FeedChoice,
@@ -20,7 +21,8 @@ import { healthLabel } from "./HealthBadge";
 import { CreateConnector } from "./CreateConnector";
 import { ConnectorDetail } from "./ConnectorDetail";
 import { AddSource } from "./AddSource";
-import { SourceList, groupSources } from "./SourceList";
+import { SourceList, groupSources, nameOf } from "./SourceList";
+import { PlusIcon } from "../RailIcons";
 import { LiveBadge, LoadingState, Notice } from "../ui";
 import type { FeedItem } from "../../lib/feed";
 import { needsCheck } from "../../lib/format";
@@ -63,7 +65,7 @@ export function ConnectorsView({
   const [creating, setCreating] = useState(false);
   const [live, setLive] = useState(false);
   const [announcement, setAnnouncement] = useState("");
-  const [, setNow] = useState(Date.now());
+  const [now, setNow] = useState(Date.now());
   const [attempt, setAttempt] = useState(0);
   const [suggestions, setSuggestions] = useState<FeedChoice[]>([]);
   const [highlight, setHighlight] = useState<string | null>(null);
@@ -89,7 +91,7 @@ export function ConnectorsView({
     for (const c of list) {
       const before = states.current.get(c.connector_id);
       if (before && before !== c.health.state)
-        changes.push(`${c.source_namespace} : ${healthLabel(c.health.state)}`);
+        changes.push(`${nameOf(c)} : ${healthLabel(c.health.state)}`);
       states.current.set(c.connector_id, c.health.state);
     }
     if (changes.length) setAnnouncement(changes.join(". "));
@@ -239,7 +241,7 @@ export function ConnectorsView({
   const onPause = (c: Connector) =>
     guarded(async () => {
       upsert(await disableConnector(c.connector_id, `pause:${c.connector_id}`));
-      notify(`« ${c.source_namespace} » en pause : plus de nouveaux articles jusqu’à la reprise.`);
+      notify(`« ${nameOf(c)} » en pause : plus de nouveaux articles jusqu’à la reprise.`);
       onChanged();
     });
   // Asks the core to check the source now, then follows the instance until
@@ -249,7 +251,7 @@ export function ConnectorsView({
     guarded(async () => {
       const id = c.connector_id;
       const { run_at } = await requestRun(id, `retry:${id}:${Date.now()}`);
-      notify(`Nouvelle vérification de « ${c.source_namespace} » demandée.`);
+      notify(`Nouvelle vérification de « ${nameOf(c)} » demandée.`);
       const deadline = Math.max(Date.parse(run_at), Date.now()) + 60_000;
       while (Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, RETRY_POLL));
@@ -258,8 +260,8 @@ export function ConnectorsView({
         upsert(fresh);
         notify(
           displayState(fresh) === "active"
-            ? `« ${c.source_namespace} » répond de nouveau.`
-            : `« ${c.source_namespace} » ne répond toujours pas.`,
+            ? `« ${nameOf(c)} » répond de nouveau.`
+            : `« ${nameOf(c)} » ne répond toujours pas.`,
         );
         return;
       }
@@ -276,32 +278,49 @@ export function ConnectorsView({
         config: c.config,
         schedule: c.schedule,
       });
-      upsert(next);
-      notify(`La collecte de « ${c.source_namespace} » reprend.`);
+      upsert({ ...next, display_name: next.display_name ?? c.display_name });
+      notify(`La collecte de « ${nameOf(c)} » reprend.`);
       onChanged();
     });
   const onRemove = (c: Connector) =>
     guarded(async () => {
       const { removed } = await removeSource(c.connector_id);
       drop([...removed, c.connector_id]);
-      notify(`« ${c.source_namespace} » retirée. Les articles déjà reçus restent dans le fil.`);
+      notify(`« ${nameOf(c)} » retirée. Les articles déjà reçus restent dans le fil.`);
       onChanged();
       // The row is gone: land keyboard focus on the list heading.
       listHeading.current?.focus();
     });
 
+  // The name is the facade's, for every instance of the source.
+  const onRename = (c: Connector, name: string) =>
+    guarded(async () => {
+      const { display_name } = await renameSource(c.connector_id, name);
+      setConnectors((list) =>
+        list.map((x) => (x.source_namespace === c.source_namespace ? { ...x, display_name } : x)),
+      );
+      notify(
+        display_name
+          ? `« ${nameOf(c)} » s’appelle maintenant « ${display_name} ».`
+          : `« ${nameOf(c)} » reprend son nom d’origine, « ${c.source_namespace} ».`,
+      );
+      onChanged();
+    });
+
   const stats = new Map<string, SourceStats>();
   for (const item of feedItems) {
-    const s = stats.get(item.namespace) || { all: 0, caught: 0 };
+    const s = stats.get(item.namespace) || { all: 0, caught: 0, times: [] };
     s.all += 1;
     if (matched[item.record_id]?.length) s.caught += 1;
+    const at = item.received_at || item.published_at;
+    if (at) s.times.push(at);
     stats.set(item.namespace, s);
   }
   const toCheck = sources.filter((c) => needsCheck(displayState(c))).length;
 
   return (
     <main
-      className={`board ${status === "ready" && catalog ? "board-split" : "board-single"}`}
+      className="board board-single sources-board"
     >
       <h1 className="visually-hidden">Sources</h1>
       <p className="visually-hidden" role="status" aria-live="polite">
@@ -332,89 +351,99 @@ export function ConnectorsView({
         </section>
       )}
       {status === "ready" && catalog && (
-        <>
-          <section className="panel form-panel">
-            {catalog.items.some((k) => k.kind === "rss") ? (
-              <AddSource
-                catalog={catalog}
-                corpus={corpus}
-                suggestions={suggestions}
-                existing={connectors}
-                onCreated={(c, message) => {
-                  upsert(c);
-                  setHighlight(c.connector_id);
-                  notify(message);
-                  onChanged();
-                }}
-              />
-            ) : (
-              <div className="form-intro">
-                <h2>Ajouter une source</h2>
-                <p>Les fils d’actualités ne sont pas disponibles sur ce déploiement.</p>
-              </div>
-            )}
-            <div className="form-aside">
-              <p>
-                Vous pouvez aussi{" "}
-                <button type="button" className="link-button" onClick={onAdd}>
-                  ajouter un texte à la main
-                </button>
-                , par exemple une note ou un communiqué : il apparaîtra dans le
-                fil sous « Ajouté à la main ».
-              </p>
-              {catalog.items.length > 0 && (
-                <p>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => setCreating(true)}
-                  >
-                    Ajouter un connecteur d’un autre type
-                  </button>
-                </p>
-              )}
-              {catalog.credential_deposits === "unavailable" && (
-                <p className="inline-note">
-                  <Key size={16} aria-hidden="true" /> Le dépôt d’identifiants
-                  est désactivé sur ce déploiement : seules les sources sans
-                  identifiant peuvent être ajoutées.
-                </p>
-              )}
-            </div>
-          </section>
-          <section className="panel list-panel" aria-labelledby="sources-title">
-            <div className="panel-head list-head">
-              <h2 id="sources-title" ref={listHeading} tabIndex={-1}>
-                Vos sources
-              </h2>
-              {sources.length > 0 && (
+        <section className="sources-page" aria-labelledby="sources-title">
+          <div className="alerts-head">
+            <h2 id="sources-title" ref={listHeading} tabIndex={-1}>
+              Vos sources
+            </h2>
+            {sources.length > 0 && (
+              <p className="alerts-sum">
+                {sources.length} source{sources.length > 1 ? "s" : ""} ·{" "}
                 <span className="list-count" data-tone={toCheck ? "warn" : "ok"}>
                   {toCheck ? `${toCheck} à vérifier` : "Tout est à jour"}
                 </span>
-              )}
-              <LiveBadge live={live} />
-            </div>
-            {sources.length === 0 ? (
-              <p className="list-empty">
-                {catalog.items.length
-                  ? "Aucune source pour l’instant. Collez l’adresse d’un site d’actualité, ou choisissez une suggestion."
-                  : "Aucun type de source n’est disponible sur ce déploiement."}
               </p>
-            ) : (
-              <SourceList
-                sources={sources}
-                kindOf={kindOf}
-                stats={stats}
-                highlight={highlight}
-                onOpen={setSelected}
-                onPause={onPause}
-                onRetry={onRetry}
-                onResume={onResume}
-                onRemove={onRemove}
-              />
             )}
-          </section>
-        </>
+            <LiveBadge live={live} />
+            {catalog.items.some((k) => k.kind === "rss") && (
+              <button
+                type="button"
+                className="button alerts-new"
+                onClick={() => {
+                  const field = document.querySelector<HTMLInputElement>(".source-add .form-input");
+                  field?.scrollIntoView({ block: "center", behavior: "smooth" });
+                  field?.focus({ preventScroll: true });
+                }}
+              >
+                <PlusIcon size={16} />
+                Ajouter une source
+              </button>
+            )}
+          </div>
+          {sources.length === 0 && !catalog.items.length ? (
+            <p className="list-empty">Aucun type de source n’est disponible sur ce déploiement.</p>
+          ) : (
+            <SourceList
+              sources={sources}
+              kindOf={kindOf}
+              stats={stats}
+              highlight={highlight}
+              now={now}
+              onOpen={setSelected}
+              onRename={onRename}
+              onPause={onPause}
+              onRetry={onRetry}
+              onResume={onResume}
+              onRemove={onRemove}
+              extra={
+                <>
+                  {catalog.items.some((k) => k.kind === "rss") ? (
+                    <AddSource
+                      catalog={catalog}
+                      corpus={corpus}
+                      suggestions={suggestions}
+                      existing={connectors}
+                      onCreated={(c, message) => {
+                        upsert(c);
+                        setHighlight(c.connector_id);
+                        notify(message);
+                        onChanged();
+                      }}
+                    />
+                  ) : (
+                    <div className="form-intro">
+                      <h2>Ajouter une source</h2>
+                      <p>Les fils d’actualités ne sont pas disponibles sur ce déploiement.</p>
+                    </div>
+                  )}
+                  <div className="form-aside">
+                    <p>
+                      Vous pouvez aussi{" "}
+                      <button type="button" className="link-button" onClick={onAdd}>
+                        ajouter un texte à la main
+                      </button>
+                      , par exemple une note ou un communiqué : il apparaîtra dans le fil sous « Ajouté à la
+                      main ».
+                    </p>
+                    {catalog.items.length > 0 && (
+                      <p>
+                        <button type="button" className="link-button" onClick={() => setCreating(true)}>
+                          Ajouter un connecteur d’un autre type
+                        </button>
+                      </p>
+                    )}
+                    {catalog.credential_deposits === "unavailable" && (
+                      <p className="inline-note">
+                        <Key size={16} aria-hidden="true" /> Le dépôt d’identifiants est désactivé sur ce
+                        déploiement : seules les sources sans identifiant peuvent être ajoutées.
+                      </p>
+                    )}
+                  </div>
+                </>
+              }
+            />
+          )}
+        </section>
       )}
       {creating && catalog && (
         <CreateConnector

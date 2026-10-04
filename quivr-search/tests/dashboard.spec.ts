@@ -135,6 +135,15 @@ test("le fil marque les non-lus, filtre par alerte et par source, et retient les
   await page.reload();
   await expect(row(page, "Orages : la grêle")).toBeVisible();
   await expect(row(page, "Orages : la grêle")).not.toHaveAttribute("data-unread");
+
+  // The Alertes tab counts only the unread articles an alert caught, and
+  // "Tout marquer comme lu" reads every article shown.
+  const badge = page.getByRole("navigation", { name: "Sections" }).locator('.rail-badge[data-kind="alerts"]');
+  await expect(badge).toContainText("2 articles non lus attrapés par vos alertes");
+  await chips(page).getByRole("button", { name: "Tout marquer comme lu" }).click();
+  await expect(chips(page).getByRole("button", { name: /^Non lus/ })).toContainText("0");
+  await expect(badge).toHaveCount(0);
+  await expect(chips(page).getByRole("button", { name: "Tout marquer comme lu" })).toHaveCount(0);
 });
 
 test("la recherche passe des mots exacts aux idées proches et devient une alerte", async ({
@@ -256,6 +265,8 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
   page,
 }) => {
   await page.goto("/?view=alerts");
+  // The form opens in a panel from the page's button.
+  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   const form = page.getByRole("form", { name: "Nouvelle alerte" });
   const words = form.getByLabel("Mots à surveiller");
   await words.fill("orage");
@@ -265,10 +276,11 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
   await expect(form.getByRole("list", { name: "Mots surveillés" }).getByRole("listitem")).toHaveText(["orage×", "vent×"]);
   await form.getByRole("group", { name: "Combinaison des mots" }).getByRole("button", { name: "Tous ces mots" }).click();
   await form.getByLabel(/Ignorer les articles/).fill("football, publicité");
-  await form.getByRole("group", { name: "Sources surveillées" }).getByRole("button", { name: "Météo locale" }).click();
-  await expect(form.locator(".form-preview .keyword")).toHaveText([
-    "orage", "vent", "source = Météo locale", "football", "publicité",
-  ]);
+  // Sources are picked in the feed's source menu.
+  await form.getByRole("button", { name: "Sources surveillées : Toutes les sources" }).click();
+  await form.getByRole("dialog", { name: "Sources surveillées" }).getByRole("button", { name: "Météo locale" }).click();
+  await page.keyboard.press("Escape");
+  await expect(form.getByRole("button", { name: "Sources surveillées : Météo locale" })).toBeVisible();
   await form.getByLabel(/Nom de l’alerte/).fill("Vent et orage");
   await form.getByRole("button", { name: "Créer l’alerte" }).click();
   await expect(page.locator(".toast")).toContainText("« Vent et orage »");
@@ -287,14 +299,21 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
       },
     },
   });
-  const list = page.getByRole("list", { name: "Alertes" });
-  await expect(list.getByRole("listitem").first()).toContainText(
-    "Parle de « orage » et « vent » — sauf « football », « publicité » · Météo locale",
-  );
+  const table = page.getByRole("table", { name: "Alertes" });
+  const rowOf = (name: string) => table.getByRole("row").filter({ hasText: name });
+  const sheet = page.locator(".alert-sheet");
+  const actions = sheet.getByRole("group", { name: "Actions de l’alerte" });
+  // Saving closes the panel and selects the new alert: its sheet shows the rule.
+  await expect(form).toHaveCount(0);
+  await expect(sheet.getByRole("heading", { level: 2 })).toHaveText("Vent et orage");
+  await expect(sheet.locator(".sheet-rule .kw")).toHaveText(["orage", "vent", "football", "publicité"]);
+  await expect(sheet.locator(".sheet-rule .kw[data-not]")).toHaveText(["football", "publicité"]);
+  await expect(sheet.locator(".rule-sources").getByRole("img", { name: "Météo locale" })).toBeVisible();
 
   // An alert the chips cannot show opens in the advanced query; it can be renamed.
-  const ports = list.getByRole("listitem").filter({ hasText: "Ports et quais" });
-  await ports.getByRole("button", { name: "Modifier" }).click();
+  await rowOf("Ports et quais").getByRole("button", { name: "Ports et quais" }).click();
+  await expect(sheet.locator(".rule-created")).toHaveCount(0);
+  await actions.getByRole("button", { name: "Modifier" }).click();
   const edit = page.getByRole("form", { name: "Modifier l’alerte" });
   await expect(edit.getByLabel("Requête avancée")).toHaveValue(
     "(port OR quai) AND grève AND NOT (football OR rugby)",
@@ -310,22 +329,37 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
     match: { all: [{ any: [{ term: "port" }, { term: "quai" }] }, { term: "grève" }] },
   });
   expect(body.name).toBe("Grèves sur les quais");
-  await expect(list.getByRole("listitem").filter({ hasText: "Grèves sur les quais" })).toHaveCount(1);
-  await expect(list.getByRole("listitem").filter({ hasText: "Ports et quais" })).toHaveCount(0);
+  await expect(rowOf("Grèves sur les quais")).toHaveCount(1);
+  await expect(rowOf("Ports et quais")).toHaveCount(0);
+
+  // The sheet's numbers: everything it caught, the last seven days against
+  // the seven before, how often, and when it was created (noted by the facade).
+  const storm = rowOf("Orages et grêle");
+  await storm.getByRole("button", { name: "Orages et grêle" }).click();
+  // The feed only reaches a few hours back: no growth is claimed, and the
+  // week says how far it goes.
+  await expect(sheet.locator(".kpi dd")).toHaveText(["2", "2", "0,1", "25 %"]);
+  await expect(sheet.locator(".kpi dt").nth(1)).toHaveText(/^depuis \d h$/);
+  await expect(sheet.locator(".insight")).toHaveCount(0);
+  await expect(sheet.locator(".rule-created")).toHaveText(/^créée le \d{1,2} \S+$/);
 
   // A simple keyword alert comes back as chips.
-  const storm = list.getByRole("listitem").filter({ hasText: "Orages et grêle" });
-  await storm.getByRole("button", { name: "Modifier" }).click();
+  await actions.getByRole("button", { name: "Modifier" }).click();
   await expect(
     page.getByRole("form", { name: "Modifier l’alerte" }).getByRole("list", { name: "Mots surveillés" }).getByRole("listitem"),
   ).toHaveText(["orage×", "grêle×"]);
-  await expect(page.getByLabel(/Ignorer les articles/)).toHaveValue("football");
+  await expect(
+    page.getByRole("form", { name: "Modifier l’alerte" }).getByRole("list", { name: "Mots ignorés" }).getByRole("listitem"),
+  ).toHaveText(["football×"]);
   await page.getByRole("button", { name: "Annuler" }).click();
 
   // Described alerts: a sentence, limited to the chosen sources.
+  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   await page.getByRole("group", { name: "Type d’alerte" }).getByRole("button", { name: "Un sujet décrit" }).click();
   await page.getByLabel("Décrivez le sujet en une phrase").fill("Les grèves dans les transports publics");
-  await page.getByRole("group", { name: "Sources surveillées" }).getByRole("button", { name: "Revue technique" }).click();
+  await page.getByRole("button", { name: /^Sources surveillées/ }).click();
+  await page.getByRole("dialog", { name: "Sources surveillées" }).getByRole("button", { name: "Revue technique" }).click();
+  await page.keyboard.press("Escape");
   await page.getByLabel(/Nom de l’alerte/).fill("Grèves, revue technique");
   const described = posted(page, "/demo/alerts");
   await page.getByRole("button", { name: "Créer l’alerte" }).click();
@@ -334,29 +368,34 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
     description: "Les grèves dans les transports publics",
     sources: ["Revue technique"],
   });
-  await expect(list.getByRole("listitem").first()).toContainText(
-    "Décrite : « Les grèves dans les transports publics » · Revue technique",
-  );
+  await expect(sheet.locator(".rule-quote")).toHaveText("« Les grèves dans les transports publics »");
+  await expect(sheet.locator(".rule-sources").getByRole("img", { name: "Revue technique" })).toBeVisible();
 
   // Pause, then delete after a confirmation.
-  await storm.getByRole("button", { name: "Mettre en pause" }).click();
+  await storm.getByRole("button", { name: "Orages et grêle" }).click();
+  await actions.getByRole("switch", { name: "Alerte active" }).click();
   await expect(storm.locator(".alert-state")).toHaveText("En pause");
-  await storm.getByRole("button", { name: "Supprimer" }).click();
-  await storm.getByRole("group", { name: "Supprimer Orages et grêle" }).getByRole("button", { name: "Oui, supprimer" }).click();
-  await expect(list.getByRole("listitem").filter({ hasText: "Orages et grêle" })).toHaveCount(0);
+  await actions.getByRole("button", { name: "Plus d’actions pour Orages et grêle" }).click();
+  await actions.getByRole("menuitem", { name: "Supprimer" }).click();
+  await sheet
+    .getByRole("group", { name: "Confirmer la suppression" })
+    .getByRole("button", { name: "Supprimer définitivement" })
+    .click();
+  await expect(rowOf("Orages et grêle")).toHaveCount(0);
 });
 
 test("l’aperçu d’une alerte montre les derniers articles qu’elle aurait attrapés, sans rien enregistrer", async ({
   page,
 }) => {
   await page.goto("/?view=alerts");
+  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   const form = page.getByRole("form", { name: "Nouvelle alerte" });
   const preview = form.locator(".alert-preview");
   const words = form.getByLabel("Mots à surveiller");
   await words.fill("grêle");
   await words.press("Enter");
   await expect(preview.locator(".alert-preview-title")).toHaveText(
-    "Sur les 8 derniers articles, 3 auraient été attrapés.",
+    "3 articles sur les 8 derniers",
   );
   await expect(preview.getByRole("listitem")).toHaveCount(3);
   // The words to ignore are part of the previewed alert.
@@ -367,7 +406,7 @@ test("l’aperçu d’une alerte montre les derniers articles qu’elle aurait a
     match: { all: [{ term: "grêle" }, { not: { term: "football" } }] },
   });
   await expect(preview.locator(".alert-preview-title")).toHaveText(
-    "Sur les 8 derniers articles, 2 auraient été attrapés.",
+    "2 articles sur les 8 derniers",
   );
 
   // A described alert costs a classifier call per article: only on request.
@@ -378,7 +417,7 @@ test("l’aperçu d’une alerte montre les derniers articles qu’elle aurait a
   await form.getByRole("button", { name: "Tester sur les derniers articles" }).click();
   expect((await asked).expression).toEqual({ kind: "described", description: "Une grève des transports" });
   await expect(preview.locator(".alert-preview-title")).toHaveText(
-    "Sur les 8 derniers articles, 1 aurait été attrapé.",
+    "1 article sur les 8 derniers",
   );
   await expect(preview.getByRole("listitem")).toHaveText([/Les conducteurs de tramway cessent le travail/]);
   expect(sent("/demo/alerts/preview").length).toBe(before + 1);
@@ -429,7 +468,20 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
   await expect(weather.locator('[data-state="paused"]')).toBeVisible();
   await weather.getByRole("button", { name: "Reprendre Météo locale" }).click();
   await expect(weather.locator('[data-state="paused"]')).toHaveCount(0);
-  await weather.getByRole("button", { name: "Retirer Météo locale" }).click();
+
+  // Renamed in place, the source keeps its name in the feed's menus too.
+  const wire = list.locator('[data-connector="con_wire"]');
+  await wire.getByRole("button", { name: "Renommer Dépêches exemple" }).click();
+  const field = wire.getByLabel("Nouveau nom de Dépêches exemple");
+  await field.fill("Le fil des dépêches");
+  const renamed = posted(page, "/demo/sources/rename");
+  await field.press("Enter");
+  expect(await renamed).toMatchObject({ name: "Le fil des dépêches" });
+  await expect(wire.getByRole("button", { name: "Le fil des dépêches", exact: true })).toBeVisible();
+  await expect(page.locator(".toast")).toContainText("s’appelle maintenant « Le fil des dépêches »");
+
+  await weather.getByRole("button", { name: "Plus d’actions pour Météo locale" }).click();
+  await weather.getByRole("menuitem", { name: "Retirer" }).click();
   await weather.getByRole("group", { name: "Retirer Météo locale" }).getByRole("button", { name: "Oui, retirer" }).click();
   await expect(list.getByRole("button", { name: "Météo locale", exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Vos sources" })).toBeFocused();
@@ -453,7 +505,7 @@ test("le tableau de bord tient sur un téléphone, en clair et en sombre", async
     await page.getByRole("searchbox", { name: "Rechercher dans le fil" }).fill("orage");
     await expect(page.getByRole("heading", { name: /articles sur « orage »/ })).toBeVisible();
     await page.screenshot({ path: info.outputPath(`${name}-search.png`) });
-    for (const [tab, heading] of [["Alertes", "Nouvelle alerte"], ["Sources", "Vos sources"]]) {
+    for (const [tab, heading] of [["Alertes", "Vos alertes"], ["Sources", "Vos sources"]]) {
       await page.getByRole("navigation", { name: "Sections" }).getByRole("link", { name: new RegExp(`^${tab}`) }).click();
       await expect(page.getByRole("heading", { name: heading })).toBeVisible();
       for (const scheme of ["light", "dark"] as const) {

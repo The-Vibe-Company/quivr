@@ -227,6 +227,8 @@ export function alertRoutes({
     expression: query.definition.expression,
     match_count: caught.items.length,
     capped: caught.capped,
+    // When the demo created it; absent for alerts it found already there.
+    created_at: registry.created?.(sub.subscription_id),
   });
 
   async function article(match) {
@@ -369,7 +371,7 @@ export function alertRoutes({
         );
       return sub;
     }
-    await registry.add([sub.data.subscription_id]);
+    await registry.add([sub.data.subscription_id], new Date().toISOString());
     return {
       status: 201,
       data: view(sub.data, saved.data.current_version, {

@@ -11,12 +11,16 @@ export interface SectionProps {
   onUnauthorized: () => void;
   /** The header's live numbers, so a section's counts match them. */
   stats?: AdminStats | null;
+  /** Inside a tab of the page: no panel of its own, its title in the tab. */
+  bare?: boolean;
 }
 
 export function AdminSection({
   id,
   title,
   aside,
+  lead,
+  bare = false,
   status = "ready",
   error,
   onRetry,
@@ -26,6 +30,10 @@ export function AdminSection({
   id: string;
   title: string;
   aside?: ReactNode;
+  /** Shown first whatever the section's own status (the page's state). */
+  lead?: ReactNode;
+  /** No panel and a hidden title: the section sits in a tab named after it. */
+  bare?: boolean;
   /** A stats hook's status: loading shows still shapes, never a spinner. */
   status?: StatsStatus;
   error?: string;
@@ -33,11 +41,19 @@ export function AdminSection({
   children?: ReactNode;
 }) {
   return (
-    <section className="panel admin-section" aria-labelledby={`${id}-title`}>
+    <section
+      className={bare ? "admin-section" : "panel admin-section"}
+      data-bare={bare || undefined}
+      data-section={id}
+      aria-labelledby={`${id}-title`}
+    >
       <div className="panel-head">
-        <h2 id={`${id}-title`}>{title}</h2>
+        <h2 id={`${id}-title`} className={bare ? "visually-hidden" : undefined}>
+          {title}
+        </h2>
         {aside && <div className="admin-section-aside">{aside}</div>}
       </div>
+      {lead}
       {status === "loading" ? (
         <div className="admin-section-loading" aria-busy="true">
           <p role="status" className="visually-hidden">

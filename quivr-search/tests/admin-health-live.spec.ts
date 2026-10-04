@@ -56,16 +56,19 @@ test("un texte ajouté est chronométré à chaque étape, et le plugin d’inge
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/?view=admin");
   const necks = page.getByRole("region", { name: "Goulots par étape" });
+  // Each step's card gives its p50 first.
   for (const name of ["Reçu", "Découpé", "Trouvable"])
     await expect(
       necks
-        .getByRole("row", { name: new RegExp(`^${name}`) })
-        .getByRole("cell")
-        .nth(1),
+        .getByRole("listitem")
+        .filter({ has: page.getByRole("heading", { name, exact: true }) })
+        .getByRole("definition")
+        .first(),
       name,
     ).toHaveText(/\d\s?(ms|s|min)$/, { timeout: 30000 });
   await expect(necks.getByRole("status")).not.toBeEmpty();
 
+  await page.getByRole("tab", { name: "Plugins" }).click();
   const ingest = page
     .getByRole("region", { name: "Plugins" })
     .getByRole("listitem")

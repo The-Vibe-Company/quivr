@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { APIError, request } from "./search";
 import { HAND_NAMESPACE } from "./feed";
+import { displayName } from "./sourceNames";
 
 export type CellState = "done" | "slow" | "run" | "todo" | "none" | "error";
 
@@ -113,7 +114,7 @@ export const fetchTimeline = (version: string, signal?: AbortSignal) =>
 
 /** A Source Namespace as the tab shows it. */
 export const sourceName = (namespace: string) =>
-  namespace === HAND_NAMESPACE ? "À la main" : namespace;
+  namespace === HAND_NAMESPACE ? "À la main" : displayName(namespace);
 
 /**
  * The title Part, else the Fil's title for the Record (a pasted text's first

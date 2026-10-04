@@ -47,6 +47,8 @@ export interface Connector {
   connector_id: string;
   corpus_id: string;
   source_namespace: string;
+  /** The name people gave the source (the facade's), when it has one. */
+  display_name?: string | null;
   kind: string;
   config: Record<string, unknown>;
   schedule: { interval_seconds: number };
@@ -156,6 +158,13 @@ export const fetchSuggestions = (signal?: AbortSignal) =>
     undefined,
     signal,
   );
+
+/** Names a source for people; an empty name gives it its namespace back. */
+export const renameSource = (id: string, name: string) =>
+  request<{ source_namespace: string; display_name: string | null }>("/demo/sources/rename", {
+    connector_id: id,
+    name,
+  });
 
 export const removeSource = (id: string) =>
   request<{ removed: string[] }>("/demo/sources/remove", {

@@ -42,6 +42,7 @@ test("des recherches faites sur la démo apparaissent dans l’utilisation et le
   // counts show. At worst about 11 s, inside the browser budget.
   await expect(async () => {
     await page.goto("/?view=admin");
+    await page.getByRole("tab", { name: "Utilisation" }).click();
     await expect(
       top
         .getByRole("listitem")

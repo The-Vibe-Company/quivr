@@ -16,6 +16,7 @@ import type { DocumentDetail } from "../../types";
 import type { Doc } from "../../App";
 import { Highlight } from "../Highlight";
 import { LoadingState, Notice } from "../ui";
+import { displayName } from "../../lib/sourceNames";
 
 const NEIGHBOURS = 3;
 const SEED_CHARS = 400;
@@ -25,7 +26,7 @@ const sourceLabel = (namespace?: string) =>
     ? "Source"
     : namespace === HAND_NAMESPACE
       ? "Ajouté à la main"
-      : namespace;
+      : displayName(namespace);
 
 /** "liberation.fr" for an article's address. */
 function host(link: string) {
@@ -135,7 +136,7 @@ export function Reader({
   useEffect(() => {
     const outside = (event: MouseEvent) => {
       const target = event.target as Element;
-      if (!target.closest?.(".peek, .row, .menu, .rail, dialog, .toast-region")) onClose();
+      if (!target.closest?.(".peek, .row, .caught, .menu, .rail, dialog, .toast-region")) onClose();
     };
     document.addEventListener("mousedown", outside);
     return () => document.removeEventListener("mousedown", outside);

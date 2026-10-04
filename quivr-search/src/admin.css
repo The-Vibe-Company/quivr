@@ -73,179 +73,11 @@
   animation: live-pulse 1.2s var(--ease-out) infinite;
 }
 
-/* Health of the last hour, and documents per hour beside it. */
+/* The loading shapes' first row. */
 .admin-top {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
   gap: 16px;
-}
-.admin-health {
-  display: flex;
-  flex-direction: column;
-}
-.health-verdict {
-  --tone: var(--success);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--line-soft);
-  background: color-mix(in oklab, var(--tone) 7%, var(--panel));
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.15px;
-  line-height: 1.35;
-  text-wrap: pretty;
-}
-.health-verdict svg {
-  flex: none;
-  color: var(--tone);
-}
-.health-verdict[data-tone="quiet"] {
-  --tone: var(--ink-faint);
-}
-.health-verdict[data-tone="warn"] {
-  --tone: var(--warning);
-}
-.health-verdict[data-tone="bad"] {
-  --tone: var(--error);
-}
-.admin-kpis {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  flex: 1;
-  margin: 0;
-}
-.admin-kpi {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 20px 16px;
-  min-width: 0;
-}
-.admin-kpi + .admin-kpi {
-  border-left: 1px solid var(--line-soft);
-}
-.admin-kpi dt {
-  font-size: 12.5px;
-  font-weight: 550;
-  color: var(--ink-soft);
-}
-.admin-kpi dd {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin: 0;
-}
-.admin-kpi-value {
-  font-size: 26px;
-  font-weight: 620;
-  letter-spacing: -0.6px;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-.admin-kpi[data-tone="warn"] .admin-kpi-value {
-  color: var(--warning);
-}
-.admin-kpi[data-tone="bad"] .admin-kpi-value {
-  color: var(--error);
-}
-.admin-kpi-note {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--ink-faint);
-}
-
-.admin-chart {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px 20px 14px;
-}
-.admin-chart-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-.admin-chart-head h2 {
-  margin: 0;
-  font-size: 13.5px;
-  font-weight: 600;
-}
-.chart-readout {
-  font-size: 12.5px;
-  color: var(--ink-faint);
-  font-variant-numeric: tabular-nums;
-}
-.chart-readout[data-point] {
-  color: var(--ink);
-  font-weight: 600;
-}
-.chart-bars {
-  display: grid;
-  grid-template-columns: repeat(24, minmax(0, 1fr));
-  align-items: end;
-  gap: 3px;
-  flex: 1;
-  min-height: 72px;
-  border-bottom: 1px solid var(--line);
-  border-radius: 2px;
-}
-.chart-slot {
-  display: flex;
-  align-items: flex-end;
-  height: 100%;
-}
-.chart-slot[data-uncounted] {
-  background: repeating-linear-gradient(
-    135deg,
-    var(--line-soft) 0 3px,
-    transparent 3px 6px
-  );
-  border-radius: 2px 2px 0 0;
-}
-.chart-bar {
-  position: relative;
-  width: 100%;
-  min-height: 2px;
-  overflow: hidden;
-  border-radius: 2px 2px 0 0;
-  background: color-mix(in oklab, var(--accent) 45%, var(--panel));
-  transition: background-color 120ms var(--ease);
-}
-.chart-slot[data-current] .chart-bar {
-  background: color-mix(in oklab, var(--accent) 75%, var(--panel));
-}
-.chart-slot[data-point] .chart-bar {
-  background: var(--accent);
-}
-.chart-bar-errors {
-  position: absolute;
-  inset: auto 0 0;
-  min-height: 2px;
-  background: var(--error);
-}
-.chart-axis {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11.5px;
-  color: var(--ink-faint);
-  font-variant-numeric: tabular-nums;
-}
-.chart-empty {
-  margin: -52px 0 24px;
-  text-align: center;
-  font-size: 12.5px;
-  color: var(--ink-faint);
-}
-.chart-note {
-  margin: 0;
-  font-size: 12px;
-  color: var(--ink-faint);
 }
 
 /* The flow, and the timeline panel beside it once a row is open. */
@@ -265,21 +97,7 @@
 .admin-flow .panel-head {
   padding: 14px 22px;
 }
-.flow-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin: 0 0 0 auto;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-  color: var(--ink-faint);
-}
-.flow-legend li {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
+
 .admin-banner {
   display: flex;
   align-items: center;
@@ -321,19 +139,7 @@
   align-items: center;
   padding-inline: 22px;
 }
-.flow-columns {
-  padding-block: 8px;
-  border-bottom: 1px solid var(--line-soft);
-  font-size: 12px;
-  font-weight: 550;
-  color: var(--ink-faint);
-}
-.flow-columns > span:not(:first-child) {
-  text-align: center;
-}
-.flow-columns > span:last-child {
-  text-align: right;
-}
+
 .flow-rows {
   margin: 0;
   padding: 0;
@@ -930,20 +736,7 @@ li[data-fresh] > .flow-row {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-@media (max-width: 760px) {
-  .admin-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .admin-kpi:nth-child(3) {
-    border-left: 0;
-  }
-  .admin-kpi:nth-child(n + 3) {
-    border-top: 1px solid var(--line-soft);
-  }
-  .flow-legend {
-    margin-left: 0;
-  }
-}
+
 @media (max-width: 700px) {
   .flow-grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -953,8 +746,6 @@ li[data-fresh] > .flow-row {
   .flow-doc {
     grid-column: 1 / -1;
   }
-  .flow-columns > span:first-child,
-  .flow-columns > span:last-child,
   .flow-total {
     display: none;
   }
@@ -969,3 +760,500 @@ li[data-fresh] > .flow-row {
     animation: none;
   }
 }
+
+/* The page on one screen: the state on one line, the pipeline, then what
+   goes through it (the flow, or the plugins or the usage) with the day at a
+   glance beside; the flow scrolls inside. */
+.admin-status {
+  min-height: 36px;
+  margin: 0 230px 12px 0;
+}
+.admin-status-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  min-height: 36px;
+  font-size: 13.5px;
+}
+.admin-status-line svg {
+  flex: none;
+  color: var(--success);
+}
+.admin-status[data-tone="warn"] svg {
+  color: var(--warning);
+}
+.admin-status[data-tone="bad"] svg {
+  color: var(--error);
+}
+.admin-status[data-tone="quiet"] svg {
+  color: var(--ink-faint);
+}
+.admin-status-line b {
+  color: var(--success);
+  font-size: 15px;
+  font-weight: 650;
+}
+.admin-status[data-tone="warn"] b {
+  color: var(--warning);
+}
+.admin-status[data-tone="bad"] b {
+  color: var(--error);
+}
+.admin-status[data-tone="quiet"] b {
+  color: var(--ink-soft);
+}
+.admin-status-rest {
+  color: var(--ink);
+}
+.admin-status-figures {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  color: var(--ink-soft);
+}
+.admin-status-figures > span + span::before {
+  content: "·";
+  margin: 0 8px;
+  color: var(--ink-faint);
+}
+.admin-status-figures [data-tone="warn"] {
+  color: var(--warning);
+  font-weight: 600;
+}
+.admin-status-figures [data-tone="bad"] {
+  color: var(--error);
+  font-weight: 600;
+}
+.admin-board > .admin-lower {
+  flex: 1 0 360px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 26vw, 380px);
+  gap: 14px;
+  min-height: 360px;
+}
+.admin-tabs {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 0;
+  border-radius: 16px;
+  box-shadow: var(--raise);
+}
+.admin-tabs-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px 8px;
+}
+.admin-tabs-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.admin-tabs-count {
+  color: var(--ink-faint);
+  font-size: 12.5px;
+}
+.admin-tablist.segmented {
+  margin-left: auto;
+}
+.admin-tablist.segmented button {
+  flex: none;
+  height: 28px;
+  padding: 0 11px;
+}
+.admin-tabpanel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.admin-tabpanel .admin-main {
+  align-items: stretch;
+}
+.admin-tabpanel .flow-row {
+  padding-inline: 18px;
+}
+/* On the panel's own surface; hover, fresh and selected rows still tint. */
+:where(.admin-tabpanel) .flow-row {
+  background: transparent;
+}
+/* The flow's columns shrink with its panel (narrower once a document's
+   timeline opens beside it); too narrow, a row keeps its title and total,
+   and its steps stay in its label and in the timeline. */
+.admin-tabpanel .admin-flow {
+  container: admin-flow / inline-size;
+}
+.admin-tabpanel .flow-grid {
+  grid-template-columns: minmax(140px, 1fr) repeat(5, minmax(52px, 84px)) minmax(56px, 84px);
+}
+@container admin-flow (max-width: 560px) {
+  .admin-tabpanel .flow-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .admin-tabpanel .flow-row .cell {
+    display: none;
+  }
+}
+/* The page-wide narrow layout (the steps on a line under the title) does not
+   apply here: the title keeps its column and the total stays. */
+@media (max-width: 700px) {
+  .admin-tabpanel .flow-doc {
+    grid-column: auto;
+  }
+  .admin-tabpanel .flow-total {
+    display: block;
+  }
+}
+.admin-tabpanel .flow-rows > li:first-child .flow-row {
+  border-top: 1px solid var(--line-soft);
+}
+.flow-doc {
+  display: grid !important;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 1px;
+  align-items: center;
+}
+.flow-logo {
+  grid-row: 1 / 3;
+  display: flex;
+}
+/* A tab's own controls (its window, its count) sit left of the switch. */
+.admin-tabpanel .admin-section[data-bare] > .panel-head {
+  position: absolute;
+  top: 9px;
+  right: 270px;
+  padding: 0;
+  border: 0;
+}
+.admin-tabpanel .admin-section[data-bare] .admin-window button {
+  height: 28px;
+}
+.admin-section[data-bare] .admin-section-body {
+  padding-top: 8px;
+}
+
+/* The day at a glance, beside the flow. */
+.glance {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+.glance-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px 16px;
+  border: 0;
+  border-radius: 16px;
+  box-shadow: var(--raise);
+}
+.glance-card:last-child {
+  flex: 1;
+}
+.glance-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink-faint);
+  font-size: 12.5px;
+}
+.glance-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.glance-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+.glance-link:hover {
+  color: var(--accent);
+}
+.glance-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+}
+.glance-modes li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.glance-modes b {
+  margin-left: auto;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.glance-foot,
+.glance-empty {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 12.5px;
+}
+.glance-foot {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glance-card .usage-columns {
+  min-height: 70px;
+}
+
+/* The pipeline: the verdict, then one card per step, the window beside. */
+.admin-section[data-section="bottlenecks"] {
+  position: relative;
+}
+.admin-section[data-section="bottlenecks"] > .panel-head {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 0;
+}
+.admin-section[data-section="bottlenecks"] > .admin-section-body,
+.admin-section[data-section="bottlenecks"] > .admin-section-note,
+.admin-section[data-section="bottlenecks"] > .admin-section-loading {
+  padding: 0;
+}
+.admin-section[data-section="bottlenecks"] .neck-verdict:not(.visually-hidden) {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+}
+.admin-section[data-section="bottlenecks"] .neck-legend {
+  display: none;
+}
+.pipe {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity 200ms;
+}
+.pipe[data-refreshing] {
+  opacity: 0.7;
+}
+.stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--raise);
+}
+/* The pipe between two steps. */
+.stage + .stage::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -14px;
+  width: 14px;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+.stage[data-state="slow"],
+.stage[data-state="queue"] {
+  background: linear-gradient(var(--hot-bg), var(--panel) 60%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--hot) 30%, transparent);
+}
+.stage-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.stage-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+}
+.stage-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--tint);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.stage[data-state="slow"] .stage-n,
+.stage[data-state="queue"] .stage-n {
+  background: color-mix(in oklab, var(--hot) 14%, var(--panel));
+  color: var(--hot-text);
+}
+.stage-hint {
+  margin: -4px 0 0;
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-times {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin: 0;
+}
+.stage-times > div {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.stage-times dt {
+  order: 2;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+}
+.stage-times dd {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.stage-times .stage-p50 dd {
+  color: var(--ink);
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.6px;
+}
+.stage-times .neck-recent {
+  display: inline;
+}
+.stage-dots {
+  display: flex;
+  gap: 4px;
+}
+.stage-dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+}
+.stage-dots i[data-on] {
+  background: var(--accent);
+}
+.stage[data-state="slow"] .stage-dots i[data-on],
+.stage[data-state="queue"] .stage-dots i[data-on] {
+  background: var(--hot);
+}
+.stage-plugins {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.stage-plugins li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-plugins i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+.stage-plugins [data-state="degraded"] i {
+  background: var(--warning);
+}
+.stage-plugins [data-state="down"] i {
+  background: var(--error);
+}
+.stage-plugins [data-state="idle"] i {
+  background: var(--idle-dot);
+}
+.stage-wait {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+.stage-wait[data-waiting] {
+  color: var(--hot-text);
+}
+.stage-wait b {
+  font-weight: 700;
+}
+@media (max-width: 1180px) {
+  .pipe {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .stage:nth-child(4)::before {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  /* On a phone the steps slide sideways, the page itself never does. */
+  .pipe {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 78%;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scroll-snap-type: x mandatory;
+  }
+  .stage {
+    scroll-snap-align: start;
+  }
+  .stage:nth-child(4)::before {
+    display: block;
+  }
+  .admin-section[data-section="bottlenecks"] > .panel-head {
+    position: static;
+    justify-content: flex-start;
+    margin-bottom: 8px;
+  }
+  .admin-section[data-section="bottlenecks"] .neck-verdict {
+    margin-right: 0;
+  }
+  .admin-board > .admin-lower {
+    flex: none;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .admin-tabs-head {
+    flex-wrap: wrap;
+  }
+  .admin-tabpanel .admin-section[data-bare] > .panel-head {
+    position: static;
+    padding: 10px 16px 0;
+  }
+  .admin-status {
+    margin-right: 0;
+  }
+  .admin-tabpanel {
+    overflow: visible;
+  }
+}
+

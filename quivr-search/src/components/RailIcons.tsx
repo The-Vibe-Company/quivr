@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 /**
  * Icônes de la barre latérale, reprises de Tabler Icons (MIT, tabler.io/icons) :
  * news, radar-2, antenna, chart-dots-3, search, plus, sun, moon, calendar,
- * chevron-down, chevron-up, chevrons-right, external-link, check, eye et
- * eye-off.
+ * chevron-down, chevron-up, chevrons-right, external-link, check, eye,
+ * eye-off, blockquote, brain, pencil, dots, trending-up, trending-down,
+ * activity et checks.
  * Dessinées au trait, elles prennent la couleur du texte.
  */
 function Icon({ size = 22, children }: { size?: number; children: ReactNode }) {
@@ -147,5 +148,72 @@ export const EyeOffIcon = ({ size = 16 }: { size?: number }) => (
     <path d="M10.585 10.587a2 2 0 0 0 2.829 2.828" />
     <path d="M16.681 16.673a8.717 8.717 0 0 1 -4.681 1.327c-3.6 0 -6.6 -2 -9 -6c1.272 -2.12 2.712 -3.678 4.32 -4.674m2.86 -1.146a9.055 9.055 0 0 1 1.82 -.18c3.6 0 6.6 2 9 6c-.666 1.11 -1.379 2.067 -2.138 2.87" />
     <path d="M3 3l18 18" />
+  </Icon>
+);
+
+/** A keyword alert. */
+export const KeywordsIcon = ({ size = 16 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M6 15h15" />
+    <path d="M21 19h-15" />
+    <path d="M15 11h6" />
+    <path d="M21 7h-6" />
+    <path d="M9 9h1a1 1 0 1 1 -1 1v-2.5a2 2 0 0 1 2 -2" />
+    <path d="M3 9h1a1 1 0 1 1 -1 1v-2.5a2 2 0 0 1 2 -2" />
+  </Icon>
+);
+
+/** A described alert. */
+export const DescribedIcon = ({ size = 16 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M15.5 13a3.5 3.5 0 0 0 -3.5 3.5v1a3.5 3.5 0 0 0 7 0v-1.8" />
+    <path d="M8.5 13a3.5 3.5 0 0 1 3.5 3.5v1a3.5 3.5 0 0 1 -7 0v-1.8" />
+    <path d="M17.5 16a3.5 3.5 0 0 0 0 -7h-.5" />
+    <path d="M19 9.3v-2.8a3.5 3.5 0 0 0 -7 0" />
+    <path d="M6.5 16a3.5 3.5 0 0 1 0 -7h.5" />
+    <path d="M5 9.3v-2.8a3.5 3.5 0 0 1 7 0v10" />
+  </Icon>
+);
+
+export const PencilIcon = ({ size = 15 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+    <path d="M13.5 6.5l4 4" />
+  </Icon>
+);
+
+export const DotsIcon = ({ size = 18 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M5 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+    <path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+    <path d="M17 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+  </Icon>
+);
+
+export const TrendUpIcon = ({ size = 15 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M3 17l6 -6l4 4l8 -8" />
+    <path d="M14 7l7 0l0 7" />
+  </Icon>
+);
+
+export const TrendDownIcon = ({ size = 15 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M3 7l6 6l4 -4l8 8" />
+    <path d="M21 10l0 7l-7 0" />
+  </Icon>
+);
+
+export const ActivityIcon = ({ size = 15 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M3 12h4l3 8l4 -16l3 8h4" />
+  </Icon>
+);
+
+/** "Tout marquer comme lu". */
+export const ChecksIcon = ({ size = 16 }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M7 12l5 5l10 -10" />
+    <path d="M2 12l5 5m5 -5l5 -5" />
   </Icon>
 );
