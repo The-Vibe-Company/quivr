@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -17,6 +18,14 @@ import (
 // alpha weights the vector side of a hybrid search; relative score fusion
 // normalizes each side's scores before weighting them.
 const alpha = 0.5
+
+// configuration is validated by the manifest schema at install and by the
+// SDK on each invocation. Defaults are applied here, not by JSON Schema.
+type configuration struct {
+	DenseWeight    float64 `json:"dense_weight"`
+	CandidateCount int     `json:"candidate_count"`
+	HybridFusion   string  `json:"hybrid_fusion"`
+}
 
 type retriever struct{}
 
@@ -81,7 +90,13 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 // request is the one candidate request of a search: keywords on the title
 // and body for lexical, the served space for semantic, both for hybrid.
 func request(req *quivrplugin.SearchRequest) (quivrplugin.CandidateRequest, error) {
-	c := quivrplugin.CandidateRequest{QueryText: req.Query.Text, K: req.Limit}
+	config := configuration{DenseWeight: alpha, CandidateCount: req.Limit, HybridFusion: "relative_score"}
+	if len(req.Configuration) > 0 {
+		if err := json.Unmarshal(req.Configuration, &config); err != nil {
+			return quivrplugin.CandidateRequest{}, quivrplugin.TerminalSearchError("invalid_configuration", err.Error())
+		}
+	}
+	c := quivrplugin.CandidateRequest{QueryText: req.Query.Text, K: config.CandidateCount}
 	if req.Query.Mode == "lexical" {
 		c.Primitive, c.Field = quivrplugin.PrimitiveBM25, quivrplugin.FieldSource
 		return c, nil
@@ -95,8 +110,7 @@ func request(req *quivrplugin.SearchRequest) (quivrplugin.CandidateRequest, erro
 		c.Primitive = quivrplugin.PrimitiveNearVector
 		return c, nil
 	}
-	weight := alpha
-	c.Primitive, c.Field, c.Alpha, c.Fusion = quivrplugin.PrimitiveHybrid, quivrplugin.FieldSource, &weight, "relative_score"
+	c.Primitive, c.Field, c.Alpha, c.Fusion = quivrplugin.PrimitiveHybrid, quivrplugin.FieldSource, &config.DenseWeight, config.HybridFusion
 	return c, nil
 }
 
@@ -111,7 +125,11 @@ func explain(c quivrplugin.CandidateRequest) string {
 	if c.Alpha != nil {
 		weight = *c.Alpha
 	}
-	return fmt.Sprintf("keywords and vectors in %s, alpha %g, relative score fusion", c.Space, weight)
+	fusion := "relative score fusion"
+	if c.Fusion == "ranked" {
+		fusion = "ranked fusion (RRF)"
+	}
+	return fmt.Sprintf("keywords and vectors in %s, alpha %g, %s", c.Space, weight, fusion)
 }
 
 func main() {

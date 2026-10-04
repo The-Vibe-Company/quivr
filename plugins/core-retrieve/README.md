@@ -1,19 +1,16 @@
 # core.retrieve
 
-The first-party retrieval plugin: the search the engine ran itself until
-THE-779. The engine now ranks nothing itself, and the api refuses to start
-without a retrieval plugin. Every stack pins this one unless another retrieval
-plugin is pinned (`scripts/connector_plugin.py` `FIRST_PARTY`, Railway
-`CONNECTORS` in `deploy/railway/core-entrypoint.py`, run beside the api only).
+The first-party retrieval plugin, pinned by default beside the api.
+The engine ranks nothing itself and refuses to start without a retrieval plugin.
 
 ## What it does
 
 Up to two rounds of candidates, then the ranking:
 
-- **Round 1** asks for `k = limit` candidates per request: `lexical` uses
+- **Round 1** asks for `k = candidate_count` (the search limit when unset) per request: `lexical` uses
   one `bm25` request on the title and body (`field: source`); `semantic` uses
   `near_vector` in every served space; `hybrid` uses `hybrid` in every served
-  space with alpha 0.5 and relative score fusion, in batches of at most eight requests. A semantic or hybrid
+  space with the configured weight and fusion (defaults: alpha 0.5 and relative score), in batches of at most eight requests. A semantic or hybrid
   search whose Corpora serve no vector space is refused (422
   `unsupported_search`).
 - **Ranking** merges candidates by descending index score and keeps each
@@ -24,7 +21,22 @@ Up to two rounds of candidates, then the ranking:
 
 It makes no model call: the engine encodes the query with the owner of the
 space: the ingestion plugin that declares it or, for a Corpus not rebuilt
-since THE-777, the engine's former E5 space. It needs no configuration.
+since THE-777, the engine's former E5 space. Configuration is optional.
+
+## Configuration
+
+Set these keys in the plugin pin's `configuration`; both core profiles use them. The manifest validates them.
+
+| Setting | Meaning; default |
+| --- | --- |
+| `dense_weight` | Hybrid vector weight (Weaviate `alpha`), 0–1; default 0.5. Keyword weight is `1 - dense_weight`. |
+| `candidate_count` | Candidates per served space, or one lexical request, 1–100; default the search limit. A smaller value can return a shorter page. |
+| `hybrid_fusion` | `relative_score` (default) normalizes each side's scores then weights them; `ranked` uses Weaviate RRF with constant 60. |
+
+Weight and fusion affect hybrid mode only; final ranking remains capped by the
+search limit. Omitting settings preserves default request bytes. See
+[Search profiles](https://docs.quivr.thevibecompany.co/run-quivr/search-profiles#core-retrieval-settings)
+for a deployment example, trial mapping and Jev shortlist settings.
 
 ## Profiles
 
@@ -35,16 +47,11 @@ since THE-777, the engine's former E5 space. It needs no configuration.
 
 ## Parity with the engine
 
-The engine asks the index for at least 150 objects per candidate request
-whatever `k`, as its own search did for every limit, so the index query and
-its order are unchanged; it keeps each segment's first object, then hydrates
-the best ones in a few batches until it holds `k`, dropping what the caller
-may no longer read. The
-retrieval baseline (`make measure`) records every hit of the 24 CC0 queries
-and the query edge cases in the three modes: before and after the move they
-are identical, but for the order of keyword hits of exactly equal score, which
-already changed from one run of the engine to the next (THE-779). Segment ids
-derive from the Corpus, so on two installations such ties may still differ.
+The engine fetches `max(150, 3 * k)` index objects per request, keeps each
+segment's first object, then hydrates readable candidates until it holds `k`.
+With no settings, `k` is the search limit, preserving the index query and order.
+The retrieval baseline (`make measure`) records hits of 24 CC0 queries and edge
+cases in all three modes. Score ties may differ between installations because segment ids derive from the Corpus.
 
 ## Certification
 

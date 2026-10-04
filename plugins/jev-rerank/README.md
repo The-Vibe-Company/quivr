@@ -2,7 +2,7 @@
 
 An optional retrieval plugin (`jev.rerank`), not an engine dependency. Pin it
 beside `core.retrieve` to enable Jev in `deep`. Jev 1.0.0 serves only `deep`
-and requires `core.retrieve` 1.1.x's `default` profile and Plugin API 0.13.
+and requires `core.retrieve`'s `default` profile (version `>=1.1.0 <2.0.0`) and Plugin API 0.13.
 Map `default` to `core.retrieve/default` and `deep` to `jev.rerank/deep`.
 
 ## Configuration

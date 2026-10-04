@@ -12,7 +12,7 @@ These plugins live in the `plugins/` folder of the repository. They use the same
 | `alerts` | `alerts` 0.3.0 | Alert rule | keyword and meaning alerts, alone or combined |
 | `core-ingest` | `core.ingest` 1.0.0 | Ingestion | token windows embedded with `multilingual-e5-small` |
 | `hosted-embed` | `hosted.embed` 1.0.0 | Ingestion | a configured hosted or OpenAI-compatible text model |
-| `core-retrieve` | `core.retrieve` 1.1.0 | Retrieval | `default` and `deep`: keyword, vector or hybrid search, as the index ranks it |
+| `core-retrieve` | `core.retrieve` 1.2.0 | Retrieval | `default` and `deep`: keyword, vector or hybrid search, with configurable weight, depth and fusion |
 | `jev-rerank` | `jev.rerank` 1.0.0 | Retrieval | `deep`: Jev re-ranking of a hybrid shortlist, with an unpaid hybrid fallback |
 | `rss` | `connector.rss` 1.0.0 | Connector | kind `rss`: RSS, Atom and JSON Feed |
 | `m365-mail` | `connector.m365_mail` 1.0.0 | Connector | kind `m365_mail`: a Microsoft 365 mailbox folder |
@@ -80,7 +80,9 @@ Generate an immutable manifest from the configuration before installing it. Each
 
 ## core-retrieve
 
-The default retrieval plugin: the search Quivr ran itself before it moved into a plugin, with the same rankings. It asks for one candidate list that follows the search mode, `bm25` on the title and body for `lexical`, `near_vector` in the served space for `semantic`, `hybrid` in the served space with alpha 0.5 and relative score fusion for `hybrid`, and returns it as the ranking. Candidates of exactly equal score rank by segment id. It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent). Its `deep` ranks like `default`; to re-rank, install `jev.rerank` and map the short name `deep` to `jev.rerank/deep` in `retrieval.profiles`. See [Re-rank with Jev](/guides/rerank-with-jev) for that configuration. It has no plugin configuration. The api refuses to start without a retrieval plugin.
+The default retrieval plugin follows the search mode: `bm25` on the title and body for `lexical`, `near_vector` in every served space for `semantic`, and `hybrid` in every served space for `hybrid`. It merges candidates by score, keeps each segment once and breaks score ties by segment id. Optional pin settings select `dense_weight`, `candidate_count` and `hybrid_fusion`; defaults remain alpha 0.5, the search limit and relative-score fusion. See [Core retrieval settings](/run-quivr/search-profiles#core-retrieval-settings) for bounds and an example.
+
+It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent). Its `deep` ranks like `default`; to re-rank, install `jev.rerank` and map the short name `deep` to `jev.rerank/deep` in `retrieval.profiles`. See [Re-rank with Jev](/guides/rerank-with-jev) for that configuration. The api refuses to start without a retrieval plugin.
 
 ## jev-rerank
 

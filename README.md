@@ -302,7 +302,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   search accepts full `plugin/profile` names or short names configured in
   `retrieval.profiles`, including `default` ([Write a retrieval plugin](https://docs.quivr.thevibecompany.co/plugins/write-a-retrieval-plugin)).
   The first-party [core.retrieve](plugins/core-retrieve/README.md) plugin (keywords,
-  vectors or both, fused with alpha 0.5) is pinned by default; the engine ranks nothing itself.
+  vectors or both) is pinned by default; optional settings select vector weight,
+  candidate depth and relative-score or RRF fusion (defaults: alpha 0.5, search limit,
+  relative score). The engine ranks nothing itself.
 
 ## What comes next
 

@@ -45,6 +45,41 @@ The map is `retrieval.profiles` in the startup configuration. This one makes `de
 
 Quivr refuses to start when a required map is missing or a target does not resolve, and the error names the problem. Activating a new version of a plugin keeps the map, and Quivr refuses an activation that would leave the map unresolved. [Search profiles in the configuration reference](/reference/configuration#search-profiles) lists the rules, and [Re-rank with Jev](/guides/rerank-with-jev) pins both plugins.
 
+## Core retrieval settings
+
+Set `configuration` on the `core.retrieve` plugin pin to change the keyword/meaning mix and candidate depth.
+Both `core.retrieve/default` and `core.retrieve/deep` use the same settings, including when another profile calls them.
+For example, this startup configuration pins the plugin and requests 30 candidates per served vector space:
+
+```json QUIVR_CONFIG (excerpt)
+{"plugins": [{
+  "manifest": "plugins/core-retrieve/quivr-plugin.yaml",
+  "endpoint": "http://127.0.0.1:9906",
+  "configuration": {
+    "dense_weight": 0.7,
+    "candidate_count": 30,
+    "hybrid_fusion": "relative_score"
+  }
+}]}
+```
+
+The endpoint must be your running plugin's address; restart Quivr after changing its startup configuration.
+The manifest validates these settings and refuses unknown keys, wrong types and values outside the bounds:
+
+- `dense_weight`: 0–1, default 0.5. In hybrid mode it is Weaviate's vector weight (`alpha`); keyword weight is `1 - dense_weight`.
+- `candidate_count`: integer 1–100, default the search's limit. Each served space requests that many candidates; lexical mode makes one request. Final ranking returns at most the search limit, and a smaller depth can return a shorter page.
+- `hybrid_fusion`: `relative_score` (default) normalizes each side's scores before weighting them; `ranked` uses Weaviate reciprocal rank fusion (RRF, constant 60), based on positions in each list. See [Weaviate's fusion explanation](https://docs.weaviate.io/weaviate/concepts/search/hybrid-search).
+
+Weight and fusion apply only in hybrid mode. With no settings, candidate requests and ranking remain unchanged.
+The engine fetches at least `max(150, 3 * candidate_count)` index objects, then hydrates readable candidates up to that depth.
+Candidate depth is the returned shortlist size, not the size of each input list inside Weaviate's fusion.
+
+Search improvement trials use the same `dense_weight` and `candidate_count` names.
+Mixed keyword/vector tier-1 trials use weighted RRF: select `hybrid_fusion: ranked` for that fusion family.
+This does not promise identical rankings across the direct trial and Weaviate, whose candidate lists and scores differ.
+When promoting a trial, record its fusion method explicitly and reject candidate counts above 100, the current plugin protocol bound.
+Jev's separate `candidate_count` controls how many inner ranked results go to re-ranking; increasing core depth does not increase Jev's shortlist.
+
 ## See and call the profiles
 
 `GET /v0/search/profiles` lists every installed profile, the one `default` maps to first. It needs a key with `search:query`. The `make dev` stack pins only `core.retrieve` and no map, so there `deep` is `core.retrieve/deep`:

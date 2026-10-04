@@ -1,10 +1,10 @@
 # First-party retrieval plugin: the search the engine ran itself before
-# THE-779, unchanged: keywords, the served vector space, or both fused with
-# alpha 0.5 by relative score. Every stack pins it unless another retrieval
+# THE-779 by default: keywords, the served vector space, or both fused with
+# configurable weight, depth and fusion. Every stack pins it unless another retrieval
 # plugin is pinned. Check it with: quivr plugin inspect . && quivr plugin test .
 id: core.retrieve
-version: 1.1.0
-description: Keywords (BM25F on title and body), the served vector space, or both fused with alpha 0.5 by relative score, as the index ranks them.
+version: 1.2.0
+description: Keywords (BM25F on title and body), the served vector space, or both with configurable weight, candidate depth and fusion; defaults to alpha 0.5 by relative score.
 compatibility:
   engine: ">=0.1.0 <0.3.0"
   plugin_api: ">=0.8.0 <0.10.0"
@@ -12,7 +12,7 @@ contributions:
   retrieval:
     profiles:
       default:
-        description: The index's ranking for the search mode; hybrid fuses keywords and the served vector space with alpha 0.5 by relative score.
+        description: The index's ranking for the search mode, using the pin's weight, candidate depth and fusion settings; hybrid defaults to alpha 0.5 by relative score.
         max_latency_ms: 500
         max_cost_cents: 0
       # Reserved for re-ranking and query rewriting (Spec 15 experiments); it
@@ -25,7 +25,28 @@ contributions:
       # One candidate request per served space, then the merged ranking.
       max_rounds: 3
       max_requests: 8
-      # A search's limit is at most 50.
-      max_candidates: 50
+      # The result limit is at most 50; a configured shortlist may be deeper.
+      max_candidates: 100
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      dense_weight:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.5
+        description: Hybrid vector weight (Weaviate alpha); keyword weight is 1 minus this value. Used only in hybrid mode.
+      candidate_count:
+        type: integer
+        minimum: 1
+        maximum: 100
+        description: Candidates requested per served space (one request for lexical); defaults to the search limit. Final ranking still returns at most the search limit.
+      hybrid_fusion:
+        type: string
+        enum: [relative_score, ranked]
+        default: relative_score
+        description: Weaviate hybrid fusion; relative_score normalizes each side's scores before weighting, ranked uses reciprocal rank fusion (RRF, constant 60). Used only in hybrid mode.
 run:
   command: [go, run, .]
