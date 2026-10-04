@@ -4,6 +4,7 @@ No existing test covers configuration sweeps or canonical lease publication.
 Changing fusion must change rankings without re-embedding cached documents;
 successful fake network responses still exercise real shared admission.
 """
+import hashlib
 import importlib.util
 import io
 import json
@@ -43,6 +44,84 @@ class Reranker(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN') and importlib.util.find_spec('ranx'), 'needs eval dependencies and disposable PostgreSQL')
 class Trial(unittest.TestCase):
+    def test_cache_chunks_commit_before_publication_and_recover_expired_fills(self):
+        # Own bounded cache persistence/recovery, beyond the scoring sweep's
+        # tiny fixture. Only hosted HTTP is fake; leases and files are real.
+        import psycopg
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        campaign = uuid.uuid4().hex
+        store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
+        lease = store.claim(campaign, 'trial')
+        budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+        cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
+        prices = {'Cohere-Embed-V5-Fast': .08}
+        client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+        data = {'corpus': {str(i): {'text': 'passage ' + str(i)} for i in range(129)},
+                'queries': {'q': 'question'}, 'qrels': {'q': {'0': 1}}}
+        dataset = {'name': 'tiny', 'version': '1', 'split': 'dev', 'private': False}
+        def respond(request, timeout):
+            count = len(json.loads(request.data)['texts'])
+            return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                'meta': {'billed_units': {'input_tokens': count}}}).encode())
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond) as network:
+            def run(flush):
+                return search_trial.measure(cfg, data, dataset, temp, budget, client, prices, .001,
+                                            fresh_latency=False, flush=flush)
+            identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
+            busy_key = 'embedding/' + search_trial.digest({'config': identity, 'mode': 'document',
+                'text_hash': hashlib.sha256('passage 1'.encode()).hexdigest()})
+            store.claim(campaign, busy_key, ttl=86400)
+            with self.assertRaisesRegex(RuntimeError, 'embedding cache fill already leased'):
+                run(mock.Mock())
+            network.assert_not_called()
+            with psycopg.connect(store.dsn) as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND key LIKE 'embedding/%%'", (campaign,)).fetchone()[0], 1)
+                db.execute("UPDATE eval_control.leases SET expires_at=clock_timestamp()-interval '1 second' WHERE campaign=%s AND key=%s", (campaign, busy_key))
+            with self.assertRaises(OSError):
+                run(mock.Mock(side_effect=OSError('volume commit failed')))
+            with psycopg.connect(store.dsn) as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND payload IS NOT NULL', (campaign,)).fetchone()[0], 0)
+                db.execute("UPDATE eval_control.leases SET expires_at=clock_timestamp()-interval '1 second' WHERE campaign=%s AND key LIKE 'embedding/%%'", (campaign,))
+            snapshots = []
+            def flush():
+                with psycopg.connect(store.dsn) as db:
+                    snapshots.append(db.execute('SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND payload IS NOT NULL', (campaign,)).fetchone()[0])
+            before = network.call_count
+            with self.assertLogs(search_trial.LOG, level='INFO') as progress:
+                measured = run(flush)
+            self.assertEqual(snapshots, [0, 128, 129])
+            self.assertEqual(network.call_count - before, 4)
+            self.assertEqual(measured['cost']['cache_hits'], 0)
+            self.assertNotIn('passage ', '\n'.join(progress.output))
+            self.assertNotIn('question', '\n'.join(progress.output))
+            before = network.call_count
+            commit = mock.Mock()
+            replay = run(commit)
+            self.assertEqual(network.call_count, before)
+            commit.assert_not_called()
+            self.assertEqual(replay['cost']['cache_hits'], 130)
+            with psycopg.connect(store.dsn) as db:
+                payload = db.execute('SELECT payload FROM eval_control.leases WHERE campaign=%s AND key=%s', (campaign, busy_key)).fetchone()[0]
+            path = pathlib.Path(temp, payload['filename'])
+            original = path.read_bytes()
+            data['corpus']['000'] = {'text': 'uncached passage'}
+            for corrupt in (False, True):
+                with self.subTest(corrupt=corrupt):
+                    if corrupt:
+                        path.write_text('{}')
+                    else:
+                        path.unlink()
+                    with self.assertRaisesRegex(RuntimeError, 'cache (unavailable|digest mismatch)'):
+                        run(commit)
+                    self.assertEqual(network.call_count, before)
+                    with psycopg.connect(store.dsn) as db:
+                        self.assertEqual(db.execute("SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND key LIKE 'embedding/%%'", (campaign,)).fetchone()[0], 130)
+                    path.write_bytes(original)
+            recovered = run(commit)
+            self.assertEqual(network.call_count, before + 1)
+            self.assertEqual(commit.call_count, 1)
+            self.assertEqual(recovered['cost']['cache_hits'], 130)
+
     def test_cached_sweep_reprices_usage_and_logs_real_scores_without_duplicate_provider_calls(self):
         store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
         campaign = uuid.uuid4().hex
@@ -62,15 +141,19 @@ class Trial(unittest.TestCase):
             trec.write(root / 'data', {'a': {'text': 'apple'}, 'b': {'text': 'pear'}}, {'q': 'pear'}, {'q': {'a': 1}})
             data = trec.load(root / 'data')
             outbox = results.Results(directory=root / 'results')
-            def run(config, key, fresh=False):
+            def run(config, key, fresh=False, commits=0):
                 lease = store.claim(campaign, key)
                 budget = control_store.Budget(store, campaign, (key, lease['owner']))
                 client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
                 with mock.patch.object(client.opener, 'open', side_effect=respond):
-                    return search_trial.measure(config, data, {'name': 'tiny', 'version': '1', 'split': 'dev',
+                    # Each mode is one tiny chunk; commit once for documents, once for queries.
+                    commit = mock.Mock()
+                    measured = search_trial.measure(config, data, {'name': 'tiny', 'version': '1', 'split': 'dev',
                         'fingerprint': trec.fingerprint(root / 'data'), 'private': False},
-                        root / 'cache', budget, client, prices, .001, fresh_latency=fresh)
-            dense = run(cfg, 'dense')
+                        root / 'cache', budget, client, prices, .001, fresh_latency=fresh, flush=commit)
+                    self.assertEqual(commit.call_count, commits)
+                    return measured
+            dense = run(cfg, 'dense', commits=2)
             calls = len(requests)
             lexical = run(dict(cfg, dense_weight=.5), 'hybrid')
             self.assertEqual(len(requests), calls)

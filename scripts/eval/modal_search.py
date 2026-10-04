@@ -131,6 +131,7 @@ def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, out
 
 def remote_trial(request):
     """Serialized Modal function. Imports and data access happen inside admission."""
+    import logging
     import os
     import pathlib
     import sys
@@ -144,6 +145,9 @@ def remote_trial(request):
     import results
     import search_trial
     import trec
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
+    log = logging.getLogger(__name__)
+    log.info('trial started')
     cfg, policy = request['config'], request['policy']
     # Guard before even preparing/downloading a dataset.
     if policy['sets'][request['dataset']]['split'] != 'dev':
@@ -162,6 +166,8 @@ def remote_trial(request):
         name = request['dataset']
         directory = public_sets.prepare(name, pathlib.Path('/eval-cache/datasets'), include_restricted=True)
         data = trec.load(directory)
+        log.info('dataset ready documents=%d queries=%d elapsed_seconds=%.3f',
+                 len(data['corpus']), len(data['qrels']), time.monotonic() - started)
         dataset = {'name': name, 'version': search_trial.digest(public_sets.SETS[name]),
                    'split': 'dev', 'fingerprint': trec.fingerprint(directory), 'private': False}
         hosted = None
@@ -181,14 +187,17 @@ def remote_trial(request):
                     'resource_class': 'cpu8-memory16384',
                     'price_revision': policy['price_revision'], 'fresh_latency': request['fresh_latency']},
                     policy['experiment'], request['git_sha'], request['scorer_digest'])
+        log.info('measurement complete elapsed_seconds=%.3f', measured['duration_seconds'])
         store.publish(request['campaign'], *lease, row)
         results.Results(directory='/eval-cache/results').log(row)
         volume.commit()
         return row
     except embeddings.BudgetExceeded:
+        log.info('trial capped elapsed_seconds=%.3f', time.monotonic() - started)
         store.abandon(request['campaign'], *lease, 'capped')
         return {'status': 'capped', 'reason': 'provider daily cap reached'}
     except Exception:
+        log.info('trial failed elapsed_seconds=%.3f', time.monotonic() - started)
         store.abandon(request['campaign'], *lease, 'failed')
         return {'status': 'failed', 'reason': 'direct measurement failed; uncertain charges retained'}
 

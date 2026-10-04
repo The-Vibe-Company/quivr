@@ -26,10 +26,10 @@ psql -v ON_ERROR_STOP=1 -f deploy/mlflow/eval-control.sql
 ```
 
 Supply `EVAL_CONTROL_DATABASE_URL` on the dispatch machine. Remote connections
-require `sslmode=verify-full`, the host's trusted CA, and a PostgreSQL endpoint
-reachable from Modal. The runner uses short connections and ten-second statement
-timeouts; reserve connection capacity for up to four workers per dispatch.
-An unavailable control store refuses paid work, with no local admission fallback.
+require `sslmode=verify-full`, a trusted CA and an endpoint reachable from Modal.
+Cache operations use one connection/transaction per chunk of at most 128 entries,
+with ten-second statement timeouts. Reserve capacity for four workers per
+dispatch. An unavailable store refuses paid work without local fallback.
 
 For a private certificate authority, set `EVAL_CONTROL_CA_PEM` to the full PEM
 certificate text, including real newlines, on the dispatch machine and in
@@ -95,13 +95,11 @@ scores in the results wrapper. Inspect the experiment with the results CLI.
 `cheaper` means all gates pass and search cost is lower on every set;
 `better` means all gates pass without that strict cost improvement.
 
-The campaign freezes the baseline, complete set family, diagnostic roles,
-prices, caps, thresholds, code/scorer revision and latency mode on first dispatch.
-Changing them requires a new campaign identifier. Candidate settings may vary.
-Identical config/dataset/tier/code work reuses completed evidence or reports
-`leased` while another worker owns it. Expired claims can be recovered; stale
-owners cannot admit batches or publish canonical evidence. Unknown API effects
-after a crash may repeat on recovery, and their reservations remain charged.
+The campaign freezes its baseline, sets, diagnostics, prices, caps, thresholds,
+code/scorer revision and latency mode. Changes require a new campaign identifier;
+candidate settings may vary. Identical work reuses evidence or reports `leased`.
+Expired claims can be recovered; stale owners cannot admit or publish work.
+Unknown API effects may repeat on recovery; their reservations remain charged.
 
 ## Understand the gates and accounting
 
@@ -151,11 +149,15 @@ is reserved for a future trusted full-engine confirmation runner.
 ## Recover and validate
 
 The Volume `quivr-eval-embeddings-cache` holds immutable vectors and the results
-outbox. SQL stages canonical records before tracking uploads. Each new remote
-measurement replays the committed Volume outbox. Re-running the
-same command recovers completed evidence and replays pending tracking writes.
-Preserve the Volume and control schema until all results are synced and the
-campaign is archived. Never delete an unknown reservation to free a cap.
+outbox. Chunks commit files before SQL publication makes them reusable.
+Lost ownership rolls back publication. Logs show counts and elapsed time, without texts.
+New measurements replay the committed outbox; re-running recovers completed
+evidence and pending tracking writes. Preserve the Volume and schema until
+results sync and the campaign is archived. Never delete unknown reservations.
+
+Killing the dispatcher does not guarantee cancellation. Remote work may continue
+through `startup_seconds` and `max_seconds`; unknown compute stays charged.
+Cache claims expire after 24 hours. Inspect Modal before retrying; reuse completed chunks.
 
 Before live acceptance, run fake-provider unit tests and the SQL adapter tests
 with `EVAL_CONTROL_TEST_DSN` pointing only to a disposable PostgreSQL database.
@@ -165,10 +167,8 @@ For example, after provisioning that local database (commands exercised locally)
 python -m unittest discover -s scripts/eval -p 'test_*.py'
 ```
 
-The operator then checks two concurrent dispatches reuse claims, a small cap
-stops before another paid attempt, a pending tracking write replays, and a
-deliberately excessive price is rejected. Live Modal/provider acceptance belongs
-on a measurement machine, with reviewed rates and caps.
+The operator checks claim reuse, cap admission, tracking replay and excessive-price
+rejection on a measurement machine with reviewed rates and caps.
 
 ## Next
 

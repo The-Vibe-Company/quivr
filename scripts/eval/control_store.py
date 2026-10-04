@@ -12,12 +12,27 @@ import uuid
 
 import embeddings
 
+LEASE_BATCH_SIZE = 128
+
+
+def lease_batch(keys, ttl=3600):
+    keys = list(keys)
+    if len(keys) > LEASE_BATCH_SIZE or len(set(keys)) != len(keys):
+        raise ValueError('lease batch must contain at most 128 distinct keys')
+    if type(ttl) is not int or not 1 <= ttl <= 86400:
+        raise ValueError('lease lifetime must be 1..86400 seconds')
+    return keys
+
 
 class Unavailable(RuntimeError):
     pass
 
 
 class LeaseLost(RuntimeError):
+    pass
+
+
+class LeaseBusy(RuntimeError):
     pass
 
 
@@ -92,33 +107,72 @@ class Store:
             raise LeaseLost('lease expired, completed or held by another worker')
 
     def claim(self, name, key, ttl=3600):
-        if type(ttl) is not int or not 1 <= ttl <= 86400:
-            raise ValueError('lease lifetime must be 1..86400 seconds')
+        return self.claim_many(name, [key], ttl)[key]
+
+    def claim_many(self, name, keys, ttl=3600, *, require_available=False):
+        with self.claim_batch(name, keys, ttl, require_available=require_available) as claims:
+            return claims
+
+    @contextlib.contextmanager
+    def claim_batch(self, name, keys, ttl=3600, *, require_available=False):
+        """Validate a bounded chunk inside its claim transaction.
+
+        Caller errors roll back new owners. Start paid work only after exit.
+        """
+        keys = lease_batch(keys, ttl)
+        if not keys:
+            yield {}
+            return
         with self.transaction() as db:
             self.lock(db, name)
-            row = db.execute('SELECT owner, expires_at>clock_timestamp(), payload FROM eval_control.leases WHERE campaign=%s AND key=%s', (name, key)).fetchone()
-            if row and row[2] is not None:
-                return {'status': 'done', 'payload': row[2]}
-            if row and row[1]:
-                return {'status': 'leased'}
-            owner = uuid.uuid4().hex
-            db.execute("INSERT INTO eval_control.leases(campaign,key,owner,expires_at) VALUES (%s,%s,%s,clock_timestamp()+%s*interval '1 second') ON CONFLICT (campaign,key) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at", (name, key, owner, ttl))
-            return {'status': 'claimed', 'owner': owner}
+            rows = db.execute('SELECT key, owner, expires_at>clock_timestamp(), payload FROM eval_control.leases WHERE campaign=%s AND key=ANY(%s)', (name, keys)).fetchall()
+            existing = {row[0]: row[1:] for row in rows}
+            claims, owners = {}, {}
+            for key in keys:
+                row = existing.get(key)
+                if row and row[2] is not None:
+                    claims[key] = {'status': 'done', 'payload': row[2]}
+                elif row and row[1]:
+                    if require_available:
+                        raise LeaseBusy('lease held by another worker')
+                    claims[key] = {'status': 'leased'}
+                else:
+                    owners[key] = uuid.uuid4().hex
+                    claims[key] = {'status': 'claimed', 'owner': owners[key]}
+            if owners:
+                db.execute("INSERT INTO eval_control.leases(campaign,key,owner,expires_at) SELECT %s, key, owner, clock_timestamp()+%s*interval '1 second' FROM unnest(%s::text[],%s::text[]) AS batch(key,owner) ON CONFLICT (campaign,key) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at", (name, ttl, list(owners), list(owners.values())))
+            yield claims
 
     def renew(self, name, key, owner, ttl=3600):
+        self.renew_many(name, {key: owner}, ttl)
+
+    def renew_many(self, name, owners, ttl=3600):
+        """Renew the entire chunk or roll back if any entry loses its fence."""
+        keys = lease_batch(owners, ttl)
+        if not keys:
+            return
         with self.transaction() as db:
             self.lock(db, name)
-            row = db.execute("UPDATE eval_control.leases SET expires_at=clock_timestamp()+%s*interval '1 second' WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL RETURNING owner", (ttl, name, key, owner)).fetchone()
-            if row is None:
+            rows = db.execute("UPDATE eval_control.leases AS lease SET expires_at=clock_timestamp()+%s*interval '1 second' FROM unnest(%s::text[],%s::text[]) AS batch(key,owner) WHERE lease.campaign=%s AND lease.key=batch.key AND lease.owner=batch.owner AND lease.expires_at>clock_timestamp() AND lease.payload IS NULL RETURNING lease.key", (ttl, keys, [owners[k] for k in keys], name)).fetchall()
+            if len(rows) != len(keys):
                 raise LeaseLost('lease expired, completed or held by another worker')
 
     def publish(self, name, key, owner, payload):
+        self.publish_many(name, {key: (owner, payload)})
+        return payload
+
+    def publish_many(self, name, entries):
+        """Publish a durable chunk or roll back on any owner/expiry mismatch."""
+        keys = lease_batch(entries)
+        if not keys:
+            return
+        owners = [entries[k][0] for k in keys]
+        payloads = [json.dumps(entries[k][1], allow_nan=False) for k in keys]
         with self.transaction() as db:
             self.lock(db, name)
-            row = db.execute('UPDATE eval_control.leases SET payload=%s::jsonb WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL RETURNING owner', (json.dumps(payload, allow_nan=False), name, key, owner)).fetchone()
-            if row is None:
+            rows = db.execute('UPDATE eval_control.leases AS lease SET payload=batch.payload::jsonb FROM unnest(%s::text[],%s::text[],%s::text[]) AS batch(key,owner,payload) WHERE lease.campaign=%s AND lease.key=batch.key AND lease.owner=batch.owner AND lease.expires_at>clock_timestamp() AND lease.payload IS NULL RETURNING lease.key', (keys, owners, payloads, name)).fetchall()
+            if len(rows) != len(keys):
                 raise LeaseLost('lease expired, completed or held by another worker')
-        return payload
 
     def abandon(self, name, key, owner, status):
         """Persist unsuccessful attempt state and immediately allow a later retry."""

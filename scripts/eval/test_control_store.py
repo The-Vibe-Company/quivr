@@ -127,6 +127,84 @@ class Control(unittest.TestCase):
         self.assertEqual(replay['status'], 'done')
         self.assertEqual(replay['payload'], {'record': 'canonical'})
 
+    def test_cache_batch_round_trips_and_mixed_claims_preserve_each_entry(self):
+        import psycopg
+        keys = ['embedding/' + str(i) for i in range(128)]
+        connect = psycopg.connect
+        counts = {'connections': 0, 'sql': 0}
+        class CountingConnection:
+            def __init__(self, db):
+                self.db = db
+            def __enter__(self):
+                self.db.__enter__()
+                return self
+            def __exit__(self, *args):
+                return self.db.__exit__(*args)
+            def execute(self, *args, **kwargs):
+                counts['sql'] += 1
+                return self.db.execute(*args, **kwargs)
+        def counted(*args, **kwargs):
+            counts['connections'] += 1
+            return CountingConnection(connect(*args, **kwargs))
+        with mock.patch('psycopg.connect', side_effect=counted):
+            claims = self.store.claim_many(self.name, keys, ttl=86400)
+        self.assertEqual(counts['connections'], 1)
+        self.assertLessEqual(counts['sql'], 3)
+        self.assertEqual(set(claims), set(keys))
+        self.assertTrue(all(c['status'] == 'claimed' for c in claims.values()))
+        owners = {key: claim['owner'] for key, claim in claims.items()}
+        counts.update(connections=0, sql=0)
+        with mock.patch('psycopg.connect', side_effect=counted):
+            self.store.renew_many(self.name, owners, ttl=86400)
+            self.store.publish_many(self.name, {k: (o, {'value': k}) for k, o in owners.items()})
+        self.assertEqual(counts['connections'], 2)
+        self.assertLessEqual(counts['sql'], 4)
+        # A mixed batch must leave completed and active entries untouched while
+        # replacing an expired owner and admitting a previously absent entry.
+        live = self.store.claim(self.name, 'live')
+        stale = self.store.claim(self.name, 'expired')
+        with connect(self.dsn) as db:
+            db.execute("UPDATE eval_control.leases SET expires_at=clock_timestamp()-interval '1 second' WHERE campaign=%s AND key='expired'", (self.name,))
+        with self.assertRaises(control_store.LeaseBusy):
+            self.store.claim_many(self.name, ['new', 'expired', 'live', keys[0]], require_available=True)
+        with connect(self.dsn) as db:
+            self.assertIsNone(db.execute("SELECT owner FROM eval_control.leases WHERE campaign=%s AND key='new'", (self.name,)).fetchone())
+            self.assertEqual(db.execute("SELECT owner FROM eval_control.leases WHERE campaign=%s AND key='expired'", (self.name,)).fetchone()[0], stale['owner'])
+        claims = self.store.claim_many(self.name, [keys[0], 'live', 'expired', 'new'])
+        self.assertEqual(claims[keys[0]], {'status': 'done', 'payload': {'value': keys[0]}})
+        self.assertEqual(claims['live'], {'status': 'leased'})
+        self.assertEqual(claims['expired']['status'], 'claimed')
+        self.assertNotEqual(claims['expired']['owner'], stale['owner'])
+        self.assertEqual(claims['new']['status'], 'claimed')
+        with connect(self.dsn) as db:
+            self.assertEqual(db.execute("SELECT owner FROM eval_control.leases WHERE campaign=%s AND key='live'", (self.name,)).fetchone()[0], live['owner'])
+
+    def test_batch_races_and_failed_fences_roll_back_other_entries(self):
+        import psycopg
+        keys = ['embedding/race-a', 'embedding/race-b']
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            batches = list(pool.map(lambda _: self.store.claim_many(self.name, keys), range(4)))
+        for key in keys:
+            self.assertEqual(sum(b[key]['status'] == 'claimed' for b in batches), 1)
+        owners = {k: next(b[k]['owner'] for b in batches if b[k]['status'] == 'claimed') for k in keys}
+        # No waits: expire the second lease and show neither UPDATE can partially
+        # commit the first entry when its peer has lost ownership.
+        with psycopg.connect(self.dsn) as db:
+            before = db.execute('SELECT expires_at FROM eval_control.leases WHERE campaign=%s AND key=%s', (self.name, keys[0])).fetchone()[0]
+            db.execute("UPDATE eval_control.leases SET expires_at=clock_timestamp()-interval '1 second' WHERE campaign=%s AND key=%s", (self.name, keys[1]))
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.renew_many(self.name, owners, ttl=86400)
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.publish_many(self.name, {k: (o, {'canonical': True}) for k, o in owners.items()})
+        with psycopg.connect(self.dsn) as db:
+            self.assertEqual(db.execute('SELECT expires_at,payload FROM eval_control.leases WHERE campaign=%s AND key=%s', (self.name, keys[0])).fetchone(), (before, None))
+        replacement = self.store.claim_many(self.name, [keys[1]])[keys[1]]
+        owners[keys[1]] = replacement['owner']
+        self.store.publish_many(self.name, {k: (o, {'canonical': True}) for k, o in owners.items()})
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.renew_many(self.name, owners)
+        self.assertTrue(all(c == {'status': 'done', 'payload': {'canonical': True}} for c in self.store.claim_many(self.name, keys).values()))
+
     def test_confirmation_counter_is_atomic_and_store_outage_cannot_admit(self):
         def read(_):
             try:

@@ -6,6 +6,7 @@ admission ledger. Only explicit dev data is accepted by this tier.
 import collections
 import hashlib
 import json
+import logging
 import math
 import pathlib
 import re
@@ -15,12 +16,14 @@ import time
 import urllib.error
 import urllib.request
 
+import control_store
 import direct_bakeoff as direct
 import embeddings
 import results
 import scoring
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+LOG = logging.getLogger(__name__)
 
 
 def digest(value):
@@ -144,53 +147,67 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         return direct.normalize(vectors).tolist()
 
     identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
-    entries, misses, cache_hits = {}, [], 0
+    entries, cache_hits, cache_fills = {}, 0, 0
     semantic = cfg['dense_weight'] > 0
     for mode, texts in (('document', docs if semantic else []),
                         ('query', [data['queries'][q] for q in query_ids] if semantic and not fresh_latency else [])):
-        for text in dict.fromkeys(texts):
-            cache_key = 'embedding/' + digest({'config': identity, 'mode': mode, 'text_hash': hashlib.sha256(text.encode()).hexdigest()})
-            # Outlive the maximum bounded Modal invocation, including all batches.
-            claim = budget.store.claim(budget.campaign, cache_key, ttl=86400)
-            if claim['status'] == 'leased':
-                raise RuntimeError('embedding cache fill already leased; retry after completion')
-            if claim['status'] == 'done':
-                meta = claim['payload']
-                path = cache / meta['filename']
-                if not path.exists():
-                    raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
-                entry = json.loads(path.read_text())
-                if digest(entry) != meta['digest']:
-                    raise RuntimeError('embedding cache digest mismatch')
-                entries[(mode, text)] = entry
-                cache_hits += 1
-            else:
-                pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
-                misses.append((mode, text, pieces, cache_key, claim['owner']))
-    for mode in ('document', 'query'):
-        pending = [item for item in misses if item[0] == mode]
-        if not pending:
-            continue
-        texts = [piece for item in pending for piece in item[2]]
-        before = budget.summary()['confirmed_input_tokens']
-        started = time.monotonic()
-        vectors = embed(texts, mode)
-        seconds = time.monotonic() - started
-        if mode == 'document':
-            document_embedding_seconds += seconds
-        tokens = budget.summary()['confirmed_input_tokens'] - before
-        bound = embeddings.estimate_tokens(texts)
-        offset = 0
-        for _, text, pieces, cache_key, owner in pending:
-            fraction = embeddings.estimate_tokens(pieces) / bound
-            entry = {'vectors': vectors[offset:offset + len(pieces)], 'tokens': tokens * fraction,
-                     'embedding_seconds': seconds * fraction}
-            filename = digest([cache_key, owner]) + '.json'
-            results.save(cache / filename, entry)
-            flush()
-            budget.store.publish(budget.campaign, cache_key, owner, {'filename': filename, 'digest': digest(entry)})
-            entries[(mode, text)] = entry
-            offset += len(pieces)
+        unique = list(dict.fromkeys(texts))
+        for start in range(0, len(unique), control_store.LEASE_BATCH_SIZE):
+            chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
+            keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
+                     'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
+            started = time.monotonic()
+            # Cache leases outlive the maximum bounded Modal invocation.
+            pending = []
+            try:
+                # A cache validation failure must also roll back new claims.
+                with budget.store.claim_batch(budget.campaign, keyed, ttl=86400, require_available=True) as claims:
+                    for cache_key, text in keyed.items():
+                        claim = claims[cache_key]
+                        if claim['status'] == 'done':
+                            meta = claim['payload']
+                            path = cache / meta['filename']
+                            if not path.exists():
+                                raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
+                            entry = json.loads(path.read_text())
+                            if digest(entry) != meta['digest']:
+                                raise RuntimeError('embedding cache digest mismatch')
+                            entries[(mode, text)] = entry
+                            cache_hits += 1
+                        else:
+                            pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
+                            pending.append((text, pieces, cache_key, claim['owner']))
+            except control_store.LeaseBusy:
+                raise RuntimeError('embedding cache fill already leased; retry after completion') from None
+            LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
+            if pending:
+                budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=86400)
+                budget.store.renew(budget.campaign, *budget.lease)
+                texts = [piece for _, pieces, _, _ in pending for piece in pieces]
+                before = budget.summary()['confirmed_input_tokens']
+                started = time.monotonic()
+                vectors = embed(texts, mode)
+                seconds = time.monotonic() - started
+                if mode == 'document':
+                    document_embedding_seconds += seconds
+                tokens = budget.summary()['confirmed_input_tokens'] - before
+                bound = embeddings.estimate_tokens(texts)
+                offset, publication = 0, {}
+                for text, pieces, cache_key, owner in pending:
+                    fraction = embeddings.estimate_tokens(pieces) / bound
+                    entry = {'vectors': vectors[offset:offset + len(pieces)], 'tokens': tokens * fraction,
+                             'embedding_seconds': seconds * fraction}
+                    filename = digest([cache_key, owner]) + '.json'
+                    results.save(cache / filename, entry)
+                    publication[cache_key] = (owner, {'filename': filename, 'digest': digest(entry)})
+                    entries[(mode, text)] = entry
+                    offset += len(pieces)
+                # SQL can only reference files after the entire chunk is durable.
+                flush()
+                budget.store.publish_many(budget.campaign, publication)
+                cache_fills += len(pending)
+            LOG.info('cache progress processed=%d total=%d hits=%d filled=%d',
+                     start + len(chunk), len(unique), cache_hits, cache_fills)
     piece_vectors, owners, index_tokens, index_seconds = [], [], 0., 0.
     for owner, text in enumerate(docs):
         if not semantic:
@@ -228,6 +245,9 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         elapsed = time.monotonic() - started
         if position < len(warmup):
             continue
+        if (position - len(warmup) + 1) % 10 == 0 or position == len(warmup + query_ids) - 1:
+            LOG.info('search progress completed=%d total=%d elapsed_seconds=%.3f',
+                     position - len(warmup) + 1, len(query_ids), time.monotonic() - indexing_started)
         ranking[qid] = selected[:10]
         latencies.append(1000 * elapsed)
         spend = budget.summary()['confirmed_cost_usd'] - before
