@@ -187,6 +187,30 @@ def providers():
             with self.assertRaises(news.BuildError):
                 news.read_articles(directory)
 
+    def test_wire_exports_filter_and_group_updates_before_pooling(self):
+        rows = [
+            {'id': 'early', 'title': 'Port update', 'text': 'A ferry will depart.', 'published_at': '2026-01-02T09:00:00Z', 'story_id': 'story-1', 'credit': 'wire'},
+            {'id': 'latest', 'title': 'Port update', 'text': 'A ferry departed at noon.', 'published_at': '2026-01-02T12:00:00Z', 'story_id': 'story-1', 'credit': 'wire'},
+            {'id': 'duplicate', 'title': 'Port update', 'text': 'A ferry departed at noon.', 'published_at': '2026-01-02T12:01:00Z', 'credit': 'wire'},
+            {'id': 'other', 'title': 'Mountain update', 'text': 'Snow closed the mountain road.', 'published_at': '2026-01-02T10:00:00Z', 'credit': 'wire'},
+            {'id': 'excluded', 'title': 'Comment', 'text': 'A personal opinion.', 'published_at': '2026-01-02', 'credit': 'opinion'}]
+        with tempfile.TemporaryDirectory() as directory:
+            pathlib.Path(directory, 'articles.json').write_text(json.dumps(rows))
+            options = {'filter': {'field': 'credit', 'values': ['wire']}, 'group_versions': True,
+                       'near_duplicate_threshold': .9, 'representative': 'latest'}
+            grouped = news.read_articles(directory, options)
+            self.assertEqual({a.id for a in grouped}, {'duplicate', 'other'})
+            representative = next(a for a in grouped if a.id == 'duplicate')
+            self.assertEqual([v['id'] for v in representative.previous_versions], ['early', 'latest'])
+            self.assertEqual(representative.updated_at, '2026-01-02T12:01:00+00:00')
+            rows[0]['text'] = 'The ferry timetable and fares are available. ' * 3
+            pathlib.Path(directory, 'articles.json').write_text(json.dumps(rows))
+            complete = news.read_articles(directory, {**options, 'representative': 'complete'})
+            self.assertIn('early', {a.id for a in complete})
+            self.assertEqual(len(news.read_articles(directory)), 5)  # options are opt-in
+            with self.assertRaises(news.BuildError):
+                news.read_articles(directory, {'filter': {'field': 'source', 'values': ['wire']}})
+
 
 @unittest.skipUnless(shutil.which('age') and shutil.which('age-keygen'), 'needs age tools')
 class EncryptedStorage(unittest.TestCase):

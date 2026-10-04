@@ -6,7 +6,7 @@ You get working/held-out sets, a human review sheet and an aggregate quality rep
 ## Prerequisites
 
 - Python 3.12+, `age` and `age-keygen` (`python3 --version`, `age --version`).
-- Install both `scripts/eval/requirements{,-news}.txt`; for Jev, run `python3 -m pip install --no-deps -e plugins/jev-rerank`.
+- Install `scripts/eval/requirements{,-direct,-news}.txt`; for Jev, run `python3 -m pip install --no-deps -e plugins/jev-rerank`.
 - A private storage directory, mounted Modal Volume, or S3-compatible bucket.
 - Separate age keys for the working measurement runner and confirmation runner.
   Human reviewers use a privileged key that working agents cannot access.
@@ -25,9 +25,10 @@ mkdir -p .scratch/news-demo
 chmod 700 .scratch/news-demo
 age-keygen -o .scratch/news-demo/working.key
 age-keygen -o .scratch/news-demo/confirmation.key
+age-keygen -o .scratch/news-demo/review.key
 export QUIVR_NEWS_WORKING_RECIPIENTS="$(age-keygen -y .scratch/news-demo/working.key)"
 export QUIVR_NEWS_HOLDOUT_RECIPIENTS="$(age-keygen -y .scratch/news-demo/confirmation.key)"
-export QUIVR_NEWS_REVIEW_RECIPIENTS="$QUIVR_NEWS_HOLDOUT_RECIPIENTS"
+export QUIVR_NEWS_REVIEW_RECIPIENTS="$(age-keygen -y .scratch/news-demo/review.key)"
 NUMBA_NUM_THREADS=1 python3 scripts/eval/news_set.py --fake --questions 30 \
   --storage-dir .scratch/news-demo/encrypted --report .scratch/news-demo/quality.json
 ```
@@ -45,10 +46,9 @@ Fields are in the [article schema](../../scripts/eval/news-article.schema.json):
 Dates accept ISO dates or timestamps with a timezone, normalized to UTC calendar dates.
 Without a cluster, the generator samples within calendar months for multi-article questions.
 
-Create a trusted Python adapter file outside Git exporting `providers()` returning
-[`Providers`](../../scripts/eval/news_set.py). Its interfaces are:
-Only the fake providers and `JevJudge` adapter ship here; implement the live generator,
-retrievers and two LLM judge adapters for your approved services.
+Use the built-in [`news_providers.py`](../../scripts/eval/news_providers.py) factory,
+or a trusted Python file outside Git exporting `providers()` returning
+[`Providers`](../../scripts/eval/news_set.py). The contracts are:
 
 | Adapter | Contract |
 | --- | --- |
@@ -65,22 +65,107 @@ The builder deduplicates normalized text, filters copies and fills equal type qu
 
 Live adapters provide retrievers named `bm25`, `e5_small`, `cohere_pro`, `hybrid`.
 Set `Providers.baseline` to the key for the current system; it is not a fifth retriever.
-Each contributes up to 20 candidates. All candidates receive three complete, independent judgments.
+Each contributes up to 10 candidates, giving at most 40 articles per question. All candidates receive three complete, independent judgments.
 Use `JevJudge` with the existing [Jev client](../../plugins/jev-rerank/jev_rerank/client.py)
-and two LLM judges from distinct families, served on approved Azure Foundry or Modal endpoints.
+and two chat judges from distinct families on approved OpenAI-compatible endpoints.
 Jev supplies binary relevance probabilities: its adapter maps probability quartiles to 0–3.
 This is a proxy for ordinal relevance; the report records `jev_grade_mapping: probability_quartiles`.
 Jev batches the full pool within its byte/token bounds, sharing one deadline and cost allowance.
 The other judges use 0 unrelated, 1 marginal, 2 partial answer, 3 direct answer.
 Treat source/query text as untrusted; adapters must bound cost before each provider attempt and never log input or secrets.
 
-For example, not run with real articles or provider credentials:
+## Select and group dispatches
+
+Exports may include `source`, `credit`, `story_id` and `updated_at` (a timezone-qualified timestamp).
+The optional `articles` configuration controls selection before generation and retrieval.
+For example, not run with real exports, to keep one operator-defined credit:
+
+```json
+{"articles":{"filter":{"field":"credit","values":["wire"]},"group_versions":true,
+"near_duplicate_threshold":0.9,"near_duplicate_window_hours":48,
+"representative":"latest","max_previous_versions":3}}
+```
+
+Merge this section into the full provider configuration; `filter.field` is `source` or `credit`.
+Matching is exact; missing fields do not match. One filter is supported; combine fields during export if needed.
+The default filter keeps all articles.
+`group_versions` groups equal nonempty `story_id` values. Near-duplicates use normalized five-word
+shingle-set Jaccard similarity (intersection size divided by union size) within the time window; zero disables it.
+Check story ids and repeated text in the private export before a paid run; the heuristic can merge distinct stories
+or miss rewritten updates. The longest text is a length proxy, not a guarantee of factual completeness.
+At least two selected articles must remain. Operators should prefer explicit story ids when available.
+`latest` selects by update timestamp (publication time when absent); `complete` selects the longest text,
+then the newest timestamp. An older complete selection carries the latest known story timestamp,
+so judges do not treat its text as the latest state. Each story contributes one selected version to every retrieval system.
+The generator sees up to three prior versions as context and cites only the selected version's id.
+Recent/event prompts ask about datelines, latest developments and follow-ups that the selected text supports.
+Judges receive the selected version and update time, and apply the same rubric to all dispatches.
+The six question types and 60/40 split remain unchanged; grouping reduces repeated versions in both sets.
+
+
+## Configure live adapters
+
+The coordinator exports articles through their deployment API into a private folder.
+For example, not run with a real export, one JSONL row is:
+
+```json
+{"id":"article-1","title":"A ferry opens","text":"The ferry sails Monday.","published_at":"2026-01-02"}
+```
+
+Create a private configuration using the factory CLI. For example, not run against private storage:
 
 ```sh
-python3 scripts/eval/news_set.py --articles /private/articles \
-  --providers /private/news_adapters.py --questions 1500 \
-  --storage-dir /private/news-volume --report .scratch/news-quality.json
+python3 scripts/eval/news_providers.py --write-example /private/news-providers.json
 ```
+
+Edit the generator and two judges' `model` and judge `family`, token/USD caps and contracted prices.
+The template prices are placeholders. Set `baseline` to the current retrieval system you want to measure.
+`build_max_usd` limits the sum of generation, two chat judges and Jev caps; retrieval has a separate cap.
+`endpoint_env` and `key_env` name environment variables, never literal endpoints or secrets.
+The template uses `NEWS_ENDPOINT`/`NEWS_KEY` for chat, `AZURE_FOUNDRY_ENDPOINT`/`AZURE_FOUNDRY_KEY`
+for Cohere and `TYPESAFE_API_KEY` for Jev. Provision their values through your private runner environment.
+For Azure AI Foundry, set the chat endpoint variable to the resource URL followed by `/openai/v1`;
+the adapter appends `/chat/completions` and sends the key in `api-key`.
+For Bearer-token endpoints, set `auth_header` to `bearer`; the default is `api-key`.
+Configure `output_token_field` as `max_completion_tokens` (default) or `max_tokens` for the endpoint.
+Chat attempts reserve final UTF-8 request bytes plus framing and the maximum completion, at separate rates.
+429/5xx retry at most twice by default, with at most ten seconds between attempts.
+Failed attempts keep their reservations as an upper bound, not a claim about actual provider billing.
+Truncated, duplicate-key or malformed JSON fails the build. Large judgment pools are batched within input bounds.
+Jev reserves all three client attempts before calling it. Usage that exceeds a reservation stops the adapter.
+
+Retrieval reuses the direct comparison's pinned local E5, Cohere client, token/USD gate and character windows.
+Install the direct requirements before the live run; E5 downloads its pinned model on first use.
+BM25 is indexed once; vectors and query embeddings are cached only in memory for this build.
+Hybrid uses weighted reciprocal rank fusion of BM25 and Cohere top-ten lists (`dense_weight`, default 0.5).
+This local comparison baseline is not a measurement of a running Quivr deployment.
+
+For example, not run with private keys, articles or credentials; use fresh output paths on every attempt:
+
+```sh
+umask 077
+age-keygen -o /private/working.key
+age-keygen -o /private/confirmation.key
+age-keygen -o /private/review.key
+export QUIVR_NEWS_WORKING_RECIPIENTS="$(age-keygen -y /private/working.key)"
+export QUIVR_NEWS_HOLDOUT_RECIPIENTS="$(age-keygen -y /private/confirmation.key)"
+export QUIVR_NEWS_REVIEW_RECIPIENTS="$(age-keygen -y /private/review.key)"
+export QUIVR_NEWS_CONFIG=/private/news-providers.json
+python3 scripts/eval/news_providers.py --config "$QUIVR_NEWS_CONFIG" --questions 1500
+python3 scripts/eval/news_set.py --articles /private/articles \
+  --providers scripts/eval/news_providers.py --questions 1500 \
+  --storage-dir /private/news-volume --report .scratch/news-quality.json \
+  --usage-report .scratch/news-usage.json
+```
+
+The estimate is offline: it shows worst bounded chat attempts, pool size and spend ceilings.
+Worst-case estimates can exceed the caps; caps stop calls and do not guarantee 1,500 accepted questions.
+The quality report includes aggregate provider usage; `--usage-report` also saves usage after a failed build.
+Use `confirmed_cost_usd` for confirmed usage and `cost_upper_bound_usd` for confirmed plus unknown reservations.
+The `totals` block sums all provider spend and records the generation/judging and separate retrieval ceilings.
+Always supply the ledger path for a paid build: a failed build otherwise has no saved spend report.
+Counts and phases go to stderr; exceptions and provider bodies are sanitised.
+Keep keys, configuration, exports and encrypted artifacts in private storage, outside Git.
 
 Replace `--storage-dir` with `--bucket <private-bucket> --prefix <version-prefix>` for S3 storage.
 Use boto3's standard role/environment credentials with Get/Put/Delete access to the private prefix.

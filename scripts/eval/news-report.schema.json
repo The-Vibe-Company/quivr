@@ -348,6 +348,63 @@
         "held_out",
         "review"
       ]
+    },
+    "provider_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "generator": {
+          "$ref": "#/$defs/chat_usage"
+        },
+        "judge_1": {
+          "$ref": "#/$defs/chat_usage"
+        },
+        "judge_2": {
+          "$ref": "#/$defs/chat_usage"
+        },
+        "jev": {
+          "$ref": "#/$defs/embedding_usage"
+        },
+        "retrieval": {
+          "$ref": "#/$defs/embedding_usage"
+        },
+        "totals": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "confirmed_cost_usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "cost_upper_bound_usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "generation_judging_max_usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "retrieval_max_usd": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "confirmed_cost_usd",
+            "cost_upper_bound_usd",
+            "generation_judging_max_usd",
+            "retrieval_max_usd"
+          ]
+        }
+      },
+      "required": [
+        "generator",
+        "judge_1",
+        "judge_2",
+        "jev",
+        "retrieval",
+        "totals"
+      ]
     }
   },
   "required": [
@@ -367,5 +424,124 @@
     "human_check",
     "baseline",
     "saturation"
-  ]
+  ],
+  "$defs": {
+    "chat_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budgeted_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budgeted_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cost_upper_bound_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stopped": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "attempts",
+        "budgeted_input_tokens",
+        "budgeted_output_tokens",
+        "confirmed_input_tokens",
+        "confirmed_output_tokens",
+        "confirmed_cost_usd",
+        "cost_upper_bound_usd",
+        "max_usd",
+        "stopped"
+      ]
+    },
+    "embedding_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reserved_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budgeted_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "admitted_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blocked_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "confirmed_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cost_upper_bound_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stopped": {
+          "type": "boolean"
+        },
+        "reason": {
+          "enum": [
+            null,
+            "run embedding input-token or USD budget exhausted",
+            "provider usage exceeded conservative input-token reservation"
+          ]
+        }
+      },
+      "required": [
+        "max_input_tokens",
+        "confirmed_input_tokens",
+        "reserved_input_tokens",
+        "budgeted_input_tokens",
+        "admitted_calls",
+        "blocked_calls",
+        "confirmed_cost_usd",
+        "cost_upper_bound_usd",
+        "max_usd",
+        "stopped",
+        "reason"
+      ]
+    }
+  }
 }

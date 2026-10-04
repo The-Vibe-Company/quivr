@@ -1,6 +1,6 @@
 """Build a private news-search set; provider adapters are supplied by the operator.
 
-The only built-in providers are offline fakes. Articles, generated questions,
+Live adapters ship in news_providers; offline fakes need no credentials. Articles, generated questions,
 judgments and human review rows stay in memory until separately age-encrypted.
 """
 from __future__ import annotations
@@ -31,6 +31,11 @@ from typing import Protocol
 
 KINDS = ('entity', 'event', 'recent', 'paraphrase', 'multi_article', 'no_answer')
 SYSTEMS = ('bm25', 'e5_small', 'cohere_pro', 'hybrid')
+POOL_DEPTH = 10
+
+
+def progress(phase, count):
+    print(f'[news-set] {phase}: {count}', file=sys.stderr, flush=True)
 STOPWORDS = set('a au aux avec ce ces dans de des du en et la le les leur par pour que qui un une'.split())
 
 
@@ -45,6 +50,13 @@ class Article:
     text: str
     date: str
     cluster: str = ''
+    published_at: str = ''
+    updated_at: str = ''
+    story_id: str = ''
+    source: str = ''
+    credit: str = ''
+    latest_story_update: str = ''
+    previous_versions: tuple[dict, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -88,6 +100,7 @@ class Providers:
     judges: list[Judge]
     baseline: str
     synthetic: bool = False
+    article_options: dict = dataclasses.field(default_factory=dict)
 
 
 class Storage(Protocol):
@@ -110,9 +123,89 @@ def words(text):
     return set(normalize(text).split()) - STOPWORDS
 
 
-def read_articles(directory):
-    """JSON object/array or JSONL rows: id, title, text, published_at, cluster?"""
-    result, seen = [], set()
+def article_options(value):
+    defaults = {'filter': None, 'group_versions': False, 'near_duplicate_threshold': 0,
+                'near_duplicate_window_hours': 48, 'representative': 'latest', 'max_previous_versions': 3}
+    if not isinstance(value, dict) or set(value) - set(defaults):
+        raise BuildError('unknown article selection options')
+    cfg = {**defaults, **value}
+    if (type(cfg['group_versions']) is not bool or cfg['representative'] not in ('latest', 'complete')
+            or type(cfg['max_previous_versions']) is not int or not 0 <= cfg['max_previous_versions'] <= 10
+            or type(cfg['near_duplicate_threshold']) not in (int, float)
+            or not (cfg['near_duplicate_threshold'] == 0 or .5 <= cfg['near_duplicate_threshold'] <= 1)
+            or type(cfg['near_duplicate_window_hours']) not in (int, float)
+            or not 0 < cfg['near_duplicate_window_hours'] <= 168):
+        raise BuildError('invalid article selection options')
+    selected = cfg['filter']
+    if selected is not None and (not isinstance(selected, dict) or set(selected) != {'field', 'values'}
+            or selected['field'] not in ('source', 'credit') or not isinstance(selected['values'], list)
+            or not selected['values'] or any(not isinstance(v, str) or not v for v in selected['values'])):
+        raise BuildError('article filter requires source/credit and nonempty exact values')
+    return cfg
+
+
+def timestamp(value):
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}(?:[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2}))?', value):
+        raise BuildError('article timestamp must include a timezone, or be an ISO date')
+    parsed = datetime.datetime.fromisoformat(value.replace('Z', '+00:00').replace('z', '+00:00'))
+    return parsed.replace(tzinfo=datetime.timezone.utc) if parsed.tzinfo is None else parsed.astimezone(datetime.timezone.utc)
+
+
+def group_articles(articles, cfg):
+    """Explicit story ids or time-bounded shingle similarity group dispatch versions.
+
+    An inverted shingle index restricts comparisons to overlapping texts. Union
+    groups include transitive duplicates; all output/evidence stays private.
+    """
+    parents = list(range(len(articles)))
+    def root(i):
+        while parents[i] != i:
+            parents[i] = parents[parents[i]]
+            i = parents[i]
+        return i
+    def join(i, j):
+        parents[root(i)] = root(j)
+    stories, inverted, shingles, dates = {}, collections.defaultdict(list), [], []
+    threshold = cfg['near_duplicate_threshold']
+    for i, article in enumerate(articles):
+        if cfg['group_versions'] and article.story_id:
+            if article.story_id in stories:
+                join(i, stories[article.story_id])
+            stories[article.story_id] = i
+        tokens = normalize(article.text).split()
+        grams = {tuple(tokens[j:j + 5]) for j in range(max(1, len(tokens) - 4))}
+        date = timestamp(article.updated_at)
+        if threshold:
+            possible = set(j for gram in grams for j in inverted[gram])
+            for j in possible:
+                if (abs((date - dates[j]).total_seconds()) <= cfg['near_duplicate_window_hours'] * 3600
+                        and len(grams & shingles[j]) / len(grams | shingles[j]) >= threshold):
+                    join(i, j)
+            for gram in grams:
+                inverted[gram].append(i)
+        shingles.append(grams)
+        dates.append(date)
+    groups = collections.defaultdict(list)
+    for i, article in enumerate(articles):
+        groups[root(i)].append(article)
+    selected = []
+    for group in groups.values():
+        newest = lambda a: (a.updated_at, a.id)
+        key = newest if cfg['representative'] == 'latest' else lambda a: (len(a.text), *newest(a))
+        chosen = max(group, key=key)
+        previous = sorted((a for a in group if a.id != chosen.id and a.updated_at <= chosen.updated_at), key=newest)
+        previous = previous[-cfg['max_previous_versions']:] if cfg['max_previous_versions'] else []
+        context = tuple({'id': a.id, 'title': a.title, 'text': a.text, 'updated_at': a.updated_at} for a in previous)
+        selected.append(dataclasses.replace(chosen, previous_versions=context,
+                         latest_story_update=max(a.updated_at for a in group),
+                         story_id=chosen.story_id or next((a.story_id for a in group if a.story_id), '')))
+    progress('selected_articles', len(selected))
+    return selected
+
+
+def read_articles(directory, options=None):
+    """Private JSON/JSONL exports, with opt-in credit filtering and version grouping."""
+    result, seen, cfg = [], set(), article_options({} if options is None else options)
     try:
         for path in sorted(pathlib.Path(directory).rglob('*')):
             if path.suffix not in ('.json', '.jsonl') or not path.is_file():
@@ -123,29 +216,31 @@ def read_articles(directory):
                 rows = json.loads(path.read_text())
                 rows = rows if isinstance(rows, list) else [rows]
             for row in rows:
+                selected = cfg['filter']
+                if selected and row.get(selected['field']) not in selected['values']:
+                    continue
                 if any(not isinstance(row.get(k), str) or not row[k].strip()
                        for k in ('id', 'title', 'text', 'published_at')):
                     raise BuildError('article fields must be nonempty strings')
                 if row['id'] in seen:
                     raise BuildError('duplicate article id')
-                value = row['published_at']
-                if not re.fullmatch(r'\d{4}-\d{2}-\d{2}(?:[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2}))?', value):
-                    raise BuildError('article timestamp must include a timezone, or be an ISO date')
-                published = datetime.datetime.fromisoformat(value.replace('Z', '+00:00').replace('z', '+00:00'))
-                if published.tzinfo is not None:
-                    published = published.astimezone(datetime.timezone.utc)
-                cluster = row.get('cluster', '')
-                if not isinstance(cluster, str):
-                    raise BuildError('cluster must be a string')
-                result.append(Article(row['id'], row['title'], row['text'], published.date().isoformat(), cluster))
+                published = timestamp(row['published_at'])
+                updated = timestamp(row.get('updated_at', row['published_at']))
+                if updated < published:
+                    raise BuildError('article update precedes publication')
+                extras = {k: row.get(k, '') for k in ('cluster', 'story_id', 'source', 'credit')}
+                if any(not isinstance(v, str) for v in extras.values()):
+                    raise BuildError('article grouping and credit fields must be strings')
+                result.append(Article(row['id'], row['title'], row['text'], updated.date().isoformat(),
+                                      published_at=published.isoformat(), updated_at=updated.isoformat(), **extras))
                 seen.add(row['id'])
     except BuildError:
         raise
     except (ValueError, OSError, TypeError, AttributeError, KeyError):
         raise BuildError('invalid article input; check the input schema') from None
     if not result:
-        raise BuildError('no articles found')
-    return result
+        raise BuildError('no articles found after selection')
+    return group_articles(result, cfg) if cfg['group_versions'] or cfg['near_duplicate_threshold'] else result
 
 
 def generate(corpus, generator, count, seed):
@@ -203,6 +298,7 @@ def generate(corpus, generator, count, seed):
         if len(accepted) != target:
             raise BuildError('generator exhausted attempts before filling every question type')
         questions.extend(accepted)
+        progress('generated', len(questions))
     return questions, dict(rejected)
 
 
@@ -216,8 +312,8 @@ def judge_pool(questions, corpus, retrievers, judges):
         pool = collections.defaultdict(dict)
         rankings[qi] = {}
         for system, retriever in retrievers.items():
-            ids = retriever.search(question, corpus, 20)
-            if not isinstance(ids, list) or len(ids) > 20 or len(ids) != len(set(ids)) or any(d not in by_id for d in ids):
+            ids = retriever.search(question, corpus, POOL_DEPTH)
+            if not isinstance(ids, list) or len(ids) > POOL_DEPTH or len(ids) != len(set(ids)) or any(d not in by_id for d in ids):
                 raise BuildError('retriever returned invalid candidate ids')
             rankings[qi][system] = ids
             for rank, doc in enumerate(ids, 1):
@@ -240,6 +336,8 @@ def judge_pool(questions, corpus, retrievers, judges):
         if has_positive == (question.kind == 'no_answer'):
             raise BuildError('answerability conflicts with pooled judgments')
         rows.extend(query_rows)
+        if (qi + 1) % 25 == 0 or qi + 1 == len(questions):
+            progress('judged', qi + 1)
     return rows, rankings
 
 
@@ -406,6 +504,15 @@ def validate_report(report, published=False):
             raise BuildError('artifact names must match the published version')
 
 
+def validate_usage(usage):
+    import jsonschema
+    schema = json.loads(pathlib.Path(__file__).with_name('news-report.schema.json').read_text())
+    try:
+        jsonschema.Draft202012Validator({'$defs': schema['$defs'], **schema['properties']['provider_usage']}).validate(usage)
+    except jsonschema.ValidationError:
+        raise BuildError('usage violates the aggregate-only schema') from None
+
+
 def build(corpus, providers, count=1500, seed=992, salt=None):
     salt = salt or os.urandom(32)
     if len(salt) < 32:
@@ -436,9 +543,11 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
                                    for i in ids for r in rows_by_query[i] if r['grade'] == 0],
                 'provenance': {'seed': seed, 'baseline': providers.baseline, 'synthetic': providers.synthetic,
                                'generator': type(providers.generator).__name__,
+                               'generator_version': getattr(providers.generator, 'version', ''),
                                'judges': [{'family': j.family, 'version': getattr(j, 'version', '')}
                                           for j in providers.judges],
-                               'article_metadata': {a.id: {'date': a.date, 'cluster': a.cluster} for a in corpus}}}
+                               'article_metadata': {a.id: {'date': a.date, 'cluster': a.cluster, 'published_at': a.published_at,
+                                     'updated_at': a.updated_at, 'story_id': a.story_id} for a in corpus}}}
     working, held_out = partition(dev), partition(held)
     scorable = {q: judgments for q, judgments in working['qrels'].items() if any(judgments.values())}
     # Only working query ids are ever passed to the scorer, including saturation.
@@ -470,6 +579,9 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
     for chunk in json.JSONEncoder(sort_keys=True, ensure_ascii=False).iterencode([working, held_out]):
         digest.update(chunk.encode())
     version = digest.hexdigest()
+    if hasattr(providers, 'usage'):
+        report['provider_usage'] = providers.usage()
+        validate_report(report)
     return Build(working, held_out, review, report, version)
 
 
@@ -748,8 +860,12 @@ def main(argv=None):
     parser.add_argument('--prefix', default='')
     parser.add_argument('--s3-endpoint')
     parser.add_argument('--report', required=True, type=pathlib.Path)
+    parser.add_argument('--usage-report', type=pathlib.Path, help='aggregate spend ledger, also written on build failure')
     args = parser.parse_args(argv)
-    if args.report.exists():
+    if args.usage_report and (args.usage_report.exists() or args.usage_report.is_symlink()
+                              or args.usage_report.resolve() == args.report.resolve()):
+        parser.error('usage report must name a separate new file')
+    if args.report.exists() or args.report.is_symlink():
         parser.error('report exists; choose a new filename')
     if bool(args.storage_dir) == bool(args.bucket):
         parser.error('choose exactly one storage directory or private bucket')
@@ -759,6 +875,7 @@ def main(argv=None):
         parser.error('live builds require articles and at least 1500 questions')
     if not args.fake and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
         parser.error('live builds are refused in CI')
+    providers = None
     try:
         if args.fake:
             providers = fake_providers()
@@ -766,7 +883,8 @@ def main(argv=None):
                               f'Le ferry dessert une île et accueille {i + 10} voyageurs.',
                               f'2026-{1 + i % 2:02d}-02', 'maritime') for i in range(8)]
         else:
-            providers, corpus = load_providers(args.providers), read_articles(args.articles)
+            providers = load_providers(args.providers)
+            corpus = read_articles(args.articles, providers.article_options)
             if providers.synthetic:
                 raise BuildError('live build cannot use synthetic providers')
         recipients = [os.environ.get(k, '').split() for k in
@@ -788,7 +906,19 @@ def main(argv=None):
         # Provider/SDK exceptions can contain inputs, credentials and URLs.
         print('News-set build failed; check adapters, input schema, recipients and private storage.')
         return 2
+    finally:
+        if args.usage_report and providers is not None and hasattr(providers, 'usage'):
+            try:
+                usage = providers.usage()
+                validate_usage(usage)
+                args.usage_report.parent.mkdir(parents=True, exist_ok=True)
+                with args.usage_report.open('x') as output:
+                    json.dump(usage, output, indent=2, allow_nan=False)
+                    output.write('\n')
+            except Exception:
+                print('Aggregate usage ledger could not be written.', file=sys.stderr)
 
 
 if __name__ == '__main__':
+    sys.modules['news_set'] = sys.modules[__name__]
     raise SystemExit(main())
