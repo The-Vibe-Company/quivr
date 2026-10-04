@@ -161,6 +161,43 @@ class Run(unittest.TestCase):
             self.assertEqual(report['results']['candidate']['latency_ms']['samples'], 1)
             self.assertGreaterEqual(report['results']['candidate']['latency_ms']['p95'], 0)
 
+    def test_cached_reference_is_reused_and_stale_samples_are_refused(self):
+        # Owns reference provenance and paired scores, using real scoring.
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            trec.write(root / 'set', {'a': {'text': 'relevant'}, 'b': {'text': 'other'}},
+                       {'q': 'question'}, {'q': {'a': 1}})
+            (root / 'set' / 'manifest.json').write_text('{"sample":{"seed":775}}')
+            common = ['--set', 'scifact', '--max-input-tokens', '1000', '--max-usd', '1']
+            with mock.patch.dict(os.environ, {'CI': '', 'GITHUB_ACTIONS': ''}), \
+                 mock.patch.object(bakeoff.public_sets, 'prepare', return_value=root / 'set'), \
+                 mock.patch.object(bakeoff.E5, 'embed', side_effect=[[[1, 0], [0, 1]], [[1, 0]]]):
+                self.assertEqual(bakeoff.main(common + ['--models', bakeoff.BASELINE,
+                    '--out', str(root / 'reference.json')]), 0)
+            config = {'format': 'openai', 'auth': 'none', 'base_url': 'http://localhost:8080/v1',
+                      'model': 'example/model', 'dimensions': 2, 'send_dimensions': False}
+            (root / 'config.json').write_text(json.dumps(config))
+            for stale in (False, True):
+                if stale:
+                    reference = json.loads((root / 'reference.json').read_text())
+                    reference['fingerprint'] = 'different sample'
+                    (root / 'reference.json').write_text(json.dumps(reference))
+                out = root / ('stale.json' if stale else 'candidate.json')
+                with mock.patch.dict(os.environ, {'CI': '', 'GITHUB_ACTIONS': ''}), \
+                     mock.patch.object(bakeoff.public_sets, 'prepare', return_value=root / 'set'), \
+                     mock.patch.object(bakeoff.E5, 'embed', side_effect=AssertionError('reference recomputed')), \
+                     mock.patch.object(bakeoff.OpenAI, 'embed', side_effect=[[[1, 0], [0, 1]], [[1, 0]]]):
+                    code = bakeoff.main(common + ['--openai-config', 'candidate=' + str(root / 'config.json'),
+                        '--e5-reference', str(root / 'reference.json'), '--out', str(out)])
+                report = json.loads(out.read_text())
+                self.assertEqual(code, 2 if stale else 0)
+                if stale:
+                    self.assertEqual(report['reason']['kind'], 'reference_mismatch')
+                    self.assertEqual(report['results'], {})
+                else:
+                    self.assertEqual(report['results']['candidate']['vs_current']['ndcg@10']['delta'], 0)
+                    self.assertEqual(report['results'][bakeoff.BASELINE]['mean']['ndcg@10'], 1)
+
     def test_completed_scores_and_capped_partial_evidence_survive(self):
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)

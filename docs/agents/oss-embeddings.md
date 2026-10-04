@@ -1,9 +1,8 @@
 # Measure open-source embeddings
 
-Compare self-hosted models with hosted models on the same public samples, using
-`hosted.embed` configuration and the dense `direct_bakeoff.py` scoring path.
-You need Python 3.11+, the dependencies below, and an authenticated Modal profile
-for paid runs. The coordinator dispatches paid runs. CI uses offline fixtures only.
+Compare embedding models on public samples with `hosted.embed` and `direct_bakeoff.py`.
+Python 3.11+ and the requirements below install the Modal CLI; paid runs need operator authentication.
+The coordinator dispatches paid runs; CI uses offline fixtures only.
 
 ## Preview the campaign
 
@@ -14,54 +13,52 @@ python3 -m venv .scratch/eval/oss-venv
   --out .scratch/eval/oss-plan.json
 ```
 
-The plan writes ten default sets, four models and two hardware choices without
-contacting Modal. Add `--include-restricted` for three diagnostic sets; those
-sets never count toward promotion. Outputs refuse overwrites. Use new paths on reruns.
+The plan previews ten sets, four models and two hardware choices without Modal.
+`--include-restricted` adds three diagnostic sets, ineligible for promotion. Outputs refuse overwrites.
 
 Candidates use Apache-2.0 weights: [Qwen3 0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B),
 [Granite 311M multilingual r2](https://huggingface.co/ibm-granite/granite-embedding-311m-multilingual-r2)
 and [Arctic l v2](https://huggingface.co/Snowflake/snowflake-arctic-embed-l-v2.0).
-The fourth model is the pinned e5-small baseline served through TEI.
-The configuration examples in `plugins/hosted-embed/examples/` set model, dimensions
-and query/document prefixes. Full weight revisions live in `oss_bakeoff.py`;
-plugin `model_revision` uses the first sixteen characters because its field is bounded.
-TEI 1.9.3 serves all four through its OpenAI-compatible API. CPU uses float32; L4 uses float16.
+Configurations live in `plugins/hosted-embed/examples/`; `oss_bakeoff.py` pins weight revisions.
+TEI 1.9.3 uses its OpenAI-compatible API. CPU uses float32; L4 uses float16.
+Qwen3 CPU is excluded pending validation: its pinned serving combination exited
+before readiness in the operator run. Upstream includes CPU architecture support.
 
 ## Run a measurement
 
-Paid example, not run here; first authenticate the Modal CLI with your operator profile:
+Paid example, not run here; authenticate with `.scratch/eval/oss-venv/bin/modal token new` first:
 
 ```sh
 .scratch/eval/oss-venv/bin/python scripts/eval/oss_bakeoff.py run \
   --models e5-small qwen3 granite-r2 arctic-v2 --hardware cpu L4 \
-  --timeout 3600 --max-input-tokens 200000000 --acknowledge-cost \
+  --timeout 3600 --concurrency 4 --max-input-tokens 200000000 --acknowledge-cost \
   --out .scratch/eval/oss-runs
 ```
 
-Jobs run serially and create no deployment, public endpoint or persistent volume.
-Each TEI server listens on container loopback and stops when the job ends.
-The timeout covers each model/hardware job, including preparation and the local e5
-comparison. Campaigns record Modal app and call IDs for billing reconciliation.
-The token allowance is shared across its sets; byte-based reservations
-remain charged when serving usage is absent. Interrupted jobs may have no returned
-report; use smaller `--sets` selections if preparation or inference hits the timeout.
+Each model/hardware/set runs independently; `--concurrency` bounds both phases (default 4, 1..32).
+Failures leave other jobs running; exit 2 means incomplete jobs. Loopback TEI servers are reaped.
+The timeout covers each set job, including preparation. The model/hardware token
+allowance is divided equally across sets, with any remainder unused; reservations
+remain charged when usage is absent. Select fewer `--sets` for a larger allowance.
 
-The reference windows stay at 1,800 characters for e5 and 6,000 for other models,
-with 200-character overlap, title plus text, and best-piece cosine top ten.
-TEI can truncate at its model limit, as the original local e5 encoder does.
-Each set includes the pinned local CPU e5 comparison; configured e5 rows separately
-measure TEI resource costs. Query p50/p95 measures individual encoding calls,
-including loopback HTTP; it is not engine search latency or external network latency.
-The direct benchmark requires cosine and omits plugin timeout/retry/concurrency/batch-token
-controls. Its recorded execution is serial, one attempt, with a 120-second HTTP timeout.
+A separate CPU phase computes e5 once per set. Scored reference artifacts live in
+`--reference-cache` (default `.scratch/eval/e5-references`), keyed by measurement
+code and pinned encoder. Candidates validate the sample fingerprint before reuse.
+A failed reference blocks only its set; other sets continue. Corrupt cache entries
+record a reference mismatch; choose a new cache directory to recompute them.
+
+Reference windows use 1,800 characters for e5 and 6,000 for others, 200-character
+overlap, title plus text, and best-piece cosine top ten. TEI can truncate at its limit.
+Set reports include cached CPU e5 scores; configured e5 rows measure TEI costs.
+Query p50/p95 measures individual encoding over loopback, not engine search latency.
+The direct benchmark omits plugin operational controls: each job sends serial
+requests with one attempt and a 120-second HTTP timeout.
 
 The dated [Modal function rates](https://modal.com/pricing) checked 2026-10-03 give
 $0.252576/hour for four physical CPU cores and 8 GiB, or $1.051776/hour with an L4.
-Eight one-hour jobs estimate $5.217408 in function compute. Builds, scheduling,
-startup and egress are excluded; this estimate is not an invoice or a guaranteed cap.
-Candidate cost per million tokens uses confirmed OpenAI usage and candidate elapsed
-time. Whole-job cost also includes preparation, local baseline and scoring, so keep
-it separate. Missing token usage means unavailable per-token cost, never zero.
+The plan sums per-set candidate and uncached reference compute, excluding builds,
+scheduling, startup and egress; it is not an invoice or guaranteed cap. Candidate
+per-token cost uses confirmed usage and encoding time; job/reference costs are separate.
 
 ## Compare and retain evidence
 
@@ -76,10 +73,13 @@ python3 scripts/eval/oss_report.py --out .scratch/eval/oss-comparison.md \
 ```
 
 Import each completed set report through `scripts/eval/results`; `*-campaign.json`
-is resource metadata rather than a scored set. Include the coordinator's Cohere Fast
-and Pro evidence from the same samples. Historical batch latency cannot supply query
-percentiles; rerun with `direct_bakeoff.py --query-latency` if they are required.
+is resource metadata rather than a scored set. Aggregate model/hardware campaigns
+keep their existing filenames; `jobs/` holds individual stop reasons and Modal IDs,
+and `references/` holds newly computed reference costs. Reasons distinguish timeout,
+token cap, TEI exit code with the last 20 stderr lines (at most 8 KiB), provider error,
+and unavailable reference. Job artifacts retain stderr; scored reports omit it; logs contain counts and phases.
+Include hosted evidence from the same samples; use `--query-latency` for missing percentiles.
 The comparison checks sample lineage and query IDs before paired statistics.
 Restricted sets remain diagnostic and raw per-query data stays outside public reports.
-Keep the hosted winner until measured quality, latency and serving cost justify a
-replacement on named hardware. A nonsignificant difference alone does not prove equivalence.
+Keep the hosted winner until quality, latency and serving cost justify replacement;
+a nonsignificant difference alone does not prove equivalence.

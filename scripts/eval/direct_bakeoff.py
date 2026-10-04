@@ -35,6 +35,14 @@ MODELS = [BASELINE, 'Cohere-Embed-V5-Fast', 'Cohere-Embed-V5-Pro', 'text-embeddi
           'Cohere-Embed-V5-Pro-1024']
 
 
+def reference_identity():
+    """Invalidate cached scores when the pinned encoder, sample or scoring changes."""
+    digest = hashlib.sha256()
+    for module in (__file__, public_sets.__file__, trec.__file__, scoring.__file__):
+        digest.update(pathlib.Path(module).read_bytes())
+    return digest.hexdigest()
+
+
 class OpenAI:
     """Self-hosted endpoint using the hosted.embed plugin's configuration."""
     def __init__(self, config, budget, set_name, label):
@@ -254,6 +262,7 @@ def main(argv=None):
                         help='e5 baseline always runs first; include Cohere-Embed-V5-Pro-1024 for reduced dimensions')
     parser.add_argument('--openai-config', action='append', default=[], metavar='LABEL=FILE',
                         help='self-hosted candidate with the same JSON configuration as hosted.embed (auth none)')
+    parser.add_argument('--e5-reference', type=pathlib.Path, help='reuse a completed e5 report with matching sample and code')
     parser.add_argument('--query-latency', action='store_true',
                         help='encode queries individually to measure warm query p50/p95, instead of batch throughput')
     parser.add_argument('--max-input-tokens', required=True, type=int)
@@ -310,7 +319,7 @@ def main(argv=None):
               'set': args.set, 'documents': len(docs), 'queries': len(queries), 'results': {},
               'fingerprint': trec.fingerprint(directory), 'sample': json.loads((directory / 'manifest.json').read_text()),
               'promotion_eligible': public_sets.SETS[args.set]['promotion_eligible'],
-              'settings': {'models': systems, 'e5_model': E5_MODEL, 'e5_revision': E5_REVISION, 'e5_window_chars': 1800, 'hosted_window_chars': 6000,
+              'settings': {'e5_reference_identity': reference_identity(), 'models': systems, 'e5_model': E5_MODEL, 'e5_revision': E5_REVISION, 'e5_window_chars': 1800, 'hosted_window_chars': 6000,
                            'overlap_chars': 200, 'retrieval': 'exact cosine, best piece, top 10',
                            'prices_usd_per_million': prices, 'price_reference_date': '2026-10-03',
                            'scoring': scoring.CONVENTION, 'paired_test': scoring.TEST}}
@@ -335,6 +344,21 @@ def main(argv=None):
             for name in systems:
                 report['active_model'] = name
                 save()
+                if name == BASELINE and args.e5_reference:
+                    reference = json.loads(args.e5_reference.read_text())
+                    if (reference.get('status') != 'complete' or reference.get('set') != args.set
+                            or reference.get('fingerprint') != report['fingerprint']
+                            or reference.get('settings', {}).get('e5_reference_identity') != reference_identity()
+                            or BASELINE not in reference.get('results', {})):
+                        report['reason'] = {'kind': 'reference_mismatch'}
+                        raise ValueError('e5 reference provenance differs')
+                    result = reference['results'][BASELINE]
+                    base = {'mean': result['mean'], 'per_query': result['per_query']}
+                    report['results'][BASELINE] = result
+                    report['settings'].setdefault('window_chars', {})[BASELINE] = 1800
+                    report['e5_reference'] = {'source': reference['source'], 'fingerprint': reference['fingerprint']}
+                    save()
+                    continue
                 started = time.monotonic()
                 width = 1800 if name == BASELINE or configs.get(name, {}).get('model') == E5_MODEL else 6000
                 report['settings'].setdefault('window_chars', {})[name] = width
@@ -379,16 +403,18 @@ def main(argv=None):
                     result['vs_current'] = {metric: scoring.paired(scores['per_query'][metric], base['per_query'][metric])
                                             for metric in ('ndcg@10', 'recall@10')}
                 report['results'][name] = result
-                print(name, json.dumps(result['mean']), flush=True)
+                print('scoring', len(report['results']), len(systems), flush=True)
                 save()
             report['status'] = 'complete'
             report.pop('active_model', None)
         except embeddings.BudgetExceeded:
             report['status'] = 'capped'
-        except Exception:
+            report['reason'] = {'kind': 'token_cap'}
+        except Exception as error:
             # Raw dependency/provider errors may contain URLs, input or credentials.
             report['status'] = 'failed'
-            print('comparison failed; see partial results and budget in the output file', flush=True)
+            report.setdefault('reason', {'kind': 'provider_error', 'error_type': type(error).__name__})
+            print('failed', len(report['results']), len(systems), flush=True)
         finally:
             save()
     return 0 if report['status'] == 'complete' else 2

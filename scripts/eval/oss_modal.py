@@ -14,21 +14,23 @@ class JobFailed(Exception):
         # Exception text may contain provider inputs or credentials.
         super().__init__(f'Modal job failed ({error_type}); inspect operator console')
         self.app_id = app_id
+        self.reason = {'kind': 'timeout' if error_type in ('TimeoutError', 'FunctionTimeoutError') else 'provider_error',
+                       'error_type': error_type}
 
 
-def remote_measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted, started):
+def remote_measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted, started, reference=None):
     started.put(True)
     # Modal serialization imports this module by name; the repository is mounted
     # at the same fixed path in every container, without credentials or .git.
     sys.path.insert(0, '/workspace/scripts/eval')
     from oss_bakeoff import measure
-    result = measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted)
+    result = measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted, reference)
     result['campaign']['modal_call_id'] = modal.current_function_call_id()
     return result
 
 
-def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted):
-    from oss_bakeoff import image_for
+def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, reference=None):
+    from oss_bakeoff import image_for, report_campaign
     # Only the local dispatcher needs the checkout. Modal imports this module
     # from /root/oss_modal.py, which has no repository-relative parent layout.
     root = pathlib.Path(__file__).resolve().parents[2]
@@ -51,8 +53,8 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted):
                           max_containers=1, scaledown_window=2, retries=0)(remote_measure)
     # Ephemeral App.run scope ends on success, failure, or keyboard interruption.
     try:
-        with modal.enable_output(), app.run(), modal.Queue.ephemeral() as started:
-            call = worker.spawn(label, hardware, sets, git_sha, max_tokens, timeout, restricted, started)
+        with app.run(), modal.Queue.ephemeral() as started:
+            call = worker.spawn(label, hardware, sets, git_sha, max_tokens, timeout, restricted, started, reference)
             try:
                 try:
                     started.get(timeout=STARTUP_TIMEOUT)
@@ -63,12 +65,12 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted):
                     call.get(timeout=0)
                     raise TimeoutError('Modal function did not signal startup')
                 result = call.get(timeout=timeout)
-            except TimeoutError:
+            except (TimeoutError, modal.exception.FunctionTimeoutError):
                 call.cancel(terminate_containers=True)
                 raise
             result['campaign']['modal_app_id'] = app.app_id
             for report in result['reports']:
-                report['serving_campaign'] = result['campaign']
+                report['serving_campaign'] = report_campaign(result['campaign'])
             return result
     except Exception as error:
         raise JobFailed(app.app_id, type(error).__name__) from None
