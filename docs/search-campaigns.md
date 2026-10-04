@@ -5,7 +5,7 @@ quality/cost/latency Pareto front: candidates for which improving one score mean
 worsening another. It measures public development sets on Modal and records evidence
 through the [results store](eval-results.md). A lead can submit bounded proposals,
 ingest exact usage receipts and send daily Linear/Slack summaries. Trusted full-stack
-confirmation is required before the promotion adapter can prepare a settings PR.
+confirmation automatically checks configured finalists before a settings PR opens.
 
 ## Prerequisites
 
@@ -35,6 +35,8 @@ Run a supervisor and a separate watchdog under a process manager that restarts t
 They can run on any machine with this checkout, Python, Modal CLI/network access and
 both databases. Preserve the committed checkout across restarts. Neither process
 needs an engine stack locally. Measurement machines install the Modal requirements.
+Automatic confirmation also needs the Go toolchain specified in `go.mod` to build
+and run the hosted plugin's offline configure command before dispatch.
 
 ## Validate your campaign
 
@@ -66,7 +68,7 @@ for promotion. Trials missing measurements never get synthetic scores.
 The YAML supports `choices` or `low`/`high`/`step` distributions over supported search
 configuration keys. `parallelism` is 1–4; `max_trials` counts all Optuna trials,
 including failed ones. `confirmation_limit` can lower the maximum of 10 held-out
-reads. This stage never consumes a held-out read.
+reads. Exploration never consumes a held-out read.
 
 ## Start and recover
 
@@ -125,5 +127,6 @@ Modal stop: other campaigns may share the account.
 
 Confirm exploration finalists on the complete stack before changing deployed settings.
 Until the confirmation integration is configured, `confirmation_available` is false
-and this command opens no promotion PRs. See [report and review candidates](search-campaign-reporting.md)
+and this command opens no promotion PRs. Configure frozen confirmation metadata with
+`--confirmation-configuration` on `start` or `resume`; see [report and review candidates](search-campaign-reporting.md)
 for notification credentials, exact receipts, proposals and the confirmation hand-off.

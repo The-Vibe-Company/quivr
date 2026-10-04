@@ -35,6 +35,40 @@ class CampaignStore(control_store.Store):
         return {**row[3], 'spec': row[0], 'git_sha': row[1], 'scorer_digest': row[2],
                 'owner': row[4], 'live': bool(row[5]), 'generation': row[6]}
 
+    def confirmation_configuration(self, name, configuration):
+        """Freeze validated operator metadata independently of exploration state."""
+        with self.edit(name) as (_, state):
+            if state.setdefault('confirmation_configuration', configuration) != configuration:
+                raise ValueError('confirmation configuration is immutable')
+
+    def development_keys(self, name, trial):
+        """Resolve synced aggregate result identities to canonical SQL leases.
+
+        Private query evidence stays in SQL; only opaque lease keys leave this
+        boundary. The native runner validates the rows and their MLflow sync.
+        """
+        import results
+        state = self.snapshot(name)
+        value = state['trials'][str(trial)]
+        evidence = value['report'].get('evidence', [])
+        if not evidence or any(item.get('status') != 'synced' for item in evidence):
+            raise ValueError('development evidence must be synced')
+        identities = {results.result_key(item) for item in evidence}
+        configurations = {'baseline': state['spec']['policy']['baseline'], 'candidate': value['config']}
+        keys = {dataset: {} for dataset in state['spec']['policy']['sets']}
+        with self.transaction() as db:
+            self.lock(db, name)
+            for side, configuration in configurations.items():
+                rows = db.execute("SELECT key,payload FROM eval_control.leases WHERE campaign=%s AND payload->>'tier'='direct' AND payload->'config' @> %s::jsonb ORDER BY key",
+                                  (name, json.dumps(configuration))).fetchall()
+                for key, row in rows:
+                    dataset = row['dataset']['name']
+                    if dataset in keys and results.record(row)['result_key'] in identities:
+                        keys[dataset].setdefault(side, key)
+        if any(set(pair) != {'baseline', 'candidate'} for pair in keys.values()):
+            raise ValueError('canonical development pairing is incomplete')
+        return keys
+
     @contextlib.contextmanager
     def edit(self, name):
         """Serialize lead receipts/outboxes, including after compute is stopped.

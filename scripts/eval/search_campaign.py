@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Start, resume and stop a bounded configuration-search campaign outside CI."""
 import argparse
+import copy
 import concurrent.futures
 import contextlib
 import tempfile
@@ -328,6 +329,140 @@ def lineage():
     return sha, scorer
 
 
+class NativeConfirmation:
+    """Translate the trusted engine receipt to the campaign promotion protocol."""
+    def __init__(self, store, name, configuration, outbox, *, transport=None):
+        import engine_confirmation as native
+        if not isinstance(configuration, dict) or set(configuration) != {
+                'heldout_family', 'datasets', 'mapping_policy', 'engine_runner_git_sha'}:
+            raise ValueError('confirmation requires frozen input and engine metadata')
+        self.store, self.name, self.outbox = store, name, pathlib.Path(outbox)
+        policy = store.policy(name)
+        # Native validation allowlists every metadata field before persistence.
+        preview = native.build_request(store, name, 0, policy['baseline'],
+            configuration['heldout_family'], configuration['datasets'],
+            {n: {'baseline': 'preview/baseline', 'candidate': 'preview/candidate'} for n in policy['sets']},
+            configuration['mapping_policy'], configuration['engine_runner_git_sha'])
+        self.configuration = {k: preview[k] for k in configuration}
+        store.confirmation_configuration(name, self.configuration)
+        self.transport = transport or native.ModalAdapter(store, outbox)
+        self.engine_git_sha = preview['engine_runner_git_sha']
+        self.engine_scorer_digest = preview['engine_runner_scorer_digest']
+        self.heldout_fingerprint = preview['heldout_fingerprint']
+        self.heldout_family = {'sets': native.family_sets(preview['heldout_family']),
+                               'fingerprint': self.heldout_fingerprint}
+        # Preserve safe family metadata in the campaign protocol as well.
+        if 'sets' in preview['heldout_family']:
+            self.heldout_family.update(preview['heldout_family'])
+        self.confirmation_policy_digest = native.digest(native.invariants(preview, policy))
+
+    def prepare(self, trial):
+        import engine_confirmation as native
+        cfg = self.configuration
+        candidate = self.store.snapshot(self.name)['trials'][str(trial)]['config']
+        native.mapping(candidate, self.store.policy(self.name)['baseline'],
+                       cfg['mapping_policy']['production'], candidate=True)
+        self.request = native.build_request(self.store, self.name, trial,
+            candidate, cfg['heldout_family'],
+            cfg['datasets'], self.store.development_keys(self.name, trial),
+            cfg['mapping_policy'], self.engine_git_sha)
+        # A receipt may authorize only the settings that the promotion target
+        # actually deploys. Resolve omitted hosted values with its real offline
+        # configure command; never guess execution defaults or segmentation.
+        import campaign_promotion as promotion
+        with promotion._checkout(ROOT, self.engine_git_sha) as checkout:
+            baseline = promotion.effective_settings(checkout)
+            effective = {'baseline': baseline, 'candidate': promotion._candidate_settings(
+                checkout, candidate, self.store.policy(self.name)['baseline'], 'ranked')}
+            manifest = promotion.HostedManifestBuilder()(checkout, baseline['hosted'])
+        locked = {k: v.get('const') for k, v in manifest['configuration']['schema']['properties'].items()}
+        for side, settings in effective.items():
+            hosted = {**locked, **settings['hosted']}
+            ingestion = self.request['effective_' + side]['ingestion']
+            retrieve = {**settings['retrieve']}
+            if retrieve['candidate_count'] == 'request_limit':
+                retrieve['candidate_count'] = 10
+            if (ingestion.get('kind') != 'hosted'
+                    or any(hosted.get(k) != v for k, v in ingestion.items() if k != 'kind')
+                    or retrieve != self.request['effective_' + side]['retrieve']):
+                raise native.Unmappable('production_settings_mismatch')
+        self.campaign_settings = effective
+
+    def __call__(self, request, resource):
+        import engine_confirmation as native
+        import campaign_promotion as promotion
+        req = self.request
+        if any(request['effective_' + side] != settings
+               for side, settings in self.campaign_settings.items()):
+            raise promotion.Refused('confirmed settings differ from the promotion target')
+        if any(request[k] != req[k] for k in ('campaign', 'trial', 'baseline_hash', 'candidate_hash',
+                                              'git_sha', 'scorer_digest', 'engine_runner_git_sha',
+                                              'engine_runner_scorer_digest')):
+            raise promotion.Refused('native and campaign request identities differ')
+        result = self.transport(copy.deepcopy(req), resource)
+        if result.get('status') not in ('confirmed', 'rejected'):
+            return {'status': result.get('status') if result.get('status') in
+                    ('unavailable', 'leased', 'capped', 'failed') else 'failed', 'confirmation_available': False}
+        bindings = {k: req[k] for k in native.BINDINGS}
+        key = 'engine-confirmation/' + native.digest(bindings)
+        publication = self.store.evidence(self.name, [key]).get(key, {})
+        canonical = publication.get('output')
+        if (result.get('bindings') != bindings
+                or result.get('confirmation_policy_digest') != self.confirmation_policy_digest
+                or result.get('confirmation_key') != key or result.get('cleanup_verified') is not True
+                or result.get('confirmation_available') is not True
+                or result.get('heldout') != {'passed': True, 'fingerprint': self.heldout_fingerprint}
+                or canonical is None or {k: v for k, v in result.items() if k != 'receipts'} != canonical):
+            raise promotion.Refused('native confirmation binding, policy or cleanup mismatch')
+        ids = result.get('compute_ids')
+        if (not isinstance(ids, dict) or set(ids) != {'app_id', 'sandbox_id'}
+                or any(not isinstance(ids[k], str) or not re.fullmatch(prefix + r'-[A-Za-z0-9_-]+', ids[k])
+                       for k, prefix in (('app_id', 'ap'), ('sandbox_id', 'sb')))):
+            raise promotion.Refused('native compute termination identities are required')
+        resources = self.store.snapshot(self.name)['resources']
+        current_id = resource.resource['id'] if resource.resource else None
+        if not any(r['app_id'] == ids['app_id'] and (r['status'] == 'closed' or identity == current_id)
+                   for identity, r in resources.items()):
+            raise promotion.Refused('native app identity is not registered')
+        gates = result.get('gates', {})
+        if (set(gates) != set(promotion.GATES) or any(type(gates[g].get('passed')) is not bool for g in gates)
+                or (all(gates[g]['passed'] for g in gates)) != (result['status'] == 'confirmed')):
+            raise promotion.Refused('native confirmation verdict is inconsistent')
+        if not result.get('receipts') or any(set(r) != {'result_key', 'run_id', 'status'}
+                or r['status'] != 'synced' for r in result['receipts']):
+            raise promotion.Refused('native aggregate tracking must be synced')
+        expected = {results.record(row)['result_key'] for row in publication['records']}
+        if len(result['receipts']) != len(expected) or {r['result_key'] for r in result['receipts']} != expected:
+            raise promotion.Refused('native tracking receipts do not match canonical measurements')
+        tracking = results.Results(directory=self.outbox)
+        for receipt in result['receipts']:
+            actual = tracking.get(results.result_key(receipt))
+            if actual.get('source') != 'mlflow' or actual.get('run_id') != receipt['run_id']:
+                raise promotion.Refused('native aggregate tracking identity is not synced')
+        return {k: copy.deepcopy(v) for k, v in {
+            **result, 'bindings': request, 'compute_ids': [ids['app_id']]}.items()
+            if k != 'confirmation_policy_digest'}
+
+
+def advance_confirmations(store, name, owner, study, adapter, **kwargs):
+    """Confirm Pareto finalists and reconcile durable results into Optuna."""
+    import campaign_promotion
+    outcomes = campaign_promotion.advance(store, name, owner, adapter=adapter, **kwargs)
+    state = store.snapshot(name)
+    summaries = {}
+    for number, record in state.get('confirmations', {}).items():
+        summaries[number] = {k: record[k] for k in ('status', 'reason')}
+        if record.get('receipt'):
+            summaries[number]['aggregate_sets'] = record['receipt']['aggregate_sets']
+        elif record.get('report'):
+            summaries[number]['aggregate_sets'] = record['report']['aggregate_sets']
+    # Optuna freezes completed trials; study metadata is its supported mutable
+    # annotation surface. Keep exploration objective values unchanged.
+    if study.user_attrs.get('confirmations') != summaries:
+        study.set_user_attr('confirmations', summaries)
+    return outcomes
+
+
 def public_status(store, name, study=None):
     import campaign_reporting
     import campaign_promotion
@@ -349,10 +484,11 @@ def public_status(store, name, study=None):
               'trials': [{'number': int(number), 'config': value.get('config'),
                           'report': campaign_reporting.export_report(value.get('report'), state['spec']['policy']['sets'])}
                          for number, value in state['trials'].items()]}
-    output['pareto'] = [{'number': p['number'], 'objectives': p['objectives']}
+    output['pareto'] = [{'number': p['number'], 'objectives': p['objectives'], 'confirmation': p['confirmation']}
                         for p in campaign_reporting.leaderboard(state)]
     if study is not None:
-        output['pareto'] = [{'number': trial.number, 'objectives': trial.values}
+        output['pareto'] = [{'number': trial.number, 'objectives': trial.values,
+                            'confirmation': study.user_attrs.get('confirmations', {}).get(str(trial.number), {})}
                             for trial in study.best_trials]
     output.update(campaign_promotion.public_status(state))
     return output
@@ -363,6 +499,9 @@ def supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_r
     import campaign_store
     import campaign_compute
     compute = campaign_compute.ModalCompute()
+    configuration = store.snapshot(name).get('confirmation_configuration')
+    if confirmation_adapter is None and configuration is not None:
+        confirmation_adapter = NativeConfirmation(store, name, configuration, pathlib.Path(outbox) / 'confirmation')
     while True:
         try:
             available = watchdog_once(store, name, compute)
@@ -386,12 +525,13 @@ def supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_r
         try:
             loop = Loop(store, name, owner, study, campaign_compute.Measurement(store, name, owner, outbox, compute))
             with guard(store, name, owner, compute, stop_requested):
+                # Recover finalists saved before a crash before tick can reach
+                # the terminal trial limit and close new confirmation admission.
+                advance_confirmations(store, name, owner, study, confirmation_adapter, compute=compute)
                 while True:
                     result = loop.tick()
                     import campaign_promotion
-                    # THE-1008 supplies the trusted runner via this small seam.
-                    # CLI deployments remain disabled until its adapter is wired.
-                    campaign_promotion.advance(store, name, owner, adapter=confirmation_adapter, compute=compute)
+                    advance_confirmations(store, name, owner, study, confirmation_adapter, compute=compute)
                     import campaign_reporting
                     campaign_reporting.notify(store, name)
                     if once or result.get('paused') or result.get('stopped'):
@@ -435,6 +575,11 @@ def main(argv=None):
         sub.add_argument('trial', type=int)
         if command == 'promote':
             sub.add_argument('--open-pr', action='store_true', help='publish a settings PR only from trusted confirmation')
+    for sub in (start, commands.choices['resume'], commands.choices['confirm']):
+        sub.add_argument('--confirmation-configuration', type=pathlib.Path,
+                         help='freeze trusted held-out fingerprints, production/resources and engine revision')
+    commands.choices['confirm'].add_argument('--allow-paid', action='store_true', help='operator-only confirmation outside CI')
+    commands.choices['confirm'].add_argument('--outbox', type=pathlib.Path, default=ROOT / '.scratch/eval/results')
     for sub in (start, *(commands.choices[c] for c in ('resume', 'stop', 'watchdog'))):
         sub.add_argument('--allow-paid', action='store_true', help='explicit operator-only live lifecycle; never CI')
         sub.add_argument('--once', action='store_true', help='perform one scheduling/watchdog pass')
@@ -444,6 +589,10 @@ def main(argv=None):
         parser.error('promotion requires --open-pr outside CI')
     if args.command == 'digest' and args.send and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
         parser.error('notification delivery is refused in CI')
+    if args.command == 'confirm' and args.allow_paid and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
+        parser.error('live confirmation is refused in CI')
+    if args.command == 'confirm' and args.confirmation_configuration and not args.allow_paid:
+        parser.error('confirmation configuration requires --allow-paid outside CI')
     if args.command == 'validate':
         try:
             print(results.encode(read_spec(args.spec)))
@@ -466,13 +615,30 @@ def main(argv=None):
             name = args.campaign
             if not IDENTIFIER.fullmatch(name):
                 raise ValueError('invalid campaign identifier')
+        if getattr(args, 'confirmation_configuration', None):
+            NativeConfirmation(store, name, json.loads(args.confirmation_configuration.read_text()),
+                               args.outbox / 'confirmation')
         if args.command in ('confirm', 'promote'):
             import campaign_promotion
             state = store.snapshot(name)
             if args.trial < 0 or str(args.trial) not in state['trials']:
                 raise ValueError('invalid trial number')
             if args.command == 'confirm':
-                output = campaign_promotion.confirm(store, name, args.trial, None)
+                configuration = state.get('confirmation_configuration')
+                if configuration is None or not args.allow_paid:
+                    output = campaign_promotion.confirmation_status(store, name, args.trial)
+                else:
+                    compute = campaign_compute.ModalCompute()
+                    watchdog_once(store, name, compute)
+                    owner = store.acquire(name)
+                    try:
+                        with guard(store, name, owner, compute):
+                            adapter = NativeConfirmation(store, name, configuration, args.outbox / 'confirmation')
+                            output = campaign_promotion.confirm(store, name, args.trial, owner,
+                                                                adapter=adapter, compute=compute)
+                    finally:
+                        store.release_owner(name, owner)
+                        campaign_store.cleanup(store, name, compute)
             else:
                 output = campaign_promotion.promote(store, name, args.trial)
         elif args.command in ('usage', 'propose', 'digest'):

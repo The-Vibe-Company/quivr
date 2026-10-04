@@ -3,3 +3,6 @@ optuna==4.5.0       # MIT; persistent multi-objective ask/tell study
 psycopg[binary]==3.3.4
 modal==1.6.1
 PyYAML==6.0.3
+# Native confirmation rechecks paired canonical development evidence locally.
+numpy==2.0.2
+scipy==1.17.1

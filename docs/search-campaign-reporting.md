@@ -107,18 +107,20 @@ a scheduled `digest --send` can finish retries.
 
 ## Confirm and promote
 
-Full-engine confirmation is unavailable until the trusted runner integration lands.
-Its native request/result aliases require an explicit trusted translator; the campaign
-hook does not wire the native runner automatically.
-The existing engine smoke command cannot qualify a candidate.
-`confirm <campaign> <trial>` reports the disabled adapter; it launches no measurement. Finalists remain
-pending; no held-out read is charged by the campaign supervisor.
-
-The confirmation adapter must bind frozen code/scorer, dataset/split fingerprints,
-baseline and candidate settings, all four gates, held-out pass and synced aggregate
-results-store evidence. The trusted runner owns confirmation-read admission and
-registers its compute through the campaign lifecycle. Arbitrary success JSON is
-never an approval source.
+Configure `start` or `resume` with `--confirmation-configuration <file>` to confirm
+eligible Pareto finalists automatically. Follow the [full-engine setup](eval-engine-confirmation.md#prerequisites)
+for protected inputs, consent and access. The campaign requirements include NumPy/SciPy.
+The ignored JSON file contains only the [metadata format](eval-engine-confirmation.md#prepare-the-trusted-configuration):
+`heldout_family`, actual dev `datasets` fingerprints and `mapping_policy`; add
+`engine_runner_git_sha` matching the committed supervisor SHA. Omit `dev_evidence`:
+the campaign resolves synced result keys to SQL. Metadata is immutable and reused on resume.
+Without configuration, finalists stay pending and no confirmation compute runs.
+`confirm <campaign> <trial> --allow-paid` runs confirmation; omit `--allow-paid` to read status only.
+The runner alone admits reads; canonical replay consumes no new read. Rejected and
+unavailable outcomes appear in the digest, leaderboard and Optuna study metadata.
+Metadata retains confirmation aggregates; exploration objective values stay unchanged.
+The adapter checks all four gates, native bindings, policy, SQL publication, tracking
+and app/sandbox cleanup. Smoke results and arbitrary success JSON cannot authorize promotion.
 
 The promotion adapter supports hosted Pro/Fast model and dimensions, plus
 `core.retrieve` 1.2.0 weight, depth and fusion settings. Changed character windows,
@@ -133,5 +135,4 @@ Relevant main drift blocks promotion; unrelated changes are allowed after settin
 
 ## Next
 
-[Record and compare evidence](eval-results.md), then use the existing evaluation,
-backfill and promotion path after a human reviews and merges a settings PR.
+[Record and compare evidence](eval-results.md), then evaluate, backfill and promote after a human merges the settings PR.

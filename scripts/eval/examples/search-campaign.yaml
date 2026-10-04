@@ -43,10 +43,10 @@ policy:
     fiqa: {split: dev}
   baseline:
     model: Cohere-Embed-V5-Pro
-    revision: '2026-10-03'
+    revision: '1'
     dimensions: 1024
     window_chars: 6000
     overlap_chars: 200
     dense_weight: 0.5
-    candidate_count: 30
+    candidate_count: 10
     reranker: none

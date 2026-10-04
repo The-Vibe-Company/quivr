@@ -35,6 +35,7 @@ class Spec(unittest.TestCase):
             with mock.patch.dict(os.environ, CI='true'), mock.patch('sys.stderr', new_callable=io.StringIO):
                 for command in (['start', str(path), '--allow-paid'],
                                 ['promote', 'campaign', '0', '--open-pr'],
+                                ['confirm', 'campaign', '0', '--allow-paid'],
                                 ['digest', 'campaign', '--send']):
                     with self.subTest(command=command):
                         with self.assertRaises(SystemExit) as refused:

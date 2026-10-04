@@ -317,7 +317,7 @@ class TrustedPromotion(unittest.TestCase):
             setattr(unavailable, key, getattr(adapter, key))
         outcome = promotion.confirm(self.store, self.name, 0, self.owner, adapter=unavailable,
                                     repository=self.repository, compute=self.compute)
-        self.assertEqual(outcome['status'], 'pending_confirmation')
+        self.assertEqual(outcome['status'], 'unavailable')
         self.assertEqual(self.store.snapshot(self.name)['resources'], {})
         self.assertEqual(self.store.availability(self.name)['confirmation_reads_left'], 10)
         # Simulate canonical engine publication followed by supervisor proof loss:

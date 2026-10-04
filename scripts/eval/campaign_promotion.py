@@ -1,6 +1,7 @@
 """Campaign-side trusted confirmation hook and configuration-only promotion.
 
-Default integration remains disabled; there is no direct native runner call.
+Unconfigured integration remains disabled. search_campaign.NativeConfirmation
+implements the native request/result translation described below.
 A trusted translator must build an engine_confirmation request explicitly, using
 build_request and the actual frozen TREC/split fingerprints and per-set canonical
 baseline/candidate SQL lease keys. Campaign result_key lists are not native dev
@@ -16,8 +17,8 @@ The callable supplies heldout_fingerprint, safe heldout_family, engine_git_sha,
 engine_scorer_digest and confirmation_policy_digest; optional fusion is ranked.
 It uses resource.app_name/on_app/check for invoke; the native runner alone owns
 fenced protected-input admission and held-out reads. Missing metadata fails
-before intent. Native bridge wiring awaits the runner's final schema/helpers;
-no local success JSON grants trust and raw/private gate details are not stored.
+before intent. No local success JSON grants trust and raw/private gate details
+are not stored.
 """
 import ast
 import contextlib
@@ -231,7 +232,7 @@ def _fingerprints(checkout):
 
 def _validate_family(family, expected):
     """Frozen aggregate descriptors allow metadata only, never private sources."""
-    fields = {'version', 'name', 'split', 'fingerprint', 'digest', 'privacy', 'private', 'sets'}
+    fields = {'version', 'name', 'split', 'fingerprint', 'digest', 'privacy', 'private', 'sets', 'diagnostic'}
     identifiers = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}')
     def descriptor(value, nested=False):
         if not isinstance(value, dict) or not value or set(value) - (fields - {'sets'} if nested else fields):
@@ -251,7 +252,7 @@ def _validate_family(family, expected):
             elif key in ('fingerprint', 'digest'):
                 if not isinstance(item, str) or not re.fullmatch(r'(sha256:)?[a-f0-9]{64}', item):
                     raise Refused('held-out fingerprints must be immutable content digests')
-            elif key == 'private':
+            elif key in ('private', 'diagnostic'):
                 if type(item) is not bool:
                     raise Refused('held-out privacy must be explicit')
             elif key == 'privacy':
@@ -439,8 +440,11 @@ def confirm(store, name, trial, owner, *, adapter=None, repository=ROOT, compute
         return {'status': 'confirmed', 'reason': 'Trusted full-engine and held-out confirmation complete.'}
     handle = None
     receipt = None
+    report = None
     outcome = {'status': 'pending_confirmation', 'reason': 'Trusted full-engine confirmation failed or evidence is incomplete.'}
     try:
+        if hasattr(adapter, 'prepare'):
+            adapter.prepare(trial)
         with _checkout(repository, state['git_sha']) as checkout, \
              _checkout(repository, getattr(adapter, 'engine_git_sha', None)) as engine_checkout:
             request = _request(state, trial, checkout, getattr(adapter, 'heldout_fingerprint', None),
@@ -462,7 +466,13 @@ def confirm(store, name, trial, owner, *, adapter=None, repository=ROOT, compute
             raise RuntimeError('trusted confirmation adapter failed') from None
         store.renew_owner(name, owner)
         if isinstance(result, dict) and result.get('status') in ('rejected', 'unavailable', 'leased', 'capped', 'failed'):
-            raise Refused('Trusted engine confirmation is ' + result['status'] + '; promotion remains disabled.')
+            if result['status'] == 'rejected' and isinstance(result.get('aggregate_sets'), dict):
+                from search_campaign import aggregate
+                report = aggregate({**result, 'work': {str(i): {'receipt': r} for i, r in enumerate(result.get('receipts', []))}},
+                                   state['spec']['policy']['sets'])
+            outcome = {'status': result['status'],
+                       'reason': 'Trusted engine confirmation is ' + result['status'] + '; promotion remains disabled.'}
+            raise Refused(outcome['reason'])
         resources = store.snapshot(name)['resources']
         requested_ids = result.get('compute_ids', []) if isinstance(result, dict) else []
         current_id = handle.resource['id'] if handle.resource else None
@@ -475,9 +485,11 @@ def confirm(store, name, trial, owner, *, adapter=None, repository=ROOT, compute
         outcome = {'status': 'confirmed', 'reason': 'Trusted full-engine and held-out confirmation complete.'}
     except Refused as error:
         outcome['reason'] = str(error)
-    except Exception:
+    except Exception as error:
         # Arbitrary adapter exceptions can contain raw private payload or secrets.
-        pass
+        import engine_confirmation
+        if isinstance(error, engine_confirmation.Unmappable):
+            outcome = {'status': 'unavailable', 'reason': 'Candidate settings have no full-engine mapping; promotion remains disabled.'}
     finally:
         if handle and handle.resource:
             try:
@@ -494,12 +506,15 @@ def confirm(store, name, trial, owner, *, adapter=None, repository=ROOT, compute
                 store.closed(name, resource['id'], owner=owner)
             except Exception:
                 receipt = None
+                report = None
                 outcome = {'status': 'pending_confirmation', 'reason': 'Confirmation compute cleanup pending; retry watchdog or stop.'}
     # A stopped/replaced owner cannot publish a receipt after external work.
     with store.mutation(name, owner) as (_, current, __):
         record = {**outcome}
         if receipt:
             record['receipt'] = receipt
+        if report:
+            record['report'] = report
         current.setdefault('confirmations', {})[str(trial)] = record
     return outcome
 
@@ -725,8 +740,19 @@ def advance(store, name, owner, *, repository=ROOT, adapter=None, compute=None, 
     """Advance finalists; absent adapter persists an honest pending state only."""
     state = store.snapshot(name)
     outcomes = []
-    for number, trial in sorted(state['trials'].items(), key=lambda item: int(item[0])):
+    import campaign_reporting
+    eligible = {**state, 'trials': {n: t for n, t in state['trials'].items()
+                                   if t.get('report', {}).get('status') == 'exploration_finalist'}}
+    # The parent spec sends the top 2-3 exploration points to the expensive tier.
+    points = campaign_reporting.leaderboard(eligible)[:3]
+    finalists = {str(p['number']) for p in points}
+    order = {str(p['number']): rank for rank, p in enumerate(points)}
+    for number, trial in sorted(state['trials'].items(), key=lambda item: (order.get(item[0], len(order)), int(item[0]))):
         if trial.get('report', {}).get('status') != 'exploration_finalist':
+            continue
+        if adapter is not None and number not in finalists:
+            continue
+        if state.get('confirmations', {}).get(number, {}).get('status') in ('rejected', 'unavailable'):
             continue
         result = confirm(store, name, int(number), owner, adapter=adapter, repository=repository, compute=compute)
         if adapter is None:
@@ -740,7 +766,9 @@ def advance(store, name, owner, *, repository=ROOT, adapter=None, compute=None, 
 
 def public_status(state):
     """Only safe lifecycle summaries; receipts/adapter payload never cross here."""
-    return {'confirmation_available': False, 'confirmation_reason': DISABLED,
+    configured = 'confirmation_configuration' in state
+    return {'confirmation_available': configured,
+            'confirmation_reason': 'Trusted full-engine confirmation configured.' if configured else DISABLED,
             'confirmations': [{'trial': int(n), 'status': r['status'], 'reason': r['reason']}
                               for n, r in state.get('confirmations', {}).items()],
             'promotions': [{k: r[k] for k in ('status', 'reason', 'branch', 'pr_url') if k in r}

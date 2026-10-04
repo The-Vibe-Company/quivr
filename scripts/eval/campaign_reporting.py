@@ -132,7 +132,11 @@ def leaderboard(state):
         clean = export_report(report, state['spec']['policy']['sets'])
         values = objectives(clean, state['spec']['goal']['weights'])
         if values is not None and clean['status'] in ('exploration_finalist', 'rejected'):
-            points.append({'number': int(number), 'objectives': values, 'report': clean})
+            record = state.get('confirmations', {}).get(number, {})
+            points.append({'number': int(number), 'objectives': values, 'report': clean,
+                           'confirmation': {**{k: record[k] for k in ('status', 'reason') if k in record},
+                               **({'aggregate_sets': record.get('receipt', record.get('report', {}))['aggregate_sets']}
+                                  if record.get('receipt') or record.get('report') else {})}})
     def dominates(a, b):
         return (a[0] >= b[0] and a[1] <= b[1] and a[2] <= b[2]
                 and a != b)
@@ -159,6 +163,8 @@ def digest_body(state, available, ledger):
             lines.append(f"Evidence result {receipt['result_key']} ({receipt['status']}), run {receipt['run_id'] or 'unknown'}")
     if not leaderboard(state):
         lines.append('No complete Pareto points yet.')
+    for number, record in sorted(state.get('confirmations', {}).items(), key=lambda item: int(item[0])):
+        lines.append(f"Trial {number}: confirmation={record['status']}; {record['reason']}")
     for kind in ('provider', 'modal'):
         spend = ledger.get(kind, {'charged_usd': 0, 'unknown_usd': 0})
         lines.append(f"{kind}: confirmed ${spend['charged_usd']-spend['unknown_usd']:.6g}, uncertain ${spend['unknown_usd']:.6g}, charged ${spend['charged_usd']:.6g}")
@@ -171,7 +177,10 @@ def digest_body(state, available, ledger):
     lines.append(f"Held-out reads left: {available['confirmation_reads_left']}")
     tokens = usage(state)
     lines.append('Agent tokens: ' + (json.dumps(tokens, sort_keys=True) if tokens else 'unknown (no exact receipts)'))
-    lines.append('Next plan: ' + state.get('next_plan', 'Continue bounded exploration; full-engine confirmation adapter is unavailable.'))
+    default_plan = ('Continue bounded exploration and full-engine confirmation of Pareto finalists.'
+                    if 'confirmation_configuration' in state else
+                    'Continue bounded exploration; full-engine confirmation adapter is unavailable.')
+    lines.append('Next plan: ' + state.get('next_plan', default_plan))
     lines.append('Compute charges cover reserved runner compute, not a full account invoice.')
     return '\n'.join(lines)
 

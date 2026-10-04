@@ -195,7 +195,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Bounded search campaigns** explore public settings with a persistent Pareto
   front, daily/total caps, recoverable cleanup and daily summaries. Leads submit bounded
   proposals and exact usage receipts ([guide](docs/search-campaigns.md)).
-  Full-stack confirmation is required before any production change.
+  Configured campaigns confirm finalists on the full stack before opening settings PRs.
 - **Private news evaluation builder**: pluggable question generation, pooled judgments,
   separate encrypted working/held-out sets and a human review sheet
   ([contributor guide](docs/agents/news-set.md)); real provider runs are operator controlled.
