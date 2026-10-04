@@ -1,0 +1,4023 @@
+.agents/skills/armada-coordinator/MERGE.md
+  s_54b80c92daa9cb::t_bf03289ac3666c 1-73
+.agents/skills/armada-coordinator/SKILL.md
+  s_54b80c92daa9cb::t_ab79a9f6c99f64 1-67
+.agents/skills/armada-runtime-claude-code/SKILL.md
+  s_54b80c92daa9cb::t_6b118dd592471e 1-108
+.agents/skills/armada-runtime-conductor/SKILL.md
+  s_54b80c92daa9cb::t_9bafad6f42d7bc 1-145
+.agents/skills/armada-runtime-herdr/SKILL.md
+  s_54b80c92daa9cb::t_4bbf9f6e0f9e78 1-50
+.agents/skills/armada-worker/SKILL.md
+  s_54b80c92daa9cb::t_dcd68ed1064072 1-36
+.agents/skills/ask-matt/PHASE-BOUNDARIES.md
+  s_54b80c92daa9cb::t_31ff197829f8fb 1-55
+.agents/skills/ask-matt/SKILL.md
+  s_54b80c92daa9cb::t_0368fb00562d21 1-90
+.agents/skills/ask-matt/agents/openai.yaml
+  s_54b80c92daa9cb::t_df62dac2714b05 1-5
+.agents/skills/audit-tests-dev/CAMPAIGN.md
+  s_54b80c92daa9cb::t_134af6dffbbe08 1-115
+.agents/skills/audit-tests-dev/LICENSE
+  s_54b80c92daa9cb::t_128ef30a85f3a0 1-24
+.agents/skills/audit-tests-dev/SKILL.md
+  s_54b80c92daa9cb::t_69bc6c45a0e494 1-181
+.agents/skills/audit-tests-dev/SOURCE.md
+  s_54b80c92daa9cb::t_1db1f34834b249 1-14
+.agents/skills/better-ui/LICENSE
+  s_54b80c92daa9cb::t_140d085593f1c7 1-21
+.agents/skills/better-ui/SKILL.md
+  s_54b80c92daa9cb::t_3ca141febba9c4 1-149
+.agents/skills/better-ui/SOURCE.md
+  s_54b80c92daa9cb::t_696b1b6d23867c 1-13
+.agents/skills/better-ui/animations.md
+  s_54b80c92daa9cb::t_83c789c7614df9 1-204
+.agents/skills/better-ui/companion.json
+  s_54b80c92daa9cb::t_d5de3d41cbdee6 1-36
+.agents/skills/better-ui/enter-exit.md
+  s_54b80c92daa9cb::t_2759996ee4a607 1-146
+.agents/skills/better-ui/icon-transitions.md
+  s_54b80c92daa9cb::t_5e41a73983ae2c 1-101
+.agents/skills/better-ui/icons.md
+  s_54b80c92daa9cb::t_ed84078b62a099 1-110
+.agents/skills/better-ui/performance.md
+  s_54b80c92daa9cb::t_340de4bcdc1377 1-88
+.agents/skills/better-ui/surfaces.md
+  s_54b80c92daa9cb::t_7e080e63168a72 1-219
+.agents/skills/capture-learning-tools/LICENSE
+  s_54b80c92daa9cb::t_297a3ae3ce1035 1-21
+.agents/skills/capture-learning-tools/SKILL.md
+  s_54b80c92daa9cb::t_d179a10390c58f 1-181
+.agents/skills/capture-learning-tools/UPSTREAM.md
+  s_54b80c92daa9cb::t_e957e1a223424b 1-6
+.agents/skills/capture-learning-tools/companion.json
+  s_54b80c92daa9cb::t_fbd2ad45ca3a7f 1-57
+.agents/skills/capture-learning-tools/evals/evals.json
+  s_54b80c92daa9cb::t_3e15bc0925e30b 1-29
+.agents/skills/capture-learning-tools/references/agent-instructions.md
+  s_54b80c92daa9cb::t_2646caf2d3ec37 1-71
+.agents/skills/capture-learning-tools/references/ci-policy.md
+  s_54b80c92daa9cb::t_4e75815f6a6518 1-84
+.agents/skills/capture-learning-tools/references/conversation-analysis.md
+  s_54b80c92daa9cb::t_964bbd3b554726 1-44
+.agents/skills/capture-learning-tools/references/cross-agent-linking.md
+  s_54b80c92daa9cb::t_cf2c1fb4e31866 1-56
+.agents/skills/capture-learning-tools/references/examples.md
+  s_54b80c92daa9cb::t_ca18c92760514d 1-61
+.agents/skills/capture-learning-tools/references/non-technical-mode.md
+  s_54b80c92daa9cb::t_eedc27765d0eb6 1,3,5,7-12,14,16-18,20-21,23-24,26-27,30,32-36
+.agents/skills/capture-learning-tools/references/project-memory.md
+  s_54b80c92daa9cb::t_277b72d41ae196 1-46
+.agents/skills/capture-learning-tools/references/promotion-matrix.md
+  s_54b80c92daa9cb::t_91673398b72461 1-44
+.agents/skills/capture-learning-tools/references/testing-policy.md
+  s_54b80c92daa9cb::t_2121423ccb78c3 1-57
+.agents/skills/capture-learning-tools/scripts/classify_learning.py
+  s_54b80c92daa9cb::t_07bf83619c1b85 1-72
+.agents/skills/capture-learning-tools/scripts/inspect_ci_surface.py
+  s_54b80c92daa9cb::t_443eb6206d0401 1-2,4,6-10,13-17,20-23,25-48,50-81,84-115
+.agents/skills/capture-learning-tools/scripts/inspect_project_guidance.py
+  s_54b80c92daa9cb::t_47fd610caf4ff8 1-137
+.agents/skills/code-review/SKILL.md
+  s_54b80c92daa9cb::t_a6ea2bbff40b6f 1-87
+.agents/skills/code-review/agents/openai.yaml
+  s_54b80c92daa9cb::t_86de9529defb3a 1-3
+.agents/skills/codebase-design/DEEPENING.md
+  s_54b80c92daa9cb::t_43a7f0e5e013e7 1-37
+.agents/skills/codebase-design/DESIGN-IT-TWICE.md
+  s_54b80c92daa9cb::t_de15a0ecbe1c33 1,3,5-44
+.agents/skills/codebase-design/SKILL.md
+  s_54b80c92daa9cb::t_a42aa8b5e61fac 1-114
+.agents/skills/codebase-design/agents/openai.yaml
+  s_54b80c92daa9cb::t_5e0156e67d4cd1 1-3
+.agents/skills/coordinate-fleet/MERGE.md
+  s_54b80c92daa9cb::t_a0369bb65a2dfa 1-25
+.agents/skills/coordinate-fleet/OPERATIONS.md
+  s_54b80c92daa9cb::t_9a0f612025501b 1-19
+.agents/skills/coordinate-fleet/SKILL.md
+  s_54b80c92daa9cb::t_632c6f68188c52 1-31
+.agents/skills/coordinate-fleet/WORKER-BRIEF.md
+  s_54b80c92daa9cb::t_4a17aa8107f54d 1,3,5,7,9,11-15,17,19-23,25,27-31,33,35-37
+.agents/skills/design-frontend-dev/LICENSE
+  s_54b80c92daa9cb::t_627e2d1c878c60 1-191
+.agents/skills/design-frontend-dev/SKILL.md
+  s_54b80c92daa9cb::t_d6909f58f868b1 1-172
+.agents/skills/design-frontend-dev/SOURCE.md
+  s_54b80c92daa9cb::t_e5d26ee0a11420 1-26
+.agents/skills/design-frontend-dev/companion.json
+  s_54b80c92daa9cb::t_55466c476758e6 1-55
+.agents/skills/design-frontend-dev/evals/evals.json
+  s_54b80c92daa9cb::t_be48a53b95f365 1-20
+.agents/skills/design-frontend-dev/reference/adapt.md
+  s_54b80c92daa9cb::t_1d542e1bc24c67 1-311
+.agents/skills/design-frontend-dev/reference/animate.md
+  s_54b80c92daa9cb::t_64a8b1d9b2446d 1-201
+.agents/skills/design-frontend-dev/reference/audit.md
+  s_54b80c92daa9cb::t_1ca46e63281d71 1-132
+.agents/skills/design-frontend-dev/reference/bolder.md
+  s_54b80c92daa9cb::t_a05fdef25f535b 1-113
+.agents/skills/design-frontend-dev/reference/brand.md
+  s_54b80c92daa9cb::t_014b975309e263 1-108
+.agents/skills/design-frontend-dev/reference/clarify.md
+  s_54b80c92daa9cb::t_9a08ce8ab8a442 1-288
+.agents/skills/design-frontend-dev/reference/colorize.md
+  s_54b80c92daa9cb::t_ae588509eb2950 1-245
+.agents/skills/design-frontend-dev/reference/critique.md
+  s_54b80c92daa9cb::t_65cde7667b7e26 1-59
+.agents/skills/design-frontend-dev/reference/delight.md
+  s_54b80c92daa9cb::t_f3ea924f2b1347 1-302
+.agents/skills/design-frontend-dev/reference/distill.md
+  s_54b80c92daa9cb::t_b11c48a748ec52 1-111
+.agents/skills/design-frontend-dev/reference/harden.md
+  s_54b80c92daa9cb::t_2011321d81304f 1-347
+.agents/skills/design-frontend-dev/reference/interaction-design.md
+  s_54b80c92daa9cb::t_239a6d4f2f659c 1-189
+.agents/skills/design-frontend-dev/reference/layout.md
+  s_54b80c92daa9cb::t_e49689963f3c4f 1-161
+.agents/skills/design-frontend-dev/reference/onboard.md
+  s_54b80c92daa9cb::t_76a2485c564204 1-234
+.agents/skills/design-frontend-dev/reference/optimize.md
+  s_54b80c92daa9cb::t_47b97fdb1b650b 1-258
+.agents/skills/design-frontend-dev/reference/overdrive.md
+  s_54b80c92daa9cb::t_dfbd494f54f712 1-130
+.agents/skills/design-frontend-dev/reference/polish.md
+  s_54b80c92daa9cb::t_6e7c7049cb39d3 1-236
+.agents/skills/design-frontend-dev/reference/product.md
+  s_54b80c92daa9cb::t_25858c8c323059 1-60
+.agents/skills/design-frontend-dev/reference/quieter.md
+  s_54b80c92daa9cb::t_47f170c25ea8cd 1-99
+.agents/skills/design-frontend-dev/reference/shape.md
+  s_54b80c92daa9cb::t_c1905802fc342d 1-165
+.agents/skills/design-frontend-dev/reference/typeset.md
+  s_54b80c92daa9cb::t_960656858b3e21 1-279
+.agents/skills/diagnosing-bugs/SKILL.md
+  s_54b80c92daa9cb::t_745041f4f87c17 1-138
+.agents/skills/diagnosing-bugs/agents/openai.yaml
+  s_54b80c92daa9cb::t_df704369ef0e4d 1-3
+.agents/skills/diagnosing-bugs/scripts/hitl-loop.template.sh
+  s_54b80c92daa9cb::t_a66dc3cf61025e 1-44
+.agents/skills/documentation-writer/LICENSE
+  s_54b80c92daa9cb::t_60c869fa1d9272 1-21
+.agents/skills/documentation-writer/SKILL.md
+  s_54b80c92daa9cb::t_c1ed003cfd5781 1-45
+.agents/skills/domain-modeling/ADR-FORMAT.md
+  s_54b80c92daa9cb::t_327eb9f8d1f6c9 1-47
+.agents/skills/domain-modeling/CONTEXT-FORMAT.md
+  s_54b80c92daa9cb::t_82838622edc9e3 1-60
+.agents/skills/domain-modeling/SKILL.md
+  s_54b80c92daa9cb::t_3ab0c94b3dd444 1-74
+.agents/skills/domain-modeling/agents/openai.yaml
+  s_54b80c92daa9cb::t_05fea38229faf9 1-3
+.agents/skills/emil-design-eng/LICENSE
+  s_54b80c92daa9cb::t_27c3783d89d22a 1-21
+.agents/skills/emil-design-eng/SKILL.md
+  s_54b80c92daa9cb::t_fe9b25c885bdbb 1-711
+.agents/skills/emil-design-eng/SOURCE.md
+  s_54b80c92daa9cb::t_85cb15c9cb5ff8 1,3-6,8,10,12-13
+.agents/skills/emil-design-eng/companion.json
+  s_54b80c92daa9cb::t_715a404947d819 1-34
+.agents/skills/grill-me/SKILL.md
+  s_54b80c92daa9cb::t_cf72f11581508e 1-7
+.agents/skills/grill-me/agents/openai.yaml
+  s_54b80c92daa9cb::t_bf4ae1543794a5 1-5
+.agents/skills/grill-with-docs/SKILL.md
+  s_54b80c92daa9cb::t_5eb84c530d80f5 1-7
+.agents/skills/grill-with-docs/agents/openai.yaml
+  s_54b80c92daa9cb::t_d95b06f6e49130 1-5
+.agents/skills/grilling/LICENSE
+  s_54b80c92daa9cb::t_64789b8993bd75 1-21
+.agents/skills/grilling/SKILL.md
+  s_54b80c92daa9cb::t_be84038e9c5df2 1-61
+.agents/skills/grilling/SOURCE.md
+  s_54b80c92daa9cb::t_90695097ee174b 1-12
+.agents/skills/grilling/companion.json
+  s_54b80c92daa9cb::t_33af091fb6d7bc 1-34
+.agents/skills/handoff/SKILL.md
+  s_54b80c92daa9cb::t_676e69be689fd4 1-16
+.agents/skills/handoff/agents/openai.yaml
+  s_54b80c92daa9cb::t_920eef8329ba04 1-5
+.agents/skills/humanizer/LICENSE
+  s_54b80c92daa9cb::t_23df4113b9ee11 1-21
+.agents/skills/humanizer/README.md
+  s_54b80c92daa9cb::t_b995f5a1fa1279 1-206
+.agents/skills/humanizer/SKILL.md
+  s_54b80c92daa9cb::t_fa41174ca3077f 1-397
+.agents/skills/implement/SKILL.md
+  s_54b80c92daa9cb::t_0ddc5c74c47351 1-15
+.agents/skills/implement/agents/openai.yaml
+  s_54b80c92daa9cb::t_c90f283b844829 1-5
+.agents/skills/improve-codebase-architecture/HTML-REPORT.md
+  s_54b80c92daa9cb::t_b936e0a04d7852 1-123
+.agents/skills/improve-codebase-architecture/SKILL.md
+  s_54b80c92daa9cb::t_1d7e420ba46b69 1-71
+.agents/skills/improve-codebase-architecture/agents/openai.yaml
+  s_54b80c92daa9cb::t_e1025448b6deff 1-5
+.agents/skills/mermaid-diagrams/LICENSE
+  s_54b80c92daa9cb::t_9892855de013ea 1-21
+.agents/skills/mermaid-diagrams/README.md
+  s_54b80c92daa9cb::t_f30255aac423eb 1-244
+.agents/skills/mermaid-diagrams/SKILL.md
+  s_54b80c92daa9cb::t_90596f26c0a21d 1-217
+.agents/skills/mermaid-diagrams/references/advanced-features.md
+  s_54b80c92daa9cb::t_ed8b0cfc861924 1-556
+.agents/skills/mermaid-diagrams/references/architecture-diagrams.md
+  s_54b80c92daa9cb::t_1e90eeaf58ca3a 1-192
+.agents/skills/mermaid-diagrams/references/c4-diagrams.md
+  s_54b80c92daa9cb::t_1560d0692cafb1 1-410
+.agents/skills/mermaid-diagrams/references/class-diagrams.md
+  s_54b80c92daa9cb::t_2a4abdf08aa3c7 1-361
+.agents/skills/mermaid-diagrams/references/erd-diagrams.md
+  s_54b80c92daa9cb::t_bfc6d11fdf5205 1-510
+.agents/skills/mermaid-diagrams/references/flowcharts.md
+  s_54b80c92daa9cb::t_ed090785b41314 1-450
+.agents/skills/mermaid-diagrams/references/sequence-diagrams.md
+  s_54b80c92daa9cb::t_8c4b0b1774aeaa 1-394
+.agents/skills/mintlify/LICENSE
+  s_54b80c92daa9cb::t_0e02824584bed8 1-21
+.agents/skills/mintlify/SKILL.md
+  s_54b80c92daa9cb::t_ca9b0868852c04 1-330
+.agents/skills/plan-pr/SKILL.md
+  s_54b80c92daa9cb::t_2ec276abb1b4da 1-124
+.agents/skills/plan-pr/companion.json
+  s_54b80c92daa9cb::t_4a54d0ebdabc87 1-56
+.agents/skills/plan-pr/evals/evals.json
+  s_54b80c92daa9cb::t_9aacc4ba463f63 1-109
+.agents/skills/plan-pr/evals/fixtures/project/AGENTS.md
+  s_54b80c92daa9cb::t_3c95de5e580a91 1-2
+.agents/skills/plan-pr/evals/fixtures/project/approved-plan.md
+  s_54b80c92daa9cb::t_d6ab5b434f2c2c 1-8
+.agents/skills/plan-pr/evals/fixtures/project/docs/agents/plan-pr-validation.md
+  s_54b80c92daa9cb::t_b70d477ff79cf0 1-4
+.agents/skills/plan-pr/evals/fixtures/project/docs/agents/plan-pr.md
+  s_54b80c92daa9cb::t_607583890fa862 1-4
+.agents/skills/plan-pr/evals/fixtures/project/package.json
+  s_54b80c92daa9cb::t_e1ca5f7dcd0fed 1-7
+.agents/skills/plan-pr/evals/fixtures/project/src/copy.js
+  s_54b80c92daa9cb::t_8f9b3a4f262efb 1
+.agents/skills/plan-pr/evals/fixtures/project/src/export.js
+  s_54b80c92daa9cb::t_df25564c2f03eb 1-4
+.agents/skills/plan-pr/evals/fixtures/project/src/export.test.js
+  s_54b80c92daa9cb::t_2cfd475c0d71ce 1-5
+.agents/skills/plan-pr/evals/fixtures/project/src/graph.js
+  s_54b80c92daa9cb::t_fe934fdefd87fd 1-4
+.agents/skills/plan-pr/evals/fixtures/project/tickets/APP-10.md
+  s_54b80c92daa9cb::t_f48bd9db276954 1-2
+.agents/skills/plan-pr/evals/fixtures/project/tickets/APP-42.md
+  s_54b80c92daa9cb::t_327aa32cb7a9ff 1-5
+.agents/skills/plan-pr/evals/fixtures/project/tickets/APP-43.md
+  s_54b80c92daa9cb::t_c43b3c6e359f9f 1-2
+.agents/skills/plan-pr/evals/fixtures/project/tickets/APP-44.md
+  s_54b80c92daa9cb::t_46df1a322ac728 1-2
+.agents/skills/plan-pr/evals/fixtures/project/tickets/APP-9.md
+  s_54b80c92daa9cb::t_9f019617fb0779 1-2
+.agents/skills/plan-pr/references/plan-contract.md
+  s_54b80c92daa9cb::t_be18c3c2eaaa5a 1-48
+.agents/skills/plan-pr/references/setup.md
+  s_54b80c92daa9cb::t_e21f8f3abb6291 1-52
+.agents/skills/plan-pr/references/ticket-intake.md
+  s_54b80c92daa9cb::t_64508f23f98721 1-18
+.agents/skills/prototype/LOGIC.md
+  s_54b80c92daa9cb::t_7fc6cd892474b8 1-67
+.agents/skills/prototype/SKILL.md
+  s_54b80c92daa9cb::t_d2d92714a787f5 1-26
+.agents/skills/prototype/UI.md
+  s_54b80c92daa9cb::t_a8aafc9beaf0be 1-112
+.agents/skills/prototype/agents/openai.yaml
+  s_54b80c92daa9cb::t_6a1b73086d080e 1-3
+.agents/skills/research/SKILL.md
+  s_54b80c92daa9cb::t_c643c6a2f37f3f 1-12
+.agents/skills/research/agents/openai.yaml
+  s_54b80c92daa9cb::t_6197be0fe8e79d 1-3
+.agents/skills/resolving-merge-conflicts/SKILL.md
+  s_54b80c92daa9cb::t_e4b80014a4df89 1-14
+.agents/skills/resolving-merge-conflicts/agents/openai.yaml
+  s_54b80c92daa9cb::t_908a0486eb49a8 1-3
+.agents/skills/review-code-dev/LICENSE
+  s_54b80c92daa9cb::t_36ded3d24ae293 1-201
+.agents/skills/review-code-dev/LICENSE-MIT
+  s_54b80c92daa9cb::t_781f3b79e3f615 1-21
+.agents/skills/review-code-dev/SKILL.md
+  s_54b80c92daa9cb::t_7cd9739d32612c 1-270
+.agents/skills/review-code-dev/UPSTREAM.md
+  s_54b80c92daa9cb::t_ae26e3844f19d4 1,3-7,9-12,14,16,18-21,23-25
+.agents/skills/review-code-dev/companion.json
+  s_54b80c92daa9cb::t_650763dcfa56d6 1-108
+.agents/skills/review-code-dev/scripts/.gitignore
+  s_54b80c92daa9cb::t_3ebcf3347bec23 2
+.agents/skills/review-code-dev/scripts/ocr.py
+  s_54b80c92daa9cb::t_de10571f51c294 1-109
+.agents/skills/review-code-dev/scripts/test_ocr.py
+  s_54b80c92daa9cb::t_1a22e15687bfab 1-97
+.agents/skills/setup-matt-pocock-skills/SKILL.md
+  s_54b80c92daa9cb::t_309e8e76c3a06d 1-116
+.agents/skills/setup-matt-pocock-skills/agents/openai.yaml
+  s_54b80c92daa9cb::t_9a490cd8d3fe81 1-5
+.agents/skills/setup-matt-pocock-skills/domain.md
+  s_54b80c92daa9cb::t_a8ed0423311204 1-51
+.agents/skills/setup-matt-pocock-skills/issue-tracker-github.md
+  s_54b80c92daa9cb::t_a8ec3d0a9b1dba 1-45
+.agents/skills/setup-matt-pocock-skills/issue-tracker-gitlab.md
+  s_54b80c92daa9cb::t_b964b46cdd4421 1-46
+.agents/skills/setup-matt-pocock-skills/issue-tracker-local.md
+  s_54b80c92daa9cb::t_080b6a04d62751 1-30
+.agents/skills/setup-matt-pocock-skills/triage-labels.md
+  s_54b80c92daa9cb::t_4d7ea002ff870e 1-15
+.agents/skills/ship-pr-dev/LICENSE
+  s_54b80c92daa9cb::t_e530105904adb6 1-21
+.agents/skills/ship-pr-dev/SKILL.md
+  s_54b80c92daa9cb::t_1c5d14df4466a8 1-179
+.agents/skills/ship-pr-dev/UPSTREAM.md
+  s_54b80c92daa9cb::t_5a5106c93a02e2 1-15
+.agents/skills/ship-pr-dev/companion.json
+  s_54b80c92daa9cb::t_2fddbf464aa675 1-118
+.agents/skills/ship-pr-dev/evals/evals.json
+  s_54b80c92daa9cb::t_a757188efc67ae 2-127,129-130
+.agents/skills/ship-pr-dev/references/agent-routing.md
+  s_54b80c92daa9cb::t_44c564b93e6114 1-123
+.agents/skills/ship-pr-dev/references/pr-template.md
+  s_54b80c92daa9cb::t_ce866e2a2b49dc 1-81
+.agents/skills/ship-pr-dev/references/readiness-gates.md
+  s_54b80c92daa9cb::t_40e10091fa6e7d 1-94
+.agents/skills/ship-pr-dev/references/review-gate.md
+  s_54b80c92daa9cb::t_bc5e8ed374ec7d 1-66
+.agents/skills/ship-pr-dev/references/workflow.md
+  s_54b80c92daa9cb::t_f6453a65ffc22a 1-58
+.agents/skills/ship-pr-dev/scripts/.gitignore
+  s_54b80c92daa9cb::t_db29ba378aa6b6 2
+.agents/skills/ship-pr-dev/scripts/collect_ship_context.py
+  s_54b80c92daa9cb::t_5d05d140762df9 1-225
+.agents/skills/ship-pr-dev/scripts/prepare_ship_run.py
+  s_54b80c92daa9cb::t_869fd696ea708f 1-97
+.agents/skills/ship-pr-dev/scripts/test_collect_ship_context.py
+  s_54b80c92daa9cb::t_88b24ab4ad733b 1-85
+.agents/skills/ship-pr-dev/scripts/test_prepare_ship_run.py
+  s_54b80c92daa9cb::t_2f47dd88b6d363 1-4,6,9-25,29
+.agents/skills/tdd/LICENSE
+  s_54b80c92daa9cb::t_39e62e3c6900cb 1-21
+.agents/skills/tdd/SKILL.md
+  s_54b80c92daa9cb::t_95c115d3b440e9 1-69
+.agents/skills/tdd/SOURCE.md
+  s_54b80c92daa9cb::t_85e82265b7c782 1-12
+.agents/skills/tdd/companion.json
+  s_54b80c92daa9cb::t_08a7a19aa94ce3 1-34
+.agents/skills/tdd/mocking.md
+  s_54b80c92daa9cb::t_1d93b3ce3045ca 1-59
+.agents/skills/tdd/tests.md
+  s_54b80c92daa9cb::t_0bb08451551d0e 1-77
+.agents/skills/teach/GLOSSARY-FORMAT.md
+  s_54b80c92daa9cb::t_36238983382d80 1,3,5,7-8,10,12-35
+.agents/skills/teach/LEARNING-RECORD-FORMAT.md
+  s_54b80c92daa9cb::t_2813ba056d889e 1-46
+.agents/skills/teach/MISSION-FORMAT.md
+  s_54b80c92daa9cb::t_2b291c4bf95288 1-31
+.agents/skills/teach/RESOURCES-FORMAT.md
+  s_54b80c92daa9cb::t_88f2a33caefe8a 1,3,5,7-8,10,12-15,17,19-23,25,27-32
+.agents/skills/teach/SKILL.md
+  s_54b80c92daa9cb::t_504e1099705f6f 1-140
+.agents/skills/teach/agents/openai.yaml
+  s_54b80c92daa9cb::t_f1f91bb03b2422 1-5
+.agents/skills/to-questionnaire/SKILL.md
+  s_54b80c92daa9cb::t_fd36dc0c4417df 1-54
+.agents/skills/to-questionnaire/agents/openai.yaml
+  s_54b80c92daa9cb::t_a42d3a5f0821b9 1-5
+.agents/skills/to-spec/SKILL.md
+  s_54b80c92daa9cb::t_f8adabc58f8646 1-75
+.agents/skills/to-spec/agents/openai.yaml
+  s_54b80c92daa9cb::t_019d15f60f0094 1-5
+.agents/skills/to-tickets/SKILL.md
+  s_54b80c92daa9cb::t_5066847c4f7300 1-105
+.agents/skills/to-tickets/agents/openai.yaml
+  s_54b80c92daa9cb::t_93d61c63fafabf 1-5
+.agents/skills/triage/AGENT-BRIEF.md
+  s_54b80c92daa9cb::t_f6225b47109c01 1-207
+.agents/skills/triage/OUT-OF-SCOPE.md
+  s_54b80c92daa9cb::t_dbd2103b6f1b1c 1-105
+.agents/skills/triage/SKILL.md
+  s_54b80c92daa9cb::t_b4333564a7b428 1-112
+.agents/skills/triage/agents/openai.yaml
+  s_54b80c92daa9cb::t_b8dd7eb1fb3fd0 1-5
+.agents/skills/wait-what/SKILL.md
+  s_54b80c92daa9cb::t_5ee561257e18b8 1-7
+.agents/skills/wait-what/agents/openai.yaml
+  s_54b80c92daa9cb::t_ef98aed3b22fef 1-5
+.agents/skills/wayfinder/SKILL.md
+  s_54b80c92daa9cb::t_8709453cc4ddcc 1-128
+.agents/skills/wayfinder/agents/openai.yaml
+  s_54b80c92daa9cb::t_1cc62943fb68ce 1-5
+.agents/skills/wizard/SKILL.md
+  s_54b80c92daa9cb::t_395f684da424b9 1-44
+.agents/skills/wizard/agents/openai.yaml
+  s_54b80c92daa9cb::t_6096d981414339 1-3
+.agents/skills/wizard/template.sh
+  s_54b80c92daa9cb::t_0de917516687e2 1-204
+.agents/skills/writing-docs/PAGE-TYPES.md
+  s_54b80c92daa9cb::t_14ce0fe8c022b2 1-98
+.agents/skills/writing-docs/SKILL.md
+  s_54b80c92daa9cb::t_6e801e17aead94 1-46
+.agents/skills/writing-docs/STYLE.md
+  s_54b80c92daa9cb::t_14403c947a7a1e 1-115
+.agents/skills/writing-for-agents/SKILL-MECHANICS.md
+  s_54b80c92daa9cb::t_b934c32ce8429f 1-22
+.agents/skills/writing-for-agents/SKILL.md
+  s_54b80c92daa9cb::t_dc4d1602fd5716 1-81
+.agents/skills/writing-for-agents/agents/openai.yaml
+  s_54b80c92daa9cb::t_558735fa65e6fe 1-3
+.claude/settings.json
+  s_54b80c92daa9cb::t_7d9248e9e12849 1-15
+.claude/skills/armada-coordinator
+  s_54b80c92daa9cb::t_85866be09e0a6e 1
+.claude/skills/armada-runtime-claude-code
+  s_54b80c92daa9cb::t_ff26abf2781509 1
+.claude/skills/armada-runtime-conductor
+  s_54b80c92daa9cb::t_e400240aa5d3d4 1
+.claude/skills/armada-runtime-herdr
+  s_54b80c92daa9cb::t_9d4ba9d7cf181b 1
+.claude/skills/armada-worker
+  s_54b80c92daa9cb::t_40f71928b74a48 1
+.claude/skills/ask-matt
+  s_54b80c92daa9cb::t_893bac7dfba7a9 1
+.claude/skills/audit-tests-dev
+  s_54b80c92daa9cb::t_d6b352720621e3 1
+.claude/skills/better-ui
+  s_54b80c92daa9cb::t_d13dc251b933db 1
+.claude/skills/capture-learning-tools
+  s_54b80c92daa9cb::t_a41b119eddc425 1
+.claude/skills/code-review
+  s_54b80c92daa9cb::t_bfcfc0bb7b5a80 1
+.claude/skills/codebase-design
+  s_54b80c92daa9cb::t_af47d6fe31e51f 1
+.claude/skills/coordinate-fleet
+  s_54b80c92daa9cb::t_fad0d98102d82a 1
+.claude/skills/design-frontend-dev
+  s_54b80c92daa9cb::t_5e2716133ddfbd 1
+.claude/skills/diagnosing-bugs
+  s_54b80c92daa9cb::t_3ca5c8de3f3b74 1
+.claude/skills/documentation-writer
+  s_54b80c92daa9cb::t_7c8b5c6f7accdf 1
+.claude/skills/domain-modeling
+  s_54b80c92daa9cb::t_ea651483aba634 1
+.claude/skills/emil-design-eng
+  s_54b80c92daa9cb::t_ee14ee329ee4b4 1
+.claude/skills/grill-me
+  s_54b80c92daa9cb::t_a65094c184cc9d 1
+.claude/skills/grill-with-docs
+  s_54b80c92daa9cb::t_ac699f813c67f8 1
+.claude/skills/grilling
+  s_54b80c92daa9cb::t_179690ed78cc09 1
+.claude/skills/handoff
+  s_54b80c92daa9cb::t_0e646c9ea2ffa5 1
+.claude/skills/humanizer
+  s_54b80c92daa9cb::t_95684d84d77b1e 1
+.claude/skills/implement
+  s_54b80c92daa9cb::t_19d1e59aa49bf1 1
+.claude/skills/improve-codebase-architecture
+  s_54b80c92daa9cb::t_250ac5653bc5e2 1
+.claude/skills/mermaid-diagrams
+  s_54b80c92daa9cb::t_695dc2a4ad864c 1
+.claude/skills/mintlify
+  s_54b80c92daa9cb::t_2a83fcdd74ee8b 1
+.claude/skills/plan-pr
+  s_54b80c92daa9cb::t_7c5648b6ed80f7 1
+.claude/skills/prototype
+  s_54b80c92daa9cb::t_a6f1aff755f96a 1
+.claude/skills/research
+  s_54b80c92daa9cb::t_d1dca098873183 1
+.claude/skills/resolving-merge-conflicts
+  s_54b80c92daa9cb::t_7ec8294275613c 1
+.claude/skills/review-code-dev
+  s_54b80c92daa9cb::t_151eb346ba002d 1
+.claude/skills/setup-matt-pocock-skills
+  s_54b80c92daa9cb::t_a418f34c7d2fb4 1
+.claude/skills/ship-pr-dev
+  s_54b80c92daa9cb::t_68fdf3d92c4490 1
+.claude/skills/tdd
+  s_54b80c92daa9cb::t_6be65742787d2a 1
+.claude/skills/teach
+  s_54b80c92daa9cb::t_27f3b808e15ea4 1
+.claude/skills/to-questionnaire
+  s_54b80c92daa9cb::t_47de2fc7ddde21 1
+.claude/skills/to-spec
+  s_54b80c92daa9cb::t_39a343f5c761a0 1
+.claude/skills/to-tickets
+  s_54b80c92daa9cb::t_1029fcdcd14c07 1
+.claude/skills/triage
+  s_54b80c92daa9cb::t_25e3ce988cb415 1
+.claude/skills/wait-what
+  s_54b80c92daa9cb::t_14e6884adf84d6 1
+.claude/skills/wayfinder
+  s_54b80c92daa9cb::t_2f7b62870b7232 1
+.claude/skills/wizard
+  s_54b80c92daa9cb::t_a7ae824e489354 1
+.claude/skills/writing-docs
+  s_54b80c92daa9cb::t_dd79de3510f1e3 1
+.claude/skills/writing-for-agents
+  s_54b80c92daa9cb::t_ce9312c55d2df3 1
+.conductor/settings.toml
+  s_54b80c92daa9cb::t_b0fc72bb8bd835 1-5
+.dockerignore
+  s_54b80c92daa9cb::t_28cba29988426e 1-8,10
+.github/workflows/docs-site.yml
+  s_54b80c92daa9cb::t_064caa7ca71660 1-5,8,10-16,18-20,22-23,25-28
+.github/workflows/measure-adapters.yml
+  s_54b80c92daa9cb::t_a1b529d330583b 1-6,8-16,18-21,23-25,27-39,41-45
+.github/workflows/measure-backfill.yml
+  s_54b80c92daa9cb::t_2693e445d3a0db 1-44
+.github/workflows/measure-embeddings.yml
+  s_54b80c92daa9cb::t_41f55d2fe0ccd5 1-3,6-14,16,18-20,23-33,35-39
+.github/workflows/measure-search.yml
+  s_54b80c92daa9cb::t_044271732de230 1-2,4,6,8-10,12-13,15-19
+.github/workflows/measure-upgrade.yml
+  s_54b80c92daa9cb::t_c21180c0bf3c74 1-59
+.github/workflows/measure.yml
+  s_54b80c92daa9cb::t_7f8a506de2062e 1-45
+.github/workflows/verify-nightly.yml
+  s_54b80c92daa9cb::t_5a6051ff916ba3 1-50
+.github/workflows/verify.yml
+  s_54b80c92daa9cb::t_4d02643449f6fb 1-321
+.gitignore
+  s_54b80c92daa9cb::t_09798bb9251bba 2-20
+.gitmodules
+  s_54b80c92daa9cb::t_c01e52dd02354b 1-3
+AGENTS.md
+  s_54b80c92daa9cb::t_88d08c541b5491 1-43
+CONTEXT.md
+  s_54b80c92daa9cb::t_42b72ce70dfada 1-323
+LICENSE
+  s_54b80c92daa9cb::t_283a6ef4fc8e54 1-21
+Makefile
+  s_54b80c92daa9cb::t_aede509d132783 1-86
+README.md
+  s_54b80c92daa9cb::t_ba1c8a8e902160 1-44,47-69,72-351,354-377
+armada.toml
+  s_54b80c92daa9cb::t_f20888925cc03e 1-44
+client/connector_response_test.go
+  s_54b80c92daa9cb::t_5c065361ba9a4c 1-43
+cmd/quivr-plugin-api/main.go
+  s_54b80c92daa9cb::t_977a9a6e7b68d1 1-109
+cmd/quivr-reference/main.go
+  s_54b80c92daa9cb::t_d861f96ca51865 1-89
+cmd/quivr-reference/sources.go
+  s_54b80c92daa9cb::t_a12ae110b8b340 1-90
+cmd/quivr/main.go
+  s_54b80c92daa9cb::t_f957e178429b1e 1-46
+contracts/contracts.go
+  s_54b80c92daa9cb::t_fcae5fdc290db1 1-107
+contracts/contracts_test.go
+  s_54b80c92daa9cb::t_d7168938882958 1-108
+contracts/http/v0/README.md
+  s_54b80c92daa9cb::t_0d56ce048b3998 1-132
+contracts/http/v0/bundle.py
+  s_54b80c92daa9cb::t_16295a679b9425 1-43
+contracts/http/v0/checks/go.mod
+  s_54b80c92daa9cb::t_1cdcb991c882e4 1-4
+contracts/http/v0/checks/requirements.txt
+  s_54b80c92daa9cb::t_e1fbec81c3d014 1-3
+contracts/http/v0/checks/roundtrip.cjs
+  s_54b80c92daa9cb::t_adb0e458720e40 1-55
+contracts/http/v0/checks/roundtrip.py
+  s_54b80c92daa9cb::t_1fdeae5841cd41 1-3,5-14
+contracts/http/v0/checks/roundtrip_test.go
+  s_54b80c92daa9cb::t_be5f720ad9d870 1-127
+contracts/http/v0/checks/validate.py
+  s_54b80c92daa9cb::t_67f6ee67bb19c0 1-3,6-98
+contracts/http/v0/checks/webhook.cjs
+  s_54b80c92daa9cb::t_bf93f6f4b3c1d0 1-18
+contracts/http/v0/client_schema.py
+  s_54b80c92daa9cb::t_46240ac7f79b7a 1-26
+contracts/http/v0/embed.go
+  s_54b80c92daa9cb::t_8efa4a8f18e0d4 1-11
+contracts/http/v0/examples.json
+  s_54b80c92daa9cb::t_7389daa535221f 1-66,68-72,74,76-93,95-111,113-235,237-238,240,242-328,330-334,336-355,357-1135,1137-1191,1193-1459,1461,1463-1526,1528-1551,1553-1586,1588-1594,1596-1609,1611-1612
+contracts/http/v0/openapi.yaml
+  s_54b80c92daa9cb::t_c6f178087ef242 1-7488
+contracts/http/v0/webhook-vector.json
+  s_54b80c92daa9cb::t_63eb18474caeca 1-8
+contracts/http_registry.go
+  s_54b80c92daa9cb::t_85c23fbfa173b2 1-43
+contracts/plugins/v0/README.md
+  s_54b80c92daa9cb::t_458dbc190eeefa 1-1151
+contracts/plugins/v0/checks/validate.py
+  s_54b80c92daa9cb::t_8b7d16c14fabbd 1-36
+contracts/plugins/v0/connector-check-credential-request.schema.json
+  s_54b80c92daa9cb::t_6603b608efc80e 1-44
+contracts/plugins/v0/connector-check-credential-response.schema.json
+  s_54b80c92daa9cb::t_f3e7b9b992b550 2-8,10-19
+contracts/plugins/v0/connector-describe-attachment-request.schema.json
+  s_54b80c92daa9cb::t_0aaf24fb70a2e9 1-80
+contracts/plugins/v0/connector-describe-attachment-response.schema.json
+  s_54b80c92daa9cb::t_c208b2a7b3231b 2-29,31-36,38-40,43-55,57-59,62-69
+contracts/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_f8205e6ee0ed74 1-105
+contracts/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_4b958421612860 1-202
+contracts/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_93bdca794b0a2d 1-280
+contracts/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_df6daf48540922 1-160
+contracts/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_2792337de4c3a6 1-58
+contracts/plugins/v0/connector-upload-attachment-request.schema.json
+  s_54b80c92daa9cb::t_c3eca65ed272fe 1-129
+contracts/plugins/v0/connector-upload-attachment-response.schema.json
+  s_54b80c92daa9cb::t_1e2cb4ee4885f1 1-15
+contracts/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_faed84fbc86de4 1-54
+contracts/plugins/v0/error.schema.json
+  s_54b80c92daa9cb::t_b75e7a7e643222 1-46
+contracts/plugins/v0/fixtures/connectors/feed.json
+  s_54b80c92daa9cb::t_695c058cb6951a 1-14
+contracts/plugins/v0/fixtures/connectors/missing-kind.json
+  s_54b80c92daa9cb::t_b7f05465e8f952 1
+contracts/plugins/v0/fixtures/connectors/push-body-twice.json
+  s_54b80c92daa9cb::t_e6891b6f5ed62a 1-17
+contracts/plugins/v0/fixtures/connectors/push.json
+  s_54b80c92daa9cb::t_c1c1491fb8f154 1-70
+contracts/plugins/v0/fixtures/connectors/refused-token.json
+  s_54b80c92daa9cb::t_7f60f19d4aae93 1-8
+contracts/plugins/v0/fixtures/index.json
+  s_54b80c92daa9cb::t_ae32890ab2bcb4 1-2308
+contracts/plugins/v0/fixtures/ingestion/article.json
+  s_54b80c92daa9cb::t_b60ac6c58f040b 1-22
+contracts/plugins/v0/fixtures/invocations/markdown.json
+  s_54b80c92daa9cb::t_f338999dbf5cb0 1-15
+contracts/plugins/v0/fixtures/invocations/missing-media-type.json
+  s_54b80c92daa9cb::t_e3822b6525ae87 1-5
+contracts/plugins/v0/fixtures/invocations/notes.md
+  s_54b80c92daa9cb::t_0e129859fb0327 1,3-7
+contracts/plugins/v0/fixtures/manifests/invalid/bad-range.yaml
+  s_54b80c92daa9cb::t_3ae6e91780b3d7 1-9
+contracts/plugins/v0/fixtures/manifests/invalid/connector-api-ambiguous-path.json
+  s_54b80c92daa9cb::t_8320ca36e70edd 1-57
+contracts/plugins/v0/fixtures/manifests/invalid/connector-api-bad-schema.json
+  s_54b80c92daa9cb::t_006b4cc4dfa6ff 1-43
+contracts/plugins/v0/fixtures/manifests/invalid/connector-api-duplicate-name.json
+  s_54b80c92daa9cb::t_4d1e49747b72e5 1-51
+contracts/plugins/v0/fixtures/manifests/invalid/connector-api-old-version.json
+  s_54b80c92daa9cb::t_f32375b75b97f6 1-51
+contracts/plugins/v0/fixtures/manifests/invalid/connector-api-unsafe-path.json
+  s_54b80c92daa9cb::t_d22ec4f70e13fd 1-51
+contracts/plugins/v0/fixtures/manifests/invalid/connector-api-unsupported-auth.json
+  s_54b80c92daa9cb::t_ce4826fe611f4c 1-51
+contracts/plugins/v0/fixtures/manifests/invalid/connector-api-without-push.json
+  s_54b80c92daa9cb::t_e638d7c9ef9122 1-50
+contracts/plugins/v0/fixtures/manifests/invalid/connector-attachments-plugin-api-0.3.yaml
+  s_54b80c92daa9cb::t_e882751691b49c 1-13
+contracts/plugins/v0/fixtures/manifests/invalid/connector-attachments-too-large.yaml
+  s_54b80c92daa9cb::t_46b68211f4b11c 1-14
+contracts/plugins/v0/fixtures/manifests/invalid/connector-checkpoint-bound-too-large.yaml
+  s_54b80c92daa9cb::t_09587e89aecd32 1-14
+contracts/plugins/v0/fixtures/manifests/invalid/connector-instance-token-old-version.json
+  s_54b80c92daa9cb::t_a8997cc501dcc7 1-51
+contracts/plugins/v0/fixtures/manifests/invalid/connector-invalid-schemas.yaml
+  s_54b80c92daa9cb::t_bcd68f0f0b0ddb 1-13
+contracts/plugins/v0/fixtures/manifests/invalid/connector-no-kinds.yaml
+  s_54b80c92daa9cb::t_49479992f9b093 1-9
+contracts/plugins/v0/fixtures/manifests/invalid/connector-plugin-api-0.2.yaml
+  s_54b80c92daa9cb::t_77930063989ef4 1-12
+contracts/plugins/v0/fixtures/manifests/invalid/connector-push-mode.yaml
+  s_54b80c92daa9cb::t_54257429869959 1-13
+contracts/plugins/v0/fixtures/manifests/invalid/connector-push-without-pull.yaml
+  s_54b80c92daa9cb::t_0b1158d5ea0f3c 1-13
+contracts/plugins/v0/fixtures/manifests/invalid/connector-signature-bad-window.json
+  s_54b80c92daa9cb::t_34353909603882 1-61
+contracts/plugins/v0/fixtures/manifests/invalid/connector-signature-key-metadata.json
+  s_54b80c92daa9cb::t_8c8845fb8a3d6a 1-61
+contracts/plugins/v0/fixtures/manifests/invalid/connector-signature-missing-metadata.json
+  s_54b80c92daa9cb::t_91e66fc177ba41 1-56
+contracts/plugins/v0/fixtures/manifests/invalid/connector-signature-old-version.json
+  s_54b80c92daa9cb::t_a55a765e47b368 1-61
+contracts/plugins/v0/fixtures/manifests/invalid/connector-signature-reserved-header.json
+  s_54b80c92daa9cb::t_78b642532a68be 1-61
+contracts/plugins/v0/fixtures/manifests/invalid/connector-signature-unsafe-header.json
+  s_54b80c92daa9cb::t_cc0b7d949126af 1-61
+contracts/plugins/v0/fixtures/manifests/invalid/duplicate-secret.yaml
+  s_54b80c92daa9cb::t_602ee6082b9876 1-13
+contracts/plugins/v0/fixtures/manifests/invalid/foreign-namespace.yaml
+  s_54b80c92daa9cb::t_88be8a99a122cb 1-12
+contracts/plugins/v0/fixtures/manifests/invalid/incompatible-engine.yaml
+  s_54b80c92daa9cb::t_394872be19e88b 1-9
+contracts/plugins/v0/fixtures/manifests/invalid/incompatible-plugin-api.yaml
+  s_54b80c92daa9cb::t_2501304a9662a8 1-9
+contracts/plugins/v0/fixtures/manifests/invalid/ingestion-bad-space.yaml
+  s_54b80c92daa9cb::t_f29e1f70c0a073 1-29
+contracts/plugins/v0/fixtures/manifests/invalid/ingestion-foreign-space.yaml
+  s_54b80c92daa9cb::t_a491d0c1623122 1-29
+contracts/plugins/v0/fixtures/manifests/invalid/ingestion-plugin-api-0.5.yaml
+  s_54b80c92daa9cb::t_c2e99c1ef30d0c 1-29
+contracts/plugins/v0/fixtures/manifests/invalid/ingestion-price-plugin-api-0.8.yaml
+  s_54b80c92daa9cb::t_b0a8e38a7153d1 1-31
+contracts/plugins/v0/fixtures/manifests/invalid/invalid-config-schema.yaml
+  s_54b80c92daa9cb::t_1c41b0d7ba6e8d 1-12
+contracts/plugins/v0/fixtures/manifests/invalid/invalid-extension-schema.yaml
+  s_54b80c92daa9cb::t_b5f0b6e8c28095 1-13
+contracts/plugins/v0/fixtures/manifests/invalid/no-contribution.yaml
+  s_54b80c92daa9cb::t_a8f48943da6008 1-7
+contracts/plugins/v0/fixtures/manifests/invalid/profile-candidates-old-api.json
+  s_54b80c92daa9cb::t_8ed45a71b7c40f 1-27
+contracts/plugins/v0/fixtures/manifests/invalid/profile-candidates-range.json
+  s_54b80c92daa9cb::t_336fffd21e9d17 1-27
+contracts/plugins/v0/fixtures/manifests/invalid/reserved-contribution.yaml
+  s_54b80c92daa9cb::t_404a1bfeef109c 1-11
+contracts/plugins/v0/fixtures/manifests/invalid/retrieval-bad-limits.yaml
+  s_54b80c92daa9cb::t_93f49d380ae781 1-22
+contracts/plugins/v0/fixtures/manifests/invalid/retrieval-plugin-api-0.6.yaml
+  s_54b80c92daa9cb::t_1f5d964eddc17f 1-22
+contracts/plugins/v0/fixtures/manifests/invalid/subscription-invalid-schemas.yaml
+  s_54b80c92daa9cb::t_81671059b4d1f9 1-14
+contracts/plugins/v0/fixtures/manifests/invalid/subscription-plugin-api-0.1.yaml
+  s_54b80c92daa9cb::t_5834d0929bcb06 1-9
+contracts/plugins/v0/fixtures/manifests/invalid/subscription-vectors.yaml
+  s_54b80c92daa9cb::t_72b29fb614c41b 1-10
+contracts/plugins/v0/fixtures/manifests/invalid/unknown-field.yaml
+  s_54b80c92daa9cb::t_0c413e219de615 1-10
+contracts/plugins/v0/fixtures/manifests/invalid/unsatisfiable-range.yaml
+  s_54b80c92daa9cb::t_611702444e5fbf 1-9
+contracts/plugins/v0/fixtures/manifests/valid/connector-api-signature.json
+  s_54b80c92daa9cb::t_03234dd9fa04af 1-61
+contracts/plugins/v0/fixtures/manifests/valid/connector-api.json
+  s_54b80c92daa9cb::t_ec229be864c039 1-51
+contracts/plugins/v0/fixtures/manifests/valid/connector-attachments.yaml
+  s_54b80c92daa9cb::t_4c617a214fdfcc 1-36
+contracts/plugins/v0/fixtures/manifests/valid/connector-instance-token.json
+  s_54b80c92daa9cb::t_103659311e2075 1-51
+contracts/plugins/v0/fixtures/manifests/valid/connector-push.yaml
+  s_54b80c92daa9cb::t_cf5e3df8e695cf 1-36
+contracts/plugins/v0/fixtures/manifests/valid/connector-scoped.yaml
+  s_54b80c92daa9cb::t_1234f857866070 1-25
+contracts/plugins/v0/fixtures/manifests/valid/connector.yaml
+  s_54b80c92daa9cb::t_bbf5cad24d7455 1-46
+contracts/plugins/v0/fixtures/manifests/valid/full.yaml
+  s_54b80c92daa9cb::t_e552c0f3c8d08c 1-52
+contracts/plugins/v0/fixtures/manifests/valid/ingestion.yaml
+  s_54b80c92daa9cb::t_0a1256b8d41f96 1-29
+contracts/plugins/v0/fixtures/manifests/valid/minimal.yaml
+  s_54b80c92daa9cb::t_b882bc5c114e89 1-9
+contracts/plugins/v0/fixtures/manifests/valid/profile-candidate-mode.json
+  s_54b80c92daa9cb::t_09a9b168761a13 1-27
+contracts/plugins/v0/fixtures/manifests/valid/profile-candidates.json
+  s_54b80c92daa9cb::t_887e0845107e27 1-27
+contracts/plugins/v0/fixtures/manifests/valid/retrieval-deep-only.yaml
+  s_54b80c92daa9cb::t_7795e8a135dbde 1-18
+contracts/plugins/v0/fixtures/manifests/valid/retrieval.yaml
+  s_54b80c92daa9cb::t_385130f2e9d630 1-22
+contracts/plugins/v0/fixtures/manifests/valid/subscription.yaml
+  s_54b80c92daa9cb::t_b927d6de85c056 1-41
+contracts/plugins/v0/fixtures/protocol/discovery-connector.json
+  s_54b80c92daa9cb::t_823d52094ab735 1-6
+contracts/plugins/v0/fixtures/protocol/discovery-reserved.json
+  s_54b80c92daa9cb::t_64a5d1a8427850 1-12
+contracts/plugins/v0/fixtures/protocol/discovery.json
+  s_54b80c92daa9cb::t_bbe66331164508 1-11
+contracts/plugins/v0/fixtures/protocol/error-connector-access.json
+  s_54b80c92daa9cb::t_ffc238e33a84bf 1
+contracts/plugins/v0/fixtures/protocol/error-connector-rate-limited.json
+  s_54b80c92daa9cb::t_9efd1bb5487ae8 1
+contracts/plugins/v0/fixtures/protocol/error-missing-retryable.json
+  s_54b80c92daa9cb::t_14a30874d01c50 1-4
+contracts/plugins/v0/fixtures/protocol/error-retry-after-without-class.json
+  s_54b80c92daa9cb::t_6b30f2de0b1553 1
+contracts/plugins/v0/fixtures/protocol/error-retryable.json
+  s_54b80c92daa9cb::t_1a50228598dcde 1-5
+contracts/plugins/v0/fixtures/protocol/error-terminal.json
+  s_54b80c92daa9cb::t_a03b339fa77afd 1-5
+contracts/plugins/v0/fixtures/protocol/error-unknown-class.json
+  s_54b80c92daa9cb::t_9fde26ac9b8b0b 1
+contracts/plugins/v0/fixtures/protocol/health-ok.json
+  s_54b80c92daa9cb::t_f846e467f0f491 2-3
+contracts/plugins/v0/fixtures/ranges.json
+  s_54b80c92daa9cb::t_363db5f62d4d39 1-85
+contracts/plugins/v0/fixtures/requests/connector/check-credential-with-checkpoint.json
+  s_54b80c92daa9cb::t_be7cebf23fc989 1-10
+contracts/plugins/v0/fixtures/requests/connector/check-credential.json
+  s_54b80c92daa9cb::t_9a657587c3be92 1-9
+contracts/plugins/v0/fixtures/requests/connector/describe-attachment-no-item.json
+  s_54b80c92daa9cb::t_5fe3b66ebaf8b8 1-25
+contracts/plugins/v0/fixtures/requests/connector/describe-attachment.json
+  s_54b80c92daa9cb::t_c1f1d28fb66f06 1-37
+contracts/plugins/v0/fixtures/requests/connector/fetch-bad-kind.json
+  s_54b80c92daa9cb::t_36d9758ff9e901 1-12
+contracts/plugins/v0/fixtures/requests/connector/fetch-first-run.json
+  s_54b80c92daa9cb::t_ab4019e79fdd4b 1-12
+contracts/plugins/v0/fixtures/requests/connector/fetch-missing-checkpoint.json
+  s_54b80c92daa9cb::t_1c1e042f31899a 1-11
+contracts/plugins/v0/fixtures/requests/connector/fetch-negative-page.json
+  s_54b80c92daa9cb::t_2e971c05f2ca82 1-12
+contracts/plugins/v0/fixtures/requests/connector/fetch-push.json
+  s_54b80c92daa9cb::t_8061e6d71154c7 1-26
+contracts/plugins/v0/fixtures/requests/connector/fetch.json
+  s_54b80c92daa9cb::t_d0e98914078c98 1-12
+contracts/plugins/v0/fixtures/requests/connector/receive-api-challenge.json
+  s_54b80c92daa9cb::t_ad4d02c879b444 1-40
+contracts/plugins/v0/fixtures/requests/connector/receive-api-no-body.json
+  s_54b80c92daa9cb::t_a4dfa849e0c4c3 1-39
+contracts/plugins/v0/fixtures/requests/connector/receive-api.json
+  s_54b80c92daa9cb::t_864f6cad4795b4 1-42
+contracts/plugins/v0/fixtures/requests/connector/receive-challenge.json
+  s_54b80c92daa9cb::t_0acfaa800f5bdb 1-30
+contracts/plugins/v0/fixtures/requests/connector/receive-no-request.json
+  s_54b80c92daa9cb::t_1d345fb30b95b6 1-24
+contracts/plugins/v0/fixtures/requests/connector/receive-put.json
+  s_54b80c92daa9cb::t_8a12a5b2423a1f 1-30
+contracts/plugins/v0/fixtures/requests/connector/receive-uppercase-header.json
+  s_54b80c92daa9cb::t_1e25a135815170 1-34
+contracts/plugins/v0/fixtures/requests/connector/receive.json
+  s_54b80c92daa9cb::t_0180313ce7e950 1-37
+contracts/plugins/v0/fixtures/requests/connector/upload-attachment-post.json
+  s_54b80c92daa9cb::t_9173b5a565ee7b 1-50
+contracts/plugins/v0/fixtures/requests/connector/upload-attachment.json
+  s_54b80c92daa9cb::t_99289d80db9fb4 1-50
+contracts/plugins/v0/fixtures/requests/file-reference.json
+  s_54b80c92daa9cb::t_9ff1bf775c9265 1-27
+contracts/plugins/v0/fixtures/requests/ingestion/embed-query-image.json
+  s_54b80c92daa9cb::t_9b7981d0f029c4 1-11
+contracts/plugins/v0/fixtures/requests/ingestion/embed-query-missing-space.json
+  s_54b80c92daa9cb::t_f946b25447cbde 1-10
+contracts/plugins/v0/fixtures/requests/ingestion/embed-query.json
+  s_54b80c92daa9cb::t_ecc4c8c94cb8c0 1-11
+contracts/plugins/v0/fixtures/requests/ingestion/segment-and-embed-body-only.json
+  s_54b80c92daa9cb::t_4551168687b792 1-22
+contracts/plugins/v0/fixtures/requests/ingestion/segment-and-embed-no-parts.json
+  s_54b80c92daa9cb::t_2c045718d8b051 1-18
+contracts/plugins/v0/fixtures/requests/ingestion/segment-and-embed.json
+  s_54b80c92daa9cb::t_77430b7eb09e4d 1-29
+contracts/plugins/v0/fixtures/requests/ingestion/segment-only.json
+  s_54b80c92daa9cb::t_4ddaa18d834f4d 1-26
+contracts/plugins/v0/fixtures/requests/inline-content.json
+  s_54b80c92daa9cb::t_652328f88540e2 1-44
+contracts/plugins/v0/fixtures/requests/missing-record-version.json
+  s_54b80c92daa9cb::t_e7c0cec23bb3d1 1-42
+contracts/plugins/v0/fixtures/requests/missing-sha256.json
+  s_54b80c92daa9cb::t_b40c6816ac0a97 1-42
+contracts/plugins/v0/fixtures/requests/retrieval/search-missing-spaces.json
+  s_54b80c92daa9cb::t_130e3dbb239088 1-23
+contracts/plugins/v0/fixtures/requests/retrieval/search-profile-budget.json
+  s_54b80c92daa9cb::t_230983c89f21c1 1-51
+contracts/plugins/v0/fixtures/requests/retrieval/search-profile-served.json
+  s_54b80c92daa9cb::t_fd37c218067812 1-76
+contracts/plugins/v0/fixtures/requests/retrieval/search-round-1.json
+  s_54b80c92daa9cb::t_1ad54f9c8b6ca1 1-47
+contracts/plugins/v0/fixtures/requests/retrieval/search-round-2.json
+  s_54b80c92daa9cb::t_d9843a0b2af4ba 1-112
+contracts/plugins/v0/fixtures/requests/retrieval/search-round-4.json
+  s_54b80c92daa9cb::t_2bfa744322d0e5 1-47
+contracts/plugins/v0/fixtures/requests/signed-url.json
+  s_54b80c92daa9cb::t_587d5882e83503 1-43
+contracts/plugins/v0/fixtures/requests/subscription/empty-evaluations.json
+  s_54b80c92daa9cb::t_628aba0a9f0605 1-17
+contracts/plugins/v0/fixtures/requests/subscription/missing-record.json
+  s_54b80c92daa9cb::t_fb60cd38f02b18 1-17
+contracts/plugins/v0/fixtures/requests/subscription/reserved-vector.json
+  s_54b80c92daa9cb::t_feefb958e6196f 1-26
+contracts/plugins/v0/fixtures/requests/subscription/unknown-origin.json
+  s_54b80c92daa9cb::t_cec08cf2bc7511 1-87
+contracts/plugins/v0/fixtures/requests/subscription/valid.json
+  s_54b80c92daa9cb::t_4118bf3c7e845f 1-47
+contracts/plugins/v0/fixtures/requests/subscription/vectors.json
+  s_54b80c92daa9cb::t_27d0ae924aed2a 1-127
+contracts/plugins/v0/fixtures/responses/connector/attachment-exact-too-large.json
+  s_54b80c92daa9cb::t_b11e669546a19b 1-33
+contracts/plugins/v0/fixtures/responses/connector/attachment-sha256-without-size.json
+  s_54b80c92daa9cb::t_f0fd9547b55549 1-32
+contracts/plugins/v0/fixtures/responses/connector/attachment-unknown-parent.json
+  s_54b80c92daa9cb::t_520e8f24a678c6 1-8
+contracts/plugins/v0/fixtures/responses/connector/attachments-beside-text.json
+  s_54b80c92daa9cb::t_8a44557f7ee6bc 1-8
+contracts/plugins/v0/fixtures/responses/connector/attachments-undeclared.json
+  s_54b80c92daa9cb::t_96db5bc6574791 1-35
+contracts/plugins/v0/fixtures/responses/connector/attachments.json
+  s_54b80c92daa9cb::t_b1e0d1aee623cc 1-59
+contracts/plugins/v0/fixtures/responses/connector/blob-part.json
+  s_54b80c92daa9cb::t_8dc20214c6ddc5 1-9
+contracts/plugins/v0/fixtures/responses/connector/checkpoint-too-large.json
+  s_54b80c92daa9cb::t_ba4d18ab14e6bb 1
+contracts/plugins/v0/fixtures/responses/connector/credential-invalid-status.json
+  s_54b80c92daa9cb::t_6484509169c800 1
+contracts/plugins/v0/fixtures/responses/connector/credential-ok.json
+  s_54b80c92daa9cb::t_b2df40e680c316 1
+contracts/plugins/v0/fixtures/responses/connector/describe-size-and-skip.json
+  s_54b80c92daa9cb::t_75719a70b513d6 1-5
+contracts/plugins/v0/fixtures/responses/connector/describe-size.json
+  s_54b80c92daa9cb::t_246679b6c2a86f 1-4
+contracts/plugins/v0/fixtures/responses/connector/describe-skip.json
+  s_54b80c92daa9cb::t_ddadbd3b41223a 1-13
+contracts/plugins/v0/fixtures/responses/connector/describe-too-large.json
+  s_54b80c92daa9cb::t_1adfe70898620a 1-4
+contracts/plugins/v0/fixtures/responses/connector/describe-undeclared-namespace.json
+  s_54b80c92daa9cb::t_34ec91cd56e0a4 1-9
+contracts/plugins/v0/fixtures/responses/connector/diagnostics-too-large.json
+  s_54b80c92daa9cb::t_6ea90c227a92fd 1
+contracts/plugins/v0/fixtures/responses/connector/duplicate-record-key.json
+  s_54b80c92daa9cb::t_9ebba3bb816623 1-8
+contracts/plugins/v0/fixtures/responses/connector/empty.json
+  s_54b80c92daa9cb::t_6622704c2d1817 1
+contracts/plugins/v0/fixtures/responses/connector/missing-checkpoint.json
+  s_54b80c92daa9cb::t_8870f1a9e96533 1
+contracts/plugins/v0/fixtures/responses/connector/no-content.json
+  s_54b80c92daa9cb::t_123e7b3f40a424 1
+contracts/plugins/v0/fixtures/responses/connector/not-due-moved-checkpoint.json
+  s_54b80c92daa9cb::t_c7c6155cf8dbe4 1
+contracts/plugins/v0/fixtures/responses/connector/not-due.json
+  s_54b80c92daa9cb::t_802248ff2adfc2 1
+contracts/plugins/v0/fixtures/responses/connector/push-active-with-error.json
+  s_54b80c92daa9cb::t_9212443af538a7 1-12
+contracts/plugins/v0/fixtures/responses/connector/push-active.json
+  s_54b80c92daa9cb::t_e79a2dea446470 1-11
+contracts/plugins/v0/fixtures/responses/connector/push-failed-without-class.json
+  s_54b80c92daa9cb::t_eb51d8c9edd1ee 1-11
+contracts/plugins/v0/fixtures/responses/connector/push-failed.json
+  s_54b80c92daa9cb::t_342f476fd348d5 1-12
+contracts/plugins/v0/fixtures/responses/connector/push-pending-with-interval.json
+  s_54b80c92daa9cb::t_0e09911c4db973 1-11
+contracts/plugins/v0/fixtures/responses/connector/push-pending.json
+  s_54b80c92daa9cb::t_bf427c933f5801 1-11
+contracts/plugins/v0/fixtures/responses/connector/receive-accepted-4xx.json
+  s_54b80c92daa9cb::t_bedab35f43eab4 1-24
+contracts/plugins/v0/fixtures/responses/connector/receive-accepted.json
+  s_54b80c92daa9cb::t_b95ca5cc19ae73 1-25
+contracts/plugins/v0/fixtures/responses/connector/receive-attachments.json
+  s_54b80c92daa9cb::t_a44eb637c42cc8 1-32
+contracts/plugins/v0/fixtures/responses/connector/receive-challenge.json
+  s_54b80c92daa9cb::t_ae53e6cc942c82 1-8
+contracts/plugins/v0/fixtures/responses/connector/receive-checkpoint.json
+  s_54b80c92daa9cb::t_b4a235854ff94e 1-10
+contracts/plugins/v0/fixtures/responses/connector/receive-header-injection.json
+  s_54b80c92daa9cb::t_32b603b900fc5c 1-7
+contracts/plugins/v0/fixtures/responses/connector/receive-refused-2xx.json
+  s_54b80c92daa9cb::t_be4b0d4d3349e3 1-6
+contracts/plugins/v0/fixtures/responses/connector/receive-refused-with-items.json
+  s_54b80c92daa9cb::t_42356fc8765072 1-24
+contracts/plugins/v0/fixtures/responses/connector/receive-refused.json
+  s_54b80c92daa9cb::t_a27189ded3bf50 1-8
+contracts/plugins/v0/fixtures/responses/connector/receive-undeclared-namespace.json
+  s_54b80c92daa9cb::t_98db120d009482 2-16,18,20-21
+contracts/plugins/v0/fixtures/responses/connector/too-many-items.json
+  s_54b80c92daa9cb::t_5fdad40a65f758 1
+contracts/plugins/v0/fixtures/responses/connector/undeclared-namespace.json
+  s_54b80c92daa9cb::t_d9fdb4894b00f5 1-8
+contracts/plugins/v0/fixtures/responses/connector/unknown-field.json
+  s_54b80c92daa9cb::t_0e1f946352848e 1
+contracts/plugins/v0/fixtures/responses/connector/upload-other-status.json
+  s_54b80c92daa9cb::t_5354901b7b4504 1-3
+contracts/plugins/v0/fixtures/responses/connector/upload-uploaded.json
+  s_54b80c92daa9cb::t_bc8673e7be92e5 1-3
+contracts/plugins/v0/fixtures/responses/connector/valid.json
+  s_54b80c92daa9cb::t_713b4cb434ccf0 1-27
+contracts/plugins/v0/fixtures/responses/connector/withdraw-with-content.json
+  s_54b80c92daa9cb::t_b3210879d28efa 1
+contracts/plugins/v0/fixtures/responses/cyclic-parents.json
+  s_54b80c92daa9cb::t_43aea659e11530 1-68
+contracts/plugins/v0/fixtures/responses/duplicate-part-keys.json
+  s_54b80c92daa9cb::t_03e646661acfbe 1-67
+contracts/plugins/v0/fixtures/responses/ingestion/dimension-mismatch.json
+  s_54b80c92daa9cb::t_57bf9e1c116d23 1-47
+contracts/plugins/v0/fixtures/responses/ingestion/duplicate-segment.json
+  s_54b80c92daa9cb::t_a145eb5923ba1e 1-73
+contracts/plugins/v0/fixtures/responses/ingestion/embed-query-dimension-mismatch.json
+  s_54b80c92daa9cb::t_fc15ffe1fe574a 1-7
+contracts/plugins/v0/fixtures/responses/ingestion/embed-query-extra.json
+  s_54b80c92daa9cb::t_463fe9e97e200a 1-9
+contracts/plugins/v0/fixtures/responses/ingestion/embed-query-valid.json
+  s_54b80c92daa9cb::t_ce0f8ed41ff4c6 1-8
+contracts/plugins/v0/fixtures/responses/ingestion/float32-overflow.json
+  s_54b80c92daa9cb::t_98fcb77c250722 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/lexical-text-at-limit.json
+  s_54b80c92daa9cb::t_860c441995898b 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/lexical-text-too-large.json
+  s_54b80c92daa9cb::t_ee0e73202f5551 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/missing-vector.json
+  s_54b80c92daa9cb::t_b2aa5cb8fce114 1-43
+contracts/plugins/v0/fixtures/responses/ingestion/no-segments.json
+  s_54b80c92daa9cb::t_a82ed20f3d0f11 1-3
+contracts/plugins/v0/fixtures/responses/ingestion/nul-lexical-text.json
+  s_54b80c92daa9cb::t_264c6fd832ccdb 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/offset-out-of-range.json
+  s_54b80c92daa9cb::t_edc69e3c9cc333 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/segment-only.json
+  s_54b80c92daa9cb::t_d13a1f7a136b74 1-17
+contracts/plugins/v0/fixtures/responses/ingestion/start-after-end.json
+  s_54b80c92daa9cb::t_175c16aca785f8 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/string-vector.json
+  s_54b80c92daa9cb::t_da2dfbce9bb08e 1-12
+contracts/plugins/v0/fixtures/responses/ingestion/title-only.json
+  s_54b80c92daa9cb::t_b9f0915345e3b7 1-25
+contracts/plugins/v0/fixtures/responses/ingestion/too-many-segments.json
+  s_54b80c92daa9cb::t_90b2bd60c79d8c 1-117
+contracts/plugins/v0/fixtures/responses/ingestion/unknown-field.json
+  s_54b80c92daa9cb::t_453acc8d75be97 1-52
+contracts/plugins/v0/fixtures/responses/ingestion/unknown-part-key.json
+  s_54b80c92daa9cb::t_f93fe7280df59f 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/unrequested-space.json
+  s_54b80c92daa9cb::t_0d7100606d8ab0 1-57
+contracts/plugins/v0/fixtures/responses/ingestion/valid.json
+  s_54b80c92daa9cb::t_51fc0cf36c2581 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/zero-cosine-vector.json
+  s_54b80c92daa9cb::t_49011c50cbe525 1-51
+contracts/plugins/v0/fixtures/responses/ingestion/zero-dot-vector.json
+  s_54b80c92daa9cb::t_799c15915ea6ca 1-51
+contracts/plugins/v0/fixtures/responses/minimal.json
+  s_54b80c92daa9cb::t_c4a9a09fb61ef4 1-15
+contracts/plugins/v0/fixtures/responses/missing-role.json
+  s_54b80c92daa9cb::t_f5f6005a4cf9de 1-66
+contracts/plugins/v0/fixtures/responses/no-parts.json
+  s_54b80c92daa9cb::t_fcd827c9bc3ae5 1-6
+contracts/plugins/v0/fixtures/responses/pages.json
+  s_54b80c92daa9cb::t_b824028a5338aa 1-67
+contracts/plugins/v0/fixtures/responses/retrieval/bm25-with-space.json
+  s_54b80c92daa9cb::t_a91ff38a5098bb 1-11
+contracts/plugins/v0/fixtures/responses/retrieval/candidate-limit.json
+  s_54b80c92daa9cb::t_a529741dd3f49a 1-10
+contracts/plugins/v0/fixtures/responses/retrieval/dimension-mismatch.json
+  s_54b80c92daa9cb::t_85b528bd12a107 1-13
+contracts/plugins/v0/fixtures/responses/retrieval/duplicate-hit.json
+  s_54b80c92daa9cb::t_4df5a976b4093a 1-14
+contracts/plugins/v0/fixtures/responses/retrieval/filter-outside-scope.json
+  s_54b80c92daa9cb::t_36fcb0eca430aa 1-15
+contracts/plugins/v0/fixtures/responses/retrieval/hybrid-with-profile.json
+  s_54b80c92daa9cb::t_82f13bcb2c40f9 1-14
+contracts/plugins/v0/fixtures/responses/retrieval/near-vector-without-query.json
+  s_54b80c92daa9cb::t_a25c99a518b562 2-6,8-9
+contracts/plugins/v0/fixtures/responses/retrieval/profile-candidates.json
+  s_54b80c92daa9cb::t_c6cb50f83b8fdb 1-11
+contracts/plugins/v0/fixtures/responses/retrieval/profile-mode-invalid.json
+  s_54b80c92daa9cb::t_553ba1f7c93786 1-12
+contracts/plugins/v0/fixtures/responses/retrieval/profile-mode.json
+  s_54b80c92daa9cb::t_bb94fd1f76c674 1-12
+contracts/plugins/v0/fixtures/responses/retrieval/profile-undeclared.json
+  s_54b80c92daa9cb::t_c3418a3605cd73 1-11
+contracts/plugins/v0/fixtures/responses/retrieval/profile-with-space.json
+  s_54b80c92daa9cb::t_e60eb2063d8bf1 1-12
+contracts/plugins/v0/fixtures/responses/retrieval/ranking-empty.json
+  s_54b80c92daa9cb::t_d57cfe791acae1 1-5
+contracts/plugins/v0/fixtures/responses/retrieval/ranking.json
+  s_54b80c92daa9cb::t_d49bff0a8ebea1 1-18
+contracts/plugins/v0/fixtures/responses/retrieval/requests-and-ranking.json
+  s_54b80c92daa9cb::t_7b9f38767d8d6b 1-13
+contracts/plugins/v0/fixtures/responses/retrieval/requests.json
+  s_54b80c92daa9cb::t_7cc34e9140e240 1-16
+contracts/plugins/v0/fixtures/responses/retrieval/too-many-hits.json
+  s_54b80c92daa9cb::t_cbe6be21aa083f 1-18
+contracts/plugins/v0/fixtures/responses/retrieval/too-many-requests.json
+  s_54b80c92daa9cb::t_54e63cc57ce9df 1-22
+contracts/plugins/v0/fixtures/responses/retrieval/too-many-rounds.json
+  s_54b80c92daa9cb::t_e02cc27ff6211e 1-10
+contracts/plugins/v0/fixtures/responses/retrieval/unknown-space.json
+  s_54b80c92daa9cb::t_880b57efc2b37a 1-10
+contracts/plugins/v0/fixtures/responses/retrieval/unserved-candidate.json
+  s_54b80c92daa9cb::t_02cbca67201012 1-10
+contracts/plugins/v0/fixtures/responses/subscription/details-too-large.json
+  s_54b80c92daa9cb::t_fbf2909c845845 1-21
+contracts/plugins/v0/fixtures/responses/subscription/duplicate-decision.json
+  s_54b80c92daa9cb::t_38472b1fa507af 1-7
+contracts/plugins/v0/fixtures/responses/subscription/explanation-at-limit.json
+  s_54b80c92daa9cb::t_84af92f6445243 1-18
+contracts/plugins/v0/fixtures/responses/subscription/explanation-too-long.json
+  s_54b80c92daa9cb::t_680baef9278357 1-18
+contracts/plugins/v0/fixtures/responses/subscription/match-without-evidence.json
+  s_54b80c92daa9cb::t_8ce433e85e55b6 1-6
+contracts/plugins/v0/fixtures/responses/subscription/missing-decision.json
+  s_54b80c92daa9cb::t_2c7d88276fe307 1-9
+contracts/plugins/v0/fixtures/responses/subscription/nul-in-evidence.json
+  s_54b80c92daa9cb::t_5fc8fd523094e2 1-18
+contracts/plugins/v0/fixtures/responses/subscription/too-many-part-keys.json
+  s_54b80c92daa9cb::t_2030e1772dc41c 1-118
+contracts/plugins/v0/fixtures/responses/subscription/unknown-decision-value.json
+  s_54b80c92daa9cb::t_f3757fa0d6a4db 1-6
+contracts/plugins/v0/fixtures/responses/subscription/unknown-decision.json
+  s_54b80c92daa9cb::t_cba253a5d151de 1-7
+contracts/plugins/v0/fixtures/responses/subscription/unknown-part-key.json
+  s_54b80c92daa9cb::t_ff749d7cf25dc6 1-10
+contracts/plugins/v0/fixtures/responses/subscription/valid.json
+  s_54b80c92daa9cb::t_af46139bd20b9d 1-17
+contracts/plugins/v0/fixtures/responses/too-many-warnings.json
+  s_54b80c92daa9cb::t_763bc763c8fd35 1-195
+contracts/plugins/v0/fixtures/responses/unknown-field.json
+  s_54b80c92daa9cb::t_73b7a601a9a5a1 1-68
+contracts/plugins/v0/fixtures/responses/unknown-parent.json
+  s_54b80c92daa9cb::t_e466cb4d5a0bf5 1-67
+contracts/plugins/v0/fixtures/responses/wrong-manifest-kind.json
+  s_54b80c92daa9cb::t_936080dcc01dc4 1-67
+contracts/plugins/v0/fixtures/retrieval/newsroom.json
+  s_54b80c92daa9cb::t_6f160bcfa5e920 1-33
+contracts/plugins/v0/fixtures/subscriptions/metadata.json
+  s_54b80c92daa9cb::t_5d92e53834aca8 1-39
+contracts/plugins/v0/fixtures/subscriptions/missing-expression.json
+  s_54b80c92daa9cb::t_45cbda083bc316 1-10
+contracts/plugins/v0/fixtures/subscriptions/strike.json
+  s_54b80c92daa9cb::t_3e32ec97bbc2ee 1-14
+contracts/plugins/v0/health.schema.json
+  s_54b80c92daa9cb::t_2fb47e20f8a6a5 1-15
+contracts/plugins/v0/ingestion-embed-query-request.schema.json
+  s_54b80c92daa9cb::t_041b49f37e6da9 1-59
+contracts/plugins/v0/ingestion-embed-query-response.schema.json
+  s_54b80c92daa9cb::t_75c0e0798c6582 1-21
+contracts/plugins/v0/ingestion-fixture.schema.json
+  s_54b80c92daa9cb::t_62628b7846316d 1-63,65-77,79-91
+contracts/plugins/v0/ingestion-segment-and-embed-request.schema.json
+  s_54b80c92daa9cb::t_6461710b83d0d1 1-109
+contracts/plugins/v0/ingestion-segment-and-embed-response.schema.json
+  s_54b80c92daa9cb::t_ef4c9613083258 1-70
+contracts/plugins/v0/normalizer-request.schema.json
+  s_54b80c92daa9cb::t_ef77bf61c90b15 1-145
+contracts/plugins/v0/normalizer-response.schema.json
+  s_54b80c92daa9cb::t_6efff4d8f066a4 1-48
+contracts/plugins/v0/plugin-fixture.schema.json
+  s_54b80c92daa9cb::t_5ebd8eceb953da 1-51
+contracts/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_bfc5108f43bc38 2-177,179-225,227-251,253-318,320-321,323-326,328-393,395-399,401-406,408,410-420,422-622,624-628,630-718,720,722-736,738,740-772,774-779,781-849,851,853-854
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_54b80c92daa9cb::t_a724ac8cb69798 1-228
+contracts/plugins/v0/retrieval-fixture.schema.json
+  s_54b80c92daa9cb::t_bfa96f9d3eec6a 1-158
+contracts/plugins/v0/retrieval-search-request.schema.json
+  s_54b80c92daa9cb::t_7fe60692069816 2-203,205-258,260-371,373-377,379-381,383-411,413-416,418-421,423-426,428-431,433,435,437-467,469-472,474-477,479-507,509-512,514-550,552-570,572,574,576,578-634,636,638-654,656,658-659
+contracts/plugins/v0/retrieval-search-response.schema.json
+  s_54b80c92daa9cb::t_9027110408b142 1-91
+contracts/plugins/v0/subscription-fixture.schema.json
+  s_54b80c92daa9cb::t_34156bdcc8d028 1-93
+contracts/plugins/v0/subscription-request.schema.json
+  s_54b80c92daa9cb::t_2be5fb274b5a9c 2-110,112,114,116,118-129,131-133,135-160,162-165,167-169,171-182,184-203,205-207,209-210,212-214,216,218,220-279,281-283,285-287,289-291,293-297,299-319,321,323-324,326,328-330,332-333
+contracts/plugins/v0/subscription-response.schema.json
+  s_54b80c92daa9cb::t_8cc6799af05fad 1-69
+contracts/shared/v0/manifest.schema.json
+  s_54b80c92daa9cb::t_138ceb07bf68eb 1-283
+deploy/compose/compose.macos.yaml
+  s_54b80c92daa9cb::t_364ac4384fc9b5 1-13
+deploy/compose/compose.yaml
+  s_54b80c92daa9cb::t_a6b75b14277ad8 1-89
+deploy/mlflow/Dockerfile
+  s_54b80c92daa9cb::t_ac7e87ba15c459 1-5
+deploy/mlflow/README.md
+  s_54b80c92daa9cb::t_f4e7a8b88faf72 1-68
+deploy/mlflow/entrypoint.py
+  s_54b80c92daa9cb::t_1fe3173c291e92 1-49
+deploy/mlflow/eval-control.sql
+  s_54b80c92daa9cb::t_70993e12f56fb0 1-88
+deploy/mlflow/optuna.sql
+  s_54b80c92daa9cb::t_7b9e9a1ab5f4c6 1-11
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_0fc27e747bf067 1-246
+deploy/railway/check_public.py
+  s_54b80c92daa9cb::t_ac8239d46d22a2 1-61
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_c7b57276c3107a 1-321
+deploy/railway/core.Dockerfile
+  s_54b80c92daa9cb::t_e83740a29fa9b2 1-62
+deploy/railway/deploy.py
+  s_54b80c92daa9cb::t_9f61468d3898ea 1-5,7,10-27,30-31
+deploy/railway/hosted-embeddings.md
+  s_54b80c92daa9cb::t_f989c8b9635ec4 1-107
+deploy/railway/provision.py
+  s_54b80c92daa9cb::t_aef637cec1ee85 1-98
+deploy/railway/seaweed-entrypoint.sh
+  s_54b80c92daa9cb::t_6287bae4262a49 1-7
+deploy/railway/seaweed.Dockerfile
+  s_54b80c92daa9cb::t_c4537b60dacb1f 1-3
+deploy/railway/services.json
+  s_54b80c92daa9cb::t_ca69ce907c014f 1-19
+deploy/railway/tei.Dockerfile
+  s_54b80c92daa9cb::t_dd93f2fef55188 1-10
+deploy/railway/temporal.Dockerfile
+  s_54b80c92daa9cb::t_6010310c9482d1 1-3
+deploy/railway/web.Dockerfile
+  s_54b80c92daa9cb::t_3f89c4dbd4a59e 1-15
+docs-site/api-reference/overview.mdx
+  s_54b80c92daa9cb::t_ebd6dd80d3d08c 1-70
+docs-site/concepts.mdx
+  s_54b80c92daa9cb::t_90bc3e2a53bf10 1-147
+docs-site/docs.json
+  s_54b80c92daa9cb::t_ff82d62dc3fd7b 1-308
+docs-site/guides/add-content.mdx
+  s_54b80c92daa9cb::t_2f9964c9393643 1-272
+docs-site/guides/ai-agents.mdx
+  s_54b80c92daa9cb::t_eb9a1a2bf2b265 1-239
+docs-site/guides/alerts.mdx
+  s_54b80c92daa9cb::t_a06f9696007692 1-127
+docs-site/guides/connectors.mdx
+  s_54b80c92daa9cb::t_bea0227ab5e782 1-105
+docs-site/guides/described-alerts.mdx
+  s_54b80c92daa9cb::t_d21973093e4168 1-124
+docs-site/guides/follow-changes.mdx
+  s_54b80c92daa9cb::t_f6e9967b65349d 1-413
+docs-site/guides/keyword-alerts.mdx
+  s_54b80c92daa9cb::t_da341608cbcf1a 1-284
+docs-site/guides/microsoft-365.mdx
+  s_54b80c92daa9cb::t_67499cc8ba4a0f 1-98
+docs-site/guides/rerank-with-jev.mdx
+  s_54b80c92daa9cb::t_007d93f5657985 1-88
+docs-site/guides/rss.mdx
+  s_54b80c92daa9cb::t_14e0a152f89d77 1-75
+docs-site/guides/search.mdx
+  s_54b80c92daa9cb::t_fb07729b6f453f 1-179
+docs-site/guides/x.mdx
+  s_54b80c92daa9cb::t_79771b5fc98e3d 1-86
+docs-site/index.mdx
+  s_54b80c92daa9cb::t_e60d2ae65dcacf 1-131
+docs-site/openapi.yaml
+  s_54b80c92daa9cb::t_e27148272c544c 1-8742
+docs-site/plugins/first-plugin.mdx
+  s_54b80c92daa9cb::t_347d0fa742fe16 1-281
+docs-site/plugins/overview.mdx
+  s_54b80c92daa9cb::t_f0f767bfd3e861 1-118
+docs-site/plugins/push-source.mdx
+  s_54b80c92daa9cb::t_8b5ac8330be59a 1-197
+docs-site/plugins/types.mdx
+  s_54b80c92daa9cb::t_23d99d7ad98988 1-228
+docs-site/plugins/write-a-connector.mdx
+  s_54b80c92daa9cb::t_08914f8eea1325 1-216
+docs-site/plugins/write-a-retrieval-plugin.mdx
+  s_54b80c92daa9cb::t_12de9191bb5d19 1-148
+docs-site/plugins/write-an-alert-rule.mdx
+  s_54b80c92daa9cb::t_7d5c887834d5f5 1-4,7-8,11,13,15,17,19-23,25,27,29-30,32-38,40-41,43,45-48,50,52-53,55,57-67,69,71-72,74,76-78,80-82,84-85,87-89,91,93-95,97-98,100,102-104,106-107,109,111-123,125
+docs-site/plugins/write-an-ingestion-plugin.mdx
+  s_54b80c92daa9cb::t_0fbee0aebdc6e9 1-124
+docs-site/quickstart.mdx
+  s_54b80c92daa9cb::t_dc37d073bd6e91 1-270
+docs-site/reference/cli.mdx
+  s_54b80c92daa9cb::t_17cc1ca5cb549e 1-203
+docs-site/reference/configuration.mdx
+  s_54b80c92daa9cb::t_b371074dda1630 1-207
+docs-site/reference/mcp.mdx
+  s_54b80c92daa9cb::t_8767ade78c61f7 1-358
+docs-site/reference/plugin-manifest.mdx
+  s_54b80c92daa9cb::t_9ce4f5f8ba7daa 1-156
+docs-site/reference/plugin-protocol.mdx
+  s_54b80c92daa9cb::t_a349816032bb01 1-618
+docs-site/run-quivr/backfill-a-vector-space.mdx
+  s_54b80c92daa9cb::t_ad534b6d177e2b 1-122
+docs-site/run-quivr/catalog.mdx
+  s_54b80c92daa9cb::t_6aed01874d2a86 1-105
+docs-site/run-quivr/configure-alert-fields.mdx
+  s_54b80c92daa9cb::t_6a248ca76b48e7 1-42
+docs-site/run-quivr/pin.mdx
+  s_54b80c92daa9cb::t_242aa1c96656b0 1-78
+docs-site/run-quivr/receive-pushes.mdx
+  s_54b80c92daa9cb::t_cd16076595f494 1-247
+docs-site/run-quivr/record-search-measurements.mdx
+  s_54b80c92daa9cb::t_b535c70e91d425 1-104
+docs-site/run-quivr/reprocess-quarantined-versions.mdx
+  s_54b80c92daa9cb::t_80ac2c41a0f90d 1-128
+docs-site/run-quivr/retire-alert-evaluations.mdx
+  s_54b80c92daa9cb::t_03790e5a9fbe7c 1-71
+docs-site/run-quivr/run-search-campaign.mdx
+  s_54b80c92daa9cb::t_17263fe3afc3ef 1-102
+docs-site/run-quivr/search-profiles.mdx
+  s_54b80c92daa9cb::t_54515ece75927c 1-163
+docs-site/run-quivr/switch-a-vector-model.mdx
+  s_54b80c92daa9cb::t_f6ce690ba24ba8 1-412
+docs-site/run-quivr/upgrade-a-plugin.mdx
+  s_54b80c92daa9cb::t_40b636fc37ae4f 1-277
+docs-site/run-quivr/upgrade-an-alert-rule.mdx
+  s_54b80c92daa9cb::t_ac6e82ad140f4a 1-84
+docs/adr/0001-plugin-cli-and-contract-runner-in-quivr-binary.md
+  s_54b80c92daa9cb::t_eccbf7c13b5d73 1-15
+docs/adr/0002-record-version-identity-from-submitted-input.md
+  s_54b80c92daa9cb::t_f284e458951522 1-14
+docs/adr/0003-revert-to-earlier-content-mints-a-new-record-version.md
+  s_54b80c92daa9cb::t_d83091f66e508a 1-28
+docs/adr/0004-documentation-rules-are-enforced-by-ci-only.md
+  s_54b80c92daa9cb::t_66cc07d27a1cf7 1-24
+docs/adr/0005-a-query-mistake-gets-the-same-code-on-every-route.md
+  s_54b80c92daa9cb::t_3ab141204b75ce 1-32
+docs/adr/0006-explicitly-retire-unavailable-alert-evaluations.md
+  s_54b80c92daa9cb::t_0e2a4cae383288 1-47
+docs/agents/documentation.md
+  s_54b80c92daa9cb::t_dacfa0ade7ef38 1-55
+docs/agents/domain.md
+  s_54b80c92daa9cb::t_56cafc085e7e55 1-44
+docs/agents/evaluation.md
+  s_54b80c92daa9cb::t_8eec10b4d21ff2 1-169
+docs/agents/fleet-workflow.md
+  s_54b80c92daa9cb::t_d1e1ae3db5ec96 1-60
+docs/agents/issue-tracker.md
+  s_54b80c92daa9cb::t_c7c24c7c1017ee 1-101
+docs/agents/news-set.md
+  s_54b80c92daa9cb::t_db3c1a20a512b4 1-252
+docs/agents/oss-embeddings.md
+  s_54b80c92daa9cb::t_84f7486fb6ac5e 1-85
+docs/agents/testing.md
+  s_54b80c92daa9cb::t_3602a3e3fd3693 1-80
+docs/agents/triage-labels.md
+  s_54b80c92daa9cb::t_4d96b58bcbaef3 1-13
+docs/assets/quivr-v2-architecture-plugins.excalidraw
+  s_54b80c92daa9cb::t_806a4fa9f83dcc 1-4934
+docs/assets/quivr-v2-flow-animated.svg
+  s_54b80c92daa9cb::t_60bc4c1232ed72 1-69
+docs/assets/quivr-v2-plugins-animated.svg
+  s_54b80c92daa9cb::t_7407505b6d0992 1-67
+docs/dated/README.md
+  s_54b80c92daa9cb::t_576b3980aecadf 1-68
+docs/dated/design/quivr-v2-architecture-overview.md
+  s_54b80c92daa9cb::t_f3fbe35f123d64 1-317
+docs/dated/design/quivr-v2-backend-mvp-scope.md
+  s_54b80c92daa9cb::t_ee8dcce2c1a78b 1-681
+docs/dated/design/quivr-v2-canonical-data-model.md
+  s_54b80c92daa9cb::t_ad8b2437240d12 1-531
+docs/dated/design/quivr-v2-ingestion-contracts.md
+  s_54b80c92daa9cb::t_7c830e46c2dbf5 1-561
+docs/dated/design/quivr-v2-module-boundaries.md
+  s_54b80c92daa9cb::t_7704bf255f3646 1-371
+docs/dated/design/quivr-v2-monitoring-tracer.md
+  s_54b80c92daa9cb::t_1689dc50194ac1 1-770
+docs/dated/design/quivr-v2-search-contracts.md
+  s_54b80c92daa9cb::t_9e1646513135f5 1-354
+docs/dated/evidence/2026-10-03-embedding-comparison/miracl-fr-dims.json
+  s_54b80c92daa9cb::t_44fd2a7ceaaa18 1-77
+docs/dated/evidence/2026-10-03-embedding-comparison/miracl-fr.json
+  s_54b80c92daa9cb::t_0cabf02cb5fd9a 1-102
+docs/dated/evidence/2026-10-03-embedding-comparison/mldr-fr.json
+  s_54b80c92daa9cb::t_b296a4ef33e31c 1-106
+docs/dated/evidence/2026-10-03-embedding-comparison/scifact.json
+  s_54b80c92daa9cb::t_90a79e2fe6aab6 1-106
+docs/dated/evidence/2026-10-03-embedding-comparison/summary.md
+  s_54b80c92daa9cb::t_949dda8d898b20 1-47
+docs/dated/evidence/2026-10-03-news-set-builder/quality.json
+  s_54b80c92daa9cb::t_011898acfa7f8d 1-76
+docs/dated/evidence/2026-10-03-news-set-builder/summary.md
+  s_54b80c92daa9cb::t_693035c867b285 1-27
+docs/dated/evidence/2026-10-03-public-sets/alloprof.json
+  s_54b80c92daa9cb::t_8870035c95f69c 1-426
+docs/dated/evidence/2026-10-03-public-sets/alloprof.md
+  s_54b80c92daa9cb::t_814c94cd3c0cdf 1-58
+docs/dated/evidence/2026-10-03-public-sets/arguana.json
+  s_54b80c92daa9cb::t_a85a1a65c8822e 1-527
+docs/dated/evidence/2026-10-03-public-sets/arguana.md
+  s_54b80c92daa9cb::t_3b4d56554ee3f4 1-56
+docs/dated/evidence/2026-10-03-public-sets/bsard.json
+  s_54b80c92daa9cb::t_8988b6f5436c98 1-361
+docs/dated/evidence/2026-10-03-public-sets/bsard.md
+  s_54b80c92daa9cb::t_2fbd159acb4869 1-57
+docs/dated/evidence/2026-10-03-public-sets/fiqa.json
+  s_54b80c92daa9cb::t_05119cc69ab3f5 1-316
+docs/dated/evidence/2026-10-03-public-sets/fiqa.md
+  s_54b80c92daa9cb::t_ac17de27db2566 1-56
+docs/dated/evidence/2026-10-03-public-sets/hosted-plan.json
+  s_54b80c92daa9cb::t_a417c3819981f7 1-589
+docs/dated/evidence/2026-10-03-public-sets/miracl-fr.json
+  s_54b80c92daa9cb::t_ae6140240eabaf 1-288
+docs/dated/evidence/2026-10-03-public-sets/miracl-fr.md
+  s_54b80c92daa9cb::t_1b0d171f08a63d 1-57
+docs/dated/evidence/2026-10-03-public-sets/mkqa-fr.json
+  s_54b80c92daa9cb::t_203eec979dcdde 1-276
+docs/dated/evidence/2026-10-03-public-sets/mkqa-fr.md
+  s_54b80c92daa9cb::t_b2f02da0a989c1 1-56
+docs/dated/evidence/2026-10-03-public-sets/mldr-fr.json
+  s_54b80c92daa9cb::t_fc100fb2692ad4 1-367
+docs/dated/evidence/2026-10-03-public-sets/mldr-fr.md
+  s_54b80c92daa9cb::t_06e73dc2d5467d 1-56
+docs/dated/evidence/2026-10-03-public-sets/nfcorpus.json
+  s_54b80c92daa9cb::t_1cd22291db2d31 1-351
+docs/dated/evidence/2026-10-03-public-sets/nfcorpus.md
+  s_54b80c92daa9cb::t_05b52f7a7064a2 1-57
+docs/dated/evidence/2026-10-03-public-sets/scidocs.json
+  s_54b80c92daa9cb::t_6ad2cf0d3a8e8c 1-321
+docs/dated/evidence/2026-10-03-public-sets/scidocs.md
+  s_54b80c92daa9cb::t_4f5826320a61a8 1-56
+docs/dated/evidence/2026-10-03-public-sets/scifact.json
+  s_54b80c92daa9cb::t_8efff5de59854c 1-350
+docs/dated/evidence/2026-10-03-public-sets/scifact.md
+  s_54b80c92daa9cb::t_71591afb235fbe 1,3-4,6-11,13,15,17-19,21,23-24,26-29,31-34,36,38-41,43-44,46-55
+docs/dated/evidence/2026-10-03-public-sets/summary.md
+  s_54b80c92daa9cb::t_faf528461ec7fc 1-126
+docs/dated/evidence/2026-10-03-public-sets/trec-covid.json
+  s_54b80c92daa9cb::t_69ffbe7dfebbf1 1-224
+docs/dated/evidence/2026-10-03-public-sets/trec-covid.md
+  s_54b80c92daa9cb::t_4977bab83b1f19 1-57
+docs/dated/evidence/2026-10-03-public-sets/webfaq-fr.json
+  s_54b80c92daa9cb::t_7fd268831e4407 1-296
+docs/dated/evidence/2026-10-03-public-sets/webfaq-fr.md
+  s_54b80c92daa9cb::t_5cbf1278a139d1 1-56
+docs/dated/evidence/2026-10-03-public-sets/xpqa-fr.json
+  s_54b80c92daa9cb::t_ff9ac98dd721f0 1-296
+docs/dated/evidence/2026-10-03-public-sets/xpqa-fr.md
+  s_54b80c92daa9cb::t_9a1f22786be8a9 1-56
+docs/dated/evidence/the-661-retrieval-baseline.json
+  s_54b80c92daa9cb::t_487bb3149d18e6 1-1442
+docs/dated/evidence/the-661-retrieval-baseline.md
+  s_54b80c92daa9cb::t_6b84abbf199e2c 1-106
+docs/dated/evidence/the-661-workload-v1.json
+  s_54b80c92daa9cb::t_0a0955278e7a57 1-71
+docs/dated/evidence/the-662-spec1-closure.md
+  s_54b80c92daa9cb::t_0e6a098328c5b4 1-111
+docs/dated/evidence/the-663-ui.md
+  s_54b80c92daa9cb::t_a62079f72095e4 1-25
+docs/dated/evidence/the-664-deployment.json
+  s_54b80c92daa9cb::t_5e7f3a293faef7 1-126
+docs/dated/evidence/the-664-deployment.md
+  s_54b80c92daa9cb::t_161ccde5a5495a 1-44
+docs/dated/evidence/the-675-query-floor.md
+  s_54b80c92daa9cb::t_7d6c14c5f96fbd 1-106
+docs/dated/evidence/the-675-retrieval-after.json
+  s_54b80c92daa9cb::t_f884f75972ad70 1-1449
+docs/dated/evidence/the-675-retrieval-before.json
+  s_54b80c92daa9cb::t_df47c744e3f299 1-1453
+docs/dated/research/deepseek-harness-plugin-architecture.md
+  s_54b80c92daa9cb::t_0910b80b716be9 1-240
+docs/dated/research/event-runtime-devx.md
+  s_54b80c92daa9cb::t_8d6478be5ba123 1-201
+docs/dated/research/forge-generation-pipeline.md
+  s_54b80c92daa9cb::t_e1636263f938cc 1-245
+docs/dated/research/herd-plugin-architecture.md
+  s_54b80c92daa9cb::t_9ee0df47ed3559 1-181
+docs/dated/research/meilisearch-for-quivr.md
+  s_54b80c92daa9cb::t_e46c218fd6a61e 1-295
+docs/dated/research/modern-search-devx.md
+  s_54b80c92daa9cb::t_85adbb03892058 1-254
+docs/dated/research/new-durable-runtime-systems.md
+  s_54b80c92daa9cb::t_f591ec393d527f 1-276
+docs/dated/research/new-oss-vector-systems.md
+  s_54b80c92daa9cb::t_370d50efe039ef 1-264
+docs/dated/research/pi-plugin-architecture.md
+  s_54b80c92daa9cb::t_f9873d5475746f 1-239
+docs/dated/research/plugin-isolation-runtime.md
+  s_54b80c92daa9cb::t_60c46c6f9de41b 1-281
+docs/dated/research/storage-search-stack.md
+  s_54b80c92daa9cb::t_a00a4d2064d2e7 1-266
+docs/dated/research/windmill-for-quivr.md
+  s_54b80c92daa9cb::t_b7d524902da5a6 1-171
+docs/eval-engine-confirmation.md
+  s_54b80c92daa9cb::t_4a0d6c223af2bc 1-170
+docs/eval-engine-smoke.md
+  s_54b80c92daa9cb::t_607e6233952cb5 1-144
+docs/eval-modal.md
+  s_54b80c92daa9cb::t_813d0359f7d3f5 1-176
+docs/eval-results.md
+  s_54b80c92daa9cb::t_a8f9419a72b44b 1-148
+docs/inventory.toml
+  s_54b80c92daa9cb::t_fa1fb9d9a1c700 1-148
+docs/quivr-v2-local-harness.md
+  s_54b80c92daa9cb::t_1f2b63f41469b3 1-611
+docs/quivr-v2-remaining-limits.md
+  s_54b80c92daa9cb::t_2d379a51811156 1-157
+docs/reference/cli.md
+  s_54b80c92daa9cb::t_6321e53ef3a1a9 1-202
+docs/reference/mcp.md
+  s_54b80c92daa9cb::t_583fe226178739 1-362
+docs/runnable-guides.md
+  s_54b80c92daa9cb::t_cf5690580d1b07 1-83
+docs/search-campaign-reporting.md
+  s_54b80c92daa9cb::t_7f32d2412cb9c0 1-138
+docs/search-campaigns.md
+  s_54b80c92daa9cb::t_8700be0bb56357 1-132
+docs/start/contributor.md
+  s_54b80c92daa9cb::t_a3fd0aad9484a5 1-43
+docs/start/functional.md
+  s_54b80c92daa9cb::t_3360934236069b 1-31
+docs/start/plugin-author.md
+  s_54b80c92daa9cb::t_4f70d7efa0cc11 1-28
+go.mod
+  s_54b80c92daa9cb::t_e574c8ea6ddc07 1-59
+go.sum
+  s_54b80c92daa9cb::t_43952147d2a2de 1-187
+internal/adapters/pluginhttp/connector.go
+  s_54b80c92daa9cb::t_3a34ab1436ede6 1-262
+internal/adapters/pluginhttp/connector_test.go
+  s_54b80c92daa9cb::t_8ec46d1a27c01d 1-389
+internal/adapters/pluginhttp/ingestion.go
+  s_54b80c92daa9cb::t_3c7d82cc24701c 1-220
+internal/adapters/pluginhttp/ingestion_test.go
+  s_54b80c92daa9cb::t_a5939ffaa494ac 1-349
+internal/adapters/pluginhttp/live.go
+  s_54b80c92daa9cb::t_b1cd39fbd114e1 1-140
+internal/adapters/pluginhttp/observe.go
+  s_54b80c92daa9cb::t_58a003531e912d 1-75
+internal/adapters/pluginhttp/pluginhttp.go
+  s_54b80c92daa9cb::t_124f13f89611da 1-81
+internal/adapters/pluginhttp/receive.go
+  s_54b80c92daa9cb::t_0fc1e87478c677 1-59
+internal/adapters/pluginhttp/receive_test.go
+  s_54b80c92daa9cb::t_024d2b94443848 1-146
+internal/adapters/pluginhttp/retrieval.go
+  s_54b80c92daa9cb::t_650f90306f6a3a 1-45
+internal/adapters/pluginhttp/subscription.go
+  s_54b80c92daa9cb::t_f0e62a6a5462c5 1-247
+internal/adapters/pluginhttp/subscription_test.go
+  s_54b80c92daa9cb::t_44237365db0aab 1-312
+internal/adapters/postgres/activation_order_test.go
+  s_54b80c92daa9cb::t_0c705e20f186d6 1-142
+internal/adapters/postgres/activity.go
+  s_54b80c92daa9cb::t_70b3a045fa58b9 1-134
+internal/adapters/postgres/backfill.go
+  s_54b80c92daa9cb::t_2ccbf1e6963c70 1-785
+internal/adapters/postgres/backfill_test.go
+  s_54b80c92daa9cb::t_7c776419cf8107 1-716
+internal/adapters/postgres/batch_test.go
+  s_54b80c92daa9cb::t_631b9f4fec50bc 1-139
+internal/adapters/postgres/catalog_test.go
+  s_54b80c92daa9cb::t_74fbafc1f3e4a3 1-101
+internal/adapters/postgres/changes.go
+  s_54b80c92daa9cb::t_65d2257a6cf4e7 1-166
+internal/adapters/postgres/changes_test.go
+  s_54b80c92daa9cb::t_129093ed6f6652 1-104
+internal/adapters/postgres/connector_push.go
+  s_54b80c92daa9cb::t_6c708965d1b232 1-226
+internal/adapters/postgres/connector_push_protection_test.go
+  s_54b80c92daa9cb::t_5ba76dbb396dbc 1-443
+internal/adapters/postgres/connector_push_test.go
+  s_54b80c92daa9cb::t_d445a9f5c51d15 1-137
+internal/adapters/postgres/connector_replay.go
+  s_54b80c92daa9cb::t_be84466fe756d6 1-56
+internal/adapters/postgres/connector_replay_test.go
+  s_54b80c92daa9cb::t_88746f8c616628 1-98
+internal/adapters/postgres/connector_tokens.go
+  s_54b80c92daa9cb::t_184390ebb39466 1-114
+internal/adapters/postgres/connector_tokens_test.go
+  s_54b80c92daa9cb::t_60db8da18e79ff 1-387
+internal/adapters/postgres/connectors.go
+  s_54b80c92daa9cb::t_5047705e933f95 1-590
+internal/adapters/postgres/connectors_test.go
+  s_54b80c92daa9cb::t_17c6eaf8ba3bc2 1-390
+internal/adapters/postgres/content.go
+  s_54b80c92daa9cb::t_2bef841972f992 1-225
+internal/adapters/postgres/content_fixture_test.go
+  s_54b80c92daa9cb::t_5d5620fb70c8f0 1-58
+internal/adapters/postgres/content_test.go
+  s_54b80c92daa9cb::t_d2e5512f9446b1 1-250
+internal/adapters/postgres/corpora.go
+  s_54b80c92daa9cb::t_20dff3465f339a 1-85
+internal/adapters/postgres/corrections_test.go
+  s_54b80c92daa9cb::t_65fe621d837394 1-551
+internal/adapters/postgres/default_generation_test.go
+  s_54b80c92daa9cb::t_940b7bd95f8395 1-89
+internal/adapters/postgres/delivery.go
+  s_54b80c92daa9cb::t_103f94fd17ae36 1-240
+internal/adapters/postgres/delivery_fixture_test.go
+  s_54b80c92daa9cb::t_aad2bc3dbb5b91 1-234
+internal/adapters/postgres/delivery_guard_test.go
+  s_54b80c92daa9cb::t_2e4893af843d3c 1-73
+internal/adapters/postgres/delivery_retry_test.go
+  s_54b80c92daa9cb::t_824513cbc7c246 1-127
+internal/adapters/postgres/delivery_test.go
+  s_54b80c92daa9cb::t_75af21b501c64c 1,3-187
+internal/adapters/postgres/dispatch_test.go
+  s_54b80c92daa9cb::t_297fbe1fe036df 1-194
+internal/adapters/postgres/eligibility.go
+  s_54b80c92daa9cb::t_262263d574cce6 1-30
+internal/adapters/postgres/eligibility_test.go
+  s_54b80c92daa9cb::t_d4dd3a64678118 1-83
+internal/adapters/postgres/embeddings.go
+  s_54b80c92daa9cb::t_9f1401e92b731a 1-235
+internal/adapters/postgres/embeddings_test.go
+  s_54b80c92daa9cb::t_af0cc7a0afcdad 1-286
+internal/adapters/postgres/enrichment_reason_test.go
+  s_54b80c92daa9cb::t_5a6dc1ace74f8e 1-92
+internal/adapters/postgres/evaluation.go
+  s_54b80c92daa9cb::t_579b2436859794 1-659
+internal/adapters/postgres/evaluation_batch.go
+  s_54b80c92daa9cb::t_aa0c6359507f16 1-89
+internal/adapters/postgres/evaluation_batch_test.go
+  s_54b80c92daa9cb::t_9fa842dfe1d09d 1-257
+internal/adapters/postgres/evaluation_retirement.go
+  s_54b80c92daa9cb::t_8adb5d5a16f605 1-166
+internal/adapters/postgres/evaluation_retirement_test.go
+  s_54b80c92daa9cb::t_110e55ac534506 1-322
+internal/adapters/postgres/evaluation_test.go
+  s_54b80c92daa9cb::t_4dbf30a66a732c 1-374
+internal/adapters/postgres/evaluator_migration_test.go
+  s_54b80c92daa9cb::t_329f9978c04227 1-201
+internal/adapters/postgres/ingestion_evaluation.go
+  s_54b80c92daa9cb::t_91404198631729 1-268
+internal/adapters/postgres/ingestion_evaluation_test.go
+  s_54b80c92daa9cb::t_9bdb97643d5f20 1-246
+internal/adapters/postgres/ingestion_promotion.go
+  s_54b80c92daa9cb::t_89445b033cd348 1-253
+internal/adapters/postgres/ingestion_promotion_test.go
+  s_54b80c92daa9cb::t_564af662d876c6 1-700
+internal/adapters/postgres/main_test.go
+  s_54b80c92daa9cb::t_40631373835752 1,3-9,11-14,16-32,34-37,39-62
+internal/adapters/postgres/matches.go
+  s_54b80c92daa9cb::t_ccf21b080d0f84 1-105
+internal/adapters/postgres/migrate.go
+  s_54b80c92daa9cb::t_9c26f5dd5b0e76 1-142
+internal/adapters/postgres/migrate_test.go
+  s_54b80c92daa9cb::t_61731aab0d9e50 1-178
+internal/adapters/postgres/monitoring.go
+  s_54b80c92daa9cb::t_617bc8dc0c754c 1-716
+internal/adapters/postgres/monitoring_edit_test.go
+  s_54b80c92daa9cb::t_6d4102bd612310 1-404
+internal/adapters/postgres/monitoring_owner_test.go
+  s_54b80c92daa9cb::t_fa35bf2c4633ab 1-176
+internal/adapters/postgres/monitoring_rename_test.go
+  s_54b80c92daa9cb::t_ee73307a53ba3f 1,3-7,9,12-72
+internal/adapters/postgres/monitoring_test.go
+  s_54b80c92daa9cb::t_9b9c488a5af670 1-317
+internal/adapters/postgres/normalization_failures_test.go
+  s_54b80c92daa9cb::t_995a2ac2acf471 1-358
+internal/adapters/postgres/normalizations.go
+  s_54b80c92daa9cb::t_c9dc2622b570f0 1-118
+internal/adapters/postgres/normalizations_test.go
+  s_54b80c92daa9cb::t_8c03ed25870ed3 1-186
+internal/adapters/postgres/observability.go
+  s_54b80c92daa9cb::t_0b0f17580ce3c1 1-108
+internal/adapters/postgres/observability_test.go
+  s_54b80c92daa9cb::t_89a74fcae7dca6 1-110
+internal/adapters/postgres/operation_control_test.go
+  s_54b80c92daa9cb::t_594be4cdee10fd 1-301
+internal/adapters/postgres/operations.go
+  s_54b80c92daa9cb::t_8cd808f8dab7e9 1-407
+internal/adapters/postgres/operations_test.go
+  s_54b80c92daa9cb::t_1cf6abe6f18d9e 1-169
+internal/adapters/postgres/plugins.go
+  s_54b80c92daa9cb::t_6445f63fdaded1 1-699
+internal/adapters/postgres/plugins_test.go
+  s_54b80c92daa9cb::t_5b359497a264bf 1-638
+internal/adapters/postgres/preview.go
+  s_54b80c92daa9cb::t_4d2cb200409dc7 1-36
+internal/adapters/postgres/preview_test.go
+  s_54b80c92daa9cb::t_cc936687c7b8ba 1-58
+internal/adapters/postgres/promote.go
+  s_54b80c92daa9cb::t_75df81ab12fcdc 1-146
+internal/adapters/postgres/promote_test.go
+  s_54b80c92daa9cb::t_e6b4f2b8142e2c 1-166
+internal/adapters/postgres/prune_test.go
+  s_54b80c92daa9cb::t_8f128519a38c8d 1-279
+internal/adapters/postgres/purge.go
+  s_54b80c92daa9cb::t_235ee24532f34b 1-127
+internal/adapters/postgres/purge_test.go
+  s_54b80c92daa9cb::t_d0019bb2f18a2c 1-323
+internal/adapters/postgres/quarantine.go
+  s_54b80c92daa9cb::t_f746ccf3981648 1-631
+internal/adapters/postgres/quarantine_test.go
+  s_54b80c92daa9cb::t_37a15167a2f270 1-427
+internal/adapters/postgres/rebuild.go
+  s_54b80c92daa9cb::t_d0cb906c711909 1-383
+internal/adapters/postgres/rebuild_test.go
+  s_54b80c92daa9cb::t_be36fa84bba465 1-216
+internal/adapters/postgres/receipts.go
+  s_54b80c92daa9cb::t_dbc7601edcd26f 1-74
+internal/adapters/postgres/record_gone_test.go
+  s_54b80c92daa9cb::t_d8008527dbe7c6 1-65
+internal/adapters/postgres/records.go
+  s_54b80c92daa9cb::t_9002fba7aff49d 1-68
+internal/adapters/postgres/relations_test.go
+  s_54b80c92daa9cb::t_147942073a35c5 1-136
+internal/adapters/postgres/retrieval_config_test.go
+  s_54b80c92daa9cb::t_6e0c827d51925b 1-213
+internal/adapters/postgres/searchable.go
+  s_54b80c92daa9cb::t_34b255f6b0ec01 1-404
+internal/adapters/postgres/searchable_test.go
+  s_54b80c92daa9cb::t_4e4994a1226a37 1-356
+internal/adapters/postgres/serving_projection.go
+  s_54b80c92daa9cb::t_8923337d6116b1 1-300
+internal/adapters/postgres/spaces.go
+  s_54b80c92daa9cb::t_b6ccff884adc72 1-232
+internal/adapters/postgres/spaces_test.go
+  s_54b80c92daa9cb::t_f4199fc26a0d7c 1-318
+internal/adapters/postgres/steps_test.go
+  s_54b80c92daa9cb::t_2287330de5bf84 1-219
+internal/adapters/postgres/submissions.go
+  s_54b80c92daa9cb::t_0cd5e88d42f420 1-212
+internal/adapters/postgres/subscription_vectors.go
+  s_54b80c92daa9cb::t_2effdc7e673e48 1-57
+internal/adapters/postgres/telemetry.go
+  s_54b80c92daa9cb::t_738d72c504ad9e 1-30
+internal/adapters/postgres/uploads.go
+  s_54b80c92daa9cb::t_f2e799509e75ff 1-96
+internal/adapters/postgres/uploads_test.go
+  s_54b80c92daa9cb::t_947ce15f86f39d 1-77
+internal/adapters/postgres/versions.go
+  s_54b80c92daa9cb::t_0223a14832a94a 1-146
+internal/adapters/postgres/withdrawal_disabled_test.go
+  s_54b80c92daa9cb::t_40009f5dea0c8e 1-231
+internal/adapters/postgres/withdrawal_test.go
+  s_54b80c92daa9cb::t_48ee48d693ea6b 1-135
+internal/adapters/s3/blobs.go
+  s_54b80c92daa9cb::t_47dd234b0b215a 1-81
+internal/adapters/s3/blobs_test.go
+  s_54b80c92daa9cb::t_fc70e40a0fbba7 1-90
+internal/adapters/s3/uploads.go
+  s_54b80c92daa9cb::t_aa0d4592857542 1-106
+internal/adapters/s3/uploads_test.go
+  s_54b80c92daa9cb::t_f808bec84626e8 1-140
+internal/adapters/tei/encoder.go
+  s_54b80c92daa9cb::t_ff7d60a1550de6 1-116
+internal/adapters/tei/encoder_test.go
+  s_54b80c92daa9cb::t_b71b195ee13390 1-49
+internal/adapters/tei/space.json
+  s_54b80c92daa9cb::t_0d8b30228bb7aa 1
+internal/adapters/weaviate/attach_test.go
+  s_54b80c92daa9cb::t_843ae6040e7dea 1-431
+internal/adapters/weaviate/generation_test.go
+  s_54b80c92daa9cb::t_ede2c89975047c 1-98
+internal/adapters/weaviate/mapping_test.go
+  s_54b80c92daa9cb::t_a93b5b99b0a977 1-87
+internal/adapters/weaviate/named_spaces_test.go
+  s_54b80c92daa9cb::t_17fd21c06e3487 1-189
+internal/adapters/weaviate/parity_test.go
+  s_54b80c92daa9cb::t_af0b36cbdaab7e 1-89
+internal/adapters/weaviate/projection.go
+  s_54b80c92daa9cb::t_c2c0cefb72571e 1-756
+internal/adapters/weaviate/purge_limit_test.go
+  s_54b80c92daa9cb::t_41d997dfe485f2 1-51
+internal/adapters/weaviate/purge_test.go
+  s_54b80c92daa9cb::t_62bd86e52bbf1a 1-181
+internal/adapters/weaviate/relevance_test.go
+  s_54b80c92daa9cb::t_ec4082b1492483 1-133
+internal/adapters/weaviate/source_filter_test.go
+  s_54b80c92daa9cb::t_8a87913a1a5f11 1-279
+internal/adapters/weaviate/testdata/relevance-v1.json
+  s_54b80c92daa9cb::t_ecf8c4eb55b9e1 1-170
+internal/app/backfill.go
+  s_54b80c92daa9cb::t_b775696be10898 1-159
+internal/app/backfill_config_test.go
+  s_54b80c92daa9cb::t_e9a421a07ab6bc 1-16
+internal/app/credentials_config_test.go
+  s_54b80c92daa9cb::t_185a85e08d7b4a 1-41
+internal/app/database.go
+  s_54b80c92daa9cb::t_dd6549936ab34f 1-56
+internal/app/delivery_config_test.go
+  s_54b80c92daa9cb::t_493dc1c7efec56 1-63
+internal/app/fixture_config_test.go
+  s_54b80c92daa9cb::t_5b03fb03f5e223 1-72
+internal/app/log.go
+  s_54b80c92daa9cb::t_d239cf2eeacd43 1-13,16-51
+internal/app/metrics.go
+  s_54b80c92daa9cb::t_9ac69e5f9885df 1-103
+internal/app/metrics_test.go
+  s_54b80c92daa9cb::t_2b0c0b445380bc 1-108
+internal/app/monitoring.go
+  s_54b80c92daa9cb::t_733beafaeef188 1-175
+internal/app/monitoring_test.go
+  s_54b80c92daa9cb::t_8633f88507db1d 1-108
+internal/app/plugin_config_test.go
+  s_54b80c92daa9cb::t_63b3d5b3349880 1-173
+internal/app/plugins.go
+  s_54b80c92daa9cb::t_e85c29c90e1646 1-235
+internal/app/prune.go
+  s_54b80c92daa9cb::t_b521a7d4aff94a 1-50
+internal/app/prune_config_test.go
+  s_54b80c92daa9cb::t_1fffa589addf9d 1-38
+internal/app/run.go
+  s_54b80c92daa9cb::t_fc9c119288a338 1-804
+internal/app/schema.go
+  s_54b80c92daa9cb::t_274abc1ab34aa7 1-65
+internal/app/schema_test.go
+  s_54b80c92daa9cb::t_d86b7448139976 1-46
+internal/app/spaces.go
+  s_54b80c92daa9cb::t_aab4abd3f15342 1-56
+internal/app/subscription_vectors.go
+  s_54b80c92daa9cb::t_c2b42480885edc 1-88
+internal/app/subscription_vectors_test.go
+  s_54b80c92daa9cb::t_1ce9e6e5ecfb83 1,3-6,8-14,16-19,21-23,25-28,30-67
+internal/app/warm.go
+  s_54b80c92daa9cb::t_872a5dbef0e8ec 1-63
+internal/app/warm_test.go
+  s_54b80c92daa9cb::t_df112652900bd0 1-144
+internal/backfill/backfill.go
+  s_54b80c92daa9cb::t_2ed81e9ae34cbf 1-396
+internal/backfill/backfill_test.go
+  s_54b80c92daa9cb::t_d83590af11f607 1-181
+internal/backfill/promote.go
+  s_54b80c92daa9cb::t_04a822ed46a05d 1-69
+internal/backfill/run.go
+  s_54b80c92daa9cb::t_c058b334f31254 1-409
+internal/backfill/run_test.go
+  s_54b80c92daa9cb::t_aca53749a81c9d 1-374
+internal/changes/changes.go
+  s_54b80c92daa9cb::t_06e289a5cfb46b 1-272
+internal/changes/prune.go
+  s_54b80c92daa9cb::t_5a6f3ebb2e5802 1-51
+internal/changes/prune_test.go
+  s_54b80c92daa9cb::t_c977482f4aa5dd 1-83
+internal/connectors/acquire.go
+  s_54b80c92daa9cb::t_c6135d15b11cad 1-452
+internal/connectors/acquire_test.go
+  s_54b80c92daa9cb::t_faee9e5d416da8 1-429
+internal/connectors/api.go
+  s_54b80c92daa9cb::t_56da82c2cf15e1 1-332
+internal/connectors/attachments_test.go
+  s_54b80c92daa9cb::t_4777cf70437e82 1-330
+internal/connectors/connector.go
+  s_54b80c92daa9cb::t_a034e151977ee5 1-386
+internal/connectors/credentials.go
+  s_54b80c92daa9cb::t_77c4c947ce1728 1-113
+internal/connectors/credentials_test.go
+  s_54b80c92daa9cb::t_bcff65eea26062 1-116
+internal/connectors/fixture_adapter_test.go
+  s_54b80c92daa9cb::t_6ca331a05e565c 1-30
+internal/connectors/health.go
+  s_54b80c92daa9cb::t_b9616aa34ba2a3 1-77
+internal/connectors/health_test.go
+  s_54b80c92daa9cb::t_07d817f600eb34 1-50
+internal/connectors/kinds.go
+  s_54b80c92daa9cb::t_5d7a8396bf23b0 1-149
+internal/connectors/kinds_test.go
+  s_54b80c92daa9cb::t_3f9028912166ff 1-100
+internal/connectors/protection.go
+  s_54b80c92daa9cb::t_c5cf83ffac4346 1-87
+internal/connectors/protection_test.go
+  s_54b80c92daa9cb::t_d7ba7133741fb5 1,3-8,10-24,26-40
+internal/connectors/push.go
+  s_54b80c92daa9cb::t_b6acff55e081d4 1-387
+internal/connectors/push_test.go
+  s_54b80c92daa9cb::t_9eb07987e0f9b6 1-323
+internal/connectors/service.go
+  s_54b80c92daa9cb::t_b542c85a8fd3ab 1-415
+internal/connectors/service_test.go
+  s_54b80c92daa9cb::t_7d88fd1b6d535c 1-110
+internal/connectors/signature.go
+  s_54b80c92daa9cb::t_ee65bd9433e15f 1-152
+internal/connectors/tokens.go
+  s_54b80c92daa9cb::t_73e7e35e44d074 1-216
+internal/content/content.go
+  s_54b80c92daa9cb::t_c3219ea5e2f663 1-1186
+internal/content/content_test.go
+  s_54b80c92daa9cb::t_5da5e9db7fed70 1-345
+internal/content/embeddings.go
+  s_54b80c92daa9cb::t_2775398b4c91ed 1-264
+internal/content/extensions.go
+  s_54b80c92daa9cb::t_45f2c7b9482f68 1-133
+internal/content/ingestion_evaluation.go
+  s_54b80c92daa9cb::t_59806a325bfcdc 1-10
+internal/content/mapping.go
+  s_54b80c92daa9cb::t_559dec5e3ee6e9 1-121
+internal/content/mapping_test.go
+  s_54b80c92daa9cb::t_7d22eeaf816c08 1-81
+internal/content/normalized_test.go
+  s_54b80c92daa9cb::t_87084252ef2478 1-349
+internal/content/plugin.go
+  s_54b80c92daa9cb::t_7e679afee55bfb 1-127
+internal/content/registry.go
+  s_54b80c92daa9cb::t_7fe4bfc6db60c7 1-115
+internal/content/registry_test.go
+  s_54b80c92daa9cb::t_3da97ce65ff7ec 1-129
+internal/content/searchable.go
+  s_54b80c92daa9cb::t_4f955de9cf40a7 1-377
+internal/content/searchable_test.go
+  s_54b80c92daa9cb::t_a1951d7087fc39 1-70
+internal/content/spaces.go
+  s_54b80c92daa9cb::t_4e33bda3f50d28 1-71
+internal/content/steps.go
+  s_54b80c92daa9cb::t_a492f9258b92c8 1-203
+internal/content/steps_test.go
+  s_54b80c92daa9cb::t_a7ab7ca455b249 1-55
+internal/content/submission.go
+  s_54b80c92daa9cb::t_36fa9069702a25 1-34
+internal/content/trusted.go
+  s_54b80c92daa9cb::t_20d66862f75d13 1-29
+internal/content/vector_spaces.go
+  s_54b80c92daa9cb::t_eefafcc5a8a372 1-29
+internal/corpus/actions.go
+  s_54b80c92daa9cb::t_ba857ad6c9383e 1-228
+internal/corpus/actions_test.go
+  s_54b80c92daa9cb::t_656ddb44056499 1-135
+internal/corpus/corpus.go
+  s_54b80c92daa9cb::t_764d467a6ba365 1-139
+internal/corpus/retrieval.go
+  s_54b80c92daa9cb::t_21baf97fdcfef7 1-132
+internal/corpus/retrieval_test.go
+  s_54b80c92daa9cb::t_25185b48fa9cb0 1-93
+internal/monitoring/batch.go
+  s_54b80c92daa9cb::t_c9907f27190dd5 1-429
+internal/monitoring/batch_test.go
+  s_54b80c92daa9cb::t_97a2811da8a1cf 1-291
+internal/monitoring/delivery.go
+  s_54b80c92daa9cb::t_44d4fe1bcf388e 1-336
+internal/monitoring/delivery_test.go
+  s_54b80c92daa9cb::t_5d91a507e90b72 1-325
+internal/monitoring/engine.go
+  s_54b80c92daa9cb::t_4e5c856bdbde9e 1-160
+internal/monitoring/engine_test.go
+  s_54b80c92daa9cb::t_6ad9bc30332616 1-342
+internal/monitoring/evaluation.go
+  s_54b80c92daa9cb::t_42464c66b52299 1-301
+internal/monitoring/matches.go
+  s_54b80c92daa9cb::t_02b0ed59042e12 1-205
+internal/monitoring/metrics.go
+  s_54b80c92daa9cb::t_0ae315a333a4d3 1-136
+internal/monitoring/metrics_test.go
+  s_54b80c92daa9cb::t_b778f15223f82f 1,3-10,12,14-60
+internal/monitoring/migration.go
+  s_54b80c92daa9cb::t_511f2372c6eef4 1-181
+internal/monitoring/migration_test.go
+  s_54b80c92daa9cb::t_1c8308f4949d5c 1-175
+internal/monitoring/monitoring.go
+  s_54b80c92daa9cb::t_2772f834475926 1-711
+internal/monitoring/monitoring_test.go
+  s_54b80c92daa9cb::t_0770eefd864845 1-617
+internal/monitoring/preview.go
+  s_54b80c92daa9cb::t_33f10cbac8e53c 1-270
+internal/monitoring/preview_test.go
+  s_54b80c92daa9cb::t_7c158e9beea592 1-183
+internal/monitoring/retirement.go
+  s_54b80c92daa9cb::t_783e65fac1fd40 1-146
+internal/monitoring/retry.go
+  s_54b80c92daa9cb::t_ef734ba6e25b11 1-71
+internal/monitoring/retry_test.go
+  s_54b80c92daa9cb::t_b4adb22cb5d93d 1-68
+internal/monitoring/webhook.go
+  s_54b80c92daa9cb::t_473db7be9f1596 1-38
+internal/monitoring/webhook_test.go
+  s_54b80c92daa9cb::t_121f35a6014b16 1-44
+internal/netguard/netguard.go
+  s_54b80c92daa9cb::t_4cbd4ccd83836f 1-92
+internal/netguard/netguard_test.go
+  s_54b80c92daa9cb::t_4c25128f6d70a6 1-120
+internal/normalization/normalization.go
+  s_54b80c92daa9cb::t_6e8d2021c3ff11 1-415
+internal/normalization/normalization_test.go
+  s_54b80c92daa9cb::t_73ff35a1989a2b 1-654
+internal/normalization/requests_test.go
+  s_54b80c92daa9cb::t_d3037efc95dea6 1-223
+internal/observability/metrics.go
+  s_54b80c92daa9cb::t_8e81535141331c 1-146
+internal/observability/observability_test.go
+  s_54b80c92daa9cb::t_758c9b3be61911 1-297
+internal/observability/read.go
+  s_54b80c92daa9cb::t_fd8889c34b0199 1-158
+internal/observability/recorder.go
+  s_54b80c92daa9cb::t_a890eb2ff52b82 1-331
+internal/observability/rollup.go
+  s_54b80c92daa9cb::t_5dcb25e41657e9 1-213
+internal/observability/scoped.go
+  s_54b80c92daa9cb::t_ab6ad08107c2c0 1-32
+internal/online/mcp.go
+  s_54b80c92daa9cb::t_4c3c16fcf2139a 1-335
+internal/online/mcp_catalogue.go
+  s_54b80c92daa9cb::t_3ff972bf12bf8f 1-182
+internal/online/mcp_stdio.go
+  s_54b80c92daa9cb::t_bd15d1c1931ddc 1-182
+internal/online/online.go
+  s_54b80c92daa9cb::t_8dd491a65946a9 1-292
+internal/online/search.go
+  s_54b80c92daa9cb::t_f6aa50d1f642e7 1-123
+internal/online/search_test.go
+  s_54b80c92daa9cb::t_a0beb0ade9fe3f 1-258
+internal/operations/operations.go
+  s_54b80c92daa9cb::t_224d605d066baa 1-426
+internal/operations/operations_test.go
+  s_54b80c92daa9cb::t_cc359ff1ca00ed 1-212
+internal/orchestration/temporal/backfill.go
+  s_54b80c92daa9cb::t_74472d4d0ed011 1-32
+internal/orchestration/temporal/connectors.go
+  s_54b80c92daa9cb::t_730b6db8a457df 1-134
+internal/orchestration/temporal/connectors_test.go
+  s_54b80c92daa9cb::t_49e30c20c5f393 1-195
+internal/orchestration/temporal/dispatch.go
+  s_54b80c92daa9cb::t_c3a7d88521a608 1-185
+internal/orchestration/temporal/dispatch_test.go
+  s_54b80c92daa9cb::t_c154f84a158e27 1-227
+internal/orchestration/temporal/ingestion.go
+  s_54b80c92daa9cb::t_3f5d7fbd188d24 1-344
+internal/orchestration/temporal/ingestion_evaluation.go
+  s_54b80c92daa9cb::t_8b76dd053804ef 1-59
+internal/orchestration/temporal/ingestion_test.go
+  s_54b80c92daa9cb::t_17ed3e4a2d0901 1-168
+internal/orchestration/temporal/operation.go
+  s_54b80c92daa9cb::t_cd4882d699fb76 1-106
+internal/orchestration/temporal/operation_test.go
+  s_54b80c92daa9cb::t_61ae6456dc2604 1-268
+internal/orchestration/temporal/rebuild.go
+  s_54b80c92daa9cb::t_da12aa89489423 1-35
+internal/orchestration/temporal/reprocess.go
+  s_54b80c92daa9cb::t_8a627d32565f38 1-28
+internal/orchestration/temporal/serving_projection.go
+  s_54b80c92daa9cb::t_1456b453648598 1-55
+internal/orchestration/temporal/testdata/legacy/capture.txt
+  s_54b80c92daa9cb::t_61ea997344ae8d 1-19
+internal/plugins/call/call.go
+  s_54b80c92daa9cb::t_750c1cdb4028e4 1-284
+internal/plugins/call/call_test.go
+  s_54b80c92daa9cb::t_1e9858cb06a656 1-308
+internal/plugins/call_policy.go
+  s_54b80c92daa9cb::t_d685547c3670e1 1-47
+internal/plugins/cli/cli.go
+  s_54b80c92daa9cb::t_88440ac16bcdd9 1-314
+internal/plugins/cli/cli_test.go
+  s_54b80c92daa9cb::t_8e8220da8285dc 1-106
+internal/plugins/cli/dev.go
+  s_54b80c92daa9cb::t_c9c3a57f454521 1-371
+internal/plugins/cli/dev_test.go
+  s_54b80c92daa9cb::t_b0130ae842d4dc 1-290
+internal/plugins/cli/helpers_test.go
+  s_54b80c92daa9cb::t_4625cd8b5aa8a3 1-22
+internal/plugins/cli/init.go
+  s_54b80c92daa9cb::t_a60ab8b0a252d5 1-94
+internal/plugins/cli/test.go
+  s_54b80c92daa9cb::t_68230458961464 1-125
+internal/plugins/config_test.go
+  s_54b80c92daa9cb::t_b398e40c55fa8b 1-41
+internal/plugins/connector.go
+  s_54b80c92daa9cb::t_c4ac6a83e443d1 1-480
+internal/plugins/connector_receive.go
+  s_54b80c92daa9cb::t_4fe3cec51b49bb 1-58
+internal/plugins/dependencies.go
+  s_54b80c92daa9cb::t_61e608bde91934 1-110
+internal/plugins/dependencies_test.go
+  s_54b80c92daa9cb::t_1723d649b782cb 1,3-57
+internal/plugins/devhost/connector.go
+  s_54b80c92daa9cb::t_156eb6441d89ff 1-388
+internal/plugins/devhost/connector_api_test.go
+  s_54b80c92daa9cb::t_88195d91af624a 1-72
+internal/plugins/devhost/devhost.go
+  s_54b80c92daa9cb::t_590eb80dbe3942 1-516
+internal/plugins/devhost/devhost_test.go
+  s_54b80c92daa9cb::t_3f4ef4fa4fd21b 1-368
+internal/plugins/devhost/fakeplugin/connector.go
+  s_54b80c92daa9cb::t_ea3dab53b56c71 1-223
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_54b80c92daa9cb::t_3cc5b5dea139a0 1-339
+internal/plugins/devhost/fakeplugin/fixture_connector.go
+  s_54b80c92daa9cb::t_e7560d15cb6010 1-84
+internal/plugins/devhost/fakeplugin/fixture_connector_test.go
+  s_54b80c92daa9cb::t_ef3cd21c040978 1-55
+internal/plugins/devhost/fakeplugin/fixture_protocol_test.go
+  s_54b80c92daa9cb::t_f06def6bd78cef 1-76
+internal/plugins/devhost/fakeplugin/fixture_subscription.go
+  s_54b80c92daa9cb::t_10c22d7e59d3a7 1-157
+internal/plugins/devhost/fakeplugin/fixture_subscription_test.go
+  s_54b80c92daa9cb::t_aa50c2feab921f 1-95
+internal/plugins/devhost/fakeplugin/ingestion.go
+  s_54b80c92daa9cb::t_0effe0b2046f76 1-155
+internal/plugins/devhost/fakeplugin/retrieval.go
+  s_54b80c92daa9cb::t_ac1072997c8521 1-117
+internal/plugins/devhost/fakeplugin/scriptedsource/fixture.yaml
+  s_54b80c92daa9cb::t_c52ee5538f0371 1-66
+internal/plugins/devhost/fakeplugin/scriptedsource/source.go
+  s_54b80c92daa9cb::t_8d60794a9866f1 1-115
+internal/plugins/devhost/ingestion.go
+  s_54b80c92daa9cb::t_1f723cebaa62c4 1-230
+internal/plugins/devhost/proc_other.go
+  s_54b80c92daa9cb::t_b425006914cf18 1-14
+internal/plugins/devhost/proc_unix.go
+  s_54b80c92daa9cb::t_f5a2cada93669d 1-19
+internal/plugins/devhost/retrieval.go
+  s_54b80c92daa9cb::t_21b49e9455574b 1-306
+internal/plugins/devhost/retrieval_test.go
+  s_54b80c92daa9cb::t_6f25d93a3e709f 1-106
+internal/plugins/devhost/subscription.go
+  s_54b80c92daa9cb::t_08d947f21ef1ae 1-247
+internal/plugins/devhost/subscription_test.go
+  s_54b80c92daa9cb::t_3c252ad5bf3238 1-148
+internal/plugins/devhost/watch.go
+  s_54b80c92daa9cb::t_f0e15f16da8a2d 1-75
+internal/plugins/diagnostics.go
+  s_54b80c92daa9cb::t_b9ca198014aba5 1-13
+internal/plugins/features.go
+  s_54b80c92daa9cb::t_15628000e6d7f2 1-143
+internal/plugins/features_test.go
+  s_54b80c92daa9cb::t_118e46c9bf3365 1-54
+internal/plugins/ingestion.go
+  s_54b80c92daa9cb::t_ba408669591b91 1-288
+internal/plugins/ingestion_routes.go
+  s_54b80c92daa9cb::t_8d06881193d557 1-218
+internal/plugins/ingestion_test.go
+  s_54b80c92daa9cb::t_42ec42c3d9b394 1-201
+internal/plugins/invocation.go
+  s_54b80c92daa9cb::t_8cbcfa6b8ada2a 1-80
+internal/plugins/live.go
+  s_54b80c92daa9cb::t_fe92ee581cc261 1-190
+internal/plugins/live_test.go
+  s_54b80c92daa9cb::t_6422a077d6baba 1-153
+internal/plugins/manifest.go
+  s_54b80c92daa9cb::t_5f3edb4936e3c2 1-851
+internal/plugins/output.go
+  s_54b80c92daa9cb::t_e094381a094f53 1-295
+internal/plugins/output_test.go
+  s_54b80c92daa9cb::t_75793e69860e10 1-117
+internal/plugins/pin.go
+  s_54b80c92daa9cb::t_882b696fb3aac6 1-484
+internal/plugins/pin_test.go
+  s_54b80c92daa9cb::t_601511369792d2 1-185
+internal/plugins/pins.go
+  s_54b80c92daa9cb::t_968d2f32e85da5 1-270
+internal/plugins/pins_test.go
+  s_54b80c92daa9cb::t_bb3d69089b8951 1-160
+internal/plugins/plugins_test.go
+  s_54b80c92daa9cb::t_75fc92ac791dbc 1-373
+internal/plugins/profiles.go
+  s_54b80c92daa9cb::t_993dcc429b45ca 1-103
+internal/plugins/protocol.go
+  s_54b80c92daa9cb::t_28c18a6f760e89 1-192
+internal/plugins/push.go
+  s_54b80c92daa9cb::t_46a566b99b4cb9 1-159
+internal/plugins/registry/check.go
+  s_54b80c92daa9cb::t_ca22716be2ca67 1-188
+internal/plugins/registry/check_test.go
+  s_54b80c92daa9cb::t_f60acc85574eb4 1-142
+internal/plugins/registry/coverage.go
+  s_54b80c92daa9cb::t_3812fa5887fa97 1,3,5-10,13-15,18-21
+internal/plugins/registry/diagnostics.go
+  s_54b80c92daa9cb::t_7bc346d22d9804 1-29
+internal/plugins/registry/plan.go
+  s_54b80c92daa9cb::t_26d269140f04fc 1-684
+internal/plugins/registry/registry.go
+  s_54b80c92daa9cb::t_5e07a481a927ab 1-636
+internal/plugins/registry/registry_test.go
+  s_54b80c92daa9cb::t_f540a130db6dd3 1-649
+internal/plugins/registry/rollback.go
+  s_54b80c92daa9cb::t_9648816fb444ae 1-194
+internal/plugins/registry/rollback_test.go
+  s_54b80c92daa9cb::t_6fdb248ecc3bd6 1-123
+internal/plugins/requests.go
+  s_54b80c92daa9cb::t_bfbf3559de142c 1-366
+internal/plugins/requests_test.go
+  s_54b80c92daa9cb::t_b668df6635419c 1-29
+internal/plugins/retrieval.go
+  s_54b80c92daa9cb::t_e6bfaf68f9a33b 1-538
+internal/plugins/retrieval_test.go
+  s_54b80c92daa9cb::t_089e1ebf9e4360 1-117
+internal/plugins/runner/attachments.go
+  s_54b80c92daa9cb::t_7286ad91ecbfa7 1-162
+internal/plugins/runner/connector.go
+  s_54b80c92daa9cb::t_675acc6f7d5bcb 1-502
+internal/plugins/runner/ingestion.go
+  s_54b80c92daa9cb::t_098e9bc5e23144 1-294
+internal/plugins/runner/receive.go
+  s_54b80c92daa9cb::t_e90df297b7c5d7 1-157
+internal/plugins/runner/retrieval.go
+  s_54b80c92daa9cb::t_0520bdf1d7f054 1-217
+internal/plugins/runner/runner.go
+  s_54b80c92daa9cb::t_e97bcbaf73e685 1-762
+internal/plugins/runner/subscription.go
+  s_54b80c92daa9cb::t_4de0d5f3fd53fc 1-197
+internal/plugins/scaffold/scaffold.go
+  s_54b80c92daa9cb::t_b5b8cdadf956ed 1-155
+internal/plugins/scaffold/scaffold_test.go
+  s_54b80c92daa9cb::t_d40712a8d4278a 1-110
+internal/plugins/scaffold/templates/connector/.gitignore
+  s_54b80c92daa9cb::t_7e0844e021cc46 2-3
+internal/plugins/scaffold/templates/connector/README.md
+  s_54b80c92daa9cb::t_a1e2d94ec99476 1,3-5,9-10,12-16,18,20-24,26,28-30,32-38
+internal/plugins/scaffold/templates/connector/__PLUGIN_MODULE__/__init__.py
+  s_54b80c92daa9cb::t_8fdba370b56de1 1
+internal/plugins/scaffold/templates/connector/__PLUGIN_MODULE__/__main__.py
+  s_54b80c92daa9cb::t_f94ee281002e34 1-4
+internal/plugins/scaffold/templates/connector/__PLUGIN_MODULE__/connector.py
+  s_54b80c92daa9cb::t_9de00fd0eb5378 1-2,4,6-19,21,24-27,30-70,72-75,77-79
+internal/plugins/scaffold/templates/connector/fixtures/revoked.json
+  s_54b80c92daa9cb::t_1809f3f3137c15 1-9
+internal/plugins/scaffold/templates/connector/fixtures/sample.json
+  s_54b80c92daa9cb::t_0e8401310d4bb6 1-19
+internal/plugins/scaffold/templates/connector/pyproject.toml
+  s_54b80c92daa9cb::t_548af9843a54a7 1-4,6,8-10,12-13
+internal/plugins/scaffold/templates/connector/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_f620e409f26081 1-48
+internal/plugins/scaffold/templates/connector/tests/test_connector.py
+  s_54b80c92daa9cb::t_063a9c5c257f8d 1-64
+internal/plugins/scaffold/templates/normalizer/.gitignore
+  s_54b80c92daa9cb::t_195233a2393366 2-3
+internal/plugins/scaffold/templates/normalizer/README.md
+  s_54b80c92daa9cb::t_e60e1a541e4f18 1-59
+internal/plugins/scaffold/templates/normalizer/__PLUGIN_MODULE__/__init__.py
+  s_54b80c92daa9cb::t_111f8b30134ed6 1
+internal/plugins/scaffold/templates/normalizer/__PLUGIN_MODULE__/__main__.py
+  s_54b80c92daa9cb::t_f39723b3645f5e 1-4
+internal/plugins/scaffold/templates/normalizer/__PLUGIN_MODULE__/normalizer.py
+  s_54b80c92daa9cb::t_0e7509761b1507 1-113
+internal/plugins/scaffold/templates/normalizer/fixtures/sample.json
+  s_54b80c92daa9cb::t_b5613b327aed21 1-10
+internal/plugins/scaffold/templates/normalizer/fixtures/sample.md
+  s_54b80c92daa9cb::t_35abfcd2a4943a 1,3,5,7,9-10,13,15
+internal/plugins/scaffold/templates/normalizer/pyproject.toml
+  s_54b80c92daa9cb::t_518a74bfdec80e 1-4,6,8-11,13-14
+internal/plugins/scaffold/templates/normalizer/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_65477d8566ec35 1-46
+internal/plugins/scaffold/templates/normalizer/tests/test_normalizer.py
+  s_54b80c92daa9cb::t_3141baaeba41a1 1-4,7,9,11-40,42-88
+internal/plugins/scaffold/templates/push/.gitignore
+  s_54b80c92daa9cb::t_8b9323c9632f75 1-4
+internal/plugins/scaffold/templates/push/README.md
+  s_54b80c92daa9cb::t_ce8f89243ae351 1-20
+internal/plugins/scaffold/templates/push/__PLUGIN_MODULE__/__init__.py
+  s_54b80c92daa9cb::t_9d3dcd97b23047 1
+internal/plugins/scaffold/templates/push/__PLUGIN_MODULE__/__main__.py
+  s_54b80c92daa9cb::t_d5c9998e2abf33 1,3
+internal/plugins/scaffold/templates/push/__PLUGIN_MODULE__/connector.py
+  s_54b80c92daa9cb::t_d6d393e423f091 1-2,4-8,10,13-18,20-22,25-38
+internal/plugins/scaffold/templates/push/fixtures/sample.json
+  s_54b80c92daa9cb::t_f5a553e25f95b5 1-17
+internal/plugins/scaffold/templates/push/pyproject.toml
+  s_54b80c92daa9cb::t_e1e5092bc25333 1-4,6,8-10,12-13
+internal/plugins/scaffold/templates/push/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_1cf44a9fa25b4e 1-33
+internal/plugins/scaffold/templates/push/tests/test_connector.py
+  s_54b80c92daa9cb::t_2470166151574b 1-23
+internal/plugins/scaffold/templates/subscription/.gitignore
+  s_54b80c92daa9cb::t_9bd00b847f9a2d 1-3
+internal/plugins/scaffold/templates/subscription/README.md
+  s_54b80c92daa9cb::t_19503d746ee4d0 1,3-9,11-15,17-20,22-24,26,28,30-35,37,39-69
+internal/plugins/scaffold/templates/subscription/__PLUGIN_MODULE__/__init__.py
+  s_54b80c92daa9cb::t_3c61bc6808050b 1
+internal/plugins/scaffold/templates/subscription/__PLUGIN_MODULE__/__main__.py
+  s_54b80c92daa9cb::t_b631dafe069cd5 1-4
+internal/plugins/scaffold/templates/subscription/__PLUGIN_MODULE__/rule.py
+  s_54b80c92daa9cb::t_619793c9e075ac 1-61,65-70
+internal/plugins/scaffold/templates/subscription/fixtures/sample.json
+  s_54b80c92daa9cb::t_db15ec8ccc5663 1-19
+internal/plugins/scaffold/templates/subscription/pyproject.toml
+  s_54b80c92daa9cb::t_447f256864d42f 1-14
+internal/plugins/scaffold/templates/subscription/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_9c39aed2cc0427 1-54
+internal/plugins/scaffold/templates/subscription/tests/test_rule.py
+  s_54b80c92daa9cb::t_932dcca0434d5e 1-47
+internal/plugins/search_cost.go
+  s_54b80c92daa9cb::t_97e6beffda5f16 1-29
+internal/plugins/subscription.go
+  s_54b80c92daa9cb::t_0cb41405d853e1 1-276
+internal/plugins/version.go
+  s_54b80c92daa9cb::t_da76afbd739a48 1-186
+internal/plugins/work.go
+  s_54b80c92daa9cb::t_7228ce9d2d04df 1-123
+internal/processing/derivation.go
+  s_54b80c92daa9cb::t_f2f9a68c88b739 1-172
+internal/processing/enrichment.go
+  s_54b80c92daa9cb::t_a2d47f8162d84e 1-85
+internal/processing/enrichment_test.go
+  s_54b80c92daa9cb::t_e1bdd819794aff 1-131
+internal/processing/evaluation.go
+  s_54b80c92daa9cb::t_f96d092afc494f 1-108
+internal/processing/fill_test.go
+  s_54b80c92daa9cb::t_393a9203f3e2ea 1-96
+internal/processing/plugin.go
+  s_54b80c92daa9cb::t_7ad5a4e17fdf4a 1-414
+internal/processing/processing.go
+  s_54b80c92daa9cb::t_a59542b3a791cd 1-183
+internal/processing/route.go
+  s_54b80c92daa9cb::t_f533ec0d761cd2 1-22
+internal/processing/serving_projection.go
+  s_54b80c92daa9cb::t_d94167c95e62fd 1-100
+internal/publicerr/catalog.go
+  s_54b80c92daa9cb::t_3478f03601a80f 1-129
+internal/publicerr/catalog_test.go
+  s_54b80c92daa9cb::t_8564dfc3f10923 1,3-4,6-7,10-76
+internal/publicerr/publicerr.go
+  s_54b80c92daa9cb::t_bf2278933ec3f6 1-152
+internal/publicerr/publicerr_test.go
+  s_54b80c92daa9cb::t_7f613bea8c30ae 1,3-6,8-9,11-59
+internal/quarantine/quarantine.go
+  s_54b80c92daa9cb::t_54377182ac393e 1-221
+internal/quarantine/run.go
+  s_54b80c92daa9cb::t_d1aa17f235df66 1-263
+internal/reference/commands/commands.go
+  s_54b80c92daa9cb::t_e9321d8b56ea39 1-111
+internal/reference/commands/commands_test.go
+  s_54b80c92daa9cb::t_cafe4398698f7a 1-77
+internal/reference/commands/testdata/expected.md
+  s_54b80c92daa9cb::t_0dc357bf68a4c1 1,3,5,7,9,11-14,16,18,20-23,25-54
+internal/reference/markdown.go
+  s_54b80c92daa9cb::t_8b5ad6d5368342 1-158
+internal/reference/mcp/mcp.go
+  s_54b80c92daa9cb::t_ace8df7a375892 1-303
+internal/reference/mcp/mcp_test.go
+  s_54b80c92daa9cb::t_e8aa295a307a60 1-83
+internal/reference/mcp/testdata/expected.md
+  s_54b80c92daa9cb::t_538a8d8e22c5bc 1-142
+internal/reference/openapi/openapi.go
+  s_54b80c92daa9cb::t_46589f08d76895 1-718
+internal/reference/openapi/openapi_test.go
+  s_54b80c92daa9cb::t_081aa52e900ad4 1-67
+internal/reference/openapi/testdata/contract/http/examples.json
+  s_54b80c92daa9cb::t_527326fe12ed7e 1
+internal/reference/openapi/testdata/contract/http/openapi.yaml
+  s_54b80c92daa9cb::t_f4292a2ab2eb9d 1-119
+internal/reference/openapi/testdata/contract/shared/common.json
+  s_54b80c92daa9cb::t_aed9da6082586e 1
+internal/reference/openapi/testdata/expected.md
+  s_54b80c92daa9cb::t_363637bc73da02 1-188
+internal/retrieval/composition.go
+  s_54b80c92daa9cb::t_5dcd31b50048b8 1-115
+internal/retrieval/composition_test.go
+  s_54b80c92daa9cb::t_893c47ab4c0974 1-239
+internal/retrieval/coverage.go
+  s_54b80c92daa9cb::t_7b820b66d068b2 1-80
+internal/retrieval/coverage_test.go
+  s_54b80c92daa9cb::t_3cf4541044ac44 1-61
+internal/retrieval/plugin.go
+  s_54b80c92daa9cb::t_751895500a717a 1-588
+internal/retrieval/plugin_test.go
+  s_54b80c92daa9cb::t_eeb0ccdee521c0 1-293
+internal/retrieval/profiles_test.go
+  s_54b80c92daa9cb::t_35e96e1bab316f 1-180
+internal/retrieval/purge.go
+  s_54b80c92daa9cb::t_a780e3ca8230f8 1-184
+internal/retrieval/purge_test.go
+  s_54b80c92daa9cb::t_dfa953ba3f7856 1-129
+internal/retrieval/rebuild.go
+  s_54b80c92daa9cb::t_8fa97321df8d5e 1-208
+internal/retrieval/rebuild_test.go
+  s_54b80c92daa9cb::t_d8da95296bd845 1-333
+internal/retrieval/retrieval.go
+  s_54b80c92daa9cb::t_30cf5ea43d8386 1-325
+internal/retrieval/retrieval_test.go
+  s_54b80c92daa9cb::t_5ab8157dac237d 1-317
+internal/retrieval/scoped_profiles.go
+  s_54b80c92daa9cb::t_b4b8a701fda518 1-10
+internal/retrieval/spaces_test.go
+  s_54b80c92daa9cb::t_5b195f842d507e 1-184
+internal/telemetry/telemetry.go
+  s_54b80c92daa9cb::t_34162dfc5819ef 1-219
+internal/telemetry/telemetry_test.go
+  s_54b80c92daa9cb::t_c00d3d37dead02 1-81
+internal/testutil/apicontract/response.go
+  s_54b80c92daa9cb::t_fbbef9058cb819 1-264
+internal/testutil/apicontract/response_test.go
+  s_54b80c92daa9cb::t_8f75757c9de2e3 1,3-7,9-10,12-64
+internal/transport/httpapi/admin.go
+  s_54b80c92daa9cb::t_ed17cfa6aa57cf 1-126
+internal/transport/httpapi/admin_plugins.go
+  s_54b80c92daa9cb::t_52b7cdb0d8fb1e 1-50
+internal/transport/httpapi/admin_test.go
+  s_54b80c92daa9cb::t_59d37a7515cd13 1-121
+internal/transport/httpapi/api.go
+  s_54b80c92daa9cb::t_aaaf92306cbe83 1-396
+internal/transport/httpapi/backfills.go
+  s_54b80c92daa9cb::t_26234cda70bcd6 1-112
+internal/transport/httpapi/backfills_test.go
+  s_54b80c92daa9cb::t_5512450197e1fd 1-131
+internal/transport/httpapi/batch_test.go
+  s_54b80c92daa9cb::t_0d78d27c9d6df3 1-578
+internal/transport/httpapi/catalog.go
+  s_54b80c92daa9cb::t_2495ee3618f839 1-95
+internal/transport/httpapi/catalog_test.go
+  s_54b80c92daa9cb::t_dd64bc57074996 1-266
+internal/transport/httpapi/changes.go
+  s_54b80c92daa9cb::t_40c8765c3bea2e 1-189
+internal/transport/httpapi/changes_test.go
+  s_54b80c92daa9cb::t_f550a616de2081 1-417
+internal/transport/httpapi/connector_api.go
+  s_54b80c92daa9cb::t_73eded4a2881e4 1-89
+internal/transport/httpapi/connector_api_test.go
+  s_54b80c92daa9cb::t_0e28184ed4f243 1-245
+internal/transport/httpapi/connector_signature_test.go
+  s_54b80c92daa9cb::t_4d3a9b969f0c1b 1-272
+internal/transport/httpapi/connector_tokens.go
+  s_54b80c92daa9cb::t_e1537e49f9e0af 1-147
+internal/transport/httpapi/connectors.go
+  s_54b80c92daa9cb::t_abd2c8d6760814 1-393
+internal/transport/httpapi/connectors_test.go
+  s_54b80c92daa9cb::t_eeab199f068e79 1-447
+internal/transport/httpapi/content.go
+  s_54b80c92daa9cb::t_725c5d0cfb300b 1,3-212
+internal/transport/httpapi/content_mapping.go
+  s_54b80c92daa9cb::t_c601185824c0f2 1-310
+internal/transport/httpapi/contract_test.go
+  s_54b80c92daa9cb::t_1562ca3548331a 1,3-5,7-8,10-13
+internal/transport/httpapi/errors.go
+  s_54b80c92daa9cb::t_8a889dceed532e 1-97
+internal/transport/httpapi/evaluation_retirements.go
+  s_54b80c92daa9cb::t_05b61f12c0a068 1-114
+internal/transport/httpapi/evaluation_retirements_test.go
+  s_54b80c92daa9cb::t_ebf0e5cca6fa7d 1-94
+internal/transport/httpapi/evaluator_migrations.go
+  s_54b80c92daa9cb::t_9eea39287cca72 1-51
+internal/transport/httpapi/extensions_test.go
+  s_54b80c92daa9cb::t_19a50b0de0f84d 1-39
+internal/transport/httpapi/matches.go
+  s_54b80c92daa9cb::t_5631f961fbffa4 1-275
+internal/transport/httpapi/matches_test.go
+  s_54b80c92daa9cb::t_97a93e11f0707a 1-222
+internal/transport/httpapi/monitoring.go
+  s_54b80c92daa9cb::t_92a11db004680a 1-469
+internal/transport/httpapi/monitoring_test.go
+  s_54b80c92daa9cb::t_87900c1b59deb7 1-476
+internal/transport/httpapi/operations.go
+  s_54b80c92daa9cb::t_7d68d6c57b27f7 1-159
+internal/transport/httpapi/operations_test.go
+  s_54b80c92daa9cb::t_8d3707b1703407 1-248
+internal/transport/httpapi/pages.go
+  s_54b80c92daa9cb::t_cdbce5811e36e7 1-18
+internal/transport/httpapi/plugins.go
+  s_54b80c92daa9cb::t_c26dfc42b04835 1-216
+internal/transport/httpapi/plugins_test.go
+  s_54b80c92daa9cb::t_4a26aa649319f3 1-283
+internal/transport/httpapi/preparation.go
+  s_54b80c92daa9cb::t_4966022bedff82 1-7
+internal/transport/httpapi/profiles_test.go
+  s_54b80c92daa9cb::t_97e9ff9e6e0840 1-103
+internal/transport/httpapi/public_codes_test.go
+  s_54b80c92daa9cb::t_0ef5be4c45c9e1 1-260
+internal/transport/httpapi/public_details.go
+  s_54b80c92daa9cb::t_f989239a6c6e90 1-83
+internal/transport/httpapi/public_messages_test.go
+  s_54b80c92daa9cb::t_d8a729ea58de2b 1-259
+internal/transport/httpapi/push_protection.go
+  s_54b80c92daa9cb::t_77507c1f46450c 1,3-14,16-151
+internal/transport/httpapi/quarantine.go
+  s_54b80c92daa9cb::t_1eaf867b21fe03 1-198
+internal/transport/httpapi/quarantine_test.go
+  s_54b80c92daa9cb::t_705806f9ac8930 1-123
+internal/transport/httpapi/retrieval_config_test.go
+  s_54b80c92daa9cb::t_99d42bc74089bf 1-72
+internal/transport/httpapi/route_fallback.go
+  s_54b80c92daa9cb::t_950cb93183fa50 1-105
+internal/transport/httpapi/schemas.go
+  s_54b80c92daa9cb::t_2256ba2e09eb4b 1-42
+internal/transport/httpapi/search.go
+  s_54b80c92daa9cb::t_0baf34a3a8e6b4 1-98
+internal/transport/httpapi/search_test.go
+  s_54b80c92daa9cb::t_7c448d22448326 1-47
+internal/transport/httpapi/spaces.go
+  s_54b80c92daa9cb::t_2a85b3dfec83f5 1-64
+internal/transport/httpapi/stats.go
+  s_54b80c92daa9cb::t_38bb868fb48d4f 1-213
+internal/transport/httpapi/stats_test.go
+  s_54b80c92daa9cb::t_61fa2168a7a1b7 1-140
+internal/transport/httpapi/strict_admin.go
+  s_54b80c92daa9cb::t_fbf22a4c05d131 1-135
+internal/transport/httpapi/strict_connectors.go
+  s_54b80c92daa9cb::t_b65f48d96c6172 1-82
+internal/transport/httpapi/strict_content.go
+  s_54b80c92daa9cb::t_80bcad1d471ffb 1-54
+internal/transport/httpapi/strict_core.go
+  s_54b80c92daa9cb::t_c2c5779531b510 1-53
+internal/transport/httpapi/strict_monitoring.go
+  s_54b80c92daa9cb::t_f498c78e564dc4 1-112
+internal/transport/httpapi/strict_operations.go
+  s_54b80c92daa9cb::t_6ea1e50994c8be 1-48
+internal/transport/httpapi/telemetry.go
+  s_54b80c92daa9cb::t_7e1ffd8e3a1974 1-8
+internal/transport/httpapi/uploads.go
+  s_54b80c92daa9cb::t_2dbd0baf84c685 1-104
+internal/transport/httpapi/uploads_test.go
+  s_54b80c92daa9cb::t_d8a7f094effc00 1-51
+internal/transport/httpapi/webhooks.go
+  s_54b80c92daa9cb::t_2b5cbcebda037c 1-129
+internal/transport/httpapi/webhooks_test.go
+  s_54b80c92daa9cb::t_4d1009b4172ce1 1-123
+internal/transport/pagetoken/codec.go
+  s_54b80c92daa9cb::t_aefa07f5b2d141 1-77
+internal/transport/pagetoken/codec_test.go
+  s_54b80c92daa9cb::t_053fba5bf42c5b 1-61
+internal/transport/routing/mux.go
+  s_54b80c92daa9cb::t_4f913edee95115 1-133
+internal/transport/routing/mux_test.go
+  s_54b80c92daa9cb::t_0e92fb911b86c2 1-60
+internal/uploads/scoped.go
+  s_54b80c92daa9cb::t_7f390121674881 1-40
+internal/uploads/service_test.go
+  s_54b80c92daa9cb::t_049539fe7c583f 1-218
+internal/uploads/uploads.go
+  s_54b80c92daa9cb::t_6229b1346f6654 1-234
+migrations/001_corpora.sql
+  s_54b80c92daa9cb::t_43b4f9f1c357de 1-10
+migrations/002_inline_ingestion.sql
+  s_54b80c92daa9cb::t_7e6aceb7648f66 1-112
+migrations/003_lexical_search.sql
+  s_54b80c92daa9cb::t_4dc6c5edbeb6c5 1-40
+migrations/004_tokenizer_segments.sql
+  s_54b80c92daa9cb::t_9f55555bb86213 1-7
+migrations/005_embeddings.sql
+  s_54b80c92daa9cb::t_693e69ce86102e 1-22
+migrations/006_uploads.sql
+  s_54b80c92daa9cb::t_4f57a867beb19f 1-28
+migrations/007_manifests.sql
+  s_54b80c92daa9cb::t_daeba0a1b2969a 1-4
+migrations/008_withdrawal_receipts.sql
+  s_54b80c92daa9cb::t_958382f43ad221 1-7
+migrations/009_record_catalog.sql
+  s_54b80c92daa9cb::t_f2bb6ec61ece1c 1-2
+migrations/010_monitoring.sql
+  s_54b80c92daa9cb::t_8eae9be7f62c8f 1-60
+migrations/011_projection_rebuilds.sql
+  s_54b80c92daa9cb::t_f434c94740c6a2 1-47
+migrations/012_operation_control.sql
+  s_54b80c92daa9cb::t_0166da35b0c15c 1-7
+migrations/013_evaluation.sql
+  s_54b80c92daa9cb::t_58463ad069556f 1-93
+migrations/014_connectors.sql
+  s_54b80c92daa9cb::t_838d7be6b3918b 1-59
+migrations/015_retrieval_configs.sql
+  s_54b80c92daa9cb::t_ebd54d2276793a 1-15
+migrations/016_delivery_attempts.sql
+  s_54b80c92daa9cb::t_e046d609e34099 1-39
+migrations/20260928T1548Z_connector_usage.sql
+  s_54b80c92daa9cb::t_c1522b69007ecd 1-8
+migrations/20260928T1549Z_delivery_retries.sql
+  s_54b80c92daa9cb::t_b35c4079a752a0 1-20
+migrations/20260928T1659Z_correction_notices.sql
+  s_54b80c92daa9cb::t_5481328e8f27f6 1-17
+migrations/20260928T1838Z_receipt_accepted_at.sql
+  s_54b80c92daa9cb::t_dc8aa379184a68 1-8
+migrations/20260929T0528Z_normalizations.sql
+  s_54b80c92daa9cb::t_aabdeb6e2b4942 1-21
+migrations/20260929T0550Z_change_journal_prunes.sql
+  s_54b80c92daa9cb::t_54cd6d8d105e91 1-10
+migrations/20260929T0551Z_projection_order_and_purge.sql
+  s_54b80c92daa9cb::t_efa971a834c5ba 1-37
+migrations/20260929T0559Z_normalization_extensions.sql
+  s_54b80c92daa9cb::t_63b21f446c76b3 1-6
+migrations/20260929T0716Z_normalization_failures.sql
+  s_54b80c92daa9cb::t_0e9b09d1ea0841 1-42
+migrations/20260929T0747Z_subscription_enable.sql
+  s_54b80c92daa9cb::t_9af2e7c92b9645 1-9
+migrations/20260929T0948Z_monitoring_edit_delete.sql
+  s_54b80c92daa9cb::t_52ad6804c2f094 1-12
+migrations/20260929T1109Z_subscription_owner.sql
+  s_54b80c92daa9cb::t_88b80ff2c6e8cb 1-11
+migrations/20260929T1125Z_evaluation_intents_by_record_version.sql
+  s_54b80c92daa9cb::t_12f0d891bb9f82 1-5
+migrations/20260929T1427Z_evaluation_intents_by_subscription_version.sql
+  s_54b80c92daa9cb::t_d04b0354e2e8f8 1-7
+migrations/20260929T2133Z_connector_push.sql
+  s_54b80c92daa9cb::t_303cd86b935bc2 1-18
+migrations/20260930T0443Z_connector_run_requests.sql
+  s_54b80c92daa9cb::t_6c7e69b700a1a6 1-7
+migrations/20260930T0447Z_subscription_preview_recent.sql
+  s_54b80c92daa9cb::t_d27fcf5a75b788 1-4
+migrations/20260930T0508Z_source_namespace_projection.sql
+  s_54b80c92daa9cb::t_276d784b2abe91 1-6
+migrations/20260930T1016Z_plugin_registry.sql
+  s_54b80c92daa9cb::t_18ed1292fc984d 1-42
+migrations/20260930T1043Z_vector_space_registry.sql
+  s_54b80c92daa9cb::t_274ecb4787ebe2 1-28
+migrations/20260930T1300Z_former_default_generations.sql
+  s_54b80c92daa9cb::t_354fad01d57840 1-9
+migrations/20260930T1310Z_plugin_activation.sql
+  s_54b80c92daa9cb::t_b1399d66259c8f 1-37
+migrations/20260930T1346Z_version_step_times.sql
+  s_54b80c92daa9cb::t_d2ac44a97d7dd8 1-20
+migrations/20260930T1348Z_observability_rollups.sql
+  s_54b80c92daa9cb::t_8fe8688e242933 1-26
+migrations/20260930T1422Z_pinned_plan_work.sql
+  s_54b80c92daa9cb::t_e0ee88e60d10eb 1-25
+migrations/20260930T1423Z_normalization_failure_plan.sql
+  s_54b80c92daa9cb::t_3a2650cd0c8607 1-4
+migrations/20260930T1515Z_plan_rollback.sql
+  s_54b80c92daa9cb::t_f7ef485d663cb8 1-21
+migrations/20260930T1538Z_enrichment_timeouts.sql
+  s_54b80c92daa9cb::t_8d826ee88d2a0f 1-11
+migrations/20260930T1657Z_enrichment_reason.sql
+  s_54b80c92daa9cb::t_8004f89dda2443 1-6
+migrations/20260930T1723Z_backfills.sql
+  s_54b80c92daa9cb::t_d1ab6a416098c7 1-50
+migrations/20260930T1815Z_quarantine_reprocess.sql
+  s_54b80c92daa9cb::t_0c4edb77c54bd9 1-69
+migrations/20261001T0855Z_observability_over_objective.sql
+  s_54b80c92daa9cb::t_d8bd2cd8e77b99 1-5
+migrations/20261001T0858Z_plugin_check_fixtures.sql
+  s_54b80c92daa9cb::t_3b00a505893ba6 1-8
+migrations/20261001T1222Z_subscription_versions_by_evaluator.sql
+  s_54b80c92daa9cb::t_ebc34a6ffed4ad 1-7
+migrations/20261001T1528Z_saved_query_vectors.sql
+  s_54b80c92daa9cb::t_dac93376162644 1
+migrations/20261001T1717Z_evaluation_retirements.sql
+  s_54b80c92daa9cb::t_fadb9e081beb25 1-11
+migrations/20261002T1559Z_ingestion_dispatch_batches.sql
+  s_54b80c92daa9cb::t_b4824bc1f8aad7 1-13
+migrations/20261002T1705Z_connector_instance_tokens.sql
+  s_54b80c92daa9cb::t_65bccbe5c7388f 1-16
+migrations/20261002T1842Z_source_ingestion_routes.sql
+  s_54b80c92daa9cb::t_cea59c73c1fb4c 1-31
+migrations/20261002T1902Z_connector_signature_replays.sql
+  s_54b80c92daa9cb::t_6e5dd6db99ec5d 1-12
+migrations/20261002T1927Z_connector_push_protection.sql
+  s_54b80c92daa9cb::t_ef18ddfd2ec936 1-22
+migrations/20261002T2011Z_evaluation_projections.sql
+  s_54b80c92daa9cb::t_21cdf9c02c2f02 1-36
+migrations/20261002T2134Z_serving_projections.sql
+  s_54b80c92daa9cb::t_b6b647fa2fc6b3 1-17
+migrations/embed.go
+  s_54b80c92daa9cb::t_ec7955895cdc41 1-15
+migrations/migrations.go
+  s_54b80c92daa9cb::t_76736be6971195 1-73
+migrations/migrations_test.go
+  s_54b80c92daa9cb::t_68328a2366e857 1-56
+multimodal-rag
+  s_54b80c92daa9cb::t_3c188014065a53 1
+plugins/alerts/.gitignore
+  s_54b80c92daa9cb::t_c909726b4f30cf 1-3
+plugins/alerts/README.md
+  s_54b80c92daa9cb::t_c99c542a2dc7cc 1-404
+plugins/alerts/alerts/__init__.py
+  s_54b80c92daa9cb::t_35466d8e8596d9 1
+plugins/alerts/alerts/__main__.py
+  s_54b80c92daa9cb::t_00a238bff0c9ed 1-8
+plugins/alerts/alerts/described.py
+  s_54b80c92daa9cb::t_915fde15a64b72 1-169
+plugins/alerts/alerts/evidence.py
+  s_54b80c92daa9cb::t_d449636a28b737 1-57
+plugins/alerts/alerts/fake_system_one.py
+  s_54b80c92daa9cb::t_8e6fc8cff0a1a3 1-131
+plugins/alerts/alerts/jev.py
+  s_54b80c92daa9cb::t_12616ee87ad967 1-94,96-128
+plugins/alerts/alerts/keywords.py
+  s_54b80c92daa9cb::t_b48f73104743e7 1-119
+plugins/alerts/alerts/notation.py
+  s_54b80c92daa9cb::t_d5cd8a491e8fb7 1-234
+plugins/alerts/alerts/rule.py
+  s_54b80c92daa9cb::t_157490e4511510 1-108
+plugins/alerts/alerts/text.py
+  s_54b80c92daa9cb::t_bfbe35e8dd5e3a 1-51
+plugins/alerts/alerts/vectors.py
+  s_54b80c92daa9cb::t_f2752af889a13b 1-58
+plugins/alerts/calibration/README.md
+  s_54b80c92daa9cb::t_d76db7bbbf2b8b 1-88
+plugins/alerts/calibration/calibrate.py
+  s_54b80c92daa9cb::t_685177d930f918 1-50
+plugins/alerts/calibration/calibrate_vectors.py
+  s_54b80c92daa9cb::t_bf1240d84e6da5 1-79
+plugins/alerts/calibration/set.json
+  s_54b80c92daa9cb::t_ab05da3eed9ef4 1-26
+plugins/alerts/calibration/vector-queries.json
+  s_54b80c92daa9cb::t_a179bfb561a007 1-8
+plugins/alerts/calibration/vectors-results.json
+  s_54b80c92daa9cb::t_5c0f0bea78f5f0 1-1478
+plugins/alerts/fixtures/sample.json
+  s_54b80c92daa9cb::t_f6530ecfd2f691 1-30
+plugins/alerts/pyproject.toml
+  s_54b80c92daa9cb::t_ccf91ce253919b 1-15
+plugins/alerts/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_d4c9d7efc20db6 1-325
+plugins/alerts/tests/data/described.json
+  s_54b80c92daa9cb::t_a0920145cc0f2f 1-17
+plugins/alerts/tests/data/vectors-not-ready.json
+  s_54b80c92daa9cb::t_4db1212934ef51 1-20
+plugins/alerts/tests/data/vectors.json
+  s_54b80c92daa9cb::t_449f8ea48f22a1 1-27
+plugins/alerts/tests/notation-cases.json
+  s_54b80c92daa9cb::t_64fc159114d966 1-379
+plugins/alerts/tests/support.py
+  s_54b80c92daa9cb::t_3d069b0a693a2e 1-65
+plugins/alerts/tests/test_described.py
+  s_54b80c92daa9cb::t_392fb1a4f9a04d 1-258
+plugins/alerts/tests/test_notation.py
+  s_54b80c92daa9cb::t_81b46539d0a65f 1-122
+plugins/alerts/tests/test_rule.py
+  s_54b80c92daa9cb::t_9eb3c658f21bf2 1-191
+plugins/alerts/tests/test_vectors.py
+  s_54b80c92daa9cb::t_8f964affa52611 1-137
+plugins/core-ingest/README.md
+  s_54b80c92daa9cb::t_b857794cd3b382 1-60
+plugins/core-ingest/cost_test.go
+  s_54b80c92daa9cb::t_6a2c626de32dbb 1,3-82
+plugins/core-ingest/go.mod
+  s_54b80c92daa9cb::t_400a0ac890da75 1-13
+plugins/core-ingest/go.sum
+  s_54b80c92daa9cb::t_a3f990a3356503 1-10
+plugins/core-ingest/main.go
+  s_54b80c92daa9cb::t_4a0619ce61fc10 1-160
+plugins/core-ingest/parity_test.go
+  s_54b80c92daa9cb::t_00f9452a8fafbf 1-365
+plugins/core-ingest/profile.json
+  s_54b80c92daa9cb::t_fd644540cf4620 1-26
+plugins/core-ingest/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_462ba4fbab9e92 1-59
+plugins/core-ingest/tei.go
+  s_54b80c92daa9cb::t_42b32c032bddfa 1-265
+plugins/core-ingest/tei_test.go
+  s_54b80c92daa9cb::t_b5d64c1086c3c8 1-198
+plugins/core-ingest/testdata/golden.json
+  s_54b80c92daa9cb::t_ee4ed791d7618d 1-2334
+plugins/core-ingest/testdata/parity-input.json
+  s_54b80c92daa9cb::t_15f70b74ad4dbe 1-1376
+plugins/core-ingest/tokenizer.go
+  s_54b80c92daa9cb::t_9637b49c4916ec 1-238
+plugins/core-ingest/tokenizer.py
+  s_54b80c92daa9cb::t_7fc235ee9ac7e6 1-52
+plugins/core-ingest/tokenizer_test.go
+  s_54b80c92daa9cb::t_956d4ed12826f0 1-184
+plugins/core-ingest/windows.go
+  s_54b80c92daa9cb::t_c93188a78571a8 1-432
+plugins/core-ingest/windows_test.go
+  s_54b80c92daa9cb::t_16d3532b662d23 1-108
+plugins/core-retrieve/README.md
+  s_54b80c92daa9cb::t_0bccc3f15ee20b 1-60
+plugins/core-retrieve/fixtures/hybrid.json
+  s_54b80c92daa9cb::t_d89c46a683a36f 1-57
+plugins/core-retrieve/fixtures/lexical.json
+  s_54b80c92daa9cb::t_378a5552d0d078 1-57
+plugins/core-retrieve/fixtures/semantic.json
+  s_54b80c92daa9cb::t_b7b37f5eb4402e 1-57
+plugins/core-retrieve/go.mod
+  s_54b80c92daa9cb::t_8e02c17dae0bde 1-13
+plugins/core-retrieve/go.sum
+  s_54b80c92daa9cb::t_6898450010d4f3 1-10
+plugins/core-retrieve/main.go
+  s_54b80c92daa9cb::t_83c8a9ee8c9cc6 1-157
+plugins/core-retrieve/main_test.go
+  s_54b80c92daa9cb::t_42d3c186ab46c9 1-209
+plugins/core-retrieve/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_301c1ee2783c4e 1-52
+plugins/hosted-embed/README.md
+  s_54b80c92daa9cb::t_615c05802c4de7 1-184
+plugins/hosted-embed/configuration.go
+  s_54b80c92daa9cb::t_f2d881c66731f6 1-143
+plugins/hosted-embed/examples/arctic-v2.json
+  s_54b80c92daa9cb::t_4ccd51e536d721 1-14
+plugins/hosted-embed/examples/foundry-cohere.json
+  s_54b80c92daa9cb::t_116350ad958d5f 1-9
+plugins/hosted-embed/examples/foundry-openai.json
+  s_54b80c92daa9cb::t_6226d6aaae1ddb 1-7
+plugins/hosted-embed/examples/granite-r2.json
+  s_54b80c92daa9cb::t_f28906915a2055 1-14
+plugins/hosted-embed/examples/openai.json
+  s_54b80c92daa9cb::t_698b012ebbfccd 1-7
+plugins/hosted-embed/examples/qwen3.json
+  s_54b80c92daa9cb::t_fd56cf78b040d9 1-14
+plugins/hosted-embed/examples/tei.json
+  s_54b80c92daa9cb::t_a6a681405def0a 1-10
+plugins/hosted-embed/go.mod
+  s_54b80c92daa9cb::t_16df4b67e11f07 1-18
+plugins/hosted-embed/go.sum
+  s_54b80c92daa9cb::t_186f46c2993464 1-10
+plugins/hosted-embed/ingestion.go
+  s_54b80c92daa9cb::t_05902157e66cfd 1-131
+plugins/hosted-embed/ingestion_test.go
+  s_54b80c92daa9cb::t_19296c691f9fcc 1-451
+plugins/hosted-embed/main.go
+  s_54b80c92daa9cb::t_c38e201d0a717e 1-78
+plugins/hosted-embed/provider.go
+  s_54b80c92daa9cb::t_68c75980bb5bc2 1-195
+plugins/hosted-embed/provider_gate.go
+  s_54b80c92daa9cb::t_dfa1277ca12a48 1-48
+plugins/hosted-embed/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_4b72e49b8d2df2 1-121
+plugins/hosted-embed/windows.go
+  s_54b80c92daa9cb::t_802de570759435 1-96
+plugins/jev-rerank/README.md
+  s_54b80c92daa9cb::t_1ea06a5c8881cd 1-79
+plugins/jev-rerank/fixtures/deep-unavailable.json
+  s_54b80c92daa9cb::t_2887ca68ff78f0 1-13
+plugins/jev-rerank/jev_rerank/__init__.py
+  s_54b80c92daa9cb::t_3b51bc0bcae6e3 1
+plugins/jev-rerank/jev_rerank/__main__.py
+  s_54b80c92daa9cb::t_09318bcfb3824f 1-7
+plugins/jev-rerank/jev_rerank/client.py
+  s_54b80c92daa9cb::t_056905a4de6dc6 1-209
+plugins/jev-rerank/jev_rerank/retriever.py
+  s_54b80c92daa9cb::t_4bb56f8d840e97 1-138
+plugins/jev-rerank/pyproject.toml
+  s_54b80c92daa9cb::t_aa739a2906356b 1-13
+plugins/jev-rerank/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_51ea70499ba879 1-56
+plugins/jev-rerank/tests/data/hybrid-ranking.json
+  s_54b80c92daa9cb::t_8c6fc8eed3343b 1-389
+plugins/jev-rerank/tests/test_core_candidates.py
+  s_54b80c92daa9cb::t_c680fe775bc884 1-104
+plugins/jev-rerank/tests/test_retrieval.py
+  s_54b80c92daa9cb::t_724e41ba09ca62 1-6,8-12,14-180,182-301
+plugins/m365-mail/attachments.go
+  s_54b80c92daa9cb::t_68d2cd68373298 1-72
+plugins/m365-mail/auth.go
+  s_54b80c92daa9cb::t_c27300b19f44c5 1-190
+plugins/m365-mail/fixtures/mailbox.json
+  s_54b80c92daa9cb::t_86632a27e960cb 1-10
+plugins/m365-mail/fixtures/wrong-secret.json
+  s_54b80c92daa9cb::t_3d626a973fd52b 1-10
+plugins/m365-mail/go.mod
+  s_54b80c92daa9cb::t_80a8c1682debe3 1-19
+plugins/m365-mail/go.sum
+  s_54b80c92daa9cb::t_bb6359e791f398 1-12
+plugins/m365-mail/golden_test.go
+  s_54b80c92daa9cb::t_401fd969e258dd 1-251
+plugins/m365-mail/graph.go
+  s_54b80c92daa9cb::t_52b92f526e08af 1-142
+plugins/m365-mail/harness_test.go
+  s_54b80c92daa9cb::t_e3d88de86e086d 1-119
+plugins/m365-mail/mail.go
+  s_54b80c92daa9cb::t_8b0555eec0acb7 1-248
+plugins/m365-mail/mail_test.go
+  s_54b80c92daa9cb::t_44c0f2e3e64490 1-332
+plugins/m365-mail/main.go
+  s_54b80c92daa9cb::t_2e0305efa932ee 1-26
+plugins/m365-mail/mapping.go
+  s_54b80c92daa9cb::t_5fed4bf5f6c89c 1-313
+plugins/m365-mail/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_41009afaee39b5 1-140
+plugins/m365-mail/testdata/golden/attachments.json
+  s_54b80c92daa9cb::t_8a59bc6046d292 2-42,44-58,60-143,145,147-162,164-168,170-187,189-213,215,217-231,233,235-249,251,253-261,263,265-266
+plugins/m365-mail/testdata/golden/bodies_and_headers.json
+  s_54b80c92daa9cb::t_a8bad1cb122cb6 2-42,44-53,55-1665,1667,1669-1695,1697-1713,1715-1741,1743-1775,1777-1798,1800-1827,1829-1835,1837-1847,1849-1865,1867-1869,1871-1873,1875-1877,1879-2261,2263-2264,2266,2268-2281,2283,2285-2286
+plugins/m365-mail/testdata/golden/deleted_and_changed.json
+  s_54b80c92daa9cb::t_b7433764297f56 1-300
+plugins/m365-mail/testdata/golden/delta_paging.json
+  s_54b80c92daa9cb::t_0f44065878c6ca 1-449
+plugins/m365-mail/testdata/golden/expired_delta_resyncs.json
+  s_54b80c92daa9cb::t_fa900b908776d9 1-199
+plugins/m365-mail/testdata/golden/foreign_link_restarts.json
+  s_54b80c92daa9cb::t_facd7d306c6610 1-122
+plugins/m365-mail/testdata/golden/no_backfill_starts_now.json
+  s_54b80c92daa9cb::t_d9134206f5003d 1-158
+plugins/m365-mail/testdata/golden/unknown_mailbox.json
+  s_54b80c92daa9cb::t_528f1e8c616fa2 1-29
+plugins/pdf-text/.gitignore
+  s_54b80c92daa9cb::t_27a024684b3234 1-3
+plugins/pdf-text/README.md
+  s_54b80c92daa9cb::t_802bd8b784cc31 1-114
+plugins/pdf-text/fixtures/sample.json
+  s_54b80c92daa9cb::t_4d646d8abcbaff 1-7
+plugins/pdf-text/fixtures/sample.pdf
+  s_54b80c92daa9cb::t_10855b864c5805 1-68
+plugins/pdf-text/pdf_text/__init__.py
+  s_54b80c92daa9cb::t_dfc757ac91620a 1
+plugins/pdf-text/pdf_text/__main__.py
+  s_54b80c92daa9cb::t_cbfa8982d30697 1-4
+plugins/pdf-text/pdf_text/normalizer.py
+  s_54b80c92daa9cb::t_a6e1484d80825f 1-169
+plugins/pdf-text/pyproject.toml
+  s_54b80c92daa9cb::t_e88b490ed7bdbe 1-17
+plugins/pdf-text/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_daa1997e687f61 1-54
+plugins/pdf-text/scripts/make_fixtures.py
+  s_54b80c92daa9cb::t_4684aa83f87c01 1-73
+plugins/pdf-text/tests/test_normalizer.py
+  s_54b80c92daa9cb::t_acb56a08a45f7a 1-146
+plugins/push-source/.gitignore
+  s_54b80c92daa9cb::t_89cd3309b31f6b 1-4
+plugins/push-source/README.md
+  s_54b80c92daa9cb::t_32c70bdf16ccd1 1-20
+plugins/push-source/fixtures/sample.json
+  s_54b80c92daa9cb::t_68143332af0774 1-17
+plugins/push-source/push_source/__init__.py
+  s_54b80c92daa9cb::t_2a94f6934764a5 1
+plugins/push-source/push_source/__main__.py
+  s_54b80c92daa9cb::t_d659e0f549378d 1,3
+plugins/push-source/push_source/connector.py
+  s_54b80c92daa9cb::t_29a6773036c037 1-38
+plugins/push-source/pyproject.toml
+  s_54b80c92daa9cb::t_c96876b4ad7a9c 1-13
+plugins/push-source/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_fe3f9b1b9e1e9b 1-33
+plugins/push-source/tests/test_connector.py
+  s_54b80c92daa9cb::t_ef2ac511554d5a 1-23
+plugins/rss/README.md
+  s_54b80c92daa9cb::t_f078bdd7f5d52d 1,3-7,9,11-15,17-19,21-23,25-26,28,30-32,34-37,39,41-48,50,52-55,57
+plugins/rss/fixtures/not-due.json
+  s_54b80c92daa9cb::t_c8e7b5ab82d19a 1-9
+plugins/rss/fixtures/private-address.json
+  s_54b80c92daa9cb::t_155f45818cdfce 1-9
+plugins/rss/go.mod
+  s_54b80c92daa9cb::t_93b46edea2e089 1-18
+plugins/rss/go.sum
+  s_54b80c92daa9cb::t_ce9637c6b92a50 1-20
+plugins/rss/html.go
+  s_54b80c92daa9cb::t_769e3de12ff2fa 1-60
+plugins/rss/main.go
+  s_54b80c92daa9cb::t_38a71a485fdd40 1-36
+plugins/rss/netguard.go
+  s_54b80c92daa9cb::t_9e4599a148170d 1-66
+plugins/rss/parity_test.go
+  s_54b80c92daa9cb::t_e58d937a519ef0 1-165
+plugins/rss/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_82103be025d9fc 1-111
+plugins/rss/rss.go
+  s_54b80c92daa9cb::t_8c37d0f27461ae 1-667
+plugins/rss/rss_test.go
+  s_54b80c92daa9cb::t_1b03f3932f427d 1-479
+plugins/rss/testdata/atom.xml
+  s_54b80c92daa9cb::t_a1d84334bff984 1-18
+plugins/rss/testdata/golden/atom.json
+  s_54b80c92daa9cb::t_dd400e1bbca815 1-84
+plugins/rss/testdata/golden/rss1.json
+  s_54b80c92daa9cb::t_c7c2da14ef492a 1-64
+plugins/rss/testdata/golden/sequence.json
+  s_54b80c92daa9cb::t_f09b28951ce43b 1-261
+plugins/rss/testdata/large.xml
+  s_54b80c92daa9cb::t_ffd7665e7e28f4 1-527
+plugins/rss/testdata/rss1.rdf
+  s_54b80c92daa9cb::t_9a7b6d789b4bee 1-21
+plugins/rss/testdata/rss2-v2.xml
+  s_54b80c92daa9cb::t_9e66c8ddd2bc81 1-35
+plugins/rss/testdata/rss2.xml
+  s_54b80c92daa9cb::t_3a1fe4d9f41738 1-28
+plugins/x-list/README.md
+  s_54b80c92daa9cb::t_840e3264974516 1-58
+plugins/x-list/fixtures/list.json
+  s_54b80c92daa9cb::t_bb685eaefcf64b 1-13
+plugins/x-list/fixtures/revoked.json
+  s_54b80c92daa9cb::t_05509143fe32cc 1-10
+plugins/x-list/fixtures/webhook.json
+  s_54b80c92daa9cb::t_588bc7f129ebf5 1-68
+plugins/x-list/go.mod
+  s_54b80c92daa9cb::t_db0911a42f67d7 1-18
+plugins/x-list/go.sum
+  s_54b80c92daa9cb::t_dfb21d1b637bb7 1-10
+plugins/x-list/harness_test.go
+  s_54b80c92daa9cb::t_a971c4d0f72d0f 1-240
+plugins/x-list/main.go
+  s_54b80c92daa9cb::t_93c34c87507bc8 1-24
+plugins/x-list/mappost.go
+  s_54b80c92daa9cb::t_84009f952f1779 1-161
+plugins/x-list/parity_test.go
+  s_54b80c92daa9cb::t_011068f0ac4376 1-199
+plugins/x-list/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_afcd6e613f7978 1-156
+plugins/x-list/stream.go
+  s_54b80c92daa9cb::t_fd64a5dac6d9a7 1-372
+plugins/x-list/testdata/builtin/backfill_resumes_interrupted_sweep.json
+  s_54b80c92daa9cb::t_84e2b0657da09b 1-292
+plugins/x-list/testdata/builtin/cutover_mid_life.json
+  s_54b80c92daa9cb::t_79c60b938945bd 1-1123
+plugins/x-list/testdata/builtin/daily_cap_stops_polling_keeps_rechecking.json
+  s_54b80c92daa9cb::t_e259b7eaf75296 1-252
+plugins/x-list/testdata/builtin/expired_token_restarts_sweep.json
+  s_54b80c92daa9cb::t_bce3d7f046dade 1-169
+plugins/x-list/testdata/builtin/maps_posts_and_edits.json
+  s_54b80c92daa9cb::t_e8450437e3f73e 1-320
+plugins/x-list/testdata/builtin/recheck_withdraws_deleted_and_protected.json
+  s_54b80c92daa9cb::t_85eff86e9ccac1 1-781
+plugins/x-list/testdata/builtin/source_failures.json
+  s_54b80c92daa9cb::t_9c091fb3955556 1-183
+plugins/x-list/testdata/builtin/start_now_then_watermark.json
+  s_54b80c92daa9cb::t_c1cbe7c3f6f0f6 1-870
+plugins/x-list/testdata/scenarios.json
+  s_54b80c92daa9cb::t_55720d0e291aaa 1-138
+plugins/x-list/webhook.go
+  s_54b80c92daa9cb::t_da2da5ac2e86da 1-125
+plugins/x-list/webhook_test.go
+  s_54b80c92daa9cb::t_c6fdb70b010d60 1-263
+plugins/x-list/xapi.go
+  s_54b80c92daa9cb::t_28632ff52cc1fd 1-134
+plugins/x-list/xlist.go
+  s_54b80c92daa9cb::t_70631490f43f6a 1-439
+plugins/x-list/xlist_test.go
+  s_54b80c92daa9cb::t_0c17a2767908dd 1-121
+quivr-search/.gitignore
+  s_54b80c92daa9cb::t_c92faaa3d22494 1-4,6
+quivr-search/README.md
+  s_54b80c92daa9cb::t_e9bb856db28b44 1-102
+quivr-search/admin-plugins.mjs
+  s_54b80c92daa9cb::t_85815242927504 1-46
+quivr-search/admin.mjs
+  s_54b80c92daa9cb::t_26478d5b39b83e 1-597
+quivr-search/alerts.mjs
+  s_54b80c92daa9cb::t_9ee1d1d73eef24 1-537
+quivr-search/feed.mjs
+  s_54b80c92daa9cb::t_856cb950c0c938 1-254,256-267,269-271,273-306,308-319,321-388
+quivr-search/feeds.mjs
+  s_54b80c92daa9cb::t_13ae6e6dc992f8 1-534
+quivr-search/index.html
+  s_54b80c92daa9cb::t_55a3ce2607ba45 1-2,5-9,12-13
+quivr-search/package-lock.json
+  s_54b80c92daa9cb::t_39bbb0cdaec0ec 1-1961
+quivr-search/package.json
+  s_54b80c92daa9cb::t_94e2e2930e1d64 1-28
+quivr-search/playwright.config.ts
+  s_54b80c92daa9cb::t_c5e87c04577e12 1-14
+quivr-search/public/favicon.svg
+  s_54b80c92daa9cb::t_cfbfb5acce11b9 1-6
+quivr-search/server.mjs
+  s_54b80c92daa9cb::t_d938e3f8fefb74 1-566
+quivr-search/src/admin.css
+  s_54b80c92daa9cb::t_73405ab9f8f92c 1-1259
+quivr-search/src/alerts.css
+  s_54b80c92daa9cb::t_d8bb1b26c00956 1-39,41-123,125-151,153-228
+quivr-search/src/components/AddText.tsx
+  s_54b80c92daa9cb::t_602f63ac6edab2 1-9,11-18,21-40,42-44,46-89,91-94,96-104,106-108,110-114,116-117,120-282
+quivr-search/src/components/Dialog.tsx
+  s_54b80c92daa9cb::t_599f2d77f12f27 1-71
+quivr-search/src/components/Highlight.tsx
+  s_54b80c92daa9cb::t_8f03f3fb0b85b8 1,3-12,14-36,38-39,41,43-51,53-64
+quivr-search/src/components/Logo.tsx
+  s_54b80c92daa9cb::t_a47ec60122744a 1-22
+quivr-search/src/components/MoreMenu.tsx
+  s_54b80c92daa9cb::t_ab6a065ac896a1 1-72
+quivr-search/src/components/RailIcons.tsx
+  s_54b80c92daa9cb::t_b482124cda3281 1-219
+quivr-search/src/components/admin/AdminSection.tsx
+  s_54b80c92daa9cb::t_e47bab6e44be38 1-119
+quivr-search/src/components/admin/AdminView.tsx
+  s_54b80c92daa9cb::t_2730f1f72696f1 1-541
+quivr-search/src/components/admin/Bottlenecks.tsx
+  s_54b80c92daa9cb::t_5468cacb0b784b 1-260
+quivr-search/src/components/admin/Glance.tsx
+  s_54b80c92daa9cb::t_b2f75e128c3f5f 1-118
+quivr-search/src/components/admin/Plugins.tsx
+  s_54b80c92daa9cb::t_acbfedbdf9e91c 1-478
+quivr-search/src/components/admin/TimelinePanel.tsx
+  s_54b80c92daa9cb::t_f93c42ef8131db 1-388
+quivr-search/src/components/admin/Usage.tsx
+  s_54b80c92daa9cb::t_9dbd9072cecb4f 1-538
+quivr-search/src/components/admin/UsageChart.tsx
+  s_54b80c92daa9cb::t_2957e09f6f2ab7 1-268
+quivr-search/src/components/alerts/AlertForm.tsx
+  s_54b80c92daa9cb::t_b7bf736bf9e64e 1-499
+quivr-search/src/components/alerts/AlertPreview.tsx
+  s_54b80c92daa9cb::t_a5aead97cc50a6 1-178
+quivr-search/src/components/alerts/AlertsView.tsx
+  s_54b80c92daa9cb::t_bc906a8e00086f 1-1085
+quivr-search/src/components/alerts/CaughtItem.tsx
+  s_54b80c92daa9cb::t_8751e3b3ac50cc 1-116
+quivr-search/src/components/alerts/DescribedNote.tsx
+  s_54b80c92daa9cb::t_97cfd10eadae3a 1-20
+quivr-search/src/components/alerts/Interpretation.tsx
+  s_54b80c92daa9cb::t_d3cfd3dbce4f80 1-52
+quivr-search/src/components/alerts/QueryPreview.tsx
+  s_54b80c92daa9cb::t_e17841aea9772a 1-57
+quivr-search/src/components/connectors/AddSource.tsx
+  s_54b80c92daa9cb::t_7161cc7278ea7d 1-386
+quivr-search/src/components/connectors/ConnectorDetail.tsx
+  s_54b80c92daa9cb::t_9cc7e8f26bef52 1-417
+quivr-search/src/components/connectors/ConnectorsView.tsx
+  s_54b80c92daa9cb::t_47cc5e6cf0ab64 1-475
+quivr-search/src/components/connectors/CreateConnector.tsx
+  s_54b80c92daa9cb::t_521f53b702909f 1-285
+quivr-search/src/components/connectors/ErrorSummary.tsx
+  s_54b80c92daa9cb::t_893d7b2b802750 1-53
+quivr-search/src/components/connectors/HealthBadge.tsx
+  s_54b80c92daa9cb::t_8a64d57fb561d2 1-66
+quivr-search/src/components/connectors/SchemaForm.tsx
+  s_54b80c92daa9cb::t_995018ba922263 1-380
+quivr-search/src/components/connectors/SourceList.tsx
+  s_54b80c92daa9cb::t_8a13f081b14084 1-586
+quivr-search/src/components/connectors/fields.tsx
+  s_54b80c92daa9cb::t_755a6b3c3d5cde 1-80
+quivr-search/src/components/connectors/summary.ts
+  s_54b80c92daa9cb::t_2d4dd6d49683ad 1-18
+quivr-search/src/components/connectors/useSubmit.ts
+  s_54b80c92daa9cb::t_2761e97f41f70c 1-78
+quivr-search/src/components/feed/FeedPage.tsx
+  s_54b80c92daa9cb::t_c51c4d6087212a 1-1126
+quivr-search/src/components/feed/FilterMenu.tsx
+  s_54b80c92daa9cb::t_e9f2ac1ee53d19 1-103
+quivr-search/src/components/feed/Reader.tsx
+  s_54b80c92daa9cb::t_a310bc342c973c 1-450
+quivr-search/src/components/feed/SideColumn.tsx
+  s_54b80c92daa9cb::t_187b87258551b9 1-152
+quivr-search/src/components/feed/SourceLogo.tsx
+  s_54b80c92daa9cb::t_4ac730c46e521b 1-169
+quivr-search/src/components/ui.tsx
+  s_54b80c92daa9cb::t_aa49582d18ed35 1-136
+quivr-search/src/dashboard.css
+  s_54b80c92daa9cb::t_b299b5a5e55375 1-4045
+quivr-search/src/fonts/OFL.txt
+  s_54b80c92daa9cb::t_acbf9d24919a4a 1-92
+quivr-search/src/health.css
+  s_54b80c92daa9cb::t_99ab343b1a6129 1-624
+quivr-search/src/lib/admin.ts
+  s_54b80c92daa9cb::t_a72ba6fa6e00d9 1-408
+quivr-search/src/lib/adminStats.ts
+  s_54b80c92daa9cb::t_d9fb01796f9dc1 1-186
+quivr-search/src/lib/alertForm.ts
+  s_54b80c92daa9cb::t_f0d5a506331e26 1-107
+quivr-search/src/lib/alertStats.ts
+  s_54b80c92daa9cb::t_27bb5591ad0084 1-176
+quivr-search/src/lib/alerts.ts
+  s_54b80c92daa9cb::t_ee1d75a82eff84 1-234
+quivr-search/src/lib/connectors.ts
+  s_54b80c92daa9cb::t_65677f5bfc08a4 1-241
+quivr-search/src/lib/deep.ts
+  s_54b80c92daa9cb::t_1d45ac07a3aaf8 1-73
+quivr-search/src/lib/diff.ts
+  s_54b80c92daa9cb::t_8b14c7deb8007b 1-3,5-8,10-11,13-14,16-20,22-71,73-90
+quivr-search/src/lib/feed.ts
+  s_54b80c92daa9cb::t_438494d2a380a6 1-42
+quivr-search/src/lib/format.ts
+  s_54b80c92daa9cb::t_446ba682aac582 1-71
+quivr-search/src/lib/health.ts
+  s_54b80c92daa9cb::t_126356f96df66a 1-482
+quivr-search/src/lib/moments.ts
+  s_54b80c92daa9cb::t_87d7ee2f1a9529 1-106
+quivr-search/src/lib/muted.ts
+  s_54b80c92daa9cb::t_dbb453332ed687 1-20
+quivr-search/src/lib/notation.ts
+  s_54b80c92daa9cb::t_083f24f6d0f71f 1-274
+quivr-search/src/lib/readState.ts
+  s_54b80c92daa9cb::t_d651ebed4b27eb 1-78
+quivr-search/src/lib/search.ts
+  s_54b80c92daa9cb::t_924a9cfdebb6e6 1-112
+quivr-search/src/lib/sourceNames.ts
+  s_54b80c92daa9cb::t_32075f0367598f 1-14
+quivr-search/src/lib/theme.ts
+  s_54b80c92daa9cb::t_97ceff762b7f78 1-49
+quivr-search/src/lib/topics.ts
+  s_54b80c92daa9cb::t_98d441196010a8 1-84
+quivr-search/src/lib/usage.ts
+  s_54b80c92daa9cb::t_19754101e3f3e1 1-292
+quivr-search/src/lib/workspace.ts
+  s_54b80c92daa9cb::t_564d476846e9e4 1-244
+quivr-search/src/main.tsx
+  s_54b80c92daa9cb::t_18a0548506c465 1-16
+quivr-search/src/styles.css
+  s_54b80c92daa9cb::t_3a7de3ac31c648 1-1800
+quivr-search/src/types.ts
+  s_54b80c92daa9cb::t_9ab1e8f7dd36ec 1-65
+quivr-search/src/usage.css
+  s_54b80c92daa9cb::t_92708b7b089c64 1-563
+quivr-search/tests/access.spec.ts
+  s_54b80c92daa9cb::t_62ce15a118cc48 1-55
+quivr-search/tests/admin-health-live.spec.ts
+  s_54b80c92daa9cb::t_3c0e4fc5ee2598 1-86
+quivr-search/tests/admin-health.spec.ts
+  s_54b80c92daa9cb::t_1bee772e805b09 1-148
+quivr-search/tests/admin-plugins.test.mjs
+  s_54b80c92daa9cb::t_b1e08096670a3c 1-58
+quivr-search/tests/admin.spec.ts
+  s_54b80c92daa9cb::t_7358c2b83fbadc 1-76
+quivr-search/tests/admin.test.mjs
+  s_54b80c92daa9cb::t_d142fcb7882c9f 1-289
+quivr-search/tests/alertStats.spec.ts
+  s_54b80c92daa9cb::t_9603761f27a7b8 1-95
+quivr-search/tests/alerts.spec.ts
+  s_54b80c92daa9cb::t_9a5a418fbcca1b 1-353
+quivr-search/tests/alerts.test.mjs
+  s_54b80c92daa9cb::t_406d1385a487c9 1-628
+quivr-search/tests/connectors.spec.ts
+  s_54b80c92daa9cb::t_af050f026d3bad 1-292
+quivr-search/tests/dashboard.spec.ts
+  s_54b80c92daa9cb::t_7dde54db8d7888 1-522
+quivr-search/tests/deep-search.spec.ts
+  s_54b80c92daa9cb::t_371f4e867e8d16 1-90
+quivr-search/tests/demo.spec.ts
+  s_54b80c92daa9cb::t_7be079c843bb7b 1-67
+quivr-search/tests/diff.spec.ts
+  s_54b80c92daa9cb::t_899e531b406440 1-22
+quivr-search/tests/fake-admin.ts
+  s_54b80c92daa9cb::t_d03b1c206fe0c1 1-339
+quivr-search/tests/fake-engine.ts
+  s_54b80c92daa9cb::t_869522644c1e6e 1-546
+quivr-search/tests/feed.spec.ts
+  s_54b80c92daa9cb::t_9b0124fee9e6ea 1-174
+quivr-search/tests/feeds.test.mjs
+  s_54b80c92daa9cb::t_1f7fa47a2ccf59 1-270
+quivr-search/tests/health.spec.ts
+  s_54b80c92daa9cb::t_4b279abb50adef 1-211
+quivr-search/tests/notation.spec.ts
+  s_54b80c92daa9cb::t_39552eb12ee322 1-31
+quivr-search/tests/pages.spec.ts
+  s_54b80c92daa9cb::t_4a1d1b23b0ae0c 1-124
+quivr-search/tests/server.test.mjs
+  s_54b80c92daa9cb::t_b2617377800f3c 1-970
+quivr-search/tests/sources.spec.ts
+  s_54b80c92daa9cb::t_c9c0a16c62355c 1-224
+quivr-search/tests/states.spec.ts
+  s_54b80c92daa9cb::t_c93d9f105f8728 1-164
+quivr-search/tests/usage-stack.spec.ts
+  s_54b80c92daa9cb::t_a5a4866dd660cb 1,3-8,10-14,16-35,37-67
+quivr-search/tests/usage.spec.ts
+  s_54b80c92daa9cb::t_ec7ab788be6d9b 1-429
+quivr-search/tsconfig.json
+  s_54b80c92daa9cb::t_879b73848f6e1c 1-29
+quivr-search/vite.config.ts
+  s_54b80c92daa9cb::t_eb117f2d408416 1-11
+scripts/adapter_postgres.py
+  s_54b80c92daa9cb::t_1e8c9dbe70e475 1-124
+scripts/api_contract.py
+  s_54b80c92daa9cb::t_c68f4d9d150c57 1-94
+scripts/ci_summary.py
+  s_54b80c92daa9cb::t_b857b8f760a324 1-81
+scripts/connector_plugin.py
+  s_54b80c92daa9cb::t_4b748dd89b1b26 1-238
+scripts/connector_restart.py
+  s_54b80c92daa9cb::t_a5b745651b00e5 1-80
+scripts/connector_x_push.py
+  s_54b80c92daa9cb::t_4cabe34e2ac189 1-95
+scripts/connector_x_restart.py
+  s_54b80c92daa9cb::t_980e61ef3ad5bf 1-92
+scripts/contracts.sh
+  s_54b80c92daa9cb::t_dc2d5c17414e7c 1-48
+scripts/core_ingest_plugin.py
+  s_54b80c92daa9cb::t_153f8a6eeee764 1-57
+scripts/demo.py
+  s_54b80c92daa9cb::t_84722cb7d56030 1-127
+scripts/denylist.py
+  s_54b80c92daa9cb::t_e53484ebd3d688 1-130
+scripts/denylist.sha256
+  s_54b80c92daa9cb::t_3206e805b2af99 1-6
+scripts/docs.py
+  s_54b80c92daa9cb::t_3e5704ef417560 1-681
+scripts/embedding_outage.py
+  s_54b80c92daa9cb::t_b143650ec11cf1 1-55
+scripts/eval/campaign.py
+  s_54b80c92daa9cb::t_f845ce70b2ccab 1-271
+scripts/eval/campaign_compute.py
+  s_54b80c92daa9cb::t_79c13e4147e17b 1-6,8-73
+scripts/eval/campaign_promotion.py
+  s_54b80c92daa9cb::t_d14ec28a07a193 1-775
+scripts/eval/campaign_reporting.py
+  s_54b80c92daa9cb::t_c49865f78c6e82 1-287
+scripts/eval/campaign_store.py
+  s_54b80c92daa9cb::t_801bc58247b791 1-196
+scripts/eval/control_store.py
+  s_54b80c92daa9cb::t_aa2a1386ce96d3 1-445
+scripts/eval/direct_bakeoff.py
+  s_54b80c92daa9cb::t_dd62b0fabfc006 1-424
+scripts/eval/embeddings.py
+  s_54b80c92daa9cb::t_b6eaa1a9455598 1-266
+scripts/eval/engine_confirm_runner.py
+  s_54b80c92daa9cb::t_045c9a5f2b068d 1-51
+scripts/eval/engine_confirmation.py
+  s_54b80c92daa9cb::t_fdf457d755b27f 1-613
+scripts/eval/engine_measurement.py
+  s_54b80c92daa9cb::t_fe5e55a2ff9072 1-275
+scripts/eval/engine_stack.py
+  s_54b80c92daa9cb::t_179c59c060b9b4 1-239
+scripts/eval/examples/modal-candidate.json
+  s_54b80c92daa9cb::t_48b1cfaf17fc71 1-10
+scripts/eval/examples/modal-policy.json
+  s_54b80c92daa9cb::t_3b390162376acd 1-15
+scripts/eval/examples/search-campaign.yaml
+  s_54b80c92daa9cb::t_455b951edb16d8 1-52
+scripts/eval/gates.py
+  s_54b80c92daa9cb::t_25d56817196ab1 1-106
+scripts/eval/jev.py
+  s_54b80c92daa9cb::t_73fec16bd6fa2a 1-210
+scripts/eval/modal_engine.py
+  s_54b80c92daa9cb::t_5ce77d5fdbbc9b 1-327
+scripts/eval/modal_search.py
+  s_54b80c92daa9cb::t_86a0ce221e1d0c 1-321
+scripts/eval/news-article.schema.json
+  s_54b80c92daa9cb::t_dc1fed5aa3e75c 2-21,23,26-46,49,51-60
+scripts/eval/news-report.schema.json
+  s_54b80c92daa9cb::t_5b1623bf5eee43 2-289,291-312,314-392,394-419,421-449,451-457,459-467,469-770,772-783,785-819,821-823,825-869,871-884,886-887
+scripts/eval/news_cache.py
+  s_54b80c92daa9cb::t_78d045747049c3 1-106
+scripts/eval/news_providers.py
+  s_54b80c92daa9cb::t_e4e4770404bbb0 1-736
+scripts/eval/news_review.py
+  s_54b80c92daa9cb::t_5b9563b95c0d20 1-56
+scripts/eval/news_set.py
+  s_54b80c92daa9cb::t_f6f8c271efaea9 1-1180
+scripts/eval/oss_bakeoff.py
+  s_54b80c92daa9cb::t_e13b5d8631916d 1-376
+scripts/eval/oss_modal.py
+  s_54b80c92daa9cb::t_2bbfca570acc97 1-76
+scripts/eval/oss_report.py
+  s_54b80c92daa9cb::t_1126dc258240ab 1-426
+scripts/eval/public_sets.json
+  s_54b80c92daa9cb::t_6bf5d8e5f5d568 1-523
+scripts/eval/public_sets.py
+  s_54b80c92daa9cb::t_1734bf280353d7 1-150
+scripts/eval/quality_reports.py
+  s_54b80c92daa9cb::t_a6c3f3233a3414 1-455
+scripts/eval/report.py
+  s_54b80c92daa9cb::t_5b2f35b9071d9f 1-260
+scripts/eval/requirements-campaign.txt
+  s_54b80c92daa9cb::t_bfddbf9ebe1e26 1-8
+scripts/eval/requirements-direct.txt
+  s_54b80c92daa9cb::t_aa85aabb5e9a5c 1-4
+scripts/eval/requirements-engine.txt
+  s_54b80c92daa9cb::t_c2682cab5c445b 1-4
+scripts/eval/requirements-modal.txt
+  s_54b80c92daa9cb::t_45b1517cd70f62 1-7
+scripts/eval/requirements-news.txt
+  s_54b80c92daa9cb::t_5d5d872a0f3123 1-3
+scripts/eval/requirements-oss.txt
+  s_54b80c92daa9cb::t_ebfd8ee550f50a 1-3
+scripts/eval/requirements.txt
+  s_54b80c92daa9cb::t_534176913b01e0 1-4
+scripts/eval/resources.py
+  s_54b80c92daa9cb::t_d6affb0337661a 1-99
+scripts/eval/results
+  s_54b80c92daa9cb::t_983c373c858750 1-5
+scripts/eval/results.py
+  s_54b80c92daa9cb::t_fee0221ee69abe 1-703
+scripts/eval/run.py
+  s_54b80c92daa9cb::t_279febdaeb205f 1-803
+scripts/eval/scoring.py
+  s_54b80c92daa9cb::t_82a19257d0f750 1-38
+scripts/eval/search_campaign.py
+  s_54b80c92daa9cb::t_94ad10196aa103 1-702
+scripts/eval/search_trial.py
+  s_54b80c92daa9cb::t_17ac03691dd0f5 1-366
+scripts/eval/test_campaign.py
+  s_54b80c92daa9cb::t_88502b13768e43 1-197
+scripts/eval/test_campaign_confirmation.py
+  s_54b80c92daa9cb::t_efc5a98426c47e 1-301
+scripts/eval/test_campaign_promotion.py
+  s_54b80c92daa9cb::t_47fe05e8824dc6 1-346
+scripts/eval/test_campaign_reporting.py
+  s_54b80c92daa9cb::t_47e1c7f8c68e80 1-149
+scripts/eval/test_control_store.py
+  s_54b80c92daa9cb::t_4e82dc9ce701c0 1-315
+scripts/eval/test_direct_bakeoff.py
+  s_54b80c92daa9cb::t_5f86f49534c98f 1-235
+scripts/eval/test_embeddings.py
+  s_54b80c92daa9cb::t_57a03b32e54b54 1-177
+scripts/eval/test_engine_confirmation.py
+  s_54b80c92daa9cb::t_64988c15ee8736 1-293
+scripts/eval/test_engine_stack.py
+  s_54b80c92daa9cb::t_991c62b21fa24a 1-99
+scripts/eval/test_gates.py
+  s_54b80c92daa9cb::t_bec69c454dd7b7 1-130
+scripts/eval/test_jev.py
+  s_54b80c92daa9cb::t_30c89a807e4bc5 1-69
+scripts/eval/test_modal_engine.py
+  s_54b80c92daa9cb::t_fe06efa25057fd 1-223
+scripts/eval/test_modal_search.py
+  s_54b80c92daa9cb::t_cf3917a366282d 1-123
+scripts/eval/test_news_providers.py
+  s_54b80c92daa9cb::t_2696d58f3c570a 1-1021
+scripts/eval/test_news_set.py
+  s_54b80c92daa9cb::t_1e3df75b3f49b0 1-368
+scripts/eval/test_oss_bakeoff.py
+  s_54b80c92daa9cb::t_ee542398dae852 1-131
+scripts/eval/test_oss_modal.py
+  s_54b80c92daa9cb::t_3c922b6a00e47b 1-141
+scripts/eval/test_oss_report.py
+  s_54b80c92daa9cb::t_ee9277c91d2d57 1-150
+scripts/eval/test_public_sets.py
+  s_54b80c92daa9cb::t_e7dcff712dfc44 1-105
+scripts/eval/test_quality_reports.py
+  s_54b80c92daa9cb::t_ffab59f7007d06 1-150
+scripts/eval/test_report.py
+  s_54b80c92daa9cb::t_c80ab916c4d3de 1-147
+scripts/eval/test_resources.py
+  s_54b80c92daa9cb::t_5bd672a29e329c 1-26
+scripts/eval/test_results.py
+  s_54b80c92daa9cb::t_bd134f85837461 1-389
+scripts/eval/test_run.py
+  s_54b80c92daa9cb::t_b3584dc22227a8 1-429
+scripts/eval/test_scoring.py
+  s_54b80c92daa9cb::t_c0bbbd455b692c 1-36
+scripts/eval/test_search_campaign.py
+  s_54b80c92daa9cb::t_7986cf5918b6f4 1-270
+scripts/eval/test_search_trial.py
+  s_54b80c92daa9cb::t_42a03c1056587f 1-396
+scripts/eval/test_trec.py
+  s_54b80c92daa9cb::t_69603ef75d12d7 1-75
+scripts/eval/trec.py
+  s_54b80c92daa9cb::t_056a2c01789126 1-204
+scripts/failure_drill.py
+  s_54b80c92daa9cb::t_ee5042a83ee9c1 1-108
+scripts/fake_api.py
+  s_54b80c92daa9cb::t_8276d52877824b 1-71
+scripts/fake_feeds.py
+  s_54b80c92daa9cb::t_08aa76292c06c9 1-111
+scripts/first_search.py
+  s_54b80c92daa9cb::t_efafad3e6f62e0 1-51
+scripts/fixture_plugin.py
+  s_54b80c92daa9cb::t_23f4d459a841b8 1-55
+scripts/gotest.py
+  s_54b80c92daa9cb::t_d1772683b265b6 1-142
+scripts/guides.py
+  s_54b80c92daa9cb::t_e0845a0facfe4d 1-337
+scripts/hosted_embed_plugin.py
+  s_54b80c92daa9cb::t_fc3d82d2f095ee 1-203
+scripts/http-bindings/config.yaml
+  s_54b80c92daa9cb::t_a2170bf239cbc1 1-10
+scripts/http-bindings/std-http-middleware.tmpl
+  s_54b80c92daa9cb::t_2e182ca79908a2 1-21
+scripts/http-bindings/strict-http.tmpl
+  s_54b80c92daa9cb::t_fb0be077f6fe7a 1-82
+scripts/http-bindings/strict-interface.tmpl
+  s_54b80c92daa9cb::t_ecb63adef54da8 1-251
+scripts/image_context.py
+  s_54b80c92daa9cb::t_49ba93a95b8d5d 1-294
+scripts/ingestion_plugin.py
+  s_54b80c92daa9cb::t_b252025eec8450 1-194
+scripts/inventory.py
+  s_54b80c92daa9cb::t_8e9364aabcf184 1-116
+scripts/lifecycle.py
+  s_54b80c92daa9cb::t_5a629f48fd23c6 1-64
+scripts/local.py
+  s_54b80c92daa9cb::t_3dce94f3ec91b4 1-758
+scripts/m365_restart.py
+  s_54b80c92daa9cb::t_7166aba544b414 1-96
+scripts/measure.py
+  s_54b80c92daa9cb::t_e5020b8a006ad0 1-400
+scripts/measure_backfill.py
+  s_54b80c92daa9cb::t_ab8561c33ab836 1-183
+scripts/measure_metrics.py
+  s_54b80c92daa9cb::t_3da392a1001b29 1-83
+scripts/measure_upgrade.py
+  s_54b80c92daa9cb::t_a09146430e7adb 1-578
+scripts/migrations.py
+  s_54b80c92daa9cb::t_595ac7f8bf2888 1-189
+scripts/normalizer_plugin.py
+  s_54b80c92daa9cb::t_9dc11b2464347f 1-334
+scripts/operation_control.py
+  s_54b80c92daa9cb::t_80d8108dd7fe1e 1-82
+scripts/plugin_boundary.py
+  s_54b80c92daa9cb::t_0dbff7c3fdd9ae 1-87
+scripts/plugin_m365_mail_fixtures.py
+  s_54b80c92daa9cb::t_d09c422fc3b654 1-48
+scripts/plugin_sdk.sh
+  s_54b80c92daa9cb::t_cc9e10c3dc5917 1-176
+scripts/plugin_sdk_conformance.py
+  s_54b80c92daa9cb::t_04e4da9796f93c 1-65
+scripts/plugin_sdk_conformance_python.py
+  s_54b80c92daa9cb::t_e47f3f9f9fd206 1-80
+scripts/plugin_sdk_go.sh
+  s_54b80c92daa9cb::t_0780c10f9d452e 1-98
+scripts/plugin_x_list_fixtures.py
+  s_54b80c92daa9cb::t_0700781a5e13f8 1-40
+scripts/ports.py
+  s_54b80c92daa9cb::t_c70e0f0fd948fd 1-148
+scripts/prepare_embeddings.py
+  s_54b80c92daa9cb::t_1ea305369605bd 1-26
+scripts/prepare_tokenizer.py
+  s_54b80c92daa9cb::t_bf3736c13bcf0a 1-33
+scripts/push_plugin.py
+  s_54b80c92daa9cb::t_61740af1813b15 1-63
+scripts/rebuild_recovery.py
+  s_54b80c92daa9cb::t_30ff2e231e586c 1-89
+scripts/retrieval_plugin.py
+  s_54b80c92daa9cb::t_551fc70334d333 1-85
+scripts/subscription_plugin.py
+  s_54b80c92daa9cb::t_794c86eb71b309 1-298
+scripts/test_adapter_postgres.py
+  s_54b80c92daa9cb::t_a93493548d2e41 1-124
+scripts/test_api_contract.py
+  s_54b80c92daa9cb::t_77203fba7193db 1-37
+scripts/test_ci_output.py
+  s_54b80c92daa9cb::t_3d4389b16a00d2 1-167
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_b1c079a699bf7e 1-350
+scripts/test_denylist.py
+  s_54b80c92daa9cb::t_6fd5edac34f60d 1-92
+scripts/test_docs.py
+  s_54b80c92daa9cb::t_2bcb0d613d9435 1-584
+scripts/test_guides.py
+  s_54b80c92daa9cb::t_0bbc95b2caa66a 1-203
+scripts/test_image_context.py
+  s_54b80c92daa9cb::t_95f9a0a6ab2550 1-5,7-154
+scripts/test_local.py
+  s_54b80c92daa9cb::t_42a06eb9e0b572 1-293
+scripts/test_measure.py
+  s_54b80c92daa9cb::t_b92537aab6e0b5 1-98
+scripts/test_measure_upgrade.py
+  s_54b80c92daa9cb::t_3609065bc79ee0 1-3,5,8-18,21-22,25-27,29-35,37-42,44-47,49-52,54-68
+scripts/test_migrations.py
+  s_54b80c92daa9cb::t_a6393cdc8ece78 1-4,6,8-98
+scripts/test_mintlify.py
+  s_54b80c92daa9cb::t_5e0e6052af7e21 1-149
+scripts/test_mlflow_entrypoint.py
+  s_54b80c92daa9cb::t_d6d64b9412bdce 1-50
+scripts/test_normalizer_plugin.py
+  s_54b80c92daa9cb::t_c0078b25c9855e 1-76
+scripts/test_plugin_boundary.py
+  s_54b80c92daa9cb::t_48098454fc008a 1-56
+scripts/test_ports.py
+  s_54b80c92daa9cb::t_3a6d34c634d92e 1-134
+scripts/test_subscription_plugin.py
+  s_54b80c92daa9cb::t_b48e01e49c6807 1-87
+scripts/validate_captures.py
+  s_54b80c92daa9cb::t_0ea36f9971a691 1-10
+scripts/verify_report.py
+  s_54b80c92daa9cb::t_1fc8b39bd47a21 1-209
+sdks/go/README.md
+  s_54b80c92daa9cb::t_02b70b1bb884b0 1-201
+sdks/go/examples/fusion-retriever/fixtures/harbour.json
+  s_54b80c92daa9cb::t_b3cfcc9adce870 1-13
+sdks/go/examples/fusion-retriever/main.go
+  s_54b80c92daa9cb::t_ba1013dbe4271e 1-107
+sdks/go/examples/fusion-retriever/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_be80214efe47a6 1-27
+sdks/go/examples/hash-embedder/fixtures/article.json
+  s_54b80c92daa9cb::t_eb0247526d88be 1-17
+sdks/go/examples/hash-embedder/main.go
+  s_54b80c92daa9cb::t_086c91602d9053 1-158
+sdks/go/examples/hash-embedder/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_6a3125ad87c578 1-34
+sdks/go/examples/static-source/fixtures/pages.json
+  s_54b80c92daa9cb::t_95258538d1b0cc 1-19
+sdks/go/examples/static-source/fixtures/revoked.json
+  s_54b80c92daa9cb::t_3632a9febf1a5c 1-9
+sdks/go/examples/static-source/main.go
+  s_54b80c92daa9cb::t_e19e5a6b390c27 1-105
+sdks/go/examples/static-source/main_test.go
+  s_54b80c92daa9cb::t_243988c07bf060 1-34
+sdks/go/examples/static-source/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_ae93c4a62f999b 1-51
+sdks/go/go.mod
+  s_54b80c92daa9cb::t_8266957e24b115 1-10
+sdks/go/go.sum
+  s_54b80c92daa9cb::t_af1cbd5ab61af7 1-10
+sdks/go/quivrplugin/api.gen.go
+  s_54b80c92daa9cb::t_52e9b930397698 1-41
+sdks/go/quivrplugin/attachment.go
+  s_54b80c92daa9cb::t_a4feecd140404d 1-373
+sdks/go/quivrplugin/attachment_test.go
+  s_54b80c92daa9cb::t_911c1bcd98c86e 1-184
+sdks/go/quivrplugin/conformance_test.go
+  s_54b80c92daa9cb::t_a0570468318774 1-109
+sdks/go/quivrplugin/connector.go
+  s_54b80c92daa9cb::t_4cb48bf2df60a6 1-261
+sdks/go/quivrplugin/errors.go
+  s_54b80c92daa9cb::t_388ee76750ef5a 1-90
+sdks/go/quivrplugin/ingestion.go
+  s_54b80c92daa9cb::t_ead4863bea93cd 1-359
+sdks/go/quivrplugin/ingestion_test.go
+  s_54b80c92daa9cb::t_4840f699449ed1 1-131
+sdks/go/quivrplugin/manifest.go
+  s_54b80c92daa9cb::t_dfe2b1aa23a7be 1-482
+sdks/go/quivrplugin/normalizer.go
+  s_54b80c92daa9cb::t_68cd91a2df94b7 1-207
+sdks/go/quivrplugin/normalizer_subscription_test.go
+  s_54b80c92daa9cb::t_05f39cc66695d8 1-220
+sdks/go/quivrplugin/plugin.go
+  s_54b80c92daa9cb::t_b10b7ac66a48c5 1-535
+sdks/go/quivrplugin/plugin_test.go
+  s_54b80c92daa9cb::t_851309010112da 1-256
+sdks/go/quivrplugin/plugintest/plugintest.go
+  s_54b80c92daa9cb::t_ce7582445da3bc 1-265
+sdks/go/quivrplugin/receive.go
+  s_54b80c92daa9cb::t_c74268463e4cd7 1-333
+sdks/go/quivrplugin/receive_test.go
+  s_54b80c92daa9cb::t_4cb37346c14fa6 1-343
+sdks/go/quivrplugin/redact.go
+  s_54b80c92daa9cb::t_b635b287ebd667 1-143
+sdks/go/quivrplugin/retrieval.go
+  s_54b80c92daa9cb::t_b838942c215d9a 1-322
+sdks/go/quivrplugin/retrieval_test.go
+  s_54b80c92daa9cb::t_881d91a682ae23 1-122
+sdks/go/quivrplugin/schema.go
+  s_54b80c92daa9cb::t_ea9b77f8d3a3ac 1-117
+sdks/go/quivrplugin/schemas/plugins/v0/connector-check-credential-request.schema.json
+  s_54b80c92daa9cb::t_06e211d8bd333e 1-44
+sdks/go/quivrplugin/schemas/plugins/v0/connector-check-credential-response.schema.json
+  s_54b80c92daa9cb::t_5d93dd9c799e96 1-20
+sdks/go/quivrplugin/schemas/plugins/v0/connector-describe-attachment-request.schema.json
+  s_54b80c92daa9cb::t_2f2cc2f0bcaa8a 1-80
+sdks/go/quivrplugin/schemas/plugins/v0/connector-describe-attachment-response.schema.json
+  s_54b80c92daa9cb::t_0fda736d669293 1-70
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_f9606827b83446 1-105
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_cfd34fd8bd7ae3 1-202
+sdks/go/quivrplugin/schemas/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_7d430f3f5d7219 1-280
+sdks/go/quivrplugin/schemas/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_0566a5d9233cd7 1-160
+sdks/go/quivrplugin/schemas/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_e96c4e48d11370 1-58
+sdks/go/quivrplugin/schemas/plugins/v0/connector-upload-attachment-request.schema.json
+  s_54b80c92daa9cb::t_d601772bc1ca96 1-129
+sdks/go/quivrplugin/schemas/plugins/v0/connector-upload-attachment-response.schema.json
+  s_54b80c92daa9cb::t_67c18872b72eba 1-15
+sdks/go/quivrplugin/schemas/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_78477a71394733 1-54
+sdks/go/quivrplugin/schemas/plugins/v0/error.schema.json
+  s_54b80c92daa9cb::t_e0c70e5e863ce1 1-46
+sdks/go/quivrplugin/schemas/plugins/v0/health.schema.json
+  s_54b80c92daa9cb::t_8dad4a1a5ee941 1-15
+sdks/go/quivrplugin/schemas/plugins/v0/ingestion-embed-query-request.schema.json
+  s_54b80c92daa9cb::t_40e6214b5f9973 1-59
+sdks/go/quivrplugin/schemas/plugins/v0/ingestion-embed-query-response.schema.json
+  s_54b80c92daa9cb::t_766632e0d309b2 1-21
+sdks/go/quivrplugin/schemas/plugins/v0/ingestion-fixture.schema.json
+  s_54b80c92daa9cb::t_4be1e474b8db2d 1-91
+sdks/go/quivrplugin/schemas/plugins/v0/ingestion-segment-and-embed-request.schema.json
+  s_54b80c92daa9cb::t_4eba1becc150c7 1-109
+sdks/go/quivrplugin/schemas/plugins/v0/ingestion-segment-and-embed-response.schema.json
+  s_54b80c92daa9cb::t_6039b46f3cb785 1-70
+sdks/go/quivrplugin/schemas/plugins/v0/normalizer-request.schema.json
+  s_54b80c92daa9cb::t_a6a15ff7169d91 1-145
+sdks/go/quivrplugin/schemas/plugins/v0/normalizer-response.schema.json
+  s_54b80c92daa9cb::t_a5de6902768961 1-48
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-fixture.schema.json
+  s_54b80c92daa9cb::t_bb6c5f461a1922 1-51
+sdks/go/quivrplugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_b8556eeb74ba79 2-177,179-225,227-251,253-318,320-321,323-326,328-393,395-399,401-406,408,410-420,422-622,624-628,630-718,720,722-736,738,740-772,774-779,781-849,851,853-854
+sdks/go/quivrplugin/schemas/plugins/v0/retrieval-fixture.schema.json
+  s_54b80c92daa9cb::t_2907dfc218c29d 1-158
+sdks/go/quivrplugin/schemas/plugins/v0/retrieval-search-request.schema.json
+  s_54b80c92daa9cb::t_1348efb46827c0 1-659
+sdks/go/quivrplugin/schemas/plugins/v0/retrieval-search-response.schema.json
+  s_54b80c92daa9cb::t_828157445ba2a1 1-91
+sdks/go/quivrplugin/schemas/plugins/v0/subscription-fixture.schema.json
+  s_54b80c92daa9cb::t_985fc293bad4b1 1-93
+sdks/go/quivrplugin/schemas/plugins/v0/subscription-request.schema.json
+  s_54b80c92daa9cb::t_0c6e8435fff194 2-110,112,114,116,118-129,131-133,135-160,162-165,167-169,171-182,184-203,205-207,209-210,212-214,216,218,220-279,281-283,285-287,289-291,293-297,299-319,321,323-324,326,328-330,332-333
+sdks/go/quivrplugin/schemas/plugins/v0/subscription-response.schema.json
+  s_54b80c92daa9cb::t_25ff5ebd715785 1-69
+sdks/go/quivrplugin/schemas/shared/v0/manifest.schema.json
+  s_54b80c92daa9cb::t_bb7c9bdceefcab 1-283
+sdks/go/quivrplugin/subscription.go
+  s_54b80c92daa9cb::t_8ae4bbe5f1e659 1-207
+sdks/go/quivrplugin/testdata/attachments.yaml
+  s_54b80c92daa9cb::t_d0e01cc3fd89a9 1-23
+sdks/go/quivrplugin/testdata/conformance/main.go
+  s_54b80c92daa9cb::t_ed8d832e8387bf 1-75
+sdks/go/quivrplugin/testdata/push.yaml
+  s_54b80c92daa9cb::t_d9b28de4d44a4d 1-21
+sdks/go/quivrplugin/testdata/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_3dc586b53034ce 1-37
+sdks/go/quivrplugin/testdata/routes.json
+  s_54b80c92daa9cb::t_379d3f8385ad54 1-82
+sdks/go/scripts/sync_schemas.py
+  s_54b80c92daa9cb::t_b842ed9edf9ae4 1-47
+sdks/python/README.md
+  s_54b80c92daa9cb::t_5c2b3594d743e2 1-158
+sdks/python/examples/static-source/.gitignore
+  s_54b80c92daa9cb::t_0761dcbe035997 1-3
+sdks/python/examples/static-source/fixtures/pages.json
+  s_54b80c92daa9cb::t_ec586958696aeb 1-19
+sdks/python/examples/static-source/fixtures/revoked.json
+  s_54b80c92daa9cb::t_22e94450fcf2a9 1-9
+sdks/python/examples/static-source/pyproject.toml
+  s_54b80c92daa9cb::t_a18d1892ba46b8 1-13
+sdks/python/examples/static-source/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_582bf60e497b3b 1-48
+sdks/python/examples/static-source/static_source/__init__.py
+  s_54b80c92daa9cb::t_886de8226c5702 1
+sdks/python/examples/static-source/static_source/__main__.py
+  s_54b80c92daa9cb::t_d4944c0e64d762 1-4
+sdks/python/examples/static-source/static_source/connector.py
+  s_54b80c92daa9cb::t_06d6125a70e8c3 1-2,4,6-19,21,24-27,30-43,45-70,72-74,76-79
+sdks/python/pyproject.toml
+  s_54b80c92daa9cb::t_1fc4362322e1d0 1-4,6-12,14-15,18-19,21-22
+sdks/python/scripts/generate.py
+  s_54b80c92daa9cb::t_e47e6bee2340ae 1-292
+sdks/python/src/quivr_plugin/__init__.py
+  s_54b80c92daa9cb::t_160b86922a6211 1-82
+sdks/python/src/quivr_plugin/_codec.py
+  s_54b80c92daa9cb::t_f395a1586cae7c 1-131
+sdks/python/src/quivr_plugin/_json.py
+  s_54b80c92daa9cb::t_a48a993e200f21 1-2,4-7,10-15,17-20,22-27,29-41,44-45,47-48,50-51,53-54,56-61,64-77
+sdks/python/src/quivr_plugin/api_versions.py
+  s_54b80c92daa9cb::t_4f7c3595d6b838 1-22
+sdks/python/src/quivr_plugin/blob.py
+  s_54b80c92daa9cb::t_37d429e55f7540 1-73
+sdks/python/src/quivr_plugin/connector.py
+  s_54b80c92daa9cb::t_e769bb2b748dd6 1-627
+sdks/python/src/quivr_plugin/credential.py
+  s_54b80c92daa9cb::t_f3b44cef733d7e 1-120
+sdks/python/src/quivr_plugin/errors.py
+  s_54b80c92daa9cb::t_6b63d97193c721 1-63
+sdks/python/src/quivr_plugin/ingestion.py
+  s_54b80c92daa9cb::t_785b5e8bb464f4 1-244
+sdks/python/src/quivr_plugin/logs.py
+  s_54b80c92daa9cb::t_fd438d667623ae 1-85
+sdks/python/src/quivr_plugin/manifest.py
+  s_54b80c92daa9cb::t_867f874f9ccdcc 1-237
+sdks/python/src/quivr_plugin/models.py
+  s_54b80c92daa9cb::t_0135df6983352e 1-1359
+sdks/python/src/quivr_plugin/schema.py
+  s_54b80c92daa9cb::t_412b62eba2141c 1-2,4-7,9-11,13,16-26,29-31,34-39,42-45,48-51
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-check-credential-request.schema.json
+  s_54b80c92daa9cb::t_f0302fdeff8951 1-44
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-check-credential-response.schema.json
+  s_54b80c92daa9cb::t_26500ba48f7510 1-20
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-describe-attachment-request.schema.json
+  s_54b80c92daa9cb::t_9abb418594707f 1-80
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-describe-attachment-response.schema.json
+  s_54b80c92daa9cb::t_9afafbb58d2475 1-70
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-request.schema.json
+  s_54b80c92daa9cb::t_50be7d59fbb1b9 1-105
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fetch-response.schema.json
+  s_54b80c92daa9cb::t_8bc643c2957717 1-202
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-fixture.schema.json
+  s_54b80c92daa9cb::t_85aa641a724ff3 1-280
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-receive-request.schema.json
+  s_54b80c92daa9cb::t_c3dd44d5ea9106 1-160
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-receive-response.schema.json
+  s_54b80c92daa9cb::t_ce81c695efc71d 1-58
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-upload-attachment-request.schema.json
+  s_54b80c92daa9cb::t_a4d62994b5014a 1-129
+sdks/python/src/quivr_plugin/schemas/plugins/v0/connector-upload-attachment-response.schema.json
+  s_54b80c92daa9cb::t_ff62ba509fb5a1 1-15
+sdks/python/src/quivr_plugin/schemas/plugins/v0/discovery.schema.json
+  s_54b80c92daa9cb::t_5a3d208447318f 1-54
+sdks/python/src/quivr_plugin/schemas/plugins/v0/error.schema.json
+  s_54b80c92daa9cb::t_e0c03b88ba6367 1-46
+sdks/python/src/quivr_plugin/schemas/plugins/v0/health.schema.json
+  s_54b80c92daa9cb::t_07d82220dd8460 1-15
+sdks/python/src/quivr_plugin/schemas/plugins/v0/ingestion-embed-query-request.schema.json
+  s_54b80c92daa9cb::t_ecad9b7676e521 1-59
+sdks/python/src/quivr_plugin/schemas/plugins/v0/ingestion-embed-query-response.schema.json
+  s_54b80c92daa9cb::t_dc2f317c3c4812 1-21
+sdks/python/src/quivr_plugin/schemas/plugins/v0/ingestion-fixture.schema.json
+  s_54b80c92daa9cb::t_53f011794a1c9e 1-91
+sdks/python/src/quivr_plugin/schemas/plugins/v0/ingestion-segment-and-embed-request.schema.json
+  s_54b80c92daa9cb::t_0aba8a6c211ab6 1-109
+sdks/python/src/quivr_plugin/schemas/plugins/v0/ingestion-segment-and-embed-response.schema.json
+  s_54b80c92daa9cb::t_0803462b81524e 1-70
+sdks/python/src/quivr_plugin/schemas/plugins/v0/normalizer-request.schema.json
+  s_54b80c92daa9cb::t_1a2bcf483bb9b2 1-145
+sdks/python/src/quivr_plugin/schemas/plugins/v0/normalizer-response.schema.json
+  s_54b80c92daa9cb::t_36dc0106d598e2 1-48
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-fixture.schema.json
+  s_54b80c92daa9cb::t_060281c68a831b 1-51
+sdks/python/src/quivr_plugin/schemas/plugins/v0/plugin-manifest.schema.json
+  s_54b80c92daa9cb::t_135395a386b490 2-177,179-225,227-251,253-318,320-321,323-326,328-393,395-399,401-406,408,410-420,422-622,624-628,630-718,720,722-736,738,740-772,774-779,781-849,851,853-854
+sdks/python/src/quivr_plugin/schemas/plugins/v0/retrieval-fixture.schema.json
+  s_54b80c92daa9cb::t_02ea004331500d 1-158
+sdks/python/src/quivr_plugin/schemas/plugins/v0/retrieval-search-request.schema.json
+  s_54b80c92daa9cb::t_cd8219dfc9a647 1-659
+sdks/python/src/quivr_plugin/schemas/plugins/v0/retrieval-search-response.schema.json
+  s_54b80c92daa9cb::t_95992725bdd281 1-91
+sdks/python/src/quivr_plugin/schemas/plugins/v0/subscription-fixture.schema.json
+  s_54b80c92daa9cb::t_9de8379796323d 1-93
+sdks/python/src/quivr_plugin/schemas/plugins/v0/subscription-request.schema.json
+  s_54b80c92daa9cb::t_2972ba3537d818 2-110,112,114,116,118-129,131-133,135-160,162-165,167-169,171-182,184-203,205-207,209-210,212-214,216,218,220-279,281-283,285-287,289-291,293-297,299-319,321,323-324,326,328-330,332-333
+sdks/python/src/quivr_plugin/schemas/plugins/v0/subscription-response.schema.json
+  s_54b80c92daa9cb::t_12c48274ead0a2 1-69
+sdks/python/src/quivr_plugin/schemas/shared/v0/manifest.schema.json
+  s_54b80c92daa9cb::t_0f9d04f69721ae 1-283
+sdks/python/src/quivr_plugin/server.py
+  s_54b80c92daa9cb::t_df66284259ac72 1-565
+sdks/python/src/quivr_plugin/subscription.py
+  s_54b80c92daa9cb::t_0b46d60aa7e672 1-13,15-16,18-22,24-192
+sdks/python/src/quivr_plugin/testing.py
+  s_54b80c92daa9cb::t_fc030380e5e48c 1-181
+sdks/python/tests/data/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_2fd1b9ff77de81 1-23
+sdks/python/tests/data/subscription-plugin.yaml
+  s_54b80c92daa9cb::t_7b81c37c6fa246 1-31
+sdks/python/tests/support.py
+  s_54b80c92daa9cb::t_0cf4d9bc6fcb63 1-69
+sdks/python/tests/test_blob.py
+  s_54b80c92daa9cb::t_d1d2e6a6132695 1-99
+sdks/python/tests/test_connector.py
+  s_54b80c92daa9cb::t_a9a1a502f7bdac 1-4,6-40,43-227,229-263,265-275,278,280-288,290-587
+sdks/python/tests/test_ingestion.py
+  s_54b80c92daa9cb::t_7e342d90908a32 1-128
+sdks/python/tests/test_models.py
+  s_54b80c92daa9cb::t_b50151078d483a 1-106
+sdks/python/tests/test_server.py
+  s_54b80c92daa9cb::t_32ef5f6547e655 1-224
+sdks/python/tests/test_subscription.py
+  s_54b80c92daa9cb::t_389374a8ba075f 1-180
+skills-lock.json
+  s_54b80c92daa9cb::t_25879883a99140 1-263
+tests/acceptance/README.md
+  s_54b80c92daa9cb::t_afd43fe093d1c1 1-45
+tests/acceptance/alert_plugin_upgrade_test.go
+  s_54b80c92daa9cb::t_6cf64152f0e2c1 1-147
+tests/acceptance/backfill_test.go
+  s_54b80c92daa9cb::t_60ff9571b74281 1-175
+tests/acceptance/catalog_test.go
+  s_54b80c92daa9cb::t_201e75d7aeea03 1-394
+tests/acceptance/changes_test.go
+  s_54b80c92daa9cb::t_0ad3dc694f85e6 1-391
+tests/acceptance/collector_plugin_test.go
+  s_54b80c92daa9cb::t_d7753f3c00a9c4 1-197
+tests/acceptance/connectors_config_test.go
+  s_54b80c92daa9cb::t_23bd2fb793c934 1-65
+tests/acceptance/connectors_m365_test.go
+  s_54b80c92daa9cb::t_80bb8caee34f63 1-284
+tests/acceptance/connectors_rss_test.go
+  s_54b80c92daa9cb::t_93705bc4e93291 1-196
+tests/acceptance/connectors_test.go
+  s_54b80c92daa9cb::t_65717957357ce1 1-292
+tests/acceptance/connectors_x_push_test.go
+  s_54b80c92daa9cb::t_fa4bf6353dff5f 1-169
+tests/acceptance/connectors_x_test.go
+  s_54b80c92daa9cb::t_6d2e1d411395ce 1-182
+tests/acceptance/corpora_test.go
+  s_54b80c92daa9cb::t_6d501bec247f79 1-206
+tests/acceptance/corrections_test.go
+  s_54b80c92daa9cb::t_32a09c657b3f08 1-321
+tests/acceptance/delivery_retry_test.go
+  s_54b80c92daa9cb::t_5af88b8cb91589 1-193
+tests/acceptance/delivery_test.go
+  s_54b80c92daa9cb::t_c8975d54a8065a 1-390
+tests/acceptance/described_alerts_test.go
+  s_54b80c92daa9cb::t_fda2a514e4975c 1-118
+tests/acceptance/embedding_test.go
+  s_54b80c92daa9cb::t_e97ec7fa0160dc 1-114
+tests/acceptance/hosted_embedding_test.go
+  s_54b80c92daa9cb::t_0544959a4794f7 1-29
+tests/acceptance/hosted_redeploy_test.go
+  s_54b80c92daa9cb::t_1d19c53de164e2 1-192
+tests/acceptance/ingestion_batch_test.go
+  s_54b80c92daa9cb::t_f852ac4a81dabd 1-320
+tests/acceptance/ingestion_plugin_test.go
+  s_54b80c92daa9cb::t_645588a9d4c6e3 1-120
+tests/acceptance/ingestion_routes_test.go
+  s_54b80c92daa9cb::t_f52376011e6991 1-48
+tests/acceptance/ingestion_test.go
+  s_54b80c92daa9cb::t_d374aca5c7fa17 1-159
+tests/acceptance/journey_test.go
+  s_54b80c92daa9cb::t_723c58f59a4e4b 1-394
+tests/acceptance/keyless_test.go
+  s_54b80c92daa9cb::t_5a654f3e05ba3c 1-75
+tests/acceptance/keyword_alerts_test.go
+  s_54b80c92daa9cb::t_6478698f63a7e7 1-121
+tests/acceptance/manifest_test.go
+  s_54b80c92daa9cb::t_0f6ea0031c5844 1-295
+tests/acceptance/matches_test.go
+  s_54b80c92daa9cb::t_f45c0a76f7b69b 1-283
+tests/acceptance/monitoring_edit_test.go
+  s_54b80c92daa9cb::t_2ad1bcb669d0d9 1-154
+tests/acceptance/monitoring_owner_test.go
+  s_54b80c92daa9cb::t_73a14f8e19aeea 1-116
+tests/acceptance/monitoring_plugin_test.go
+  s_54b80c92daa9cb::t_cc69366e91777c 1-214
+tests/acceptance/monitoring_test.go
+  s_54b80c92daa9cb::t_240a0ae1352ab4 1-220
+tests/acceptance/normalizer_failures_test.go
+  s_54b80c92daa9cb::t_5a0a1d1eb7bdde 1-204
+tests/acceptance/normalizer_test.go
+  s_54b80c92daa9cb::t_4d6c5f041ad43c 1-236
+tests/acceptance/observability_test.go
+  s_54b80c92daa9cb::t_91061eb2f2ef46 1-107
+tests/acceptance/pdf_test.go
+  s_54b80c92daa9cb::t_4810d48f368e6d 1-141
+tests/acceptance/plugin_activation_test.go
+  s_54b80c92daa9cb::t_9e2a95f9cca47c 1-292
+tests/acceptance/plugin_fixtures_test.go
+  s_54b80c92daa9cb::t_18142c7541b243 1-87
+tests/acceptance/plugin_registry_test.go
+  s_54b80c92daa9cb::t_0ddb9eb8d2c403 1-51
+tests/acceptance/plugin_rollback_test.go
+  s_54b80c92daa9cb::t_4d6a60c7217f12 1-112
+tests/acceptance/prune_test.go
+  s_54b80c92daa9cb::t_e6b785adec69af 1-137
+tests/acceptance/quarantine_test.go
+  s_54b80c92daa9cb::t_7678224d830726 1-175
+tests/acceptance/rebuild_test.go
+  s_54b80c92daa9cb::t_0d0e96ee21f5a0 1-314
+tests/acceptance/retrieval_config_test.go
+  s_54b80c92daa9cb::t_2f09e2c22a41a4 1-151
+tests/acceptance/retrieval_plugin_test.go
+  s_54b80c92daa9cb::t_5abf8d31c51617 1-92
+tests/acceptance/search_cli_test.go
+  s_54b80c92daa9cb::t_e4fd25ab6d47c8 1-193
+tests/acceptance/search_enriched_test.go
+  s_54b80c92daa9cb::t_ef9faa1097e3a7 1-74
+tests/acceptance/search_mcp_test.go
+  s_54b80c92daa9cb::t_f8f7aa88b43d94 1-411
+tests/acceptance/search_test.go
+  s_54b80c92daa9cb::t_b56f725c5dadc4 1-220
+tests/acceptance/segmentation_test.go
+  s_54b80c92daa9cb::t_68f512ee066f98 1-90
+tests/acceptance/subscription_preview_test.go
+  s_54b80c92daa9cb::t_2ed1082f58084b 1-93
+tests/acceptance/upload_test.go
+  s_54b80c92daa9cb::t_df3eff67d6224d 1-143
+tests/acceptance/vector_alerts_test.go
+  s_54b80c92daa9cb::t_f468278908837e 1-97
+tests/acceptance/withdrawal_test.go
+  s_54b80c92daa9cb::t_c2dbc6dcfd4a43 1-211
+tests/fakeplugin/main.go
+  s_54b80c92daa9cb::t_59c0eb6cab75fb 1-12
+tests/fakes/README.md
+  s_54b80c92daa9cb::t_72c8beae3a918d 1-60
+tests/fakes/cmd/embedding/main.go
+  s_54b80c92daa9cb::t_34cee67818f66c 1,3-13,15-16,18-44
+tests/fakes/cmd/graph/main.go
+  s_54b80c92daa9cb::t_ec1d0aa033ca38 1-44
+tests/fakes/cmd/x/main.go
+  s_54b80c92daa9cb::t_ac0ce8f4438510 1-45
+tests/fakes/embedding/embedding.go
+  s_54b80c92daa9cb::t_13496eae3e6dd3 1-160
+tests/fakes/go.mod
+  s_54b80c92daa9cb::t_c285747ec56edb 1,3
+tests/fakes/graph/fixtures/README.md
+  s_54b80c92daa9cb::t_6e6fb4364572cc 1-17
+tests/fakes/graph/fixtures/attachments.json
+  s_54b80c92daa9cb::t_36d24f336af91c 1-13
+tests/fakes/graph/fixtures/delta.json
+  s_54b80c92daa9cb::t_9ccb531f319fdc 1-8
+tests/fakes/graph/fixtures/error.json
+  s_54b80c92daa9cb::t_9a9ae82e82d60d 1-6
+tests/fakes/graph/fixtures/message.json
+  s_54b80c92daa9cb::t_0b72cb61d84e62 1-35
+tests/fakes/graph/fixtures/token-error.json
+  s_54b80c92daa9cb::t_d91e699ae145d4 1-7
+tests/fakes/graph/fixtures/token.json
+  s_54b80c92daa9cb::t_c413e0246deba6 1-5
+tests/fakes/graph/graph.go
+  s_54b80c92daa9cb::t_44a3accd160103 1-574
+tests/fakes/process/process.go
+  s_54b80c92daa9cb::t_3a36b02a832f9e 1-127
+tests/fakes/x/fixtures/README.md
+  s_54b80c92daa9cb::t_65d73742e7d659 1-17
+tests/fakes/x/fixtures/delivery.json
+  s_54b80c92daa9cb::t_ebf15d5dbdd9ec 1
+tests/fakes/x/fixtures/lookup.json
+  s_54b80c92daa9cb::t_2a91d55fed10d5 1
+tests/fakes/x/fixtures/timeline.json
+  s_54b80c92daa9cb::t_046dc5171aa880 1
+tests/fakes/x/x.go
+  s_54b80c92daa9cb::t_6a96484a5732a8 1-654
+tests/fakes/x/x_test.go
+  s_54b80c92daa9cb::t_691ebc6e4b77df 1-78
+tests/measurement/workload-v2.json
+  s_54b80c92daa9cb::t_8824fef7ddd699 1-71
+tests/plugin-contract/accepted-invalid-request/expect.json
+  s_54b80c92daa9cb::t_1e97ebeae5f601 1-6
+tests/plugin-contract/accepted-invalid-request/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_7c3bb228c55f4c 1-12
+tests/plugin-contract/bad-checksum/expect.json
+  s_54b80c92daa9cb::t_e90fcfccfb919f 1-6
+tests/plugin-contract/bad-checksum/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_b61e4fce906adb 1-12
+tests/plugin-contract/connector-valid/expect.json
+  s_54b80c92daa9cb::t_f9dcc84bc6754d 1-4
+tests/plugin-contract/connector-valid/fixtures/pages.json
+  s_54b80c92daa9cb::t_7ab8bbc9852c77 1-107
+tests/plugin-contract/connector-valid/fixtures/revoked.json
+  s_54b80c92daa9cb::t_87ac5d27e72375 1-9
+tests/plugin-contract/connector-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_f6f3208031049b 1-43
+tests/plugin-contract/contract_test.go
+  s_54b80c92daa9cb::t_d4f6a5c1237d52 1-373
+tests/plugin-contract/incompatible-range/expect.json
+  s_54b80c92daa9cb::t_bcf5845850ec10 1-6
+tests/plugin-contract/incompatible-range/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_6f01a88ec5b745 1-12
+tests/plugin-contract/ingestion-valid/expect.json
+  s_54b80c92daa9cb::t_fbb0ce1936b06a 1-4
+tests/plugin-contract/ingestion-valid/fixtures/memo.json
+  s_54b80c92daa9cb::t_37494b377da107 1-18
+tests/plugin-contract/ingestion-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_243b4ef52fb92a 1-34
+tests/plugin-contract/malformed-part/expect.json
+  s_54b80c92daa9cb::t_8cae4f79950874 1-6
+tests/plugin-contract/malformed-part/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_a146c472b04e07 1-12
+tests/plugin-contract/nondeterministic/expect.json
+  s_54b80c92daa9cb::t_cd8574e50e8a26 1-6
+tests/plugin-contract/nondeterministic/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_dde5159eb37974 1-12
+tests/plugin-contract/oversize/expect.json
+  s_54b80c92daa9cb::t_e66f3450a04a29 1-6
+tests/plugin-contract/oversize/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_c5dfb02db63e62 1-12
+tests/plugin-contract/retrieval-valid/expect.json
+  s_54b80c92daa9cb::t_5ca9f89ec07aca 1-4
+tests/plugin-contract/retrieval-valid/fixtures/wire.json
+  s_54b80c92daa9cb::t_6ceb522d26a7e9 1-13
+tests/plugin-contract/retrieval-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_1ae25676cab48b 1-30
+tests/plugin-contract/subscription-batch-dependent/expect.json
+  s_54b80c92daa9cb::t_baf42ace80c4a3 1-6
+tests/plugin-contract/subscription-batch-dependent/fixtures/news.json
+  s_54b80c92daa9cb::t_ffe0f1ebc4ec95 1-34
+tests/plugin-contract/subscription-batch-dependent/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_089d28beb15189 1-19
+tests/plugin-contract/subscription-missing-decision/expect.json
+  s_54b80c92daa9cb::t_46e7bcf43f5fbd 1-6
+tests/plugin-contract/subscription-missing-decision/fixtures/news.json
+  s_54b80c92daa9cb::t_d9f47112380e55 1-34
+tests/plugin-contract/subscription-missing-decision/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_26c3ac3595b658 1-19
+tests/plugin-contract/subscription-nondeterministic/expect.json
+  s_54b80c92daa9cb::t_a309c7d191e18e 1-6
+tests/plugin-contract/subscription-nondeterministic/fixtures/news.json
+  s_54b80c92daa9cb::t_879f10716aac08 1-34
+tests/plugin-contract/subscription-nondeterministic/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_dea652ba4dd016 1-19
+tests/plugin-contract/subscription-oversize-evidence/expect.json
+  s_54b80c92daa9cb::t_5599f43e0dc982 1-6
+tests/plugin-contract/subscription-oversize-evidence/fixtures/news.json
+  s_54b80c92daa9cb::t_7e49a0392ba85a 1-34
+tests/plugin-contract/subscription-oversize-evidence/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_5ec756e48b1559 1-19
+tests/plugin-contract/subscription-unexpected-decision/expect.json
+  s_54b80c92daa9cb::t_35e6e3bfc8b832 1-6
+tests/plugin-contract/subscription-unexpected-decision/fixtures/news.json
+  s_54b80c92daa9cb::t_ccc4f3e4dd98e0 1-34
+tests/plugin-contract/subscription-unexpected-decision/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_68caa8cf15faef 1-19
+tests/plugin-contract/subscription-unknown-part-key/expect.json
+  s_54b80c92daa9cb::t_c6df6c84d0429e 1-6
+tests/plugin-contract/subscription-unknown-part-key/fixtures/news.json
+  s_54b80c92daa9cb::t_f4b7c8c08834e8 1-34
+tests/plugin-contract/subscription-unknown-part-key/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_f065935ce14a7f 1-19
+tests/plugin-contract/subscription-valid/expect.json
+  s_54b80c92daa9cb::t_52e139a60bb7b4 1-4
+tests/plugin-contract/subscription-valid/fixtures/news.json
+  s_54b80c92daa9cb::t_b7dbf091a64405 1-34
+tests/plugin-contract/subscription-valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_12d57b710b187f 1-19
+tests/plugin-contract/subscription-wrong-error-class/expect.json
+  s_54b80c92daa9cb::t_94916bbe47a5bc 1-6
+tests/plugin-contract/subscription-wrong-error-class/fixtures/news.json
+  s_54b80c92daa9cb::t_d5f8f976438ab6 1-34
+tests/plugin-contract/subscription-wrong-error-class/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_c5077187c5e116 1-19
+tests/plugin-contract/timeout/expect.json
+  s_54b80c92daa9cb::t_f98ecfd3271dce 1-6
+tests/plugin-contract/timeout/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_11865f3da0ba69 1-13
+tests/plugin-contract/undeclared-namespace/expect.json
+  s_54b80c92daa9cb::t_ceac380ecded33 1-6
+tests/plugin-contract/undeclared-namespace/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_524086950a412b 1-12
+tests/plugin-contract/valid/expect.json
+  s_54b80c92daa9cb::t_550323de439b31 1-4
+tests/plugin-contract/valid/fixtures/note.json
+  s_54b80c92daa9cb::t_d83518dec00bec 1-7
+tests/plugin-contract/valid/fixtures/note.txt
+  s_54b80c92daa9cb::t_629ace1441c640 1
+tests/plugin-contract/valid/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_277cebf973a9be 1-22
+tests/plugin-contract/wrong-error-class/expect.json
+  s_54b80c92daa9cb::t_b4927a7ae7038b 1-6
+tests/plugin-contract/wrong-error-class/quivr-plugin.yaml
+  s_54b80c92daa9cb::t_586108ce2fcb6d 1-12
+third_party/README.md
+  s_54b80c92daa9cb::t_d83b041eaea5a9 1-32
+third_party/e5/LICENSE.tei
+  s_54b80c92daa9cb::t_aea9af8884d09a 1-201
+third_party/e5/MODEL_CARD.md
+  s_54b80c92daa9cb::t_5d7efbbd0c9c3f 1-18484
+third_party/e5/NOTICE.md
+  s_54b80c92daa9cb::t_b77b23aee4e73b 1-52
+third_party/e5/model-lock.json
+  s_54b80c92daa9cb::t_b5458988325552 1-13
+third_party/oapi-codegen/LICENSE.oapi-codegen
+  s_54b80c92daa9cb::t_621eda61a4084d 1-201
+third_party/oapi-codegen/NOTICE.md
+  s_54b80c92daa9cb::t_3c10fec701c14c 1-10
+third_party/tokenizer/LICENSE.tokenizers
+  s_54b80c92daa9cb::t_ef9baddc9de18e 1-201
+third_party/tokenizer/NOTICE.md
+  s_54b80c92daa9cb::t_87536ba622b855 1-40
+third_party/tokenizer/requirements-linux-x86_64.txt
+  s_54b80c92daa9cb::t_b0e2e73ec2d9aa 1-2
+third_party/tokenizer/requirements-macos-arm64.txt
+  s_54b80c92daa9cb::t_405cdf45056d8e 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d9f490782007fc048002bc2fced69027a7dbc8ce",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
