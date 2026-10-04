@@ -171,6 +171,10 @@ class Loop:
         available = self.store.availability(self.name)
         if available['stopped'] or available['paused']:
             return available
+        import campaign_reporting
+        snapshot = self.store.snapshot(self.name)
+        self.spec = {**snapshot['spec'], 'space': snapshot.get('space', snapshot['spec']['space'])}
+        campaign_reporting.enqueue(self.study, snapshot)
         limit = limit or self.spec['parallelism']
         running = self.study.get_trials(states=(optuna.trial.TrialState.RUNNING,))
         state = self.store.snapshot(self.name)['trials']
@@ -195,7 +199,8 @@ class Loop:
         # A replay tick does not immediately launch replacement work.
         if replayed:
             return {'replayed': len(replayed)}
-        while len(pending) < limit and len(self.study.trials) < self.spec['max_trials']:
+        while len(pending) < limit and (self.study.get_trials(states=(optuna.trial.TrialState.WAITING,))
+                                       or len(self.study.trials) < self.spec['max_trials']):
             self.store.renew_owner(self.name, self.owner)
             trial = self.study.ask()
             try:
@@ -297,6 +302,13 @@ def guard(store, name, owner, compute, stop_requested=None):
                 return
     thread = threading.Thread(target=poll, daemon=True)
     thread.start()
+    def report():
+        import campaign_reporting
+        while not done.wait(60):
+            campaign_reporting.notify(store, name)
+    # Notification timeouts must never delay lease renewal or stop signals.
+    reporter = threading.Thread(target=report, daemon=True)
+    reporter.start()
     try:
         yield
         if failures:
@@ -304,6 +316,7 @@ def guard(store, name, owner, compute, stop_requested=None):
     finally:
         done.set()
         thread.join(timeout=60)
+        reporter.join(timeout=1)
 
 
 def lineage():
@@ -316,21 +329,37 @@ def lineage():
 
 
 def public_status(store, name, study=None):
+    import campaign_reporting
+    import campaign_promotion
     state = store.snapshot(name)
     status = store.availability(name)
     output = {'campaign': name, **status, 'ledger': store.summary(name),
-              'agent_token_usage': None, 'confirmation_available': False,
+              'baseline': state['spec']['policy']['baseline'],
+              'space': state.get('space', state['spec']['space']),
+              'space_revision': len(state.get('space_revisions', [])),
+              'goal': state['spec']['goal'], 'max_trials': state['spec']['max_trials'],
+              'agent_token_usage': campaign_reporting.usage(state), 'confirmation_available': False,
+              'next_plan': state.get('next_plan'),
+              'proposals': [{'id': p['id'], 'config': p.get('config'), 'idea': p.get('idea')}
+                            for p in state.get('proposals', {}).values()],
+              'notifications': {day: {d: {'status': receipt['status']} for d, receipt in item['deliveries'].items()}
+                                for day, item in state.get('digests', {}).items()},
               'compute_cap_notice': modal_search.COMPUTE_NOTICE,
               'cleanup_pending': any(r['status'] != 'closed' for r in state['resources'].values()),
-              'trials': [{'number': int(number), 'config': value.get('config'), 'report': value.get('report')}
+              'trials': [{'number': int(number), 'config': value.get('config'),
+                          'report': campaign_reporting.export_report(value.get('report'), state['spec']['policy']['sets'])}
                          for number, value in state['trials'].items()]}
+    output['pareto'] = [{'number': p['number'], 'objectives': p['objectives']}
+                        for p in campaign_reporting.leaderboard(state)]
     if study is not None:
         output['pareto'] = [{'number': trial.number, 'objectives': trial.values}
                             for trial in study.best_trials]
+    output.update(campaign_promotion.public_status(state))
     return output
 
 
-def supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_requested=None):
+def supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_requested=None,
+              confirmation_adapter=None):
     import campaign_store
     import campaign_compute
     compute = campaign_compute.ModalCompute()
@@ -343,8 +372,12 @@ def supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_r
             time.sleep(poll_seconds)
             continue
         if available['stopped']:
+            import campaign_reporting
+            campaign_reporting.notify(store, name)
             return public_status(store, name, study)
         if available['paused']:
+            import campaign_reporting
+            campaign_reporting.notify(store, name)
             if once:
                 return public_status(store, name, study)
             time.sleep(poll_seconds)
@@ -355,6 +388,12 @@ def supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_r
             with guard(store, name, owner, compute, stop_requested):
                 while True:
                     result = loop.tick()
+                    import campaign_promotion
+                    # THE-1008 supplies the trusted runner via this small seam.
+                    # CLI deployments remain disabled until its adapter is wired.
+                    campaign_promotion.advance(store, name, owner, adapter=confirmation_adapter, compute=compute)
+                    import campaign_reporting
+                    campaign_reporting.notify(store, name)
                     if once or result.get('paused') or result.get('stopped'):
                         break
                     if result.get('waiting'):
@@ -383,11 +422,28 @@ def main(argv=None):
     for command in ('resume', 'status', 'stop', 'watchdog'):
         sub = commands.add_parser(command)
         sub.add_argument('campaign')
+    for command in ('usage', 'propose', 'digest'):
+        sub = commands.add_parser(command, help='durable lead/reporting operation; no measurement dispatch')
+        sub.add_argument('campaign')
+        if command != 'digest':
+            sub.add_argument('file', type=pathlib.Path, help='exact receipt or bounded proposal JSON')
+        else:
+            sub.add_argument('--send', action='store_true', help='deliver through provisioned Linear/Slack credentials')
+    for command in ('confirm', 'promote'):
+        sub = commands.add_parser(command)
+        sub.add_argument('campaign')
+        sub.add_argument('trial', type=int)
+        if command == 'promote':
+            sub.add_argument('--open-pr', action='store_true', help='publish a settings PR only from trusted confirmation')
     for sub in (start, *(commands.choices[c] for c in ('resume', 'stop', 'watchdog'))):
         sub.add_argument('--allow-paid', action='store_true', help='explicit operator-only live lifecycle; never CI')
         sub.add_argument('--once', action='store_true', help='perform one scheduling/watchdog pass')
         sub.add_argument('--outbox', type=pathlib.Path, default=ROOT / '.scratch/eval/results')
     args = parser.parse_args(argv)
+    if args.command == 'promote' and (not args.open_pr or any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS'))):
+        parser.error('promotion requires --open-pr outside CI')
+    if args.command == 'digest' and args.send and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
+        parser.error('notification delivery is refused in CI')
     if args.command == 'validate':
         try:
             print(results.encode(read_spec(args.spec)))
@@ -396,7 +452,7 @@ def main(argv=None):
             # YAML parser exceptions can include entire input lines.
             print(results.encode({'status': 'invalid', 'reason': 'campaign YAML or configuration is invalid'}))
             return 2
-    if args.command != 'status' and (not args.allow_paid or any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS'))):
+    if args.command in ('start', 'resume', 'stop', 'watchdog') and (not args.allow_paid or any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS'))):
         parser.error('live lifecycle requires --allow-paid outside CI')
     import campaign_store
     import campaign_compute
@@ -410,7 +466,26 @@ def main(argv=None):
             name = args.campaign
             if not IDENTIFIER.fullmatch(name):
                 raise ValueError('invalid campaign identifier')
-        if args.command == 'stop':
+        if args.command in ('confirm', 'promote'):
+            import campaign_promotion
+            state = store.snapshot(name)
+            if args.trial < 0 or str(args.trial) not in state['trials']:
+                raise ValueError('invalid trial number')
+            if args.command == 'confirm':
+                output = campaign_promotion.confirm(store, name, args.trial, None)
+            else:
+                output = campaign_promotion.promote(store, name, args.trial)
+        elif args.command in ('usage', 'propose', 'digest'):
+            import campaign_reporting
+            if args.command == 'usage':
+                output = campaign_reporting.ingest_usage(store, name, json.loads(args.file.read_text()))
+            elif args.command == 'propose':
+                output = campaign_reporting.propose(store, name, json.loads(args.file.read_text()))
+            elif args.send:
+                output = campaign_reporting.digest(store, name)
+            else:
+                output = {'body': campaign_reporting.digest_body(store.snapshot(name), store.availability(name), store.summary(name))}
+        elif args.command == 'stop':
             store.stop(name)
             watchdog_once(store, name, campaign_compute.ModalCompute())
             output = public_status(store, name)
@@ -444,6 +519,10 @@ def main(argv=None):
                         watchdog_once(store, name, campaign_compute.ModalCompute())
                         output = public_status(store, name, study)
         print(results.encode(output))
+        if args.command in ('confirm', 'promote'):
+            return 0 if output['status'] in ('confirmed', 'opened') else 2
+        if args.command == 'digest' and args.send:
+            return 0 if all(v['status'] == 'delivered' for v in output.values()) else 2
         return 0
     except campaign_store.CleanupPending:
         print(results.encode({'status': 'cleanup_pending', 'reason': 'compute termination is not acknowledged; retry stop or watchdog'}))

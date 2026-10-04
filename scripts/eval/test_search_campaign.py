@@ -33,9 +33,13 @@ class Spec(unittest.TestCase):
             self.assertEqual(parsed['policy']['baseline']['dense_weight'], .5)
             # No datastore/provider setup occurs when CI refuses live lifecycle.
             with mock.patch.dict(os.environ, CI='true'), mock.patch('sys.stderr', new_callable=io.StringIO):
-                with self.assertRaises(SystemExit) as refused:
-                    search_campaign.main(['start', str(path), '--allow-paid'])
-            self.assertEqual(refused.exception.code, 2)
+                for command in (['start', str(path), '--allow-paid'],
+                                ['promote', 'campaign', '0', '--open-pr'],
+                                ['digest', 'campaign', '--send']):
+                    with self.subTest(command=command):
+                        with self.assertRaises(SystemExit) as refused:
+                            search_campaign.main(command)
+                        self.assertEqual(refused.exception.code, 2)
             for edit in (
                 lambda s: s.update(secret='unsafe'),
                 lambda s: s['policy']['baseline'].update(model='multilingual-e5-small (current)'),

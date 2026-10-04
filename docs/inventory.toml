@@ -79,6 +79,7 @@ excluded = [
 "docs/dated/README.md" = { audience = "contributor", kind = "index", summary = "frozen design records, evidence and research, as decided at their date" }
 "docs/eval-engine-smoke.md" = { audience = "contributor", kind = "guide", summary = "run and stop a temporary full-stack Modal smoke" }
 "docs/eval-modal.md" = { audience = "contributor", kind = "guide", summary = "measure configurations on Modal with shared caps and gates" }
+"docs/search-campaign-reporting.md" = { audience = "contributor", kind = "guide", summary = "report exact usage, propose bounded candidates and review campaign promotion" }
 "docs/search-campaigns.md" = { audience = "contributor", kind = "guide", summary = "start, resume and stop a bounded configuration search campaign" }
 "docs/eval-results.md" = { audience = "contributor", kind = "guide", summary = "log, sync, compare and query shared search measurements" }
 "docs/quivr-v2-local-harness.md" = { audience = "contributor", kind = "concept", summary = "how `make dev` and `make verify` work" }
@@ -112,6 +113,7 @@ excluded = [
 # Maximum number of lines per page, in path order.
 [budgets]
 "docs/search-campaigns.md" = 138
+"docs/search-campaign-reporting.md" = 138
 "deploy/mlflow/README.md" = 68
 "docs/eval-engine-smoke.md" = 149
 "docs/eval-results.md" = 160

@@ -26,6 +26,7 @@ How this repository is organised, tested and changed, for people and coding agen
 - [Measure search configurations on Modal](../eval-modal.md): measure configurations on Modal with shared caps and gates
 - [Record and compare search measurements](../eval-results.md): log, sync, compare and query shared search measurements
 - [Runnable guide blocks](../runnable-guides.md): write guide blocks that `make verify` replays
+- [Report and review campaign candidates](../search-campaign-reporting.md): report exact usage, propose bounded candidates and review campaign promotion
 - [Run a bounded search campaign](../search-campaigns.md): start, resume and stop a bounded configuration search campaign
 - [Public acceptance suite](../../tests/acceptance/README.md): the public acceptance suite and how to run it
 - [Shared provider fakes](../../tests/fakes/README.md): run shared provider fakes for Go and Python tests

@@ -35,6 +35,21 @@ class CampaignStore(control_store.Store):
         return {**row[3], 'spec': row[0], 'git_sha': row[1], 'scorer_digest': row[2],
                 'owner': row[4], 'live': bool(row[5]), 'generation': row[6]}
 
+    @contextlib.contextmanager
+    def edit(self, name):
+        """Serialize lead receipts/outboxes, including after compute is stopped.
+
+        This does not grant launch or trial ownership. Those still use mutation.
+        """
+        with self.transaction() as db:
+            self.lock(db, name)
+            row = db.execute('SELECT state FROM eval_control.campaign_runs WHERE campaign=%s FOR UPDATE', (name,)).fetchone()
+            if row is None:
+                raise ValueError('campaign supervisor has not been registered')
+            state = row[0]
+            yield db, state
+            db.execute('UPDATE eval_control.campaign_runs SET state=%s::jsonb WHERE campaign=%s', (json.dumps(state, allow_nan=False), name))
+
     def acquire(self, name, ttl=120):
         control_store.lease_batch([], ttl)
         with self.transaction() as db:

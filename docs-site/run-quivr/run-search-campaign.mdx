@@ -6,7 +6,8 @@ keywords: [search quality, evaluation, campaigns, Modal, Optuna]
 
 Run a campaign to compare public search settings over several days. It keeps the
 best quality, cost and latency trade-offs while enforcing daily and total spending
-caps. This stage explores candidates; confirmation and promotion are separate.
+caps. The lead submits bounded proposals and exact usage receipts; daily summaries
+go to Linear and Slack. Promotion requires trusted full-engine confirmation.
 
 ## Prerequisites
 
@@ -51,8 +52,12 @@ python3 scripts/eval/search_campaign.py status public-search-pilot
 python3 scripts/eval/search_campaign.py resume public-search-pilot --allow-paid
 ```
 
-Run the supervisor and watchdog as separate managed processes on a machine with
-this frozen checkout, Modal access and both databases. Restart them automatically.
+`start` launches the supervisor. Run it and the watchdog as separate managed
+processes on a machine with this frozen checkout, Modal access and both databases.
+After registration, configure `resume` as the supervisor restart command. A running
+supervisor resumes automatically on the next UTC day after a daily cap; `resume`
+recovers a lost supervisor after the watchdog reconciles its compute. Terminal
+stops require a new campaign. Restart the watchdog automatically too.
 Daily exhaustion cancels compute and pauses until the next UTC day. Total caps,
 the end date and the trial limit stop the campaign. Conservative reservations
 include uncertain charges; Modal builds/storage and other account charges need
@@ -62,7 +67,13 @@ separate budgeting. No measurements run in CI.
 
 `status` returns aggregate results, Pareto objectives, spending and held-out reads
 remaining. It exports no query IDs or raw records. `agent_token_usage: null` means
-unknown; usage is never estimated. Exploration does not consume held-out reads.
+unknown when no exact receipts have been ingested; usage is never estimated.
+Exploration does not consume held-out reads. Configure `EVAL_LINEAR_TOKEN`,
+`EVAL_SLACK_BOT_TOKEN` and `EVAL_SLACK_CHANNEL` outside the repository for daily
+summaries. The supervisor freezes one aggregate snapshot per UTC day and retries
+unacknowledged destinations. Slack timeouts can cause duplicate messages.
+See the [reporting guide](https://github.com/The-Vibe-Company/quivr-v2/blob/main/docs/search-campaign-reporting.md)
+for proposals, receipt format and delivery recovery.
 
 Example requiring Modal and database credentials; not run during development:
 
@@ -79,5 +90,8 @@ SIGTERM and Ctrl-C stop the campaign; hard kills are recovered by the watchdog.
 ## Next
 
 Confirm finalists on the full stack and frozen holdout before changing production.
-This stage reports `confirmation_available: false` and opens no promotion PRs.
+The trusted confirmation runner is unavailable; the engine smoke command cannot
+qualify a candidate. Campaigns report `confirmation_available: false` and open no
+promotion PRs until that integration lands. The promotion adapter maps hosted
+model/dimensions and retrieval weight, depth and fusion only after confirmation.
 [Record and compare measurements](/run-quivr/record-search-measurements).

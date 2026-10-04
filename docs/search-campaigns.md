@@ -3,8 +3,9 @@
 A campaign searches configuration settings over several days, keeping a persistent
 quality/cost/latency Pareto front: candidates for which improving one score means
 worsening another. It measures public development sets on Modal and records evidence
-through the [results store](eval-results.md). This stage explores settings only;
-full-stack confirmation, notifications and promotion are separate integrations.
+through the [results store](eval-results.md). A lead can submit bounded proposals,
+ingest exact usage receipts and send daily Linear/Slack summaries. Trusted full-stack
+confirmation is required before the promotion adapter can prepare a settings PR.
 
 ## Prerequisites
 
@@ -96,7 +97,7 @@ refuse further paid admission; there is no local budget fallback.
 `status` returns aggregate trial reports, the Pareto trial numbers/objectives,
 confirmed plus uncertain ledger amounts, held-out reads left and `cleanup_pending`.
 No raw records, query IDs or latency sample IDs are exported. `agent_token_usage`
-is `null` (unknown) in this stage; no token usage is estimated.
+is `null` (unknown) without exact receipts; no token usage is estimated.
 
 ## Stop and verify cleanup
 
@@ -124,5 +125,5 @@ Modal stop: other campaigns may share the account.
 
 Confirm exploration finalists on the complete stack before changing deployed settings.
 Until the confirmation integration is configured, `confirmation_available` is false
-and this command opens no promotion PRs. Daily digests, exact usage-receipt ingestion,
-lead proposals and hosted-model/dimensions promotion are the next campaign layer.
+and this command opens no promotion PRs. See [report and review candidates](search-campaign-reporting.md)
+for notification credentials, exact receipts, proposals and the confirmation hand-off.
