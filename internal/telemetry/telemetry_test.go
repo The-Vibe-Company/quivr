@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 func render(w func(*strings.Builder)) string {

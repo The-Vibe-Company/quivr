@@ -3,7 +3,7 @@ package plugins_test
 import (
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // The public Plugin API history is the independent contract for this table.

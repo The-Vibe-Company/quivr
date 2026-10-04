@@ -376,7 +376,7 @@ It exits 1 and explains the mistake for an invalid query. From Python, use
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e <quivr-v2 checkout>/sdks/python -e .
+pip install -e <quivr checkout>/sdks/python -e .
 python3 -m unittest discover -s tests            # grammar, matching, evidence, schema, Jev and local vectors
 quivr plugin dev --fixture fixtures/sample.json  # replay the keyword sample batch
 quivr plugin test .                              # Contract Runner certification (keyword fixture)

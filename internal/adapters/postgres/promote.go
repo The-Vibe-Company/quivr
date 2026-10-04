@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/backfill"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/jackc/pgx/v5"
 )
 

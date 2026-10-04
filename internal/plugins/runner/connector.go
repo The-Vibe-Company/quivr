@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/contracts"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/contracts"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
 )
 
 type connectorRun struct {

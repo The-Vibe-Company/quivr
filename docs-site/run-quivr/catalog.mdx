@@ -76,7 +76,7 @@ The default ingestion plugin. It cuts the `title` and `body` Parts of each Versi
 
 The optional hosted ingestion plugin selects a model, dimensions and input templates by configuration. It supports OpenAI-compatible `/embeddings` and Cohere v2 `/embed` APIs, with bearer, `api-key` or no authentication. Its key is a declared `AZURE_FOUNDRY_KEY` secret in the plugin process environment. It cuts bounded text windows, batches requests and resumes completed batches after a retryable provider failure.
 
-Generate an immutable manifest from the configuration before installing it. Each model, dimension, revision or template change creates a new vector space; evaluation, backfill and promotion use the usual engine operations. Each provider attempt logs input-token usage for cost accounting. See the [configuration examples and package commands](https://github.com/The-Vibe-Company/quivr-v2/blob/main/plugins/hosted-embed/README.md).
+Generate an immutable manifest from the configuration before installing it. Each model, dimension, revision or template change creates a new vector space; evaluation, backfill and promotion use the usual engine operations. Each provider attempt logs input-token usage for cost accounting. See the [configuration examples and package commands](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md).
 
 ## core-retrieve
 

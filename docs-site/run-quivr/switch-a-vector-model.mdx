@@ -8,7 +8,7 @@ Run a second embedding model (a model that turns text into numeric vectors) besi
 
 ## Prerequisites
 
-- A running Quivr with [an ingestion plugin pinned](/run-quivr/pin). This guide keeps `core.ingest` serving and adds `hosted.embed`, the [hosted text embedding plugin](https://github.com/The-Vibe-Company/quivr-v2/tree/main/plugins/hosted-embed).
+- A running Quivr with [an ingestion plugin pinned](/run-quivr/pin). This guide keeps `core.ingest` serving and adds `hosted.embed`, the [hosted text embedding plugin](https://github.com/The-Vibe-Company/quivr/tree/main/plugins/hosted-embed).
 - `curl`, `jq`, Go and the `quivr` CLI (`curl --version`, `jq --version`, `go version`, `command -v quivr`). Run package commands from a Quivr checkout.
 - Your API address in `QUIVR_API_URL` and the id of a collection of documents (Corpus) in `CORPUS_ID`.
 - [API keys](/reference/configuration#api-keys) with the following permissions and grants for the Corpus:

@@ -9,7 +9,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // retrievalRoutes serves the retrieval Contribution. The well-behaved plugin

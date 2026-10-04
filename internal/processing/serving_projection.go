@@ -5,7 +5,7 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 // ServingProjectionStore owns the independently pinned publication required

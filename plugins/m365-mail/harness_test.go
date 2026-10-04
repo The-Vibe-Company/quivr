@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/tests/fakes/process"
+	"github.com/The-Vibe-Company/quivr/tests/fakes/process"
 )
 
 // fakeGraph is a control/observation client of the canonical Graph binary.

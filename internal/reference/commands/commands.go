@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference"
+	"github.com/The-Vibe-Company/quivr/internal/reference"
 )
 
 // Source is everything the page shows, in order.

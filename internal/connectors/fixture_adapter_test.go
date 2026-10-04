@@ -3,7 +3,7 @@ package connectors
 import (
 	"context"
 	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin/scriptedsource"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin/scriptedsource"
 )
 
 // Fixture is a test-only adapter to the canonical fake plugin's script.

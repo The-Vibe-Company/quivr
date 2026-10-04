@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 // MigrationAction is the operator permission a migration needs: the plugin

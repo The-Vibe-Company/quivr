@@ -7,9 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
-	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/observability"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 // processingObserver feeds the worker's processing metrics (THE-662) and

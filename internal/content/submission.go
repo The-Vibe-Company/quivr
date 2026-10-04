@@ -2,7 +2,7 @@ package content
 
 import (
 	"context"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // Submitter is a command path bound to the authenticated request's scope.

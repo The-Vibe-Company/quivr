@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // Match is an immutable positive historical determination. It is unique per

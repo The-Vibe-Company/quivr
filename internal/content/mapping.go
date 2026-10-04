@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // SegmentText is the searchable text a projection indexes for one segment.

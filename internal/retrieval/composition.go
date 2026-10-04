@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // Keep time for the caller to consume candidates and finish its own round.

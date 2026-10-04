@@ -27,15 +27,15 @@ The first start downloads the pinned container images and the embedding model, a
 Clone the repository and start the local stack:
 
 ```bash
-git clone https://github.com/The-Vibe-Company/quivr-v2.git
-cd quivr-v2
+git clone https://github.com/The-Vibe-Company/quivr.git
+cd quivr
 make dev
 ```
 
 `make dev` starts PostgreSQL, Temporal, S3-compatible storage, Weaviate and an embedding server in Docker, builds the `quivr` binary, and runs its API and worker. When it is ready it prints the API address:
 
 ```text
-API http://127.0.0.1:41863 — credentials in /home/you/quivr-v2/.scratch/quivr-dev-3f2a9c1b7d/config.json
+API http://127.0.0.1:41863 — credentials in /home/you/quivr/.scratch/quivr-dev-3f2a9c1b7d/config.json
 Use it from this shell: eval "$(make -s env)"
 ```
 

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	contract "github.com/The-Vibe-Company/quivr-v2/contracts/http/v0"
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	contract "github.com/The-Vibe-Company/quivr/contracts/http/v0"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 )
 
 // The signer must reproduce the independently computed contract vector.

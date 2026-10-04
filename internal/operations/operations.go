@@ -9,8 +9,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 // KindProjectionRebuild rebuilds one Corpus's search projection from canonical

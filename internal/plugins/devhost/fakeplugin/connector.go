@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // connectorRoutes serves the connector Contribution as a static source: the

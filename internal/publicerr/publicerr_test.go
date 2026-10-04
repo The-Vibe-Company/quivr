@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 func TestCodeSurvivesDetail(t *testing.T) {

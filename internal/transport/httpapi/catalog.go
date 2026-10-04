@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 // recordPage is the signed payload of a Record catalog page cursor. It binds

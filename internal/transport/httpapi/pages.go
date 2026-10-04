@@ -3,7 +3,7 @@ package httpapi
 import (
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/transport/pagetoken"
+	"github.com/The-Vibe-Company/quivr/internal/transport/pagetoken"
 )
 
 func (a *API) encodePage(domain string, payload any) string {

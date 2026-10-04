@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
-	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
+	store "github.com/The-Vibe-Company/quivr/internal/adapters/s3"
+	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
 
 func transferConfig(t *testing.T) store.Config {

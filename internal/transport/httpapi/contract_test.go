@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/testutil/apicontract"
+	"github.com/The-Vibe-Company/quivr/internal/testutil/apicontract"
 )
 
 // All memory-backed HTTP harnesses validate every response, not just examples.

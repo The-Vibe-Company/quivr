@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 )
 
 // A worker started before the api migrates waits for the migration instead of

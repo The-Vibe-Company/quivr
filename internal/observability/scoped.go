@@ -2,7 +2,7 @@ package observability
 
 import (
 	"context"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // ScopedReader keeps admin rollup reads bound to an authorized Organization.

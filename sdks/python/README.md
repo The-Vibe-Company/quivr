@@ -15,7 +15,7 @@ See the [feature history](../../contracts/plugins/v0/README.md#plugin-api-versio
 
 ```bash
 pip install -e sdks/python                       # from a checkout
-pip install "quivr-plugin-sdk @ git+https://github.com/The-Vibe-Company/quivr-v2#subdirectory=sdks/python"
+pip install "quivr-plugin-sdk @ git+https://github.com/The-Vibe-Company/quivr#subdirectory=sdks/python"
 ```
 
 Start a new plugin with `quivr plugin init <name>`. It writes a working

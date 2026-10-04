@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	store "github.com/The-Vibe-Company/quivr-v2/internal/adapters/s3"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	store "github.com/The-Vibe-Company/quivr/internal/adapters/s3"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 func TestImmutableObjectSurvivesLostPutAcknowledgment(t *testing.T) {

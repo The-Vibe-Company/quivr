@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/app"
-	"github.com/The-Vibe-Company/quivr-v2/internal/online"
-	plugincli "github.com/The-Vibe-Company/quivr-v2/internal/plugins/cli"
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference/commands"
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference/mcp"
+	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/online"
+	plugincli "github.com/The-Vibe-Company/quivr/internal/plugins/cli"
+	"github.com/The-Vibe-Company/quivr/internal/reference/commands"
+	"github.com/The-Vibe-Company/quivr/internal/reference/mcp"
 )
 
 // cliSource reads the three command tables of the quivr binary. Online

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 // TestTimelineTimesEachStepFromItsCause owns the timeline contract: finished

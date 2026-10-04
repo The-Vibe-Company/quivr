@@ -19,8 +19,8 @@ Python 3.12 or later. Install the Quivr Plugin SDK from the Quivr repository:
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-pip install -e <path to a quivr-v2 checkout>/sdks/python
-# or: pip install "quivr-plugin-sdk @ git+https://github.com/The-Vibe-Company/quivr-v2#subdirectory=sdks/python"
+pip install -e <path to a quivr checkout>/sdks/python
+# or: pip install "quivr-plugin-sdk @ git+https://github.com/The-Vibe-Company/quivr#subdirectory=sdks/python"
 ```
 
 ## Develop

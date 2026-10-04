@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference/commands"
+	"github.com/The-Vibe-Company/quivr/internal/reference/commands"
 )
 
 // The fixture has what a reader of the page needs told apart: a group that

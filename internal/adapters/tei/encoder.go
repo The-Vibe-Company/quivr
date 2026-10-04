@@ -7,7 +7,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 	"io"
 	"math"
 	"net/http"

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/scaffold"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/scaffold"
 )
 
 const initUsage = "quivr plugin init <name> [--kind normalizer|subscription|connector] [--push] [--dir <path>]"
@@ -84,7 +84,7 @@ func initCommand(_ context.Context, args []string, stdout, stderr io.Writer) int
 	fmt.Fprintf(stdout, "Created %s plugin %s in %s (%d files).\n\nNext steps:\n", kind, name, dir, len(files))
 	fmt.Fprintf(stdout, "  cd %s\n", filepath.Clean(dir))
 	fmt.Fprintln(stdout, "  python3 -m venv .venv && . .venv/bin/activate")
-	fmt.Fprintln(stdout, "  pip install -e <quivr-v2 checkout>/sdks/python   # the Quivr Plugin SDK")
+	fmt.Fprintln(stdout, "  pip install -e <quivr checkout>/sdks/python   # the Quivr Plugin SDK")
 	fmt.Fprintln(stdout, "  python3 -m unittest discover -s tests")
 	if kind != scaffold.KindConnector {
 		fmt.Fprintln(stdout, "  quivr plugin dev --fixture fixtures/sample.json")

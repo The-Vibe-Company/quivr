@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 // coverageEntries bounds the Corpora a CoverageCache holds; past it the

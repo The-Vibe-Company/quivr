@@ -2,7 +2,7 @@ package content
 
 import (
 	"context"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 type VectorSpaceStore interface {

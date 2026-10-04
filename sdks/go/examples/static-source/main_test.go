@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin/plugintest"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin/plugintest"
 )
 
 // TestFixtures replays every fixture in process and checks its expectations,

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 // CodePluginConflict is a plugin pinned twice.

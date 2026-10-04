@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // IngestionPlugin is the pinned ingestion plugin as the engine calls it. Its

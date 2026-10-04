@@ -7,14 +7,14 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
-	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/backfill"
+	"github.com/The-Vibe-Company/quivr/internal/changes"
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 // errorResponse is shared by JSON responses, batch entries and SSE events.

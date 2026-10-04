@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/operations"
 )
 
 // Item phases. A reprocess takes each Version once, in a durable phase, so a

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	"github.com/The-Vibe-Company/quivr-v2/internal/transport/routing"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/transport/routing"
 )
 
 // routeFallback preserves the established errors for unsupported methods and

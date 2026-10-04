@@ -3,7 +3,7 @@ package temporal
 import (
 	"context"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
+	"github.com/The-Vibe-Company/quivr/internal/backfill"
 
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"

@@ -15,9 +15,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference/commands"
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference/mcp"
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference/openapi"
+	"github.com/The-Vibe-Company/quivr/internal/reference/commands"
+	"github.com/The-Vibe-Company/quivr/internal/reference/mcp"
+	"github.com/The-Vibe-Company/quivr/internal/reference/openapi"
 )
 
 type page struct {

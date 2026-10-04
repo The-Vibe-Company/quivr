@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 // DeliveryBacklog is the admissible scheduled delivery work: Deliveries that

@@ -22,7 +22,7 @@ measurement secrets, aggregate MLflow credentials and these environment variable
 Remote database URLs require `sslmode=verify-full`. A database owner applies
 `deploy/mlflow/eval-control.sql` and `deploy/mlflow/optuna.sql` first. Keep secrets
 outside campaign files. See the repository's
-[campaign guide](https://github.com/The-Vibe-Company/quivr-v2/blob/main/docs/search-campaigns.md)
+[campaign guide](https://github.com/The-Vibe-Company/quivr/blob/main/docs/search-campaigns.md)
 for roles and runtime requirements.
 
 ## Validate and start
@@ -72,7 +72,7 @@ Exploration does not consume held-out reads. Configure `EVAL_LINEAR_TOKEN`,
 `EVAL_SLACK_BOT_TOKEN` and `EVAL_SLACK_CHANNEL` outside the repository for daily
 summaries. The supervisor freezes one aggregate snapshot per UTC day and retries
 unacknowledged destinations. Slack timeouts can cause duplicate messages.
-See the [reporting guide](https://github.com/The-Vibe-Company/quivr-v2/blob/main/docs/search-campaign-reporting.md)
+See the [reporting guide](https://github.com/The-Vibe-Company/quivr/blob/main/docs/search-campaign-reporting.md)
 for proposals, receipt format and delivery recovery.
 
 Example requiring Modal and database credentials; not run during development:
@@ -92,7 +92,7 @@ SIGTERM and Ctrl-C stop the campaign; hard kills are recovered by the watchdog.
 Configure full-stack confirmation with `--confirmation-configuration` on `start`
 or `resume`. Your operator provisions protected inputs and supplies frozen held-out
 descriptors, actual development fingerprints, production/resource settings and the
-committed engine revision. The [reporting guide](https://github.com/The-Vibe-Company/quivr-v2/blob/main/docs/search-campaign-reporting.md#confirm-and-promote)
+committed engine revision. The [reporting guide](https://github.com/The-Vibe-Company/quivr/blob/main/docs/search-campaign-reporting.md#confirm-and-promote)
 gives the file format and commands. The supervisor then confirms eligible Pareto
 finalists automatically. Rejected and unavailable outcomes appear in daily summaries.
 Only confirmed results passing quality, no-loss, latency and price gates, with

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/runner"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/runner"
 )
 
 const testUsage = "quivr plugin test [--endpoint <url>] [--report <file>] [--fixture <file>]... [--startup-timeout <duration>] [<plugin-dir>]"

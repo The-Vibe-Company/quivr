@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/netguard"
+	"github.com/The-Vibe-Company/quivr/internal/netguard"
 )
 
 // Attempt outcomes. An attempt without an outcome fact reads as in_flight.

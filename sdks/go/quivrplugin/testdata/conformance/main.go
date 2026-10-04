@@ -8,7 +8,7 @@ import (
 	"log"
 	"strings"
 
-	sdk "github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	sdk "github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 type peer struct{}

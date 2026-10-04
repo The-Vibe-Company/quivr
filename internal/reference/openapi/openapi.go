@@ -18,7 +18,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference"
+	"github.com/The-Vibe-Company/quivr/internal/reference"
 )
 
 // Source names the contract and its example file inside FS.

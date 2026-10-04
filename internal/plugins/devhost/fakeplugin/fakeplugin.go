@@ -20,7 +20,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // Environment variables understood by the fake plugin.

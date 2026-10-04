@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
 
 	"go.temporal.io/sdk/activity"
 	sdktemporal "go.temporal.io/sdk/temporal"

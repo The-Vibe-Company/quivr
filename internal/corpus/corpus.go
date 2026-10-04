@@ -5,7 +5,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 var (

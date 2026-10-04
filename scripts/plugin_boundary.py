@@ -3,7 +3,7 @@
 Plugins under plugins/ and the public SDKs under sdks/go/ may import only
 public packages. Go's own internal rule does not protect the engine here:
 the SDK's module path sits under the engine's module path, so Go would let it
-import github.com/The-Vibe-Company/quivr-v2/internal/... once its go.mod
+import github.com/The-Vibe-Company/quivr/internal/... once its go.mod
 requires the engine. This check fails on:
 
   - any Go import of the engine's internal/ packages, in any build-tagged file;
@@ -18,7 +18,7 @@ import re
 import sys
 from pathlib import Path
 
-ENGINE = "github.com/The-Vibe-Company/quivr-v2"
+ENGINE = "github.com/The-Vibe-Company/quivr"
 TREES = ("plugins", "sdks/go")
 SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__", "testdata"}
 

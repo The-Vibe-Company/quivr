@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // SubscriptionRoute is the subscription Contribution route (Plugin API 0.2).

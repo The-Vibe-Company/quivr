@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/tests/fakes/graph"
+	"github.com/The-Vibe-Company/quivr/tests/fakes/graph"
 )
 
 func main() {

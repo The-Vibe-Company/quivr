@@ -12,7 +12,7 @@ See the [feature history](../../contracts/plugins/v0/README.md#plugin-api-versio
 <!-- /plugin-api -->
 
 ```bash
-go get github.com/The-Vibe-Company/quivr-v2/sdks/go
+go get github.com/The-Vibe-Company/quivr/sdks/go
 ```
 
 The sample [`examples/static-source`](examples/static-source/) is a complete

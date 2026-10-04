@@ -3,8 +3,8 @@ package httpapi
 import (
 	"encoding/json"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 // unionKind reads a discriminated union's `kind` without assuming its variant.

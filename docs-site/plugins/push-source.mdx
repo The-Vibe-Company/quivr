@@ -52,7 +52,7 @@ Declare `modes: [pull, push]` on your source kind; API routes require push mode,
 
 The Python SDK dispatches `@plugin.connector_route("events", "publish")` with a typed `ReceiveRequest`. `request.body` holds parsed JSON; `request.request` preserves the caller's path, query and raw body. Return a `ConnectorReceiveResponse` with accepted items or a refusal; the generated handler shows the complete mapping. Go implements `Receiver.Receive`, selects `req.Route` and decodes `req.Body`. For a route such as `events/{category}`, read the actual relative path, such as `events/news`, from Python's `request.request.path` or Go's `req.Request.Path`.
 
-Return a stable Record Key for each document and a new `revision` when its source content changes. Accepted POST items enter normal ingestion, and Quivr returns `202` with Receipts, identifiers used to follow processing. The handler's accepted status does not replace that response. Read [the plugin contract](/reference/plugin-protocol#connector) for wire fields and the [Python kit](https://github.com/The-Vibe-Company/quivr-v2/blob/main/sdks/python/README.md) or [Go kit](https://github.com/The-Vibe-Company/quivr-v2/blob/main/sdks/go/README.md) for handler types.
+Return a stable Record Key for each document and a new `revision` when its source content changes. Accepted POST items enter normal ingestion, and Quivr returns `202` with Receipts, identifiers used to follow processing. The handler's accepted status does not replace that response. Read [the plugin contract](/reference/plugin-protocol#connector) for wire fields and the [Python kit](https://github.com/The-Vibe-Company/quivr/blob/main/sdks/python/README.md) or [Go kit](https://github.com/The-Vibe-Company/quivr/blob/main/sdks/go/README.md) for handler types.
 
 For certification, a fixture's `receive` case sets `route: "publish"` and `request.path: "records"`, with source JSON in `request.body`. The runner checks plugin handling; engine authentication and admission are separate checks.
 
@@ -72,7 +72,7 @@ Declare `signature: {header, timestamp_header?, window_seconds}` on a signature 
 
 Your handler verifies the provider's signature over the exact raw bytes before accepting items. On the wire these are `request.body_base64`. In Python, decode `request.request.body_base64` with `base64.b64decode`; Go exposes `req.Request.Body()`. Re-encoding parsed JSON can change the bytes and invalidate the signature. If you declare `timestamp_header`, verify that timestamp as part of the signed message too. Quivr checks its age, not its authenticity.
 
-For example, the first-party X plugin compares `sha256=` plus the base64 HMAC-SHA256 of the raw body against `x-twitter-webhooks-signature`, using the deposited consumer secret and a constant-time comparison. It refuses a mismatch with `401` and no items. See its [handler](https://github.com/The-Vibe-Company/quivr-v2/blob/main/plugins/x-list/webhook.go) and [offline checks](https://github.com/The-Vibe-Company/quivr-v2/blob/main/plugins/x-list/webhook_test.go).
+For example, the first-party X plugin compares `sha256=` plus the base64 HMAC-SHA256 of the raw body against `x-twitter-webhooks-signature`, using the deposited consumer secret and a constant-time comparison. It refuses a mismatch with `401` and no items. See its [handler](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/x-list/webhook.go) and [offline checks](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/x-list/webhook_test.go).
 
 ### Answer provider challenges
 

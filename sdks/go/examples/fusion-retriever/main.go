@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 // rrfK damps the weight of the first ranks in reciprocal rank fusion.

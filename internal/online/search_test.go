@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/online"
-	"github.com/The-Vibe-Company/quivr-v2/internal/testutil/apicontract"
+	"github.com/The-Vibe-Company/quivr/internal/online"
+	"github.com/The-Vibe-Company/quivr/internal/testutil/apicontract"
 )
 
 const hitJSON = `{"items":[{"record_id":"rec_1","version_id":"ver_1","part_key":"body","segment_id":"seg_1","segmentation_id":"sgm_1","projection_generation_id":"gen_1","rank":1,"excerpt":{"text":"Eclipse over\nthe city","start":4,"end":24,"coordinate_system":"unicode_codepoint"},"availability":{"state":"retrieval_ready","is_current":true,"searchable":true}}],"retrieval_profile":{"name":"default","version":"v1"}}`
@@ -239,7 +239,7 @@ func TestSearchHelpNamesTheServerAndEnvironment(t *testing.T) {
 // link the storage, workflow or search adapters the engine processes use.
 func TestOnlineCommandsLinkNoInfrastructure(t *testing.T) {
 	gobin := filepath.Join(runtime.GOROOT(), "bin", "go")
-	out, err := exec.Command(gobin, "list", "-deps", "github.com/The-Vibe-Company/quivr-v2/internal/online").Output()
+	out, err := exec.Command(gobin, "list", "-deps", "github.com/The-Vibe-Company/quivr/internal/online").Output()
 	if err != nil {
 		t.Fatal(err)
 	}

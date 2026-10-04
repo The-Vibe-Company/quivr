@@ -23,7 +23,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/client"
+	"github.com/The-Vibe-Company/quivr/client"
 )
 
 // Environment variables every online command reads. The --api-url and

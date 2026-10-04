@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 )
 
 // schemaWait bounds how long startup waits for pending migrations (THE-806):

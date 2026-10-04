@@ -10,7 +10,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 // The candidate request is what makes the ranking the engine's former one:

@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/client"
+	"github.com/The-Vibe-Company/quivr/client"
 )
 
 const searchUsage = "quivr search --corpus <corpus-id> [--corpus <corpus-id>]... [--mode lexical|semantic|hybrid] [--profile <name>] [--limit <1-50>] [--source <namespace>]... [--json] [--api-url <url>] [--api-key <key>] <query>"

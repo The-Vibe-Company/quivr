@@ -32,7 +32,7 @@ A keyword alert fires when a new article matches a query such as `"harbour strik
 
 ## Turn it into an expression
 
-Quivr stores a query as a JSON tree, which it validates when you save the alert, so a malformed query is refused at once. An unmapped metadata field is still valid syntax but never matches (see [Filter on your own metadata](#filter-on-your-own-metadata)). The plugin ships the parser. From a `quivr-v2` checkout:
+Quivr stores a query as a JSON tree, which it validates when you save the alert, so a malformed query is refused at once. An unmapped metadata field is still valid syntax but never matches (see [Filter on your own metadata](#filter-on-your-own-metadata)). The plugin ships the parser. From a `quivr` checkout:
 
 ```bash
 cd plugins/alerts && python3 -m alerts.notation '"harbour strike" AND (ferry OR port) NOT football'
@@ -182,7 +182,7 @@ When an article that matched is corrected or withdrawn, the same receiver gets a
 
 Check the signature on the raw body before you parse it. Requests follow [Standard Webhooks](https://www.standardwebhooks.com/): the `webhook-signature` header holds `v1,` and a base64 HMAC-SHA256 of `webhook-id`, `webhook-timestamp` and the raw body, joined by dots. The key is the destination's secret, `whsec_` followed by base64. The operator sets it in [Quivr's configuration](/reference/configuration#webhook-destinations) and gives it to you. The header can hold several signatures separated by spaces; accept the request when one of them matches.
 
-This Python function takes the headers as a dictionary with lower-case names. It accepts only `v1` signatures, skips malformed ones, and refuses a request whose timestamp is more than five minutes old; every retry carries a fresh timestamp. It was run by hand against Quivr's [public test vector](https://github.com/The-Vibe-Company/quivr-v2/blob/main/contracts/http/v0/webhook-vector.json) and against altered copies of it.
+This Python function takes the headers as a dictionary with lower-case names. It accepts only `v1` signatures, skips malformed ones, and refuses a request whose timestamp is more than five minutes old; every retry carries a fresh timestamp. It was run by hand against Quivr's [public test vector](https://github.com/The-Vibe-Company/quivr/blob/main/contracts/http/v0/webhook-vector.json) and against altered copies of it.
 
 ```python
 import base64, binascii, hashlib, hmac, time

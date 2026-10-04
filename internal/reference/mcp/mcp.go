@@ -14,8 +14,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/online"
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference"
+	"github.com/The-Vibe-Company/quivr/internal/online"
+	"github.com/The-Vibe-Company/quivr/internal/reference"
 )
 
 // Source is the catalogue to render.

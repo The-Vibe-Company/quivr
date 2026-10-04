@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
-	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/observability"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 func TestAPIMetricsExposeCommandsAndIngestionBacklog(t *testing.T) {

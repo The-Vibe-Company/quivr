@@ -1,3 +1,3 @@
-module github.com/The-Vibe-Company/quivr-v2/tests/fakes
+module github.com/The-Vibe-Company/quivr/tests/fakes
 
 go 1.24

@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/observability"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 func (a *API) ListPluginRegistrations(ctx context.Context, in transport.ListPluginRegistrationsRequestObject) (transport.ListPluginRegistrationsResponseObject, error) {

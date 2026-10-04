@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // Exit codes.

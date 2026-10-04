@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 func (a *API) IngestRecord(ctx context.Context, in transport.IngestRecordRequestObject) (transport.IngestRecordResponseObject, error) {

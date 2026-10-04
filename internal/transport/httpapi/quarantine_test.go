@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
-	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
-	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
-	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
-	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/quarantine"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
+	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
 
 // quarantineStore lists three stuck Versions and keeps dry runs by key.

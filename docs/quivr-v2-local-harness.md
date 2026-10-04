@@ -17,11 +17,11 @@ HTTP contracts and captured webhooks. Reuse the accepted
 [ingestion contract](dated/design/quivr-v2-ingestion-contracts.md) and
 [monitoring tracer](dated/design/quivr-v2-monitoring-tracer.md).
 
-The [THE-549 spike](https://github.com/The-Vibe-Company/quivr-v2/tree/4196f51/prototype/runtime-spike)
+The [THE-549 spike](https://github.com/The-Vibe-Company/quivr/tree/4196f51/prototype/runtime-spike)
 provides recovery scenarios and operational evidence. Its tests also inspect
 PostgreSQL, Temporal and Weaviate, so they are not the public acceptance suite.
 Its fake embeddings and external fake normalizer are not the reference baseline.
-Use THE-553's [pinned local E5/TEI profile and CC0 fixture](https://github.com/The-Vibe-Company/quivr-v2/blob/9e59d3bf12afe5d20ce1b0afd5775e464b2ebddf/research/text-segmentation-embedding-profile.md).
+Use THE-553's [pinned local E5/TEI profile and CC0 fixture](https://github.com/The-Vibe-Company/quivr/blob/9e59d3bf12afe5d20ce1b0afd5775e464b2ebddf/research/text-segmentation-embedding-profile.md).
 Monitoring matches through a pinned alert-rule plugin (the `subscription`
 template, see below). A harness-owned `quivr.fixture@1.0.0` plugin supplies
 the scripted connector and notification-mechanics evaluator through the normal

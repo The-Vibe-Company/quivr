@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
+	"github.com/The-Vibe-Company/quivr/internal/changes"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
