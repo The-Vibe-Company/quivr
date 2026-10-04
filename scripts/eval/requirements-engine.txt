@@ -1,0 +1,4 @@
+# CPU full-stack smoke only; no model libraries, held-out data or paid providers.
+modal==1.6.1
+psycopg[binary]==3.3.4
+PyYAML==6.0.3
