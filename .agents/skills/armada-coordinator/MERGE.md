@@ -33,7 +33,7 @@ When none of the required checks ran on the head (a release pull request opened 
 3. `gh pr checks <n>` shows every required check passing.
 4. The head contains the current default branch: `git merge-base --is-ancestor origin/<default> <sha>`. If not, update it (`--wait`) or ask the worker to bring the default branch in (rebase, or merge it into their branch; never force-push a branch someone else pushed to).
 5. Semantic check: search the default branch for callers of anything the pull request deletes or renames.
-6. A dashboard pull request (one that changes Armada's own dashboard, `packages/dashboard`): compare with /agents and /design. Open each page it changes on its preview or the demo next to `/agents` and `/design`. The header bar, the toolbar, the sections and the rows must match them. A page with a title of its own, another font or its own list style goes back to the worker.
+6. A dashboard pull request (one that changes Armada's own dashboard, `packages/dashboard`): compare with the owner's design, `design/dashboard-v7/Armada Dashboard.dc.html`. Open each page it changes on its preview or the demo next to the design's screen and the overview (`/`). The header bar, the page's title line, its lists and rows must match them. A page with a title of its own outside that anatomy, another font or its own list style goes back to the worker.
 
 ## Merge
 
