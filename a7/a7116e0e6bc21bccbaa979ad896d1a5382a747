@@ -1,0 +1,16 @@
+.agents/skills/armada-coordinator/MERGE.md
+  h_ecee222750141d 36
+skills-lock.json
+  h_ecee222750141d 8-9,15,22,29,36,64,186,199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a7a7116e0e6bc21bccbaa979ad896d1a5382a747",
+  "prompts": {},
+  "humans": {
+    "h_ecee222750141d": {
+      "author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
