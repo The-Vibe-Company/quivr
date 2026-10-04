@@ -281,6 +281,9 @@ test("an alert is created in the demo corpus with the deployment's evaluator, de
     listed.data.items.map((a) => [a.alert_id, a.enabled]),
     [[id, false]],
   );
+  // The core does not date Subscriptions: the facade notes when it created one.
+  assert.ok(Date.parse(created.data.created_at) <= Date.now());
+  assert.equal(listed.data.items[0].created_at, created.data.created_at);
 
   const deleted = await call(`/demo/alerts/${id}/delete`, {
     idempotency_key: idem(),

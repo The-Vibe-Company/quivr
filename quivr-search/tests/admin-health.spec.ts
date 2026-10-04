@@ -20,6 +20,14 @@ test.afterEach(async () => {
 const necks = (page: Page) =>
   page.getByRole("region", { name: "Goulots par étape" });
 const plugins = (page: Page) => page.getByRole("region", { name: "Plugins" });
+// A step of the pipeline: its card, named by its heading.
+const step = (page: Page, name: string) =>
+  necks(page)
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("heading", { name, exact: true }) });
+// Plugins and usage live in tabs under the pipeline.
+const openTab = (page: Page, name: string) =>
+  page.getByRole("tab", { name: new RegExp(`^${name}`) }).click();
 const plugin = (page: Page, id: string) =>
   plugins(page).getByRole("listitem").filter({ hasText: id });
 
@@ -32,14 +40,13 @@ test("les goulots nomment l’étape ralentie, avec ses durées et sa file", asy
   await expect(section.getByRole("status")).toHaveText(
     /^L’étape « Vecteurs » ralentit tout : \d,\d\ss au p95 ces 10 dernières minutes, contre 1,5\ss d’habitude\. 6 documents attendent à cette étape\.$/,
   );
-  const vectors = section.getByRole("row", { name: /^Vecteurs/ });
+  const vectors = step(page, "Vecteurs");
   await expect(vectors).toContainText("Ralenti");
-  await expect(vectors.getByRole("cell").nth(3)).toHaveText(
-    /^6\s*depuis 3\s*min$/,
-  );
-  const cut = section.getByRole("row", { name: /^Découpé/ });
+  await expect(vectors).toContainText(/6 en attente depuis 3\s*min/);
+  const cut = step(page, "Découpé");
   await expect(cut).not.toContainText("Ralenti");
-  await expect(cut.getByRole("cell").nth(1)).toHaveText("40 ms");
+  // The step's p50, then its p95.
+  await expect(cut.getByRole("definition").first()).toHaveText("40 ms");
 
   // A week reads the same steps over 2-hour buckets.
   await section.getByRole("button", { name: "7 j" }).click();
@@ -63,6 +70,7 @@ test("un plugin arrêté passe en panne avec sa dernière erreur, puis redevient
   await page.clock.install();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/?view=admin");
+  await openTab(page, "Plugins");
   const alerts = plugin(page, "alerts");
   await expect(alerts.getByRole("button")).toContainText("Opérationnel");
   await expect(
@@ -104,6 +112,7 @@ test("un connecteur montre ses sources, leur dernier relevé et ce qu’elles on
 }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/?view=admin");
+  await openTab(page, "Plugins");
   const rss = plugin(page, "connector.rss");
   await expect(rss.getByRole("button")).toContainText(
     /Collecte rss · 3 sources · dernier relevé réussi il y a \d min · 177 lus aujourd’hui/,
@@ -125,6 +134,7 @@ test("mobile sombre : les deux sections tiennent dans l’écran", async ({
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await page.goto("/?view=admin");
   await expect(necks(page).getByRole("status")).toContainText("Vecteurs");
+  await openTab(page, "Plugins");
   await expect(plugin(page, "core.ingest")).toBeVisible();
   expect(
     await page.evaluate(

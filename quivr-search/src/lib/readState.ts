@@ -63,5 +63,16 @@ export function useReadState() {
       return next;
     });
   }, []);
-  return { isUnread, markRead };
+  // "Tout marquer comme lu": every article given, at once.
+  const markAllRead = useCallback((items: Pick<FeedItem, "record_id" | "version_id">[]) => {
+    setState((current) => {
+      const known = new Set(current.read);
+      const added = items.map(id).filter((key) => !known.has(key));
+      if (!added.length) return current;
+      const next = { ...current, read: [...current.read, ...added].slice(-MAX) };
+      save(next);
+      return next;
+    });
+  }, []);
+  return { isUnread, markRead, markAllRead };
 }

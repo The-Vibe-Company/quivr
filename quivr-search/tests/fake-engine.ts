@@ -65,6 +65,7 @@ export function workspace() {
       alert_id: "alert_storm",
       name: "Orages et grêle",
       enabled: true,
+      created_at: minutes(20 * 24 * 60),
       kind: "keywords",
       expression: {
         kind: "keywords",
@@ -236,6 +237,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     expression: a.expression,
     match_count: Object.keys(a.caught).length,
     capped: false,
+    created_at: "created_at" in a ? a.created_at : undefined,
   });
   const find = (id: string) => ws.articles.find((a) => a.record_id === id);
 
@@ -484,6 +486,15 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     const one = path.match(/^\/v0\/connectors\/([\w-]+)$/);
     if (one)
       return json(route, ws.connectors.find((x) => x.connector_id === one[1]));
+    if (path === "/demo/sources/rename") {
+      // Like the facade: the name of the namespace, on every instance.
+      const c = ws.connectors.find((x) => x.connector_id === body.connector_id)!;
+      const name = String(body.name).trim();
+      for (const x of ws.connectors)
+        if (x.source_namespace === c.source_namespace)
+          Object.assign(x, { display_name: name && name !== c.source_namespace ? name : undefined });
+      return json(route, { source_namespace: c.source_namespace, display_name: name || null });
+    }
     if (path === "/demo/sources/remove") {
       // Like the facade: every instance of the source's namespace goes.
       const c = ws.connectors.find((x) => x.connector_id === body.connector_id)!;

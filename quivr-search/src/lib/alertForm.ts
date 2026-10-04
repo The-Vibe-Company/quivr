@@ -2,8 +2,9 @@
 // words to ignore, and the sources to watch. It is one shape of the plugin's
 // keyword tree, so a form becomes a tree and a tree of that shape becomes a
 // form again. Any other tree is edited as an advanced query (notation.ts).
-import { print, type KeywordExpression, type KeywordNode } from "./notation";
+import type { KeywordExpression, KeywordNode } from "./notation";
 import { HAND_NAMESPACE } from "./feed";
+import { displayName } from "./sourceNames";
 
 export interface WordsForm {
   words: string[];
@@ -18,7 +19,7 @@ export const SOURCE_FIELD = "source";
 
 /** How a Source Namespace reads in the app. */
 export const sourceName = (namespace: string) =>
-  namespace === HAND_NAMESPACE ? "Ajouté à la main" : namespace;
+  namespace === HAND_NAMESPACE ? "Ajouté à la main" : displayName(namespace);
 
 const fold = (text: string) =>
   text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
@@ -104,16 +105,3 @@ export function decompose(node: KeywordNode): WordsForm | null {
     : null;
 }
 
-const quoted = (words: string[], joiner: string) =>
-  words.map((w) => `« ${w} »`).join(joiner);
-
-/** A plain sentence for a keyword alert, as the lists show it. */
-export function keywordRule(node: KeywordNode): string {
-  const form = decompose(node);
-  if (!form) return `Requête : ${print(node) ?? "avancée"}`;
-  let rule = `Parle de ${quoted(form.words, form.mode === "all" ? " et " : " ou ")}`;
-  if (form.exclude.length) rule += ` — sauf ${quoted(form.exclude, ", ")}`;
-  if (form.sources.length)
-    rule += ` · ${form.sources.map(sourceName).join(", ")}`;
-  return rule;
-}

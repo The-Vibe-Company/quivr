@@ -36,7 +36,7 @@ const TOP_QUERIES = 10;
 // Sources read to stack five and fold the next ones into "Autres".
 const SOURCES_READ = 20;
 
-export function Usage({ onUnauthorized }: SectionProps) {
+export function Usage({ onUnauthorized, bare }: SectionProps) {
   const [window, setWindow] = useState<UsageWindow>("24h");
   const received = useAdminStats(
     "received",
@@ -65,6 +65,7 @@ export function Usage({ onUnauthorized }: SectionProps) {
     <AdminSection
       id="usage"
       title="Utilisation"
+      bare={bare}
       status={section}
       aside={
         <WindowPicker

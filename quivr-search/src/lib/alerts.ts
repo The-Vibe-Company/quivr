@@ -4,6 +4,7 @@
 // a plain-language description when the deployment has a classifier.
 import { APIError, request } from "./search";
 import { pollChanges } from "./connectors";
+import { displayName } from "./sourceNames";
 import type { KeywordExpression } from "./notation";
 
 export interface DescribedExpression {
@@ -21,6 +22,8 @@ interface AlertBase {
   enabled: boolean;
   match_count: number;
   capped: boolean;
+  /** When the demo created it (ISO), unknown for older alerts. */
+  created_at?: string;
 }
 
 export type Alert = AlertBase &
@@ -169,7 +172,9 @@ export const score = (value: number) =>
 export const sourceLabel = (namespace: string) =>
   namespace === "web-demo"
     ? "Ajouté à la main"
-    : namespace || "Source inconnue";
+    : namespace
+      ? displayName(namespace)
+      : "Source inconnue";
 
 const LIVE_INTERVAL = 3000;
 

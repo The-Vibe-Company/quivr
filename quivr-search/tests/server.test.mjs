@@ -295,7 +295,7 @@ test("connector routes are fenced to the demo corpus and mutations must be same-
   );
 });
 
-test("sources: suggestions, guarded discovery and creation, removal hides every instance", async (t) => {
+test("sources: suggestions, guarded discovery and creation, renaming, removal hides every instance", async (t) => {
   const seen = [];
   const instances = {
     connector_a1: { source_namespace: "Example news", enabled: false },
@@ -448,6 +448,25 @@ test("sources: suggestions, guarded discovery and creation, removal hides every 
   );
   assert.equal((await fetch(base + "/v0/connectors/connector_a2")).status, 404);
   assert.equal((await fetch(base + "/v0/connectors/connector_b")).status, 200);
+
+  // A source's name is the facade's: shown with its instances, and an empty
+  // name gives the source its namespace back. The core is not asked.
+  const writes = seen.length;
+  assert.equal(
+    (await post("/demo/sources/rename", { connector_id: "connector_outside", name: "X" })).status,
+    404,
+  );
+  const renamed = await post("/demo/sources/rename", { connector_id: "connector_b", name: "  Le   fil " });
+  assert.deepEqual(await renamed.json(), { source_namespace: "Other", display_name: "Le fil" });
+  assert.equal((await (await fetch(base + "/v0/connectors")).json()).items[0].display_name, "Le fil");
+  assert.equal((await (await fetch(base + "/v0/connectors/connector_b")).json()).display_name, "Le fil");
+  await post("/demo/sources/rename", { connector_id: "connector_b", name: "" });
+  assert.equal((await (await fetch(base + "/v0/connectors")).json()).items[0].display_name, undefined);
+  assert.equal(
+    seen.slice(writes).filter((r) => r.method === "POST").length,
+    0,
+    "renaming never writes to the core",
+  );
 });
 
 test("source logos: an RSS source of the demo corpus only, raster images served from this origin", async (t) => {

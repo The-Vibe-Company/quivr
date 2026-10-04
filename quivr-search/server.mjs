@@ -62,20 +62,36 @@ function logoFor(feedURL) {
 }
 const stateFile = process.env.DEMO_STATE_FILE;
 let removed = new Set();
-// Alerts (THE-734) created by the demo, oldest first.
+// Alerts (THE-734) created by the demo, oldest first, and when each was
+// created here: the core does not date Subscriptions.
 let alertIDs = [];
+// Keyed by ids and namespaces people choose: maps without a prototype, so
+// a namespace such as "__proto__" is an ordinary key.
+let alertDates = Object.create(null);
+// Names people gave their sources, by Source Namespace: the core names a
+// source by its namespace only, which Records and alerts already use.
+let sourceNames = Object.create(null);
 if (stateFile)
   try {
     const saved = JSON.parse(await readFile(stateFile, "utf8"));
     removed = new Set(saved.removed || []);
     alertIDs = Array.isArray(saved.alerts) ? saved.alerts : [];
+    if (saved.created && typeof saved.created === "object")
+      alertDates = Object.assign(Object.create(null), saved.created);
+    if (saved.names && typeof saved.names === "object")
+      sourceNames = Object.assign(Object.create(null), saved.names);
   } catch (error) {
     if (error.code !== "ENOENT")
       console.warn("DEMO_STATE_FILE is unreadable; starting empty.");
   }
 async function saveState() {
   if (!stateFile) return;
-  const data = JSON.stringify({ removed: [...removed], alerts: alertIDs });
+  const data = JSON.stringify({
+    removed: [...removed],
+    alerts: alertIDs,
+    created: alertDates,
+    names: sourceNames,
+  });
   try {
     await writeFile(stateFile + ".tmp", data);
     await rename(stateFile + ".tmp", stateFile);
@@ -110,12 +126,15 @@ const alerts = alertRoutes({
   described: ["1", "true"].includes(process.env.DEMO_DESCRIBED_ALERTS || ""),
   registry: {
     ids: () => [...alertIDs],
-    add: async (ids) => {
+    created: (id) => alertDates[id],
+    add: async (ids, at) => {
       alertIDs = [...alertIDs, ...ids.filter((id) => !alertIDs.includes(id))];
+      if (at) for (const id of ids) alertDates[id] ||= at;
       await saveState();
     },
     remove: async (ids) => {
       alertIDs = alertIDs.filter((id) => !ids.includes(id));
+      for (const id of ids) delete alertDates[id];
       await saveState();
     },
   },
@@ -226,9 +245,9 @@ async function connectorRoute(req, path, url, corpus) {
     }
     const page = await upstream(`${path}?${query}`);
     if (page.status === 200 && Array.isArray(page.data.items))
-      page.data.items = page.data.items.filter(
-        (item) => !removed.has(item.connector_id),
-      );
+      page.data.items = page.data.items
+        .filter((item) => !removed.has(item.connector_id))
+        .map(named);
     return page;
   }
   if (path === "/v0/connectors" && req.method === "POST") {
@@ -237,7 +256,7 @@ async function connectorRoute(req, path, url, corpus) {
     if (body.source_namespace === "web-demo")
       throw fail(422, "Cet espace de noms est réservé aux textes ajoutés.");
     if (body.kind === "rss") await feeds.check(body.config?.url);
-    return upstream(path, "POST", body);
+    return withName(await upstream(path, "POST", body));
   }
   const match = path.match(
     /^\/v0\/connectors\/([\w-]+)(?:\/(disable|credential|schedule|runs))?$/,
@@ -249,7 +268,35 @@ async function connectorRoute(req, path, url, corpus) {
   const body = method ? await jsonBody(req) : undefined;
   const current = await ownConnector(match[1], corpus);
   if (current.status >= 500) return current;
-  return method ? upstream(path, method, body) : current;
+  return withName(method ? await upstream(path, method, body) : current);
+}
+// A connector as the browser sees it: with the name given to its source.
+const named = (connector) =>
+  sourceNames[connector.source_namespace]
+    ? { ...connector, display_name: sourceNames[connector.source_namespace] }
+    : connector;
+const withName = (response) =>
+  response.status < 300 && response.data?.source_namespace
+    ? { ...response, data: named(response.data) }
+    : response;
+// Renaming a source names its namespace, every instance included; an empty
+// name, or the namespace itself, gives the source its own name back.
+async function renameSource(req, corpus) {
+  const body = await jsonBody(req);
+  if (typeof body.connector_id !== "string" || typeof body.name !== "string")
+    throw fail(400, "Requête invalide.");
+  const name = body.name.replace(/\s+/g, " ").trim();
+  if (name.length > 80) throw fail(422, "Le nom d’une source tient en 80 caractères.");
+  const current = await ownConnector(body.connector_id, corpus);
+  if (current.status >= 500) return current;
+  const namespace = current.data.source_namespace;
+  if (!name || name === namespace) delete sourceNames[namespace];
+  else sourceNames[namespace] = name;
+  await saveState();
+  return {
+    status: 200,
+    data: { source_namespace: namespace, display_name: sourceNames[namespace] || null },
+  };
 }
 // A connector of the demo corpus that was not removed, or a 404.
 async function ownConnector(id, corpus) {
@@ -345,6 +392,7 @@ const server = http.createServer(async (req, res) => {
       path.startsWith("/v0/") ||
       path.startsWith("/demo/feeds/") ||
       path === "/demo/sources/remove" ||
+      path === "/demo/sources/rename" ||
       path.startsWith("/demo/sources/logo/") ||
       path === "/demo/feed" ||
       path === "/demo/feed/stream" ||
@@ -412,6 +460,8 @@ const server = http.createServer(async (req, res) => {
         response = { status: 200, data: await feeds.discover(body.url) };
       } else if (path === "/demo/sources/remove" && req.method === "POST")
         response = await removeSource(req, id);
+      else if (path === "/demo/sources/rename" && req.method === "POST")
+        response = await renameSource(req, id);
       else if (path === "/v0/search" && req.method === "POST") {
         const body = await jsonBody(req);
         if (
