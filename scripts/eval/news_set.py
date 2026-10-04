@@ -1170,61 +1170,70 @@ def main(argv=None):
     if args.concurrency is not None and not 1 <= args.concurrency <= 8:
         parser.error('concurrency must be from 1 to 8')
     providers = None
+    exit_code, stopped_signal = 2, None
     phase = 'setup'
     previous_handlers = {}
     def stop(signum, frame):
+        nonlocal stopped_signal
+        stopped_signal = signum
         # Ignore repeated interrupts while in-flight calls settle and the ledger is saved.
         for stopped_by in previous_handlers:
             signal.signal(stopped_by, signal.SIG_IGN)
-        raise BuildInterrupted(signum)
+        if phase != 'cleanup':
+            raise BuildInterrupted(signum)
     try:
-        for stopped_by in (signal.SIGINT, signal.SIGTERM):
-            previous_handlers[stopped_by] = signal.signal(stopped_by, stop)
-        if args.fake:
-            providers = fake_providers()
-            corpus = [Article(str(i), 'Une liaison ouvre au port',
-                              f'Le ferry dessert une île et accueille {i + 10} voyageurs.',
-                              f'2026-{1 + i % 2:02d}-02', 'maritime') for i in range(8)]
-        else:
-            providers = load_providers(args.providers)
-            phase = 'input'
-            corpus = read_articles(args.articles, providers.article_options)
-            if providers.synthetic:
-                raise BuildError('live build cannot use synthetic providers')
-        phase = 'setup'
-        if args.concurrency is not None:
-            providers.concurrency = args.concurrency
-        if args.response_cache:
-            if not hasattr(providers, 'enable_cache'):
-                raise BuildError('response cache requires the built-in live adapters')
-            providers.enable_cache(args.storage_dir / 'responses')
-        recipients = [os.environ.get(k, '').split() for k in
-                      ('QUIVR_NEWS_WORKING_RECIPIENTS', 'QUIVR_NEWS_HOLDOUT_RECIPIENTS', 'QUIVR_NEWS_REVIEW_RECIPIENTS')]
-        if not all(recipients) or set(recipients[0]) & set(recipients[1]):
-            raise BuildError('provide three recipient groups with separate working and held-out keys')
-        phase = 'build'
-        result = build(corpus, providers, args.questions, args.seed)
-        phase = 'publication'
-        store = DirectoryStorage(args.storage_dir) if args.storage_dir else S3Storage(args.bucket, args.prefix, args.s3_endpoint)
-        manifest = publish(result, store, *recipients)
-        phase = 'report'
-        report = {**result.report, 'version': result.version, 'artifacts': manifest}
-        validate_report(report)
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        with args.report.open('x') as output:
-            json.dump(report, output, indent=2, sort_keys=True, allow_nan=False)
-            output.write('\n')
-        print('Encrypted dataset stored; aggregate quality report written. Human review is pending.')
-        return 0
+        try:
+            for stopped_by in (signal.SIGINT, signal.SIGTERM):
+                previous_handlers[stopped_by] = signal.signal(stopped_by, stop)
+            if args.fake:
+                providers = fake_providers()
+                corpus = [Article(str(i), 'Une liaison ouvre au port',
+                                  f'Le ferry dessert une île et accueille {i + 10} voyageurs.',
+                                  f'2026-{1 + i % 2:02d}-02', 'maritime') for i in range(8)]
+            else:
+                providers = load_providers(args.providers)
+                phase = 'input'
+                corpus = read_articles(args.articles, providers.article_options)
+                if providers.synthetic:
+                    raise BuildError('live build cannot use synthetic providers')
+            phase = 'setup'
+            if args.concurrency is not None:
+                providers.concurrency = args.concurrency
+            if args.response_cache:
+                if not hasattr(providers, 'enable_cache'):
+                    raise BuildError('response cache requires the built-in live adapters')
+                providers.enable_cache(args.storage_dir / 'responses')
+            recipients = [os.environ.get(k, '').split() for k in
+                          ('QUIVR_NEWS_WORKING_RECIPIENTS', 'QUIVR_NEWS_HOLDOUT_RECIPIENTS', 'QUIVR_NEWS_REVIEW_RECIPIENTS')]
+            if not all(recipients) or set(recipients[0]) & set(recipients[1]):
+                raise BuildError('provide three recipient groups with separate working and held-out keys')
+            phase = 'build'
+            result = build(corpus, providers, args.questions, args.seed)
+            phase = 'publication'
+            store = DirectoryStorage(args.storage_dir) if args.storage_dir else S3Storage(args.bucket, args.prefix, args.s3_endpoint)
+            manifest = publish(result, store, *recipients)
+            phase = 'report'
+            report = {**result.report, 'version': result.version, 'artifacts': manifest}
+            validate_report(report)
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            with args.report.open('x') as output:
+                json.dump(report, output, indent=2, sort_keys=True, allow_nan=False)
+                output.write('\n')
+            print('Encrypted dataset stored; aggregate quality report written. Human review is pending.')
+            exit_code = 0
+        except Exception as error:
+            # Provider/SDK exceptions can contain inputs, credentials and URLs.
+            details = failure_details(error)
+            details.setdefault('phase', phase)
+            print('News-set build failed; diagnostic: ' + json.dumps(details, sort_keys=True))
+            exit_code = 2
+        # Set cleanup inside the protected block so a signal at the transition
+        # also reaches the handler below. Cleanup records signals without unwinding.
+        phase = 'cleanup'
     except BuildInterrupted as error:
+        phase = 'cleanup'
         print('News-set build stopped; signal: ' + str(error.signum), file=sys.stderr)
-        return 128 + error.signum
-    except Exception as error:
-        # Provider/SDK exceptions can contain inputs, credentials and URLs.
-        details = failure_details(error)
-        details.setdefault('phase', phase)
-        print('News-set build failed; diagnostic: ' + json.dumps(details, sort_keys=True))
-        return 2
+        exit_code = 128 + error.signum
     finally:
         if args.usage_report and providers is not None and hasattr(providers, 'usage'):
             try:
@@ -1242,6 +1251,8 @@ def main(argv=None):
         finally:
             for stopped_by, handler in previous_handlers.items():
                 signal.signal(stopped_by, handler)
+
+    return 128 + stopped_signal if stopped_signal is not None else exit_code
 
 
 if __name__ == '__main__':

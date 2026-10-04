@@ -1017,39 +1017,57 @@ class ChatAdapters(unittest.TestCase):
 
     def test_cli_signals_preserve_paid_fake_transport_usage(self):
         import signal
-        for stopped_by in (signal.SIGTERM, signal.SIGINT):
-            with self.subTest(signal=stopped_by), tempfile.TemporaryDirectory() as directory:
+        for stopped_by, stage in ((sig, stage) for sig in (signal.SIGTERM, signal.SIGINT)
+                                  for stage in ('build', 'usage', 'ledger', 'cache')):
+            with self.subTest(signal=stopped_by, stage=stage), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
-                (root / 'adapters.py').write_text('''import io,json,os,signal,urllib.request
+                (root / 'adapters.py').write_text('''import io,json,os,pathlib,signal,urllib.request
 import news_set as news
 import news_providers as live
 class FakeHTTP:
     calls=0
     def open(self,*args,**kwargs):
         self.calls+=1
-        if self.calls==2:
+        if self.calls==2 and os.environ['TEST_STOP_STAGE']=='build':
             os.kill(os.getpid(),int(os.environ['TEST_STOP_SIGNAL']))
         return io.BytesIO(json.dumps({'usage':{'prompt_tokens':100,'completion_tokens':20},
           'choices':[{'finish_reason':'stop','message':{'content':'{"questions":[]}'}}]}).encode())
+class SignaledUsage(dict):
+    def items(self):
+        if os.environ['TEST_STOP_STAGE']=='ledger':
+            os.kill(os.getpid(),int(os.environ['TEST_STOP_SIGNAL']))
+        return super().items()
+class CacheObserver(live.ResponseCache):
+    def close(self):
+        if os.environ['TEST_STOP_STAGE']=='cache':
+            os.kill(os.getpid(),int(os.environ['TEST_STOP_SIGNAL']))
+        super().close()
+        pathlib.Path(os.environ['TEST_CLOSED_MARKER']).touch()
 def providers():
     from test_news_providers import config
     result=news.Providers(news.FakeGenerator(),{s:news.FakeRetriever() for s in news.SYSTEMS},
                           [news.FakeJudge(str(i)) for i in range(3)],'hybrid',synthetic=True)
     urllib.request.build_opener=lambda *args:FakeHTTP()
     result.generator=live.ChatGenerator(config())
+    result.attempt_budgets=dict.fromkeys(news.KINDS,2)
+    result.response_cache=CacheObserver(os.environ['TEST_CACHE_DIRECTORY'])
     def usage():
+        if os.environ['TEST_STOP_STAGE']=='usage':
+            os.kill(os.getpid(),int(os.environ['TEST_STOP_SIGNAL']))
         chat=result.generator.summary()
-        return {'generator':chat,'judge_1':live.Chat(config()).summary(),'judge_2':live.Chat(config()).summary(),
+        return SignaledUsage({'generator':chat,'judge_1':live.Chat(config()).summary(),'judge_2':live.Chat(config()).summary(),
                 'jev':live.embeddings.Budget(10000,1).summary(),'retrieval':live.embeddings.Budget(10000,1).summary(),
                 'totals':{'confirmed_cost_usd':chat['confirmed_cost_usd'],
                           'cost_upper_bound_usd':chat['cost_upper_bound_usd'],
-                          'generation_judging_max_usd':30,'retrieval_max_usd':1}}
+                          'generation_judging_max_usd':30,'retrieval_max_usd':1}})
     result.usage=usage
     return result
 ''')
                 environment = {**os.environ, 'NEWS_ENDPOINT': 'https://example.invalid', 'NEWS_KEY': 'fake-key',
                     'QUIVR_NEWS_WORKING_RECIPIENTS': 'working', 'QUIVR_NEWS_HOLDOUT_RECIPIENTS': 'holdout',
-                    'QUIVR_NEWS_REVIEW_RECIPIENTS': 'review', 'TEST_STOP_SIGNAL': str(int(stopped_by))}
+                    'QUIVR_NEWS_REVIEW_RECIPIENTS': 'review', 'TEST_STOP_SIGNAL': str(int(stopped_by)),
+                    'TEST_STOP_STAGE': stage, 'TEST_CACHE_DIRECTORY': str(root / 'responses'),
+                    'TEST_CLOSED_MARKER': str(root / 'cache-closed')}
                 # Load the operator factory through the real CLI; --fake only supplies articles.
                 command = [sys.executable, '-c',
                     "import sys,news_set as n;n.fake_providers=lambda:n.load_providers(sys.argv[1]);"
@@ -1064,6 +1082,7 @@ def providers():
                 self.assertGreaterEqual(usage['generator']['confirmed_cost_usd'], .00014)
                 self.assertGreaterEqual(usage['generator']['confirmed_input_tokens'], 100)
                 self.assertFalse((root / 'quality.json').exists())
+                self.assertTrue((root / 'cache-closed').exists())
                 self.assertNotIn('fake-key', completed.stdout + completed.stderr)
 
     def test_cli_failure_retains_spend_from_a_configured_factory(self):
