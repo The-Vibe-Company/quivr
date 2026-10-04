@@ -84,6 +84,51 @@ class ChatAdapters(unittest.TestCase):
                     live.ChatJudge(config()).grade(q, articles)
                 self.assertEqual(self.opener.open.call_count, 1)
 
+    def test_answerability_conflicts_are_replaced_and_counted_with_shares(self):
+        from test_news_set import articles, unavailable_scorer
+        for kind, reason, persistent in [
+                ('entity', 'answer_expected_none_found', False),
+                ('no_answer', 'no_answer_but_relevant_found', False),
+                ('entity', 'answer_expected_none_found', True)]:
+            with self.subTest(kind=kind, persistent=persistent):
+                state = {'question': None, 'bad': None}
+                by_text = {}
+                def retrieve(question, corpus, limit):
+                    state['question'] = question
+                    by_text.update({a.text: a.id for a in corpus})
+                    if question.kind == kind and state['bad'] is None:
+                        state['bad'] = question.text
+                    return [a.id for a in corpus]
+                def answer(request, **kwargs):
+                    data = json.loads(json.loads(request.data)['messages'][1]['content'])
+                    conflict = data['query'] == state['bad'] or (persistent and state['question'].kind == kind)
+                    return response(json.dumps({'grades': {
+                        a['id']: (0 if kind == 'entity' else 3) if conflict else
+                        3 if by_text[a['text']] in state['question'].sources else 0 for a in data['articles']}}))
+                self.opener.open.side_effect = answer
+                providers = news.fake_providers()
+                providers.retrievers = {'bm25': mock.Mock(search=retrieve)}
+                providers.baseline = 'bm25'
+                providers.judges[:2] = [live.ChatJudge({**config(), 'family': f}) for f in ('a', 'b')]
+                with mock.patch('scoring.score', side_effect=unavailable_scorer):
+                    if persistent:
+                        with self.assertRaises(news.BuildError) as caught:
+                            news.build(articles(), providers, 6, 42, salt=b'x' * 32)
+                        diagnostic = caught.exception.diagnostic
+                        self.assertEqual(diagnostic['reason'], 'generation_attempts_exhausted')
+                        self.assertEqual((diagnostic['accepted'], diagnostic['target'], diagnostic['attempts']), (0, 1, 10))
+                        self.assertEqual(diagnostic['rejected'][reason], 10)
+                        continue
+                    result = news.build(articles(), providers, 6, 42, salt=b'x' * 32)
+                self.assertEqual(result.report['question_types'], dict.fromkeys(news.KINDS, 1))
+                self.assertEqual(result.report['rejected'][reason], 1)
+                quality = result.report['question_quality']
+                self.assertEqual((quality['questions'], quality['dropped_questions']), (7, 1))
+                self.assertEqual(quality['shares'][reason], 1 / 7)
+                self.assertEqual(result.report['content_filter']['dropped_questions'], 0)
+                self.assertNotIn(state['bad'], {**result.working['queries'], **result.held_out['queries']}.values())
+                news.validate_report(result.report)
+
     def test_response_cache_survives_interruption_and_accounts_reuse(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = live.ResponseCache(directory)
@@ -167,6 +212,7 @@ class ChatAdapters(unittest.TestCase):
             value = query.split(' preuves ', 1)[1]
             return set(value.split(',')) if value != 'aucune' else set()
         fail = {'enabled': True, 'malformed_nonce': None}
+        conflicts = set()
         def answer(request, **kwargs):
             body = json.loads(request.data)
             data = json.loads(body['messages'][1]['content'])
@@ -182,13 +228,19 @@ class ChatAdapters(unittest.TestCase):
                     if data['nonce'] == fail['malformed_nonce']:
                         return response('{"questions":[]}')
                     ids = [] if data['kind'] == 'no_answer' else [a['id'] for a in data['articles']]
+                    if data['kind'] in ('entity', 'no_answer') and data['count'] == 25:
+                        evidence = ','.join(by_text[a['text']] for a in data['articles']) if ids else 'aucune'
+                        conflicts.add(f"Dossier {data['kind']} {data['nonce']} 0 preuves {evidence}")
                     return response(json.dumps({'questions': [
                         {'text': f"Dossier {data['kind']} {data['nonce']} {i} preuves {','.join(by_text[a['text']] for a in data['articles']) if ids else 'aucune'}",
                          'sources': ids} for i in range(data['count'])]}))
                 if fail['enabled'] and 'Dossier event ' in data['query'] and body['model'] == 'judge-a':
                     raise urllib.error.HTTPError('private-url', 401, 'private-key', {}, io.BytesIO(b'private-body'))
-                return response(json.dumps({'grades': {a['id']: 3 if by_text[a['text']] in sources(data['query']) else 0
-                                                       for a in data['articles']}}))
+                # One inconsistent question per full generation batch; top-ups
+                # have smaller batches and produce consistent replacement rows.
+                conflict = data['query'] in conflicts
+                return response(json.dumps({'grades': {a['id']: (3 if 'Dossier no_answer ' in data['query'] else 0) if conflict else
+                        3 if by_text[a['text']] in sources(data['query']) else 0 for a in data['articles']}}))
             finally:
                 leave()
         class JevTransport:
@@ -238,6 +290,8 @@ class ChatAdapters(unittest.TestCase):
             news.validate_usage(usage)
             self.assertGreater(usage['generator']['cached_calls'], 0)
             self.assertEqual(result.report['rejected']['invalid_count'], 1)
+            self.assertEqual(result.report['rejected']['answer_expected_none_found'], 2)
+            self.assertEqual(result.report['rejected']['no_answer_but_relevant_found'], 2)
             self.assertGreater(usage['judge_1']['cached_calls'], 0)
             self.assertGreater(usage['jev']['cached_calls'], 0)
             self.assertGreater(usage['totals']['cached_cost_usd'], 0)
@@ -470,6 +524,13 @@ class ChatAdapters(unittest.TestCase):
                                             '--report', str(pathlib.Path(directory) / 'report.json')])
                     self.assertEqual(result, 2)
                     expected = {'exception': exception, 'phase': phase}
+                    if status in (429, 503):
+                        expected['reason'] = 'chat provider refused the request'
+                    elif phase == 'generation' and status is None:
+                        expected['reason'] = 'chat transport failed'
+                    elif phase == 'retrieval':
+                        expected['reason'] = ('retriever returned invalid candidate ids' if exception == 'BuildError'
+                                              else 'news-set phase failed')
                     if status:
                         expected['http_status'] = status
                     if code:
@@ -732,7 +793,9 @@ class ChatAdapters(unittest.TestCase):
                 self.assertEqual(filters['judged_candidates'], 8 * (6 + dropped))
                 self.assertEqual(filters['filtered_candidates'], filtered_count)
                 self.assertEqual(filters['filtered_candidate_share'], filtered_count / (8 * (6 + dropped)))
-                self.assertEqual(filters['dropped_questions'], dropped)
+                self.assertEqual(filters['dropped_questions'], dropped if not filter_source else 0)
+                if filter_source:
+                    self.assertEqual(result.report['rejected']['answer_expected_none_found'], dropped)
                 self.assertEqual(filters['max_filtered_candidate_share'], cap)
                 queries = {**result.working['queries'], **result.held_out['queries']}
                 self.assertEqual(state['first'] in queries.values(), not dropped)
@@ -822,6 +885,22 @@ class ChatAdapters(unittest.TestCase):
         batches = [json.loads(json.loads(call.args[0].data)['messages'][1]['content'])['articles']
                    for call in self.opener.open.call_args_list]
         self.assertEqual([[a['id'] for a in batch] for batch in batches], [['a1'], ['a1'], ['a1'], ['a1']])
+
+    def test_oversized_articles_are_unavailable_votes_and_generation_resamples(self):
+        q = news.Question('q', 'event', '2026-01-02', ('small',))
+        small = news.Article('small', '', 'short', q.date)
+        large = news.Article('large', '', 'x' * 200000, q.date)
+        self.opener.open.side_effect = lambda *args, **kwargs: response('{"grades":{"a1":3}}')
+        self.assertEqual(live.ChatJudge(config()).grade(q, [large, small]), {'large': None, 'small': 3})
+        self.assertEqual(self.opener.open.call_count, 1)
+        with self.assertRaises(news.InvalidBatch) as caught:
+            live.ChatGenerator(config()).generate([large], 'entity', 1, random.Random(1))
+        self.assertEqual(caught.exception.reason, 'input_bound')
+        self.assertEqual(self.opener.open.call_count, 1)
+        from jev_rerank.client import Result
+        transport = mock.Mock(judge=lambda query, passages, deadline, cost_limit:
+                              Result(scores=dict.fromkeys(passages, 1.0)))
+        self.assertEqual(news.JevJudge(transport).grade(q, [large, small]), {'large': None, 'small': 3})
 
     def test_failed_jev_attempts_consume_budget_and_block_next_call(self):
         from jev_rerank.client import MAX_TOKENS, Result

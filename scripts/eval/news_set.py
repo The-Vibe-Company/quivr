@@ -35,6 +35,8 @@ from typing import Protocol
 KINDS = ('entity', 'event', 'recent', 'paraphrase', 'multi_article', 'no_answer')
 SYSTEMS = ('bm25', 'e5_small', 'cohere_pro', 'hybrid')
 POOL_DEPTH = 10
+QUESTION_DROP_REASONS = ('answer_expected_none_found', 'no_answer_but_relevant_found',
+                         'invalid_judge_grades', 'empty_candidate_pool', 'judge_content_filter')
 # Provider bodies may echo credentials even in code fields. Publish known codes only.
 PROVIDER_CODES = frozenset({
     'invalid_request_error', 'invalid_value', 'unsupported_value', 'invalid_api_key',
@@ -87,8 +89,12 @@ class InvalidBatch(BuildError):
 
 def failure_details(error):
     """Copy only bounded diagnostic fields; never stringify a provider exception."""
-    if isinstance(error, BuildError) and error.diagnostic is not None:
-        return dict(error.diagnostic)
+    if isinstance(error, BuildError):
+        details = dict(error.diagnostic or {})
+        details.setdefault('reason', str(error))
+        if error.diagnostic is None:
+            details['exception'] = type(error).__name__
+        return details
     name = type(error).__name__
     details = {'exception': name if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,127}', name) else 'Exception'}
     if isinstance(error, urllib.error.HTTPError):
@@ -327,6 +333,7 @@ def filtered_candidate_share(value):
 
 
 def generate(corpus, generator, count, seed, accept_question=None, filter_counts=None, executor=None, accept_questions=None):
+    """Fill bounded type quotas; acceptance callbacks may return a drop reason."""
     if count < len(KINDS) or len(corpus) < 2:
         raise BuildError('need at least six questions and two articles')
     by_id = {a.id: a for a in corpus}
@@ -371,27 +378,37 @@ def generate(corpus, generator, count, seed, accept_question=None, filter_counts
                     if generated.reason == 'content_filter':
                         filter_counts['filtered_generation_batches'] += 1
                     continue
+                if not isinstance(generated, (list, tuple)):
+                    rejected['invalid_questions'] += 1
+                    continue
                 for q in generated:
                     if len(accepted) + len(valid_questions) == target:
                         break
                     if not isinstance(q, Question) or not isinstance(q.text, str) or not q.text.strip() or q.kind != kind:
-                        raise BuildError('generator returned an invalid question')
+                        rejected['invalid_questions'] += 1
+                        continue
                     key = normalize(q.text)
+                    if not key:
+                        rejected['invalid_questions'] += 1
+                        continue
                     if any(title in key for title in titles):
                         rejected['title_copy'] += 1
                         continue
                     if key in seen:
                         rejected['duplicate'] += 1
                         continue
-                    if (not isinstance(q.sources, tuple) or len(set(q.sources)) != len(q.sources)
+                    if (not isinstance(q.sources, tuple) or any(not isinstance(s, str) for s in q.sources)
+                            or len(set(q.sources)) != len(q.sources)
                             or any(s not in {a.id for a in sample} for s in q.sources)
                             or (kind == 'no_answer' and q.sources)
                             or (kind != 'no_answer' and not q.sources)
                             or (kind == 'multi_article' and len(q.sources) < 2)):
-                        raise BuildError('generator evidence does not match its sample')
+                        rejected['invalid_evidence'] += 1
+                        continue
                     expected_date = max(by_id[s].date for s in q.sources) if q.sources else sample[0].date
                     if q.date != expected_date:
-                        raise BuildError('question date must match its source evidence')
+                        rejected['invalid_date'] += 1
+                        continue
                     if kind == 'paraphrase' and any(words(q.text) & words(by_id[s].title + ' ' + by_id[s].text)
                                                    for s in q.sources):
                         rejected['shared_keywords'] += 1
@@ -401,8 +418,8 @@ def generate(corpus, generator, count, seed, accept_question=None, filter_counts
             decisions = (accept_questions(valid_questions) if accept_questions else
                          [accept_question(q) if accept_question else True for q in valid_questions])
             for q, keep in zip(valid_questions, decisions):
-                if not keep:
-                    rejected['judge_content_filter'] += 1
+                if isinstance(keep, str) or not keep:
+                    rejected[keep if isinstance(keep, str) else 'judge_content_filter'] += 1
                 else:
                     accepted.append(q)
             progress('accepted', len(questions) + len(accepted))
@@ -416,7 +433,7 @@ def generate(corpus, generator, count, seed, accept_question=None, filter_counts
     return questions, dict(rejected)
 
 
-def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_share=.1, filter_counts=None, executor=None):
+def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_share=.1, filter_counts=None, executor=None, question_drops=None):
     threshold = filtered_candidate_share(max_filtered_candidate_share)
     filter_counts = filter_counts if filter_counts is not None else collections.Counter()
     if len(judges) != 3 or len({j.family for j in judges}) != 3:
@@ -424,6 +441,13 @@ def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_sha
     if not retrievers or set(retrievers) - set(SYSTEMS):
         raise BuildError('unsupported retrieval system')
     by_id, rows, rankings = {a.id: a for a in corpus}, [], {}
+    question_drops = question_drops if question_drops is not None else {}
+    def drop(qi, reason):
+        question_drops[qi] = reason
+        del rankings[qi]
+        if reason == 'judge_content_filter':
+            filter_counts['dropped_questions'] += 1
+        progress('dropped', len(question_drops))
     prepared = []
     for qi, question in enumerate(questions):
         pool = collections.defaultdict(dict)
@@ -437,27 +461,27 @@ def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_sha
             for rank, doc in enumerate(ids, 1):
                 pool[doc][system] = rank
         if not pool:
-            raise BuildError('empty candidate pool')
+            drop(qi, 'empty_candidate_pool')
+            continue
         candidates = [by_id[d] for d in sorted(pool)]
-        prepared.append((question, pool, candidates))
+        prepared.append((qi, question, pool, candidates))
     def grade(item):
         judge, question, candidates = item
         with build_phase('judging'):
             return judge.grade(question, candidates)
-    tasks = [(judge, question, candidates) for question, _, candidates in prepared for judge in judges]
+    tasks = [(judge, question, candidates) for _, question, _, candidates in prepared for judge in judges]
     results = iter(ordered_calls(executor, grade, tasks))
-    for qi, (question, pool, candidates) in enumerate(prepared):
+    for qi, question, pool, candidates in prepared:
         votes = [next(results) for judge in judges]
+        filter_counts['judged_candidates'] += len(pool)
         if any(not isinstance(v, dict) or set(v) != set(pool)
                or any(g is not None and (type(g) is not int or not 0 <= g <= 3) for g in v.values()) for v in votes):
-            raise BuildError('judge returned missing or invalid grades')
+            drop(qi, 'invalid_judge_grades')
+            continue
         filtered = {doc for doc in pool if any(v[doc] is None for v in votes)}
-        filter_counts['judged_candidates'] += len(pool)
         filter_counts['filtered_candidates'] += len(filtered)
         if len(filtered) / len(pool) >= threshold:
-            filter_counts['dropped_questions'] += 1
-            progress('dropped', filter_counts['dropped_questions'])
-            del rankings[qi]
+            drop(qi, 'judge_content_filter')
             continue
         query_rows = []
         for doc in sorted(set(pool) - filtered):
@@ -468,12 +492,10 @@ def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_sha
                                'grade': sorted(grades)[1], 'ranks': pool[doc]})
         has_positive = any(r['grade'] > 0 for r in query_rows)
         if has_positive == (question.kind == 'no_answer'):
-            if filtered and question.kind != 'no_answer':
-                filter_counts['dropped_questions'] += 1
-                progress('dropped', filter_counts['dropped_questions'])
-                del rankings[qi]
-                continue
-            raise BuildError('answerability conflicts with pooled judgments')
+            reason = ('no_answer_but_relevant_found' if question.kind == 'no_answer' else
+                      'answer_expected_none_found')
+            drop(qi, reason)
+            continue
         rows.extend(query_rows)
         if executor is None and ((qi + 1) % 25 == 0 or (len(questions) > 1 and qi + 1 == len(questions))):
             progress('judged', qi + 1)
@@ -641,6 +663,13 @@ def validate_report(report, published=False):
                  and filters['filtered_generation_batches'] == report['rejected'].get('content_filter', 0)
                  and filters['filtered_candidate_share'] == filters['filtered_candidates'] / max(1, filters['judged_candidates'])
                  and filters['filtered_generation_share'] == filters['filtered_generation_batches'] / max(1, filters['generation_batches']))
+    if 'question_quality' in report:
+        quality = report['question_quality']
+        valid = (valid and quality['questions'] == report['questions'] + quality['dropped_questions']
+                 and quality['dropped_questions'] == sum(quality['reasons'].values())
+                 and all(quality['reasons'][reason] == report['rejected'].get(reason, 0)
+                         and quality['shares'][reason] == quality['reasons'][reason] / max(1, quality['questions'])
+                         for reason in QUESTION_DROP_REASONS))
     numbers = list(baseline['metrics'].values()) + report['agreement']['cohen_kappa']
     numbers += [report['agreement']['fleiss_kappa'], human['agreement_rate']]
     if not valid or any(n is not None and not math.isfinite(n) for n in numbers):
@@ -678,22 +707,26 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
     corpus = [dataclasses.replace(a, id=opaque('article:' + a.id)) for a in sorted(corpus, key=lambda a: a.id)]
     threshold = filtered_candidate_share(providers.max_filtered_candidate_share)
     rows, rankings, filter_counts = [], {}, collections.Counter()
+    assessed_questions = 0
     def accept_questions(batch):
+        nonlocal assessed_questions
+        drops = {}
+        assessed_questions += len(batch)
         with build_phase('judging'):
             query_rows, query_rankings = judge_pool(batch, corpus, providers.retrievers, providers.judges,
-                                                   threshold, filter_counts, executor)
+                                                   threshold, filter_counts, executor, drops)
         by_query = collections.defaultdict(list)
         for row in query_rows:
             by_query[row['query']].append(row)
         decisions = []
         for i in range(len(batch)):
             keep = bool(by_query[i])
-            decisions.append(keep)
+            decisions.append(True if keep else drops[i])
             if keep:
                 qi = len(rankings)
                 rows.extend({**row, 'query': qi} for row in by_query[i])
                 rankings[qi] = query_rankings[i]
-        progress('judged', len(rankings) + filter_counts['dropped_questions'])
+        progress('judged', assessed_questions)
         return decisions
     if type(providers.concurrency) is not int or not 1 <= providers.concurrency <= 8:
         raise BuildError('concurrency must be an integer from 1 to 8')
@@ -736,6 +769,10 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
               'questions': len(questions), 'articles': len(corpus),
               'question_types': dict(collections.Counter(q.kind for q in questions)),
               'rejected': {**dict.fromkeys(('title_copy', 'duplicate', 'shared_keywords'), 0), **rejected},
+              'question_quality': {'questions': assessed_questions,
+                                   'dropped_questions': sum(rejected.get(reason, 0) for reason in QUESTION_DROP_REASONS),
+                                   'reasons': {reason: rejected.get(reason, 0) for reason in QUESTION_DROP_REASONS},
+                                   'shares': {reason: rejected.get(reason, 0) / assessed_questions for reason in QUESTION_DROP_REASONS}},
               'content_filter': {**dict.fromkeys(('generation_batches', 'filtered_generation_batches',
                                                    'judged_candidates', 'filtered_candidates', 'dropped_questions'), 0),
                                  **filter_counts, 'max_filtered_candidate_share': threshold,
@@ -983,13 +1020,18 @@ class JevJudge:
                     grades.update(dict.fromkeys(passages))
                 return
             remaining -= result.cost_cents
-            if result.reason or set(result.scores) != set(passages) or remaining < 0:
+            if remaining < 0 or result.reason not in ('', 'invalid answer', 'response size bound'):
                 raise BuildError('Jev judgment unavailable')
+            if (result.reason or not isinstance(result.scores, dict) or set(result.scores) != set(passages)
+                    or any(type(v) not in (int, float) or not 0 <= v <= 1 for v in result.scores.values())):
+                grades.update(dict.fromkeys(passages))
+                return
             grades.update({key: min(3, int(value * 4)) for key, value in result.scores.items()})
         for article in candidates:
             item = {article.id: article.title + '\n' + article.text}
             if not fits(item):
-                raise BuildError('article exceeds the Jev input bound')
+                grades[article.id] = None
+                continue
             if batch and not fits({**batch, **item}):
                 submit(batch)
                 batch = {}

@@ -357,6 +357,8 @@ class ChatGenerator(Chat):
                 date = max(by_id[s].date for s in row['sources']) if row['sources'] else sample[0].date
                 questions.append(news.Question(row['text'], kind, date, tuple(by_id[s].id for s in row['sources'])))
             return questions
+        if self.input_bound(instruction, data) > self.cfg['request_input_tokens']:
+            raise self.invalid('input_bound')
         return self.complete(instruction, data, validate, cache_rejections=True)
 
 
@@ -374,17 +376,17 @@ class ChatJudge(Chat):
             return {'query': question.text, 'articles': [
                 {'id': f'a{i}', 'title': a.title, 'text': a.text, 'updated_at': a.updated_at,
                  'latest_story_update': a.latest_story_update} for i, a in enumerate(batch, 1)]}
-        batches, batch = [], []
+        batches, batch, grades = [], [], {}
         for article in candidates:
             if self.input_bound(instruction, data([article])) > self.cfg['request_input_tokens']:
-                raise AdapterError('article exceeds the chat judgment input bound')
+                grades[article.id] = None
+                continue
             if batch and self.input_bound(instruction, data(batch + [article])) > self.cfg['request_input_tokens']:
                 batches.append(batch)
                 batch = []
             batch.append(article)
         if batch:
             batches.append(batch)
-        grades = {}
         for batch in batches:
             by_id = {f'a{i}': a.id for i, a in enumerate(batch, 1)}
             def recover():

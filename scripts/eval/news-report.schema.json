@@ -106,6 +106,30 @@
         "request_refused": {
           "type": "integer",
           "minimum": 0
+        },
+        "answer_expected_none_found": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "no_answer_but_relevant_found": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_judge_grades": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "empty_candidate_pool": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid_date": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_bound": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -492,6 +516,97 @@
         "filtered_generation_batches",
         "filtered_generation_share"
       ]
+    },
+    "question_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "questions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_questions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasons": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "answer_expected_none_found": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "no_answer_but_relevant_found": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "invalid_judge_grades": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "empty_candidate_pool": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "judge_content_filter": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "answer_expected_none_found",
+            "no_answer_but_relevant_found",
+            "invalid_judge_grades",
+            "empty_candidate_pool",
+            "judge_content_filter"
+          ]
+        },
+        "shares": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "answer_expected_none_found": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "no_answer_but_relevant_found": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "invalid_judge_grades": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "empty_candidate_pool": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "judge_content_filter": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "answer_expected_none_found",
+            "no_answer_but_relevant_found",
+            "invalid_judge_grades",
+            "empty_candidate_pool",
+            "judge_content_filter"
+          ]
+        }
+      },
+      "required": [
+        "questions",
+        "dropped_questions",
+        "reasons",
+        "shares"
+      ]
     }
   },
   "required": [
@@ -601,6 +716,10 @@
               "minimum": 0
             },
             "request_refused": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "input_bound": {
               "type": "integer",
               "minimum": 0
             }

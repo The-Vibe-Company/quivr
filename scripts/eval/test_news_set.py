@@ -51,12 +51,19 @@ def providers():
         class Generator(news.FakeGenerator):
             def generate(self, sample, kind, count, rng):
                 good = list(super().generate(sample, kind, count, rng))
-                return [news.Question('LE PORT OUVRE UNE LIAISON !', kind, sample[0].date,
+                return [None, news.Question('', kind, sample[0].date, ()),
+                        news.Question('Une question incohérente', kind, sample[0].date, ([],)),
+                        news.Question('Une question sans preuve', kind, sample[0].date, ('unknown',)),
+                        news.Question('Une question mal datée', kind, '1900-01-01', good[0].sources),
+                        news.Question('LE PORT OUVRE UNE LIAISON !', kind, sample[0].date,
                                       (sample[0].id,)), good[0], good[0], *good[1:]]
         questions, rejected = news.generate(articles(), Generator(), 30, 42)
         self.assertEqual(len(questions), 30)
         self.assertEqual(len({news.normalize(q.text) for q in questions}), 30)
         self.assertEqual(set(q.kind for q in questions), set(news.KINDS))
+        self.assertGreater(rejected['invalid_questions'], 0)
+        self.assertGreater(rejected['invalid_evidence'], 0)
+        self.assertGreater(rejected['invalid_date'], 0)
         self.assertGreater(rejected['title_copy'], 0)
         self.assertGreater(rejected['duplicate'], 0)
         self.assertTrue(all(len(q.sources) >= 2 for q in questions if q.kind == 'multi_article'))
@@ -84,12 +91,40 @@ def providers():
         self.assertAlmostEqual(news.agreement([[0, 0, 0], [1, 1, 2]])['cohen_kappa'][0], 1)
         self.assertIsNone(news.agreement([[0, 0, 0]])['fleiss_kappa'])
         judges[1].values[1] = True
-        with self.assertRaises(news.BuildError):
-            news.judge_pool(qs, articles(), {'bm25': Retriever(['0', '1'])}, judges)
+        drops = {}
+        self.assertEqual(news.judge_pool(qs, articles(), {'bm25': Retriever(['0', '1'])}, judges,
+                                        question_drops=drops), ([], {}))
+        self.assertEqual(drops, {0: 'invalid_judge_grades'})
         judges[1].values[1] = 0
         judges[1].family = 'a'
         with self.assertRaises(news.BuildError):
             news.judge_pool(qs, articles(), {'bm25': Retriever(['0'])}, judges)
+
+    @mock.patch('scoring.score', side_effect=unavailable_scorer)
+    def test_empty_pool_and_incomplete_votes_top_up_without_losing_other_questions(self, scorer):
+        for failure in ('empty_candidate_pool', 'invalid_judge_grades'):
+            with self.subTest(failure=failure):
+                providers = news.fake_providers()
+                first = None
+                def retrieve(question, corpus, limit):
+                    nonlocal first
+                    first = first or question.text
+                    return [] if failure == 'empty_candidate_pool' and question.text == first else [a.id for a in corpus]
+                original = providers.judges[0].grade
+                def grade(question, candidates):
+                    values = original(question, candidates)
+                    if failure == 'invalid_judge_grades' and question.text == first:
+                        values.pop(candidates[0].id)
+                    return values
+                providers.retrievers = {'bm25': types.SimpleNamespace(search=retrieve)}
+                providers.baseline = 'bm25'
+                providers.judges[0].grade = grade
+                result = news.build(articles(), providers, 12, 42, salt=b'x' * 32)
+                self.assertEqual(result.report['question_types'], dict.fromkeys(news.KINDS, 2))
+                self.assertEqual(result.report['rejected'][failure], 1)
+                self.assertEqual(result.report['question_quality']['questions'], 13)
+                self.assertEqual(result.report['question_quality']['shares'][failure], 1 / 13)
+                self.assertNotIn(first, {**result.working['queries'], **result.held_out['queries']}.values())
 
     def test_split_is_repeatable_balanced_and_baseline_only_scores_working(self):
         qs, rejected = news.generate(articles(), news.FakeGenerator(), 60, 42)
@@ -138,6 +173,9 @@ def providers():
         self.assertEqual(result.report['human_check']['status'], 'pending')
         with self.assertRaises(news.BuildError):
             news.validate_report({**result.report, 'query_text': 'private input'})
+        with self.assertRaises(news.BuildError):
+            news.validate_report({**result.report, 'question_quality': {**result.report['question_quality'],
+                                  'shares': {**result.report['question_quality']['shares'], 'invalid_judge_grades': .5}}})
         for change in [{'questions': 1}, {'split': {'working': 1, 'held_out': 1}},
                        {'judgments': 1}, {'human_check': {'status': 'complete', 'sampled': 100,
                                                         'reviewed': 1, 'agreement_rate': 1}}]:
@@ -166,6 +204,14 @@ def providers():
         adapter = news.JevJudge(transport)
         grades = adapter.grade(news.Question('Quelle évolution ?', 'event', '2026-01-02', ('0',)), corpus)
         self.assertEqual(grades, {str(i): i % 4 for i in range(80)})
+        q = news.Question('Quelle évolution ?', 'event', '2026-01-02', ('0',))
+        for result in [types.SimpleNamespace(reason='invalid answer', cost_cents=.01, scores={}),
+                       types.SimpleNamespace(reason='response size bound', cost_cents=.01, scores={}),
+                       types.SimpleNamespace(reason='', cost_cents=.01, scores={'unknown': .5}),
+                       types.SimpleNamespace(reason='', cost_cents=.01, scores={'0': float('nan')}),
+                       types.SimpleNamespace(reason='', cost_cents=.01, scores={'0': True})]:
+            with self.subTest(result=result), mock.patch.object(transport, 'judge', return_value=result):
+                self.assertEqual(adapter.grade(q, corpus[:1]), {'0': None})
         transport.fail = True
         with self.assertRaises(news.BuildError):
             adapter.grade(news.Question('Quelle évolution ?', 'event', '2026-01-02', ('0',)), corpus)

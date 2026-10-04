@@ -1,7 +1,6 @@
 # Build a private French news search set
 
-Use the builder to turn news articles from RSS feeds into an encrypted search evaluation set.
-You get working/held-out sets, a human review sheet and an aggregate quality report.
+Use the builder to turn news articles from RSS feeds into an encrypted search evaluation set, with working/held-out sets, a human review sheet and an aggregate quality report.
 
 ## Prerequisites
 
@@ -56,7 +55,7 @@ or a trusted Python file outside Git exporting `providers()` returning
 | --- | --- |
 | Generator | `generate(sample, kind, count, rng)` returns `Question` objects, source ids and evidence dates. |
 | Retriever | `search(question, corpus, limit)` returns distinct article ids, in ranking order. |
-| Judge | `grade(question, candidates)` returns every candidate's grade, 0–3, or `None` for a dropped request refusal; exposes `family`. |
+| Judge | `grade(question, candidates)` returns every candidate's grade, 0–3, or `None` for an unavailable candidate; exposes `family`. |
 | Storage | `put` creates immutable objects, `get` reads commit manifests, `delete` cleans only aborted attempt objects. |
 
 Generators receive sampled articles, or up to three related articles for multi-article questions.
@@ -64,6 +63,7 @@ Generate natural French newsroom searches, with no copied title or paraphrase co
 Use the six types `entity`, `event`, `recent`, `paraphrase`, `multi_article`, `no_answer`.
 Questions must cite evidence from their sample, with its latest date; no-answer questions cite no evidence.
 The builder deduplicates normalized text, filters copies and fills equal type quotas with bounded attempts.
+Malformed questions, evidence or dates are counted as `invalid_questions`, `invalid_evidence` or `invalid_date` and replaced.
 
 Live adapters provide retrievers named `bm25`, `e5_small`, `cohere_pro`, `hybrid`.
 Set `Providers.baseline` to the key for the current system; it is not a fifth retriever.
@@ -128,10 +128,11 @@ Refusal counts use `status:provider_code`, with `unknown` for absent or unrecogn
 Chat judges split a refused batch once, then drop still-refused candidates. Content filters retain recursive isolation;
 `None` means filtered, never grade zero. Set top-level `max_filtered_candidate_share` (default `0.1`, range `(0, 1]`).
 Divide candidates filtered by any judge by the original pool size. A question drops at that limit, or if filtering
-removes every positive majority grade for an answerable question. Below the limit, filtered candidates leave the pool. Dropped questions
+removes every candidate. Below the limit, unavailable candidates leave the pool. Dropped questions
 are replaced within generation's existing attempt bound; count, type balance and spend caps still apply.
 Failed attempts keep their reservations as an upper bound. Each chat adapter counts `timeouts` (including the final failure) and `retries` (additional transport attempts reserved and sent, including HTTP retries). A cap-blocked retry is not counted.
-Malformed generator batches resample; malformed judge batches retry within configured bounds. Large pools are batched within input bounds.
+Malformed generator batches resample; malformed judge batches retry, split once, then drop unresolved candidates.
+Large pools are batched within input bounds; oversized articles become unavailable votes. Oversized generator requests resample without a provider call.
 Jev reserves all three client attempts before calling it. Usage that exceeds a reservation stops the adapter.
 
 Retrieval reuses the direct comparison's pinned local E5, Cohere client, token/USD gate and character windows.
@@ -178,7 +179,8 @@ by multiple judges counts once per question. The legacy `content_filter` candida
 and generic judge request refusals. Generator refusals appear as `rejected.request_refused`; explicit generator filters
 use `rejected.content_filter` and `content_filter.filtered_generation_batches`.
 Provider `refusals` counts only new HTTP refusals, including splits; `cached_refusals` counts replayed refusals separately.
-Failures print only exception class, build phase, HTTP status and known provider code when available; messages, text, URLs and keys are omitted.
+Failures include our safe `BuildError` reason, build phase, exception class, HTTP status and known provider code when available.
+Provider exception messages, input text, URLs and keys are omitted.
 Use `confirmed_cost_usd` for confirmed usage and `cost_upper_bound_usd` for confirmed plus unknown reservations. The `totals` block sums all provider spend and records the generation/judging and separate retrieval ceilings.
 Always supply the ledger path for a paid build: a failed build otherwise has no saved spend report.
 Accepted, judged and dropped counts go to stderr; exceptions and provider bodies are sanitised. Keep keys, configuration, exports and encrypted artifacts in private storage, outside Git.
@@ -192,7 +194,14 @@ Age encryption protects content even if a storage policy is misconfigured.
 ## Check it worked
 
 Live builds require at least 1,500 questions and all four retrieval systems plus the Jev adapter.
-Missing votes, invalid grades, empty pools and pooled answerability conflicts fail the build.
+A judge map with missing entries or invalid grades drops the question; explicit `None` removes a candidate. Empty pools and pooled answerability conflicts also drop the question and trigger replacement.
+`question_quality` reports all assessed questions, dropped questions, reason counts and shares of assessed questions.
+Reasons are `answer_expected_none_found`, `no_answer_but_relevant_found`, `invalid_judge_grades`,
+`empty_candidate_pool` and `judge_content_filter` (the unavailable-candidate threshold).
+The same counts appear in `rejected`; conflicts below the threshold retain their answerability reason even with unavailable candidates.
+Jev malformed or oversized responses become unavailable votes; transport/deadline failures remain fatal.
+If a type cannot fill its quota within bounded attempts, the diagnostic names its accepted/target counts and rejection reasons.
+Configuration, authentication, spend/token caps, invalid retrieval ids, input/cache integrity and publication failures remain fatal.
 The majority grade wins; three-way disagreements use the median and are counted separately.
 The report includes three unweighted Cohen pair kappas and Fleiss' kappa; undefined values are null.
 High-ranked grade-zero candidates become private hard negatives.
