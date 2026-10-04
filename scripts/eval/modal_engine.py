@@ -152,16 +152,23 @@ async def dispatch(store, campaign, cfg, sha, invoke, outbox):
 
 COMPOSE_VERSION = '2.39.4'
 COMPOSE_SHA = '7af95166a730b87e172d4fc9aefea8725d3c6c7327d59149267b452114ddb7d4'
+# linux/amd64 golang:1.27.1-bookworm; immutable confirmation build inputs.
+CONFIRMATION_BASE = 'golang@sha256:966278043a40889499db9b0cd196fc789c37c385d41bd9a10cb1e7764af60cdc'
+DEBIAN_SNAPSHOT = '20261003T000000Z'
 
 
-def image_definition(modal):
+def image_definition(modal, *, confirmation=False):
     tracked = set(subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode().split('\0'))
     def ignored(path):
         relative = str(path)  # Modal passes paths relative to the upload root.
         return relative not in tracked and not any(name.startswith(relative.rstrip('/') + '/') for name in tracked)
     go = lineage()['go_version']
-    return (modal.Image.from_registry(f'golang:{go}-bookworm', add_python='3.12')
-            .entrypoint([]).apt_install('docker.io', 'curl', 'ca-certificates', 'iptables')
+    image = modal.Image.from_registry(CONFIRMATION_BASE if confirmation else f'golang:{go}-bookworm', add_python='3.12').entrypoint([])
+    if confirmation:
+        image = image.run_commands(
+            'rm -f /etc/apt/sources.list.d/*',
+            f"printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/{DEBIAN_SNAPSHOT}/ bookworm main' > /etc/apt/sources.list")
+    return (image.apt_install('docker.io', 'curl', 'ca-certificates', 'iptables')
             .run_commands('mkdir -p /usr/local/lib/docker/cli-plugins',
                 f'curl -fsSL https://github.com/docker/compose/releases/download/v{COMPOSE_VERSION}/docker-compose-linux-x86_64 '
                 '-o /usr/local/lib/docker/cli-plugins/docker-compose',
@@ -178,6 +185,7 @@ async def run_modal(request, renew):
     """Bounded SDK boundary. Success leaves this scope only after terminate(wait)."""
     import modal
     cfg = request['policy']
+    confirmation = 'confirmation_request' in request
     sandbox, waiter, heartbeat = None, None, None
     observed, verified = None, False
     recovery = pathlib.Path(request['outbox']) / 'active' / (request['campaign'] + '.json')
@@ -191,29 +199,40 @@ async def run_modal(request, renew):
     async def observe():
         nonlocal observed
         async for line in sandbox.stdout:
-            if len(line) > 4096:
+            if len(line) > (1 << 20 if confirmation else 4096):
                 raise ValueError('oversized smoke output')
             row = json.loads(line)
             if row.get('event') == 'result':
                 observed = row
             elif row.get('event') == 'progress':
                 phase, count = row.get('phase'), row.get('count')
-                if phase in ('docker', 'starting', 'ingesting', 'searching', 'cleanup') and type(count) is int and 0 <= count <= 3:
+                if phase in ('docker', 'starting', 'ingesting', 'searching', 'cleanup') and type(count) is int and 0 <= count <= (100 if confirmation else 3):
                     logging.info('smoke phase=%s count=%d', phase, count)
                     results.save(recovery, {'app_id': app.app_id, 'sandbox_id': sandbox.object_id,
                                             'state': 'running', 'phase': phase})
         await sandbox.wait.aio(raise_on_termination=False)
-    app = modal.App('quivr-engine-smoke')
+    app = modal.App(request.get('app_name', 'quivr-engine-confirmation' if confirmation else 'quivr-engine-smoke'))
     try:
         async with app.run.aio(detach=False):
-            image = image_definition(modal)
+            if request.get('on_app'):
+                await asyncio.to_thread(request['on_app'], app.app_id)
+            image = image_definition(modal, confirmation=confirmation)
+            if confirmation:
+                image = image.pip_install('numpy==2.0.2', 'scipy==1.17.1', 'ranx==0.3.21', 'psycopg[binary]==3.3.4').apt_install('age')
             results.save(recovery, {'app_id': app.app_id, 'state': 'creating'})
             try:
+                command = ['python', '/repo/scripts/eval/engine_stack.py', '--supervise', '--settings', results.encode(cfg)]
+                extra = {}
+                if confirmation:
+                    serialized = {k: request[k] for k in ('campaign', 'policy', 'confirmation_request', 'lease_key', 'owner')}
+                    command = ['python', '/repo/scripts/eval/engine_confirm_runner.py', '--supervise', '--request', results.encode(serialized)]
+                    extra = {'secrets': [modal.Secret.from_name('quivr-eval-engine-confirmation')],
+                             'volumes': {'/protected': modal.Volume.from_name('quivr-eval-heldout')}}
                 sandbox = await asyncio.wait_for(modal.Sandbox.create.aio(
-                    'python', '/repo/scripts/eval/engine_stack.py', '--supervise', '--settings', results.encode(cfg),
+                    *command,
                     app=app, image=image, runtime='vm', cpu=(cfg['cpu'], cfg['cpu']),
                     memory=(cfg['memory_mib'], cfg['memory_mib']), timeout=lifetime(cfg),
-                    workdir='/repo', tags={'kind': 'engine-smoke', 'campaign': request['campaign']}),
+                    workdir='/repo', tags={'kind': 'engine-confirmation' if confirmation else 'engine-smoke', 'campaign': request['campaign']}, **extra),
                     timeout=cfg['startup_seconds'])
                 results.save(recovery, {'app_id': app.app_id, 'sandbox_id': sandbox.object_id, 'state': 'running'})
                 heartbeat, waiter = asyncio.create_task(keepalive()), asyncio.create_task(observe())
@@ -238,7 +257,8 @@ async def run_modal(request, renew):
                 await renew()
         if observed is None:
             raise RuntimeError('smoke did not return aggregate evidence')
-        return {**observed, 'sandbox_terminated': verified, 'image_id': image.object_id}
+        return {**observed, 'sandbox_terminated': verified, 'image_id': image.object_id,
+                **({'compute_ids': {'app_id': app.app_id, 'sandbox_id': sandbox.object_id}} if confirmation else {})}
     except Exception as error:
         import engine_stack
         return {'status': 'failed', **engine_stack.failure(error),

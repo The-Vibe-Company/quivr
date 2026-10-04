@@ -78,6 +78,58 @@ class Control(unittest.TestCase):
         self.policy = {'provider_daily_usd': 1, 'modal_daily_usd': 1}
         self.store.campaign(self.name, self.policy)
 
+    def test_fenced_confirmation_opens_each_attempt_once_and_shares_the_limit(self):
+        # New contract: a lease alone does not prevent duplicate remote delivery
+        # reading held-out data twice. Real SQL owns single-use admission.
+        binding = {'heldout_family_digest': 'a' * 64, 'baseline_hash': 'b' * 64}
+        self.store.register_confirmation(self.name, binding)
+        self.assertEqual(self.store.confirmation_policy(self.name), binding)
+        with self.assertRaises(ValueError):
+            self.store.register_confirmation(self.name, {**binding, 'baseline_hash': 'c' * 64})
+        key = 'engine-confirmation/first-finalist'
+        owner = self.store.claim(self.name, key)['owner']
+        def admit(_):
+            try:
+                return self.store.confirmation(self.name, (key, owner))
+            except PermissionError:
+                return None
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            self.assertEqual([x for x in pool.map(admit, range(8)) if x], [1])
+        self.assertEqual(self.store.confirmation_proof(self.name, key, owner)['read_ordinal'], 1)
+        # An uncertain first read stays consumed; replacing its lease cannot
+        # reuse the ordinal, even for the same finalist.
+        self.store.abandon(self.name, key, owner, 'failed')
+        replacement = self.store.claim(self.name, key)['owner']
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.confirmation(self.name, (key, owner))
+        self.assertEqual(self.store.confirmation(self.name, (key, replacement)), 2)
+        other = 'engine-confirmation/second-finalist'
+        second = self.store.claim(self.name, other)['owner']
+        self.assertEqual(self.store.confirmation(self.name, (other, second)), 3)
+        for number in range(4, 11):
+            lease_key = 'remaining-' + str(number)
+            held = self.store.claim(self.name, lease_key)['owner']
+            self.assertEqual(self.store.confirmation(self.name, (lease_key, held)), number)
+        held = self.store.claim(self.name, 'eleventh')['owner']
+        with self.assertRaises(PermissionError):
+            self.store.confirmation(self.name, ('eleventh', held))
+        self.assertEqual(self.store.availability(self.name)['confirmation_reads_left'], 0)
+        # The same campaign lock fences durable standalone intent/bind and
+        # rejects publication after stop even with a valid consumed read.
+        intent = 'intent'
+        resource_owner = self.store.claim(self.name, 'confirmation-resource/' + intent)['owner']
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.bind_confirmation_app(self.name, intent, resource_owner, 'ap-fixture')
+        self.store.confirmation_intent(self.name, intent, resource_owner)
+        self.store.bind_confirmation_app(self.name, intent, resource_owner, 'ap-fixture')
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.bind_confirmation_app(self.name, intent, resource_owner, 'ap-different')
+        self.store.stop(self.name)
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.publish_confirmation(self.name, other, second, {'status': 'confirmed'})
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.bind_confirmation_app(self.name, intent, resource_owner, 'ap-fixture')
+
     def test_concurrent_reservations_reconcile_once_and_unknown_attempts_remain_charged(self):
         def attempt(_):
             try:

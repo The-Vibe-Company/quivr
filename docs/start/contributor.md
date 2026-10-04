@@ -22,6 +22,7 @@ How this repository is organised, tested and changed, for people and coding agen
 - [Measure open-source embeddings](../agents/oss-embeddings.md): preview and measure open-source embedding models on ephemeral CPU and GPU jobs
 - [Testing standard](../agents/testing.md): what a good test looks like here
 - [Triage labels](../agents/triage-labels.md): the five triage labels
+- [Confirm a search finalist on the full engine](../eval-engine-confirmation.md): confirm finalists with aggregate held-out measurements on the full engine
 - [Run a temporary Quivr stack on Modal](../eval-engine-smoke.md): run and stop a temporary full-stack Modal smoke
 - [Measure search configurations on Modal](../eval-modal.md): measure configurations on Modal with shared caps and gates
 - [Record and compare search measurements](../eval-results.md): log, sync, compare and query shared search measurements

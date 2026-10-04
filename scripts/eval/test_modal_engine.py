@@ -103,8 +103,10 @@ class Admission(unittest.TestCase):
 
 class Lifecycle(unittest.TestCase):
     def test_termination_precedes_return_on_success_remote_failure_and_cancellation(self):
-        for fault in ('none', 'remote', 'cancel', 'lease', 'terminate', 'build', 'build-invalid'):
+        for fault in ('none', 'remote', 'cancel', 'lease', 'terminate', 'build', 'build-invalid',
+                      'confirmation', 'confirmation-bind', 'confirmation-cancel'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temp:
+                confirmation = fault.startswith('confirmation')
                 events = []
                 async def renew():
                     events.append('renew')
@@ -122,7 +124,7 @@ class Lifecycle(unittest.TestCase):
                 class Lines:
                     async def __aiter__(self):
                         await asyncio.sleep(0)
-                        if fault == 'cancel':
+                        if fault in ('cancel', 'confirmation-cancel'):
                             raise asyncio.CancelledError()
                         if fault == 'remote':
                             raise RuntimeError('secret query text')
@@ -144,7 +146,16 @@ class Lifecycle(unittest.TestCase):
                 async def create(*args, **kwargs):
                     events.append('create')
                     self.assertEqual(kwargs['runtime'], 'vm')
-                    self.assertNotIn('secrets', kwargs)
+                    if confirmation:
+                        self.assertLess(events.index('bind'), events.index('create'))
+                        self.assertEqual(kwargs['secrets'], ['quivr-eval-engine-confirmation'])
+                        self.assertEqual(kwargs['volumes'], {'/protected': 'quivr-eval-heldout'})
+                        self.assertIn('engine_confirm_runner.py', args[1])
+                        serialized = json.loads(args[-1])
+                        self.assertEqual(serialized['lease_key'], 'engine-confirmation/fixture')
+                        self.assertNotIn('outbox', serialized)
+                    else:
+                        self.assertNotIn('secrets', kwargs)
                     if fault.startswith('build'):
                         # Modal's ImageBuildError carries this public attribute
                         # before image hydration; inject that transport failure.
@@ -163,22 +174,36 @@ class Lifecycle(unittest.TestCase):
                     return image
                 image.add_local_dir.side_effect = source_directory
                 modal = types.SimpleNamespace(App=App, Sandbox=types.SimpleNamespace(create=types.SimpleNamespace(aio=create)),
-                                               Image=types.SimpleNamespace(from_registry=lambda *args, **kwargs: image))
+                                               Image=types.SimpleNamespace(from_registry=lambda *args, **kwargs: image),
+                                               Secret=types.SimpleNamespace(from_name=lambda name: name),
+                                               Volume=types.SimpleNamespace(from_name=lambda name: name))
+                def bind(app_id):
+                    events.append('bind')
+                    self.assertEqual(app_id, 'ap-fixture')
+                    if fault == 'confirmation-bind':
+                        raise control_store.LeaseLost('secret owner expired')
+                request = {'policy': modal_engine.policy({}), 'campaign': 'fixture', 'outbox': temp}
+                if confirmation:
+                    request.update(confirmation_request={'version': 1}, lease_key='engine-confirmation/fixture',
+                                   owner='fixture-owner', app_name='durable-intent', on_app=bind)
                 with mock.patch.dict('sys.modules', {'modal': modal}):
-                    if fault == 'none':
-                        result = asyncio.run(modal_engine.run_modal({'policy': modal_engine.policy({}),
-                             'campaign': 'fixture', 'outbox': temp}, renew))
+                    if fault in ('none', 'confirmation'):
+                        result = asyncio.run(modal_engine.run_modal(request, renew))
                         self.assertTrue(result['sandbox_terminated'])
-                    elif fault == 'cancel':
+                        if confirmation:
+                            self.assertEqual(result['compute_ids'], {'app_id': 'ap-fixture', 'sandbox_id': 'sb-fixture'})
+                    elif fault in ('cancel', 'confirmation-cancel'):
                         with self.assertRaises(asyncio.CancelledError):
-                            asyncio.run(modal_engine.run_modal({'policy': modal_engine.policy({}),
-                                'campaign': 'fixture', 'outbox': temp}, renew))
+                            asyncio.run(modal_engine.run_modal(request, renew))
                     else:
-                        result = asyncio.run(modal_engine.run_modal({'policy': modal_engine.policy({}),
-                            'campaign': 'fixture', 'outbox': temp}, renew))
+                        result = asyncio.run(modal_engine.run_modal(request, renew))
                         self.assertEqual(result['status'], 'failed')
-                        self.assertEqual(result['sandbox_terminated'], fault not in ('terminate', 'build', 'build-invalid'))
+                        self.assertEqual(result['sandbox_terminated'], fault not in ('terminate', 'build', 'build-invalid', 'confirmation-bind'))
                         self.assertNotIn('secret', json.dumps(result))
+                if fault == 'confirmation-bind':
+                    self.assertNotIn('create', events)
+                    self.assertIn('app-stop', events)
+                    continue
                 if fault.startswith('build'):
                     self.assertNotIn('terminate', events)
                     recovery = json.loads((pathlib.Path(temp) / 'active/fixture.json').read_text())

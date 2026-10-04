@@ -142,7 +142,7 @@ and provider token limits; observed overages cannot undo already incurred bills.
 
 Tier 1 accepts public campaign-dev sets only; an upstream `test` partition differs
 from campaign-heldout data, which tier 1 cannot consume. The store's maximum-ten confirmation counter
-is reserved for a future trusted full-engine confirmation runner.
+is owned by the [trusted full-engine confirmation runner](eval-engine-confirmation.md).
 
 ## Recover and validate
 

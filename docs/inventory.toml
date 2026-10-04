@@ -77,6 +77,7 @@ excluded = [
 "docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
 "docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide", summary = "the five triage labels" }
 "docs/dated/README.md" = { audience = "contributor", kind = "index", summary = "frozen design records, evidence and research, as decided at their date" }
+"docs/eval-engine-confirmation.md" = { audience = "contributor", kind = "guide", summary = "confirm finalists with aggregate held-out measurements on the full engine" }
 "docs/eval-engine-smoke.md" = { audience = "contributor", kind = "guide", summary = "run and stop a temporary full-stack Modal smoke" }
 "docs/eval-modal.md" = { audience = "contributor", kind = "guide", summary = "measure configurations on Modal with shared caps and gates" }
 "docs/search-campaign-reporting.md" = { audience = "contributor", kind = "guide", summary = "report exact usage, propose bounded candidates and review campaign promotion" }
@@ -115,6 +116,7 @@ excluded = [
 "docs/search-campaigns.md" = 138
 "docs/search-campaign-reporting.md" = 138
 "deploy/mlflow/README.md" = 68
+"docs/eval-engine-confirmation.md" = 174
 "docs/eval-engine-smoke.md" = 149
 "docs/eval-results.md" = 160
 "docs/eval-modal.md" = 176

@@ -8,6 +8,7 @@ import decimal
 import datetime
 import json
 import os
+import re
 import tempfile
 import uuid
 
@@ -301,15 +302,108 @@ class Store:
         if exceeded:
             raise embeddings.BudgetExceeded('confirmed usage exceeded reservation; campaign stopped')
 
-    def confirmation(self, name):
+    def policy(self, name):
+        """Read frozen admission policy; does not create or replace a campaign."""
+        with self.transaction() as db:
+            policy, _ = self.lock(db, name)
+        return policy
+
+    def evidence(self, name, keys):
+        """Read canonical evidence without claiming missing measurement keys."""
+        keys = lease_batch(keys)
+        with self.transaction() as db:
+            self.lock(db, name)
+            rows = db.execute('SELECT key,payload FROM eval_control.leases WHERE campaign=%s AND key=ANY(%s) AND payload IS NOT NULL', (name, keys)).fetchall()
+        return dict(rows)
+
+    def register_confirmation(self, name, binding):
+        encoded = json.dumps(binding, sort_keys=True, allow_nan=False)
+        with self.transaction() as db:
+            policy, stopped = self.lock(db, name)
+            row = db.execute('SELECT policy FROM eval_control.confirmation_policies WHERE campaign=%s', (name,)).fetchone()
+            if row is not None:
+                if row[0] != json.loads(encoded):
+                    raise ValueError('confirmation policy is immutable')
+                # Registration replay is read-only; admission/publication still
+                # enforce stop/end under this same campaign-row lock.
+                return
+            if self.terminal(db, name, policy, stopped):
+                raise PermissionError('campaign stopped or ended')
+            db.execute('INSERT INTO eval_control.confirmation_policies(campaign,policy) VALUES (%s,%s::jsonb)', (name, encoded))
+
+    def confirmation_policy(self, name):
+        with self.transaction() as db:
+            self.lock(db, name)
+            row = db.execute('SELECT policy FROM eval_control.confirmation_policies WHERE campaign=%s', (name,)).fetchone()
+        if row is None:
+            raise ValueError('confirmation policy has not been registered')
+        return row[0]
+
+    def confirmation_intent(self, name, intent, owner):
+        """Standalone dispatch intent, persisted before Modal app creation."""
+        with self.transaction() as db:
+            policy, stopped = self.lock(db, name)
+            if self.terminal(db, name, policy, stopped):
+                raise LeaseLost('confirmation campaign stopped or ended')
+            self.fence(db, name, 'confirmation-resource/' + intent, owner)
+            db.execute('INSERT INTO eval_control.confirmation_apps(campaign,intent,owner) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING', (name, intent, owner))
+
+    def bind_confirmation_app(self, name, intent, owner, app_id):
+        """Bind the fenced, already persisted intent before runner dispatch."""
+        if not isinstance(app_id, str) or not re.fullmatch(r'ap-[A-Za-z0-9_-]+', app_id):
+            raise ValueError('invalid confirmation app identity')
+        with self.transaction() as db:
+            policy, stopped = self.lock(db, name)
+            if self.terminal(db, name, policy, stopped):
+                raise LeaseLost('confirmation campaign stopped or ended')
+            self.fence(db, name, 'confirmation-resource/' + intent, owner)
+            row = db.execute('UPDATE eval_control.confirmation_apps SET app_id=%s WHERE campaign=%s AND intent=%s AND owner=%s AND (app_id IS NULL OR app_id=%s) RETURNING app_id', (app_id, name, intent, owner, app_id)).fetchone()
+            if row is None:
+                raise LeaseLost('confirmation intent missing or already bound')
+
+    def confirmation_proof(self, name, key, owner):
+        with self.transaction() as db:
+            self.lock(db, name)
+            row = db.execute('SELECT read_ordinal FROM eval_control.confirmation_reads WHERE campaign=%s AND key=%s AND owner=%s', (name, key, owner)).fetchone()
+        if row is None:
+            raise PermissionError('protected input was not admitted')
+        return {'read_ordinal': row[0]}
+
+    def publish_confirmation(self, name, key, owner, payload):
+        """Stop/end and the read/owner fence remain atomic at publication."""
+        with self.transaction() as db:
+            policy, stopped = self.lock(db, name)
+            if self.terminal(db, name, policy, stopped):
+                raise LeaseLost('confirmation campaign stopped or ended')
+            self.fence(db, name, key, owner)
+            if not db.execute('SELECT 1 FROM eval_control.confirmation_reads WHERE campaign=%s AND key=%s AND owner=%s', (name, key, owner)).fetchone():
+                raise PermissionError('protected input was not admitted')
+            row = db.execute('UPDATE eval_control.leases SET payload=%s::jsonb WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL AND (%s::timestamptz IS NULL OR clock_timestamp()<%s::timestamptz) RETURNING key', (json.dumps(payload, allow_nan=False), name, key, owner, policy.get('end_at'), policy.get('end_at'))).fetchone()
+            if row is None:
+                raise LeaseLost('confirmation ownership or deadline lost before publication')
+
+    def confirmation(self, name, lease=None):
         """Atomic guard for trusted confirmation runners; tier 1 never calls it."""
         with self.transaction() as db:
             policy, stopped = self.lock(db, name)
             if self.terminal(db, name, policy, stopped):
                 raise PermissionError('campaign stopped or ended')
-            row = db.execute('UPDATE eval_control.campaigns SET confirmation_reads=confirmation_reads+1 WHERE name=%s AND confirmation_reads<%s AND (%s::timestamptz IS NULL OR clock_timestamp()<%s::timestamptz) RETURNING confirmation_reads', (name, policy.get('confirmation_limit', 10), policy.get('end_at'), policy.get('end_at'))).fetchone()
+            predicate, parameters = '', ()
+            if lease is not None:
+                self.fence(db, name, *lease)
+                if not db.execute('SELECT 1 FROM eval_control.confirmation_policies WHERE campaign=%s', (name,)).fetchone():
+                    raise PermissionError('confirmation policy has not been registered')
+                if db.execute('SELECT 1 FROM eval_control.confirmation_reads WHERE campaign=%s AND key=%s AND owner=%s', (name, *lease)).fetchone():
+                    raise PermissionError('protected input attempt already consumed')
+                predicate = ' AND EXISTS (SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL)'
+                parameters = (name, *lease)
+            row = db.execute('UPDATE eval_control.campaigns SET confirmation_reads=confirmation_reads+1 WHERE name=%s AND confirmation_reads<%s AND (%s::timestamptz IS NULL OR clock_timestamp()<%s::timestamptz)' + predicate + ' RETURNING confirmation_reads', (name, policy.get('confirmation_limit', 10), policy.get('end_at'), policy.get('end_at')) + parameters).fetchone()
             if row is None:
+                if lease is not None:
+                    self.fence(db, name, *lease)
                 raise PermissionError('campaign confirmation read limit reached')
+            if lease is not None:
+                db.execute('INSERT INTO eval_control.confirmation_reads(campaign,key,owner,read_ordinal) VALUES (%s,%s,%s,%s)', (name, *lease, row[0]))
             return row[0]
 
     def summary(self, name):

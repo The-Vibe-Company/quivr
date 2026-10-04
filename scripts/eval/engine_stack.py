@@ -46,7 +46,7 @@ def failure(error):
                'ValueError', 'CalledProcessError', 'LeaseLost', 'Unavailable'}
     kind = type(error).__name__
     return {'error_class': kind if kind in classes else 'Exception',
-            'error_message': 'smoke dependency or lifecycle failed; inspect the private remote logs'}
+            'error_message': 'engine dependency or lifecycle failed; inspect the private remote logs'}
 
 
 def search_smoke(client, corpus, keys):
@@ -136,7 +136,7 @@ def stop(process, seconds):
         process.wait(timeout=5)
 
 
-def supervise(cfg):
+def supervise(cfg, command=None):
     """Sandbox PID 1 owns dockerd and the runner, including before create returns.
 
     Keepalives arrive on stdin, independent of smoke stdout/exec activity.
@@ -179,8 +179,8 @@ def supervise(cfg):
                     ready = probe.returncode == 0
                     if ready:
                         with (directory / 'runner.log').open('w') as log:
-                            worker = subprocess.Popen([sys.executable, __file__, '--local', '--settings',
-                                json.dumps(cfg), '--output', str(result_path), '--progress', str(event_path)],
+                            entrypoint = command or [sys.executable, __file__, '--local', '--settings', json.dumps(cfg)]
+                            worker = subprocess.Popen([*entrypoint, '--output', str(result_path), '--progress', str(event_path)],
                                 stdout=log, stderr=log, start_new_session=True)
                 if event_path.exists():
                     event = json.loads(event_path.read_text())
@@ -211,7 +211,7 @@ def supervise(cfg):
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
         print(json.dumps({'event': 'result', **result}), flush=True)
-    return 0 if result['status'] == 'complete' else 2
+    return 0 if result['status'] in ('complete', 'confirmed', 'rejected') else 2
 
 
 def main(argv=None):

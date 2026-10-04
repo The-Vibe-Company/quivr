@@ -4,7 +4,7 @@ This contributor guide starts a CPU VM on Modal, ingests three fixed public
 records through Quivr, checks lexical, semantic and hybrid search, and removes
 the stack. The result contains counts and infrastructure lineage. It is a smoke
 check, with no candidate, held-out data, quality scores or promotion verdict.
-Finalist confirmation is a separate measurement step.
+Use the [finalist confirmation runner](eval-engine-confirmation.md) for held-out measurement and gates.
 
 ## Prepare
 

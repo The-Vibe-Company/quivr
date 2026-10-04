@@ -58,6 +58,31 @@ CREATE TABLE IF NOT EXISTS eval_control.campaign_runs (
   generation integer NOT NULL DEFAULT 0,
   state jsonb NOT NULL DEFAULT '{"resources":{},"trials":{}}'
 );
+-- Cross-tier invariants are separate from the immutable exploration policy.
+-- Different finalists share these invariants, budgets and the campaign counter.
+CREATE TABLE IF NOT EXISTS eval_control.confirmation_policies (
+  campaign text PRIMARY KEY REFERENCES eval_control.campaigns(name),
+  policy jsonb NOT NULL
+);
+-- One protected input opening per fenced owner, even on duplicate delivery.
+-- Failed/uncertain openings remain counted when a new owner retries.
+CREATE TABLE IF NOT EXISTS eval_control.confirmation_reads (
+  campaign text NOT NULL REFERENCES eval_control.campaigns(name),
+  key text NOT NULL,
+  owner text NOT NULL,
+  read_ordinal integer NOT NULL CHECK (read_ordinal BETWEEN 1 AND 10),
+  PRIMARY KEY (campaign, key, owner),
+  UNIQUE (campaign, read_ordinal)
+);
+-- Standalone operator command persists an app intent before remote creation.
+-- Campaign supervisors use their existing resource registry instead.
+CREATE TABLE IF NOT EXISTS eval_control.confirmation_apps (
+  campaign text NOT NULL REFERENCES eval_control.campaigns(name),
+  intent text NOT NULL,
+  owner text NOT NULL,
+  app_id text,
+  PRIMARY KEY (campaign, intent, owner)
+);
 GRANT USAGE ON SCHEMA eval_control TO quivr_eval_control;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA eval_control TO quivr_eval_control;
 COMMIT;
