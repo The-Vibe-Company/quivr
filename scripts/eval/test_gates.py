@@ -4,6 +4,7 @@ Credible regressions: uncorrected significance, excluding a loss after seeing it
 or allowing a good score to override price. Existing scoring tests own only the
 paired test; these exercise the verdict on complete measurement families.
 """
+import hashlib
 import importlib.util
 import unittest
 
@@ -23,7 +24,9 @@ class Verdict(unittest.TestCase):
         def row(scores, price):
             return {'per_query': {'ndcg@10': scores}, 'dataset': {'name': 'tiny', 'split': 'dev', 'fingerprint': 'v1'},
                     'tier': 'direct', 'git_sha': 'a' * 40,
-                    'cost': {'resource_class': 'fixed', 'latency_method': 'fresh serial'},
+                    'cost': {'resource_class': 'fixed', 'latency_method': 'fresh serial',
+                             'latency_sample': {'policy': 'sha256-query-id-v1; max=50', 'query_ids': sorted(scores, key=lambda q: (hashlib.sha256(q.encode()).hexdigest(), q)),
+                                                'warmup_query_ids': ['0']}},
                     'metrics': {'latency_p95_ms': 10, 'cost_per_search_usd': price,
                                 'cost_per_1000_documents_usd': 2}}
         a, b = row(candidate, .0002), row(base, .0003)
@@ -46,6 +49,12 @@ class Verdict(unittest.TestCase):
         self.assertEqual(gates.evaluate({}, policy)['verdict'], 'rejected')
         deep = gates.evaluate({'a': self.pair(cost_per_search_usd=.05)}, dict(policy, profile='deep'))
         self.assertEqual(deep['verdict'], 'better')
+        self.assertEqual(set(good['gates']['latency']['samples']['a']['candidate']['query_ids']), set(map(str, range(20))))
+        for sample in (None, {'policy': 'other', 'query_ids': ['0', '1'], 'warmup_query_ids': ['0']},
+                       {'policy': 'sha256-query-id-v1; max=50', 'query_ids': ['1'], 'warmup_query_ids': ['0']}):
+            mismatch = self.pair()
+            mismatch['candidate']['cost']['latency_sample'] = sample
+            self.assertFalse(gates.evaluate({'a': mismatch}, policy)['gates']['latency']['passed'])
         mismatch = self.pair()
         mismatch['candidate']['per_query']['ndcg@10'].pop('0')
         self.assertEqual(gates.evaluate({'a': mismatch}, policy)['verdict'], 'rejected')

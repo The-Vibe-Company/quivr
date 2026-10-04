@@ -4,6 +4,8 @@ Network adapters are runner-owned so every paid attempt crosses the shared
 admission ledger. Only explicit dev data is accepted by this tier.
 """
 import collections
+import concurrent.futures
+import copy
 import hashlib
 import json
 import logging
@@ -24,6 +26,9 @@ import scoring
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 LOG = logging.getLogger(__name__)
+CACHE_CONCURRENCY = 4
+LATENCY_SAMPLE_SIZE = 50
+LATENCY_SAMPLE_POLICY = 'sha256-query-id-v1; max=50'
 
 
 def digest(value):
@@ -129,7 +134,6 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         raise PermissionError('tier 1 accepts public campaign-dev data only')
     cfg = configuration(cfg)
     indexing_started = time.monotonic()
-    document_embedding_seconds = 0
     doc_ids, query_ids = sorted(data['corpus']), sorted(data['qrels'])
     docs = [(data['corpus'][d].get('title', '') + '\n' if data['corpus'][d].get('title') else '')
             + data['corpus'][d]['text'] for d in doc_ids]
@@ -138,76 +142,117 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     cache = pathlib.Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
     local = direct.E5()
-    def embed(texts, mode):
+    def embed(texts, mode, task_budget=budget, client=hosted):
         if cfg['model'] == direct.E5_MODEL:
             return direct.normalize(local.embed(texts, mode)).tolist()
-        vectors = hosted.embed(cfg['model'], texts, mode, dimensions=cfg['dimensions'])
-        if budget.summary()['reserved_input_tokens']:
+        vectors = client.embed(cfg['model'], texts, mode, dimensions=cfg['dimensions'])
+        if task_budget.summary()['reserved_input_tokens']:
             raise RuntimeError('provider omitted confirmed usage; measurement rejected')
         return direct.normalize(vectors).tolist()
 
     identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
     entries, cache_hits, cache_fills = {}, 0, 0
     semantic = cfg['dense_weight'] > 0
+    document_embedding_seconds = 0
+    index_overhead_seconds = time.monotonic() - indexing_started
     for mode, texts in (('document', docs if semantic else []),
-                        ('query', [data['queries'][q] for q in query_ids] if semantic and not fresh_latency else [])):
+                        ('query', [data['queries'][q] for q in query_ids] if semantic else [])):
+        mode_started = time.monotonic()
         unique = list(dict.fromkeys(texts))
-        for start in range(0, len(unique), control_store.LEASE_BATCH_SIZE):
-            chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
-            keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
-                     'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
-            started = time.monotonic()
-            # Cache leases outlive the maximum bounded Modal invocation.
-            pending = []
-            try:
-                # A cache validation failure must also roll back new claims.
-                with budget.store.claim_batch(budget.campaign, keyed, ttl=86400, require_available=True) as claims:
-                    for cache_key, text in keyed.items():
-                        claim = claims[cache_key]
-                        if claim['status'] == 'done':
-                            meta = claim['payload']
-                            path = cache / meta['filename']
-                            if not path.exists():
-                                raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
-                            entry = json.loads(path.read_text())
-                            if digest(entry) != meta['digest']:
-                                raise RuntimeError('embedding cache digest mismatch')
-                            entries[(mode, text)] = entry
-                            cache_hits += 1
-                        else:
-                            pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
-                            pending.append((text, pieces, cache_key, claim['owner']))
-            except control_store.LeaseBusy:
-                raise RuntimeError('embedding cache fill already leased; retry after completion') from None
-            LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
-            if pending:
-                budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=86400)
-                budget.store.renew(budget.campaign, *budget.lease)
-                texts = [piece for _, pieces, _, _ in pending for piece in pieces]
-                before = budget.summary()['confirmed_input_tokens']
+        # Local inference stays serial; hosted requests overlap across a bounded
+        # wave. Claims, file persistence, Volume commits and publication stay on
+        # this thread. Never enqueue the entire dataset.
+        concurrency = CACHE_CONCURRENCY if mode == 'document' and cfg['model'] != direct.E5_MODEL else 1
+        wave_size = concurrency * control_store.LEASE_BATCH_SIZE
+        for wave_start in range(0, len(unique), wave_size):
+            wave = []
+            for start in range(wave_start, min(wave_start + wave_size, len(unique)), control_store.LEASE_BATCH_SIZE):
+                chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
+                keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
+                         'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
                 started = time.monotonic()
-                vectors = embed(texts, mode)
+                pending = []
+                try:
+                    # A cache validation failure also rolls back new claims in
+                    # this chunk. No paid work starts before the wave validates.
+                    with budget.store.claim_batch(budget.campaign, keyed, ttl=86400, require_available=True) as claims:
+                        for cache_key, text in keyed.items():
+                            claim = claims[cache_key]
+                            if claim['status'] == 'done':
+                                meta = claim['payload']
+                                path = cache / meta['filename']
+                                if not path.exists():
+                                    raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
+                                entry = json.loads(path.read_text())
+                                if digest(entry) != meta['digest']:
+                                    raise RuntimeError('embedding cache digest mismatch')
+                                entries[(mode, text)] = entry
+                                cache_hits += 1
+                            else:
+                                pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
+                                pending.append((text, pieces, cache_key, claim['owner']))
+                except control_store.LeaseBusy:
+                    raise RuntimeError('embedding cache fill already leased; retry after completion') from None
+                LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
+                if pending:
+                    budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=86400)
+                    budget.store.renew(budget.campaign, *budget.lease)
+                    wave.append(pending)
+            if wave:
+                task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease) for _ in wave]
+                def fill(item):
+                    pending, task_budget = item
+                    texts = [piece for _, pieces, _, _ in pending for piece in pieces]
+                    started = time.monotonic()
+                    if cfg['model'] == direct.E5_MODEL:
+                        vectors = embed(texts, mode)
+                    else:
+                        # Usage and unknown reservations belong to this task,
+                        # never a delta of a concurrently changing global sum.
+                        client = copy.copy(hosted)
+                        client.budget = task_budget
+                        vectors = embed(texts, mode, task_budget, client)
+                    return vectors, task_budget.summary()['confirmed_input_tokens'], time.monotonic() - started
+                started = time.monotonic()
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+                        futures = [pool.submit(fill, item) for item in zip(wave, task_budgets)]
+                        filled = [future.result() for future in futures]
+                finally:
+                    # Executor exit drains admitted attempts even on failure.
+                    # Include their confirmed and uncertain charges in evidence.
+                    for task_budget in task_budgets:
+                        budget.calls.extend(task_budget.calls)
                 seconds = time.monotonic() - started
                 if mode == 'document':
                     document_embedding_seconds += seconds
-                tokens = budget.summary()['confirmed_input_tokens'] - before
-                bound = embeddings.estimate_tokens(texts)
-                offset, publication = 0, {}
-                for text, pieces, cache_key, owner in pending:
-                    fraction = embeddings.estimate_tokens(pieces) / bound
-                    entry = {'vectors': vectors[offset:offset + len(pieces)], 'tokens': tokens * fraction,
-                             'embedding_seconds': seconds * fraction}
-                    filename = digest([cache_key, owner]) + '.json'
-                    results.save(cache / filename, entry)
-                    publication[cache_key] = (owner, {'filename': filename, 'digest': digest(entry)})
-                    entries[(mode, text)] = entry
-                    offset += len(pieces)
-                # SQL can only reference files after the entire chunk is durable.
-                flush()
-                budget.store.publish_many(budget.campaign, publication)
-                cache_fills += len(pending)
+                # Attribute overlapping provider time as wall time, without
+                # charging parallel durations multiple times. Cached metadata
+                # retains this original attribution for later repricing.
+                total_seconds = sum(item[2] for item in filled)
+                for pending, (vectors, tokens, task_seconds) in zip(wave, filled):
+                    texts = [piece for _, pieces, _, _ in pending for piece in pieces]
+                    bound = embeddings.estimate_tokens(texts)
+                    attributed_seconds = seconds * task_seconds / total_seconds if total_seconds else 0
+                    offset, publication = 0, {}
+                    for text, pieces, cache_key, owner in pending:
+                        fraction = embeddings.estimate_tokens(pieces) / bound
+                        entry = {'vectors': vectors[offset:offset + len(pieces)], 'tokens': tokens * fraction,
+                                 'embedding_seconds': attributed_seconds * fraction}
+                        filename = digest([cache_key, owner]) + '.json'
+                        results.save(cache / filename, entry)
+                        publication[cache_key] = (owner, {'filename': filename, 'digest': digest(entry)})
+                        entries[(mode, text)] = entry
+                        offset += len(pieces)
+                    # SQL references files only after this chunk is durable.
+                    flush()
+                    budget.store.publish_many(budget.campaign, publication)
+                    cache_fills += len(pending)
             LOG.info('cache progress processed=%d total=%d hits=%d filled=%d',
-                     start + len(chunk), len(unique), cache_hits, cache_fills)
+                     min(wave_start + wave_size, len(unique)), len(unique), cache_hits, cache_fills)
+        if mode == 'document':
+            index_overhead_seconds += max(0, time.monotonic() - mode_started - document_embedding_seconds)
+    assembly_started = time.monotonic()
     piece_vectors, owners, index_tokens, index_seconds = [], [], 0., 0.
     for owner, text in enumerate(docs):
         if not semantic:
@@ -217,43 +262,57 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         owners.extend([owner] * len(entry['vectors']))
         index_tokens += entry['tokens']
         index_seconds += entry['embedding_seconds']
-    # Include chunking/cache processing; do not charge fresh embedding time twice.
-    index_seconds += max(0, time.monotonic() - indexing_started - document_embedding_seconds)
+    # Include document preparation/cache processing, excluding quality queries.
+    index_seconds += index_overhead_seconds + max(0, time.monotonic() - assembly_started)
     ranking, latencies, query_prices = {}, [], []
     provider_rate = prices.get(cfg['model'], 0) / 1_000_000
-    # One deterministic, budgeted warmup exercises the same serving path on both
-    # configurations. Its charges are in the ledger, outside per-search metrics.
-    warmup = [query_ids[0]] if fresh_latency else []
-    for position, qid in enumerate(warmup + query_ids):
+
+    def search(qid, fresh):
         budget.store.renew(budget.campaign, *budget.lease)
         query = data['queries'][qid]
         before = budget.summary()['confirmed_cost_usd']
         started = time.monotonic()
         if not semantic:
-            vector, query_tokens = None, 0
-        elif fresh_latency:
+            vector, query_tokens, embedding_seconds = None, 0, 0
+        elif fresh:
             vector = embed([query], 'query')[0]
+            query_tokens, embedding_seconds = 0, 0
         else:
             entry = entries[('query', query)]
             vector = entry['vectors'][0]
-            query_tokens = entry['tokens']
+            query_tokens, embedding_seconds = entry['tokens'], entry['embedding_seconds']
         selected = rank(docs, doc_ids, query, vector, piece_vectors, owners, cfg)
         if cfg['reranker'] == 'jev':
             if not rerank_key:
                 raise ValueError('reranker secret is absent')
             selected = rerank(query, {d: docs[doc_ids.index(d)] for d in selected}, budget, rerank_key, prices['jev-1.13.0'])
         elapsed = time.monotonic() - started
-        if position < len(warmup):
-            continue
-        if (position - len(warmup) + 1) % 10 == 0 or position == len(warmup + query_ids) - 1:
-            LOG.info('search progress completed=%d total=%d elapsed_seconds=%.3f',
-                     position - len(warmup) + 1, len(query_ids), time.monotonic() - indexing_started)
-        ranking[qid] = selected[:10]
-        latencies.append(1000 * elapsed)
         spend = budget.summary()['confirmed_cost_usd'] - before
-        # Cached query accounting is repriced, never zeroed by avoiding a call.
-        query_prices.append(spend + (0 if fresh_latency or not semantic else query_tokens * provider_rate)
-                            + (elapsed + (0 if fresh_latency or not semantic else entry['embedding_seconds'])) * compute_rate)
+        return selected[:10], elapsed, spend + query_tokens * provider_rate + (elapsed + embedding_seconds) * compute_rate
+
+    # Quality always covers every judged query, using batched query vectors.
+    for position, qid in enumerate(query_ids, 1):
+        selected, elapsed, price = search(qid, False)
+        ranking[qid] = selected
+        if not fresh_latency:
+            query_prices.append(price)
+        if position % 10 == 0 or position == len(query_ids):
+            LOG.info('search progress completed=%d total=%d elapsed_seconds=%.3f',
+                     position, len(query_ids), time.monotonic() - indexing_started)
+    sample = None
+    if fresh_latency:
+        timed_ids = sorted(query_ids, key=lambda q: (hashlib.sha256(q.encode()).hexdigest(), q))[:LATENCY_SAMPLE_SIZE]
+        sample = {'policy': LATENCY_SAMPLE_POLICY, 'query_ids': timed_ids, 'warmup_query_ids': [query_ids[0]]}
+        # Warmup exercises the same fresh serving path on both configurations.
+        # Its charges stay in the ledger, outside per-search metrics.
+        search(query_ids[0], True)
+        for position, qid in enumerate(timed_ids, 1):
+            _, elapsed, price = search(qid, True)
+            latencies.append(1000 * elapsed)
+            query_prices.append(price)
+            if position % 10 == 0 or position == len(timed_ids):
+                LOG.info('latency progress completed=%d total=%d elapsed_seconds=%.3f',
+                         position, len(timed_ids), time.monotonic() - indexing_started)
     scores = scoring.score(data['qrels'], ranking)
     ordered = sorted(latencies)
     percentile = lambda fraction: ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
@@ -264,7 +323,7 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                 'cost_per_1000_documents_usd': (index_tokens * provider_rate + index_seconds * compute_rate) * 1000 / len(docs)},
             'per_query': scores['per_query'], 'cost': {'provider': budget.summary(),
                 'index_tokens_attributed': index_tokens, 'index_embedding_seconds_attributed': index_seconds,
-                'cache_hits': cache_hits, 'latency_method': 'serial fresh query embedding+retrieval+rerank; one fixed first-query warmup' if fresh_latency else 'cached exploration; p95 unavailable',
+                'cache_hits': cache_hits, 'latency_sample': sample, 'latency_method': 'serial fresh query embedding+retrieval+rerank; fixed hash sample up to 50; one fixed first-query warmup' if fresh_latency else 'cached exploration; p95 unavailable',
                 'price_basis': 'frozen rates, original embedding usage; includes attributable compute'},
             'machine': socket.gethostname()}
 

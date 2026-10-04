@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import tempfile
+import threading
 import unittest
 import uuid
 from unittest import mock
@@ -121,6 +122,126 @@ class Trial(unittest.TestCase):
             self.assertEqual(network.call_count, before + 1)
             self.assertEqual(commit.call_count, 1)
             self.assertEqual(recovered['cost']['cache_hits'], 130)
+
+    def test_parallel_fills_and_full_quality_use_a_fixed_fresh_latency_sample(self):
+        # Own the performance contract at the real runner/SQL boundary. A
+        # barrier proves overlap without timing assertions; transport counts
+        # catch serial quality embeddings and unsampled latency regressions.
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        campaign = uuid.uuid4().hex
+        store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
+        lease = store.claim(campaign, 'trial')
+        budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+        cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
+        prices = {'Cohere-Embed-V5-Fast': .08}
+        client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+        data = {'corpus': {str(i): {'text': 'passage ' + str(i)} for i in range(513)},
+                'queries': {f'q{i:02}': f'question {i}' for i in range(61)},
+                'qrels': {f'q{i:02}': {'0': 1} for i in range(61)}}
+        dataset = {'name': 'tiny', 'version': '1', 'split': 'dev', 'private': False}
+        barrier, lock = threading.Barrier(4), threading.Lock()
+        calls, active, peak = [], 0, 0
+        def respond(request, timeout):
+            nonlocal active, peak
+            body = json.loads(request.data)
+            with lock:
+                calls.append(body)
+                active += 1
+                peak = max(peak, active)
+                document_call = sum(c['input_type'] == 'search_document' for c in calls)
+            # First attempt of each document chunk meets all four workers.
+            if body['input_type'] == 'search_document' and document_call <= 4:
+                barrier.wait(timeout=5)
+            with lock:
+                active -= 1
+            count = len(body['texts'])
+            return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                'meta': {'billed_units': {'input_tokens': 7 if body['input_type'] == 'search_query' and count == 1 else count}}}).encode())
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond):
+            measured = search_trial.measure(cfg, data, dataset, temp, budget, client, prices, 0)
+            self.assertEqual(peak, 4)
+            self.assertAlmostEqual(measured['cost']['index_tokens_attributed'], 513)
+            self.assertEqual(measured['cost']['provider']['reserved_input_tokens'], 0)
+            self.assertEqual(measured['cost']['provider']['confirmed_input_tokens'], 931)
+            self.assertEqual(len(measured['per_query']['ndcg@10']), 61)
+            query_calls = [c['texts'] for c in calls if c['input_type'] == 'search_query']
+            expected_ids = sorted(data['qrels'], key=lambda q: (hashlib.sha256(q.encode()).hexdigest(), q))[:50]
+            self.assertEqual(query_calls[0], [data['queries'][q] for q in sorted(data['qrels'])])
+            self.assertEqual(query_calls[1:], [[data['queries']['q00']]] + [[data['queries'][q]] for q in expected_ids])
+            self.assertEqual(measured['cost']['latency_sample']['query_ids'], expected_ids)
+            self.assertEqual(measured['cost']['latency_sample']['warmup_query_ids'], ['q00'])
+            self.assertIsNotNone(measured['metrics']['latency_p95_ms'])
+            self.assertAlmostEqual(measured['metrics']['cost_per_search_usd'], 7 * .08 / 1_000_000)
+
+    def test_index_price_includes_preparation_but_excludes_quality_query_fill(self):
+        # Own indexing phase boundaries, which call-count/usage tests cannot
+        # see. Dependency work advances a fake clock; no wall-clock wait.
+        clock = [0.]
+        class Title(str):
+            def __add__(self, other):
+                clock[0] += 5
+                return super().__add__(other)
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        campaign = uuid.uuid4().hex
+        store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
+        lease = store.claim(campaign, 'trial')
+        budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+        cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
+        prices = {'Cohere-Embed-V5-Fast': .08}
+        client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+        data = {'corpus': {'a': {'title': Title('a'), 'text': 'apple'}, 'b': {'title': Title('b'), 'text': 'pear'}},
+                'queries': {'q': 'question'}, 'qrels': {'q': {'a': 1}}}
+        def respond(request, timeout):
+            body = json.loads(request.data)
+            clock[0] += 7 if body['input_type'] == 'search_document' else 1000
+            count = len(body['texts'])
+            return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                'meta': {'billed_units': {'input_tokens': count}}}).encode())
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond), \
+                mock.patch.object(search_trial.time, 'monotonic', side_effect=lambda: clock[0]):
+            measured = search_trial.measure(cfg, data, {'split': 'dev', 'private': False}, temp,
+                                           budget, client, prices, .001, fresh_latency=False)
+        self.assertAlmostEqual(measured['metrics']['cost_per_1000_documents_usd'], 8.50008)
+
+    def test_parallel_missing_usage_drains_accounting_without_publishing(self):
+        # A sibling in-flight reservation must not reject a valid response,
+        # but one response without usage rejects the whole unpublished wave.
+        import psycopg
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        campaign = uuid.uuid4().hex
+        store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
+        lease = store.claim(campaign, 'trial')
+        budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+        cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
+        prices = {'Cohere-Embed-V5-Fast': .08}
+        client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+        data = {'corpus': {str(i): {'text': 'passage ' + str(i)} for i in range(512)},
+                'queries': {'q': 'question'}, 'qrels': {'q': {'0': 1}}}
+        barrier = threading.Barrier(4)
+        first_calls, lock = set(), threading.Lock()
+        def respond(request, timeout):
+            body = json.loads(request.data)
+            first = body['texts'][0]
+            with lock:
+                first_attempt = threading.get_ident() not in first_calls
+                first_calls.add(threading.get_ident())
+            if first_attempt:
+                barrier.wait(timeout=5)
+            count = len(body['texts'])
+            return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                'meta': {'billed_units': {} if first == 'passage 0' else {'input_tokens': count}}}).encode())
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond):
+            commit = mock.Mock()
+            with self.assertRaisesRegex(RuntimeError, 'omitted confirmed usage'):
+                search_trial.measure(cfg, data, {'split': 'dev', 'private': False}, temp, budget, client,
+                                     prices, .001, flush=commit)
+            commit.assert_not_called()
+            self.assertEqual(budget.summary()['admitted_calls'], 8)
+            self.assertEqual(budget.summary()['confirmed_input_tokens'], 448)
+            self.assertGreater(budget.summary()['reserved_input_tokens'], 0)
+            with psycopg.connect(store.dsn) as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND payload IS NOT NULL', (campaign,)).fetchone()[0], 0)
+            self.assertGreater(store.summary(campaign)['provider']['unknown_usd'], 0)
 
     def test_cached_sweep_reprices_usage_and_logs_real_scores_without_duplicate_provider_calls(self):
         store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])

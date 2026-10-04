@@ -109,29 +109,28 @@ MLDR-fr, WebFAQ-fr, TREC-COVID and MKQA-fr are diagnostic because of saturation,
 small samples or proxy questions; restricted-licence sets are also diagnostic.
 Their scores remain reported. Diagnostics cannot supply the qualifying gain.
 
-Fresh searches run serially after one fixed first-query warmup. Warmup spend is
-in the campaign ledger and excluded from per-search metrics. Their p95 includes query embedding,
-retrieval and reranking and must be at most 1.2 times baseline. Both configurations
-use the same resource class. `--cached-exploration` reuses query vectors for cheap
-fusion sweeps; it reports no measured p95 and cannot pass the latency gate.
+Quality covers every query with relevance judgments using batched, cached embeddings. Fresh latency
+uses up to 50 serial queries, ordered by SHA-256 of the ID (ID breaks ties), after
+warming up the lexicographically first judged ID, which may also be timed.
+Both configurations use the same sample and resource class.
+`cost.latency_sample` records ordered timed IDs, warmup ID and policy;
+`gates.latency.samples` echoes both and rejects missing or mismatched evidence.
+P95 includes query embedding, retrieval and reranking; its limit is 1.2 times baseline.
+Serving price uses the fresh sample; warmup charges stay outside per-search metrics.
+`--cached-exploration` reuses query vectors and cannot pass the unmeasured latency gate.
 
 Price limits are $0.0005/search for `default`, $0.05/search for `deep`, and
-$10/1,000 original documents. Configure `gates` to override `min_gain`,
-`latency_ratio`, `search_usd` or `index_usd`. Serving prices include query
-embedding, reranking and attributable compute; indexing includes every document
-window and indexing compute. Cached usage is repriced, rather than treated as
-free serving. Token/time attribution across a cached batch is proportional to
-its input bound; campaign confirmed provider usage remains exact.
+$10/1,000 original documents. Override `min_gain`, `latency_ratio`, `search_usd` or
+`index_usd` in `gates`. Serving includes query embedding, reranking and compute.
+Indexing covers all document windows, excluding quality-query preparation. Cached
+usage is repriced by input bounds and parallel wall time; campaign usage stays exact.
 
-Provider admission and planning share the UTF-8 byte-plus-eight-token bound.
-Each confirmed response releases unused reservation. Failed/unknown attempts
-remain reserved; a provider exceeding the supported bound stops the campaign.
-A token reservation is multiplied by the frozen provider price. Confirmed usage
-above the bound is charged at its actual amount before stopping future work.
-A daily cap hit stops that ledger for its UTC day, even if a later settlement
-releases money. Other campaigns have independent caps. Exact reported agent
-input/output tokens may be supplied as `agent_token_usage`; absent usage remains
-unknown, and agent tokens are never capped or inferred from text.
+Admission and planning share the UTF-8 byte-plus-eight-token bound at frozen prices.
+Confirmed responses release unused reservations; failed/unknown attempts stay reserved.
+Usage above the bound is charged at its actual amount and stops the campaign.
+A daily cap hit stops that ledger for its UTC day, even after later settlements.
+Other campaigns have independent caps. Exact reported `agent_token_usage` contains
+input/output tokens; absent usage remains unknown, never inferred or capped.
 
 **The compute cap covers runner reservations, not the full Modal invoice.**
 It reserves configured CPU/memory cost for the enforced execution and startup
@@ -141,19 +140,20 @@ compute charge, including queue/transport time. Builds, Volume storage and other
 account charges need separate operator budgets. Bounds depend on correct rates
 and provider token limits; observed overages cannot undo already incurred bills.
 
-Tier 1 accepts public campaign-dev sets only. An upstream benchmark's original
-`test` partition is distinct from a campaign's frozen heldout. No tier-1 command
-can consume campaign-heldout data. The store's maximum-ten confirmation counter
+Tier 1 accepts public campaign-dev sets only; an upstream `test` partition differs
+from campaign-heldout data, which tier 1 cannot consume. The store's maximum-ten confirmation counter
 is reserved for a future trusted full-engine confirmation runner.
 
 ## Recover and validate
 
-The Volume `quivr-eval-embeddings-cache` holds immutable vectors and the results
-outbox. Chunks commit files before SQL publication makes them reusable.
-Lost ownership rolls back publication. Logs show counts and elapsed time, without texts.
-New measurements replay the committed outbox; re-running recovers completed
-evidence and pending tracking writes. Preserve the Volume and schema until
-results sync and the campaign is archived. Never delete unknown reservations.
+The Volume `quivr-eval-embeddings-cache` holds immutable vectors and the outbox.
+Hosted document fills overlap at most four 128-entry cache chunks; each provider
+attempt reserves and settles independently. Local e5 and quality-query fills stay
+serial and batched. Claims and validation precede paid work; commits and fenced
+publication stay serial. Failed waves drain attempts and retain uncertain charges.
+Chunks commit before publication; lost ownership rolls it back. Logs exclude texts.
+Reruns recover evidence and tracking writes. Keep the Volume and schema until
+results sync and campaign archival; never delete unknown reservations.
 
 Killing the dispatcher does not guarantee cancellation. Remote work may continue
 through `startup_seconds` and `max_seconds`; unknown compute stays charged.

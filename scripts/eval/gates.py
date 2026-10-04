@@ -1,5 +1,6 @@
 """Conservative four-gate decisions for complete, paired measurement families."""
 import math
+import hashlib
 
 import scoring
 
@@ -29,10 +30,13 @@ def evaluate(pairs, policy):
               'search_usd': .05 if policy['profile'] == 'deep' else .0005,
               **policy.get('gates', {})}
     stats, incomplete = {}, set(names) - set(pairs)
+    samples, comparable_samples = {}, True
     for name in names:
         if name not in pairs:
             continue
         candidate, baseline = (pairs[name][side] for side in ('candidate', 'baseline'))
+        samples[name] = {side: pairs[name][side].get('cost', {}).get('latency_sample')
+                         for side in ('candidate', 'baseline')}
         if (candidate.get('dataset') != baseline.get('dataset')
                 or not candidate.get('dataset') or candidate.get('tier') != baseline.get('tier')
                 or not candidate.get('tier') or not candidate.get('git_sha')
@@ -48,6 +52,10 @@ def evaluate(pairs, policy):
         if not a or set(a) != set(b) or any(not finite(v) or v > 1 for v in [*a.values(), *b.values()]):
             incomplete.add(name)
             continue
+        expected = {'policy': 'sha256-query-id-v1; max=50',
+                    'query_ids': sorted(a, key=lambda q: (hashlib.sha256(q.encode()).hexdigest(), q))[:50],
+                    'warmup_query_ids': [sorted(a)[0]]}
+        comparable_samples &= all(sample == expected for sample in samples[name].values())
         stats[name] = {**scoring.paired(a, b),
                        'role': 'diagnostic' if names[name]['diagnostic'] else 'gate',
                        'reason': names[name].get('reason')}
@@ -58,7 +66,7 @@ def evaluate(pairs, policy):
     eligible = [s for s in stats.values() if s['role'] == 'gate']
     quality = not incomplete and any(s['delta'] >= limits['min_gain'] and s['adjusted_p'] < .05 for s in eligible)
     no_loss = not incomplete and bool(eligible) and not any(s['delta'] < 0 and s['adjusted_p'] < .05 for s in eligible)
-    latency, price, cheaper = not incomplete, not incomplete, True
+    latency, price, cheaper = not incomplete and comparable_samples, not incomplete, True
     for name in names:
         if name not in pairs:
             continue
@@ -72,7 +80,7 @@ def evaluate(pairs, policy):
     outcome = {
         'quality': {'passed': quality, 'reason': 'requires corrected gain >= threshold', 'min_gain': limits['min_gain']},
         'no_loss': {'passed': no_loss, 'reason': 'no corrected significant loss on eligible sets'},
-        'latency': {'passed': latency, 'reason': 'requires comparable measured p95', 'max_ratio': limits['latency_ratio']},
+        'latency': {'passed': latency, 'reason': 'requires comparable measured p95', 'max_ratio': limits['latency_ratio'], 'samples': samples},
         'price': {'passed': price, 'reason': 'unknown or excessive serving/indexing price rejects',
                   'max_search_usd': limits['search_usd'], 'max_index_usd_per_1000_documents': limits['index_usd']}}
     passed = all(g['passed'] for g in outcome.values())
