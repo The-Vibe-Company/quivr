@@ -1,0 +1,5 @@
+# Supervisor only; measurements install requirements-modal.txt on rented machines.
+optuna==4.5.0       # MIT; persistent multi-objective ask/tell study
+psycopg[binary]==3.3.4
+modal==1.6.1
+PyYAML==6.0.3

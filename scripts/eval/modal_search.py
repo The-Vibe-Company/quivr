@@ -45,7 +45,8 @@ def policy(value):
                 'max_seconds': 3600, 'startup_seconds': 300, 'baseline': {},
                 'prices': {**direct_bakeoff.PRICES, 'jev-1.13.0': .042}, 'gates': {},
                 'agent_token_usage': None}
-    allowed = set(defaults) | {'experiment', 'sets', 'modal_usd_per_second', 'price_revision'}
+    allowed = set(defaults) | {'experiment', 'sets', 'modal_usd_per_second', 'price_revision',
+                               'provider_total_usd', 'modal_total_usd', 'end_at', 'confirmation_limit'}
     if not isinstance(value, dict) or set(value) - allowed:
         raise ValueError('unknown campaign policy fields')
     cfg = {**defaults, **value}
@@ -94,6 +95,14 @@ def policy(value):
             raise ValueError('diagnostic datasets require an explicit reason')
         if entry['reason'] is not None and not re.fullmatch(r'[A-Za-z0-9 .;%-]+', entry['reason']):
             raise ValueError('diagnostic reason must be plain words, without secrets')
+    for field in ('provider_total_usd', 'modal_total_usd'):
+        if field in cfg and control_store.money(cfg[field]) <= 0:
+            raise ValueError('total caps must be positive')
+    if 'end_at' in cfg:
+        cfg['end_at'] = control_store.end_timestamp(cfg['end_at'])
+    if 'confirmation_limit' in cfg and (type(cfg['confirmation_limit']) is not int
+                                      or not 1 <= cfg['confirmation_limit'] <= 10):
+        raise ValueError('confirmation limit must be 1..10')
     usage = cfg['agent_token_usage']
     if usage is not None and (not isinstance(usage, dict) or set(usage) != {'input_tokens', 'output_tokens'}
             or any(type(v) is not int or v < 0 for v in usage.values())):
@@ -101,9 +110,13 @@ def policy(value):
     return cfg
 
 
+def frozen_policy(policy, sha, scorer_digest, fresh_latency=True):
+    return {**policy, 'git_sha': sha, 'scorer_digest': scorer_digest,
+            'registry_digest': search_trial.digest(public_sets.SETS), 'fresh_latency': fresh_latency}
+
+
 def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, outbox, fresh_latency):
-    frozen = {**policy, 'git_sha': sha, 'scorer_digest': scorer_digest,
-              'registry_digest': search_trial.digest(public_sets.SETS), 'fresh_latency': fresh_latency}
+    frozen = frozen_policy(policy, sha, scorer_digest, fresh_latency)
     store.campaign(campaign, frozen)
     key = search_trial.digest({'config': cfg, 'dataset': name, 'registry': public_sets.SETS[name],
                               'tier': 'direct', 'sha': sha, 'scorer': scorer_digest, 'fresh_latency': fresh_latency})
@@ -219,7 +232,8 @@ def remote_trial(request):
         return {'status': 'failed', 'reason': 'direct measurement failed; uncertain charges retained'}
 
 
-def launch(policy, candidate, campaign, outbox, fresh_latency):
+def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quivr-search-measurement',
+           on_app=lambda identity: None, check=lambda: None):
     import modal
     if subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=ROOT).returncode:
         raise ValueError('measurement code must be committed before live dispatch')
@@ -231,7 +245,7 @@ def launch(policy, candidate, campaign, outbox, fresh_latency):
     image = (modal.Image.debian_slim(python_version='3.12')
              .pip_install_from_requirements(str(ROOT / 'scripts/eval/requirements-modal.txt'))
              .add_local_dir(ROOT, '/repo', ignore=ignored))
-    app = modal.App('quivr-search-measurement')
+    app = modal.App(app_name)
     secrets = [modal.Secret.from_name('quivr-eval-results'), modal.Secret.from_name('quivr-eval-embeddings')]
     if any(c['reranker'] == 'jev' for c in (candidate, policy['baseline'])):
         secrets.append(modal.Secret.from_name('quivr-eval-rerank'))
@@ -245,22 +259,28 @@ def launch(policy, candidate, campaign, outbox, fresh_latency):
     scorer_digest = 'sha256:' + search_trial.digest({name: (ROOT / 'scripts/eval' / name).read_text()
         for name in ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py')})
     pairs, work = {}, {}
+    check()
     with app.run():
+        on_app(app.app_id)
         for name in policy['sets']:
             pair = {}
             for side, cfg in (('baseline', policy['baseline']), ('candidate', candidate)):
+                check()
                 outcome = dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, remote.remote, outbox, fresh_latency)
                 work[name + '/' + side] = {k: v for k, v in outcome.items() if k != 'record'}
                 if outcome['status'] in ('complete', 'reused'):
                     row = outcome['record']
                     pair[side] = {**row, 'per_query': {key.replace('_at_', '@'): values for key, values in row['per_query'].items()},
                                   'metrics': {key.replace('_at_', '@'): value for key, value in row['metrics'].items()}}
-                elif outcome['status'] == 'capped':
-                    return {'status': 'capped', 'reason': outcome['reason'], 'work': work,
+                elif outcome['status'] in ('capped', 'leased'):
+                    return {'status': outcome['status'], 'reason': outcome['reason'], 'work': work,
                             'ledger': store.summary(campaign), 'compute_cap_notice': COMPUTE_NOTICE}
             if len(pair) == 2:
                 pairs[name] = pair
-    return {**gates.evaluate(pairs, policy), 'work': work, 'ledger': store.summary(campaign),
+    aggregate_sets = {name: {side: {key: row.get('metrics', {}).get(key.replace('_at_', '@'), row.get('metrics', {}).get(key))
+                            for key in ('ndcg_at_10', 'latency_p95_ms', 'cost_per_search_usd', 'cost_per_1000_documents_usd')}
+                            for side, row in pair.items()} for name, pair in pairs.items()}
+    return {**gates.evaluate(pairs, policy), 'work': work, 'aggregate_sets': aggregate_sets, 'ledger': store.summary(campaign),
             'agent_token_usage': policy['agent_token_usage'], 'compute_cap_notice': COMPUTE_NOTICE}
 
 

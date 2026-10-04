@@ -101,6 +101,47 @@ class Control(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.campaign(self.name, dict(self.policy, provider_daily_usd=2))
 
+    def test_total_end_and_stop_guard_paid_work_and_confirmation(self):
+        # New lifetime contract: the old daily tests cannot see cross-day
+        # totals, deadlines or stopped confirmation. Real SQL owns races.
+        import psycopg
+        bounded = uuid.uuid4().hex
+        self.store.campaign(bounded, {**self.policy, 'provider_total_usd': .7,
+                                     'modal_total_usd': 2, 'confirmation_limit': 2})
+        first = self.store.reserve(bounded, 'provider', .5)
+        self.store.settle(first, .5)
+        # Move the charged attempt to yesterday without waiting for midnight.
+        with psycopg.connect(self.dsn) as db:
+            db.execute("UPDATE eval_control.reservations SET day=day-1 WHERE campaign=%s", (bounded,))
+        def attempt(_):
+            try:
+                return self.store.reserve(bounded, 'provider', .15)
+            except embeddings.BudgetExceeded:
+                return None
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            admitted = [r for r in pool.map(attempt, range(4)) if r]
+        self.assertEqual(len(admitted), 1)
+        self.assertAlmostEqual(self.store.summary(bounded)['provider']['charged_usd'], .65)
+        with self.assertRaises(PermissionError):
+            self.store.confirmation(bounded)
+        expired = uuid.uuid4().hex
+        self.store.campaign(expired, {**self.policy, 'end_at': '2000-01-01T00:00:00+00:00'})
+        with self.assertRaises(embeddings.BudgetExceeded):
+            self.store.reserve(expired, 'modal', .1)
+        with self.assertRaises(PermissionError):
+            self.store.confirmation(expired)
+        limited = uuid.uuid4().hex
+        self.store.campaign(limited, {**self.policy, 'confirmation_limit': 2})
+        self.assertEqual(self.store.confirmation(limited), 1)
+        self.assertEqual(self.store.confirmation(limited), 2)
+        with self.assertRaises(PermissionError):
+            self.store.confirmation(limited)
+        self.store.stop(limited, 'operator stop')
+        with self.assertRaises(embeddings.BudgetExceeded):
+            self.store.reserve(limited, 'modal', .01)
+        with self.assertRaises(PermissionError):
+            self.store.confirmation(limited)
+
     def test_lease_race_and_expiry_fence_publication_before_outbox_upload(self):
         with ThreadPoolExecutor(max_workers=8) as pool:
             claims = list(pool.map(lambda _: self.store.claim(self.name, 'candidate'), range(8)))

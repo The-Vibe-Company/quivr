@@ -67,6 +67,7 @@
               "run-quivr/configure-alert-fields",
               "run-quivr/switch-a-vector-model",
               "run-quivr/record-search-measurements",
+              "run-quivr/run-search-campaign",
               "run-quivr/backfill-a-vector-space",
               "run-quivr/reprocess-quarantined-versions",
               "run-quivr/search-profiles",

@@ -47,6 +47,17 @@ CREATE TABLE IF NOT EXISTS eval_control.attempts (
   status text NOT NULL CHECK (status IN ('capped', 'failed')),
   recorded_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+-- Supervisor state is separate from canonical measurement leases/results.
+CREATE TABLE IF NOT EXISTS eval_control.campaign_runs (
+  campaign text PRIMARY KEY REFERENCES eval_control.campaigns(name),
+  spec jsonb NOT NULL,
+  git_sha text NOT NULL,
+  scorer_digest text NOT NULL,
+  owner text,
+  expires_at timestamptz,
+  generation integer NOT NULL DEFAULT 0,
+  state jsonb NOT NULL DEFAULT '{"resources":{},"trials":{}}'
+);
 GRANT USAGE ON SCHEMA eval_control TO quivr_eval_control;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA eval_control TO quivr_eval_control;
 COMMIT;

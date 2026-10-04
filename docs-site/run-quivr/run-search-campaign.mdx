@@ -1,0 +1,83 @@
+---
+title: Run a bounded search campaign
+description: Explore search settings with persistent results, spending caps and recoverable cleanup.
+keywords: [search quality, evaluation, campaigns, Modal, Optuna]
+---
+
+Run a campaign to compare public search settings over several days. It keeps the
+best quality, cost and latency trade-offs while enforcing daily and total spending
+caps. This stage explores candidates; confirmation and promotion are separate.
+
+## Prerequisites
+
+Use Python 3.12 and a committed Quivr checkout. Install
+`scripts/eval/requirements-campaign.txt`. Your operator supplies Modal access,
+measurement secrets, aggregate MLflow credentials and these environment variables:
+
+- `EVAL_CONTROL_DATABASE_URL`: the evaluation control PostgreSQL database.
+- `EVAL_STUDY_DATABASE_URL`: PostgreSQL for Optuna's separate `eval_optuna` schema.
+- `EVAL_CONTROL_CA_PEM` when the remote database needs a private certificate authority.
+
+Remote database URLs require `sslmode=verify-full`. A database owner applies
+`deploy/mlflow/eval-control.sql` and `deploy/mlflow/optuna.sql` first. Keep secrets
+outside campaign files. See the repository's
+[campaign guide](https://github.com/The-Vibe-Company/quivr-v2/blob/main/docs/search-campaigns.md)
+for roles and runtime requirements.
+
+## Validate and start
+
+Copy `scripts/eval/examples/search-campaign.yaml` to an ignored operator file. Set
+an actual end date, deployment revision, opaque ticket reference and spending caps.
+The baseline is Cohere-Embed-V5-Pro, 1024 dimensions, hybrid weight 0.5.
+
+Run this validation without credentials or network:
+
+```sh
+python3 scripts/eval/search_campaign.py validate scripts/eval/examples/search-campaign.yaml
+```
+
+It prints the normalized goal, test sets, search ranges and budgets. Exploration
+accepts public development splits only. It maximizes weighted nDCG@10 and minimizes
+worst-set serving cost and p95 latency. A Pareto front lists candidates whose scores
+cannot all be improved by another candidate. Gate failures remain visible but
+cannot qualify for promotion.
+
+Examples requiring operator credentials and rented compute; not run during development:
+
+```sh
+python3 scripts/eval/search_campaign.py start .scratch/pilot.yaml --allow-paid
+python3 scripts/eval/search_campaign.py watchdog public-search-pilot --allow-paid
+python3 scripts/eval/search_campaign.py status public-search-pilot
+python3 scripts/eval/search_campaign.py resume public-search-pilot --allow-paid
+```
+
+Run the supervisor and watchdog as separate managed processes on a machine with
+this frozen checkout, Modal access and both databases. Restart them automatically.
+Daily exhaustion cancels compute and pauses until the next UTC day. Total caps,
+the end date and the trial limit stop the campaign. Conservative reservations
+include uncertain charges; Modal builds/storage and other account charges need
+separate budgeting. No measurements run in CI.
+
+## Check and stop
+
+`status` returns aggregate results, Pareto objectives, spending and held-out reads
+remaining. It exports no query IDs or raw records. `agent_token_usage: null` means
+unknown; usage is never estimated. Exploration does not consume held-out reads.
+
+Example requiring Modal and database credentials; not run during development:
+
+```sh
+python3 scripts/eval/search_campaign.py stop public-search-pilot --allow-paid
+```
+
+Stop closes paid admission and terminates only this campaign's compute. Check
+`cleanup_pending: false` before treating cleanup as complete. If termination cannot
+be acknowledged, the command returns a nonzero exit code; retry stop or let the
+managed watchdog retry. Uncertain charges and completed evidence are retained.
+SIGTERM and Ctrl-C stop the campaign; hard kills are recovered by the watchdog.
+
+## Next
+
+Confirm finalists on the full stack and frozen holdout before changing production.
+This stage reports `confirmation_available: false` and opens no promotion PRs.
+[Record and compare measurements](/run-quivr/record-search-measurements).

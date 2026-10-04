@@ -5,6 +5,7 @@ strings and dependency errors may contain credentials. Provisioning is explicit.
 """
 import contextlib
 import decimal
+import datetime
 import json
 import os
 import tempfile
@@ -41,6 +42,16 @@ def money(value):
     if not amount.is_finite() or amount < 0:
         raise ValueError('USD must be finite and nonnegative')
     return amount
+
+
+def end_timestamp(value):
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            raise ValueError('timezone required')
+        return parsed.astimezone(datetime.timezone.utc).isoformat()
+    except (AttributeError, TypeError, ValueError):
+        raise ValueError('end_at must be an ISO timestamp with a timezone') from None
 
 
 class Store:
@@ -94,6 +105,14 @@ class Store:
         for kind in ('provider', 'modal'):
             if money(policy[kind + '_daily_usd']) <= 0:
                 raise ValueError('daily caps must be positive')
+        for kind in ('provider', 'modal'):
+            if kind + '_total_usd' in policy and money(policy[kind + '_total_usd']) <= 0:
+                raise ValueError('total caps must be positive')
+        if 'end_at' in policy:
+            end_timestamp(policy['end_at'])
+        limit = policy.get('confirmation_limit', 10)
+        if type(limit) is not int or not 1 <= limit <= 10:
+            raise ValueError('confirmation limit must be 1..10')
         encoded = json.dumps(policy, sort_keys=True, allow_nan=False)
         with self.transaction() as db:
             db.execute('INSERT INTO eval_control.campaigns(name,policy) VALUES (%s,%s::jsonb) ON CONFLICT DO NOTHING', (name, encoded))
@@ -185,6 +204,44 @@ class Store:
                 raise LeaseLost('lease expired, completed or held by another worker')
             db.execute('INSERT INTO eval_control.attempts(campaign,key,owner,status) VALUES (%s,%s,%s,%s)', (name, key, owner, status))
 
+    def terminal(self, db, name, policy, stopped):
+        """Called after the campaign lock; use admission-time UTC, not tx start."""
+        if not stopped and policy.get('end_at'):
+            if db.execute('SELECT clock_timestamp() >= %s::timestamptz', (policy['end_at'],)).fetchone()[0]:
+                stopped = 'campaign end reached'
+                db.execute('UPDATE eval_control.campaigns SET stopped=%s WHERE name=%s', (stopped, name))
+        return stopped
+
+    def stop(self, name, reason='operator stop'):
+        # Leaves leases and uncertain spend intact until compute is terminated.
+        if reason not in ('operator stop', 'campaign end reached', 'trial limit reached', 'supervisor failed'):
+            raise ValueError('unknown campaign stop reason')
+        with self.transaction() as db:
+            self.lock(db, name)
+            db.execute('UPDATE eval_control.campaigns SET stopped=COALESCE(stopped,%s) WHERE name=%s', (reason, name))
+
+    def availability(self, name):
+        """Read shared lifetime/day state for supervisors and independent watchdogs."""
+        with self.transaction() as db:
+            policy, stopped = self.lock(db, name)
+            stopped = self.terminal(db, name, policy, stopped)
+            day = db.execute("SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date").fetchone()[0]
+            rows = db.execute('SELECT kind, sum(charged_usd) FROM eval_control.reservations WHERE campaign=%s GROUP BY kind', (name,)).fetchall()
+            totals = dict(rows)
+            for kind in ('provider', 'modal'):
+                if policy.get(kind + '_total_usd') is not None and totals.get(kind, 0) >= money(policy[kind + '_total_usd']):
+                    stopped = stopped or kind + ' total cap reached'
+            if stopped:
+                db.execute('UPDATE eval_control.campaigns SET stopped=%s WHERE name=%s', (stopped, name))
+            daily = db.execute('SELECT kind,sum(charged_usd) FROM eval_control.reservations WHERE campaign=%s AND day=%s GROUP BY kind', (name, day)).fetchall()
+            for kind, charged in daily:
+                if charged >= money(policy[kind + '_daily_usd']):
+                    db.execute('INSERT INTO eval_control.days(campaign,day,kind,stopped) VALUES (%s,%s,%s,true) ON CONFLICT (campaign,day,kind) DO UPDATE SET stopped=true', (name, day, kind))
+            paused = db.execute('SELECT kind FROM eval_control.days WHERE campaign=%s AND day=%s AND stopped', (name, day)).fetchall()
+            reads = db.execute('SELECT confirmation_reads FROM eval_control.campaigns WHERE name=%s', (name,)).fetchone()[0]
+        return {'stopped': stopped, 'paused': bool(paused), 'day': str(day),
+                'confirmation_reads_left': policy.get('confirmation_limit', 10) - reads}
+
     def reserve(self, name, kind, usd, metadata=None, lease=None):
         amount, refused = money(usd), False
         if kind not in ('provider', 'modal'):
@@ -194,20 +251,33 @@ class Store:
             policy, stopped = self.lock(db, name)
             if lease:
                 self.fence(db, name, *lease)
-            day = db.execute("SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date").fetchone()[0]
+            stopped = self.terminal(db, name, policy, stopped)
+            day = db.execute("SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date").fetchone()[0]
             db.execute('INSERT INTO eval_control.days(campaign,day,kind) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING', (name, day, kind))
             daily_stopped = db.execute('SELECT stopped FROM eval_control.days WHERE campaign=%s AND day=%s AND kind=%s', (name, day, kind)).fetchone()[0]
             used = db.execute('SELECT COALESCE(sum(charged_usd),0) FROM eval_control.reservations WHERE campaign=%s AND day=%s AND kind=%s', (name, day, kind)).fetchone()[0]
+            total = db.execute('SELECT COALESCE(sum(charged_usd),0) FROM eval_control.reservations WHERE campaign=%s AND kind=%s', (name, kind)).fetchone()[0]
+            if policy.get(kind + '_total_usd') is not None and total + amount > money(policy[kind + '_total_usd']):
+                stopped = stopped or kind + ' total cap reached'
+                db.execute('UPDATE eval_control.campaigns SET stopped=%s WHERE name=%s', (stopped, name))
             if stopped or daily_stopped or used + amount > money(policy[kind + '_daily_usd']):
                 db.execute('UPDATE eval_control.days SET stopped=true WHERE campaign=%s AND day=%s AND kind=%s', (name, day, kind))
                 refused = True
             else:
                 values = (rid, name, day, kind, amount, amount, json.dumps(metadata or {}, allow_nan=False))
-                predicate, parameters = ('', ()) if not lease else (
-                    ' WHERE EXISTS (SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL)', (name, *lease))
+                # Recheck the deadline at the write itself, after preceding SQL
+                # and network latency, just like the measurement lease fence.
+                predicate = ' WHERE (%s::timestamptz IS NULL OR clock_timestamp()<%s::timestamptz)'
+                parameters = (policy.get('end_at'), policy.get('end_at'))
+                if lease:
+                    predicate += ' AND EXISTS (SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL)'
+                    parameters += (name, *lease)
                 row = db.execute('INSERT INTO eval_control.reservations(id,campaign,day,kind,reserved_usd,charged_usd,metadata) SELECT %s,%s,%s,%s,%s,%s,%s::jsonb' + predicate + ' RETURNING id', values + parameters).fetchone()
                 if row is None:
-                    raise LeaseLost('lease expired before paid admission')
+                    if self.terminal(db, name, policy, stopped):
+                        refused = True
+                    else:
+                        raise LeaseLost('lease expired before paid admission')
         if refused:
             raise embeddings.BudgetExceeded(kind + ' daily cap reached or campaign stopped')
         return rid
@@ -234,8 +304,10 @@ class Store:
     def confirmation(self, name):
         """Atomic guard for trusted confirmation runners; tier 1 never calls it."""
         with self.transaction() as db:
-            self.lock(db, name)
-            row = db.execute('UPDATE eval_control.campaigns SET confirmation_reads=confirmation_reads+1 WHERE name=%s AND confirmation_reads<10 RETURNING confirmation_reads', (name,)).fetchone()
+            policy, stopped = self.lock(db, name)
+            if self.terminal(db, name, policy, stopped):
+                raise PermissionError('campaign stopped or ended')
+            row = db.execute('UPDATE eval_control.campaigns SET confirmation_reads=confirmation_reads+1 WHERE name=%s AND confirmation_reads<%s AND (%s::timestamptz IS NULL OR clock_timestamp()<%s::timestamptz) RETURNING confirmation_reads', (name, policy.get('confirmation_limit', 10), policy.get('end_at'), policy.get('end_at'))).fetchone()
             if row is None:
                 raise PermissionError('campaign confirmation read limit reached')
             return row[0]

@@ -17,6 +17,20 @@ jobs:
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    services:
+      evaluation-postgres:
+        image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        env:
+          POSTGRES_DB: evaluation_tests
+          POSTGRES_USER: evaluation
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U evaluation -d evaluation_tests"
+          --health-interval 2s --health-timeout 2s --health-retries 20
+    env:
+      EVAL_CONTROL_TEST_DSN: postgresql://evaluation@localhost:55433/evaluation_tests
     steps:
       # The frozen-docs rule compares with the merge base of this checkout and main,
       # so it needs full history (about 25 MB); the migration guard reads main's tree.
@@ -34,10 +48,12 @@ jobs:
           cache-dependency-path: |
             contracts/http/v0/checks/requirements.txt
             scripts/eval/requirements-news.txt
+            scripts/eval/requirements-campaign.txt
             plugins/jev-rerank/pyproject.toml
       # PyYAML for `make docs`, which regenerates the documentation site's bundled contract to compare it.
       - run: pip install -r contracts/http/v0/checks/requirements.txt
       - run: pip install -r scripts/eval/requirements-news.txt
+      - run: pip install -r scripts/eval/requirements-campaign.txt
       # Build the OSS runner's SDK and exercise prepared scoring on offline vectors.
       - run: pip install modal==1.6.1 numpy==2.0.2
       # The builder reuses this pinned stdlib client, without the plugin runtime dependencies.

@@ -1,0 +1,457 @@
+#!/usr/bin/env python3
+"""Start, resume and stop a bounded configuration-search campaign outside CI."""
+import argparse
+import concurrent.futures
+import contextlib
+import tempfile
+import threading
+import subprocess
+import time
+import json
+import math
+import os
+import pathlib
+import re
+
+import control_store
+import campaign_store
+import modal_search
+import results
+import search_trial
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+IDENTIFIER = re.compile(r'[A-Za-z0-9_.-]{1,120}')
+
+
+def specification(value):
+    fields = {'version', 'name', 'ticket', 'policy', 'goal', 'space', 'parallelism', 'max_trials', 'seed'}
+    if not isinstance(value, dict) or set(value) != fields or value['version'] != 1:
+        raise ValueError('campaign requires only the version-1 fields')
+    cfg = json.loads(results.encode(value))
+    for key in ('name', 'ticket'):
+        if not isinstance(cfg[key], str) or not IDENTIFIER.fullmatch(cfg[key]):
+            raise ValueError('campaign and ticket identifiers must be plain opaque identifiers')
+    for key, maximum in (('parallelism', 4), ('max_trials', 100000), ('seed', 2**32 - 1)):
+        if type(cfg[key]) is not int or not (0 if key == 'seed' else 1) <= cfg[key] <= maximum:
+            raise ValueError('invalid campaign parallelism, trial limit or seed')
+    cfg['policy'] = modal_search.policy(cfg['policy'])
+    for key in ('provider_total_usd', 'modal_total_usd', 'end_at'):
+        if key not in cfg['policy']:
+            raise ValueError('multi-day campaigns require total caps and end_at')
+    baseline = cfg['policy']['baseline']
+    if (baseline['model'] != 'Cohere-Embed-V5-Pro' or baseline['dimensions'] != 1024
+            or baseline['dense_weight'] != .5):
+        raise ValueError('campaign baseline must be explicit Pro, 1024 dimensions, hybrid weight 0.5')
+    goal = cfg['goal']
+    if (not isinstance(goal, dict) or set(goal) != {'metric', 'weights'} or goal['metric'] != 'ndcg@10'
+            or not isinstance(goal['weights'], dict) or not goal['weights']):
+        raise ValueError('goal requires ndcg@10 and positive eligible-set weights')
+    eligible = {name for name, entry in cfg['policy']['sets'].items() if not entry['diagnostic']}
+    if set(goal['weights']) != eligible or any(type(w) not in (int, float) or not math.isfinite(w) or w <= 0
+                                               for w in goal['weights'].values()):
+        raise ValueError('goal weights must cover exactly the eligible datasets')
+    space = cfg['space']
+    if not isinstance(space, dict) or not space or set(space) - set(baseline):
+        raise ValueError('search space requires supported configuration keys')
+    for key, dist in space.items():
+        if not isinstance(dist, dict):
+            raise ValueError('invalid search distribution')
+        if set(dist) == {'choices'}:
+            choices = dist['choices']
+            if not isinstance(choices, list) or not choices or len(choices) > 100:
+                raise ValueError('categorical distribution needs bounded choices')
+            for choice in choices:
+                search_trial.configuration({**baseline, key: choice})
+        elif set(dist) <= {'low', 'high', 'step'} and {'low', 'high'} <= set(dist):
+            low, high = dist['low'], dist['high']
+            integer = key in ('dimensions', 'window_chars', 'overlap_chars', 'candidate_count')
+            for v in (low, high, dist.get('step', 1 if integer else .01)):
+                if type(v) not in ((int,) if integer else (int, float)) or not math.isfinite(v):
+                    raise ValueError('distribution requires finite correctly typed bounds')
+            if low > high or dist.get('step', 1 if integer else .01) <= 0:
+                raise ValueError('distribution requires ordered bounds and positive step')
+            for bound in (low, high):
+                search_trial.configuration({**baseline, key: bound})
+        else:
+            raise ValueError('distribution requires choices or low/high/step')
+    return cfg
+
+
+def read_spec(path):
+    import yaml
+    return specification(yaml.safe_load(path.read_text()))
+
+
+
+def aggregate(report, sets):
+    """Campaign export boundary: never copy records, sample IDs or raw errors."""
+    status = report.get('status')
+    if status not in ('exploration_finalist', 'rejected', 'capped', 'failed', 'leased'):
+        status = 'failed'
+    output = {'status': status, 'verdict': report.get('verdict') if report.get('verdict') in ('better', 'cheaper', 'rejected') else None,
+              'gates': {}, 'aggregate_sets': {}, 'evidence': []}
+    for name in ('quality', 'no_loss', 'latency', 'price'):
+        gate = report.get('gates', {}).get(name, {})
+        output['gates'][name] = {'passed': gate.get('passed') is True}
+    for name in sets:
+        pair = report.get('aggregate_sets', {}).get(name, {})
+        output['aggregate_sets'][name] = {}
+        for side in ('candidate', 'baseline'):
+            source = pair.get(side, {})
+            output['aggregate_sets'][name][side] = {
+                key: source[key] for key in ('ndcg_at_10', 'latency_p95_ms', 'cost_per_search_usd', 'cost_per_1000_documents_usd')
+                if type(source.get(key)) in (int, float) and math.isfinite(source[key]) and source[key] >= 0}
+    for item in report.get('work', {}).values():
+        receipt = item.get('receipt', {})
+        key = receipt.get('result_key', '')
+        rid = receipt.get('run_id', '')
+        if isinstance(key, str) and re.fullmatch(r'[a-f0-9]{64}', key):
+            output['evidence'].append({'result_key': key, 'status': 'synced' if receipt.get('status') == 'synced' else 'pending',
+                                       'run_id': rid if isinstance(rid, str) and IDENTIFIER.fullmatch(rid) else None})
+    return output
+
+
+def objectives(report, weights):
+    pairs = report['aggregate_sets']
+    try:
+        quality = sum(weights[n] * pairs[n]['candidate']['ndcg_at_10'] for n in weights) / sum(weights.values())
+        cost = max(pairs[n]['candidate']['cost_per_search_usd'] for n in weights)
+        latency = max(pairs[n]['candidate']['latency_p95_ms'] for n in weights)
+        if quality > 1:
+            raise ValueError('invalid quality')
+        return [quality, cost, latency]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def suggest(trial, spec):
+    config = dict(spec['policy']['baseline'])
+    for key, dist in spec['space'].items():
+        if 'choices' in dist:
+            config[key] = trial.suggest_categorical(key, dist['choices'])
+        elif key in ('dimensions', 'window_chars', 'overlap_chars', 'candidate_count'):
+            config[key] = trial.suggest_int(key, dist['low'], dist['high'], step=dist.get('step', 1))
+        else:
+            config[key] = trial.suggest_float(key, dist['low'], dist['high'], step=dist.get('step', .01))
+    return search_trial.configuration(config)
+
+
+class Loop:
+    def __init__(self, store, name, owner, study, measure):
+        self.store, self.name, self.owner, self.study, self.measure = store, name, owner, study, measure
+        self.spec = store.snapshot(name)['spec']
+
+    def complete(self, trial, value):
+        import optuna
+        self.store.renew_owner(self.name, self.owner)
+        report = value.get('report')
+        if report is None:
+            return
+        numbers = objectives(report, self.spec['goal']['weights'])
+        if report['status'] in ('exploration_finalist', 'rejected') and numbers is not None:
+            self.study.tell(trial.number, numbers, skip_if_finished=True)
+        else:
+            self.study.tell(trial.number, state=optuna.trial.TrialState.FAIL, skip_if_finished=True)
+
+    def perform(self, trial, value):
+        self.store.renew_owner(self.name, self.owner)
+        try:
+            report = aggregate(self.measure(value['config']), self.spec['policy']['sets'])
+        except (control_store.LeaseLost, control_store.Unavailable, campaign_store.CleanupPending):
+            raise
+        except Exception:
+            report = aggregate({'status': 'failed'}, self.spec['policy']['sets'])
+        result = {**value, 'report': report}
+        self.store.trial(self.name, self.owner, trial.number, result)
+        return trial, result
+
+    def tick(self, limit=None):
+        import optuna
+        self.store.renew_owner(self.name, self.owner)
+        available = self.store.availability(self.name)
+        if available['stopped'] or available['paused']:
+            return available
+        limit = limit or self.spec['parallelism']
+        running = self.study.get_trials(states=(optuna.trial.TrialState.RUNNING,))
+        state = self.store.snapshot(self.name)['trials']
+        replayed, pending = [], []
+        for trial in running:
+            value = state.get(str(trial.number))
+            if value and 'report' in value and value['report']['status'] not in ('capped', 'leased'):
+                self.complete(trial, value)
+                replayed.append(trial)
+            else:
+                # No paid launch precedes this durable config mapping. Orphan
+                # asks can safely complete suggestions before their first launch.
+                if value is None:
+                    live_trial = optuna.trial.Trial(self.study, trial._trial_id)
+                    try:
+                        value = {'config': suggest(live_trial, self.spec)}
+                        self.store.trial(self.name, self.owner, trial.number, value)
+                    except ValueError:
+                        self.study.tell(trial.number, state=optuna.trial.TrialState.FAIL, skip_if_finished=True)
+                        continue
+                pending.append((trial, value))
+        # A replay tick does not immediately launch replacement work.
+        if replayed:
+            return {'replayed': len(replayed)}
+        while len(pending) < limit and len(self.study.trials) < self.spec['max_trials']:
+            self.store.renew_owner(self.name, self.owner)
+            trial = self.study.ask()
+            try:
+                value = {'config': suggest(trial, self.spec)}
+                self.store.trial(self.name, self.owner, trial.number, value)
+                pending.append((trial, value))
+            except ValueError:
+                self.study.tell(trial.number, state=optuna.trial.TrialState.FAIL, skip_if_finished=True)
+        if not pending:
+            self.store.stop(self.name, 'trial limit reached')
+            return {'stopped': 'trial limit reached'}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=limit) as pool:
+            futures = [pool.submit(self.perform, trial, value) for trial, value in pending[:limit]]
+            for future in concurrent.futures.as_completed(futures):
+                trial, value = future.result()
+                self.store.renew_owner(self.name, self.owner)
+                if value['report']['status'] not in ('capped', 'leased'):
+                    self.complete(trial, value)
+        result = self.store.availability(self.name)
+        result['waiting'] = any(value['report']['status'] == 'leased' for _, value in [f.result() for f in futures])
+        return result
+
+
+@contextlib.contextmanager
+def open_study(name, url, seed=42):
+    """Separate PostgreSQL schema, verified TLS, bounded pool; no live SQLite."""
+    import optuna
+    from sqlalchemy.engine import make_url
+    from psycopg.conninfo import conninfo_to_dict
+    parsed = make_url(url)
+    if parsed.drivername not in ('postgresql', 'postgresql+psycopg'):
+        raise ValueError('campaign study requires PostgreSQL')
+    dsn = parsed.set(drivername='postgresql').render_as_string(hide_password=False)
+    validator = control_store.Store(dsn)
+    info = conninfo_to_dict(dsn)
+    args = {'options': '-c search_path=eval_optuna', 'connect_timeout': 5}
+    with contextlib.ExitStack() as stack:
+        if validator.ca_pem:
+            ca = stack.enter_context(tempfile.NamedTemporaryFile(mode='w', encoding='utf-8'))
+            ca.write(validator.ca_pem)
+            ca.flush()
+            args['sslrootcert'] = ca.name
+        if info.get('sslmode'):
+            args['sslmode'] = info['sslmode']
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+        storage = optuna.storages.RDBStorage(parsed.set(drivername='postgresql+psycopg').render_as_string(hide_password=False),
+            engine_kwargs={'pool_pre_ping': True, 'pool_size': 4, 'max_overflow': 0, 'connect_args': args})
+        try:
+            yield optuna.create_study(study_name=name, storage=storage, load_if_exists=True,
+                sampler=optuna.samplers.NSGAIISampler(seed=seed), directions=['maximize', 'minimize', 'minimize'])
+        finally:
+            storage.remove_session()
+            storage.engine.dispose()
+
+
+
+def watchdog_once(store, name, compute):
+    import campaign_store
+    available = store.availability(name)
+    state = store.snapshot(name)
+    if available['paused'] or available['stopped']:
+        if state['owner']:
+            store.release_owner(name, state['owner'])
+        campaign_store.cleanup(store, name, compute)
+    elif not state['live']:
+        campaign_store.cleanup(store, name, compute)
+    return available
+
+
+@contextlib.contextmanager
+def guard(store, name, owner, compute, stop_requested=None):
+    """Renew ownership and enforce watchdog independently of blocking measurements."""
+    done = threading.Event()
+    stop_requested = stop_requested or threading.Event()
+    failures = []
+    def poll():
+        next_check = time.monotonic() + 10
+        while not done.is_set():
+            try:
+                # Signal handling only sets an event. Database admission closes
+                # here, before the executor waits for interrupted remote calls.
+                # Never reenter a DB transaction from a Python signal handler.
+                requested = stop_requested.wait(1)
+                if done.is_set():
+                    return
+                if requested:
+                    store.stop(name)
+                    watchdog_once(store, name, compute)
+                    return
+                if time.monotonic() < next_check:
+                    continue
+                available = watchdog_once(store, name, compute)
+                if available['paused'] or available['stopped']:
+                    return
+                store.renew_owner(name, owner)
+                next_check = time.monotonic() + 10
+            except Exception as error:
+                failures.append(type(error).__name__)
+                return
+    thread = threading.Thread(target=poll, daemon=True)
+    thread.start()
+    try:
+        yield
+        if failures:
+            raise control_store.Unavailable('campaign guard unavailable; no further scheduling')
+    finally:
+        done.set()
+        thread.join(timeout=60)
+
+
+def lineage():
+    if subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=ROOT).returncode:
+        raise ValueError('campaign measurement code must be committed')
+    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    scorer = 'sha256:' + search_trial.digest({name: (ROOT / 'scripts/eval' / name).read_text()
+        for name in ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py')})
+    return sha, scorer
+
+
+def public_status(store, name, study=None):
+    state = store.snapshot(name)
+    status = store.availability(name)
+    output = {'campaign': name, **status, 'ledger': store.summary(name),
+              'agent_token_usage': None, 'confirmation_available': False,
+              'compute_cap_notice': modal_search.COMPUTE_NOTICE,
+              'cleanup_pending': any(r['status'] != 'closed' for r in state['resources'].values()),
+              'trials': [{'number': int(number), 'config': value.get('config'), 'report': value.get('report')}
+                         for number, value in state['trials'].items()]}
+    if study is not None:
+        output['pareto'] = [{'number': trial.number, 'objectives': trial.values}
+                            for trial in study.best_trials]
+    return output
+
+
+def supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_requested=None):
+    import campaign_store
+    import campaign_compute
+    compute = campaign_compute.ModalCompute()
+    while True:
+        try:
+            available = watchdog_once(store, name, compute)
+        except campaign_store.CleanupPending:
+            if once:
+                raise
+            time.sleep(poll_seconds)
+            continue
+        if available['stopped']:
+            return public_status(store, name, study)
+        if available['paused']:
+            if once:
+                return public_status(store, name, study)
+            time.sleep(poll_seconds)
+            continue
+        owner = store.acquire(name)
+        try:
+            loop = Loop(store, name, owner, study, campaign_compute.Measurement(store, name, owner, outbox, compute))
+            with guard(store, name, owner, compute, stop_requested):
+                while True:
+                    result = loop.tick()
+                    if once or result.get('paused') or result.get('stopped'):
+                        break
+                    if result.get('waiting'):
+                        time.sleep(poll_seconds)
+        except control_store.LeaseLost:
+            if not store.availability(name)['paused'] and not store.availability(name)['stopped']:
+                raise
+        finally:
+            store.release_owner(name, owner)
+            try:
+                campaign_store.cleanup(store, name, compute)
+            except campaign_store.CleanupPending:
+                if once:
+                    raise
+        if once:
+            return public_status(store, name, study)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    validate = commands.add_parser('validate', help='validate YAML without keys or network')
+    validate.add_argument('spec', type=pathlib.Path)
+    start = commands.add_parser('start', help='register an immutable YAML campaign and run')
+    start.add_argument('spec', type=pathlib.Path)
+    for command in ('resume', 'status', 'stop', 'watchdog'):
+        sub = commands.add_parser(command)
+        sub.add_argument('campaign')
+    for sub in (start, *(commands.choices[c] for c in ('resume', 'stop', 'watchdog'))):
+        sub.add_argument('--allow-paid', action='store_true', help='explicit operator-only live lifecycle; never CI')
+        sub.add_argument('--once', action='store_true', help='perform one scheduling/watchdog pass')
+        sub.add_argument('--outbox', type=pathlib.Path, default=ROOT / '.scratch/eval/results')
+    args = parser.parse_args(argv)
+    if args.command == 'validate':
+        try:
+            print(results.encode(read_spec(args.spec)))
+            return 0
+        except Exception:
+            # YAML parser exceptions can include entire input lines.
+            print(results.encode({'status': 'invalid', 'reason': 'campaign YAML or configuration is invalid'}))
+            return 2
+    if args.command != 'status' and (not args.allow_paid or any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS'))):
+        parser.error('live lifecycle requires --allow-paid outside CI')
+    import campaign_store
+    import campaign_compute
+    try:
+        store = campaign_store.CampaignStore(os.environ['EVAL_CONTROL_DATABASE_URL'])
+        if args.command == 'start':
+            spec = read_spec(args.spec)
+            name = spec['name']
+            store.register(spec, *lineage())
+        else:
+            name = args.campaign
+            if not IDENTIFIER.fullmatch(name):
+                raise ValueError('invalid campaign identifier')
+        if args.command == 'stop':
+            store.stop(name)
+            watchdog_once(store, name, campaign_compute.ModalCompute())
+            output = public_status(store, name)
+        elif args.command == 'watchdog':
+            while True:
+                watchdog_once(store, name, campaign_compute.ModalCompute())
+                output = public_status(store, name)
+                if args.once or output['stopped']:
+                    break
+                time.sleep(15)
+        else:
+            state = store.snapshot(name)
+            with open_study(name, os.environ['EVAL_STUDY_DATABASE_URL'], state['spec']['seed']) as study:
+                if args.command == 'status':
+                    output = public_status(store, name, study)
+                else:
+                    if (state['git_sha'], state['scorer_digest']) != lineage():
+                        raise ValueError('resume requires the frozen measurement checkout')
+                    import signal
+                    stop_requested = threading.Event()
+                    def interrupted(*_):
+                        stop_requested.set()
+                        raise KeyboardInterrupt()
+                    signal.signal(signal.SIGTERM, interrupted)
+                    signal.signal(signal.SIGINT, interrupted)
+                    try:
+                        output = supervise(store, name, study, args.outbox, once=args.once,
+                                           stop_requested=stop_requested)
+                    except KeyboardInterrupt:
+                        store.stop(name)
+                        watchdog_once(store, name, campaign_compute.ModalCompute())
+                        output = public_status(store, name, study)
+        print(results.encode(output))
+        return 0
+    except campaign_store.CleanupPending:
+        print(results.encode({'status': 'cleanup_pending', 'reason': 'compute termination is not acknowledged; retry stop or watchdog'}))
+        return 2
+    except Exception:
+        print(results.encode({'status': 'failed', 'reason': 'campaign admission or operation failed; no local fallback'}))
+        return 2
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
