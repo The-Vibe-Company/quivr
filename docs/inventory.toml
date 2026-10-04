@@ -114,14 +114,14 @@ excluded = [
 
 # Maximum number of lines per page, in path order.
 [budgets]
-"docs/eval-private-working.md" = 85
-"docs/search-campaigns.md" = 142
+"docs/eval-private-working.md" = 90
+"docs/search-campaigns.md" = 150
 "docs/search-campaign-reporting.md" = 138
 "deploy/mlflow/README.md" = 68
 "docs/eval-engine-confirmation.md" = 174
 "docs/eval-engine-smoke.md" = 149
 "docs/eval-results.md" = 160
-"docs/eval-modal.md" = 185
+"docs/eval-modal.md" = 195
 "AGENTS.md" = 45
 "CONTEXT.md" = 327
 "deploy/railway/README.md" = 250

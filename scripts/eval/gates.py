@@ -47,11 +47,18 @@ def evaluate(pairs, policy):
                 or candidate.get('cost', {}).get('latency_method') != baseline.get('cost', {}).get('latency_method')):
             incomplete.add(name)
             continue
-        if candidate['dataset'].get('private') and candidate.get('provenance', {}).get('private_pair'):
+        provenance = candidate.get('provenance', {})
+        if not isinstance(provenance, dict):
+            incomplete.add(name)
+            continue
+        if candidate['dataset'].get('private') and 'private_pair' in provenance:
             import results
             import search_trial
-            evidence = candidate['provenance']['private_pair']
-            paired = evidence.get('statistics', {})
+            evidence = provenance['private_pair']
+            if not isinstance(evidence, dict) or not isinstance(evidence.get('statistics'), dict):
+                incomplete.add(name)
+                continue
+            paired = evidence['statistics']
             if (evidence.get('baseline_result_key') != results.record(baseline)['result_key']
                     or evidence.get('baseline_payload_digest') != search_trial.digest(baseline)
                     or evidence.get('candidate_result_key') != results.record(candidate)['result_key']

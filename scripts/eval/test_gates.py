@@ -167,6 +167,14 @@ class Verdict(unittest.TestCase):
                     self.assertAlmostEqual(verdict['sets']['private']['adjusted_p'], .06)
                     self.assertTrue(verdict['gates']['no_loss']['passed'])
         self.assertIsNone(good['gates']['latency']['samples']['private']['candidate'])
+        for provenance in (None, [], {'private_pair': None}, {'private_pair': [1]},
+                           {'private_pair': {'statistics': [1]}}):
+            with self.subTest(malformed_provenance=provenance):
+                changed = copy.deepcopy(pairs)
+                changed['private']['candidate']['provenance'] = provenance
+                rejected = gates.evaluate(changed, policy)
+                self.assertEqual(rejected['status'], 'rejected')
+                self.assertEqual(rejected['missing_or_incompatible_sets'], ['private'])
 
     def test_corrected_loss_blocks_but_frozen_diagnostic_loss_is_reported(self):
         pairs = {'gain': self.pair(), 'loss': self.pair(-.1)}

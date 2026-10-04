@@ -44,7 +44,8 @@ worst-set serving cost and p95 latency. A Pareto front lists candidates whose sc
 cannot all be improved by another candidate. Gate failures remain visible but
 cannot qualify for promotion.
 
-For a private set, add its `input` descriptor under `policy.sets`: name, version,
+For a private set, keep the enclosing set's `split: dev` and add its `input`
+descriptor under `policy.sets`: name, version,
 `split: working`, ciphertext digest, TREC fingerprint and `privacy: private`.
 Give eligible private sets a `goal.weights` entry. Your operator uploads only
 working ciphertext to a private Modal Volume, provisions a working age identity

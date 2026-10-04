@@ -34,13 +34,15 @@ manager. The same environment is needed on campaign start and resume.
 Use the Modal account/environment that owns these resources. Authenticate as
 described in the [Modal comparison prerequisites](eval-modal.md#prerequisites).
 Launch attaches the named Secret and mounts the named Volume automatically.
+Prepare `/secure/working-secret.env` with mode `0600` and one assignment,
+`EVAL_WORKING_AGE_EXAMPLE=<working age identity>`; omit identity-file comments.
 For example, requiring Modal operator credentials and not run live:
 
 ```sh
 modal volume create eval-working-example
 modal volume put eval-working-example /secure/working.tar.gz.age working.tar.gz.age
 modal secret create eval-working-example-secret \
-  EVAL_WORKING_AGE_EXAMPLE="$(cat /secure/working-identity.txt)"
+  --from-dotenv /secure/working-secret.env
 export EVAL_WORKING_RUNTIME='{
   "private-example": {
     "volume": "eval-working-example",

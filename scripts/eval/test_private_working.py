@@ -217,6 +217,8 @@ class Runner(unittest.TestCase):
                 self.assertTrue(all(not path.exists() for path in self.ephemeral_paths))
                 self.assertNotIn('secret-query', '\n'.join(logs.output))
                 self.assertNotIn(str(self.mount), '\n'.join(logs.output))
+                if problem == 'heldout-key':
+                    self.assertIn('error=DecryptionError', '\n'.join(logs.output))
                 with self.store.transaction() as db:
                     count = db.execute('SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND payload IS NOT NULL',
                                        (self.campaign,)).fetchone()[0]

@@ -120,7 +120,8 @@ uses up to 50 serial queries, ordered by SHA-256 of the ID (ID breaks ties), aft
 warming up the lexicographically first judged ID, which may also be timed.
 Both configurations use the same sample and resource class.
 For public sets, `cost.latency_sample` records timed IDs, warmup ID and policy;
-`gates.latency.samples` echoes both. Private samples stay inside the runner; only
+`gates.latency.samples` echoes both and rejects missing or mismatched evidence.
+Private samples stay inside the runner; only
 the verified comparability boolean is published.
 P95 includes query embedding, retrieval and reranking; its limit is 1.2 times baseline.
 Serving price uses the fresh sample; warmup charges stay outside per-search metrics.
