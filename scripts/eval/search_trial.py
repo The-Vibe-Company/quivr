@@ -62,41 +62,63 @@ def configuration(value):
     return cfg
 
 
-def bm25(docs, query):
-    terms = [collections.Counter(re.findall(r'\w+', text.casefold())) for text in docs]
-    lengths = [sum(t.values()) for t in terms]
-    average = sum(lengths) / len(lengths) or 1
-    scores = [0.] * len(docs)
-    for word in set(re.findall(r'\w+', query.casefold())):
-        df = sum(word in t for t in terms)
-        idf = math.log(1 + (len(docs) - df + .5) / (df + .5))
-        for i, term in enumerate(terms):
-            tf = term[word]
-            scores[i] += idf * tf * 2.2 / (tf + 1.2 * (.25 + .75 * lengths[i] / average))
-    return scores
+class BM25:
+    """Prepared term postings; scoring visits only the query's terms."""
+    def __init__(self, docs):
+        self.postings = collections.defaultdict(list)
+        lengths = []
+        for i, text in enumerate(docs):
+            terms = collections.Counter(re.findall(r'\w+', text.casefold()))
+            lengths.append(sum(terms.values()))
+            for word, tf in terms.items():
+                self.postings[word].append((i, tf))
+        self.count = len(docs)
+        average = sum(lengths) / self.count or 1
+        self.norms = [1.2 * (.25 + .75 * length / average) for length in lengths]
+        self.idfs = {word: math.log(1 + (self.count - len(postings) + .5) / (len(postings) + .5))
+                     for word, postings in self.postings.items()}
+
+    def score(self, query):
+        scores = [0.] * self.count
+        for word in set(re.findall(r'\w+', query.casefold())):
+            for i, tf in self.postings.get(word, ()):
+                scores[i] += self.idfs[word] * tf * 2.2 / (tf + self.norms[i])
+        return scores
 
 
-def rank(docs, doc_ids, query, query_vector, piece_vectors, owners, cfg):
-    """Best-piece exact cosine and weighted reciprocal-rank BM25 fusion."""
-    import numpy as np
-    order = lambda values: sorted(range(len(doc_ids)), key=lambda i: (-values[i], doc_ids[i]))
-    alpha = cfg['dense_weight']
-    if alpha == 0:
-        return [doc_ids[i] for i in order(bm25(docs, query))[:cfg['candidate_count']]]
-    scores = direct.normalize([query_vector]) @ direct.normalize(piece_vectors).T
-    dense = np.full(len(docs), -np.inf, dtype=np.float32)
-    np.maximum.at(dense, owners, scores[0])
-    dense_order = order(dense)
-    if alpha == 1:
-        selected = dense_order
-    else:
-        lexical_order = order(bm25(docs, query))
-        fused = [0.] * len(docs)
-        for weight, ranking in ((alpha, dense_order), (1 - alpha, lexical_order)):
-            for position, index in enumerate(ranking, 1):
-                fused[index] += weight / (60 + position)
-        selected = order(fused)
-    return [doc_ids[i] for i in selected[:cfg['candidate_count']]]
+class SearchIndex:
+    """One trial set's prepared BM25 and best-piece exact cosine retrieval."""
+    def __init__(self, docs, doc_ids, piece_vectors, owners, cfg):
+        self.doc_ids, self.cfg, self.owners = doc_ids, cfg, owners
+        self.lexical = BM25(docs) if cfg['dense_weight'] < 1 else None
+        self.pieces = direct.normalize(piece_vectors) if cfg['dense_weight'] > 0 else None
+
+    def dense_scores(self, query_vectors):
+        import numpy as np
+        scores = direct.normalize(query_vectors) @ self.pieces.T
+        dense = np.full((len(scores), len(self.doc_ids)), -np.inf, dtype=np.float32)
+        np.maximum.at(dense.T, self.owners, scores.T)
+        return dense
+
+    def rank(self, query, query_vector=None, dense=None):
+        order = lambda values: sorted(range(len(self.doc_ids)), key=lambda i: (-values[i], self.doc_ids[i]))
+        alpha = self.cfg['dense_weight']
+        if alpha == 0:
+            selected = order(self.lexical.score(query))
+        else:
+            if dense is None:
+                dense = self.dense_scores([query_vector])[0]
+            dense_order = order(dense)
+            if alpha == 1:
+                selected = dense_order
+            else:
+                lexical_order = order(self.lexical.score(query))
+                fused = [0.] * len(self.doc_ids)
+                for weight, ranking in ((alpha, dense_order), (1 - alpha, lexical_order)):
+                    for position, index in enumerate(ranking, 1):
+                        fused[index] += weight / (60 + position)
+                selected = order(fused)
+        return [self.doc_ids[i] for i in selected[:self.cfg['candidate_count']]]
 
 
 def rerank(query, passages, budget, key, price):
@@ -262,12 +284,13 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         owners.extend([owner] * len(entry['vectors']))
         index_tokens += entry['tokens']
         index_seconds += entry['embedding_seconds']
+    index = SearchIndex(docs, doc_ids, piece_vectors, owners, cfg)
     # Include document preparation/cache processing, excluding quality queries.
     index_seconds += index_overhead_seconds + max(0, time.monotonic() - assembly_started)
     ranking, latencies, query_prices = {}, [], []
     provider_rate = prices.get(cfg['model'], 0) / 1_000_000
 
-    def search(qid, fresh):
+    def search(qid, fresh, dense=None, batch_seconds=0):
         budget.store.renew(budget.campaign, *budget.lease)
         query = data['queries'][qid]
         before = budget.summary()['confirmed_cost_usd']
@@ -281,24 +304,31 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             entry = entries[('query', query)]
             vector = entry['vectors'][0]
             query_tokens, embedding_seconds = entry['tokens'], entry['embedding_seconds']
-        selected = rank(docs, doc_ids, query, vector, piece_vectors, owners, cfg)
+        selected = index.rank(query, vector, dense)
         if cfg['reranker'] == 'jev':
             if not rerank_key:
                 raise ValueError('reranker secret is absent')
             selected = rerank(query, {d: docs[doc_ids.index(d)] for d in selected}, budget, rerank_key, prices['jev-1.13.0'])
         elapsed = time.monotonic() - started
         spend = budget.summary()['confirmed_cost_usd'] - before
-        return selected[:10], elapsed, spend + query_tokens * provider_rate + (elapsed + embedding_seconds) * compute_rate
+        return selected[:10], elapsed, spend + query_tokens * provider_rate + (elapsed + embedding_seconds + batch_seconds) * compute_rate
 
-    # Quality always covers every judged query, using batched query vectors.
-    for position, qid in enumerate(query_ids, 1):
-        selected, elapsed, price = search(qid, False)
-        ranking[qid] = selected
-        if not fresh_latency:
-            query_prices.append(price)
-        if position % 10 == 0 or position == len(query_ids):
-            LOG.info('search progress completed=%d total=%d elapsed_seconds=%.3f',
-                     position, len(query_ids), time.monotonic() - indexing_started)
+    # Bound temporary piece-score memory while batching quality-only work.
+    # Fresh serving below always computes its own per-query dense scores.
+    for start in range(0, len(query_ids), 32):
+        batch_ids = query_ids[start:start + 32]
+        batch_started = time.monotonic()
+        dense_batch = index.dense_scores([entries[('query', data['queries'][q])]['vectors'][0]
+                                          for q in batch_ids]) if semantic else [None] * len(batch_ids)
+        batch_seconds = (time.monotonic() - batch_started) / len(batch_ids)
+        for position, (qid, dense) in enumerate(zip(batch_ids, dense_batch), start + 1):
+            selected, elapsed, price = search(qid, False, dense, batch_seconds)
+            ranking[qid] = selected
+            if not fresh_latency:
+                query_prices.append(price)
+            if position % 10 == 0 or position == len(query_ids):
+                LOG.info('search progress completed=%d total=%d elapsed_seconds=%.3f',
+                         position, len(query_ids), time.monotonic() - indexing_started)
     sample = None
     if fresh_latency:
         timed_ids = sorted(query_ids, key=lambda q: (hashlib.sha256(q.encode()).hexdigest(), q))[:LATENCY_SAMPLE_SIZE]

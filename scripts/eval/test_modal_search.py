@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import tempfile
+import types
 import unittest
 import uuid
 from unittest import mock
@@ -42,6 +43,39 @@ class Refusal(unittest.TestCase):
             policy['sets']['scifact']['split'] = 'test'
             with self.assertRaises(PermissionError):
                 modal_search.policy(policy)
+
+
+class FailureLogging(unittest.TestCase):
+    def test_remote_failure_logs_bounded_diagnostics_without_credentials(self):
+        # Own diagnostics at the remote catch boundary. Only external setup
+        # and dataset I/O are fake; exception formatting and logging are real.
+        cfg = search_trial.configuration({})
+        request = {'config': cfg, 'policy': {'sets': {'scifact': {'split': 'dev'}}, 'max_seconds': 30},
+                   'dataset': 'scifact', 'campaign': 'fixture', 'lease_key': 'trial', 'owner': 'owner'}
+        modal = types.SimpleNamespace(Volume=mock.Mock())
+        credentials = {'AZURE_FOUNDRY_KEY': 'fixture-provider-credential',
+                       'EVAL_CONTROL_DATABASE_URL': 'postgres://user:pass@host/db'}
+        message = ('cache missing ' + credentials['AZURE_FOUNDRY_KEY'] + '\n'
+                   'https://host/path?token=unknown postgres://user:pass@host/db '
+                   'token=unknown-token password="unknown password" Bearer unknown-bearer '
+                   'sk-unknownkey ' + 'x' * 200)
+        with mock.patch.dict('sys.modules', {'modal': modal}), mock.patch.dict(os.environ, credentials), \
+                mock.patch.object(control_store, 'Store') as store, \
+                mock.patch.object(modal_search.results.Results, 'sync'), \
+                mock.patch.object(modal_search.public_sets, 'prepare', side_effect=OSError(message)), \
+                self.assertLogs('modal_search', level='INFO') as logs:
+            row = modal_search.remote_trial(request)
+        failure = next(line for line in logs.output if 'trial failed' in line)
+        self.assertIn('error=OSError message=cache missing', failure)
+        self.assertIn('[redacted]', failure)
+        for secret in (*credentials.values(), 'https://host', 'unknown-token', 'unknown password',
+                       'unknown-bearer', 'sk-unknownkey'):
+            self.assertNotIn(secret, failure)
+        diagnostic = failure.split('message=', 1)[1].split(' elapsed_seconds=', 1)[0]
+        self.assertLessEqual(len(diagnostic), 160)
+        self.assertNotIn('\n', diagnostic)
+        self.assertEqual(row, {'status': 'failed', 'reason': 'direct measurement failed; uncertain charges retained'})
+        store.return_value.abandon.assert_called_once_with('fixture', 'trial', 'owner', 'failed')
 
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN'), 'requires disposable PostgreSQL')

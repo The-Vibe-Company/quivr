@@ -25,6 +25,21 @@ DIAGNOSTIC = {'mldr-fr': 'joint baseline saturation above 80%',
               'trec-covid': 'small query sample', 'mkqa-fr': 'short-answer proxy'}
 
 
+def failure_summary(error):
+    """Short diagnostics without reflected credentials or endpoint URLs."""
+    message = str(error)
+    credentials = [value for name, value in os.environ.items() if value and
+                   re.search(r'KEY|TOKEN|SECRET|PASSWORD|DSN|DATABASE_URL|ENDPOINT|CREDENTIAL|AUTH', name, re.I)]
+    for value in sorted(credentials, key=len, reverse=True):
+        message = message.replace(value, '[redacted]')
+    message = re.sub(r'\b[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\"\']+', '[url]', message)
+    message = re.sub(r'(?i)\bBearer\s+\S+', 'Bearer [redacted]', message)
+    message = re.sub(r'(?i)\b([\w-]*(?:key|token|secret|password|authorization|credential)[\w-]*)\b[\"\']?\s*[:=]\s*'
+                     r'(?:\"[^\"]*\"|\'[^\']*\'|[^\s,;]+)', r'\1=[redacted]', message)
+    message = re.sub(r'\b(?:sk-|armada_launch_|armada_)[A-Za-z0-9_-]+', '[redacted]', message)
+    return type(error).__name__, ' '.join(message.split())[:160]
+
+
 def policy(value):
     defaults = {'profile': 'default', 'provider_daily_usd': 1000, 'modal_daily_usd': 1000,
                 'max_seconds': 3600, 'startup_seconds': 300, 'baseline': {},
@@ -196,8 +211,10 @@ def remote_trial(request):
         log.info('trial capped elapsed_seconds=%.3f', time.monotonic() - started)
         store.abandon(request['campaign'], *lease, 'capped')
         return {'status': 'capped', 'reason': 'provider daily cap reached'}
-    except Exception:
-        log.info('trial failed elapsed_seconds=%.3f', time.monotonic() - started)
+    except Exception as error:
+        kind, message = failure_summary(error)
+        log.info('trial failed error=%s message=%s elapsed_seconds=%.3f',
+                 kind, message, time.monotonic() - started)
         store.abandon(request['campaign'], *lease, 'failed')
         return {'status': 'failed', 'reason': 'direct measurement failed; uncertain charges retained'}
 

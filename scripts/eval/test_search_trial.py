@@ -5,6 +5,9 @@ Changing fusion must change rankings without re-embedding cached documents;
 successful fake network responses still exercise real shared admission.
 """
 import hashlib
+import collections
+import math
+import re
 import importlib.util
 import io
 import json
@@ -23,6 +26,77 @@ import results
 import search_trial
 import trec
 
+
+
+# Frozen pre-THE-1004 scorer: independent oracle for ranking preservation.
+def reference_bm25(docs, query):
+    terms = [collections.Counter(re.findall(r'\w+', text.casefold())) for text in docs]
+    lengths = [sum(t.values()) for t in terms]
+    average = sum(lengths) / len(lengths) or 1
+    scores = [0.] * len(docs)
+    for word in set(re.findall(r'\w+', query.casefold())):
+        df = sum(word in t for t in terms)
+        idf = math.log(1 + (len(docs) - df + .5) / (df + .5))
+        for i, term in enumerate(terms):
+            tf = term[word]
+            scores[i] += idf * tf * 2.2 / (tf + 1.2 * (.25 + .75 * lengths[i] / average))
+    return scores
+
+
+def reference_rank(docs, doc_ids, query, query_vector, piece_vectors, owners, cfg):
+    """Best-piece exact cosine and weighted reciprocal-rank BM25 fusion."""
+    import numpy as np
+    order = lambda values: sorted(range(len(doc_ids)), key=lambda i: (-values[i], doc_ids[i]))
+    alpha = cfg['dense_weight']
+    if alpha == 0:
+        return [doc_ids[i] for i in order(reference_bm25(docs, query))[:cfg['candidate_count']]]
+    scores = direct_bakeoff.normalize([query_vector]) @ direct_bakeoff.normalize(piece_vectors).T
+    dense = np.full(len(docs), -np.inf, dtype=np.float32)
+    np.maximum.at(dense, owners, scores[0])
+    dense_order = order(dense)
+    if alpha == 1:
+        selected = dense_order
+    else:
+        lexical_order = order(reference_bm25(docs, query))
+        fused = [0.] * len(docs)
+        for weight, ranking in ((alpha, dense_order), (1 - alpha, lexical_order)):
+            for position, index in enumerate(ranking, 1):
+                fused[index] += weight / (60 + position)
+        selected = order(fused)
+    return [doc_ids[i] for i in selected[:cfg['candidate_count']]]
+
+
+
+@unittest.skipUnless(importlib.util.find_spec('numpy'), 'requires numpy')
+class PreparedSearch(unittest.TestCase):
+    def test_prepared_serial_and_batched_rankings_match_previous_scorer(self):
+        # Own scoring preservation and corpus reuse at the cheapest boundary.
+        # Re-tokenisation after preparation is forbidden without timing sleeps.
+        docs = ['Apple apple pear', '', 'CAFÉ café pear', 'pear apple', 'unrelated']
+        ids = ['z', 'a', 'c', 'b', 'd']
+        pieces = [[2, 0, 0], [0, 3, 0], [1, 1, 0], [0, 0, 4], [2, 0, 0], [-1, 0, 0]]
+        owners = [0, 0, 1, 2, 3, 4]
+        queries = ['APPLE apple missing', 'café pear', '', 'unseen']
+        vectors = [[3, 0, 0], [0, 1, 1], [1, 1, 0], [-1, 0, 0]]
+        class Document(str):
+            readable = True
+            def casefold(self):
+                if not self.readable:
+                    raise AssertionError('scoring re-read a corpus document')
+                return super().casefold()
+        for weight in (0, .3, .5, 1):
+            with self.subTest(weight=weight):
+                cfg = search_trial.configuration({'dense_weight': weight})
+                expected = [reference_rank(docs, ids, q, v, pieces, owners, cfg)
+                            for q, v in zip(queries, vectors)]
+                guarded = [Document(d) for d in docs]
+                index = search_trial.SearchIndex(guarded, ids, pieces, owners, cfg)
+                for d in guarded:
+                    d.readable = False
+                batch = index.dense_scores(vectors) if weight else [None] * len(queries)
+                for q, v, scores, ranking in zip(queries, vectors, batch, expected):
+                    self.assertEqual(index.rank(q, v), ranking)
+                    self.assertEqual(index.rank(q, dense=scores), ranking)
 
 class Reranker(unittest.TestCase):
     def test_admission_precedes_transport_and_only_valid_usage_and_scores_are_accepted(self):
@@ -132,7 +206,8 @@ class Trial(unittest.TestCase):
         store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
         lease = store.claim(campaign, 'trial')
         budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
-        cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
+        cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2,
+                                          'dense_weight': .5})
         prices = {'Cohere-Embed-V5-Fast': .08}
         client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
         data = {'corpus': {str(i): {'text': 'passage ' + str(i)} for i in range(513)},
@@ -157,8 +232,26 @@ class Trial(unittest.TestCase):
             count = len(body['texts'])
             return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
                 'meta': {'billed_units': {'input_tokens': 7 if body['input_type'] == 'search_query' and count == 1 else count}}}).encode())
-        with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond):
+        tokenised, normalised = collections.Counter(), collections.Counter()
+        normalize = direct_bakeoff.normalize
+        def normalize_once(vectors):
+            normalised[len(vectors)] += 1
+            if len(vectors) == 513 and normalised[513] > 1:
+                raise AssertionError('query scoring normalised corpus vectors again')
+            return normalize(vectors)
+        findall = re.findall
+        def tokenize(pattern, text):
+            if text.startswith('passage '):
+                tokenised[text] += 1
+                if tokenised[text] > 1:
+                    raise AssertionError('query scoring tokenised a document again')
+            return findall(pattern, text)
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond), \
+                mock.patch.object(search_trial.re, 'findall', side_effect=tokenize), \
+                mock.patch.object(direct_bakeoff, 'normalize', side_effect=normalize_once):
             measured = search_trial.measure(cfg, data, dataset, temp, budget, client, prices, 0)
+            self.assertEqual(len(tokenised), 513)
+            self.assertEqual(normalised[513], 1)
             self.assertEqual(peak, 4)
             self.assertAlmostEqual(measured['cost']['index_tokens_attributed'], 513)
             self.assertEqual(measured['cost']['provider']['reserved_input_tokens'], 0)
@@ -283,8 +376,8 @@ class Trial(unittest.TestCase):
             self.assertGreater(lexical['metrics']['cost_per_1000_documents_usd'], 0)
             self.assertIsNone(lexical['metrics']['latency_p95_ms'])
             self.assertEqual(lexical['cost']['provider']['confirmed_input_tokens'], 0)
-            self.assertEqual(search_trial.rank(['apple', 'pear'], ['a', 'b'], 'apple', [0, 1], [[1, 0], [0, 1]], [0, 1], cfg), ['b', 'a'])
-            self.assertEqual(search_trial.rank(['apple', 'pear'], ['a', 'b'], 'apple', [0, 1], [[1, 0], [0, 1]], [0, 1], dict(cfg, dense_weight=0)), ['a', 'b'])
+            self.assertEqual(search_trial.SearchIndex(['apple', 'pear'], ['a', 'b'], [[1, 0], [0, 1]], [0, 1], cfg).rank('apple', [0, 1]), ['b', 'a'])
+            self.assertEqual(search_trial.SearchIndex(['apple', 'pear'], ['a', 'b'], [], [], dict(cfg, dense_weight=0)).rank('apple'), ['a', 'b'])
             before = len(requests)
             fresh = run(cfg, 'fresh', fresh=True)
             self.assertEqual(len(requests) - before, 2)  # One warmup, one scored query.
