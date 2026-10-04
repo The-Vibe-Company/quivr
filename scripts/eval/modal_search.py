@@ -16,6 +16,7 @@ import gates
 import public_sets
 import results
 import search_trial
+import private_working
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 COMPUTE_NOTICE = ('The compute cap covers compute reserved by this runner, not the full Modal invoice; '
@@ -78,14 +79,16 @@ def policy(value):
         raise ValueError('campaign requires a complete dataset family')
     cfg['sets'] = json.loads(results.encode(cfg['sets']))
     for name, entry in cfg['sets'].items():
-        if not isinstance(entry, dict) or set(entry) - {'split', 'diagnostic', 'reason'}:
+        if not isinstance(entry, dict) or set(entry) - {'split', 'diagnostic', 'reason', 'input'}:
             raise ValueError('unknown dataset policy fields')
         if entry.get('split') != 'dev':
             raise PermissionError('tier 1 cannot read campaign-heldout/test data')
-        if name not in public_sets.SETS:
-            raise ValueError('tier 1 requires a registered public dataset')
+        if 'input' in entry:
+            private_working.descriptor(name, entry['input'])
+        elif name not in public_sets.SETS:
+            raise ValueError('tier 1 requires a registered public dataset or private working descriptor')
         mandatory = DIAGNOSTIC.get(name)
-        if not public_sets.SETS[name]['promotion_eligible']:
+        if 'input' not in entry and not public_sets.SETS[name]['promotion_eligible']:
             mandatory = 'restricted licence; diagnostic only'
         if type(entry.get('diagnostic', False)) is not bool:
             raise ValueError('diagnostic must be boolean')
@@ -118,18 +121,20 @@ def frozen_policy(policy, sha, scorer_digest, fresh_latency=True):
 def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, outbox, fresh_latency):
     frozen = frozen_policy(policy, sha, scorer_digest, fresh_latency)
     store.campaign(campaign, frozen)
-    key = search_trial.digest({'config': cfg, 'dataset': name, 'registry': public_sets.SETS[name],
+    key = search_trial.digest({'config': cfg, 'dataset': name, 'registry': policy['sets'][name].get('input', public_sets.SETS.get(name)),
                               'tier': 'direct', 'sha': sha, 'scorer': scorer_digest, 'fresh_latency': fresh_latency})
     claim = store.claim(campaign, key, policy['max_seconds'] + policy['startup_seconds'])
     tracking = results.Results(directory=outbox)
     if claim['status'] == 'done':
-        return {'status': 'reused', 'record': claim['payload'], 'receipt': tracking.log(claim['payload'])}
+        return completed(store, campaign, key, claim['payload'], tracking, 'reused')
     if claim['status'] == 'leased':
         return {'status': 'leased', 'reason': 'another worker owns this measurement'}
     owner, reservation = claim['owner'], None
     request = {'campaign': campaign, 'policy': frozen, 'config': cfg, 'dataset': name,
                'lease_key': key, 'owner': owner, 'git_sha': sha,
                'scorer_digest': scorer_digest, 'fresh_latency': fresh_latency}
+    if 'input' in policy['sets'][name]:
+        request['working_runtime'] = private_working.runtime(name)
     try:
         reservation = store.reserve(campaign, 'modal',
             (policy['max_seconds'] + policy['startup_seconds']) * control_store.money(policy['modal_usd_per_second']),
@@ -145,7 +150,7 @@ def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, out
         if canonical['status'] != 'done':
             raise RuntimeError('remote measurement did not publish canonical evidence')
         row = canonical['payload']
-        return {'status': 'complete', 'record': row, 'receipt': tracking.log(row)}
+        return completed(store, campaign, key, row, tracking, 'complete')
     except embeddings.BudgetExceeded:
         status, reason = 'capped', 'daily reservation cap reached or usage bound exceeded'
     except Exception:
@@ -155,6 +160,15 @@ def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, out
     except control_store.LeaseLost:
         pass  # A canonical result or replacement exists; never change it.
     return {'status': status, 'reason': reason}
+
+
+def completed(store, campaign, key, row, tracking, status):
+    output = {'status': status, 'record': row, 'receipt': tracking.log(row)}
+    if row['dataset']['private']:
+        baseline_key = row['provenance']['private_pair']['baseline_lease_key']
+        baseline = store.evidence(campaign, [baseline_key])[baseline_key]
+        output.update(baseline_record=baseline, baseline_receipt=tracking.log(baseline))
+    return output
 
 
 def remote_trial(request):
@@ -170,6 +184,7 @@ def remote_trial(request):
     import direct_bakeoff
     import embeddings
     import public_sets
+    import private_working
     import results
     import search_trial
     import trec
@@ -192,6 +207,11 @@ def remote_trial(request):
     started = time.monotonic()
     try:
         name = request['dataset']
+        if 'input' in policy['sets'][name]:
+            row = private_working.trial(request, store)
+            results.Results(directory='/eval-cache/results').log(row)
+            volume.commit()
+            return row
         directory = public_sets.prepare(name, pathlib.Path('/eval-cache/datasets'), include_restricted=True)
         data = trec.load(directory)
         log.info('dataset ready documents=%d queries=%d elapsed_seconds=%.3f',
@@ -225,7 +245,7 @@ def remote_trial(request):
         store.abandon(request['campaign'], *lease, 'capped')
         return {'status': 'capped', 'reason': 'provider daily cap reached'}
     except Exception as error:
-        kind, message = failure_summary(error)
+        kind, message = (type(error).__name__, 'protected measurement failed') if 'input' in policy['sets'][request['dataset']] else failure_summary(error)
         log.info('trial failed error=%s message=%s elapsed_seconds=%.3f',
                  kind, message, time.monotonic() - started)
         store.abandon(request['campaign'], *lease, 'failed')
@@ -243,33 +263,41 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
         relative = str(path.relative_to(ROOT)) if path.is_absolute() else str(path)
         return relative not in tracked and not any(name.startswith(relative.rstrip('/') + '/') for name in tracked)
     image = (modal.Image.debian_slim(python_version='3.12')
+             .apt_install('age')
              .pip_install_from_requirements(str(ROOT / 'scripts/eval/requirements-modal.txt'))
              .add_local_dir(ROOT, '/repo', ignore=ignored))
     app = modal.App(app_name)
     secrets = [modal.Secret.from_name('quivr-eval-results'), modal.Secret.from_name('quivr-eval-embeddings')]
     if any(c['reranker'] == 'jev' for c in (candidate, policy['baseline'])):
         secrets.append(modal.Secret.from_name('quivr-eval-rerank'))
+    private_volumes, private_secrets = private_working.mounts(policy)
+    secrets.extend(modal.Secret.from_name(name) for name in private_secrets)
     remote = app.function(image=image, cpu=(8, 8), memory=(16384, 16384),
         timeout=policy['max_seconds'], startup_timeout=policy['startup_seconds'],
         retries=0, max_containers=4, scaledown_window=2, single_use_containers=True,
         include_source=False, serialized=True, secrets=secrets,
-        volumes={'/eval-cache': modal.Volume.from_name('quivr-eval-embeddings-cache', create_if_missing=True)})(remote_trial)
+        volumes={'/eval-cache': modal.Volume.from_name('quivr-eval-embeddings-cache', create_if_missing=True),
+                 **{mount: modal.Volume.from_name(name) for mount, name in private_volumes.items()}})(remote_trial)
     store = control_store.Store(os.environ['EVAL_CONTROL_DATABASE_URL'])
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     scorer_digest = 'sha256:' + search_trial.digest({name: (ROOT / 'scripts/eval' / name).read_text()
-        for name in ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py')})
+        for name in ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py', 'private_working.py', 'protected_inputs.py')})
     pairs, work = {}, {}
     check()
     with app.run():
         on_app(app.app_id)
         for name in policy['sets']:
             pair = {}
-            for side, cfg in (('baseline', policy['baseline']), ('candidate', candidate)):
+            sides = (('candidate', candidate),) if 'input' in policy['sets'][name] else (('baseline', policy['baseline']), ('candidate', candidate))
+            for side, cfg in sides:
                 check()
                 outcome = dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, remote.remote, outbox, fresh_latency)
-                work[name + '/' + side] = {k: v for k, v in outcome.items() if k != 'record'}
+                work[name + '/' + side] = {k: v for k, v in outcome.items() if k not in ('record', 'baseline_record', 'baseline_receipt')}
                 if outcome['status'] in ('complete', 'reused'):
                     row = outcome['record']
+                    if 'baseline_record' in outcome:
+                        pair['baseline'] = outcome['baseline_record']
+                        work[name + '/baseline'] = {'receipt': outcome['baseline_receipt']}
                     pair[side] = {**row, 'per_query': {key.replace('_at_', '@'): values for key, values in row['per_query'].items()},
                                   'metrics': {key.replace('_at_', '@'): value for key, value in row['metrics'].items()}}
                 elif outcome['status'] in ('capped', 'leased'):

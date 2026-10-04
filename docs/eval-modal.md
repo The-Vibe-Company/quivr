@@ -76,6 +76,12 @@ loading datasets or keys. The sample reserves $2.10 for each dispatched worker.
 The default daily caps are $1,000 each for provider APIs and runner compute;
 the sample deliberately uses smaller caps.
 
+## Add a private working set
+
+Mix public sets with a private encrypted working set using a `working` input
+descriptor. Follow [private working-set setup](eval-private-working.md) for the
+Volume upload, age identity Secret, runtime references and aggregate-only outputs.
+
 ## Run and inspect the result
 
 The following needs paid-provider and Modal credentials and was not run live:
@@ -90,8 +96,8 @@ python scripts/eval/modal_search.py \
 The command prints JSON. A passing comparison returns `better` or `cheaper`,
 `status=exploration_finalist`, four gate results, tracking receipts and ledger
 totals. All other verdicts exit 2. A stopped budget returns `status=capped` and
-its reason. Every complete measurement includes lineage and public per-query
-scores in the results wrapper. Inspect the experiment with the results CLI.
+its reason. Every complete measurement includes lineage. Public sets include per-query
+scores; private working sets expose aggregates only. Inspect the experiment with the results CLI.
 `cheaper` means all gates pass and search cost is lower on every set;
 `better` means all gates pass without that strict cost improvement.
 
@@ -113,8 +119,9 @@ Quality covers every query with relevance judgments using batched, cached embedd
 uses up to 50 serial queries, ordered by SHA-256 of the ID (ID breaks ties), after
 warming up the lexicographically first judged ID, which may also be timed.
 Both configurations use the same sample and resource class.
-`cost.latency_sample` records ordered timed IDs, warmup ID and policy;
-`gates.latency.samples` echoes both and rejects missing or mismatched evidence.
+For public sets, `cost.latency_sample` records timed IDs, warmup ID and policy;
+`gates.latency.samples` echoes both. Private samples stay inside the runner; only
+the verified comparability boolean is published.
 P95 includes query embedding, retrieval and reranking; its limit is 1.2 times baseline.
 Serving price uses the fresh sample; warmup charges stay outside per-search metrics.
 `--cached-exploration` reuses query vectors and cannot pass the unmeasured latency gate.
@@ -140,7 +147,8 @@ compute charge, including queue/transport time. Builds, Volume storage and other
 account charges need separate operator budgets. Bounds depend on correct rates
 and provider token limits; observed overages cannot undo already incurred bills.
 
-Tier 1 accepts public campaign-dev sets only; an upstream `test` partition differs
+Tier 1 accepts public campaign-dev sets and private working descriptors. An upstream
+public `test` partition differs
 from campaign-heldout data, which tier 1 cannot consume. The store's maximum-ten confirmation counter
 is owned by the [trusted full-engine confirmation runner](eval-engine-confirmation.md).
 

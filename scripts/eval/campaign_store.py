@@ -44,8 +44,9 @@ class CampaignStore(control_store.Store):
     def development_keys(self, name, trial):
         """Resolve synced aggregate result identities to canonical SQL leases.
 
-        Private query evidence stays in SQL; only opaque lease keys leave this
-        boundary. The native runner validates the rows and their MLflow sync.
+        Only opaque canonical measurement keys leave this boundary; private
+        per-query evidence remains inside the trusted runner. The native runner
+        validates the rows and their MLflow sync.
         """
         import results
         state = self.snapshot(name)
@@ -63,7 +64,8 @@ class CampaignStore(control_store.Store):
                                   (name, json.dumps(configuration))).fetchall()
                 for key, row in rows:
                     dataset = row['dataset']['name']
-                    if dataset in keys and results.record(row)['result_key'] in identities:
+                    if (dataset in keys and results.record(row)['result_key'] in identities
+                            and row['config'].get('paired_side', side) == side):
                         keys[dataset].setdefault(side, key)
         if any(set(pair) != {'baseline', 'candidate'} for pair in keys.values()):
             raise ValueError('canonical development pairing is incomplete')

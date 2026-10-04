@@ -5,6 +5,7 @@ or allowing a good score to override price. Existing scoring tests own only the
 paired test; these exercise the verdict on complete measurement families.
 """
 import hashlib
+import copy
 import importlib.util
 import json
 import unittest
@@ -114,6 +115,58 @@ class Verdict(unittest.TestCase):
         mismatch = self.pair()
         mismatch['candidate']['per_query']['ndcg@10'].pop('0')
         self.assertEqual(gates.evaluate({'a': mismatch}, policy)['verdict'], 'rejected')
+
+    def test_mixed_private_aggregates_share_holm_and_all_four_gates(self):
+        # Own cross-format family decisions: public samples and trusted private
+        # sufficient statistics must enter one correction and all four gates.
+        # No existing public-only or private-only owner sees that combination.
+        import results
+        import search_trial
+        public = self.pair()
+        public['candidate']['per_query'] = copy.deepcopy(public['baseline']['per_query'])
+        private = self.pair()
+        for side, row in private.items():
+            row.update(schema_version=1, experiment='public/example', plugin_digest='sha256:fixture',
+                       config={'side': side}, machine='fixture', duration_seconds=1)
+            row['dataset'].update(version='v1', private=True)
+            row['per_query'] = {}
+            row['cost'].pop('latency_sample')
+        private['candidate']['provenance'] = {'private_pair': {
+            'statistics': {'queries': 20, 'delta': .02, 'p_value': .01}, 'latency_comparable': True}}
+        def seal(pair):
+            baseline, candidate = pair['baseline'], pair['candidate']
+            candidate['provenance']['private_pair'].update(
+                baseline_result_key=results.record(baseline)['result_key'],
+                baseline_payload_digest=search_trial.digest(baseline),
+                candidate_result_key=results.record(candidate)['result_key'],
+                candidate_payload_digest=search_trial.digest({k: v for k, v in candidate.items() if k != 'provenance'}))
+        pairs = {'public': public, 'private': private}
+        policy = {'sets': {name: {'diagnostic': False} for name in pairs}, 'profile': 'default'}
+        seal(private)
+        good = gates.evaluate(pairs, policy)
+        self.assertEqual(good['status'], 'exploration_finalist')
+        self.assertTrue(all(gate['passed'] for gate in good['gates'].values()))
+        self.assertAlmostEqual(good['sets']['private']['adjusted_p'], .02)
+        for failed in ('quality', 'no_loss', 'latency', 'price'):
+            changed = copy.deepcopy(pairs)
+            if failed == 'quality':
+                changed['private']['candidate']['provenance']['private_pair']['statistics']['p_value'] = .03
+            elif failed == 'no_loss':
+                scores = changed['public']['candidate']['per_query']['ndcg@10']
+                scores.update({q: value - .1 for q, value in scores.items()})
+            elif failed == 'latency':
+                changed['private']['candidate']['metrics']['latency_p95_ms'] = 15
+            else:
+                changed['private']['candidate']['metrics']['cost_per_search_usd'] = .002
+            seal(changed['private'])
+            with self.subTest(failed=failed):
+                verdict = gates.evaluate(changed, policy)
+                self.assertEqual(verdict['status'], 'rejected')
+                self.assertFalse(verdict['gates'][failed]['passed'])
+                if failed == 'quality':
+                    self.assertAlmostEqual(verdict['sets']['private']['adjusted_p'], .06)
+                    self.assertTrue(verdict['gates']['no_loss']['passed'])
+        self.assertIsNone(good['gates']['latency']['samples']['private']['candidate'])
 
     def test_corrected_loss_blocks_but_frozen_diagnostic_loss_is_reported(self):
         pairs = {'gain': self.pair(), 'loss': self.pair(-.1)}

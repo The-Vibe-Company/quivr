@@ -4,7 +4,8 @@ description: Explore search settings with persistent results, spending caps and 
 keywords: [search quality, evaluation, campaigns, Modal, Optuna]
 ---
 
-Run a campaign to compare public search settings over several days. It keeps the
+Run a campaign to compare search settings on public development or encrypted private
+working sets over several days. It keeps the
 best quality, cost and latency trade-offs while enforcing daily and total spending
 caps. The lead submits bounded proposals and exact usage receipts; daily summaries
 go to Linear and Slack. Promotion requires trusted full-engine confirmation.
@@ -38,10 +39,20 @@ python3 scripts/eval/search_campaign.py validate scripts/eval/examples/search-ca
 ```
 
 It prints the normalized goal, test sets, search ranges and budgets. Exploration
-accepts public development splits only. It maximizes weighted nDCG@10 and minimizes
+accepts public development splits and private working descriptors only. It maximizes weighted nDCG@10 and minimizes
 worst-set serving cost and p95 latency. A Pareto front lists candidates whose scores
 cannot all be improved by another candidate. Gate failures remain visible but
 cannot qualify for promotion.
+
+For a private set, add its `input` descriptor under `policy.sets`: name, version,
+`split: working`, ciphertext digest, TREC fingerprint and `privacy: private`.
+Give eligible private sets a `goal.weights` entry. Your operator uploads only
+working ciphertext to a private Modal Volume, provisions a working age identity
+Secret and supplies `EVAL_WORKING_RUNTIME` on start and resume. Paths and keys
+stay outside the YAML. The [private working-set guide](https://github.com/The-Vibe-Company/quivr/blob/main/docs/eval-private-working.md)
+gives the upload, Secret and runtime format. Private paired statistics are computed
+inside the runner; only aggregate evidence is stored. Held-out descriptors and
+ciphertext encrypted to a separate held-out key cannot be used by tier 1.
 
 Examples requiring operator credentials and rented compute; not run during development:
 

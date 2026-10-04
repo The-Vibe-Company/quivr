@@ -17,6 +17,7 @@ import engine_confirmation as confirmation
 import gates
 import results
 import scoring
+import protected_inputs
 import trec
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -43,13 +44,9 @@ def inputs(request, references, directory):
         if confirmation.private(entry):
             if not reference.get('age_identity') or reference.get('provider_consent') is not True:
                 raise PermissionError('private input requires held-out key and provider consent')
-            if trec.sha256_file(path) != entry['digest']:
-                raise ValueError('ciphertext checksum mismatch')
-            archive = pathlib.Path(directory) / (name + '.tar.gz')
-            with archive.open('wb') as out:
-                subprocess.run(['age', '--decrypt', '--identity', reference['age_identity'], str(path)],
-                    stdout=out, stderr=subprocess.DEVNULL, check=True, timeout=60)
-            held = trec.materialize(archive, pathlib.Path(directory) / name)
+            target = pathlib.Path(directory) / name
+            target.mkdir()
+            held = protected_inputs.decrypt(entry, path, reference['age_identity'], target)
         elif path.is_dir():
             held = path
             if trec.fingerprint(held) != entry['digest']:
