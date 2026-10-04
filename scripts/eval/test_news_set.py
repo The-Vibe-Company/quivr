@@ -5,6 +5,7 @@ import importlib.util
 import json
 import pathlib
 import shutil
+import signal
 import sys
 import subprocess
 import tempfile
@@ -148,6 +149,45 @@ def providers():
             parsed = load(directory)
             self.assertEqual(len(parsed['queries']), 30)
             self.assertEqual(len(parsed['dropped_queries']), 6)
+
+    @mock.patch('scoring.score', side_effect=unavailable_scorer)
+    def test_live_minimum_supports_smaller_sets_and_nonempty_partitions(self, scorer):
+        from jev_rerank.client import Result
+        class JevTransport:
+            def judge(self, query, passages, deadline, cost_limit):
+                return Result(scores=dict.fromkeys(passages, 0), paid_calls=1, input_tokens=1)
+        for count, minimum, expected_split, kind in [(1000, None, (600, 400), 'entity'),
+                                                      (2, 2, (1, 1), 'entity'), (2, 2, (1, 1), 'no_answer')]:
+            with self.subTest(count=count, kind=kind):
+                scorer.reset_mock()
+                providers = news.fake_providers()
+                providers.synthetic = False
+                providers.judges[2] = news.JevJudge(JevTransport())
+                providers.question_targets = {k: count if k == kind else 0 for k in news.KINDS}
+                providers.min_questions = minimum
+                result = news.build(articles(), providers, count, 42, salt=b'x' * 32)
+                self.assertEqual(result.report['questions'], count)
+                self.assertEqual(result.report['min_questions'], count)
+                self.assertEqual((len(result.working['queries']), len(result.held_out['queries'])), expected_split)
+                self.assertEqual(result.report['question_types'][kind], count)
+                if kind == 'no_answer':
+                    self.assertIsNone(result.report['baseline']['metrics']['ndcg@10'])
+                    scorer.assert_not_called()
+                zero_kind = 'entity' if kind == 'no_answer' else 'no_answer'
+                invalid_reports = [
+                    {**result.report, 'question_targets': {**result.report['question_targets'],
+                        kind: {**result.report['question_targets'][kind], 'shortfall': 1}}},
+                    {**result.report, 'question_targets': {**result.report['question_targets'],
+                        zero_kind: {**result.report['question_targets'][zero_kind], 'attempts': 1}}},
+                    {**result.report, 'baseline': {**result.report['baseline'],
+                        'metrics': dict.fromkeys(('ndcg@10', 'recall@10', 'mrr@10'),
+                                                0 if kind == 'no_answer' else None)}}]
+                for index, invalid in enumerate(invalid_reports):
+                    with self.subTest(invalid_report=index), self.assertRaises(news.BuildError):
+                        news.validate_report(invalid)
+                providers.min_questions = 1
+                with self.assertRaises(news.BuildError):
+                    news.build(articles(), providers, count, 42, salt=b'x' * 32)
 
     @mock.patch('scoring.score', side_effect=unavailable_scorer)
     def test_human_check_validates_the_sample_and_never_exports_text_in_report(self, scorer):
@@ -326,6 +366,16 @@ class EncryptedStorage(unittest.TestCase):
             uncertain = CommitReplyLost(root / 'uncertain')
             completed = news.publish(result, uncertain, [keys[0][1]], [keys[1][1]], [keys[1][1]])
             self.assertEqual(json.loads(uncertain.get(result.version + '-manifest.json'))['artifacts'], completed)
+            class StoppedAfterCommit(news.DirectoryStorage):
+                def put(self, name, ciphertext):
+                    super().put(name, ciphertext)
+                    if name.endswith('-manifest.json'):
+                        raise news.BuildInterrupted(signal.SIGTERM)
+            stopped = StoppedAfterCommit(root / 'stopped')
+            with self.assertRaises(news.BuildInterrupted):
+                news.publish(result, stopped, [keys[0][1]], [keys[1][1]], [keys[1][1]])
+            committed = json.loads(stopped.get(result.version + '-manifest.json'))
+            self.assertTrue(all(stopped.get(a['object']) is not None for a in committed['artifacts'].values()))
 
 
 @unittest.skipUnless(importlib.util.find_spec('boto3'), 'needs scripts/eval/requirements-news.txt')

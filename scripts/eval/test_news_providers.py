@@ -115,8 +115,10 @@ class ChatAdapters(unittest.TestCase):
                         with self.assertRaises(news.BuildError) as caught:
                             news.build(articles(), providers, 6, 42, salt=b'x' * 32)
                         diagnostic = caught.exception.diagnostic
-                        self.assertEqual(diagnostic['reason'], 'generation_attempts_exhausted')
-                        self.assertEqual((diagnostic['accepted'], diagnostic['target'], diagnostic['attempts']), (0, 1, 10))
+                        self.assertEqual(diagnostic['reason'], 'min_questions_not_met')
+                        self.assertEqual((diagnostic['accepted'], diagnostic['min_questions']), (5, 6))
+                        self.assertEqual(diagnostic['question_targets']['entity'],
+                                         {'target': 1, 'accepted': 0, 'shortfall': 1, 'attempts': 10, 'attempt_budget': 10})
                         self.assertEqual(diagnostic['rejected'][reason], 10)
                         continue
                     result = news.build(articles(), providers, 6, 42, salt=b'x' * 32)
@@ -307,6 +309,79 @@ class ChatAdapters(unittest.TestCase):
             self.assertEqual(reused.usage()['totals']['confirmed_cost_usd'], 0)
             self.assertEqual(reused.usage()['totals']['cost_upper_bound_usd'], 0)
             reused.response_cache.close()
+
+    def test_shortfall_replays_identical_accepted_questions_without_paid_calls(self):
+        from test_news_set import articles, unavailable_scorer
+        # Real generator/cache boundary: only HTTP is faked. Most no-answer
+        # queries have relevant candidates, so the builder must retain one.
+        from jev_rerank.client import Result
+        calls = []
+        by_text = {a.text: a.id for a in articles()}
+        def relevant(query, text):
+            if query.startswith('Dossier no_answer '):
+                return not query.split(' preuves ', 1)[0].endswith(' 0')
+            return by_text[text] in query.split(' preuves ', 1)[1].split(',')
+        def answer(request, **kwargs):
+            calls.append(request.data)
+            data = json.loads(json.loads(request.data)['messages'][1]['content'])
+            if 'kind' not in data:
+                return response(json.dumps({'grades': {a['id']: 3 if relevant(data['query'], a['text']) else 0
+                                                        for a in data['articles']}}))
+            ids = [] if data['kind'] == 'no_answer' else [a['id'] for a in data['articles']]
+            evidence = ','.join(by_text[a['text']] for a in data['articles']) if ids else 'aucune'
+            return response(json.dumps({'questions': [
+                {'text': f"Dossier {data['kind']} {data['nonce']} {i} preuves {evidence}", 'sources': ids}
+                for i in range(data['count'])]}))
+        class JevTransport:
+            def judge(self, query, passages, deadline, cost_limit):
+                calls.append(('jev', query))
+                return Result(scores={key: float(any(text in passage and relevant(query, text)
+                                                    for text in by_text)) for key, passage in passages.items()},
+                              paid_calls=1, input_tokens=100)
+        def factory():
+            retrievers = {s: news.FakeRetriever() for s in news.SYSTEMS}
+            hosted = types.SimpleNamespace(reuse=live.Reuse())
+            for retriever in retrievers.values():
+                retriever.retrieval = types.SimpleNamespace(hosted=hosted)
+            budget = live.embeddings.Budget(1000000, 1)
+            providers = live.LiveProviders(live.ChatGenerator(config()), retrievers,
+                [live.ChatJudge({**config(), 'family': family}) for family in ('a', 'b')] +
+                [news.JevJudge(live.CappedJev(JevTransport(), budget))], 'hybrid', synthetic=True,
+                question_targets={'entity': 3, 'no_answer': 3}, attempt_budgets={'no_answer': 1}, min_questions=12,
+                embedding_budget=live.embeddings.Budget(1000000, 1), jev_budget=budget,
+                resume_config={'model': 'fake-v1'})
+            providers.enable_cache(directory)
+            return providers
+        self.opener.open.side_effect = answer
+        with tempfile.TemporaryDirectory() as directory, mock.patch('scoring.score', side_effect=unavailable_scorer):
+            first = factory()
+            try:
+                result = news.build(articles(), first, 12, 42)
+            finally:
+                first.response_cache.close()
+            self.assertEqual(result.report['questions'], 12)
+            self.assertEqual(result.report['question_types']['entity'], 3)
+            self.assertEqual(result.report['question_targets']['no_answer'],
+                             {'target': 3, 'accepted': 1, 'shortfall': 2, 'attempts': 1, 'attempt_budget': 1})
+            self.assertEqual(result.report['split'], {'working': 7, 'held_out': 5})
+            calls.clear()
+            replay = factory()
+            try:
+                again = news.build(articles(), replay, 12, 42)
+                self.assertEqual(again.version, result.version)
+                self.assertEqual(again.working, result.working)
+                self.assertEqual(again.held_out, result.held_out)
+                self.assertEqual(calls, [])
+                self.assertEqual(replay.usage()['totals']['confirmed_cost_usd'], 0)
+                replay.min_questions = 13
+                with self.assertRaises(news.BuildError) as caught:
+                    news.build(articles(), replay, 12, 42)
+                self.assertEqual(caught.exception.diagnostic['reason'], 'min_questions_not_met')
+                self.assertEqual(caught.exception.diagnostic['accepted'], 12)
+                self.assertEqual(caught.exception.diagnostic['min_questions'], 13)
+                self.assertEqual(calls, [])
+            finally:
+                replay.response_cache.close()
 
     def test_cache_keeps_embedding_batches_and_jev_refusals_private(self):
         from jev_rerank.client import MAX_TOKENS, Result
@@ -536,13 +611,14 @@ class ChatAdapters(unittest.TestCase):
                     if code:
                         expected['provider_code'] = code
                     if status == 400:
-                        expected = {'phase': phase, 'reason': 'generation_attempts_exhausted',
-                                    'kind': 'entity', 'attempts': 10, 'accepted': 0, 'target': 1,
-                                    'rejected': {'request_refused': 10}}
+                        expected = {'phase': phase, 'reason': 'min_questions_not_met', 'accepted': 0, 'min_questions': 6,
+                                    'question_targets': {kind: {'target': 1, 'accepted': 0, 'shortfall': 1,
+                                        'attempts': 10, 'attempt_budget': 10} for kind in news.KINDS},
+                                    'rejected': {'request_refused': 60}}
                     self.assertEqual(json.loads(output.getvalue().split('diagnostic: ', 1)[1]), expected)
                     for private in ('private-body', 'private-key', 'private-text', 'private-query', 'private-url'):
                         self.assertNotIn(private, output.getvalue() + stderr.getvalue())
-                    self.assertEqual(self.opener.open.call_count, 0 if phase == 'retrieval' else 10 if status == 400 else 1)
+                    self.assertEqual(self.opener.open.call_count, 0 if phase == 'retrieval' else 60 if status == 400 else 1)
 
     def test_retries_charge_unknown_attempts_and_caps_block_before_http(self):
         client = live.ChatJudge(config())
@@ -819,7 +895,7 @@ class ChatAdapters(unittest.TestCase):
                 self.opener.open.side_effect = refuse
                 providers = news.fake_providers()
                 client = (live.ChatGenerator if adapter == 'generator' else live.ChatJudge)(
-                    {**config(), 'max_output_tokens': cap})
+                    {**config(), 'max_output_tokens': cap, 'max_input_tokens': 10000000})
                 if adapter == 'generator':
                     providers.generator = client
                 else:
@@ -831,11 +907,12 @@ class ChatAdapters(unittest.TestCase):
                     self.assertEqual(caught.exception.diagnostic['reason'], 'chat_cap_exhausted')
                     self.assertEqual(self.opener.open.call_count, 1)
                 else:
-                    self.assertEqual(caught.exception.diagnostic['reason'], 'generation_attempts_exhausted')
-                    self.assertEqual(caught.exception.diagnostic['attempts'], 10)
+                    self.assertEqual(caught.exception.diagnostic['reason'], 'min_questions_not_met')
+                    self.assertTrue(all(v['attempts'] == v['attempt_budget'] == 10
+                                        for v in caught.exception.diagnostic['question_targets'].values()))
                     reason = 'content_filter' if adapter == 'generator' else 'judge_content_filter'
-                    self.assertEqual(caught.exception.diagnostic['rejected'][reason], 10)
-                    self.assertEqual(self.opener.open.call_count, 10 if adapter == 'generator' else 150)
+                    self.assertEqual(caught.exception.diagnostic['rejected'][reason], 60)
+                    self.assertEqual(self.opener.open.call_count, 60 if adapter == 'generator' else 900)
 
     def test_generator_rejects_count_evidence_and_extra_fields_before_returning_any_row(self):
         cases = [('{"questions":[]}', 'event', 1, 'invalid_count'),
@@ -917,6 +994,9 @@ class ChatAdapters(unittest.TestCase):
 
     def test_offline_config_rejects_unsafe_caps_and_unknown_fields_without_http(self):
         for change in [{'max_filtered_candidate_share': v} for v in (0, 1.1, float('nan'), True, '0.1')] + [
+                       *({'min_questions': v} for v in (0, 1, True, None, '1000')),
+                       *({name: value} for name in ('question_targets', 'attempt_budgets')
+                         for value in ([], {'unknown': 1}, {'entity': -1}, {'entity': True}, {'entity': 1.5})),
                        {'build_max_usd': 1}, {'generator': {**config(), 'max_retries': 99}},
                        {'articles': {'filter': {'field': 'credit', 'values': []}}},
                        {'retrieval': {**live.example_config()['retrieval'], 'key_env': 'literal-secret'}},
@@ -924,7 +1004,67 @@ class ChatAdapters(unittest.TestCase):
                        {'retrieval': {**live.example_config()['retrieval'], 'dense_weight': float('nan')}}]:
             with self.subTest(change=change), self.assertRaises(live.AdapterError):
                 live.validate_config({**live.example_config(), **change})
+        cfg = live.validate_config({**live.example_config(), 'question_targets': {'no_answer': 0},
+                                    'attempt_budgets': {'no_answer': 0, 'entity': 2}, 'min_questions': 1000})
+        estimated = live.estimate(cfg, 1200)
+        self.assertEqual(estimated['questions'], 1000)
+        self.assertEqual(estimated['generation_max_attempts'], 4002)
+        self.assertEqual(estimated['min_questions'], 1000)
+        self.assertEqual(live.estimate(live.example_config(), 1500)['min_questions'], 1000)
+        with self.assertRaises(news.BuildError):
+            live.estimate(cfg, 1194)
         self.opener.open.assert_not_called()
+
+    def test_cli_signals_preserve_paid_fake_transport_usage(self):
+        import signal
+        for stopped_by in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signal=stopped_by), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                (root / 'adapters.py').write_text('''import io,json,os,signal,urllib.request
+import news_set as news
+import news_providers as live
+class FakeHTTP:
+    calls=0
+    def open(self,*args,**kwargs):
+        self.calls+=1
+        if self.calls==2:
+            os.kill(os.getpid(),int(os.environ['TEST_STOP_SIGNAL']))
+        return io.BytesIO(json.dumps({'usage':{'prompt_tokens':100,'completion_tokens':20},
+          'choices':[{'finish_reason':'stop','message':{'content':'{"questions":[]}'}}]}).encode())
+def providers():
+    from test_news_providers import config
+    result=news.Providers(news.FakeGenerator(),{s:news.FakeRetriever() for s in news.SYSTEMS},
+                          [news.FakeJudge(str(i)) for i in range(3)],'hybrid',synthetic=True)
+    urllib.request.build_opener=lambda *args:FakeHTTP()
+    result.generator=live.ChatGenerator(config())
+    def usage():
+        chat=result.generator.summary()
+        return {'generator':chat,'judge_1':live.Chat(config()).summary(),'judge_2':live.Chat(config()).summary(),
+                'jev':live.embeddings.Budget(10000,1).summary(),'retrieval':live.embeddings.Budget(10000,1).summary(),
+                'totals':{'confirmed_cost_usd':chat['confirmed_cost_usd'],
+                          'cost_upper_bound_usd':chat['cost_upper_bound_usd'],
+                          'generation_judging_max_usd':30,'retrieval_max_usd':1}}
+    result.usage=usage
+    return result
+''')
+                environment = {**os.environ, 'NEWS_ENDPOINT': 'https://example.invalid', 'NEWS_KEY': 'fake-key',
+                    'QUIVR_NEWS_WORKING_RECIPIENTS': 'working', 'QUIVR_NEWS_HOLDOUT_RECIPIENTS': 'holdout',
+                    'QUIVR_NEWS_REVIEW_RECIPIENTS': 'review', 'TEST_STOP_SIGNAL': str(int(stopped_by))}
+                # Load the operator factory through the real CLI; --fake only supplies articles.
+                command = [sys.executable, '-c',
+                    "import sys,news_set as n;n.fake_providers=lambda:n.load_providers(sys.argv[1]);"
+                    "raise SystemExit(n.main(sys.argv[2:]))", str(root / 'adapters.py'),
+                    '--fake', '--questions', '6', '--storage-dir', str(root / 'storage'),
+                    '--report', str(root / 'quality.json'), '--usage-report', str(root / 'usage.json')]
+                completed = subprocess.run(command, cwd=pathlib.Path(news.__file__).parent, env=environment,
+                                           capture_output=True, text=True, timeout=10)
+                self.assertEqual(completed.returncode, 128 + stopped_by, completed.stdout + completed.stderr)
+                usage = json.loads((root / 'usage.json').read_text())
+                news.validate_usage(usage)
+                self.assertGreaterEqual(usage['generator']['confirmed_cost_usd'], .00014)
+                self.assertGreaterEqual(usage['generator']['confirmed_input_tokens'], 100)
+                self.assertFalse((root / 'quality.json').exists())
+                self.assertNotIn('fake-key', completed.stdout + completed.stderr)
 
     def test_cli_failure_retains_spend_from_a_configured_factory(self):
         # Owner regression: loading config and articles in one assignment lost the
@@ -935,7 +1075,7 @@ class ChatAdapters(unittest.TestCase):
             (root / 'input/articles.json').write_text(json.dumps([
                 {'id': 'a', 'title': 'Port', 'text': 'A ferry opens Monday.', 'published_at': '2026-01-02'},
                 {'id': 'b', 'title': 'Mountain', 'text': 'The road closes Tuesday.', 'published_at': '2026-01-02'}]))
-            (root / 'config.json').write_text(json.dumps(live.example_config()))
+            (root / 'config.json').write_text(json.dumps({**live.example_config(), 'attempt_budgets': dict.fromkeys(news.KINDS, 2)}))
             (root / 'adapters.py').write_text('''import io,json,urllib.request
 import news_providers as live
 class FakeHTTP:
@@ -958,13 +1098,14 @@ def providers():
                 '--usage-report', str(root / 'usage.json')], env=environment, capture_output=True, text=True, timeout=10)
             self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
             usage = json.loads((root / 'usage.json').read_text())
-            self.assertEqual(usage['generator']['attempts'], 1250)
-            self.assertEqual(usage['generator']['rejected'], {'invalid_count': 1250})
+            self.assertEqual(usage['generator']['attempts'], 12)
+            self.assertEqual(usage['generator']['rejected'], {'invalid_count': 12})
             self.assertEqual(json.loads(completed.stdout.split('diagnostic: ', 1)[1]),
-                             {'phase': 'generation', 'reason': 'generation_attempts_exhausted',
-                              'kind': 'entity', 'attempts': 1250, 'accepted': 0, 'target': 250,
-                              'rejected': {'invalid_count': 1250}})
-            self.assertEqual(usage['generator']['confirmed_cost_usd'], .25)
+                             {'phase': 'generation', 'reason': 'min_questions_not_met', 'accepted': 0, 'min_questions': 1000,
+                              'question_targets': {kind: {'target': 250, 'accepted': 0, 'shortfall': 250,
+                                  'attempts': 2, 'attempt_budget': 2} for kind in news.KINDS},
+                              'rejected': {'invalid_count': 12}})
+            self.assertEqual(usage['generator']['confirmed_cost_usd'], .0024)
             self.assertFalse((root / 'quality.json').exists())
             self.assertNotIn('fake-key', completed.stdout + completed.stderr)
             (root / 'alias').symlink_to(root, target_is_directory=True)

@@ -610,7 +610,7 @@ class LiveProviders(news.Providers):
 
 @safe
 def validate_config(cfg):
-    if (not isinstance(cfg, dict) or set(cfg) - {'articles', 'max_filtered_candidate_share', 'concurrency'} != {'generator', 'judges', 'jev', 'retrieval', 'baseline', 'build_max_usd'}
+    if (not isinstance(cfg, dict) or set(cfg) - {'articles', 'max_filtered_candidate_share', 'concurrency', 'question_targets', 'attempt_budgets', 'min_questions'} != {'generator', 'judges', 'jev', 'retrieval', 'baseline', 'build_max_usd'}
             or not isinstance(cfg['judges'], list) or len(cfg['judges']) != 2
             or cfg['baseline'] not in news.SYSTEMS):
         raise ValueError('invalid provider configuration')
@@ -623,6 +623,11 @@ def validate_config(cfg):
         raise ValueError('judges require three families')
     if type(cfg.get('concurrency', 1)) is not int or not 1 <= cfg.get('concurrency', 1) <= 8:
         raise ValueError('concurrency must be an integer from 1 to 8')
+    if type(cfg.get('min_questions', 1000)) is not int or cfg.get('min_questions', 1000) < 2:
+        raise ValueError('min_questions must allow a nonempty 60/40 split')
+    # --questions supplies the total later; config validation checks the settings only.
+    news.question_options(1500, cfg.get('question_targets'), cfg.get('attempt_budgets'),
+                          cfg.get('min_questions', 1000), check_total=False)
     news.article_options(cfg.get('articles', {}))
     news.filtered_candidate_share(cfg.get('max_filtered_candidate_share', .1))
     retrieval = cfg['retrieval']
@@ -667,8 +672,11 @@ def providers(config=None):
                          article_options=news.article_options(cfg.get('articles', {})),
                          max_filtered_candidate_share=cfg.get('max_filtered_candidate_share', .1),
                          embedding_budget=embedding_budget, jev_budget=jev_budget,
-                         concurrency=cfg.get('concurrency', 1),
-                         resume_config={k: v for k, v in cfg.items() if k != 'concurrency'})
+                         concurrency=cfg.get('concurrency', 1), question_targets=cfg.get('question_targets', {}),
+                         attempt_budgets=cfg.get('attempt_budgets', {}), min_questions=cfg.get('min_questions', 1000),
+                         # Completion controls do not change corpus ids or invalidate paid responses.
+                         resume_config={k: v for k, v in cfg.items()
+                                        if k not in {'concurrency', 'question_targets', 'attempt_budgets', 'min_questions'}})
 
 
 def example_config():
@@ -689,14 +697,11 @@ def example_config():
 
 @safe
 def estimate(config, count):
-    if count < 1500:
-        raise ValueError('live estimate requires 1500 questions')
+    targets, budgets, minimum = news.question_options(count, config.get('question_targets'),
+        config.get('attempt_budgets'), config.get('min_questions', 1000))
     # Worst bounded generation attempts, including filter rejection; no provider calls.
-    generation = sum(max(10, (count // 6 + (i < count % 6)) * 5) for i in range(6))
-    # Replaced questions share generation bounds; a fully filtered pool can
-    # require a binary split tree of 2 * 40 - 1 calls per chat judge.
-    judged_questions = sum(max(10, target * 5) * min(25, target)
-                           for target in (count // 6 + (i < count % 6) for i in range(6)))
+    generation = sum(budgets[kind] for kind in news.KINDS if targets[kind])
+    judged_questions = sum(budgets[kind] * min(25, targets[kind]) for kind in news.KINDS)
     requested = []
     for cfg, calls, retry_layers in [(config['generator'], generation, 1),
                                      *[(c, judged_questions * 79, 2) for c in config['judges']]]:
@@ -705,7 +710,8 @@ def estimate(config, count):
         cost = calls * (cfg.get('request_input_tokens', 65536) * number(cfg['input_usd_per_million'])
                         + cfg.get('request_output_tokens', 4096) * number(cfg['output_usd_per_million'])) / 1000000
         requested.append(float(cost))
-    return {'questions': count, 'pool_max_candidates': 40, 'generation_max_attempts': generation,
+    return {'questions': sum(targets.values()), 'min_questions': minimum,
+            'question_targets': targets, 'attempt_budgets': budgets, 'pool_max_candidates': 40, 'generation_max_attempts': generation,
             'chat_worst_case_usd': requested, 'generation_and_judging_cap_usd': float(number(config['build_max_usd'])),
             'retrieval_cap_usd': float(number(config['retrieval']['max_usd'])),
             'completion_guaranteed': False}
