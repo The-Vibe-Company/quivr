@@ -55,6 +55,10 @@ class ChatAdapters(unittest.TestCase):
         self.assertEqual(requests[0].get_header('Api-key'), 'private-key')
         self.assertEqual(requests[1].get_header('Authorization'), 'Bearer private-key')
         self.assertIsNone(requests[1].get_header('Api-key'))
+        for request in requests:
+            body = json.loads(request.data)
+            self.assertEqual(body['response_format'], {'type': 'json_object'})
+            self.assertRegex(body['messages'][0]['content'].lower(), r'return[^.]*\bjson\b')
         generator_input = json.loads(json.loads(requests[0].data)['messages'][1]['content'])
         self.assertEqual(generator_input['articles'][0]['previous_versions'][0]['text'], 'Ouverture prévue')
         self.assertNotIn('id', generator_input['articles'][0]['previous_versions'][0])
@@ -66,6 +70,63 @@ class ChatAdapters(unittest.TestCase):
         self.assertNotIn('previous_versions', judge_input['articles'][0])
         self.assertEqual(judge_input['articles'][0]['updated_at'], '2026-01-02T12:00:00Z')
         self.assertEqual(generator.summary()['confirmed_cost_usd'], .00014)
+
+    def test_cli_reports_only_safe_failure_fields_at_the_failing_phase(self):
+        cases = [
+            ('generation', 400, b'{"error":{"code":"invalid_request_error","message":"private-body private-key"}}',
+             'HTTPError', 'invalid_request_error'),
+            ('judging', 503, b'{"error":{"code":"service_unavailable","message":"private-body"}}',
+             'HTTPError', 'service_unavailable'),
+            ('generation', 429, b'{"error":{"code":"rate_limit_exceeded"}}', 'HTTPError', 'rate_limit_exceeded'),
+            ('generation', 400, b'private-body', 'HTTPError', None),
+            ('generation', 400, b'{"error":[]}', 'HTTPError', None),
+            ('generation', 400, b'{"error":{"code":"private-key\\nprivate-text"}}', 'HTTPError', None),
+            ('generation', 400, b'{"error":{"code":"https://private-url/private-key"}}', 'HTTPError', None),
+            ('generation', 400, b'{"error":{"code":123}}', 'HTTPError', None),
+            ('generation', 400, b'{"error":{"code":"private-key"}}', 'HTTPError', None),
+            ('generation', 400, b'{"error":{"code":"invalid_request_error"},"padding":"' + b'x' * 65536 + b'"}',
+             'HTTPError', None),
+            ('generation', None, None, 'TimeoutError', None),
+            ('retrieval', None, None, 'TimeoutError', None),
+            ('retrieval', None, b'invalid-candidates', 'BuildError', None),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for phase, status, payload, exception, code in cases:
+                with self.subTest(phase=phase, status=status, payload=payload[:80] if payload else None):
+                    self.opener.open.reset_mock()
+                    client = (live.ChatGenerator if phase == 'generation' else live.ChatJudge)(
+                        {**config(), 'max_retries': 0})
+                    error = (urllib.error.HTTPError('https://private-url', status, 'private-body', {}, io.BytesIO(payload))
+                             if status else TimeoutError('private-key private-text private-query'))
+                    self.opener.open.side_effect = error
+                    providers = news.fake_providers()
+                    if phase == 'generation':
+                        providers.generator = client
+                    elif phase == 'judging':
+                        providers.judges[0] = client
+                    else:
+                        providers.retrievers['bm25'] = mock.Mock()
+                        if exception == 'BuildError':
+                            providers.retrievers['bm25'].search.return_value = ['unknown-article']
+                        else:
+                            providers.retrievers['bm25'].search.side_effect = error
+                    output, stderr = io.StringIO(), io.StringIO()
+                    with mock.patch('news_set.fake_providers', return_value=providers), \
+                         mock.patch.dict(os.environ, QUIVR_NEWS_WORKING_RECIPIENTS='working',
+                                         QUIVR_NEWS_HOLDOUT_RECIPIENTS='holdout', QUIVR_NEWS_REVIEW_RECIPIENTS='review'), \
+                         contextlib.redirect_stdout(output), contextlib.redirect_stderr(stderr):
+                        result = news.main(['--fake', '--questions', '6', '--storage-dir', directory,
+                                            '--report', str(pathlib.Path(directory) / 'report.json')])
+                    self.assertEqual(result, 2)
+                    expected = {'exception': exception, 'phase': phase}
+                    if status:
+                        expected['http_status'] = status
+                    if code:
+                        expected['provider_code'] = code
+                    self.assertEqual(json.loads(output.getvalue().split('diagnostic: ', 1)[1]), expected)
+                    for private in ('private-body', 'private-key', 'private-text', 'private-query', 'private-url'):
+                        self.assertNotIn(private, output.getvalue() + stderr.getvalue())
+                    self.assertEqual(self.opener.open.call_count, 0 if phase == 'retrieval' else 1)
 
     def test_retries_charge_unknown_attempts_and_caps_block_before_http(self):
         client = live.ChatJudge(config())

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import contextlib
 import csv
 import dataclasses
 import datetime
@@ -27,11 +28,19 @@ import tarfile
 import time
 import unicodedata
 import uuid
+import urllib.error
 from typing import Protocol
 
 KINDS = ('entity', 'event', 'recent', 'paraphrase', 'multi_article', 'no_answer')
 SYSTEMS = ('bm25', 'e5_small', 'cohere_pro', 'hybrid')
 POOL_DEPTH = 10
+# Provider bodies may echo credentials even in code fields. Publish known codes only.
+PROVIDER_CODES = frozenset({
+    'invalid_request_error', 'invalid_value', 'unsupported_value', 'invalid_api_key',
+    'context_length_exceeded', 'model_not_found', 'rate_limit_exceeded', 'insufficient_quota',
+    'content_filter', 'content_policy_violation', 'server_error', 'service_unavailable',
+    'BadRequest', 'InvalidRequest', 'Unauthorized', 'DeploymentNotFound', 'InternalServerError',
+})
 
 
 def progress(phase, count):
@@ -41,6 +50,41 @@ STOPWORDS = set('a au aux avec ce ces dans de des du en et la le les leur par po
 
 class BuildError(ValueError):
     """A safe diagnostic that contains no input/provider text."""
+
+    def __init__(self, message, *, diagnostic=None):
+        super().__init__(message)
+        self.diagnostic = diagnostic
+
+
+def failure_details(error):
+    """Copy only bounded diagnostic fields; never stringify a provider exception."""
+    if isinstance(error, BuildError) and error.diagnostic is not None:
+        return dict(error.diagnostic)
+    name = type(error).__name__
+    details = {'exception': name if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,127}', name) else 'Exception'}
+    if isinstance(error, urllib.error.HTTPError):
+        if type(error.code) is int and 100 <= error.code <= 599:
+            details['http_status'] = error.code
+        try:
+            raw = error.read(65537)
+            if len(raw) <= 65536:
+                payload = json.loads(raw)
+                code = payload.get('error', {}).get('code')
+                if isinstance(code, str) and code in PROVIDER_CODES:
+                    details['provider_code'] = code
+        except Exception:
+            pass  # Malformed or unreadable bodies must not hide the original failure.
+    return details
+
+
+@contextlib.contextmanager
+def build_phase(phase):
+    try:
+        yield
+    except Exception as error:
+        details = failure_details(error)
+        details.setdefault('phase', phase)  # Preserve the innermost failing phase.
+        raise BuildError('news-set phase failed', diagnostic=details) from None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -312,16 +356,18 @@ def judge_pool(questions, corpus, retrievers, judges):
         pool = collections.defaultdict(dict)
         rankings[qi] = {}
         for system, retriever in retrievers.items():
-            ids = retriever.search(question, corpus, POOL_DEPTH)
-            if not isinstance(ids, list) or len(ids) > POOL_DEPTH or len(ids) != len(set(ids)) or any(d not in by_id for d in ids):
-                raise BuildError('retriever returned invalid candidate ids')
+            with build_phase('retrieval'):
+                ids = retriever.search(question, corpus, POOL_DEPTH)
+                if not isinstance(ids, list) or len(ids) > POOL_DEPTH or len(ids) != len(set(ids)) or any(d not in by_id for d in ids):
+                    raise BuildError('retriever returned invalid candidate ids')
             rankings[qi][system] = ids
             for rank, doc in enumerate(ids, 1):
                 pool[doc][system] = rank
         if not pool:
             raise BuildError('empty candidate pool')
         candidates = [by_id[d] for d in sorted(pool)]
-        votes = [judge.grade(question, candidates) for judge in judges]
+        with build_phase('judging'):
+            votes = [judge.grade(question, candidates) for judge in judges]
         if any(not isinstance(v, dict) or set(v) != set(pool)
                or any(type(g) is not int or not 0 <= g <= 3 for g in v.values()) for v in votes):
             raise BuildError('judge returned missing or invalid grades')
@@ -525,9 +571,11 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
         raise BuildError('baseline must name a pooled retrieval system')
     opaque = lambda value: hmac.new(salt, value.encode(), hashlib.sha256).hexdigest()
     corpus = [dataclasses.replace(a, id=opaque('article:' + a.id)) for a in sorted(corpus, key=lambda a: a.id)]
-    questions, rejected = generate(corpus, providers.generator, count, seed)
+    with build_phase('generation'):
+        questions, rejected = generate(corpus, providers.generator, count, seed)
     qids = {i: opaque('query:' + normalize(q.text)) for i, q in enumerate(questions)}
-    rows, rankings = judge_pool(questions, corpus, providers.retrievers, providers.judges)
+    with build_phase('judging'):
+        rows, rankings = judge_pool(questions, corpus, providers.retrievers, providers.judges)
     dev, held = split(questions, seed)
     docs = {a.id: {'title': a.title, 'text': a.text} for a in corpus}
     rows_by_query = collections.defaultdict(list)
@@ -876,6 +924,7 @@ def main(argv=None):
     if not args.fake and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
         parser.error('live builds are refused in CI')
     providers = None
+    phase = 'setup'
     try:
         if args.fake:
             providers = fake_providers()
@@ -884,16 +933,21 @@ def main(argv=None):
                               f'2026-{1 + i % 2:02d}-02', 'maritime') for i in range(8)]
         else:
             providers = load_providers(args.providers)
+            phase = 'input'
             corpus = read_articles(args.articles, providers.article_options)
             if providers.synthetic:
                 raise BuildError('live build cannot use synthetic providers')
+        phase = 'setup'
         recipients = [os.environ.get(k, '').split() for k in
                       ('QUIVR_NEWS_WORKING_RECIPIENTS', 'QUIVR_NEWS_HOLDOUT_RECIPIENTS', 'QUIVR_NEWS_REVIEW_RECIPIENTS')]
         if not all(recipients) or set(recipients[0]) & set(recipients[1]):
             raise BuildError('provide three recipient groups with separate working and held-out keys')
+        phase = 'build'
         result = build(corpus, providers, args.questions, args.seed)
+        phase = 'publication'
         store = DirectoryStorage(args.storage_dir) if args.storage_dir else S3Storage(args.bucket, args.prefix, args.s3_endpoint)
         manifest = publish(result, store, *recipients)
+        phase = 'report'
         report = {**result.report, 'version': result.version, 'artifacts': manifest}
         validate_report(report)
         args.report.parent.mkdir(parents=True, exist_ok=True)
@@ -902,9 +956,11 @@ def main(argv=None):
             output.write('\n')
         print('Encrypted dataset stored; aggregate quality report written. Human review is pending.')
         return 0
-    except Exception:
+    except Exception as error:
         # Provider/SDK exceptions can contain inputs, credentials and URLs.
-        print('News-set build failed; check adapters, input schema, recipients and private storage.')
+        details = failure_details(error)
+        details.setdefault('phase', phase)
+        print('News-set build failed; diagnostic: ' + json.dumps(details, sort_keys=True))
         return 2
     finally:
         if args.usage_report and providers is not None and hasattr(providers, 'usage'):

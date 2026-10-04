@@ -33,8 +33,9 @@ def safe(operation):
             return operation(*args, **kwargs)
         except AdapterError:
             raise
-        except Exception:
-            raise AdapterError('news provider failed; inspect private configuration and aggregate usage') from None
+        except Exception as error:
+            raise AdapterError('news provider failed; inspect private configuration and aggregate usage',
+                               diagnostic=news.failure_details(error)) from None
     return call
 
 
@@ -195,9 +196,10 @@ class Chat:
                 return strict_json(content)
             except urllib.error.HTTPError as error:
                 code, retry = error.code, error.headers.get('Retry-After', '')
+                diagnostic = news.failure_details(error)
                 error.close()
                 if (code != 429 and not 500 <= code <= 599) or attempt == self.cfg['max_retries']:
-                    raise AdapterError('chat provider refused the request') from None
+                    raise AdapterError('chat provider refused the request', diagnostic=diagnostic) from None
                 delay = min(10, float(retry)) if re.fullmatch(r'\d{1,9}', retry) else min(10, 2 ** attempt)
                 time.sleep(delay)
         raise AdapterError('chat retries exhausted')
@@ -219,7 +221,7 @@ class ChatGenerator(Chat):
                        'including inflections, except French stopwords. For multi_article, require facts from '
                        'at least two sources. For no_answer, ask about facts absent from the supplied articles '
                        'and return no source ids. For other kinds, cite the supplied evidence ids. '
-                       'Return ONLY {"questions":[{"text":"...","sources":["id"]}]} with exactly count items.')
+                       'Return ONLY JSON: {"questions":[{"text":"...","sources":["id"]}]} with exactly count items.')
         result = self.complete(instruction, {'kind': kind, 'count': count, 'nonce': rng.getrandbits(64),
                                             'articles': [
             {'id': a.id, 'title': a.title, 'text': a.text, 'date': a.date,
@@ -249,7 +251,7 @@ class ChatJudge(Chat):
                        'For latest-on queries use its update time; if older than latest_story_update, do not treat it '
                        'as evidence of the latest state. Prefer explicit dated evidence over stale assertions. '
                        '0 unrelated, 1 marginal, 2 partial answer, 3 direct answer. Do not infer missing facts. '
-                       'Return ONLY {"grades":{"article_id":0}}; integer grades only, no extra fields.')
+                       'Return ONLY JSON: {"grades":{"article_id":0}}; integer grades only, no extra fields.')
         def data(batch):
             return {'query': question.text, 'articles': [
                 {'id': a.id, 'title': a.title, 'text': a.text, 'updated_at': a.updated_at, 'latest_story_update': a.latest_story_update} for a in batch]}

@@ -6,7 +6,7 @@ You get working/held-out sets, a human review sheet and an aggregate quality rep
 ## Prerequisites
 
 - Python 3.12+, `age` and `age-keygen` (`python3 --version`, `age --version`).
-- Install `scripts/eval/requirements{,-direct,-news}.txt`; for Jev, run `python3 -m pip install --no-deps -e plugins/jev-rerank`.
+- Install `scripts/eval/requirements{,-direct,-news}.txt`; for the live factory, run `python3 -m pip install --no-deps -e sdks/python -e plugins/jev-rerank`.
 - A private storage directory, mounted Modal Volume, or S3-compatible bucket.
 - Separate age keys for the working measurement runner and confirmation runner.
   Human reviewers use a privileged key that working agents cannot access.
@@ -44,7 +44,9 @@ Supply a folder of JSON article objects, JSON arrays or JSONL rows.
 Fields are in the [article schema](../../scripts/eval/news-article.schema.json):
 `id`, `title`, `text`, `published_at`, and optional `cluster` for related articles.
 Dates accept ISO dates or timestamps with a timezone, normalized to UTC calendar dates.
-Without a cluster, the generator samples within calendar months for multi-article questions.
+A `cluster` groups distinct related articles for multi-article questions; `story_id` groups versions of the same dispatch.
+After version grouping, a multi-article cluster needs at least two selected articles. Setting `cluster` to `story_id`
+leaves one article per cluster and fails generation. Omit `cluster` to sample within calendar months.
 
 Use the built-in [`news_providers.py`](../../scripts/eval/news_providers.py) factory,
 or a trusted Python file outside Git exporting `providers()` returning
@@ -101,7 +103,6 @@ The generator sees up to three prior versions as context and cites only the sele
 Recent/event prompts ask about datelines, latest developments and follow-ups that the selected text supports.
 Judges receive the selected version and update time, and apply the same rubric to all dispatches.
 The six question types and 60/40 split remain unchanged; grouping reduces repeated versions in both sets.
-
 
 ## Configure live adapters
 
@@ -161,6 +162,7 @@ python3 scripts/eval/news_set.py --articles /private/articles \
 The estimate is offline: it shows worst bounded chat attempts, pool size and spend ceilings.
 Worst-case estimates can exceed the caps; caps stop calls and do not guarantee 1,500 accepted questions.
 The quality report includes aggregate provider usage; `--usage-report` also saves usage after a failed build.
+Failures print only exception class, build phase, HTTP status and known provider code when available; messages, text, URLs and keys are omitted.
 Use `confirmed_cost_usd` for confirmed usage and `cost_upper_bound_usd` for confirmed plus unknown reservations.
 The `totals` block sums all provider spend and records the generation/judging and separate retrieval ceilings.
 Always supply the ledger path for a paid build: a failed build otherwise has no saved spend report.
