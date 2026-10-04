@@ -18,12 +18,15 @@ import pathlib
 import re
 import socket
 import time
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 
 import embeddings
 import news_set as news
+from direct_bakeoff import Hosted
+from news_cache import ResponseCache, Reuse, digest
 
 
 class AdapterError(news.BuildError):
@@ -40,6 +43,14 @@ def safe(operation):
         except Exception as error:
             raise AdapterError('news provider failed; inspect private configuration and aggregate usage',
                                diagnostic=news.failure_details(error)) from None
+    return call
+
+
+def synchronized(operation):
+    @functools.wraps(operation)
+    def call(self, *args, **kwargs):
+        with self.lock:
+            return operation(self, *args, **kwargs)
     return call
 
 
@@ -126,19 +137,26 @@ class Chat:
         self.cost = self.confirmed_cost = decimal.Decimal(0)
         self.stopped = False
         self.rejected = collections.Counter()
+        self.refusals = collections.Counter()
+        self.lock = threading.RLock()
+        self.response_cache = None
+        self.reuse = Reuse()
 
+    @synchronized
     def summary(self):
         return {'attempts': self.attempts, 'timeouts': self.timeouts, 'retries': self.retries,
                 'budgeted_input_tokens': self.input_tokens,
                 'budgeted_output_tokens': self.output_tokens, 'confirmed_input_tokens': self.confirmed_input,
                 'confirmed_output_tokens': self.confirmed_output, 'confirmed_cost_usd': float(self.confirmed_cost),
                 'cost_upper_bound_usd': float(self.cost), 'max_usd': float(self.cap), 'stopped': self.stopped,
-                'rejected': dict(self.rejected)}
+                'rejected': dict(self.rejected), 'refusals': dict(self.refusals), **self.reuse.summary()}
 
+    @synchronized
     def invalid(self, reason):
         self.rejected[reason] += 1
         return news.InvalidBatch(reason)
 
+    @synchronized
     def reserve(self, inputs, outputs):
         cost = inputs * self.input_rate + outputs * self.output_rate
         if (self.stopped or self.input_tokens + inputs > self.cfg['max_input_tokens']
@@ -151,6 +169,7 @@ class Chat:
         self.attempts += 1
         return cost
 
+    @synchronized
     def settle(self, usage, inputs, outputs, reserved):
         if not isinstance(usage, dict):
             return  # Missing usage keeps the complete reservation.
@@ -181,19 +200,28 @@ class Chat:
         return len(self.request_body(instruction, data)) + 128
 
     @safe
-    def complete(self, instruction, data):
+    def complete(self, instruction, data, validate=lambda value: value, cache_rejections=False):
         raw = self.request_body(instruction, data)
+        key = digest(['chat-v1', self.url, self.cfg, raw.decode()])
+        cached = self.response_cache.get(key) if self.response_cache else None
+        if cached is not None:
+            self.reuse.record(cached)
+            if 'rejection' in cached:
+                raise self.invalid(cached['rejection'])
+            return validate(cached['value'])
         inputs, outputs = len(raw) + 128, self.cfg['request_output_tokens']
         if inputs > self.cfg['request_input_tokens']:
             raise AdapterError('chat request exceeds the input token bound')
         for attempt in range(self.cfg['max_retries'] + 1):
             reserved = self.reserve(inputs, outputs)
             if attempt:
-                self.retries += 1
+                with self.lock:
+                    self.retries += 1
             request = urllib.request.Request(self.url, data=raw, method='POST',
                                              headers={'Content-Type': 'application/json', **(
                                                  {'api-key': self.key} if self.cfg['auth_header'] == 'api-key'
                                                  else {'Authorization': 'Bearer ' + self.key})})
+            usage = {}
             try:
                 with self.opener.open(request, timeout=self.cfg['timeout_seconds']) as response:
                     answer = response.read((2 << 20) + 1)
@@ -205,7 +233,8 @@ class Chat:
                         raise ValueError('invalid response')
                 except ValueError:
                     raise self.invalid('invalid_response') from None
-                self.settle(result.get('usage'), inputs, outputs, reserved)
+                usage = result.get('usage')
+                self.settle(usage, inputs, outputs, reserved)
                 try:
                     choices = result['choices']
                     if not isinstance(choices, list) or len(choices) != 1 or choices[0]['finish_reason'] != 'stop':
@@ -216,24 +245,58 @@ class Chat:
                 except (KeyError, TypeError, ValueError):
                     raise self.invalid('invalid_response') from None
                 try:
-                    return strict_json(content)
+                    value = strict_json(content)
                 except ValueError:
                     raise self.invalid('invalid_json') from None
+                validated = validate(value)
+                if self.response_cache:
+                    usage = usage if isinstance(usage, dict) else {}
+                    used_in, used_out = usage.get('prompt_tokens'), usage.get('completion_tokens')
+                    known = type(used_in) is int and type(used_out) is int and min(used_in, used_out) >= 0
+                    self.response_cache.put(key, {'value': value,
+                        'input_tokens': used_in if known else inputs,
+                        'output_tokens': used_out if known else outputs,
+                        'cost_usd': float(used_in * self.input_rate + used_out * self.output_rate) if known else float(reserved)})
+                return validated
             except urllib.error.HTTPError as error:
                 code, retry = error.code, error.headers.get('Retry-After', '')
                 diagnostic = news.failure_details(error)
                 error.close()
-                if code == 400 and diagnostic.get('provider_code') == 'content_filter':
-                    raise self.invalid('content_filter') from None
-                if (code != 429 and not 500 <= code <= 599) or attempt == self.cfg['max_retries']:
+                provider_code = diagnostic.get('provider_code', 'unknown')
+                permanent = (code in (401, 402, 403, 405, 407, 415) or provider_code in (
+                    'invalid_api_key', 'Unauthorized', 'model_not_found', 'DeploymentNotFound', 'insufficient_quota'))
+                if 400 <= code < 500 and code != 429 and not permanent:
+                    reason = 'content_filter' if provider_code == 'content_filter' else 'request_refused'
+                    with self.lock:
+                        self.refusals[f'{code}:{provider_code}'] += 1
+                    if self.response_cache:
+                        self.response_cache.put(key, {'rejection': reason, 'refusal': f'{code}:{provider_code}',
+                            'input_tokens': inputs, 'output_tokens': outputs, 'cost_usd': float(reserved)})
+                    raise self.invalid(reason) from None
+                if permanent or (code != 429 and not 500 <= code <= 599) or attempt == self.cfg['max_retries']:
+                    with self.lock:
+                        self.stopped = True
                     raise AdapterError('chat provider refused the request', diagnostic=diagnostic) from None
                 delay = min(10, float(retry)) if re.fullmatch(r'\d{1,9}', retry) else min(10, 2 ** attempt)
+            except news.InvalidBatch as error:
+                # Generation resamples after every rejected response. Replay
+                # these paid rejections so resume keeps the same sample stream.
+                if self.response_cache and cache_rejections:
+                    usage = usage if isinstance(usage, dict) else {}
+                    used_in, used_out = usage.get('prompt_tokens'), usage.get('completion_tokens')
+                    known = type(used_in) is int and type(used_out) is int and min(used_in, used_out) >= 0
+                    self.response_cache.put(key, {'rejection': error.reason,
+                        'input_tokens': used_in if known else inputs,
+                        'output_tokens': used_out if known else outputs,
+                        'cost_usd': float(used_in * self.input_rate + used_out * self.output_rate) if known else float(reserved)})
+                raise
             except (urllib.error.URLError, OSError, http.client.IncompleteRead) as error:
                 reason = error.reason if isinstance(error, urllib.error.URLError) else error
                 timed_out = isinstance(reason, (TimeoutError, socket.timeout)) or (
                     isinstance(reason, OSError) and reason.errno == errno.ETIMEDOUT)
                 if timed_out:
-                    self.timeouts += 1
+                    with self.lock:
+                        self.timeouts += 1
                 transient = (timed_out or isinstance(reason, (ConnectionError, http.client.IncompleteRead))
                              or (isinstance(reason, socket.gaierror) and reason.errno == socket.EAI_AGAIN)
                              or (isinstance(reason, OSError) and reason.errno in (
@@ -269,34 +332,37 @@ class ChatGenerator(Chat):
                        'at least two sources. For no_answer, ask about facts absent from the supplied articles '
                        'and return no source ids. For other kinds, cite the supplied evidence ids. '
                        'Return ONLY JSON: {"questions":[{"text":"...","sources":["id"]}]} with exactly count items.')
-        result = self.complete(instruction, {'kind': kind, 'count': count, 'nonce': rng.getrandbits(64),
+        data = {'kind': kind, 'count': count, 'nonce': rng.getrandbits(64),
                                             'articles': [
             {'id': a.id, 'title': a.title, 'text': a.text, 'date': a.date,
              'published_at': a.published_at, 'updated_at': a.updated_at, 'latest_story_update': a.latest_story_update,
              'previous_versions': [{key: version.get(key, '') for key in ('title', 'text', 'updated_at')}
-                                   for version in a.previous_versions]} for a in sample]})
-        if not isinstance(result, dict) or set(result) != {'questions'} or not isinstance(result['questions'], list):
-            raise self.invalid('invalid_questions')
-        if len(result['questions']) != count:
-            raise self.invalid('invalid_count')
-        by_id, questions = {a.id: a for a in sample}, []
-        for row in result['questions']:
-            if (not isinstance(row, dict) or set(row) != {'text', 'sources'}
-                    or not isinstance(row['text'], str) or not row['text'].strip()
-                    or not isinstance(row['sources'], list) or any(not isinstance(s, str) for s in row['sources'])):
+                                   for version in a.previous_versions]} for a in sample]}
+        def validate(result):
+            if not isinstance(result, dict) or set(result) != {'questions'} or not isinstance(result['questions'], list):
                 raise self.invalid('invalid_questions')
-            if (len(set(row['sources'])) != len(row['sources']) or set(row['sources']) - set(by_id)
-                    or (kind == 'no_answer' and row['sources']) or (kind != 'no_answer' and not row['sources'])
-                    or (kind == 'multi_article' and len(row['sources']) < 2)):
-                raise self.invalid('invalid_evidence')
-            date = max(by_id[s].date for s in row['sources']) if row['sources'] else sample[0].date
-            questions.append(news.Question(row['text'], kind, date, tuple(row['sources'])))
-        return questions
+            if len(result['questions']) != count:
+                raise self.invalid('invalid_count')
+            by_id, questions = {a.id: a for a in sample}, []
+            for row in result['questions']:
+                if (not isinstance(row, dict) or set(row) != {'text', 'sources'}
+                        or not isinstance(row['text'], str) or not row['text'].strip()
+                        or not isinstance(row['sources'], list) or any(not isinstance(s, str) for s in row['sources'])):
+                    raise self.invalid('invalid_questions')
+                if (len(set(row['sources'])) != len(row['sources']) or set(row['sources']) - set(by_id)
+                        or (kind == 'no_answer' and row['sources']) or (kind != 'no_answer' and not row['sources'])
+                        or (kind == 'multi_article' and len(row['sources']) < 2)):
+                    raise self.invalid('invalid_evidence')
+                date = max(by_id[s].date for s in row['sources']) if row['sources'] else sample[0].date
+                questions.append(news.Question(row['text'], kind, date, tuple(row['sources'])))
+            return questions
+        return self.complete(instruction, data, validate, cache_rejections=True)
+
 
 
 class ChatJudge(Chat):
     @safe
-    def grade(self, question, candidates):
+    def grade(self, question, candidates, _split=True):
         instruction = (UNTRUSTED + 'Grade EVERY selected dispatch version for how well it answers the query. '
                        'For latest-on queries use its update time; if older than latest_story_update, do not treat it '
                        'as evidence of the latest state. Prefer explicit dated evidence over stale assertions. '
@@ -321,13 +387,23 @@ class ChatJudge(Chat):
             # repeat earlier successful batches. Every call uses the same caps.
             for attempt in range(self.cfg['max_retries'] + 1):
                 try:
-                    result = self.complete(instruction, data(batch))
-                    if (not isinstance(result, dict) or set(result) != {'grades'} or not isinstance(result['grades'], dict)
-                            or set(result['grades']) != {a.id for a in batch}
-                            or any(type(v) is not int or not 0 <= v <= 3 for v in result['grades'].values())):
-                        raise self.invalid('invalid_grades')
+                    def validate(result):
+                        if (not isinstance(result, dict) or set(result) != {'grades'} or not isinstance(result['grades'], dict)
+                                or set(result['grades']) != {a.id for a in batch}
+                                or any(type(v) is not int or not 0 <= v <= 3 for v in result['grades'].values())):
+                            raise self.invalid('invalid_grades')
+                        return result
+                    result = self.complete(instruction, data(batch), validate)
                     break
                 except news.InvalidBatch as error:
+                    if error.reason == 'request_refused':
+                        if len(batch) == 1 or not _split:
+                            result = {'grades': {a.id: None for a in batch}}
+                        else:
+                            middle = len(batch) // 2
+                            result = {'grades': {**self.grade(question, batch[:middle], _split=False),
+                                                 **self.grade(question, batch[middle:], _split=False)}}
+                        break
                     if error.reason == 'content_filter':
                         if len(batch) == 1:
                             result = {'grades': {batch[0].id: None}}
@@ -350,14 +426,67 @@ class CappedJev:
     """Reserve all three internal client attempts before letting the client start."""
     def __init__(self, client, budget):
         self.client, self.budget = client, budget
+        self.lock = threading.Lock()
+        self.refusals = collections.Counter()
+        self.response_cache = None
+        self.reuse = Reuse()
 
     @safe
     def judge(self, query, passages, deadline, cost_limit):
-        from jev_rerank.client import MAX_TOKENS
+        from jev_rerank.client import MAX_TOKENS, Result, payload
+        key = digest(['jev-v1', self.client.url.geturl() if isinstance(getattr(self.client, 'url', None), urllib.parse.SplitResult) else '',
+                      payload(query, passages)])
+        cached = self.response_cache.get(key) if self.response_cache else None
+        if cached is not None:
+            self.reuse.record(cached)
+            if 'rejection' in cached:
+                raise news.InvalidBatch('request_refused')
+            return Result(**{**cached['value'], 'input_tokens': 0, 'paid_calls': 0, 'estimated_tokens': 0})
         call = self.budget.reserve('jev', 'news', 'judge', 3 * MAX_TOKENS, .042)
         result = self.client.judge(query, passages, deadline, cost_limit=cost_limit)
         if result.estimated_tokens == 0 or result.input_tokens > call['reserved']:
             self.budget.settle(call, result.input_tokens)
+        match = re.fullmatch(r'HTTP (4[0-9]{2})', result.reason)
+        if match and int(match[1]) not in (401, 402, 403, 405, 407, 415, 429):
+            refusal = match[1] + ':unknown'
+            with self.lock:
+                self.refusals[refusal] += 1
+            if self.response_cache:
+                self.response_cache.put(key, {'rejection': 'request_refused', 'refusal': refusal,
+                    'input_tokens': result.input_tokens, 'cost_usd': result.cost_cents / 100})
+            raise news.InvalidBatch('request_refused')
+        if self.response_cache and not result.reason and set(result.scores) == set(passages):
+            self.response_cache.put(key, {'value': dataclasses.asdict(result),
+                                         'input_tokens': result.input_tokens, 'cost_usd': result.cost_cents / 100})
+        return result
+
+
+class CachedHosted(Hosted):
+    """Persist each paid embedding request, including completed index batches."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.response_cache = None
+        self.reuse = Reuse()
+
+    def post(self, path, body, texts, label, model, mode):
+        key = digest(['embedding-v1', self.endpoint, path, body])
+        cached = self.response_cache.get(key) if self.response_cache else None
+        if cached is not None:
+            self.reuse.record(cached)
+            return cached['value']
+        result = super().post(path, body, texts, label, model, mode)
+        # Only reusable, complete vectors enter the cache.
+        cohere = model.startswith('Cohere')
+        vectors = result['embeddings']['float'] if cohere else [row['embedding'] for row in
+                    sorted(result['data'], key=lambda row: row['index'])]
+        dimensions = body.get('output_dimension' if cohere else 'dimensions')
+        if len(vectors) != len(texts) or (dimensions and any(len(v) != dimensions for v in vectors)):
+            raise AdapterError('invalid provider embeddings')
+        if self.response_cache:
+            used = result['meta']['billed_units'].get('input_tokens') if cohere else result['usage'].get('prompt_tokens')
+            tokens = used if type(used) is int and used >= 0 else embeddings.estimate_tokens(texts)
+            self.response_cache.put(key, {'value': result, 'input_tokens': tokens,
+                                         'cost_usd': float(tokens * number(self.prices[model]) / 1000000)})
         return result
 
 
@@ -423,13 +552,34 @@ class Retriever:
 class LiveProviders(news.Providers):
     embedding_budget: object = None
     jev_budget: object = None
+    resume_config: dict = dataclasses.field(default_factory=dict)
+    response_cache: object = None
+
+    @safe
+    def enable_cache(self, directory):
+        self.response_cache = ResponseCache(directory)
+        for adapter in (self.generator, *self.judges[:2], self.judges[2].client,
+                        next(iter(self.retrievers.values())).retrieval.hosted):
+            adapter.response_cache = self.response_cache
+
+    @safe
+    def prepare_resume(self, corpus, count, seed):
+        if not self.response_cache:
+            return None
+        return self.response_cache.salt({'format': 1, 'config': self.resume_config,
+            'articles': [dataclasses.asdict(a) for a in sorted(corpus, key=lambda a: a.id)],
+            'count': count, 'seed': seed})
 
     def usage(self):
         usage = {'generator': self.generator.summary(), 'judge_1': self.judges[0].summary(),
                  'judge_2': self.judges[1].summary(), 'jev': self.jev_budget.summary(),
                  'retrieval': self.embedding_budget.summary()}
+        usage['jev'].update(self.judges[2].client.reuse.summary())
+        with self.judges[2].client.lock:
+            usage['jev']['refusals'] = dict(self.judges[2].client.refusals)
+        usage['retrieval'].update(next(iter(self.retrievers.values())).retrieval.hosted.reuse.summary())
         usage['totals'] = {field: float(sum(number(value[field]) for value in usage.values()))
-                           for field in ('confirmed_cost_usd', 'cost_upper_bound_usd')}
+                           for field in ('confirmed_cost_usd', 'cost_upper_bound_usd', 'cached_cost_usd')}
         usage['totals']['generation_judging_max_usd'] = float(sum(
             number(usage[key]['max_usd']) for key in ('generator', 'judge_1', 'judge_2', 'jev')))
         usage['totals']['retrieval_max_usd'] = usage['retrieval']['max_usd']
@@ -438,7 +588,7 @@ class LiveProviders(news.Providers):
 
 @safe
 def validate_config(cfg):
-    if (not isinstance(cfg, dict) or set(cfg) - {'articles', 'max_filtered_candidate_share'} != {'generator', 'judges', 'jev', 'retrieval', 'baseline', 'build_max_usd'}
+    if (not isinstance(cfg, dict) or set(cfg) - {'articles', 'max_filtered_candidate_share', 'concurrency'} != {'generator', 'judges', 'jev', 'retrieval', 'baseline', 'build_max_usd'}
             or not isinstance(cfg['judges'], list) or len(cfg['judges']) != 2
             or cfg['baseline'] not in news.SYSTEMS):
         raise ValueError('invalid provider configuration')
@@ -449,6 +599,8 @@ def validate_config(cfg):
         Chat.settings(chat)
     if len({c['family'] for c in cfg['judges']} | {'jev'}) != 3:
         raise ValueError('judges require three families')
+    if type(cfg.get('concurrency', 1)) is not int or not 1 <= cfg.get('concurrency', 1) <= 8:
+        raise ValueError('concurrency must be an integer from 1 to 8')
     news.article_options(cfg.get('articles', {}))
     news.filtered_candidate_share(cfg.get('max_filtered_candidate_share', .1))
     retrieval = cfg['retrieval']
@@ -483,7 +635,7 @@ def providers(config=None):
         raise ValueError('judges must have three families')
     retrieval = cfg['retrieval']
     embedding_budget = embeddings.Budget(retrieval['max_input_tokens'], retrieval['max_usd'])
-    hosted = direct.Hosted(endpoint(env(retrieval['endpoint_env'])), env(retrieval['key_env']), embedding_budget,
+    hosted = CachedHosted(endpoint(env(retrieval['endpoint_env'])), env(retrieval['key_env']), embedding_budget,
                            'news', prices={retrieval['model']: float(number(retrieval['usd_per_million']))})
     indexes = Retrieval(hosted, direct.E5(), retrieval)
     jev = cfg['jev']
@@ -492,7 +644,9 @@ def providers(config=None):
     return LiveProviders(generator, {s: Retriever(indexes, s) for s in news.SYSTEMS}, judges, cfg['baseline'],
                          article_options=news.article_options(cfg.get('articles', {})),
                          max_filtered_candidate_share=cfg.get('max_filtered_candidate_share', .1),
-                         embedding_budget=embedding_budget, jev_budget=jev_budget)
+                         embedding_budget=embedding_budget, jev_budget=jev_budget,
+                         concurrency=cfg.get('concurrency', 1),
+                         resume_config={k: v for k, v in cfg.items() if k != 'concurrency'})
 
 
 def example_config():
@@ -506,7 +660,7 @@ def example_config():
             'retrieval': {'endpoint_env': 'AZURE_FOUNDRY_ENDPOINT', 'key_env': 'AZURE_FOUNDRY_KEY',
                           'max_input_tokens': 50000000, 'max_usd': 20, 'model': 'Cohere-Embed-V5-Pro',
                           'dimensions': 1024, 'usd_per_million': .12, 'dense_weight': .5},
-            'baseline': 'hybrid', 'build_max_usd': 300, 'max_filtered_candidate_share': .1,
+            'baseline': 'hybrid', 'build_max_usd': 300, 'max_filtered_candidate_share': .1, 'concurrency': 8,
             'articles': {'group_versions': True, 'near_duplicate_threshold': .9,
                          'representative': 'latest', 'max_previous_versions': 3}}
 

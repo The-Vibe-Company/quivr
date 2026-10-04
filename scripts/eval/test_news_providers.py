@@ -1,5 +1,7 @@
 """Owner tests for live adapter transport, spend and prepared retrieval contracts."""
 import contextlib
+import concurrent.futures
+import threading
 import errno
 import http.client
 import importlib.util
@@ -13,6 +15,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 import urllib.error
 from unittest import mock
@@ -42,6 +45,274 @@ class ChatAdapters(unittest.TestCase):
         self.transport = mock.patch('urllib.request.build_opener', return_value=self.opener)
         self.transport.start()
         self.addCleanup(self.transport.stop)
+
+    def test_request_refusals_split_once_and_configuration_errors_stop(self):
+        q = news.Question('private-query', 'event', '2026-01-02', ('a',))
+        articles = [news.Article(k, '', 'private-text', q.date) for k in 'abcd']
+        for status, code in [(400, None), (404, None), (413, 'context_length_exceeded'), (422, 'invalid_value')]:
+            with self.subTest(status=status, code=code):
+                self.opener.open.reset_mock()
+                def refuse(request, **kwargs):
+                    data = json.loads(json.loads(request.data)['messages'][1]['content'])
+                    if [a['id'] for a in data['articles']] == ['c', 'd']:
+                        return response('{"grades":{"c":2,"d":0}}')
+                    raise urllib.error.HTTPError('private-url', status, 'private-body', {},
+                        io.BytesIO(json.dumps({'error': {'code': code, 'message': 'private-key'}}).encode()))
+                self.opener.open.side_effect = refuse
+                judge = live.ChatJudge(config())
+                self.assertEqual(judge.grade(q, articles), {'a': None, 'b': None, 'c': 2, 'd': 0})
+                self.assertEqual(self.opener.open.call_count, 3)
+                self.assertEqual(judge.summary()['refusals'], {str(status) + ':' + (code or 'unknown'): 2})
+                self.assertNotIn('private', json.dumps(judge.summary()))
+                counts = __import__('collections').Counter()
+                rows, ranks = news.judge_pool([q], articles, {'bm25': news.FakeRetriever()},
+                    [judge, news.FakeJudge('b'), news.FakeJudge('c')], .5, counts)
+                self.assertEqual(rows, [])
+                self.assertEqual(ranks, {})
+                self.assertEqual(counts['filtered_candidates'], 2)
+                self.assertEqual(counts['dropped_questions'], 1)
+
+        for status, code in [(401, None), (403, 'content_filter'), (404, 'DeploymentNotFound'),
+                             (400, 'model_not_found'), (400, 'invalid_api_key'),
+                             (402, None), (405, None), (407, None), (415, None),
+                             (400, 'insufficient_quota'), (429, 'insufficient_quota')]:
+            with self.subTest(status=status, code=code):
+                self.opener.open.reset_mock()
+                self.opener.open.side_effect = urllib.error.HTTPError('private-url', status, 'private-body', {},
+                    io.BytesIO(json.dumps({'error': {'code': code}}).encode()))
+                with self.assertRaises(live.AdapterError):
+                    live.ChatJudge(config()).grade(q, articles)
+                self.assertEqual(self.opener.open.call_count, 1)
+
+    def test_response_cache_survives_interruption_and_accounts_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = live.ResponseCache(directory)
+            client = live.Chat(config())
+            client.response_cache = cache
+            self.opener.open.side_effect = [response('{"answer":42}'), TimeoutError('private-key')]
+            self.assertEqual(client.complete('instruction', {'text': 'private-text'}), {'answer': 42})
+            with mock.patch('news_providers.time.sleep'), self.assertRaises(live.AdapterError):
+                client.complete('instruction', {'text': 'other'})
+            self.opener.open.side_effect = urllib.error.HTTPError('private-url', 400, 'private-body', {}, io.BytesIO(b'{}'))
+            with self.assertRaises(news.InvalidBatch):
+                client.complete('instruction', {'text': 'refused'})
+            self.assertEqual(client.summary()['refusals'], {'400:unknown': 1})
+            cache.close()
+            restarted = live.Chat(config())
+            restarted.response_cache = live.ResponseCache(directory)
+            self.addCleanup(restarted.response_cache.close)
+            self.opener.open.side_effect = lambda *args, **kwargs: response('{"answer":43}')
+            calls = self.opener.open.call_count
+            self.assertEqual(restarted.complete('instruction', {'text': 'private-text'}), {'answer': 42})
+            self.assertEqual(self.opener.open.call_count, calls)
+            self.assertEqual(restarted.summary()['attempts'], 0)
+            self.assertEqual(restarted.summary()['confirmed_cost_usd'], 0)
+            self.assertEqual(restarted.summary()['cached_calls'], 1)
+            self.assertEqual(restarted.summary()['cached_cost_usd'], .00014)
+            with self.assertRaises(news.InvalidBatch):
+                restarted.complete('instruction', {'text': 'refused'})
+            self.assertEqual(self.opener.open.call_count, calls)
+            self.assertEqual(restarted.summary()['refusals'], {})
+            self.assertEqual(restarted.summary()['cached_refusals'], {'400:unknown': 1})
+            self.assertEqual(restarted.complete('instruction', {'text': 'changed'}), {'answer': 43})
+            self.assertEqual(self.opener.open.call_count, calls + 1)
+            for path in pathlib.Path(directory).rglob('*'):
+                if path.is_file():
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                    self.assertNotIn(b'private-key', path.read_bytes())
+            self.assertEqual(pathlib.Path(directory).stat().st_mode & 0o777, 0o700)
+
+    def test_concurrent_reservations_keep_hard_caps(self):
+        client = live.Chat({**config(), 'max_output_tokens': 2000})
+        barrier = threading.Barrier(2)
+        def answer(*args, **kwargs):
+            barrier.wait(timeout=2)
+            # Unknown usage retains the full reservation.
+            return io.BytesIO(b'{"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}')
+        self.opener.open.side_effect = answer
+        def call(i):
+            try:
+                return client.complete('instruction', {'i': i})
+            except live.AdapterError:
+                return None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(call, range(8)))
+        self.assertEqual(results.count({}), 2)
+        self.assertEqual(self.opener.open.call_count, 2)
+        self.assertEqual(client.summary()['budgeted_output_tokens'], 2000)
+        self.assertTrue(client.summary()['stopped'])
+
+    def test_parallel_build_resumes_paid_calls_and_keeps_seeded_output(self):
+        from jev_rerank.client import Result
+        from test_news_set import articles, unavailable_scorer
+        lock = threading.Lock()
+        calls, active, peak = [], 0, 0
+        generation_barrier, judging_barrier = threading.Barrier(2), threading.Barrier(8)
+        gated = {'generation': 0, 'judging': 0}
+        def enter(stage):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                gated[stage] += 1
+                gate = gated[stage] <= (2 if stage == 'generation' else 8)
+            if gate:
+                (generation_barrier if stage == 'generation' else judging_barrier).wait(timeout=3)
+        def leave():
+            nonlocal active
+            with lock:
+                active -= 1
+        def sources(query):
+            value = query.split(' preuves ', 1)[1]
+            return set(value.split(',')) if value != 'aucune' else set()
+        fail = {'enabled': True, 'malformed_nonce': None}
+        def answer(request, **kwargs):
+            body = json.loads(request.data)
+            data = json.loads(body['messages'][1]['content'])
+            stage = 'generation' if 'kind' in data else 'judging'
+            enter(stage)
+            try:
+                with lock:
+                    calls.append(request.data)
+                if stage == 'generation':
+                    with lock:
+                        if fail['malformed_nonce'] is None:
+                            fail['malformed_nonce'] = data['nonce']
+                    if data['nonce'] == fail['malformed_nonce']:
+                        return response('{"questions":[]}')
+                    ids = [] if data['kind'] == 'no_answer' else [a['id'] for a in data['articles']]
+                    return response(json.dumps({'questions': [
+                        {'text': f"Dossier {data['kind']} {data['nonce']} {i} preuves {','.join(ids) or 'aucune'}",
+                         'sources': ids} for i in range(data['count'])]}))
+                if fail['enabled'] and 'Dossier event ' in data['query'] and body['model'] == 'judge-a':
+                    raise urllib.error.HTTPError('private-url', 401, 'private-key', {}, io.BytesIO(b'private-body'))
+                return response(json.dumps({'grades': {a['id']: 3 if a['id'] in sources(data['query']) else 0
+                                                       for a in data['articles']}}))
+            finally:
+                leave()
+        class JevTransport:
+            def judge(self, query, passages, deadline, cost_limit):
+                enter('judging')
+                try:
+                    return Result(scores={k: float(k in sources(query)) for k in passages},
+                                  paid_calls=1, input_tokens=100)
+                finally:
+                    leave()
+        def factory(concurrency):
+            retrievers = {s: news.FakeRetriever() for s in news.SYSTEMS}
+            hosted = types.SimpleNamespace(reuse=live.Reuse())
+            for retriever in retrievers.values():
+                retriever.retrieval = types.SimpleNamespace(hosted=hosted)
+            cfg = {**config(), 'max_input_tokens': 10000000, 'max_output_tokens': 1000000}
+            jev_budget = live.embeddings.Budget(10000000, 1)
+            return live.LiveProviders(live.ChatGenerator(cfg), retrievers,
+                [live.ChatJudge({**cfg, 'model': 'judge-a', 'family': 'a'}),
+                 live.ChatJudge({**cfg, 'model': 'judge-b', 'family': 'b'}),
+                 news.JevJudge(live.CappedJev(JevTransport(), jev_budget))], 'hybrid',
+                synthetic=True, concurrency=concurrency,
+                embedding_budget=live.embeddings.Budget(100000, 1), jev_budget=jev_budget,
+                resume_config={'test-model': 'v1'})
+        self.opener.open.side_effect = answer
+        with tempfile.TemporaryDirectory() as directory, mock.patch('scoring.score', side_effect=unavailable_scorer):
+            first = factory(8)
+            first.enable_cache(directory)
+            salt = first.prepare_resume(articles(), 300, 42)
+            with self.assertRaises(news.BuildError) as caught:
+                news.build(articles(), first, 300, 42)
+            self.assertEqual(caught.exception.diagnostic['http_status'], 401)
+            self.assertEqual(peak, 8)
+            paid = set(calls)
+            first.response_cache.close()
+            fail['enabled'] = False
+            calls.clear()
+            resumed = factory(8)
+            resumed.enable_cache(directory)
+            result = news.build(articles(), resumed, 300, 42)
+            # Failed authentication requests are intentionally never cached.
+            cached_successes = paid - {raw for raw in paid if b'Dossier event ' in raw and b'judge-a' in raw}
+            self.assertFalse(cached_successes & set(calls))
+            usage = resumed.usage()
+            news.validate_usage(usage)
+            self.assertGreater(usage['generator']['cached_calls'], 0)
+            self.assertEqual(result.report['rejected']['invalid_count'], 1)
+            self.assertGreater(usage['judge_1']['cached_calls'], 0)
+            self.assertGreater(usage['jev']['cached_calls'], 0)
+            self.assertGreater(usage['totals']['cached_cost_usd'], 0)
+            resumed.response_cache.close()
+            serial = news.build(articles(), factory(1), 300, 42, salt=salt)
+            self.assertEqual(result.version, serial.version)
+            calls.clear()
+            reused = factory(8)
+            reused.enable_cache(directory)
+            again = news.build(articles(), reused, 300, 42)
+            self.assertEqual(again.version, result.version)
+            self.assertEqual(calls, [])
+            self.assertEqual(reused.usage()['totals']['confirmed_cost_usd'], 0)
+            self.assertEqual(reused.usage()['totals']['cost_upper_bound_usd'], 0)
+            reused.response_cache.close()
+
+    def test_cache_keeps_embedding_batches_and_jev_refusals_private(self):
+        from jev_rerank.client import MAX_TOKENS, Result
+        with tempfile.TemporaryDirectory() as directory:
+            cache = live.ResponseCache(directory)
+            self.addCleanup(cache.close)
+            embedding_budget = live.embeddings.Budget(10000, 1)
+            hosted = live.CachedHosted('https://example.invalid', 'private-key', embedding_budget,
+                                      'news', prices={'Cohere-test': .12})
+            hosted.response_cache = cache
+            self.opener.open.side_effect = lambda *args, **kwargs: io.BytesIO(json.dumps({
+                'embeddings': {'float': [[1, 0]]}, 'meta': {'billed_units': {'input_tokens': 10}}}).encode())
+            self.assertEqual(hosted.embed('Cohere-test', ['private-text'], 'document', dimensions=2), [[1, 0]])
+            spend = embedding_budget.summary()['confirmed_cost_usd']
+            self.assertGreater(spend, 0)
+            self.assertEqual(hosted.embed('Cohere-test', ['private-text'], 'document', dimensions=2), [[1, 0]])
+            self.assertEqual(self.opener.open.call_count, 1)
+            self.assertEqual(embedding_budget.summary()['confirmed_cost_usd'], spend)
+            self.assertEqual(hosted.reuse.summary()['cached_calls'], 1)
+            transport = mock.Mock(spec=['judge'])
+            transport.judge.return_value = Result(reason='HTTP 422', input_tokens=MAX_TOKENS,
+                                                  estimated_tokens=MAX_TOKENS)
+            client = live.CappedJev(transport, live.embeddings.Budget(10000000, 1))
+            client.response_cache = cache
+            judge = news.JevJudge(client)
+            q = news.Question('private-query', 'event', '2026-01-02', ('a',))
+            candidates = [news.Article(k, '', 'private-text', q.date) for k in 'abcd']
+            self.assertEqual(judge.grade(q, candidates), dict.fromkeys('abcd'))
+            self.assertEqual(transport.judge.call_count, 3)
+            self.assertEqual(client.refusals, {'422:unknown': 3})
+            self.assertEqual(judge.grade(q, candidates), dict.fromkeys('abcd'))
+            self.assertEqual(transport.judge.call_count, 3)
+            self.assertEqual(client.reuse.summary()['cached_calls'], 3)
+            self.assertEqual(client.refusals, {'422:unknown': 3})
+            self.assertEqual(client.reuse.summary()['cached_refusals'], {'422:unknown': 3})
+            for reason in ('HTTP 401', 'HTTP 402', 'HTTP 403', 'HTTP 405', 'HTTP 407', 'HTTP 415', 'provider refused (payment)'):
+                transport.judge.return_value = Result(reason=reason)
+                with self.assertRaises(news.BuildError):
+                    judge.grade(news.Question(reason, q.kind, q.date, q.sources), candidates)
+
+    def test_cache_identity_permissions_and_exclusive_local_access(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = live.ResponseCache(directory)
+            original = cache.salt({'seed': 42, 'config': 'v1', 'article': 'a'})
+            self.assertEqual(cache.salt({'seed': 42, 'config': 'v1', 'article': 'a'}), original)
+            for field, value in [('seed', 43), ('config', 'v2'), ('article', 'b')]:
+                identity = {'seed': 42, 'config': 'v1', 'article': 'a', field: value}
+                self.assertNotEqual(cache.salt(identity), original)
+            with self.assertRaises(ValueError):
+                live.ResponseCache(directory)
+            key = live.digest('entry')
+            cache.put(key, {'value': 1})
+            path = pathlib.Path(directory) / (key + '.json')
+            path.chmod(0o644)
+            with self.assertRaises(ValueError):
+                cache.get(key)
+            path.unlink()
+            path.symlink_to(pathlib.Path(directory) / 'lock')
+            with self.assertRaises(OSError):
+                cache.get(key)
+            cache.close()
+        with self.assertRaises(ValueError):
+            live.ResponseCache(pathlib.Path(news.__file__).resolve().parents[2] / '.context/cache-test')
 
     def test_generator_and_judge_use_json_contract_and_keep_evidence_out_of_judging(self):
         article = news.Article('a', 'Un port', 'Le ferry ouvre lundi.', '2026-01-02',
@@ -127,10 +398,14 @@ class ChatAdapters(unittest.TestCase):
                         expected['http_status'] = status
                     if code:
                         expected['provider_code'] = code
+                    if status == 400:
+                        expected = {'phase': phase, 'reason': 'generation_attempts_exhausted',
+                                    'kind': 'entity', 'attempts': 10, 'accepted': 0, 'target': 1,
+                                    'rejected': {'request_refused': 10}}
                     self.assertEqual(json.loads(output.getvalue().split('diagnostic: ', 1)[1]), expected)
                     for private in ('private-body', 'private-key', 'private-text', 'private-query', 'private-url'):
                         self.assertNotIn(private, output.getvalue() + stderr.getvalue())
-                    self.assertEqual(self.opener.open.call_count, 0 if phase == 'retrieval' else 1)
+                    self.assertEqual(self.opener.open.call_count, 0 if phase == 'retrieval' else 10 if status == 400 else 1)
 
     def test_retries_charge_unknown_attempts_and_caps_block_before_http(self):
         client = live.ChatJudge(config())
@@ -281,6 +556,7 @@ class ChatAdapters(unittest.TestCase):
             ('private-text', 'invalid_json'),
             ('truncated', 'invalid_response'),
             ('http_content_filter', 'content_filter'),
+            ('http_request_refused', 'request_refused'),
         ]
         for content, reason in cases:
             with self.subTest(reason=reason, content=content):
@@ -288,6 +564,8 @@ class ChatAdapters(unittest.TestCase):
                 def answer(request, **kwargs):
                     data = json.loads(json.loads(request.data)['messages'][1]['content'])
                     if self.opener.open.call_count == 1:
+                        if content == 'http_request_refused':
+                            raise urllib.error.HTTPError('private-url', 400, 'private-body', {}, io.BytesIO(b'private-key'))
                         if content == 'http_content_filter':
                             raise urllib.error.HTTPError('private-url', 400, 'private-body', {},
                                 io.BytesIO(b'{"error":{"code":"content_filter","message":"private-key"}}'))
@@ -315,7 +593,7 @@ class ChatAdapters(unittest.TestCase):
                 self.assertEqual(providers.generator.summary()['attempts'], 7)
                 self.assertEqual(providers.generator.summary()['rejected'], {reason: 1})
                 self.assertEqual(providers.generator.summary()['confirmed_output_tokens'],
-                                 120 if reason == 'content_filter' else 140)
+                                 120 if reason in ('content_filter', 'request_refused') else 140)
                 if reason == 'content_filter':
                     samples = [json.loads(json.loads(call.args[0].data)['messages'][1]['content'])['articles']
                                for call in self.opener.open.call_args_list[:2]]
@@ -543,11 +821,12 @@ class Retrieval(unittest.TestCase):
         corpus = [news.Article('a', 'Port', 'ferry navire', '2026-01-02'),
                   news.Article('b', 'Montagne', 'neige sommet', '2026-01-02')]
         e5, hosted = mock.Mock(), mock.Mock()
+        hosted.reuse = live.Reuse()
         e5.embed.side_effect = lambda texts, mode: [[1., 0.] if 'ferry' in t else [0., 1.] for t in texts]
         hosted.embed.side_effect = lambda model, texts, mode, **kwargs: [[1., 0.] if 'ferry' in t else [0., 1.] for t in texts]
         with mock.patch.dict(os.environ, NEWS_ENDPOINT='https://example.invalid', NEWS_KEY='key',
                              TYPESAFE_API_KEY='key', AZURE_FOUNDRY_ENDPOINT='https://example.invalid', AZURE_FOUNDRY_KEY='key'), \
-             mock.patch('direct_bakeoff.E5', return_value=e5), mock.patch('direct_bakeoff.Hosted', return_value=hosted), \
+             mock.patch('direct_bakeoff.E5', return_value=e5), mock.patch('news_providers.CachedHosted', return_value=hosted), \
              mock.patch('search_trial.BM25', wraps=__import__('search_trial').BM25) as bm25:
             providers = live.providers(cfg)
             q = news.Question('ferry', 'event', '2026-01-02', ('a',))

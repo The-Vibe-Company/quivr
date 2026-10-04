@@ -102,6 +102,10 @@
         "judge_content_filter": {
           "type": "integer",
           "minimum": 0
+        },
+        "request_refused": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -415,6 +419,10 @@
             "retrieval_max_usd": {
               "type": "number",
               "minimum": 0
+            },
+            "cached_cost_usd": {
+              "type": "number",
+              "minimum": 0
             }
           },
           "required": [
@@ -575,6 +583,10 @@
             "content_filter": {
               "type": "integer",
               "minimum": 0
+            },
+            "request_refused": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         },
@@ -585,6 +597,42 @@
         "retries": {
           "type": "integer",
           "minimum": 0
+        },
+        "refusals": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[45][0-9]{2}:(unknown|invalid_request_error|invalid_value|unsupported_value|invalid_api_key|context_length_exceeded|model_not_found|rate_limit_exceeded|insufficient_quota|content_filter|content_policy_violation|server_error|service_unavailable|BadRequest|InvalidRequest|Unauthorized|DeploymentNotFound|InternalServerError)$": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "cached_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cached_refusals": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[45][0-9]{2}:(unknown|invalid_request_error|invalid_value|unsupported_value|invalid_api_key|context_length_exceeded|model_not_found|rate_limit_exceeded|insufficient_quota|content_filter|content_policy_violation|server_error|service_unavailable|BadRequest|InvalidRequest|Unauthorized|DeploymentNotFound|InternalServerError)$": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       },
       "required": [
@@ -648,6 +696,42 @@
             "run embedding input-token or USD budget exhausted",
             "provider usage exceeded conservative input-token reservation"
           ]
+        },
+        "cached_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "refusals": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[45][0-9]{2}:(unknown|invalid_request_error|invalid_value|unsupported_value|invalid_api_key|context_length_exceeded|model_not_found|rate_limit_exceeded|insufficient_quota|content_filter|content_policy_violation|server_error|service_unavailable|BadRequest|InvalidRequest|Unauthorized|DeploymentNotFound|InternalServerError)$": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "cached_refusals": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[45][0-9]{2}:(unknown|invalid_request_error|invalid_value|unsupported_value|invalid_api_key|context_length_exceeded|model_not_found|rate_limit_exceeded|insufficient_quota|content_filter|content_policy_violation|server_error|service_unavailable|BadRequest|InvalidRequest|Unauthorized|DeploymentNotFound|InternalServerError)$": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       },
       "required": [

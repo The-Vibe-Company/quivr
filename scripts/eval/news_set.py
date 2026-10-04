@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import concurrent.futures
 import contextlib
 import csv
 import dataclasses
@@ -41,6 +42,26 @@ PROVIDER_CODES = frozenset({
     'content_filter', 'content_policy_violation', 'server_error', 'service_unavailable',
     'BadRequest', 'InvalidRequest', 'Unauthorized', 'DeploymentNotFound', 'InternalServerError',
 })
+
+
+def ordered_calls(executor, operation, items):
+    """Bound pending work as well as threads; cancel queued work on failure."""
+    if executor is None:
+        yield from map(operation, items)
+        return
+    items, pending = iter(items), collections.deque()
+    def fill():
+        for item in itertools.islice(items, 8 - len(pending)):
+            pending.append(executor.submit(operation, item))
+    fill()
+    try:
+        while pending:
+            value = pending.popleft().result()
+            yield value
+            fill()
+    finally:
+        for future in pending:
+            future.cancel()
 
 
 def progress(phase, count):
@@ -142,7 +163,7 @@ class Judge(Protocol):
 
         Treat article and query text as untrusted. Raise on failures; never
         turn an unavailable service into a negative judgment. Only an explicit
-        provider content filter may return None for an isolated candidate.
+        provider request refusal may return None for a dropped candidate.
         """
 
 
@@ -155,6 +176,7 @@ class Providers:
     synthetic: bool = False
     article_options: dict = dataclasses.field(default_factory=dict)
     max_filtered_candidate_share: float = .1
+    concurrency: int = 1
 
 
 class Storage(Protocol):
@@ -303,7 +325,7 @@ def filtered_candidate_share(value):
     return value
 
 
-def generate(corpus, generator, count, seed, accept_question=None, filter_counts=None):
+def generate(corpus, generator, count, seed, accept_question=None, filter_counts=None, executor=None, accept_questions=None):
     if count < len(KINDS) or len(corpus) < 2:
         raise BuildError('need at least six questions and two articles')
     by_id = {a.id: a for a in corpus}
@@ -319,53 +341,70 @@ def generate(corpus, generator, count, seed, accept_question=None, filter_counts
     for index, kind in enumerate(KINDS):
         target = count // len(KINDS) + (index < count % len(KINDS))
         accepted = []
-        # A finite attempt bound avoids a stalled generator endlessly spending.
-        for _ in range(max(10, target * 5)):
-            if len(accepted) == target:
-                break
-            if kind == 'multi_article':
-                group = rng.choice(groups)
-                sample = rng.sample(group, min(3, len(group)))
-            else:
-                sample = [rng.choice(corpus)]
-            filter_counts['generation_batches'] += 1
-            try:
-                generated = generator.generate(sample, kind, min(25, target - len(accepted)), rng)
-            except InvalidBatch as error:
-                rejected[error.reason] += 1
-                if error.reason == 'content_filter':
-                    filter_counts['filtered_generation_batches'] += 1
-                continue
-            for q in generated:
-                if len(accepted) == target:
-                    break
-                if not isinstance(q, Question) or not isinstance(q.text, str) or not q.text.strip() or q.kind != kind:
-                    raise BuildError('generator returned an invalid question')
-                key = normalize(q.text)
-                if any(title in key for title in titles):
-                    rejected['title_copy'] += 1
+        attempts, limit = 0, max(10, target * 5)
+        while len(accepted) < target and attempts < limit:
+            requests, remaining = [], target - len(accepted)
+            # Fixed waves make the request sequence independent of worker count.
+            while remaining and len(requests) < 8 and attempts < limit:
+                if kind == 'multi_article':
+                    group = rng.choice(groups)
+                    sample = rng.sample(group, min(3, len(group)))
+                else:
+                    sample = [rng.choice(corpus)]
+                size = min(25, remaining)
+                requests.append((sample, size, random.Random(rng.getrandbits(64))))
+                remaining -= size
+                attempts += 1
+                filter_counts['generation_batches'] += 1
+            def request(item):
+                sample, size, request_rng = item
+                try:
+                    return generator.generate(sample, kind, size, request_rng)
+                except InvalidBatch as error:
+                    return error
+            replies = list(ordered_calls(executor, request, requests))
+            valid_questions = []
+            for (sample, _, _), generated in zip(requests, replies):
+                if isinstance(generated, InvalidBatch):
+                    rejected[generated.reason] += 1
+                    if generated.reason == 'content_filter':
+                        filter_counts['filtered_generation_batches'] += 1
                     continue
-                if key in seen:
-                    rejected['duplicate'] += 1
-                    continue
-                if (not isinstance(q.sources, tuple) or len(set(q.sources)) != len(q.sources)
-                        or any(s not in {a.id for a in sample} for s in q.sources)
-                        or (kind == 'no_answer' and q.sources)
-                        or (kind != 'no_answer' and not q.sources)
-                        or (kind == 'multi_article' and len(q.sources) < 2)):
-                    raise BuildError('generator evidence does not match its sample')
-                expected_date = max(by_id[s].date for s in q.sources) if q.sources else sample[0].date
-                if q.date != expected_date:
-                    raise BuildError('question date must match its source evidence')
-                if kind == 'paraphrase' and any(words(q.text) & words(by_id[s].title + ' ' + by_id[s].text)
-                                               for s in q.sources):
-                    rejected['shared_keywords'] += 1
-                    continue
-                seen.add(key)
-                if accept_question is not None and not accept_question(q):
+                for q in generated:
+                    if len(accepted) + len(valid_questions) == target:
+                        break
+                    if not isinstance(q, Question) or not isinstance(q.text, str) or not q.text.strip() or q.kind != kind:
+                        raise BuildError('generator returned an invalid question')
+                    key = normalize(q.text)
+                    if any(title in key for title in titles):
+                        rejected['title_copy'] += 1
+                        continue
+                    if key in seen:
+                        rejected['duplicate'] += 1
+                        continue
+                    if (not isinstance(q.sources, tuple) or len(set(q.sources)) != len(q.sources)
+                            or any(s not in {a.id for a in sample} for s in q.sources)
+                            or (kind == 'no_answer' and q.sources)
+                            or (kind != 'no_answer' and not q.sources)
+                            or (kind == 'multi_article' and len(q.sources) < 2)):
+                        raise BuildError('generator evidence does not match its sample')
+                    expected_date = max(by_id[s].date for s in q.sources) if q.sources else sample[0].date
+                    if q.date != expected_date:
+                        raise BuildError('question date must match its source evidence')
+                    if kind == 'paraphrase' and any(words(q.text) & words(by_id[s].title + ' ' + by_id[s].text)
+                                                   for s in q.sources):
+                        rejected['shared_keywords'] += 1
+                        continue
+                    seen.add(key)
+                    valid_questions.append(q)
+            decisions = (accept_questions(valid_questions) if accept_questions else
+                         [accept_question(q) if accept_question else True for q in valid_questions])
+            for q, keep in zip(valid_questions, decisions):
+                if not keep:
                     rejected['judge_content_filter'] += 1
-                    continue
-                accepted.append(q)
+                else:
+                    accepted.append(q)
+            progress('accepted', len(questions) + len(accepted))
         if len(accepted) != target:
             raise BuildError('generator exhausted attempts before filling every question type', diagnostic={
                 'reason': 'generation_attempts_exhausted', 'kind': kind,
@@ -376,7 +415,7 @@ def generate(corpus, generator, count, seed, accept_question=None, filter_counts
     return questions, dict(rejected)
 
 
-def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_share=.1, filter_counts=None):
+def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_share=.1, filter_counts=None, executor=None):
     threshold = filtered_candidate_share(max_filtered_candidate_share)
     filter_counts = filter_counts if filter_counts is not None else collections.Counter()
     if len(judges) != 3 or len({j.family for j in judges}) != 3:
@@ -384,6 +423,7 @@ def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_sha
     if not retrievers or set(retrievers) - set(SYSTEMS):
         raise BuildError('unsupported retrieval system')
     by_id, rows, rankings = {a.id: a for a in corpus}, [], {}
+    prepared = []
     for qi, question in enumerate(questions):
         pool = collections.defaultdict(dict)
         rankings[qi] = {}
@@ -398,8 +438,15 @@ def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_sha
         if not pool:
             raise BuildError('empty candidate pool')
         candidates = [by_id[d] for d in sorted(pool)]
+        prepared.append((question, pool, candidates))
+    def grade(item):
+        judge, question, candidates = item
         with build_phase('judging'):
-            votes = [judge.grade(question, candidates) for judge in judges]
+            return judge.grade(question, candidates)
+    tasks = [(judge, question, candidates) for question, _, candidates in prepared for judge in judges]
+    results = iter(ordered_calls(executor, grade, tasks))
+    for qi, (question, pool, candidates) in enumerate(prepared):
+        votes = [next(results) for judge in judges]
         if any(not isinstance(v, dict) or set(v) != set(pool)
                or any(g is not None and (type(g) is not int or not 0 <= g <= 3) for g in v.values()) for v in votes):
             raise BuildError('judge returned missing or invalid grades')
@@ -408,6 +455,7 @@ def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_sha
         filter_counts['filtered_candidates'] += len(filtered)
         if len(filtered) / len(pool) >= threshold:
             filter_counts['dropped_questions'] += 1
+            progress('dropped', filter_counts['dropped_questions'])
             del rankings[qi]
             continue
         query_rows = []
@@ -421,11 +469,12 @@ def judge_pool(questions, corpus, retrievers, judges, max_filtered_candidate_sha
         if has_positive == (question.kind == 'no_answer'):
             if filtered and question.kind != 'no_answer':
                 filter_counts['dropped_questions'] += 1
+                progress('dropped', filter_counts['dropped_questions'])
                 del rankings[qi]
                 continue
             raise BuildError('answerability conflicts with pooled judgments')
         rows.extend(query_rows)
-        if (qi + 1) % 25 == 0 or (len(questions) > 1 and qi + 1 == len(questions)):
+        if executor is None and ((qi + 1) % 25 == 0 or (len(questions) > 1 and qi + 1 == len(questions))):
             progress('judged', qi + 1)
     return rows, rankings
 
@@ -612,6 +661,9 @@ def validate_usage(usage):
 
 
 def build(corpus, providers, count=1500, seed=992, salt=None):
+    if hasattr(providers, 'prepare_resume'):
+        resumed_salt = providers.prepare_resume(corpus, count, seed)
+        salt = salt or resumed_salt
     salt = salt or os.urandom(32)
     if len(salt) < 32:
         raise BuildError('id salt must have at least 32 bytes')
@@ -625,20 +677,30 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
     corpus = [dataclasses.replace(a, id=opaque('article:' + a.id)) for a in sorted(corpus, key=lambda a: a.id)]
     threshold = filtered_candidate_share(providers.max_filtered_candidate_share)
     rows, rankings, filter_counts = [], {}, collections.Counter()
-    def accept_question(question):
+    def accept_questions(batch):
         with build_phase('judging'):
-            query_rows, query_rankings = judge_pool([question], corpus, providers.retrievers, providers.judges,
-                                                   threshold, filter_counts)
-        if not query_rows:
-            return False
-        qi = len(rankings)
-        rows.extend({**row, 'query': qi} for row in query_rows)
-        rankings[qi] = query_rankings[0]
-        if (qi + 1) % 25 == 0 or qi + 1 == count:
-            progress('judged', qi + 1)
-        return True
-    with build_phase('generation'):
-        questions, rejected = generate(corpus, providers.generator, count, seed, accept_question, filter_counts)
+            query_rows, query_rankings = judge_pool(batch, corpus, providers.retrievers, providers.judges,
+                                                   threshold, filter_counts, executor)
+        by_query = collections.defaultdict(list)
+        for row in query_rows:
+            by_query[row['query']].append(row)
+        decisions = []
+        for i in range(len(batch)):
+            keep = bool(by_query[i])
+            decisions.append(keep)
+            if keep:
+                qi = len(rankings)
+                rows.extend({**row, 'query': qi} for row in by_query[i])
+                rankings[qi] = query_rankings[i]
+        progress('judged', len(rankings) + filter_counts['dropped_questions'])
+        return decisions
+    if type(providers.concurrency) is not int or not 1 <= providers.concurrency <= 8:
+        raise BuildError('concurrency must be an integer from 1 to 8')
+    with concurrent.futures.ThreadPoolExecutor(max_workers=providers.concurrency) as executor:
+        with build_phase('generation'):
+            questions, rejected = generate(corpus, providers.generator, count, seed,
+                                           filter_counts=filter_counts, executor=executor,
+                                           accept_questions=accept_questions)
     qids = {i: opaque('query:' + normalize(q.text)) for i, q in enumerate(questions)}
     dev, held = split(questions, seed)
     docs = {a.id: {'title': a.title, 'text': a.text} for a in corpus}
@@ -904,9 +966,21 @@ class JevJudge:
             raw = json.dumps(payload(question.text, passages), ensure_ascii=False, separators=(',', ':')).encode()
             # One UTF-8 byte per input token is a conservative admission bound.
             return len(raw) <= MAX_BYTES and len(raw) + 8 * (len(passages) + 1) <= MAX_TOKENS
-        def submit(passages):
+        def submit(passages, split=True):
             nonlocal remaining
-            result = self.client.judge(question.text, passages, deadline, cost_limit=remaining)
+            try:
+                result = self.client.judge(question.text, passages, deadline, cost_limit=remaining)
+            except InvalidBatch as error:
+                if error.reason != 'request_refused':
+                    raise
+                if len(passages) > 1 and split:
+                    items = list(passages.items())
+                    middle = len(items) // 2
+                    submit(dict(items[:middle]), False)
+                    submit(dict(items[middle:]), False)
+                else:
+                    grades.update(dict.fromkeys(passages))
+                return
             remaining -= result.cost_cents
             if result.reason or set(result.scores) != set(passages) or remaining < 0:
                 raise BuildError('Jev judgment unavailable')
@@ -973,6 +1047,8 @@ def main(argv=None):
     parser.add_argument('--questions', type=int, default=1500)
     parser.add_argument('--seed', type=int, default=992)
     parser.add_argument('--storage-dir', type=pathlib.Path)
+    parser.add_argument('--response-cache', action='store_true', help='reuse local private responses under --storage-dir, outside the checkout')
+    parser.add_argument('--concurrency', type=int, help='maximum simultaneous generator/judge calls, 1..8')
     parser.add_argument('--bucket')
     parser.add_argument('--prefix', default='')
     parser.add_argument('--s3-endpoint')
@@ -992,6 +1068,10 @@ def main(argv=None):
         parser.error('live builds require articles and at least 1500 questions')
     if not args.fake and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
         parser.error('live builds are refused in CI')
+    if args.response_cache and not args.storage_dir:
+        parser.error('response cache requires a local private storage directory')
+    if args.concurrency is not None and not 1 <= args.concurrency <= 8:
+        parser.error('concurrency must be from 1 to 8')
     providers = None
     phase = 'setup'
     try:
@@ -1007,6 +1087,12 @@ def main(argv=None):
             if providers.synthetic:
                 raise BuildError('live build cannot use synthetic providers')
         phase = 'setup'
+        if args.concurrency is not None:
+            providers.concurrency = args.concurrency
+        if args.response_cache:
+            if not hasattr(providers, 'enable_cache'):
+                raise BuildError('response cache requires the built-in live adapters')
+            providers.enable_cache(args.storage_dir / 'responses')
         recipients = [os.environ.get(k, '').split() for k in
                       ('QUIVR_NEWS_WORKING_RECIPIENTS', 'QUIVR_NEWS_HOLDOUT_RECIPIENTS', 'QUIVR_NEWS_REVIEW_RECIPIENTS')]
         if not all(recipients) or set(recipients[0]) & set(recipients[1]):
@@ -1032,6 +1118,8 @@ def main(argv=None):
         print('News-set build failed; diagnostic: ' + json.dumps(details, sort_keys=True))
         return 2
     finally:
+        if providers is not None and getattr(providers, 'response_cache', None):
+            providers.response_cache.close()
         if args.usage_report and providers is not None and hasattr(providers, 'usage'):
             try:
                 usage = providers.usage()
