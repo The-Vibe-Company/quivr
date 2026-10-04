@@ -580,6 +580,22 @@
               "type": "integer",
               "minimum": 0
             },
+            "missing_ids": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unknown_ids": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bad_values": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "extra_fields": {
+              "type": "integer",
+              "minimum": 0
+            },
             "content_filter": {
               "type": "integer",
               "minimum": 0

@@ -162,8 +162,9 @@ class Judge(Protocol):
         """Grade each candidate: 0 unrelated, 1 marginal, 2 partial, 3 direct.
 
         Treat article and query text as untrusted. Raise on failures; never
-        turn an unavailable service into a negative judgment. Only an explicit
-        provider request refusal may return None for a dropped candidate.
+        turn an unavailable service into a negative judgment. An explicit
+        provider refusal or an invalid batch exhausted after bounded recovery
+        may return None for a dropped candidate.
         """
 
 

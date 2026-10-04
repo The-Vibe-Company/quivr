@@ -326,24 +326,25 @@ class ChatGenerator(Chat):
         instruction = (UNTRUSTED + 'Generate natural French news-search questions of the requested kind for short factual wire dispatches. '
                        'Use datelines (place/date), latest-on questions for recent, and follow-ups across previous_versions '
                        'for event/recent when the selected version still supports the answer. Treat earlier versions as context, '
-                       'cite ONLY selected article ids, and never ask for a fact removed or contradicted in that version. '
+                       'cite ONLY selected article aliases (a1, a2, ...), and never ask for a fact removed or contradicted in that version. '
                        'Never copy an article title. For paraphrase, avoid ALL content keywords in the sources, '
                        'including inflections, except French stopwords. For multi_article, require facts from '
                        'at least two sources. For no_answer, ask about facts absent from the supplied articles '
                        'and return no source ids. For other kinds, cite the supplied evidence ids. '
-                       'Return ONLY JSON: {"questions":[{"text":"...","sources":["id"]}]} with exactly count items.')
+                       'Return ONLY JSON: {"questions":[{"text":"...","sources":["a1"]}]} with exactly count items.')
+        by_id = {f'a{i}': a for i, a in enumerate(sample, 1)}
         data = {'kind': kind, 'count': count, 'nonce': rng.getrandbits(64),
                                             'articles': [
-            {'id': a.id, 'title': a.title, 'text': a.text, 'date': a.date,
+            {'id': alias, 'title': a.title, 'text': a.text, 'date': a.date,
              'published_at': a.published_at, 'updated_at': a.updated_at, 'latest_story_update': a.latest_story_update,
              'previous_versions': [{key: version.get(key, '') for key in ('title', 'text', 'updated_at')}
-                                   for version in a.previous_versions]} for a in sample]}
+                                   for version in a.previous_versions]} for alias, a in by_id.items()]}
         def validate(result):
             if not isinstance(result, dict) or set(result) != {'questions'} or not isinstance(result['questions'], list):
                 raise self.invalid('invalid_questions')
             if len(result['questions']) != count:
                 raise self.invalid('invalid_count')
-            by_id, questions = {a.id: a for a in sample}, []
+            questions = []
             for row in result['questions']:
                 if (not isinstance(row, dict) or set(row) != {'text', 'sources'}
                         or not isinstance(row['text'], str) or not row['text'].strip()
@@ -354,7 +355,7 @@ class ChatGenerator(Chat):
                         or (kind == 'multi_article' and len(row['sources']) < 2)):
                     raise self.invalid('invalid_evidence')
                 date = max(by_id[s].date for s in row['sources']) if row['sources'] else sample[0].date
-                questions.append(news.Question(row['text'], kind, date, tuple(row['sources'])))
+                questions.append(news.Question(row['text'], kind, date, tuple(by_id[s].id for s in row['sources'])))
             return questions
         return self.complete(instruction, data, validate, cache_rejections=True)
 
@@ -367,10 +368,12 @@ class ChatJudge(Chat):
                        'For latest-on queries use its update time; if older than latest_story_update, do not treat it '
                        'as evidence of the latest state. Prefer explicit dated evidence over stale assertions. '
                        '0 unrelated, 1 marginal, 2 partial answer, 3 direct answer. Do not infer missing facts. '
-                       'Return ONLY JSON: {"grades":{"article_id":0}}; integer grades only, no extra fields.')
+                       'Use the supplied article aliases (a1, a2, ...) as keys. '
+                       'Return ONLY JSON: {"grades":{"a1":0}}; integer grades only, no extra fields.')
         def data(batch):
             return {'query': question.text, 'articles': [
-                {'id': a.id, 'title': a.title, 'text': a.text, 'updated_at': a.updated_at, 'latest_story_update': a.latest_story_update} for a in batch]}
+                {'id': f'a{i}', 'title': a.title, 'text': a.text, 'updated_at': a.updated_at,
+                 'latest_story_update': a.latest_story_update} for i, a in enumerate(batch, 1)]}
         batches, batch = [], []
         for article in candidates:
             if self.input_bound(instruction, data([article])) > self.cfg['request_input_tokens']:
@@ -383,26 +386,45 @@ class ChatJudge(Chat):
             batches.append(batch)
         grades = {}
         for batch in batches:
+            by_id = {f'a{i}': a.id for i, a in enumerate(batch, 1)}
+            def recover():
+                if len(batch) == 1 or not _split:
+                    return {'grades': dict.fromkeys(a.id for a in batch)}
+                middle = len(batch) // 2
+                return {'grades': {**self.grade(question, batch[:middle], _split=False),
+                                   **self.grade(question, batch[middle:], _split=False)}}
             # Retry only this complete batch; never fabricate missing grades or
             # repeat earlier successful batches. Every call uses the same caps.
             for attempt in range(self.cfg['max_retries'] + 1):
                 try:
                     def validate(result):
-                        if (not isinstance(result, dict) or set(result) != {'grades'} or not isinstance(result['grades'], dict)
-                                or set(result['grades']) != {a.id for a in batch}
-                                or any(type(v) is not int or not 0 <= v <= 3 for v in result['grades'].values())):
-                            raise self.invalid('invalid_grades')
-                        return result
+                        if not isinstance(result, dict):
+                            raise self.invalid('bad_values')
+                        reasons = []
+                        if set(result) - {'grades'}:
+                            reasons.append('extra_fields')
+                        values = result.get('grades')
+                        if not isinstance(values, dict):
+                            reasons.append('bad_values')
+                        else:
+                            if set(by_id) - set(values):
+                                reasons.append('missing_ids')
+                            if set(values) - set(by_id):
+                                reasons.append('unknown_ids')
+                            if any(type(v) is not int or not 0 <= v <= 3 for v in values.values()):
+                                reasons.append('bad_values')
+                        if reasons:
+                            # Count each category once per rejected response;
+                            # never publish the keys or provider content.
+                            with self.lock:
+                                self.rejected.update(reasons)
+                            raise news.InvalidBatch(reasons[0])
+                        return {'grades': {by_id[alias]: value for alias, value in values.items()}}
                     result = self.complete(instruction, data(batch), validate)
                     break
                 except news.InvalidBatch as error:
                     if error.reason == 'request_refused':
-                        if len(batch) == 1 or not _split:
-                            result = {'grades': {a.id: None for a in batch}}
-                        else:
-                            middle = len(batch) // 2
-                            result = {'grades': {**self.grade(question, batch[:middle], _split=False),
-                                                 **self.grade(question, batch[middle:], _split=False)}}
+                        result = recover()
                         break
                     if error.reason == 'content_filter':
                         if len(batch) == 1:
@@ -415,9 +437,7 @@ class ChatJudge(Chat):
                                                  **self.grade(question, batch[middle:])}}
                         break
                     if attempt == self.cfg['max_retries']:
-                        raise AdapterError('judge exhausted malformed batch retries', diagnostic={
-                            'reason': 'judge_attempts_exhausted', 'last_rejection': error.reason,
-                            'attempts': attempt + 1, 'rejected': dict(self.rejected)}) from None
+                        result = recover()
             grades.update(result['grades'])
         return grades
 

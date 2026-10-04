@@ -48,14 +48,14 @@ class ChatAdapters(unittest.TestCase):
 
     def test_request_refusals_split_once_and_configuration_errors_stop(self):
         q = news.Question('private-query', 'event', '2026-01-02', ('a',))
-        articles = [news.Article(k, '', 'private-text', q.date) for k in 'abcd']
+        articles = [news.Article(k, '', 'private-text-' + k, q.date) for k in 'abcd']
         for status, code in [(400, None), (404, None), (413, 'context_length_exceeded'), (422, 'invalid_value')]:
             with self.subTest(status=status, code=code):
                 self.opener.open.reset_mock()
                 def refuse(request, **kwargs):
                     data = json.loads(json.loads(request.data)['messages'][1]['content'])
-                    if [a['id'] for a in data['articles']] == ['c', 'd']:
-                        return response('{"grades":{"c":2,"d":0}}')
+                    if [a['text'] for a in data['articles']] == ['private-text-c', 'private-text-d']:
+                        return response('{"grades":{"a1":2,"a2":0}}')
                     raise urllib.error.HTTPError('private-url', status, 'private-body', {},
                         io.BytesIO(json.dumps({'error': {'code': code, 'message': 'private-key'}}).encode()))
                 self.opener.open.side_effect = refuse
@@ -162,6 +162,7 @@ class ChatAdapters(unittest.TestCase):
             nonlocal active
             with lock:
                 active -= 1
+        by_text = {a.text: a.id for a in articles()}
         def sources(query):
             value = query.split(' preuves ', 1)[1]
             return set(value.split(',')) if value != 'aucune' else set()
@@ -182,11 +183,11 @@ class ChatAdapters(unittest.TestCase):
                         return response('{"questions":[]}')
                     ids = [] if data['kind'] == 'no_answer' else [a['id'] for a in data['articles']]
                     return response(json.dumps({'questions': [
-                        {'text': f"Dossier {data['kind']} {data['nonce']} {i} preuves {','.join(ids) or 'aucune'}",
+                        {'text': f"Dossier {data['kind']} {data['nonce']} {i} preuves {','.join(by_text[a['text']] for a in data['articles']) if ids else 'aucune'}",
                          'sources': ids} for i in range(data['count'])]}))
                 if fail['enabled'] and 'Dossier event ' in data['query'] and body['model'] == 'judge-a':
                     raise urllib.error.HTTPError('private-url', 401, 'private-key', {}, io.BytesIO(b'private-body'))
-                return response(json.dumps({'grades': {a['id']: 3 if a['id'] in sources(data['query']) else 0
+                return response(json.dumps({'grades': {a['id']: 3 if by_text[a['text']] in sources(data['query']) else 0
                                                        for a in data['articles']}}))
             finally:
                 leave()
@@ -194,7 +195,9 @@ class ChatAdapters(unittest.TestCase):
             def judge(self, query, passages, deadline, cost_limit):
                 enter('judging')
                 try:
-                    return Result(scores={k: float(k in sources(query)) for k in passages},
+                    return Result(scores={k: float(any(text in passage and marker in sources(query)
+                                                   for text, marker in by_text.items()))
+                                          for k, passage in passages.items()},
                                   paid_calls=1, input_tokens=100)
                 finally:
                     leave()
@@ -276,7 +279,7 @@ class ChatAdapters(unittest.TestCase):
             client.response_cache = cache
             judge = news.JevJudge(client)
             q = news.Question('private-query', 'event', '2026-01-02', ('a',))
-            candidates = [news.Article(k, '', 'private-text', q.date) for k in 'abcd']
+            candidates = [news.Article(k, '', 'private-text-' + k, q.date) for k in 'abcd']
             self.assertEqual(judge.grade(q, candidates), dict.fromkeys('abcd'))
             self.assertEqual(transport.judge.call_count, 3)
             self.assertEqual(client.refusals, {'422:unknown': 3})
@@ -315,22 +318,23 @@ class ChatAdapters(unittest.TestCase):
             live.ResponseCache(pathlib.Path(news.__file__).resolve().parents[2] / '.context/cache-test')
 
     def test_generator_and_judge_use_json_contract_and_keep_evidence_out_of_judging(self):
-        article = news.Article('a', 'Un port', 'Le ferry ouvre lundi.', '2026-01-02',
+        article = news.Article('abcdef0123456789' * 4, 'Un port', 'Le ferry ouvre lundi.', '2026-01-02',
                                updated_at='2026-01-02T12:00:00Z', source='private-source', credit='private-credit',
                                story_id='private-story', previous_versions=(
                                    {'id': 'earlier', 'text': 'Ouverture prévue', 'updated_at': '2026-01-02T09:00:00Z'},))
         self.opener.open.side_effect = [response(json.dumps({'questions': [
-            {'text': 'Quand part le navire ?', 'sources': ['a']}]})), response('{"grades":{"a":3}}')]
+            {'text': 'Quand part le navire ?', 'sources': ['a1']}]})), response('{"grades":{"a1":3}}')]
         generator = live.ChatGenerator(config())
         q = generator.generate([article], 'event', 1, random.Random(1))[0]
-        self.assertEqual(q, news.Question('Quand part le navire ?', 'event', '2026-01-02', ('a',)))
-        self.assertEqual(live.ChatJudge({**config(), 'auth_header': 'bearer'}).grade(q, [article]), {'a': 3})
+        self.assertEqual(q, news.Question('Quand part le navire ?', 'event', '2026-01-02', (article.id,)))
+        self.assertEqual(live.ChatJudge({**config(), 'auth_header': 'bearer'}).grade(q, [article]), {article.id: 3})
         requests = [c.args[0] for c in self.opener.open.call_args_list]
         self.assertEqual(requests[0].full_url, 'https://example.invalid/openai/v1/chat/completions')
         self.assertEqual(requests[0].get_header('Api-key'), 'private-key')
         self.assertEqual(requests[1].get_header('Authorization'), 'Bearer private-key')
         self.assertIsNone(requests[1].get_header('Api-key'))
         for request in requests:
+            self.assertNotIn(article.id.encode(), request.data)
             body = json.loads(request.data)
             self.assertEqual(body['response_format'], {'type': 'json_object'})
             self.assertRegex(body['messages'][0]['content'].lower(), r'return[^.]*\bjson\b')
@@ -345,6 +349,78 @@ class ChatAdapters(unittest.TestCase):
         self.assertNotIn('previous_versions', judge_input['articles'][0])
         self.assertEqual(judge_input['articles'][0]['updated_at'], '2026-01-02T12:00:00Z')
         self.assertEqual(generator.summary()['confirmed_cost_usd'], .00014)
+
+    def test_judge_recovers_mistyped_long_ids_and_splits_invalid_batches_once(self):
+        articles = [news.Article(char * 64, '', char, '2026-01-02') for char in 'abcd']
+        question = news.Question('Query', 'event', '2026-01-02', (articles[2].id,))
+        batches = []
+        def answer(request, **kwargs):
+            batch = json.loads(json.loads(request.data)['messages'][1]['content'])['articles']
+            batches.append([a['text'] for a in batch])
+            # Reproduce the observed failure when prompted with long ids;
+            # the last half remains malformed even with aliases.
+            if len(batch) > 2 or batch[0]['text'] == 'c' or len(batch[0]['id']) == 64:
+                return response(json.dumps({'grades': {a['id'][:-1]: 3 for a in batch}}))
+            return response('{"grades":{"a1":3,"a2":1}}')
+        self.opener.open.side_effect = answer
+        judge = live.ChatJudge({**config(), 'max_retries': 1})
+        self.assertEqual(judge.grade(question, articles),
+                         {articles[0].id: 3, articles[1].id: 1, articles[2].id: None, articles[3].id: None})
+        self.assertEqual(batches, [list('abcd'), list('abcd'), list('ab'), list('cd'), list('cd')])
+        self.assertEqual(judge.summary()['rejected'], {'missing_ids': 4, 'unknown_ids': 4})
+        import jsonschema
+        schema = json.loads(pathlib.Path(news.__file__).with_name('news-report.schema.json').read_text())
+        jsonschema.Draft202012Validator(schema['$defs']['chat_usage']).validate(judge.summary())
+
+    def test_alias_cache_ignores_long_id_requests_and_remaps_on_reuse(self):
+        articles = [news.Article('f' * 64, 'title', 'text', '2026-01-02')]
+        question = news.Question('Query', 'event', articles[0].date, (articles[0].id,))
+        with tempfile.TemporaryDirectory() as directory:
+            cache = live.ResponseCache(directory)
+            self.addCleanup(cache.close)
+            for cls in (live.ChatJudge, live.ChatGenerator):
+                with self.subTest(adapter=cls.__name__):
+                    self.opener.open.reset_mock()
+                    client = cls(config())
+                    client.response_cache = cache
+                    def call(sample):
+                        if cls is live.ChatJudge:
+                            return client.grade(question, sample)
+                        return client.generate(sample, 'event', 1, random.Random(1))
+                    expected_value = ({'grades': {'a1': 2}} if cls is live.ChatJudge else
+                                      {'questions': [{'text': 'Question', 'sources': ['a1']}]})
+                    def answer(request, **kwargs):
+                        # Seed a legacy full-id response under the same prompt:
+                        # even without a prompt change its body has another key.
+                        body = json.loads(request.data)
+                        data = json.loads(body['messages'][1]['content'])
+                        data['articles'][0]['id'] = articles[0].id
+                        legacy_raw = client.request_body(body['messages'][0]['content'], data)
+                        key = live.digest(['chat-v1', client.url, client.cfg, legacy_raw.decode()])
+                        legacy = ({'grades': {articles[0].id: 0}} if cls is live.ChatJudge else
+                                  {'questions': [{'text': 'Stale', 'sources': [articles[0].id]}]})
+                        cache.put(key, {'value': legacy})
+                        return response(json.dumps(expected_value))
+                    self.opener.open.side_effect = answer
+                    first = call(articles)
+                    raw = self.opener.open.call_args.args[0].data.decode()
+                    alias_key = live.digest(['chat-v1', client.url, client.cfg, raw])
+                    (pathlib.Path(directory) / (alias_key + '.json')).unlink()
+                    # Only the legacy entry remains: it must miss the cache.
+                    self.assertEqual(call(articles), first)
+                    # Same content, different real id: cached aliases must be
+                    # interpreted through the current request's local mapping.
+                    remapped = [news.Article('e' * 64, 'title', 'text', '2026-01-02')]
+                    second = call(remapped)
+                    if cls is live.ChatJudge:
+                        self.assertEqual(first, {articles[0].id: 2})
+                        self.assertEqual(second, {remapped[0].id: 2})
+                    else:
+                        self.assertEqual(first[0].sources, (articles[0].id,))
+                        self.assertEqual(second[0].sources, (remapped[0].id,))
+                        self.assertEqual(second[0].text, 'Question')
+                    self.assertEqual(self.opener.open.call_count, 2)
+                    self.assertEqual(client.summary()['cached_calls'], 1)
 
     def test_cli_reports_only_safe_failure_fields_at_the_failing_phase(self):
         cases = [
@@ -410,7 +486,7 @@ class ChatAdapters(unittest.TestCase):
     def test_retries_charge_unknown_attempts_and_caps_block_before_http(self):
         client = live.ChatJudge(config())
         self.opener.open.side_effect = [urllib.error.HTTPError('private-url', 429, 'private-body',
-                                       {'Retry-After': '999999'}, io.BytesIO(b'private-body')), response('{"grades":{"a":2}}')]
+                                       {'Retry-After': '999999'}, io.BytesIO(b'private-body')), response('{"grades":{"a1":2}}')]
         q, articles = news.Question('Question ?', 'event', '2026-01-02', ('a',)), [news.Article('a', '', 'texte', '2026-01-02')]
         with mock.patch('news_providers.time.sleep') as sleep:
             self.assertEqual(client.grade(q, articles), {'a': 2})
@@ -512,23 +588,30 @@ class ChatAdapters(unittest.TestCase):
         self.opener.open.assert_not_called()
 
     def test_invalid_provider_output_is_strict_sanitised_and_never_a_negative_vote(self):
-        cases = ['{"grades":{"a":true}}', '{"grades":{"a":1,"a":2}}',
-                 '{"grades":{"a":NaN}}', '{"grades":{"other":0}}',
-                 '```json\n{"grades":{"a":3}}\n```', '{"grades":{"a":0},"secret":"private-text"}']
-        for content in cases:
+        cases = [('{"grades":{"a1":true}}', {'bad_values': 3}),
+                 ('{"grades":{"a1":4}}', {'bad_values': 3}),
+                 ('{"grades":{"a1":1.0}}', {'bad_values': 3}),
+                 ('{"grades":{"a1":1,"a1":2}}', {'invalid_json': 3}),
+                 ('{"grades":{"a1":NaN}}', {'invalid_json': 3}),
+                 ('{"grades":{}}', {'missing_ids': 3}),
+                 ('{"grades":{"a1":0,"other":0}}', {'unknown_ids': 3}),
+                 ('{"grades":{"other":0}}', {'missing_ids': 3, 'unknown_ids': 3}),
+                 ('```json\n{"grades":{"a1":3}}\n```', {'invalid_json': 3}),
+                 ('{"grades":{"a1":0},"secret":"private-text"}', {'extra_fields': 3}),
+                 ('{"grades":null}', {'bad_values': 3}),
+                 ('{}', {'bad_values': 3}), ('[]', {'bad_values': 3})]
+        for content, reasons in cases:
             with self.subTest(content=content):
                 self.opener.open.reset_mock()
                 self.opener.open.side_effect = lambda *args, **kwargs: response(content)
-                with self.assertRaises(live.AdapterError) as caught:
-                    live.ChatJudge(config()).grade(news.Question('private-query', 'event', '2026-01-02', ('a',)),
-                                                  [news.Article('a', '', 'private-text', '2026-01-02')])
-                self.assertNotIn('private-query', str(caught.exception))
-                self.assertNotIn('private-text', str(caught.exception))
-                self.assertIsNone(caught.exception.__cause__)
+                judge = live.ChatJudge(config())
+                self.assertEqual(judge.grade(news.Question('private-query', 'event', '2026-01-02', ('a',)),
+                                             [news.Article('a', '', 'private-text', '2026-01-02')]), {'a': None})
+                self.assertEqual(judge.summary()['rejected'], reasons)
+                self.assertNotIn('private', json.dumps(judge.summary()))
                 self.assertEqual(self.opener.open.call_count, 3)
-                self.assertEqual(caught.exception.diagnostic['reason'], 'judge_attempts_exhausted')
         self.opener.open.side_effect = None
-        self.opener.open.return_value = response('{"grades":{"a":3}}', completion=1001)
+        self.opener.open.return_value = response('{"grades":{"a1":3}}', completion=1001)
         client = live.ChatJudge(config())
         with self.assertRaises(live.AdapterError):
             client.grade(news.Question('q', 'event', '2026-01-02', ('a',)), [news.Article('a', '', 't', '2026-01-02')])
@@ -536,7 +619,7 @@ class ChatAdapters(unittest.TestCase):
 
     def test_unknown_usage_keeps_a_reservation_covering_escaped_request_bytes(self):
         self.opener.open.return_value = io.BytesIO(json.dumps({'choices': [
-            {'finish_reason': 'stop', 'message': {'content': '{"grades":{"a":3}}'}}]}).encode())
+            {'finish_reason': 'stop', 'message': {'content': '{"grades":{"a1":3}}'}}]}).encode())
         judge = live.ChatJudge(config())
         judge.grade(news.Question('"\\' * 500, 'event', '2026-01-02', ('a',)),
                     [news.Article('a', '', 'text', '2026-01-02')])
@@ -597,7 +680,7 @@ class ChatAdapters(unittest.TestCase):
                 if reason == 'content_filter':
                     samples = [json.loads(json.loads(call.args[0].data)['messages'][1]['content'])['articles']
                                for call in self.opener.open.call_args_list[:2]]
-                    self.assertNotEqual(samples[0][0]['id'], samples[1][0]['id'])
+                    self.assertNotEqual(samples[0][0]['text'], samples[1][0]['text'])
                     self.assertEqual(result.report['content_filter']['filtered_generation_share'], 1 / 7)
                 news.validate_report(result.report)
 
@@ -611,7 +694,9 @@ class ChatAdapters(unittest.TestCase):
             with self.subTest(filtered_count=filtered_count, cap=cap, filter_source=filter_source):
                 self.opener.open.reset_mock()
                 state = {'first': None, 'question': None, 'filtered': None}
+                by_text = {}
                 def retrieve(question, corpus, limit):
+                    by_text.update({a.text: a.id for a in corpus})
                     state['question'] = question
                     if state['first'] is None:
                         state['first'] = question.text
@@ -621,7 +706,8 @@ class ChatAdapters(unittest.TestCase):
                 def answer(request, **kwargs):
                     body = json.loads(request.data)
                     data = json.loads(body['messages'][1]['content'])
-                    ids = [a['id'] for a in data['articles']]
+                    aliases = {a['id']: by_text[a['text']] for a in data['articles']}
+                    ids = list(aliases.values())
                     # Two judges filter different candidates in the two-filter
                     # case: the pool policy must use their union.
                     index = 0 if body['model'] == 'judge-a' else -1
@@ -630,7 +716,7 @@ class ChatAdapters(unittest.TestCase):
                         raise urllib.error.HTTPError('private-url', 400, 'private-body', {},
                             io.BytesIO(b'{"error":{"code":"content_filter","message":"private-key"}}'))
                     return response(json.dumps({'grades': {
-                        d: 3 if d in state['question'].sources else 0 for d in ids}}))
+                        alias: 3 if real_id in state['question'].sources else 0 for alias, real_id in aliases.items()}}))
                 self.opener.open.side_effect = answer
                 providers = news.fake_providers()
                 providers.max_filtered_candidate_share = cap
@@ -690,11 +776,11 @@ class ChatAdapters(unittest.TestCase):
 
     def test_generator_rejects_count_evidence_and_extra_fields_before_returning_any_row(self):
         cases = [('{"questions":[]}', 'event', 1, 'invalid_count'),
-                 ('{"questions":[{"text":"q","sources":["a"]},'
+                 ('{"questions":[{"text":"q","sources":["a1"]},'
                   '{"text":"q2","sources":["other"]}]}', 'event', 2, 'invalid_evidence'),
-                 ('{"questions":[{"text":"q","sources":["a"]}]}', 'multi_article', 1, 'invalid_evidence'),
-                 ('{"questions":[{"text":"q","sources":["a"],"kind":"event"}]}', 'event', 1, 'invalid_questions'),
-                 ('{"questions":[{"text":"q","sources":["a"]},{"text":"q2","sources":["a"]}]}',
+                 ('{"questions":[{"text":"q","sources":["a1"]}]}', 'multi_article', 1, 'invalid_evidence'),
+                 ('{"questions":[{"text":"q","sources":["a1"],"kind":"event"}]}', 'event', 1, 'invalid_questions'),
+                 ('{"questions":[{"text":"q","sources":["a1"]},{"text":"q2","sources":["a1"]}]}',
                   'event', 1, 'invalid_count')]
         for content, kind, count, reason in cases:
             with self.subTest(content=content):
@@ -725,17 +811,17 @@ class ChatAdapters(unittest.TestCase):
     def test_large_judgment_pools_batch_without_losing_any_vote(self):
         candidates = [news.Article('a', '', 'x' * 1200, '2026-01-02'),
                       news.Article('b', '', 'y' * 1200, '2026-01-02')]
-        self.opener.open.side_effect = [response('{"grades":{"a":3}}'),
-                                        response('{"grades":{"b":true}}'),
-                                        response('{"grades":{"b":1,"b":2}}'),
-                                        response('{"grades":{"b":1}}')]
+        self.opener.open.side_effect = [response('{"grades":{"a1":3}}'),
+                                        response('{"grades":{"a1":true}}'),
+                                        response('{"grades":{"a1":1,"a1":2}}'),
+                                        response('{"grades":{"a1":1}}')]
         judge = live.ChatJudge({**config(), 'request_input_tokens': 2400})
         self.assertEqual(judge.grade(news.Question('q', 'event', '2026-01-02', ('a',)), candidates), {'a': 3, 'b': 1})
         self.assertEqual(judge.summary()['attempts'], 4)
-        self.assertEqual(judge.summary()['rejected'], {'invalid_grades': 1, 'invalid_json': 1})
+        self.assertEqual(judge.summary()['rejected'], {'bad_values': 1, 'invalid_json': 1})
         batches = [json.loads(json.loads(call.args[0].data)['messages'][1]['content'])['articles']
                    for call in self.opener.open.call_args_list]
-        self.assertEqual([[a['id'] for a in batch] for batch in batches], [['a'], ['b'], ['b'], ['b']])
+        self.assertEqual([[a['id'] for a in batch] for batch in batches], [['a1'], ['a1'], ['a1'], ['a1']])
 
     def test_failed_jev_attempts_consume_budget_and_block_next_call(self):
         from jev_rerank.client import MAX_TOKENS, Result
