@@ -199,10 +199,12 @@ def main(argv=None):
         except JobFailed as error:
             # SDK errors can include inputs or credentials. Preserve a safe job
             # failure and stop; already returned set evidence remains intact.
+            print(f'{job["model"]}/{job["hardware"]}: {error} (app {error.app_id})',
+                  file=sys.stderr, flush=True)
             write_new(args.out / (job['model'] + '-' + job['hardware'] + '-campaign.json'),
                       {'status': 'failed', 'model': job['model'], 'hardware': job['hardware'],
                        'requested_sets': sets, 'completed_sets': [], 'estimated_usd': None,
-                       'reason': 'Modal job failed; inspect operator console', 'estimate_only': True,
+                       'reason': str(error), 'estimate_only': True,
                        'modal_app_id': error.app_id})
             return 2
         stem = job['model'] + '-' + job['hardware']
