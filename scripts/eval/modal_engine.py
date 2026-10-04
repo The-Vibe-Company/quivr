@@ -87,6 +87,13 @@ def record(cfg, campaign, sha, measured, elapsed):
                            'confirmation_available': False}}
 
 
+def image_logs(image_id):
+    """Only opaque image identifiers may enter the failure envelope."""
+    if isinstance(image_id, str) and re.fullmatch(r'im-[A-Za-z0-9_-]+', image_id):
+        return {'image_id': image_id, 'image_logs': 'modal image logs ' + image_id}
+    return {'image_id': None}
+
+
 async def dispatch(store, campaign, cfg, sha, invoke, outbox):
     import engine_stack
     frozen = {**cfg, 'kind': 'smoke', 'provider_daily_usd': 1, 'git_sha': sha,
@@ -102,6 +109,7 @@ async def dispatch(store, campaign, cfg, sha, invoke, outbox):
     if claim['status'] == 'leased':
         return {'status': 'leased', 'kind': 'smoke', 'confirmation_available': False}
     owner, charged, started = claim['owner'], None, time.monotonic()
+    image_id = None
     async def renew():
         await asyncio.to_thread(store.renew, campaign, key, owner, ttl)
     try:
@@ -110,6 +118,7 @@ async def dispatch(store, campaign, cfg, sha, invoke, outbox):
         request = {'campaign': campaign, 'policy': cfg, 'git_sha': sha,
                    'lease_key': key, 'owner': owner, 'outbox': str(outbox)}
         measured = await asyncio.wait_for(invoke(request, renew), timeout=lifetime(cfg))
+        image_id = measured.get('image_id')
         elapsed = time.monotonic() - started
         # Even failed measurements are settled only when complete remote
         # teardown and termination were observed. Unknown completion stays held.
@@ -136,6 +145,7 @@ async def dispatch(store, campaign, cfg, sha, invoke, outbox):
     except (control_store.LeaseLost, control_store.Unavailable):
         pass
     return {'status': status, 'kind': 'smoke', 'confirmation_available': False, **diagnostic,
+            **image_logs(image_id),
             'reason': status + '; smoke did not publish clean evidence; unknown charges retained',
             'compute_cap_notice': COMPUTE_NOTICE}
 
@@ -233,7 +243,7 @@ async def run_modal(request, renew):
         import engine_stack
         return {'status': 'failed', **engine_stack.failure(error),
                 'remote_cleanup_verified': False, 'sandbox_terminated': verified,
-                'image_id': image.object_id if sandbox is not None else None}
+                **image_logs(image.object_id if sandbox is not None else getattr(error, 'image_id', None))}
 
 
 def launch(cfg, campaign, outbox):

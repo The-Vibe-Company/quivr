@@ -61,20 +61,29 @@ class Admission(unittest.TestCase):
             self.assertEqual(replay['status'], 'reused')
             self.assertEqual(len(calls), 1)
             self.assertNotIn('must-never-escape', ''.join(p.read_text() for p in outbox.glob('*.json')))
-            async def uncertain(request, renew):
-                calls.append(request)
-                return {'status': 'complete', 'remote_cleanup_verified': True, 'sandbox_terminated': False}
             cfg2 = modal_engine.policy({'max_seconds': 30, 'startup_seconds': 30,
                                        'modal_daily_usd': .3, 'experiment': 'public/uncertain'})
             # A different immutable policy gets its own campaign, not a bypass
             # inside the old campaign. A failed invocation keeps its full hold.
-            name = uuid.uuid4().hex
-            failed = asyncio.run(modal_engine.dispatch(store, name, cfg2, sha, uncertain, outbox))
-            self.assertEqual(failed['status'], 'failed')
-            self.assertAlmostEqual(store.summary(name)['modal']['unknown_usd'], .21)
-            capped = asyncio.run(modal_engine.dispatch(store, name, cfg2, sha, remote, outbox))
-            self.assertEqual(capped['status'], 'capped')
-            self.assertEqual(len(calls), 2)
+            for remote_status in ('complete', 'failed'):
+                with self.subTest(remote_status=remote_status):
+                    async def uncertain(request, renew):
+                        calls.append(request)
+                        evidence = {'documents': 3, 'searches': 3, 'modes': ['lexical', 'semantic', 'hybrid']}
+                        return {'status': remote_status, 'remote_cleanup_verified': remote_status == 'complete',
+                                'sandbox_terminated': False, 'image_id': 'im-build-fixture',
+                                'error_message': 'must-never-escape',
+                                **(evidence if remote_status == 'complete' else {})}
+                    name, before = uuid.uuid4().hex, len(calls)
+                    failed = asyncio.run(modal_engine.dispatch(store, name, cfg2, sha, uncertain, outbox))
+                    self.assertEqual(failed['status'], 'failed')
+                    self.assertEqual(failed['image_id'], 'im-build-fixture')
+                    self.assertEqual(failed['image_logs'], 'modal image logs im-build-fixture')
+                    self.assertNotIn('must-never-escape', json.dumps(failed))
+                    self.assertAlmostEqual(store.summary(name)['modal']['unknown_usd'], .21)
+                    capped = asyncio.run(modal_engine.dispatch(store, name, cfg2, sha, remote, outbox))
+                    self.assertEqual(capped['status'], 'capped')
+                    self.assertEqual(len(calls), before + 1)
             import psycopg
             async def revoked(request, renew):
                 calls.append(request)
@@ -89,12 +98,12 @@ class Admission(unittest.TestCase):
             too_small = modal_engine.policy({'modal_daily_usd': .001})
             blocked = asyncio.run(modal_engine.dispatch(store, uuid.uuid4().hex, too_small, sha, remote, outbox))
             self.assertEqual(blocked['status'], 'capped')
-            self.assertEqual(len(calls), 3)
+            self.assertEqual(len(calls), 4)
 
 
 class Lifecycle(unittest.TestCase):
     def test_termination_precedes_return_on_success_remote_failure_and_cancellation(self):
-        for fault in ('none', 'remote', 'cancel', 'lease', 'terminate'):
+        for fault in ('none', 'remote', 'cancel', 'lease', 'terminate', 'build', 'build-invalid'):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temp:
                 events = []
                 async def renew():
@@ -136,6 +145,12 @@ class Lifecycle(unittest.TestCase):
                     events.append('create')
                     self.assertEqual(kwargs['runtime'], 'vm')
                     self.assertNotIn('secrets', kwargs)
+                    if fault.startswith('build'):
+                        # Modal's ImageBuildError carries this public attribute
+                        # before image hydration; inject that transport failure.
+                        error = RuntimeError('secret build output')
+                        error.image_id = 'im-build-fixture' if fault == 'build' else 'secret invalid id'
+                        raise error
                     return sandbox
                 image = mock.Mock(object_id='im-fixture')
                 for method in ('entrypoint', 'apt_install', 'run_commands', 'pip_install', 'env', 'add_local_dir'):
@@ -162,8 +177,19 @@ class Lifecycle(unittest.TestCase):
                         result = asyncio.run(modal_engine.run_modal({'policy': modal_engine.policy({}),
                             'campaign': 'fixture', 'outbox': temp}, renew))
                         self.assertEqual(result['status'], 'failed')
-                        self.assertEqual(result['sandbox_terminated'], fault != 'terminate')
+                        self.assertEqual(result['sandbox_terminated'], fault not in ('terminate', 'build', 'build-invalid'))
                         self.assertNotIn('secret', json.dumps(result))
+                if fault.startswith('build'):
+                    self.assertNotIn('terminate', events)
+                    recovery = json.loads((pathlib.Path(temp) / 'active/fixture.json').read_text())
+                    self.assertEqual(recovery['state'], 'creating')
+                    if fault == 'build':
+                        self.assertEqual(result['image_id'], 'im-build-fixture')
+                        self.assertEqual(result['image_logs'], 'modal image logs im-build-fixture')
+                    else:
+                        self.assertIsNone(result['image_id'])
+                        self.assertNotIn('image_logs', result)
+                    continue
                 self.assertIn('terminate', events)
                 self.assertLess(events.index('terminate'), events.index('app-stop'))
 

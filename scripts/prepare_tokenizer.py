@@ -17,8 +17,8 @@ def prepare():
     pinned=requirements()
     work=ROOT/'.scratch/tokenizer';work.mkdir(parents=True,exist_ok=True)
     python=work/'venv/bin/python'
-    # On macOS a copied interpreter can miss its relocatable libpython (uv- or rye-installed Pythons), so the venv links it.
-    if not python.exists():venv.EnvBuilder(with_pip=True,symlinks=platform.system()=='Darwin').create(work/'venv')
+    # Standalone Pythons on Linux and macOS resolve libpython beside the original interpreter; copying it breaks that lookup.
+    if not python.exists():venv.EnvBuilder(with_pip=True,symlinks=True).create(work/'venv')
     check=subprocess.run([str(python),'-c','import tokenizers;assert tokenizers.__version__=="0.23.2"'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     if check.returncode:
         subprocess.run([str(python),'-m','pip','install','--only-binary=:all:','--no-deps','--require-hashes','-r',str(pinned)],check=True)
