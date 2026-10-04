@@ -7,9 +7,8 @@ need only tracking credentials; storage credentials stay on the server.
 
 Use a container host with HTTPS, two PostgreSQL databases (tracking and auth),
 and a persistent volume mounted at `/data`. Enable database and volume backups.
-The following deployment commands are examples requiring your host's credentials.
 
-Build from the repository root:
+Build from the repository root (example; requires your host's credentials):
 
 ```sh
 docker build -f deploy/mlflow/Dockerfile -t search-results .
@@ -24,10 +23,11 @@ Set these environment variables through your host's secret manager:
 | `MLFLOW_AUTH_ADMIN_PASSWORD` | Initial administrator password, at least 12 characters |
 | `MLFLOW_FLASK_SERVER_SECRET_KEY` | Stable secret shared by server workers |
 | `MLFLOW_ALLOWED_HOSTS` | Hostname of your HTTPS service |
+| `MLFLOW_CORS_ALLOWED_ORIGINS` | Required browser origins, comma-separated; for example `https://results.example.com` |
 | `PORT` | Listening port; default `5000` |
 
-Optional: `MLFLOW_AUTH_ADMIN_USERNAME` (default `admin`), `MLFLOW_WORKERS` (default
-`2`), and `MLFLOW_CORS_ALLOWED_ORIGINS` for explicit browser origins.
+Set full origins (scheme, host and any port): otherwise browser POSTs return 403 "Cross-origin request blocked", even with valid credentials and allowed hosts.
+Optional: `MLFLOW_AUTH_ADMIN_USERNAME` (default `admin`) and `MLFLOW_WORKERS` (default `2`).
 `MLFLOW_ARTIFACTS_DESTINATION` defaults to `/data/artifacts`. Keep it on the volume.
 The entrypoint disables telemetry and writes a mode-600 temporary auth config,
 with `NO_PERMISSIONS` as the default and a 60-second auth cache.

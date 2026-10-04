@@ -6,6 +6,7 @@ paired test; these exercise the verdict on complete measurement families.
 """
 import hashlib
 import importlib.util
+import json
 import unittest
 
 import gates
@@ -32,6 +33,61 @@ class Verdict(unittest.TestCase):
         a, b = row(candidate, .0002), row(base, .0003)
         a['metrics'].update(metrics)
         return {'candidate': a, 'baseline': b}
+
+    def test_gate_details_explain_each_set_and_unknown_measurements(self):
+        # The gate owner exposes evidence in JSON; boolean-only tests cannot
+        # catch missing fields, swapped operands, or unknown values shown as zero.
+        pairs = {'gain': self.pair(latency_p95_ms=15, cost_per_search_usd=.002),
+                 'loss': self.pair(-.1)}
+        policy = {'sets': {'gain': {'diagnostic': False},
+                           'loss': {'diagnostic': True, 'reason': 'proxy'},
+                           'missing': {'diagnostic': False}}, 'profile': 'default',
+                  'gates': {'min_gain': .02, 'latency_ratio': 1.4,
+                            'search_usd': .001, 'index_usd': 3}}
+        report = json.loads(json.dumps(gates.evaluate(pairs, policy), allow_nan=False))
+        for gate in report['gates'].values():
+            self.assertEqual(set(gate['details']), {'gain', 'loss', 'missing'})
+        for key in ('quality', 'no_loss'):
+            detail = report['gates'][key]['details']['gain']
+            self.assertAlmostEqual(detail['delta'], .10095)
+            self.assertGreater(detail['adjusted_p'], 0)
+            self.assertLess(detail['adjusted_p'], .05)
+            self.assertEqual(detail['role'], 'gate')
+            self.assertEqual(detail['significance_level'], .05)
+            loss = report['gates'][key]['details']['loss']
+            self.assertAlmostEqual(loss['delta'], -.09905)
+            self.assertEqual(loss['role'], 'diagnostic')
+            self.assertIsNone(report['gates'][key]['details']['missing']['delta'])
+            self.assertIsNone(report['gates'][key]['details']['missing']['adjusted_p'])
+        self.assertEqual(report['gates']['quality']['details']['gain']['min_gain'], .02)
+        self.assertEqual(report['gates']['latency']['details']['gain'], {
+            'candidate_p95_ms': 15, 'baseline_p95_ms': 10, 'ratio': 1.5,
+            'max_ratio': 1.4, 'comparable': True})
+        self.assertEqual(report['gates']['price']['details']['gain'], {
+            'cost_per_search_usd': .002, 'cost_per_1000_documents_usd': 2,
+            'max_search_usd': .001, 'max_index_usd_per_1000_documents': 3})
+        self.assertIsNone(report['gates']['price']['details']['missing']['cost_per_search_usd'])
+        self.assertIsNone(report['gates']['latency']['details']['missing']['ratio'])
+        self.assertFalse(report['gates']['latency']['details']['missing']['comparable'])
+
+        for value in (None, float('nan'), float('inf'), -1):
+            with self.subTest(unknown=value):
+                row = self.pair(latency_p95_ms=value, cost_per_search_usd=value)
+                unknown = json.loads(json.dumps(gates.evaluate({'gain': row}, policy), allow_nan=False))
+                self.assertIsNone(unknown['gates']['latency']['details']['gain']['candidate_p95_ms'])
+                self.assertIsNone(unknown['gates']['latency']['details']['gain']['ratio'])
+                self.assertIsNone(unknown['gates']['price']['details']['gain']['cost_per_search_usd'])
+        row = self.pair(latency_p95_ms=0)
+        row['baseline']['metrics']['latency_p95_ms'] = 0
+        zero = gates.evaluate({'gain': row}, dict(policy, sets={'gain': {'diagnostic': False}}))
+        self.assertTrue(zero['gates']['latency']['passed'])
+        self.assertIsNone(zero['gates']['latency']['details']['gain']['ratio'])
+        row['candidate']['cost']['latency_sample'] = None
+        incompatible = gates.evaluate({'gain': row}, policy)
+        self.assertFalse(incompatible['gates']['latency']['details']['gain']['comparable'])
+        row['baseline']['dataset']['fingerprint'] = 'different'
+        incompatible = gates.evaluate({'gain': row}, policy)
+        self.assertIsNone(incompatible['gates']['quality']['details']['gain']['delta'])
 
     def test_price_latency_and_missing_evidence_cannot_be_overridden_by_quality(self):
         policy = {'sets': {'a': {'diagnostic': False}}, 'profile': 'default'}

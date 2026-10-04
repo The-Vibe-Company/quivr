@@ -7,9 +7,10 @@ import tempfile
 
 def main():
     required = ('DATABASE_URL', 'MLFLOW_AUTH_DATABASE_URI', 'MLFLOW_AUTH_ADMIN_PASSWORD',
-                'MLFLOW_FLASK_SERVER_SECRET_KEY', 'MLFLOW_ALLOWED_HOSTS')
-    if any(not os.environ.get(k) for k in required):
-        raise SystemExit('MLflow: missing required deployment environment variables')
+                'MLFLOW_FLASK_SERVER_SECRET_KEY', 'MLFLOW_ALLOWED_HOSTS', 'MLFLOW_CORS_ALLOWED_ORIGINS')
+    missing = [k for k in required if not os.environ.get(k, '').strip()]
+    if missing:
+        raise SystemExit('MLflow: missing required deployment environment variables: ' + ', '.join(missing))
     os.environ.update(MLFLOW_DISABLE_TELEMETRY='true', DO_NOT_TRACK='true', MLFLOW_DISABLE_AGENT_HINT='1')
     def postgres(uri):
         if uri.startswith('postgres://'):
@@ -38,8 +39,9 @@ def main():
                '--serve-artifacts', '--artifacts-destination', str(artifacts), '--host', '0.0.0.0',
                '--port', os.environ.get('PORT', '5000'), '--workers', os.environ.get('MLFLOW_WORKERS', '2'),
                '--allowed-hosts', os.environ['MLFLOW_ALLOWED_HOSTS'], '--x-frame-options', 'DENY']
-    if os.environ.get('MLFLOW_CORS_ALLOWED_ORIGINS'):
-        command += ['--cors-allowed-origins', os.environ['MLFLOW_CORS_ALLOWED_ORIGINS']]
+    # Browser POSTs need full origins (scheme, host and optional port), even
+    # when the hostname already appears in --allowed-hosts.
+    command += ['--cors-allowed-origins', os.environ['MLFLOW_CORS_ALLOWED_ORIGINS']]
     os.execvp(command[0], command)
 
 
