@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 // ingestCommand validates one raw IngestCommand and runs the acceptance path

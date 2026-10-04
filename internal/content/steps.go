@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // ObservabilityRead is the action that reads the operator views of document

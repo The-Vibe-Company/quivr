@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/transport/pagetoken"
+	"github.com/The-Vibe-Company/quivr/internal/transport/pagetoken"
 )
 
 // This is the owner of signed page-token integrity, route isolation and expiry.

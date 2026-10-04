@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 // WithPlugins enables the operator routes of the plugin registry.

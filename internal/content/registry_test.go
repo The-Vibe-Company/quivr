@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 func ownedRegistry(t *testing.T) *content.ExtensionRegistry {

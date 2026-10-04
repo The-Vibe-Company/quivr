@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
 
 // KeyPrefix reserves an idempotency-key family for connector-originated

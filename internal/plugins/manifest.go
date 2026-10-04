@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"gopkg.in/yaml.v3"
 )
 
 // EngineVersion is the engine version plugins declare compatibility with.
 // Release builds may override it:
 //
-//	go build -ldflags "-X github.com/The-Vibe-Company/quivr-v2/internal/plugins.EngineVersion=0.2.1"
+//	go build -ldflags "-X github.com/The-Vibe-Company/quivr/internal/plugins.EngineVersion=0.2.1"
 var EngineVersion = "0.2.0"
 
 // ManifestFile is the plugin manifest file name inside a plugin directory.

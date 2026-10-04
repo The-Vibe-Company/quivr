@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"log/slog"
 	"os"
 	"path/filepath"

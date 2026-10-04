@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 // ErrUnavailable means the pinned plugin could not serve an invocation.

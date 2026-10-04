@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
 )
 
 // CheckReceive judges a push kind's answers to relayed deliveries (Plugin API 0.5).

@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 // OpenAttachment reads one attachment's bytes from Graph: the raw bytes of a

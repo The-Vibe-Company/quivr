@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 )
 
 // TestDeliveryWorkerRefusesPrivateDestinations runs the real delivery worker

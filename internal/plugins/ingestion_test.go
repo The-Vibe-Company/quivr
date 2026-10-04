@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 const embedderManifest = `id: acme.embedder

@@ -3,8 +3,8 @@ package devhost_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
 	"net/http"
 	"net/http/httptest"
 	"testing"

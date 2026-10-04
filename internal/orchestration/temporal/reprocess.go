@@ -3,7 +3,7 @@ package temporal
 import (
 	"context"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
+	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"

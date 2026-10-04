@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/call"
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/call"
 )
 
 // ConnectorTimeoutCap bounds one connector invocation: the deadline is

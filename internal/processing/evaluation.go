@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // EvaluationStore owns durable dispatch and per-plugin evaluation outcomes.

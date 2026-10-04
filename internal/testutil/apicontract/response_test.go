@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/testutil/apicontract"
+	"github.com/The-Vibe-Company/quivr/internal/testutil/apicontract"
 )
 
 func TestFakeResponseMustMatchItsOperation(t *testing.T) {

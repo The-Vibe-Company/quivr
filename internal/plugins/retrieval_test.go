@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 const retrieverManifest = "../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml"

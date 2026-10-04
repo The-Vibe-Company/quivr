@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 var now = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)

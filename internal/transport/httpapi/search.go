@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {

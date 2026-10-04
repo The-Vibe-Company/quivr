@@ -2,7 +2,7 @@ package uploads
 
 import (
 	"context"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // CreateScoped authorizes before loading the upload request. Worker attachment

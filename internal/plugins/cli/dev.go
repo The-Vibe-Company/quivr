@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
 )
 
 const devUsage = "quivr plugin dev [--fixture <file>] [--watch] [--port <n>] [--startup-timeout <duration>] [<plugin-dir>]"

@@ -13,12 +13,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/pluginhttp"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
 const embedderManifest = `id: acme.embedder

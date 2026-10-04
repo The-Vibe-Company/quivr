@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/operations"
 )
 
 func (f controlFixture) begin(id string) operations.Operation {

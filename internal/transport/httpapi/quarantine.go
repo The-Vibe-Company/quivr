@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/quarantine"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 // WithQuarantine enables GET /v0/admin/quarantine and

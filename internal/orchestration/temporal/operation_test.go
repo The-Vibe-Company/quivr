@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
-	"github.com/The-Vibe-Company/quivr-v2/internal/quarantine"
+	"github.com/The-Vibe-Company/quivr/internal/backfill"
+	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/stretchr/testify/mock"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"

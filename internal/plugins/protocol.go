@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/The-Vibe-Company/quivr-v2/contracts"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/contracts"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 

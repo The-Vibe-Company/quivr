@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 func main() {

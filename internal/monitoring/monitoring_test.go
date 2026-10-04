@@ -3,13 +3,13 @@ package monitoring_test
 import (
 	"context"
 	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 )
 
 // memoryStore keeps definitions in memory; idempotency and journal behavior

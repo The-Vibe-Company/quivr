@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 const OutcomeEvaluatorRetired = "evaluator_retired"

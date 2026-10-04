@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/online"
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference/mcp"
+	"github.com/The-Vibe-Company/quivr/internal/online"
+	"github.com/The-Vibe-Company/quivr/internal/reference/mcp"
 )
 
 // The fixture is a catalogue with two profiles sharing a tool, a tool that

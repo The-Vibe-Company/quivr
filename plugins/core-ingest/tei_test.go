@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 // wordTokenizer stands in for the pinned tokenizer: one token per word, with

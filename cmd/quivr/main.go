@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/app"
-	"github.com/The-Vibe-Company/quivr-v2/internal/online"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/cli"
+	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/online"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/cli"
 )
 
 func main() {

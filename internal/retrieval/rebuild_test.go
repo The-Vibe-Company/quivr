@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
-	"github.com/The-Vibe-Company/quivr-v2/internal/processing"
-	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
 type fakeRebuildStore struct {

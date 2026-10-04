@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
-	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
 
 func sessionToTransport(s uploads.Session) transport.Upload {

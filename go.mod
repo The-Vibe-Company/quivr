@@ -1,4 +1,4 @@
-module github.com/The-Vibe-Company/quivr-v2
+module github.com/The-Vibe-Company/quivr
 
 go 1.27.1
 

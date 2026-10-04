@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/pluginhttp"
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
 )
 
 // Fixture tools and engine ports must serialize the same contribution input.

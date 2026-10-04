@@ -12,7 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/client"
+	"github.com/The-Vibe-Company/quivr/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

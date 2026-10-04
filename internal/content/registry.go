@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 // ErrExtensionOwned rejects a client submission that writes an extension

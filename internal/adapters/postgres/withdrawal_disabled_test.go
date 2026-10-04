@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 )
 
 // TestWithdrawalNoticeSurvivesDisableAndReenable proves THE-696 against the

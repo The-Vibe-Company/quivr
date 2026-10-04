@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 )
 
 const testSecret = "whsec_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="

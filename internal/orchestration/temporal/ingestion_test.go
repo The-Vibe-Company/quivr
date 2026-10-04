@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/converter"

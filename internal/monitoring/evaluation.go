@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 // Decision is an evaluator's answer for one pinned Subscription Version and

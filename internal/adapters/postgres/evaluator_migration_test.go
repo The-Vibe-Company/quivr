@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
-	"github.com/The-Vibe-Company/quivr-v2/internal/app"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 )
 
 const alertsManifest = "../../../plugins/alerts/quivr-plugin.yaml"

@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 )
 
 // phraseEvaluator stands for a pinned subscription plugin: it matches when

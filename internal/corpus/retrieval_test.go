@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 func declared(ns string) bool { return ns == "example.editorial" }

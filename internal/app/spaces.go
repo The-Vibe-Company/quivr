@@ -3,9 +3,9 @@ package app
 import (
 	"encoding/json"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // DeploymentSpaces are the vector spaces this deployment registers: the

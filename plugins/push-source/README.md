@@ -7,7 +7,7 @@ The scheduled fetch only reports channel health; this source makes no external c
 
 ```sh
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e <quivr-v2 checkout>/sdks/python
+pip install -e <quivr checkout>/sdks/python
 python3 -m unittest discover -s tests
 quivr plugin test --report contract-report.json
 ```

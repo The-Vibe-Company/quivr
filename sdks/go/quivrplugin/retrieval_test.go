@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 // deadlineRecorder answers an empty ranking and records whether its context

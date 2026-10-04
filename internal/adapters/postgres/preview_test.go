@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 )
 
 // A preview judges the current eligible Version of each Record, the most

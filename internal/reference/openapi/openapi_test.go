@@ -6,7 +6,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/reference/openapi"
+	"github.com/The-Vibe-Company/quivr/internal/reference/openapi"
 )
 
 // The fixture exercises what an integrator reads: grouped endpoints with

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 	"github.com/jackc/pgx/v5"
 )
 

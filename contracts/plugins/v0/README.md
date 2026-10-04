@@ -921,7 +921,7 @@ Scaffold and run a Python normalizer with the SDK in [`sdks/python`](../../../sd
 
 ```bash
 quivr plugin init demo && cd demo
-python3 -m venv .venv && . .venv/bin/activate && pip install -e <quivr-v2 checkout>/sdks/python
+python3 -m venv .venv && . .venv/bin/activate && pip install -e <quivr checkout>/sdks/python
 quivr plugin dev --fixture fixtures/sample.json
 ```
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/client"
+	"github.com/The-Vibe-Company/quivr/client"
 )
 
 func TestConnectorClientPreservesPluginDefinedBodies(t *testing.T) {

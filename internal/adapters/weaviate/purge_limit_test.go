@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 )
 
 // A delete is complete only when the engine proves nothing is left: fewer

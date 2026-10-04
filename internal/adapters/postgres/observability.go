@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
+	"github.com/The-Vibe-Company/quivr/internal/observability"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

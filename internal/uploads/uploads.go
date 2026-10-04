@@ -7,8 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 // MaxUploadBytes bounds a single presigned transfer expectation.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 // Kinds of work pinned to the plan they started on.

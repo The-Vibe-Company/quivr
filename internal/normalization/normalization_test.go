@@ -15,11 +15,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/normalization"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/pluginhttp"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/normalization"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 const manifestYAML = `id: acme.markdown

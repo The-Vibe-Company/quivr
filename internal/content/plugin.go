@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // SegmentInput is one segment an ingestion plugin cut from a Version: Unicode

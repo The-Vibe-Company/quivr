@@ -5,17 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
-	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
-	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
+	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
 
 // echoPush is a push kind that answers every relayed request with what it

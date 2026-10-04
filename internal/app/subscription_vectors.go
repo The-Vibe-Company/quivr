@@ -4,9 +4,9 @@ import (
 	"context"
 	"sort"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/monitoring"
-	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
 type savedQueryEncoder struct {

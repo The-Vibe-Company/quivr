@@ -12,7 +12,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 // alpha weights the vector side of a hybrid search; relative score fusion

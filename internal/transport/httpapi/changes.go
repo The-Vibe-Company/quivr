@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/changes"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 // Option configures optional API capabilities.

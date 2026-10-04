@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/transport/routing"
+	"github.com/The-Vibe-Company/quivr/internal/transport/routing"
 )
 
 // The generated contract registrar uses this boundary; URL normalization and

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"

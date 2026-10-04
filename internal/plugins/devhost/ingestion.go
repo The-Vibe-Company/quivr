@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // CodeUnexpectedSegments is a segment_and_embed answer whose segments or

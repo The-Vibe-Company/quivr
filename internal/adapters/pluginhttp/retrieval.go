@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/call"
-	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/call"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
 // Retriever is the pinned plugin's retrieval Contribution as search calls

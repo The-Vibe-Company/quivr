@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/app"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
+	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

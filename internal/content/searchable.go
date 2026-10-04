@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // Segmentation is an immutable derivation; offsets address canonical Part text.

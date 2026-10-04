@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // withdrawnDuringRead never finds the stale candidate and finds the others,

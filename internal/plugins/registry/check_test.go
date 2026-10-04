@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/runner"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/runner"
 )
 
 func TestMain(m *testing.M) {

@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // Connector Contribution routes (Plugin API 0.3).

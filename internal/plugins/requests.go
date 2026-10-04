@@ -6,7 +6,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 // NormalizerSource identifies the source Record passed to a normalizer.

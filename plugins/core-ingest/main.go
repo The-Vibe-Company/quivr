@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
 // configuration is the pin configuration: where TEI answers and where the

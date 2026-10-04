@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	contract "github.com/The-Vibe-Company/quivr-v2/contracts/http/v0"
+	contract "github.com/The-Vibe-Company/quivr/contracts/http/v0"
 )
 
 // destinationCapture is the org_a destination whose URL points at the

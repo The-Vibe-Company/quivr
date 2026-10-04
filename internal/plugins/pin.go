@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 // Issue codes of a startup pin, beside the manifest codes.

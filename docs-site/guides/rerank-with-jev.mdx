@@ -30,9 +30,9 @@ This illustrative configuration maps each short name to its provider:
 
 ```yaml
 plugins:
-  - manifest: /path/to/quivr-v2/plugins/core-retrieve/quivr-plugin.yaml
+  - manifest: /path/to/quivr/plugins/core-retrieve/quivr-plugin.yaml
     endpoint: http://127.0.0.1:8084
-  - manifest: /path/to/quivr-v2/plugins/jev-rerank/quivr-plugin.yaml
+  - manifest: /path/to/quivr/plugins/jev-rerank/quivr-plugin.yaml
     endpoint: http://127.0.0.1:8083
     configuration:
       candidate_count: 30
@@ -84,5 +84,5 @@ from a failed response never enter the cache.
 
 Watch relevance, p95 latency, input tokens, cost and the fallback rate on
 your own workload before relying on `deep`. The plugin's
-[README](https://github.com/The-Vibe-Company/quivr-v2/tree/main/plugins/jev-rerank)
+[README](https://github.com/The-Vibe-Company/quivr/tree/main/plugins/jev-rerank)
 describes the cache, cost reservation, provider limits and how it was measured.

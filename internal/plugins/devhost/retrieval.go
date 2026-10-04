@@ -13,7 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // FixtureSpaceDimensions is the dimensions of every space a retrieval fixture

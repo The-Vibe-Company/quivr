@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 // Each prune pass deletes at most PruneBatches transactions of PruneBatch

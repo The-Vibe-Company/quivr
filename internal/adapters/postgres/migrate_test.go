@@ -12,8 +12,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
-	"github.com/The-Vibe-Company/quivr-v2/migrations"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

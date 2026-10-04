@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/scaffold"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/scaffold"
 )
 
 // TestTemplatesAreValidPlugins owns the content of every template kind: a

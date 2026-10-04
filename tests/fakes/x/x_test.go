@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/tests/fakes/process"
+	"github.com/The-Vibe-Company/quivr/tests/fakes/process"
 )
 
 // THE-919's owner moved here with the single provider implementation: earlier

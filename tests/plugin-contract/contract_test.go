@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/cli"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/cli"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 

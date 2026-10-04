@@ -6,7 +6,7 @@ Specs, decision maps, and implementation tickets for this repository live in Lin
 
 - **Workspace:** The Vibe Company (`thevibecompany`)
 - **Quivr V2 parent investigation:** [`THE-531`](https://linear.app/thevibecompany/issue/THE-531/investigation-et-planification-profonde-technique-du-projet)
-- **Repository:** [`The-Vibe-Company/quivr-v2`](https://github.com/The-Vibe-Company/quivr-v2)
+- **Repository:** [`The-Vibe-Company/quivr`](https://github.com/The-Vibe-Company/quivr)
 
 New Quivr V2 specs and tickets must be created as sub-issues of `THE-531` when the hierarchy fits. Otherwise, relate them explicitly to `THE-531` and keep them in the same Linear project as the parent issue.
 

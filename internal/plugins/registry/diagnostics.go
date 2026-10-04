@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 func discoveryCause(err error) plugins.IssueCause {

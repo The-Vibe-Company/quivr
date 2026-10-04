@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 // Preview bounds. Each previewed Record Version costs one evaluator call, and

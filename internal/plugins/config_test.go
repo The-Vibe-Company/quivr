@@ -7,7 +7,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 func TestValidateConfigurationAgainstTheManifestSchema(t *testing.T) {

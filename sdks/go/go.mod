@@ -1,4 +1,4 @@
-module github.com/The-Vibe-Company/quivr-v2/sdks/go
+module github.com/The-Vibe-Company/quivr/sdks/go
 
 go 1.24
 

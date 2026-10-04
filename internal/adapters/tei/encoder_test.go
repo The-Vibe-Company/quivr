@@ -3,8 +3,8 @@ package tei_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 	"os"
 	"strings"
 	"testing"

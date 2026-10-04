@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/pluginhttp"
-	"github.com/The-Vibe-Company/quivr-v2/internal/backfill"
-	"github.com/The-Vibe-Company/quivr-v2/internal/observability"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/registry"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/pluginhttp"
+	"github.com/The-Vibe-Company/quivr/internal/backfill"
+	"github.com/The-Vibe-Company/quivr/internal/observability"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 )
 
 // BackfillConfig is the deployment's backfill settings (worker for rate and

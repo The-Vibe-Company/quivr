@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
-	transport "github.com/The-Vibe-Company/quivr-v2/internal/transport/generated"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 func (a *API) ListCorpora(ctx context.Context, in transport.ListCorporaRequestObject) (transport.ListCorporaResponseObject, error) {

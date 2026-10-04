@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/sdks/go/quivrplugin"
-	"github.com/The-Vibe-Company/quivr-v2/tests/fakes/process"
+	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
+	"github.com/The-Vibe-Company/quivr/tests/fakes/process"
 )
 
 var base = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)

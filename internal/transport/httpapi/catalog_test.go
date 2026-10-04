@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins/devhost/fakeplugin"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/changes"
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/retrieval"
-	"github.com/The-Vibe-Company/quivr-v2/internal/transport/httpapi"
-	"github.com/The-Vibe-Company/quivr-v2/internal/uploads"
+	"github.com/The-Vibe-Company/quivr/internal/changes"
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
+	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
 
 // memoryCatalog answers keyset reads over Records put in key order. Key order,

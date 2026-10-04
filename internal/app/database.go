@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/tei"
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/weaviate"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

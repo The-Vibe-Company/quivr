@@ -3,7 +3,7 @@ package publicerr
 import (
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/contracts"
+	"github.com/The-Vibe-Company/quivr/contracts"
 	"gopkg.in/yaml.v3"
 )
 

@@ -3,12 +3,12 @@ package temporal
 import (
 	"context"
 	"errors"
-	"github.com/The-Vibe-Company/quivr-v2/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/stretchr/testify/mock"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"

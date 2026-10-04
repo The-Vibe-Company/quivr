@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
-	"github.com/The-Vibe-Company/quivr-v2/internal/app"
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 func pluginSpace(owner, name string, dimensions int, role string) content.RegisteredSpace {

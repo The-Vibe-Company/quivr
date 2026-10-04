@@ -33,7 +33,7 @@ versus capped-title provenance and the exact model input. No vectors or model
 inference are produced in this ticket. THE-646 owns embedding artifacts.
 
 Sources and experiment: the accepted
-[THE-553 research](https://github.com/The-Vibe-Company/quivr-v2/blob/9e59d3bf12afe5d20ce1b0afd5775e464b2ebddf/research/text-segmentation-embedding-profile.md),
+[THE-553 research](https://github.com/The-Vibe-Company/quivr/blob/9e59d3bf12afe5d20ce1b0afd5775e464b2ebddf/research/text-segmentation-embedding-profile.md),
 [pinned Tokenizers implementation](https://github.com/huggingface/tokenizers/tree/v0.23.2)
 and the [offset API](https://huggingface.co/docs/tokenizers/en/api/encoding).
 Reproduce with `python3 scripts/prepare_tokenizer.py` followed by `make verify`.

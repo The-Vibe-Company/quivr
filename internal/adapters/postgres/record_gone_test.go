@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
 
 // TestRecordGoneFence owns the withdrawn-or-tombstoned SQL contract. It covers

@@ -1,7 +1,7 @@
 package postgres_test
 
 import (
-	"github.com/The-Vibe-Company/quivr-v2/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

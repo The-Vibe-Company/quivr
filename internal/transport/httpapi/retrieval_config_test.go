@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/corpus"
-	"github.com/The-Vibe-Company/quivr-v2/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/operations"
 )
 
 func (m *memoryOperations) AcceptRetrievalConfiguration(_ context.Context, org, corpusID, key string, _ []byte, resolved []byte) (operations.Operation, error) {

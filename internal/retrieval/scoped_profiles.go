@@ -1,6 +1,6 @@
 package retrieval
 
-import "github.com/The-Vibe-Company/quivr-v2/internal/corpus"
+import "github.com/The-Vibe-Company/quivr/internal/corpus"
 
 func (s Service) ProfilesScoped(scope corpus.Scope) ([]Profile, error) {
 	if err := scope.Require(corpus.ActionSearchProfiles); err != nil {

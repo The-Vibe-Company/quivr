@@ -16,7 +16,7 @@ runtime_group = "Agent runtime"
 runtimes = ["Claude Code", "Codex", "Conductor"]
 
 [github]
-repository = "The-Vibe-Company/quivr-v2"
+repository = "The-Vibe-Company/quivr"
 
 [gates]
 # required_checks = ["test"]  # CI checks that must be green before a hand-back (default: every check)

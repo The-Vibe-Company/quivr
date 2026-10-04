@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
 // Signature declares provider-owned cryptographic verification and engine

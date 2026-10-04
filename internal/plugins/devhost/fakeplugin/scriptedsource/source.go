@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/The-Vibe-Company/quivr-v2/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 )
 
 // Source is a deterministic connector for local and CI acceptance. Each run
