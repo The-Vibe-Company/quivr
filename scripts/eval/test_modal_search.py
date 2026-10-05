@@ -69,6 +69,61 @@ class Refusal(unittest.TestCase):
 
 
 class RemoteSerialization(unittest.TestCase):
+    def test_acknowledged_modal_call_reattaches_without_respawn_and_gives_up_boundedly(self):
+        import modal
+        from grpclib import GRPCError, Status
+        from modal._grpc_client import grpc_error_to_modal_exception
+        from modal._utils.grpc_utils import RetryTimeoutError
+        clock, waits, identities = [0], [], []
+        def wait(seconds):
+            waits.append(seconds)
+            clock[0] += seconds
+        call = mock.Mock(object_id='fc-survivor')
+        remote = mock.Mock()
+        remote.spawn.return_value = call
+        result = {'status': 'complete'}
+        call.get.side_effect = [modal.exception.ConnectionError('secret'),
+                               grpc_error_to_modal_exception(GRPCError(Status.UNAVAILABLE, 'secret')),
+                               RetryTimeoutError(grpc_error_to_modal_exception(
+                                   GRPCError(Status.DEADLINE_EXCEEDED, 'secret'))), result]
+        def attach(identity):
+            identities.append(identity)
+            return call
+        with mock.patch('modal.FunctionCall.from_id', side_effect=attach), \
+             mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+             mock.patch('time.sleep', side_effect=wait), \
+             mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='12'):
+            self.assertEqual(modal_search.invoke(remote, {'campaign': 'opaque'}, lambda: None), result)
+            remote.spawn.assert_called_once()
+            self.assertEqual(identities, ['fc-survivor'] * 4)
+            self.assertEqual(waits, [1, 2, 4])
+            waits.clear()
+            call.get.side_effect = modal.exception.ConnectionError('secret')
+            import network_recovery
+            with self.assertRaises(network_recovery.Outage) as error:
+                modal_search.invoke(remote, {'campaign': 'opaque'}, lambda: None)
+            self.assertEqual(waits, [1, 2, 4, 5])
+            self.assertNotIn('secret', str(error.exception))
+            self.assertEqual(remote.spawn.call_count, 2, 'one spawn per admitted invocation')
+            waits.clear()
+            for refusal in (modal.exception.AuthError('secret'),
+                            grpc_error_to_modal_exception(GRPCError(Status.UNKNOWN, 'secret')),
+                            grpc_error_to_modal_exception(GRPCError(Status.CANCELLED, 'secret'))):
+                call.get.side_effect = refusal
+                with self.assertRaises(type(refusal)):
+                    modal_search.invoke(remote, {'campaign': 'opaque'}, lambda: None)
+                self.assertFalse(waits, 'a refusal must not retry')
+            # A lost spawn acknowledgement is ambiguous: never replay it.
+            remote.spawn.side_effect = modal.exception.ConnectionError('secret')
+            with self.assertRaises(network_recovery.Outage):
+                modal_search.invoke(remote, {'campaign': 'opaque'}, lambda: None)
+            self.assertEqual(remote.spawn.call_count, 6)
+            self.assertFalse(waits)
+            with self.assertRaises(control_store.LeaseLost):
+                modal_search.invoke(remote, {'campaign': 'opaque'},
+                                    mock.Mock(side_effect=control_store.LeaseLost('owner replaced')))
+            self.assertEqual(remote.spawn.call_count, 6, 'lost ownership must refuse before paid spawn')
+
     def test_remote_trial_loads_before_evaluation_modules_are_importable(self):
         # The container adds the evaluation directory to sys.path only inside the
         # call. Campaigns import this module, so launch must force a by-value payload.
@@ -162,6 +217,72 @@ class FailureLogging(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN'), 'requires disposable PostgreSQL')
 class Dispatch(unittest.TestCase):
+    def test_launch_survives_network_gap_with_detached_app_and_one_paid_spawn_per_measurement(self):
+        import modal
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        campaign = uuid.uuid4().hex
+        policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
+            'modal_usd_per_second': .001, 'price_revision': '2026-10-03',
+            'modal_daily_usd': 10, 'max_seconds': 30, 'startup_seconds': 10})
+        app, remote = mock.MagicMock(), mock.Mock()
+        app.function.return_value = lambda _: remote
+        app.app_id = 'ap-survivor'
+        requests, attachments, waits = [], [], []
+        calls = {}
+        def spawn(request):
+            requests.append(request)
+            identity = 'fc-' + str(len(requests))
+            attempt = [0]
+            def get(**_):
+                attempt[0] += 1
+                if len(requests) == 1 and attempt[0] <= 2:
+                    raise modal.exception.ConnectionError('network secret')
+                row = {'schema_version': 1, 'experiment': 'public/example', 'git_sha': 'a' * 40,
+                    'plugin_digest': 'sha256:fixture', 'config': request['config'], 'tier': 'direct',
+                    'machine': 'fake-modal', 'duration_seconds': 1, 'cost': {},
+                    'dataset': {'name': 'scifact', 'version': '1', 'split': 'dev', 'fingerprint': 'fixture', 'private': False},
+                    'metrics': {'ndcg@10': .5, 'latency_p95_ms': 10, 'cost_per_search_usd': .0001,
+                                'cost_per_1000_documents_usd': 1},
+                    'per_query': {'ndcg@10': {'q1': .5, 'q2': .5}}}
+                store.publish(campaign, request['lease_key'], request['owner'], row)
+                return row
+            call = mock.Mock(object_id=identity)
+            call.get.side_effect = get
+            calls[identity] = call
+            return call
+        remote.spawn.side_effect = spawn
+        def attach(identity):
+            attachments.append(identity)
+            return calls[identity]
+        def backoff(seconds):
+            waits.append(seconds)
+            self.assertEqual(len(requests), 1, 'network retries cannot create paid invocations')
+            import network_recovery
+            # Zero admission wait proves the other parallel trial is refused
+            # while this transport is disconnected, without sleeping.
+            with mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='0'):
+                with self.assertRaises(network_recovery.Outage):
+                    store.reserve(campaign, 'provider', .01)
+        with tempfile.TemporaryDirectory() as temp, \
+             mock.patch.dict(os.environ, EVAL_CONTROL_DATABASE_URL=store.dsn, MLFLOW_TRACKING_URI=''), \
+             mock.patch('modal.App', return_value=app), mock.patch('modal.Image'), \
+             mock.patch('modal.Secret'), mock.patch('modal.Volume'), \
+             mock.patch('modal.FunctionCall.from_id', side_effect=attach), \
+             mock.patch('modal_search.shipped_trial'), \
+             mock.patch('modal_search.subprocess.run', return_value=subprocess.CompletedProcess([], 0)), \
+             mock.patch('modal_search.subprocess.check_output', side_effect=[b'', 'a' * 40]), \
+             mock.patch('time.sleep', side_effect=backoff):
+            report = modal_search.launch(policy, search_trial.configuration({'dense_weight': .5}),
+                                         campaign, temp, True)
+        app.run.assert_called_once_with(detach=True)
+        self.assertEqual(waits, [1, 2])
+        self.assertEqual(attachments, ['fc-1', 'fc-1', 'fc-1', 'fc-2'])
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(report['work']), 2)
+        self.assertEqual(store.summary(campaign)['modal']['unknown_usd'], 0)
+        self.assertNotIn('provider', store.summary(campaign))
+        self.assertTrue(store.reserve(campaign, 'provider', .01), 'admission resumes after reconnection')
+
     def test_compute_cap_precedes_second_call_and_completed_result_is_replayed(self):
         store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
         cfg = search_trial.configuration({})

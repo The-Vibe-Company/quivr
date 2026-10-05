@@ -7,18 +7,36 @@ import time
 
 import campaign_store
 import modal_search
+import network_recovery
+
+
+def unreachable(error):
+    if isinstance(error, subprocess.TimeoutExpired):
+        return True
+    if isinstance(error, subprocess.CalledProcessError):
+        message = error.stderr or b''
+        if isinstance(message, bytes):
+            message = message.decode('utf-8', errors='replace')
+        return any(marker in message.lower() for marker in (
+            'connectionerror', 'deadline exceeded', 'temporary failure in name resolution',
+            'nodename nor servname provided', 'network is unreachable', 'connection reset',
+            'connection refused', 'tls handshake', 'failed to connect'))
+    return False
 
 
 class ModalCompute:
     def apps(self):
         # Capture provider output: reflected credentials never reach CLI output.
         try:
-            result = subprocess.run([sys.executable, '-m', 'modal', 'app', 'list', '--json'],
-                                    capture_output=True, text=True, timeout=30, check=True)
+            result = network_recovery.retry(lambda: subprocess.run(
+                [sys.executable, '-m', 'modal', 'app', 'list', '--json'],
+                capture_output=True, text=True, timeout=30, check=True), unreachable)
             rows = json.loads(result.stdout)
             if not isinstance(rows, list):
                 raise ValueError('invalid app listing')
             return rows
+        except network_recovery.Outage:
+            raise
         except Exception:
             raise campaign_store.CleanupPending('Modal resource listing unavailable') from None
 
@@ -36,8 +54,11 @@ class ModalCompute:
         if not self.running(app_id):
             return
         try:
-            subprocess.run([sys.executable, '-m', 'modal', 'app', 'stop', '--yes', app_id],
-                           capture_output=True, timeout=30, check=True)
+            network_recovery.retry(lambda: subprocess.run(
+                [sys.executable, '-m', 'modal', 'app', 'stop', '--yes', app_id],
+                capture_output=True, timeout=30, check=True), unreachable)
+        except network_recovery.Outage:
+            raise
         except Exception:
             raise campaign_store.CleanupPending('Modal stop acknowledgement unavailable') from None
         deadline = time.monotonic() + 30
@@ -62,11 +83,21 @@ class Measurement:
                 app_name=resource['label'],
                 on_app=lambda app: self.store.bind(self.name, self.owner, resource['id'], app),
                 check=lambda: self.store.renew_owner(self.name, self.owner))
+        except network_recovery.Outage:
+            raise
+        except Exception as error:
+            if network_recovery.modal_unreachable(error):
+                raise network_recovery.Outage('Modal app acknowledgement unavailable; reconcile before retrying') from None
+            raise
         finally:
+            # A bounded outage leaves detached compute and uncertain admissions
+            # intact. The independent watchdog reconciles after ownership grace.
+            # Do not spend another outage window on release/cleanup here.
             # A failed creation/bind remains pending for the watchdog. Live
             # ownership can close only resources whose exact ID is acknowledged.
-            current = self.store.snapshot(self.name)['resources'][resource['id']]
-            if current['app_id']:
+            current = (self.store.snapshot(self.name)['resources'][resource['id']]
+                       if not isinstance(sys.exc_info()[1], network_recovery.Outage) else None)
+            if current and current['app_id']:
                 self.compute.stop(current['app_id'])
                 if self.compute.running(current['app_id']):
                     raise campaign_store.CleanupPending('Modal termination is still pending')

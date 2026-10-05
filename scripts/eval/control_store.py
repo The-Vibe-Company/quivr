@@ -16,6 +16,7 @@ import time
 import uuid
 
 import embeddings
+import network_recovery
 
 LEASE_BATCH_SIZE = 128
 VALIDATION_LEASE_TTL = 600
@@ -31,6 +32,10 @@ def lease_batch(keys, ttl=3600):
 
 
 class Unavailable(RuntimeError):
+    pass
+
+
+class NetworkUnavailable(Unavailable, network_recovery.Outage):
     pass
 
 
@@ -117,8 +122,10 @@ class Store:
                     except (OSError, UnicodeError):
                         raise Unavailable('evaluation control CA unavailable; paid admission refused') from None
                     dsn = make_conninfo(dsn, sslrootcert=ca.name)
-                with psycopg.connect(dsn, connect_timeout=5, options='-c statement_timeout=10000') as db:
+                with network_recovery.connect(dsn, connect_timeout=5, options='-c statement_timeout=10000') as db:
                     yield db
+        except network_recovery.Outage:
+            raise NetworkUnavailable('evaluation control connection outage window elapsed; paid admission refused') from None
         except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled,
                 psycopg.errors.DeadlockDetected, psycopg.errors.SerializationFailure):
             raise Contention('evaluation control transaction timed out or conflicted; retrying') from None
@@ -305,11 +312,20 @@ class Store:
 
     @retry_contention
     def reserve(self, name, kind, usd, metadata=None, lease=None):
+        gate = network_recovery.admission(name)
+        while True:
+            gate.wait()
+            try:
+                return self._reserve(name, kind, usd, metadata, lease, gate)
+            except network_recovery.AdmissionPaused:
+                continue
+
+    def _reserve(self, name, kind, usd, metadata, lease, gate):
         amount, refused = money(usd), False
         if kind not in ('provider', 'modal'):
             raise ValueError('unsupported ledger kind')
         rid = uuid.uuid4().hex
-        with self.transaction() as db:
+        with contextlib.ExitStack() as admission_fence, self.transaction() as db:
             policy, stopped = self.lock(db, name)
             if lease:
                 self.fence(db, name, *lease)
@@ -326,6 +342,7 @@ class Store:
                 db.execute('UPDATE eval_control.days SET stopped=true WHERE campaign=%s AND day=%s AND kind=%s', (name, day, kind))
                 refused = True
             else:
+                admission_fence.enter_context(gate.commit())
                 values = (rid, name, day, kind, amount, amount, json.dumps(metadata or {}, allow_nan=False))
                 # Recheck the deadline at the write itself, after preceding SQL
                 # and network latency, just like the measurement lease fence.

@@ -19,6 +19,47 @@ import embeddings
 @unittest.skipUnless(importlib.util.find_spec('psycopg'), 'requires psycopg')
 class TLSConfiguration(unittest.TestCase):
     """Own PEM materialization at the real connection boundary, without SQL fakes."""
+    def test_connect_outage_retries_boundedly_but_refusal_and_transaction_errors_do_not_replay(self):
+        import psycopg
+        clock, waits = [0], []
+        def wait(seconds):
+            waits.append(seconds)
+            clock[0] += seconds
+        with mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+             mock.patch('time.sleep', side_effect=wait), \
+             mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='12', EVAL_CONTROL_CA_PEM=''):
+            store = control_store.Store('host=localhost')
+            with mock.patch('psycopg.connect', side_effect=[psycopg.OperationalError('DNS secret'),
+                    psycopg.OperationalError('TCP secret'), mock.MagicMock()]) as connect:
+                with store.transaction():
+                    pass
+                self.assertEqual(connect.call_count, 3)
+                self.assertEqual(waits, [1, 2])
+            waits.clear()
+            with mock.patch('psycopg.connect', side_effect=psycopg.OperationalError('TLS secret')) as connect:
+                with self.assertRaises(control_store.Unavailable) as error:
+                    with store.transaction():
+                        self.fail('unreachable store admitted work')
+                self.assertNotIn('secret', str(error.exception))
+                self.assertEqual(waits, [1, 2, 4, 5])
+                self.assertEqual(connect.call_count, 5)
+            for refused in (psycopg.errors.InvalidPassword('secret'),
+                            psycopg.OperationalError('password authentication failed for user secret')):
+                waits.clear()
+                with mock.patch('psycopg.connect', side_effect=refused) as connect:
+                    with self.assertRaises(control_store.Unavailable):
+                        with store.transaction():
+                            pass
+                    self.assertEqual(connect.call_count, 1)
+                    self.assertFalse(waits)
+            connection = mock.MagicMock()
+            connection.__exit__.side_effect = psycopg.OperationalError('connection lost during commit')
+            with mock.patch('psycopg.connect', return_value=connection) as connect:
+                with self.assertRaises(control_store.Unavailable):
+                    with store.transaction():
+                        pass
+                self.assertEqual(connect.call_count, 1, 'an uncertain transaction must never replay')
+
     def test_secret_ca_is_private_and_removed_after_success_or_connection_failure(self):
         import psycopg
         from psycopg.conninfo import conninfo_to_dict
@@ -40,7 +81,7 @@ class TLSConfiguration(unittest.TestCase):
                         if fails:
                             raise psycopg.OperationalError('secret ' + pem)
                         return mock.MagicMock()
-                    with mock.patch.dict(os.environ, EVAL_CONTROL_CA_PEM=pem), mock.patch('psycopg.connect', side_effect=connect):
+                    with mock.patch.dict(os.environ, EVAL_CONTROL_CA_PEM=pem, EVAL_NETWORK_OUTAGE_SECONDS='0'), mock.patch('psycopg.connect', side_effect=connect):
                         store = control_store.Store(dsn)
                         if fails:
                             with self.assertRaises(control_store.Unavailable) as error:
@@ -68,6 +109,45 @@ class TLSConfiguration(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN'), 'requires disposable PostgreSQL')
 class Control(unittest.TestCase):
+    def test_parallel_admission_rolls_back_when_transport_pauses_before_write(self):
+        import threading
+        import network_recovery
+        campaign = 'gate-' + uuid.uuid4().hex
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        store.campaign(campaign, {'provider_daily_usd': 10, 'modal_daily_usd': 10})
+        gate = network_recovery.admission(campaign)
+        paused, rolled_back = threading.Event(), threading.Event()
+        original_lock, original_wait = store.lock, gate.wait
+        def lock(db, name):
+            result = original_lock(db, name)
+            gate.pause()
+            paused.set()
+            return result
+        def wait():
+            if paused.is_set():
+                rolled_back.set()
+            return original_wait()
+        with mock.patch.object(store, 'lock', side_effect=lock), mock.patch.object(gate, 'wait', side_effect=wait):
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(store.reserve, campaign, 'provider', 1)
+                try:
+                    self.assertTrue(paused.wait(5), 'reservation did not reach SQL')
+                    self.assertTrue(rolled_back.wait(5), 'paused admission committed instead of rolling back')
+                    # Other campaign lookups must not evict this active gate.
+                    for index in range(129):
+                        network_recovery.admission('registry-' + campaign + str(index))
+                    with mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='0'):
+                        with self.assertRaises(network_recovery.Outage):
+                            control_store.Store(store.dsn).reserve(campaign, 'provider', 1)
+                    self.assertNotIn('provider', control_store.Store(store.dsn).summary(campaign))
+                finally:
+                    # Stop the lock hook before the retry, and release the waiter.
+                    store.lock = original_lock
+                    gate.finish(False)
+                rid = future.result(timeout=5)
+        self.assertTrue(rid)
+        self.assertEqual(store.summary(campaign)['provider']['charged_usd'], 1)
+
     def setUp(self):
         import psycopg
         self.dsn = os.environ['EVAL_CONTROL_TEST_DSN']
@@ -309,13 +389,13 @@ class Control(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=8) as pool:
             reads = [r for r in pool.map(read, range(16)) if r]
         self.assertEqual(sorted(reads), list(range(1, 11)))
-        with self.assertRaises(control_store.Unavailable):
+        with mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='0'), self.assertRaises(control_store.Unavailable):
             control_store.Store('postgresql://localhost:1/absent?connect_timeout=1').campaign('x', self.policy)
 
     def test_validation_error_survives_unavailable_claim_release(self):
         dsn = self.store.dsn
         try:
-            with self.assertLogs('control_store', level='WARNING') as messages:
+            with mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='0'), self.assertLogs('control_store', level='WARNING') as messages:
                 with self.assertRaisesRegex(ValueError, '^cache validation failed$'):
                     with self.store.claim_batch(self.name, ['release-outage'], ttl=86400) as claims:
                         self.store.dsn = 'postgresql://localhost:1/absent?connect_timeout=1'

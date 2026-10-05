@@ -111,6 +111,27 @@ Persistent contention defers supervisor/watchdog passes. Their `--once` mode ret
 Normal processes continue when contention clears. An unreachable database refuses
 further paid admission; there is no local budget fallback.
 
+Connection setup and Modal result retrieval retry from 1 to 10 seconds for
+`EVAL_NETWORK_OUTAGE_SECONDS` (default 600, range 0–3600; 0 disables retries).
+Set it in the supervisor/watchdog environment before the next campaign. Authentication
+and configuration refusals do not retry; transactions with uncertain commit outcomes
+are not replayed. While a Modal connection recovers, all local campaign reservations wait.
+Detached exploration apps survive lost operator heartbeats. Acknowledged calls reattach by their
+existing call ID, without another reservation or spawn. Lost app/spawn acknowledgements
+remain uncertain and require reconciliation rather than automatic relaunch.
+
+Full-engine confirmations use a separate disconnect watchdog and may terminate
+after its keepalive deadline; the detached-call recovery above covers exploration.
+
+The supervisor records that recovery window with its ownership. After the 120-second
+lease expires, the watchdog and a replacement supervisor wait that additional window.
+Only the same unreleased owner may renew during it; paid mutations require a current
+lease. Stop/release bypass the grace, and cleanup fences any late renewal before stopping
+apps. Past the retry window the process exits unsuccessfully, leaving running apps,
+leases and uncertain charges for the managed watchdog to reconcile after grace.
+Restart/resume still requires the frozen checkout. This behavior applies to the next
+campaign; do not restart an existing campaign on a different revision to adopt it.
+
 `status` returns aggregate trial reports, the Pareto trial numbers/objectives,
 confirmed plus uncertain ledger amounts, held-out reads left and `cleanup_pending`.
 No raw records, query IDs or latency sample IDs are exported. `agent_token_usage`
@@ -135,7 +156,7 @@ results are retained. `cleanup_pending: false` is the observable cleanup result.
 A cancellation/listing failure returns `cleanup_pending` and a nonzero exit code.
 Retry `stop` or let the managed watchdog retry. Do not report success while cleanup
 is pending. SIGTERM and Ctrl-C request terminal stop; a hard kill is reconciled by
-the independent watchdog after the supervisor lease expires. Never use a global
+the independent watchdog after the supervisor lease and recovery grace expire. Never use a global
 Modal stop: other campaigns may share the account.
 
 ## Next
