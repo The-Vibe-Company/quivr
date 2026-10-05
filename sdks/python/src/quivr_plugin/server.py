@@ -487,6 +487,18 @@ class Plugin:
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
             server_version = _server_version()
+            # Headers and small JSON bodies are written separately. Send
+            # each promptly instead of waiting for the client's delayed ACK.
+            disable_nagle_algorithm = True
+
+            def handle(self) -> None:
+                try:
+                    super().handle()
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    # The engine may give up at its invocation deadline. A
+                    # disconnected peer is not a plugin failure or traceback.
+                    self.close_connection = True
+                    log.debug("plugin caller disconnected")
 
             def _serve(self, method: str) -> None:
                 raw_length = self.headers.get("Content-Length") or "0"
