@@ -7,9 +7,9 @@ import {
   type Connector,
   type ConnectorKind,
 } from "../../lib/connectors";
-import { daily } from "../../lib/moments";
+import { daily, dayLabel } from "../../lib/moments";
 import { displayState } from "./HealthBadge";
-import { sourceProblem, sourceState } from "../../lib/format";
+import { plural, sourceProblem, sourceState } from "../../lib/format";
 import { sourceSummary } from "./summary";
 import { SourceLogo } from "../feed/SourceLogo";
 import { MoreMenu } from "../MoreMenu";
@@ -17,7 +17,7 @@ import { PencilIcon } from "../RailIcons";
 
 // Plain words for the failure codes of the rss kind (https://docs.quivr.thevibecompany.co/guides/rss);
 // other kinds fall back to their code.
-const FAILURES: Record<string, string> = {
+export const FAILURES: Record<string, string> = {
   not_found: "flux introuvable (404)",
   gone: "flux supprimé par le site (410)",
   unauthorized: "accès refusé par le site",
@@ -78,29 +78,51 @@ export interface SourceStats {
   times: string[];
 }
 
+/**
+ * Articles per day over the last week, or since the source was added: a
+ * resumed source is a new instance, so its first article may be older.
+ */
+export function weekRates(c: Connector, stats: SourceStats | undefined, now: number) {
+  const week = daily(stats?.times || [], now);
+  const lastWeek = week.reduce((n, d) => n + d.count, 0);
+  const start = Math.min(Date.parse(c.created_at), ...(stats?.times || []).map((t) => Date.parse(t)));
+  const days = Math.min(7, Math.max(1, Math.ceil((now - start) / 86400000)));
+  return { week, perDay: Math.round(lastWeek / days), most: Math.max(1, ...week.map((d) => d.count)) };
+}
+
+/** The articles received on each of the last seven days, today last. */
+export function WeekSpark({
+  week,
+  most,
+  now,
+}: {
+  week: { day: string; count: number }[];
+  most: number;
+  now: number;
+}) {
+  return (
+    <div
+      className="sc-spark"
+      role="img"
+      tabIndex={0}
+      data-tips
+      aria-label={`Articles reçus sur 7 jours : ${week.map((d) => d.count).join(", ")}`}
+    >
+      {week.map((d, i) => (
+        <span
+          key={d.day}
+          data-now={i === week.length - 1 || undefined}
+          data-zero={!d.count || undefined}
+          data-tip={`${dayLabel(d.day, now)} · ${plural(d.count, "article")}`}
+          style={d.count ? { height: `${Math.max(8, (d.count / most) * 100)}%` } : undefined}
+        />
+      ))}
+    </div>
+  );
+}
+
 /** The name a source shows: the one given to it, else its namespace. */
 export const nameOf = (c: Connector) => c.display_name || c.source_namespace;
-
-const host = (value: string) => {
-  try {
-    return new URL(value).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-};
-
-/**
- * "lemonde.fr" for a feed, with its path when another source comes from the
- * same site; else what configures the source.
- */
-function where(c: Connector, kind: ConnectorKind | undefined, shared: boolean) {
-  const value = sourceSummary(c, kind);
-  const site = c.kind === "rss" ? host(value) : "";
-  if (!site) return value || kind?.title || c.kind;
-  if (!shared) return site;
-  const { pathname, search } = new URL(value);
-  return site + pathname + search;
-}
 
 /**
  * The sources as cards, one per Source Namespace, then `extra` (the card
@@ -133,11 +155,6 @@ export function SourceList({
   onResume: (c: Connector) => Promise<void>;
   onRemove: (c: Connector) => Promise<void>;
 }) {
-  const sites = new Map<string, number>();
-  for (const c of sources) {
-    const site = c.kind === "rss" ? host(sourceSummary(c, kindOf(c.kind))) : "";
-    if (site) sites.set(site, (sites.get(site) || 0) + 1);
-  }
   return (
     <ul className="source-cards" aria-label="Sources">
       {sources.map((c) => (
@@ -145,7 +162,6 @@ export function SourceList({
           key={c.source_namespace}
           connector={c}
           kind={kindOf(c.kind)}
-          sharedSite={(sites.get(c.kind === "rss" ? host(sourceSummary(c, kindOf(c.kind))) : "") || 0) > 1}
           stats={stats.get(c.source_namespace)}
           highlight={highlight === c.connector_id}
           now={now}
@@ -248,7 +264,6 @@ function RenameField({
 function SourceCard({
   connector: c,
   kind,
-  sharedSite,
   stats,
   highlight,
   now,
@@ -261,8 +276,6 @@ function SourceCard({
 }: {
   connector: Connector;
   kind?: ConnectorKind;
-  /** Another source comes from the same site: its card shows the feed's path. */
-  sharedSite: boolean;
   stats?: SourceStats;
   highlight: boolean;
   now: number;
@@ -290,8 +303,12 @@ function SourceCard({
   const retryable = c.enabled && (state === "failing" || state === "access_error" || state === "silent");
   const troubled = c.enabled && (problem || h.last_error) && state !== "active";
 
+  // A new card is scrolled to and takes the focus: the dialog that added it
+  // gave the focus back to its opener first (its cleanup runs before this).
   useEffect(() => {
-    if (highlight) card.current?.scrollIntoView({ block: "nearest" });
+    if (!highlight) return;
+    card.current?.scrollIntoView({ block: "nearest" });
+    card.current?.querySelector<HTMLElement>(".connector-link")?.focus({ preventScroll: true });
   }, [highlight]);
   // Keyboard focus follows the controls it came from: into the removal
   // confirmation and back to the card's menu, and stays on the switch.
@@ -343,14 +360,13 @@ function SourceCard({
     }
   };
 
-  // Articles per day over the last week, or since the source was added: a
-  // resumed source is a new instance, so its first article may be older.
-  const week = daily(stats?.times || [], now);
-  const lastWeek = week.reduce((n, d) => n + d.count, 0);
-  const start = Math.min(Date.parse(c.created_at), ...(stats?.times || []).map((t) => Date.parse(t)));
-  const days = Math.min(7, Math.max(1, Math.ceil((now - start) / 86400000)));
-  const perDay = Math.round(lastWeek / days);
-  const most = Math.max(1, ...week.map((d) => d.count));
+  const { week, perDay, most } = weekRates(c, stats, now);
+  // How often it is read, or since when it is paused: the state's tooltip.
+  const schedule = c.enabled
+    ? `Vérifiée toutes les ${formatInterval(c.schedule.interval_seconds)}`
+    : c.disabled_at
+      ? `En pause depuis le ${formatAbsolute(c.disabled_at)}`
+      : undefined;
 
   return (
     <li
@@ -380,7 +396,12 @@ function SourceCard({
             />
           ) : (
             <h3 className="source-item-name">
-              <button type="button" className="connector-link" title={name} onClick={() => onOpen(c.connector_id)}>
+              <button
+                type="button"
+                className="connector-link"
+                title={[name, sourceSummary(c, kind)].filter(Boolean).join("\n")}
+                onClick={() => onOpen(c.connector_id)}
+              >
                 {name}
               </button>
               <button
@@ -393,11 +414,6 @@ function SourceCard({
                 <PencilIcon size={14} />
               </button>
             </h3>
-          )}
-          {!renaming && (
-            <p className="sc-where" title={sourceSummary(c, kind) || undefined}>
-              {where(c, kind, sharedSite)}
-            </p>
           )}
         </div>
         {(c.enabled || resumable(c, kind)) && (
@@ -470,20 +486,7 @@ function SourceCard({
           </div>
         </dl>
       )}
-      <div
-        className="sc-spark"
-        role="img"
-        aria-label={`Articles reçus sur 7 jours : ${week.map((d) => d.count).join(", ")}`}
-      >
-        {week.map((d, i) => (
-          <span
-            key={d.day}
-            data-now={i === week.length - 1 || undefined}
-            data-zero={!d.count || undefined}
-            style={d.count ? { height: `${Math.max(8, (d.count / most) * 100)}%` } : undefined}
-          />
-        ))}
-      </div>
+      <WeekSpark week={week} most={most} now={now} />
       {confirming ? (
         <div className="sc-foot row-actions" role="group" aria-label={`Retirer ${name}`}>
           <span className="row-confirm">Retirer cette source ? Les articles déjà reçus restent.</span>
@@ -502,30 +505,21 @@ function SourceCard({
         </div>
       ) : (
         <div className="sc-foot">
-          <span className="source-state" data-state={state} data-tone={status.tone}>
-            {status.label}
-          </span>
-          <span className="sc-meta">
-            {h.last_item_at ? (
-              <>
-                <span className="visually-hidden">Dernier article </span>
-                <Time value={h.last_item_at} />
-              </>
-            ) : state === "starting" ? (
-              "premier relevé en cours"
+          {/* In words: when the last article came, or what keeps them from coming. */}
+          <p className="source-state" data-state={state} data-tone={status.tone} title={schedule}>
+            {state === "active" || state === "silent" ? (
+              h.last_item_at ? (
+                <>
+                  Dernier article <Time value={h.last_item_at} />
+                </>
+              ) : (
+                "Aucun article pour l’instant"
+              )
             ) : (
-              "aucun article pour l’instant"
+              status.label
             )}
-          </span>
-          <span className="sc-meta">
-            {c.enabled ? (
-              `toutes les ${formatInterval(c.schedule.interval_seconds)}`
-            ) : c.disabled_at ? (
-              <>
-                depuis <Time value={c.disabled_at} />
-              </>
-            ) : null}
-          </span>
+          </p>
+          {schedule && <span className="visually-hidden">{schedule}</span>}
           <MoreMenu name={name} className="sc-more">
             {(close) => (
               <>
@@ -549,7 +543,7 @@ function SourceCard({
                     onOpen(c.connector_id);
                   }}
                 >
-                  Réglages de la collecte
+                  Réglages
                 </button>
                 <button
                   type="button"

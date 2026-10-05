@@ -6,8 +6,11 @@ export function Dialog({
   children,
   wide = false,
   closeLabel,
+  label,
 }: {
   title: string;
+  /** The dialog's accessible name when the visible title is too short. */
+  label?: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
@@ -21,6 +24,8 @@ export function Dialog({
         : null;
     const dialog = ref.current!;
     dialog.showModal();
+    // A field marked `data-autofocus` takes the focus from the close button.
+    dialog.querySelector<HTMLElement>("[data-autofocus]")?.focus();
     const prior = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -33,7 +38,7 @@ export function Dialog({
     <dialog
       ref={ref}
       className={`modal ${wide ? "document-modal" : ""}`}
-      aria-label={title}
+      aria-label={label || title}
       onCancel={(event) => {
         event.preventDefault();
         onClose();

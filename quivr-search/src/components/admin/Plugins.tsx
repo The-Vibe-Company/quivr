@@ -296,7 +296,7 @@ function PluginLine({
           <span className="visually-hidden">, erreurs : </span>
           {row.count ? percent(row.error_rate) : "—"}
         </span>
-        <Spark values={row.spark} window={window} />
+        <Spark values={row.spark} tips={row.sparkTips} window={window} />
         <span className="plug-last">
           <span className="visually-hidden">, dernière erreur : </span>
           {row.last_error_code ? (
@@ -427,9 +427,11 @@ function PluginLine({
  */
 function Spark({
   values,
+  tips,
   window,
 }: {
   values: (number | null)[];
+  tips: string[];
   window: StatsWindow;
 }) {
   const width = 96;
@@ -444,7 +446,7 @@ function Spark({
       ? `Aucune erreur ${WINDOW_WORDS[window]}`
       : `Taux d’erreur ${WINDOW_WORDS[window]} : jusqu’à ${percent(worst)}${values.at(-1) ? `, ${percent(values.at(-1)!)} à l’instant` : ""}`;
   return (
-    <span className="plug-spark">
+    <span className="plug-spark" data-tips>
       <svg
         width={width}
         height={height}
@@ -460,8 +462,11 @@ function Spark({
           className="spark-base"
         />
         {values.map((v, i) =>
-          v === null ? null : (
+          v === null ? (
+            <rect key={i} x={i * step} width={step} y="0" height={height} className="spark-idle" data-tip={tips[i]} />
+          ) : (
             <rect
+              data-tip={tips[i]}
               key={i}
               x={i * step + step * 0.15}
               width={Math.max(step * 0.7, 1)}
