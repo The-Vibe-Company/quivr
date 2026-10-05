@@ -201,8 +201,8 @@ def refused(stack, name, plugin, code):
     path.chmod(0o600)
     for command in ['api', 'worker']:
         result = subprocess.run([str(stack.directory / 'quivr'), command], cwd=ROOT, env={**os.environ, 'QUIVR_CONFIG': str(path)}, capture_output=True, text=True, timeout=30)
-        (stack.directory / f'bad-pin-{name}-{command}.log').write_text(result.stderr)
-        assert result.returncode != 0 and code in result.stderr, (name, command, result.returncode, result.stderr)
+        (stack.directory / f'bad-pin-{name}-{command}.log').write_text(result.stdout + result.stderr)
+        assert result.returncode != 0 and code in result.stdout, (name, command, result.returncode, result.stdout + result.stderr)
 
 
 def switch(stack, name):

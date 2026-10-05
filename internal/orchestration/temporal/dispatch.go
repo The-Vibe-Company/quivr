@@ -3,6 +3,7 @@ package temporal
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"log/slog"
 	"sync"
 	"time"
@@ -77,7 +78,7 @@ func (r *Runtime) pollIntents(ctx context.Context, period time.Duration, source 
 		if ctx.Err() != nil {
 			return
 		}
-		attempt, cancel := context.WithTimeout(ctx, dispatchAttempt)
+		attempt, cancel := context.WithTimeout(lifecycle.WorkContext(ctx), dispatchAttempt)
 		r.dispatchBatch(attempt, source)
 		cancel()
 		select {
@@ -174,7 +175,7 @@ func (r *Runtime) connectorIntents() IntentSource {
 				name:    acquireWorkflow, input: AcquireInput{Organization: run.Organization, ConnectorID: run.ConnectorID, Run: run.Run},
 				complete: func(context.Context) error { return nil }, // Run completion advances its schedule.
 				retry: func(ctx context.Context) error {
-					release, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+					release, cancel := lifecycle.CleanupContext(ctx, time.Second)
 					defer cancel()
 					return r.Connectors.Scheduler.ReleaseConnectorRun(release, run)
 				},

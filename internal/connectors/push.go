@@ -252,7 +252,7 @@ func (r Relay) Deliver(ctx context.Context, id string, req Relayed) (RelayAnswer
 		return RelayAnswer{}, ErrNoWebhook
 	}
 	if err != nil {
-		slog.Warn("connector delivery failed", "connector_id", id, "code", "storage_unavailable")
+		slog.WarnContext(ctx, "connector delivery failed", "connector_id", id, "code", "storage_unavailable")
 		return unavailable("storage_unavailable"), nil
 	}
 	entry, ok := r.Registry.current()[target.Kind]
@@ -282,9 +282,9 @@ func (r Relay) deliver(ctx context.Context, target Target, connector Connector, 
 	id := target.ID
 	org := target.Organization
 	fail := func(class ErrorClass, code string) (RelayAnswer, error) {
-		slog.Warn("connector delivery failed", "connector_id", id, "class", string(class), "code", code)
+		slog.WarnContext(ctx, "connector delivery failed", "connector_id", id, "class", string(class), "code", code)
 		if err := r.Store.RecordDelivery(ctx, org, id, DeliveryOutcome{Failure: &RunError{Class: class, Code: code, At: time.Now()}}); err != nil {
-			slog.Warn("connector delivery outcome not recorded", "connector_id", id)
+			slog.WarnContext(ctx, "connector delivery outcome not recorded", "connector_id", id)
 		}
 		if class == ClassTransient {
 			return unavailable(code), nil

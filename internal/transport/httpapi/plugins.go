@@ -133,7 +133,7 @@ func (a *API) rollbackPlan(w http.ResponseWriter, r *http.Request, scope corpus.
 		return
 	}
 	if err == nil {
-		slog.Info("pipeline plan rolled back", "plan", plan.ID, "previous", plan.PreviousPlanID, "pinned_work", in.PinnedWork)
+		slog.InfoContext(r.Context(), "pipeline plan rolled back", "plan", plan.ID, "previous", plan.PreviousPlanID, "pinned_work", in.PinnedWork)
 	}
 	sendPlan(w, plan, err)
 }

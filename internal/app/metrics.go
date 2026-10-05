@@ -9,6 +9,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/observability"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
@@ -78,7 +79,7 @@ func (o processingObserver) Enriched(ctx context.Context, org, receiptID string,
 }
 
 func (o processingObserver) read(ctx context.Context, org, receiptID string) (content.Steps, time.Duration, bool) {
-	read, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	read, cancel := lifecycle.CleanupContext(ctx, 2*time.Second)
 	defer cancel()
 	steps, age, err := o.store.ReceiptSteps(read, org, receiptID)
 	return steps, age, err == nil

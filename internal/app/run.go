@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -25,11 +24,11 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
-	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/changes"
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr/internal/normalization"
 	"github.com/The-Vibe-Company/quivr/internal/observability"
@@ -42,7 +41,6 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
-	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,6 +54,10 @@ type Config struct {
 	WeaviateURL     string                  `json:"weaviate_url"`
 	TemporalAddress string                  `json:"temporal_address"`
 	S3              s3store.Config          `json:"s3"`
+	LogLevel        string                  `json:"log_level"`
+	Instance        string                  `json:"instance"`
+	Environment     string                  `json:"environment"`
+	ShutdownGrace   string                  `json:"shutdown_grace"`
 	LogDirectory    string                  `json:"log_directory"`
 	DatabaseURL     string                  `json:"database_url"`
 	Listen          string                  `json:"listen"`
@@ -205,11 +207,23 @@ func Run(command string) error {
 	if len(cfg.M365) > 0 && string(cfg.M365) != "null" {
 		return errors.New("m365 moved to the connector.m365_mail plugin's configuration; pin plugins/m365-mail with login_endpoint and graph_endpoint (https://docs.quivr.thevibecompany.co/guides/microsoft-365)")
 	}
+	grace, err := cfg.configureProcess(command)
+	if err != nil {
+		return err
+	}
+	events := newProcessEvents(slog.Default(), cfg.processSummary(grace))
+	graceExpired := false
+	defer func() {
+		deadline, cancel := shutdownDeadline(events.shutdownStart(), grace)
+		defer cancel()
+		events.stop(deadline, graceExpired)
+	}()
+	slog.Debug("debug logging enabled", "event", "quivr.debug")
 	tlsSettings, err := cfg.validateTLS()
 	if err != nil {
 		return err
 	}
-	// Validate the pins before logs move to files, so a refusal is reported on stderr.
+	// Refusals use the configured stdout logger.
 	pins, err := cfg.loadPins(command)
 	if err != nil {
 		return err
@@ -222,13 +236,9 @@ func Run(command string) error {
 	if err != nil {
 		return err
 	}
-	if cfg.LogDirectory != "" {
-		slog.SetDefault(slog.New(slog.NewJSONHandler(&rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")}, nil)))
-	}
 	if cfg.DatabaseURL == "" || len(cfg.CursorKey) < 32 || len(cfg.Keys) == 0 {
 		return errors.New("database_url, cursor_key (32+ bytes) and keys required")
 	}
-	slog.Info("process starting", "component", command, "version", buildinfo.Version, "revision", buildinfo.Revision, "api_version", transport.V0, "plugin_engine_version", plugins.EngineVersion)
 	logger := slog.Default()
 	if command == "migrate" {
 		// Only api and worker handle credentials; migrate stays silent about them.
@@ -345,8 +355,30 @@ func Run(command string) error {
 	if command == "api" && len(pins.Retrievals()) == 0 {
 		return errors.New("no retrieval plugin pinned: pin plugins/core-retrieve (core.retrieve) or another retrieval plugin in `plugins` (plugins/core-retrieve/README.md)")
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	signals, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	loops := lifecycle.New()
+	ctx := loops.Context()
+	beginDrain := func() { events.drain(loops) }
+
+	go func() {
+		select {
+		case <-signals.Done():
+			beginDrain()
+		case <-ctx.Done():
+		}
+	}()
+	var servers []*http.Server
+	var flush = func(context.Context) {}
+	var closeResources = func(context.Context) {}
+	defer func() {
+		beginDrain()
+		deadline, cancel := shutdownDeadline(events.shutdownStart(), grace)
+		defer cancel()
+		drainProcess(deadline, loops, servers, flush)
+		closeResources(deadline)
+		graceExpired = deadline.Err() != nil
+	}()
 	poolConfig, err := postgres.PoolConfig(cfg.DatabaseURL, cfg.TLS.Postgres)
 	if err != nil {
 		return err
@@ -355,7 +387,15 @@ func Run(command string) error {
 	if err != nil {
 		return errors.New("invalid database configuration")
 	}
-	defer pool.Close()
+	closeResources = func(deadline context.Context) {
+		done := make(chan struct{})
+		go func() { pool.Close(); close(done) }()
+		select {
+		case <-done:
+		case <-deadline.Done():
+		}
+	}
+
 	if cfg.WeaviateURL == "" || cfg.TemporalAddress == "" || cfg.S3.Endpoint == "" || cfg.S3.Bucket == "" || cfg.S3.AccessKey == "" || cfg.S3.SecretKey == "" {
 		return errors.New("Temporal and S3 configuration required")
 	}
@@ -430,7 +470,7 @@ func Run(command string) error {
 			case <-time.After(200 * time.Millisecond):
 			}
 		}
-		slog.Info("migrations complete")
+		events.ready(ctx, "migrations complete")
 		return nil
 	}
 	connectorStore := postgres.ConnectorStore{Pool: pool}
@@ -442,6 +482,9 @@ func Run(command string) error {
 	close(settled)
 	var warming <-chan struct{} = settled
 	ready := func(ctx context.Context) error {
+		if loops.Draining() {
+			return errors.New("process draining")
+		}
 		if !warmed(warming) {
 			return errWarming
 		}
@@ -533,7 +576,7 @@ func Run(command string) error {
 		followed: func(ctx context.Context, set *plugins.PinSet) {
 			installed, err := cfg.planEvaluators(ctx, pluginRegistry.Store, set, evaluators.Load())
 			if err != nil {
-				slog.Error("alert-rule versions of earlier plans stay as this process last read them", "error", err)
+				slog.ErrorContext(ctx, "alert-rule versions of earlier plans stay as this process last read them", "error", err)
 			}
 			evaluators.Store(installed)
 		}}
@@ -559,7 +602,7 @@ func Run(command string) error {
 	pluginhttp.Observe(func(c pluginhttp.Call) {
 		recorder.PluginCall(observability.PluginCall{Organization: c.Organization, Plugin: c.PluginID, Version: c.Version, Operation: c.Operation, Duration: c.Duration, ErrorCode: c.ErrorCode})
 	})
-	go func() {
+	loops.Go(func(ctx context.Context) {
 		tick := time.NewTicker(time.Minute)
 		defer tick.Stop()
 		for {
@@ -567,28 +610,24 @@ func Run(command string) error {
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				pruneCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				pruneCtx, cancel := context.WithTimeout(lifecycle.WorkContext(ctx), 5*time.Second)
 				if err := connectorStore.PrunePushAnswers(pruneCtx); err != nil && ctx.Err() == nil {
 					logger.Warn("connector push replay cleanup failed")
 				}
 				cancel()
 			}
 		}
-	}()
+	})
+	recorderCtx, stopRecorder := context.WithCancel(lifecycle.WorkContext(ctx))
 	recorderDone := make(chan struct{})
-	go func() {
-		defer close(recorderDone)
-		recorder.Run(ctx)
-	}()
-	// Registered before the loops below, so it runs after their shutdown and
-	// flushes the counts they recorded last.
-	defer func() {
-		stop()
+	go func() { defer close(recorderDone); recorder.Run(recorderCtx) }()
+	flush = func(deadline context.Context) {
+		stopRecorder()
 		select {
 		case <-recorderDone:
-		case <-time.After(5 * time.Second):
+		case <-deadline.Done():
 		}
-	}()
+	}
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
 	// Coverage counts read every current segment of a Corpus; a search sees
 	// them at most 10 s old.
@@ -629,24 +668,14 @@ func Run(command string) error {
 	pluginRegistry.Activated = func(ctx context.Context) {
 		follower.Refresh(ctx)
 		if err := alignDefaultGeneration(ctx, baseline); err != nil {
-			slog.Error("new Corpora stay on the previous vector spaces until the next start", "error", err)
+			slog.ErrorContext(ctx, "new Corpora stay on the previous vector spaces until the next start", "error", err)
 		}
 	}
-	go follower.Run(ctx, planPoll)
+	loops.Go(func(ctx context.Context) { follower.Run(ctx, planPoll) })
 	probes := http.NewServeMux()
 	probes.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
-	probes.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-		if err := ready(ctx); errors.Is(err, errWarming) {
-			http.Error(w, err.Error(), 503)
-			return
-		} else if err != nil {
-			http.Error(w, "database/schema unavailable", 503)
-			return
-		}
-		w.WriteHeader(204)
-	})
+	probes.Handle("GET /readyz", readinessProbe(loops, ready))
+
 	deliveryStore := postgres.DeliveryStore{Pool: pool}
 	deliveryMetrics := &monitoring.DeliveryMetrics{}
 	commands := telemetry.NewCommands()
@@ -672,14 +701,14 @@ func Run(command string) error {
 		// and how much of it still waits for the worker.
 		probes.Handle("GET /metrics", buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)))
 	}
-	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
+	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes), ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
 		// The api checks registered plugins with the Contract Runner in
 		// process; a check a restart interrupted runs again after its lease.
-		go pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute)
+		loops.Go(func(ctx context.Context) { pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute) })
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}),
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithLifecycle(loops),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(spaces),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
@@ -699,82 +728,37 @@ func Run(command string) error {
 		}
 		servers = append(servers, &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384})
 	} else {
-		workerDone := make(chan struct{})
-		defer func() {
-			stop()
-			select {
-			case <-workerDone:
-			case <-time.After(5 * time.Second):
-			}
-		}()
-		evaluationDone := make(chan struct{})
-		defer func() {
-			stop()
-			select {
-			case <-evaluationDone:
-			case <-time.After(5 * time.Second):
-			}
-		}()
 		// Monitoring evaluation keeps its durable state in PostgreSQL and runs
 		// independently of Temporal availability.
-		go func() {
-			defer close(evaluationDone)
+		loops.Go(func(ctx context.Context) {
 			evaluation := postgres.EvaluationStore{Pool: pool}
 			monitoring.Engine{Store: evaluation, Versions: versionParts{content: contents, metadata: evaluation, vectors: baseline}, Evaluators: evaluators, Workers: 4, Lease: time.Minute, Metrics: evaluationMetrics, Matched: recorder.Matched}.Run(ctx)
-		}()
-		deliveryDone := make(chan struct{})
-		defer func() {
-			stop()
-			select {
-			case <-deliveryDone:
-			case <-time.After(15 * time.Second):
-			}
-		}()
+		})
 		// Webhook delivery is a separate PostgreSQL-leased loop: admission and
 		// outcome facts commit around, never inside, the network attempt.
-		go func() {
-			defer close(deliveryDone)
+		loops.Go(func(ctx context.Context) {
 			monitoring.Deliverer{Store: deliveryStore, Destinations: cfg.Destinations, Workers: 2, Lease: time.Minute, Timeout: deliveryTimeout, Retry: retryPolicy, Metrics: deliveryMetrics, AllowPrivateAddresses: cfg.Delivery.AllowPrivateDestinations}.Run(ctx)
-		}()
-		pruneDone := make(chan struct{})
-		defer func() {
-			stop()
-			select {
-			case <-pruneDone:
-			case <-time.After(5 * time.Second):
-			}
-		}()
+		})
 		// The change-journal prune is a bounded PostgreSQL loop beside
 		// evaluation and delivery; its watermark keeps cursor expiry exact.
-		go func() {
-			defer close(pruneDone)
+		loops.Go(func(ctx context.Context) {
 			changes.Pruner{Store: journal, Retention: prune.Retention, Interval: prune.Interval, Organizations: prune.Organizations, Metrics: pruneMetrics}.Run(ctx)
-		}()
+		})
 		// Projection purge (THE-698): a bounded PostgreSQL-leased sweep that
 		// deletes objects no route or current Version can serve again.
-		purgeDone := make(chan struct{})
-		defer func() {
-			stop()
-			select {
-			case <-purgeDone:
-			case <-time.After(5 * time.Second):
-			}
-		}()
-		go func() {
-			defer close(purgeDone)
+		loops.Go(func(ctx context.Context) {
 			retrieval.Purger{Store: purges, Projection: projection, Grace: purgeGrace, Interval: time.Minute, Batch: 100, Metrics: purgeMetrics}.Run(ctx)
-		}()
-		go func() {
-			defer close(workerDone)
+		})
+		loops.Go(func(ctx context.Context) {
 			for ctx.Err() == nil {
 				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, struct {
 					orchestration.ReceiptDispatchStore
 					orchestration.OperationDispatchStore
-				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner, cfg.IngestionEvaluationConcurrency, tlsSettings.temporal)
+				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner, cfg.IngestionEvaluationConcurrency, tlsSettings.temporal, orchestration.RuntimeOptions{ShutdownGrace: grace})
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()
-					rt.Close()
+					rt.Close(lifecycle.WorkContext(ctx))
 					return
 				}
 				slog.Warn("worker dependencies unavailable; retrying")
@@ -784,7 +768,7 @@ func Run(command string) error {
 				case <-time.After(time.Second):
 				}
 			}
-		}()
+		})
 	}
 	failures := make(chan error, len(servers))
 	for _, server := range servers {
@@ -794,18 +778,30 @@ func Run(command string) error {
 		}
 		go func(s *http.Server, l net.Listener) { failures <- s.Serve(l) }(server, listener)
 	}
-	slog.Info("process ready", "component", command)
+	loops.Go(func(ctx context.Context) {
+		tick := time.NewTicker(250 * time.Millisecond)
+		defer tick.Stop()
+		for ctx.Err() == nil {
+			check, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err := ready(check)
+			cancel()
+			if err == nil {
+				events.ready(ctx, "process ready")
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+		}
+	})
 	select {
 	case <-ctx.Done():
 	case err = <-failures:
 		if !errors.Is(err, http.ErrServerClosed) {
 			return errors.New("HTTP server stopped")
 		}
-	}
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for _, s := range servers {
-		_ = s.Shutdown(shutdown)
 	}
 	return nil
 }

@@ -135,8 +135,8 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 	} else if !write(": resumed\n\n") {
 		return
 	}
-	slog.Info("change stream opened", "organization", scope.Organization, "corpus_id", corpusID)
-	defer slog.Info("change stream closed", "organization", scope.Organization, "corpus_id", corpusID)
+	slog.InfoContext(r.Context(), "change stream opened", "organization", scope.Organization, "corpus_id", corpusID)
+	defer slog.InfoContext(r.Context(), "change stream closed", "organization", scope.Organization, "corpus_id", corpusID)
 	poll := a.changePoll
 	if poll <= 0 {
 		poll = DefaultStreamPoll

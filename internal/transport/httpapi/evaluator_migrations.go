@@ -37,7 +37,7 @@ func (a *API) migrateEvaluators(w http.ResponseWriter, r *http.Request, scope co
 		return
 	}
 	if !m.DryRun {
-		slog.Info("subscriptions moved to another alert-rule version", "organization", scope.Organization, "plugin", m.PluginID, "from", m.FromVersion, "to", m.ToVersion, "moved", len(m.Moved), "refused", len(m.Refused))
+		slog.InfoContext(r.Context(), "subscriptions moved to another alert-rule version", "organization", scope.Organization, "plugin", m.PluginID, "from", m.FromVersion, "to", m.ToVersion, "moved", len(m.Moved), "refused", len(m.Refused))
 	}
 	out := transport.SubscriptionEvaluatorMigration{PluginId: m.PluginID, FromVersion: m.FromVersion, ToVersion: m.ToVersion, DryRun: m.DryRun, NextAfter: optionalString(m.Next),
 		Moved: make([]transport.SubscriptionEvaluatorMove, 0, len(m.Moved)), Refused: make([]transport.SubscriptionEvaluatorRefusal, 0, len(m.Refused))}
