@@ -57,6 +57,182 @@
 .query-preview[data-state="invalid"] > svg {
   margin-top: 3px;
 }
+/* THE-1040: the guided form of a keyword alert, like a search engine's
+   advanced search, and help for writing the query by hand. */
+.query-builder {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.query-builder legend {
+  margin: 4px 0 6px;
+  padding: 0;
+  color: var(--ink-2);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+}
+.qb-row {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 3px 16px;
+  align-items: center;
+}
+.qb-row > label,
+.qb-label {
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+.qb-hint {
+  grid-column: 2;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.qb-sources .menu-button {
+  justify-self: start;
+  height: 36px;
+  font-size: 14px;
+}
+.qb-sources .menu-panel {
+  min-width: 260px;
+}
+.query-built {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.query-built-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.query-built-label {
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.query-built-code,
+.query-error-where code,
+.query-hint code,
+.query-example code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.query-built-code {
+  color: var(--ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.query-built .query-preview {
+  margin: 0;
+}
+.query-error {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.query-error-where {
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--error) 5%, var(--panel));
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.query-error-where code {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.query-error-where mark {
+  border-bottom: 2px solid var(--error);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+  color: var(--error);
+}
+.query-hints,
+.query-examples ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.query-hints {
+  margin-top: 12px;
+}
+.query-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+.query-hint code {
+  color: var(--accent);
+  font-weight: 650;
+}
+.query-hint:hover,
+.query-example:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.query-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin-top: 10px;
+  color: var(--ink-faint);
+  font-size: 12.5px;
+}
+.query-examples ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.query-example {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--chip-bg);
+  color: var(--ink);
+  font-size: 12.5px;
+  text-align: left;
+}
+.query-editor > .link-button,
+.query-unfit {
+  display: block;
+  margin-top: 12px;
+}
+@media (max-width: 760px) {
+  .qb-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .qb-hint {
+    grid-column: 1;
+  }
+  .query-example {
+    min-height: 32px;
+  }
+}
 .keyword {
   display: inline-block;
   padding: 0 8px;
@@ -71,22 +247,6 @@
   background: var(--subtle);
   border: 1px solid var(--border);
   font-weight: 550;
-}
-.interpretation-op {
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-.interpretation-group {
-  color: var(--muted);
-}
-.interpretation-group > .keyword:first-child {
-  margin-left: 2px;
-}
-.interpretation-group > .keyword:last-child {
-  margin-right: 2px;
-}
-.interpretation-group .keyword {
-  color: var(--text);
 }
 .alert-name {
   display: grid;

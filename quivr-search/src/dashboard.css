@@ -1998,79 +1998,11 @@ button.moment-pill:hover {
 .segmented button:disabled {
   opacity: 0.45;
 }
-.word-box {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  min-height: 46px;
-  padding: 7px 9px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
-  cursor: text;
-}
-.word-box:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.word-box input {
-  flex: 1;
-  min-width: 140px;
-  height: 28px;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--ink);
-  font-size: 14px;
-}
-.word-chips {
-  display: contents;
-  list-style: none;
-}
-.word-chips li {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-  padding: 0 3px 0 10px;
-  border-radius: 8px;
-  background: var(--chip-bg);
-  color: var(--ink);
-  font-size: 13.5px;
-  font-weight: 600;
-}
-.word-box[data-tone="not"] .word-chips li {
-  background: color-mix(in srgb, var(--error) 10%, var(--panel));
-  color: var(--error);
-}
-.word-box[data-tone="not"] .word-chips li > span {
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-}
-.word-chips button {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--ink-faint);
-  font-size: 15px;
-  line-height: 1;
-}
-.word-chips button:hover {
-  background: color-mix(in srgb, var(--ink) 8%, transparent);
-  color: var(--ink);
-}
 .form-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-}
-.form-actions .form-advanced {
-  margin-left: auto;
 }
 .alert-form .button.primary,
 .source-form .button.primary {
@@ -2500,9 +2432,6 @@ button.moment-pill:hover {
   .panel-head {
     padding: 14px 16px;
   }
-  .form-actions .form-advanced {
-    margin-left: 0;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .bar-live[data-state="live"] .bar-live-dot::after {
@@ -2615,26 +2544,6 @@ button.moment-pill:hover {
   font-size: 18px;
   font-weight: 500;
   letter-spacing: -0.3px;
-}
-.af-mode {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: 9px;
-  background: var(--chip-bg);
-}
-.af-mode button {
-  height: 28px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--ink-soft);
-  font-size: 14px;
-  font-weight: 600;
-}
-.af-mode button[aria-pressed="true"] {
-  background: var(--tint);
-  color: var(--accent);
 }
 .alert-form .af-describe {
   min-height: 64px;
