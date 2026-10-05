@@ -6,6 +6,8 @@ input-token/USD budget; credentials are read only from the environment.
 """
 import argparse
 import datetime
+import email.utils
+import http.client
 import json
 import hashlib
 import socket
@@ -14,6 +16,7 @@ import os
 import pathlib
 import math
 import re
+import random
 import time
 import urllib.error
 import urllib.parse
@@ -142,10 +145,12 @@ class Hosted:
                     raise RuntimeError('provider response exceeds size limit')
                 try:
                     result = json.loads(raw)
-                    used = (result['meta']['billed_units'].get('input_tokens') if model.startswith('Cohere')
-                            else result['usage'].get('prompt_tokens'))
+                    used = (result.get('meta', {}).get('billed_units', {}).get('input_tokens') if model.startswith('Cohere')
+                            else result.get('usage', {}).get('prompt_tokens'))
                 except (ValueError, KeyError, TypeError, AttributeError):
                     raise RuntimeError('invalid provider response') from None
+                if type(used) is not int or used < 0:
+                    raise RuntimeError('provider omitted confirmed usage; measurement rejected')
                 self.budget.settle(call, used)
                 return result
             except urllib.error.HTTPError as error:
@@ -154,13 +159,17 @@ class Hosted:
                 error.close()
                 if code not in (429, 500, 502, 503, 504) or attempt == 7:
                     raise RuntimeError(f'provider HTTP {code}') from None
-                delay = float(retry_after) if retry_after.isdigit() else 0
-            except (urllib.error.URLError, TimeoutError):
+                try:
+                    delay = (float(retry_after) if retry_after.isdigit() else
+                             email.utils.parsedate_to_datetime(retry_after).timestamp() - time.time())
+                except (ValueError, TypeError, OverflowError):
+                    delay = 0
+            except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead):
                 if attempt == 7:
                     raise RuntimeError('provider transport failed after 8 attempts') from None
                 delay = 0
             # Failed and unknown attempts stay reserved; retries must reserve again.
-            time.sleep(min(60, 2 ** attempt + delay))
+            time.sleep(min(60, max(2 ** attempt, delay) + random.uniform(0, 1)))
         raise RuntimeError('provider attempts exhausted')
 
     def embed(self, model, texts, mode, batch=None, dimensions=None, label=None):

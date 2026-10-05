@@ -15,6 +15,7 @@ from unittest import mock
 
 import control_store
 import modal_search
+import protected_inputs
 import search_trial
 
 
@@ -46,6 +47,49 @@ class Refusal(unittest.TestCase):
 
 
 class FailureLogging(unittest.TestCase):
+    def test_private_failure_verdict_and_log_only_use_fixed_diagnostics(self):
+        # Own the protected remote catch boundary, including the verdict.
+        # Provider text and dynamic exception names cannot cross it.
+        sensitive = 'private passage /private/input document-id-42 https://provider/path'
+        class ChangingMessage:
+            calls = 0
+            def __str__(self):
+                self.calls += 1
+                return 'provider HTTP 429' if self.calls == 1 else sensitive
+        cases = (
+            (RuntimeError('provider HTTP 429'), 'RuntimeError', 'provider HTTP 429'),
+            (RuntimeError('provider HTTP 503'), 'RuntimeError', 'provider HTTP 503'),
+            (RuntimeError('provider transport failed after 8 attempts'), 'RuntimeError', 'provider transport failed after 8 attempts'),
+            (RuntimeError('provider omitted confirmed usage; measurement rejected'),
+             'RuntimeError', 'provider omitted confirmed usage; measurement rejected'),
+            (protected_inputs.DecryptionError('protected input identity or ciphertext rejected'),
+             'DecryptionError', 'protected input identity or ciphertext rejected'),
+            (RuntimeError('provider HTTP 429 ' + sensitive), 'RuntimeError', 'protected measurement failed'),
+            (RuntimeError(sensitive), 'RuntimeError', 'protected measurement failed'),
+            (RuntimeError(ChangingMessage()), 'RuntimeError', 'provider HTTP 429'),
+            (type('PrivateDocumentId42', (RuntimeError,), {})('provider HTTP 429'), 'RuntimeError', 'protected measurement failed'),
+        )
+        for case, (error, kind, expected) in enumerate(cases):
+            with self.subTest(case=case, kind=kind):
+                request = {'config': search_trial.configuration({}),
+                           'policy': {'sets': {'private-example': {'split': 'dev', 'input': {}}}, 'max_seconds': 30},
+                           'dataset': 'private-example', 'campaign': 'fixture', 'lease_key': 'trial', 'owner': 'owner'}
+                with mock.patch.dict('sys.modules', {'modal': types.SimpleNamespace(Volume=mock.Mock())}), \
+                        mock.patch.dict(os.environ, {'EVAL_CONTROL_DATABASE_URL': 'postgres://fixture'}), \
+                        mock.patch.object(control_store, 'Store') as store, \
+                        mock.patch.object(modal_search.results.Results, 'sync'), \
+                        mock.patch.object(modal_search.private_working, 'trial', side_effect=error), \
+                        self.assertLogs('modal_search', level='INFO') as logs:
+                    row = modal_search.remote_trial(request)
+                self.assertEqual(row, {'status': 'failed',
+                    'reason': 'direct measurement failed; uncertain charges retained',
+                    'error': {'kind': kind, 'message': expected}})
+                failure = next(line for line in logs.output if 'trial failed' in line)
+                self.assertIn('error=' + kind + ' message=' + expected, failure)
+                for forbidden in ('private passage', '/private/input', 'document-id-42', 'https://provider', 'PrivateDocumentId42'):
+                    self.assertNotIn(forbidden, failure + json.dumps(row))
+                store.return_value.abandon.assert_called_once_with('fixture', 'trial', 'owner', 'failed')
+
     def test_remote_failure_logs_bounded_diagnostics_without_credentials(self):
         # Own diagnostics at the remote catch boundary. Only external setup
         # and dataset I/O are fake; exception formatting and logging are real.

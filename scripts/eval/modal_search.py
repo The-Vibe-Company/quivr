@@ -14,6 +14,7 @@ import direct_bakeoff
 import embeddings
 import gates
 import public_sets
+import protected_inputs
 import results
 import search_trial
 import private_working
@@ -24,10 +25,29 @@ COMPUTE_NOTICE = ('The compute cap covers compute reserved by this runner, not t
 DIAGNOSTIC = {'mldr-fr': 'joint baseline saturation above 80%',
               'webfaq-fr': 'joint baseline saturation above 80%',
               'trec-covid': 'small query sample', 'mkqa-fr': 'short-answer proxy'}
+PRIVATE_FAILURE_MESSAGES = frozenset({
+    'provider omitted confirmed usage; measurement rejected',
+    'provider transport failed after 8 attempts',
+    'provider response exceeds size limit', 'invalid provider response',
+    'invalid provider embeddings',
+} | {f'provider HTTP {code}' for code in (400, 401, 403, 404, 408, 413, 422, 429, 500, 502, 503, 504)})
+PRIVATE_FAILURES = {
+    RuntimeError: ('RuntimeError', PRIVATE_FAILURE_MESSAGES),
+    protected_inputs.DecryptionError: ('DecryptionError', frozenset({'protected input identity or ciphertext rejected'})),
+    protected_inputs.DecryptionTimeout: ('DecryptionTimeout', frozenset({'protected input decryption timed out'})),
+}
 
 
-def failure_summary(error):
+def failure_summary(error, *, private=False):
     """Short diagnostics without reflected credentials or endpoint URLs."""
+    if private:
+        # Only our exact fixed diagnostics and a fixed exception type escape.
+        # Neither provider suffixes nor arbitrary exception class names are safe.
+        kind, messages = PRIVATE_FAILURES.get(type(error), ('RuntimeError', frozenset()))
+        message = str(error) if messages else ''
+        if message in messages:
+            return kind, message
+        return 'RuntimeError', 'protected measurement failed'
     message = str(error)
     credentials = [value for name, value in os.environ.items() if value and
                    re.search(r'KEY|TOKEN|SECRET|PASSWORD|DSN|DATABASE_URL|ENDPOINT|CREDENTIAL|AUTH', name, re.I)]
@@ -245,11 +265,13 @@ def remote_trial(request):
         store.abandon(request['campaign'], *lease, 'capped')
         return {'status': 'capped', 'reason': 'provider daily cap reached'}
     except Exception as error:
-        kind, message = (type(error).__name__, 'protected measurement failed') if 'input' in policy['sets'][request['dataset']] else failure_summary(error)
+        private = 'input' in policy['sets'][request['dataset']]
+        kind, message = failure_summary(error, private=private)
         log.info('trial failed error=%s message=%s elapsed_seconds=%.3f',
                  kind, message, time.monotonic() - started)
         store.abandon(request['campaign'], *lease, 'failed')
-        return {'status': 'failed', 'reason': 'direct measurement failed; uncertain charges retained'}
+        return {'status': 'failed', 'reason': 'direct measurement failed; uncertain charges retained',
+                **({'error': {'kind': kind, 'message': message}} if private else {})}
 
 
 def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quivr-search-measurement',

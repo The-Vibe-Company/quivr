@@ -1,5 +1,7 @@
 """Offline owner contracts for the developer-local direct comparison."""
 import importlib.util
+import email.utils
+import http.client
 import io
 import json
 import os
@@ -33,6 +35,36 @@ class Retrieval(unittest.TestCase):
 
 
 class Providers(unittest.TestCase):
+    def test_hosted_success_requires_exact_nonnegative_usage(self):
+        # Own successful-response admission; unknown failed attempts are a
+        # separate trial contract. Only provider HTTP is replaced.
+        for model in ('Cohere-Embed-V5-Pro', 'text-embedding-3-large'):
+            for used in (None, '1', True, -1, 1.5, 0, 1):
+                with self.subTest(model=model, used=used):
+                    budget = embeddings.Budget(100, 1)
+                    client = bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny')
+                    result = ({'embeddings': {'float': [[1, 0]]},
+                               'meta': {'billed_units': {'input_tokens': used}}}
+                              if model.startswith('Cohere') else
+                              {'data': [{'index': 0, 'embedding': [1, 0]}],
+                               'usage': {'prompt_tokens': used}})
+                    with mock.patch.object(client.opener, 'open', return_value=io.BytesIO(json.dumps(result).encode())):
+                        if type(used) is int and used >= 0:
+                            self.assertEqual(client.embed(model, ['a'], 'document', dimensions=2), [[1, 0]])
+                            self.assertEqual(budget.summary()['confirmed_input_tokens'], used)
+                            self.assertEqual(budget.summary()['reserved_input_tokens'], 0)
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, '^provider omitted confirmed usage; measurement rejected$'):
+                                client.embed(model, ['a'], 'document', dimensions=2)
+                            self.assertEqual(budget.summary()['reserved_input_tokens'], 9)
+            # Missing the entire usage envelope must also fail closed.
+            result = ({'embeddings': {'float': [[1, 0]]}} if model.startswith('Cohere') else
+                      {'data': [{'index': 0, 'embedding': [1, 0]}]})
+            client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(100, 1), 'tiny')
+            with mock.patch.object(client.opener, 'open', return_value=io.BytesIO(json.dumps(result).encode())):
+                with self.assertRaisesRegex(RuntimeError, 'omitted confirmed usage'):
+                    client.embed(model, ['a'], 'document', dimensions=2)
+
     def test_configured_openai_prefixes_usage_and_response_validation(self):
         # Owns the configured serving wire contract; fake HTTP only.
         config = {'format': 'openai', 'auth': 'none', 'base_url': 'http://127.0.0.1:8080/v1',
@@ -112,6 +144,61 @@ class Providers(unittest.TestCase):
         with mock.patch.object(client.opener, 'open', side_effect=error):
             with self.assertRaisesRegex(RuntimeError, '^provider HTTP 401$'):
                 client.embed('Cohere-Embed-V5-Pro', ['abc'], 'document')
+
+    def test_retry_after_jitter_and_exhaustion_use_bounded_safe_errors(self):
+        for code, header, expected in (
+            (429, '3', 3.5), (503, email.utils.formatdate(1_000_004, usegmt=True), 4.5),
+            (429, 'invalid', 1.5), (429, '-3', 1.5), (429, '9' * 400, 60),
+        ):
+            with self.subTest(code=code, header=header):
+                client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(1000, 1), 'tiny')
+                failure = urllib.error.HTTPError('https://example.com', code, 'private text',
+                                                {'Retry-After': header}, io.BytesIO(b'private body'))
+                success = io.BytesIO(b'{"embeddings":{"float":[[1,0]]},"meta":{"billed_units":{"input_tokens":1}}}')
+                with mock.patch.object(client.opener, 'open', side_effect=[failure, success]), \
+                        mock.patch.object(bakeoff.time, 'sleep') as sleep, \
+                        mock.patch.object(bakeoff.time, 'time', return_value=1_000_000), \
+                        mock.patch('random.uniform', return_value=.5):
+                    self.assertEqual(client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2), [[1, 0]])
+                sleep.assert_called_once_with(expected)
+        for code in (429, 503, None):
+            client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(1000, 1), 'tiny')
+            def fail(*args, **kwargs):
+                if code is None:
+                    raise urllib.error.URLError('private transport details')
+                raise urllib.error.HTTPError('https://example.com', code, 'private text', {}, io.BytesIO(b'private body'))
+            with mock.patch.object(client.opener, 'open', side_effect=fail) as network, \
+                    mock.patch.object(bakeoff.time, 'sleep') as sleep:
+                with self.assertRaisesRegex(RuntimeError, '^' + (f'provider HTTP {code}' if code else
+                                                    'provider transport failed after 8 attempts') + '$'):
+                    client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2)
+            self.assertEqual(network.call_count, 8)
+            self.assertEqual(sleep.call_count, 7)
+            self.assertEqual(client.budget.summary()['reserved_input_tokens'], 72)
+
+    def test_response_read_failures_retry_without_confirming_partial_usage(self):
+        # Request setup failures are covered above; a truncated/reset body
+        # fails after opening the response and can include private bytes.
+        for error in (http.client.IncompleteRead(b'private body', 10), ConnectionResetError('private details')):
+            for recover in (False, True):
+                with self.subTest(error=type(error).__name__, recover=recover):
+                    class FailedRead(io.BytesIO):
+                        def read(self, *args):
+                            raise error
+                    client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(1000, 1), 'tiny')
+                    success = io.BytesIO(b'{"embeddings":{"float":[[1,0]]},"meta":{"billed_units":{"input_tokens":1}}}')
+                    transport = [FailedRead(), success] if recover else lambda *a, **k: FailedRead()
+                    with mock.patch.object(client.opener, 'open', side_effect=transport) as network, \
+                            mock.patch.object(bakeoff.time, 'sleep') as sleep:
+                        if recover:
+                            self.assertEqual(client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2), [[1, 0]])
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, '^provider transport failed after 8 attempts$'):
+                                client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2)
+                    self.assertEqual(network.call_count, 2 if recover else 8)
+                    self.assertEqual(sleep.call_count, 1 if recover else 7)
+                    self.assertEqual(client.budget.summary()['reserved_input_tokens'], 9 if recover else 72)
+                    self.assertEqual(client.budget.summary()['confirmed_input_tokens'], 1 if recover else 0)
 
     def test_e5_applies_query_and_passage_prefixes_without_download(self):
         encoder = mock.Mock()
