@@ -1182,6 +1182,24 @@ func (e GetTopQueriesParamsWindow) Valid() bool {
 	}
 }
 
+// Defines values for ListRecordsParamsOrder.
+const (
+	AcceptedAtDesc ListRecordsParamsOrder = "accepted_at_desc"
+	RecordId       ListRecordsParamsOrder = "record_id"
+)
+
+// Valid indicates whether the value is a known member of the ListRecordsParamsOrder enum.
+func (e ListRecordsParamsOrder) Valid() bool {
+	switch e {
+	case AcceptedAtDesc:
+		return true
+	case RecordId:
+		return true
+	default:
+		return false
+	}
+}
+
 // ActionRequest defines model for ActionRequest.
 type ActionRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
@@ -2420,6 +2438,11 @@ type Record struct {
 	Withdrawn        bool           `json:"withdrawn"`
 }
 
+// RecordCount defines model for RecordCount.
+type RecordCount struct {
+	Count int64 `json:"count"`
+}
+
 // RecordPage defines model for RecordPage.
 type RecordPage struct {
 	Items          []Record `json:"items"`
@@ -3320,11 +3343,32 @@ type ListMatchesParams struct {
 
 // ListRecordsParams defines parameters for ListRecords.
 type ListRecordsParams struct {
-	CorpusId   string  `form:"corpus_id" json:"corpus_id"`
-	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+	CorpusId string                  `form:"corpus_id" json:"corpus_id"`
+	Order    *ListRecordsParamsOrder `form:"order,omitempty" json:"order,omitempty"`
+
+	// AcceptedAfter Inclusive lower bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits; clients convert local days into bounds. Quivr applies no time-zone rules.
+	AcceptedAfter *time.Time `form:"accepted_after,omitempty" json:"accepted_after,omitempty"`
+
+	// AcceptedBefore Exclusive upper bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits.
+	AcceptedBefore *time.Time `form:"accepted_before,omitempty" json:"accepted_before,omitempty"`
+	PageCursor     *string    `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
 
 	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListRecordsParamsOrder defines parameters for ListRecords.
+type ListRecordsParamsOrder string
+
+// CountRecordsParams defines parameters for CountRecords.
+type CountRecordsParams struct {
+	CorpusId string `form:"corpus_id" json:"corpus_id"`
+
+	// AcceptedAfter Inclusive lower bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits; clients convert local days into bounds. Quivr applies no time-zone rules.
+	AcceptedAfter *time.Time `form:"accepted_after,omitempty" json:"accepted_after,omitempty"`
+
+	// AcceptedBefore Exclusive upper bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits.
+	AcceptedBefore *time.Time `form:"accepted_before,omitempty" json:"accepted_before,omitempty"`
 }
 
 // ListSubscriptionsParams defines parameters for ListSubscriptions.
@@ -3838,6 +3882,9 @@ type ServerInterface interface {
 
 	// (POST /v0/records/batch)
 	IngestBatch(w http.ResponseWriter, r *http.Request)
+
+	// (GET /v0/records/count)
+	CountRecords(w http.ResponseWriter, r *http.Request, params CountRecordsParams)
 
 	// (POST /v0/records/withdrawals)
 	WithdrawRecord(w http.ResponseWriter, r *http.Request)
@@ -4662,6 +4709,17 @@ func (siw *ServerInterfaceWrapper) IngestBatch(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+func (siw *ServerInterfaceWrapper) CountRecords(w http.ResponseWriter, r *http.Request) {
+	var params CountRecordsParams
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CountRecords(w, r, params)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
 func (siw *ServerInterfaceWrapper) WithdrawRecord(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -4998,6 +5056,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/records", wrapper.ListRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records", wrapper.IngestRecord)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/records/count", wrapper.CountRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records/batch", wrapper.IngestBatch)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records/withdrawals", wrapper.WithdrawRecord)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/records/{record_id}", wrapper.GetRecord)
@@ -8440,6 +8499,55 @@ func (response IngestBatchdefaultJSONResponse) VisitIngestBatchResponse(w http.R
 	return err
 }
 
+type CountRecordsRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      CountRecordsParams
+}
+
+type CountRecordsResponseObject interface {
+	VisitCountRecordsResponse(w http.ResponseWriter) error
+}
+
+// CountRecordsResponseFunc writes a deferred response, including streams and plugin answers.
+type CountRecordsResponseFunc func(http.ResponseWriter)
+
+func (response CountRecordsResponseFunc) VisitCountRecordsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type CountRecords200JSONResponse RecordCount
+
+func (response CountRecords200JSONResponse) VisitCountRecordsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CountRecordsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CountRecordsdefaultJSONResponse) VisitCountRecordsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type WithdrawRecordRequestObject struct {
 	// HTTPRequest retains bounded, deferred input parsing after service authorization.
 	HTTPRequest *http.Request
@@ -9820,6 +9928,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/records/batch)
 	IngestBatch(ctx context.Context, request IngestBatchRequestObject) (IngestBatchResponseObject, error)
+
+	// (GET /v0/records/count)
+	CountRecords(ctx context.Context, request CountRecordsRequestObject) (CountRecordsResponseObject, error)
 
 	// (POST /v0/records/withdrawals)
 	WithdrawRecord(ctx context.Context, request WithdrawRecordRequestObject) (WithdrawRecordResponseObject, error)
@@ -11712,6 +11823,34 @@ func (sh *strictHandler) IngestBatch(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(IngestBatchResponseObject); ok {
 		if err := validResponse.VisitIngestBatchResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CountRecords operation middleware
+func (sh *strictHandler) CountRecords(w http.ResponseWriter, r *http.Request, params CountRecordsParams) {
+	var request CountRecordsRequestObject
+
+	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CountRecords(ctx, request.(CountRecordsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CountRecords")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CountRecordsResponseObject); ok {
+		if err := validResponse.VisitCountRecordsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

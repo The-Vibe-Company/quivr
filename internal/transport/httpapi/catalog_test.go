@@ -27,19 +27,21 @@ import (
 // Corpus and organization isolation are the store's rules, owned by postgres
 // TestRecordCatalogKeysetTraversal.
 type memoryCatalog struct {
-	records []content.Record
-	fail    error
+	records   []content.Record
+	fail      error
+	lastQuery content.RecordQuery
 }
 
 func (c *memoryCatalog) put(r content.Record) { c.records = append(c.records, r) }
 
-func (c *memoryCatalog) Records(_ context.Context, _, _, after string, limit int) ([]content.Record, error) {
+func (c *memoryCatalog) Records(_ context.Context, _, _ string, q content.RecordQuery) ([]content.Record, error) {
+	c.lastQuery = q
 	if c.fail != nil {
 		return nil, c.fail
 	}
 	var page []content.Record
 	for _, r := range c.records {
-		if r.ID > after && len(page) < limit {
+		if r.ID > q.AfterID && len(page) < q.Limit {
 			page = append(page, r)
 		}
 	}
@@ -171,6 +173,19 @@ func TestCatalogAuthorizationAndValidation(t *testing.T) {
 		{"/v0/connectors?page_cursor=", catalogReader, 422, "invalid_cursor"},
 		{"/v0/records?corpus_id=corpus_a&page_cursor=", catalogReader, 422, "invalid_cursor"},
 		{"/v0/records?corpus_id=corpus_a&q=filter", catalogReader, 422, "invalid_query"},
+		{"/v0/records?corpus_id=corpus_a&order=unknown", catalogReader, 422, "invalid_query"},
+		{"/v0/records?corpus_id=corpus_a&accepted_after=2026-10-01", catalogReader, 422, "invalid_query"},
+		{"/v0/records?corpus_id=corpus_a&accepted_after=2026-10-01T0:00:00Z", catalogReader, 422, "invalid_query"},
+		{"/v0/records?corpus_id=corpus_a&accepted_after=2026-10-01T00:00:00.0000000001Z", catalogReader, 422, "invalid_query"},
+		{"/v0/records/count?corpus_id=corpus_a&accepted_before=2026-10-01T00:00:00.0000000001Z", catalogReader, 422, "invalid_query"},
+		{"/v0/records?corpus_id=corpus_a&accepted_after=2026-10-01T00:00:00%2B24:00", catalogReader, 422, "invalid_query"},
+		{"/v0/records?corpus_id=corpus_a&accepted_before=2026-10-01T00:00:00", catalogReader, 422, "invalid_query"},
+		{"/v0/records?corpus_id=corpus_a&accepted_after=", catalogReader, 422, "invalid_query"},
+		{"/v0/records?corpus_id=corpus_a&accepted_after=2026-10-02T00:00:00Z&accepted_before=2026-10-01T00:00:00Z", catalogReader, 422, "invalid_query"},
+		{"/v0/records/count?corpus_id=corpus_a", catalogDenied, 403, "forbidden"},
+		{"/v0/records/count?corpus_id=corpus_b", catalogScoped, 404, "not_found"},
+		{"/v0/records/count?corpus_id=missing", catalogReader, 404, "not_found"},
+		{"/v0/records/count?corpus_id=corpus_a&limit=1", catalogReader, 422, "invalid_query"},
 		{"/v0/records?corpus_id=corpus_a&corpus_id=corpus_b", catalogReader, 422, "invalid_query"},
 	} {
 		if e := getJSON(t, server, tc.path, tc.token, tc.status); e["code"] != tc.code {
@@ -263,4 +278,60 @@ func TestListPageCursorsPaginateAndRejectUndomainedSignatures(t *testing.T) {
 			t.Fatal(c.path, "legacy cursor", e)
 		}
 	}
+}
+
+// Date sorting/count accuracy are owned by the real PostgreSQL catalog test.
+// This owner protects signed query identity and authorization before decoding.
+func TestRecordDateCursorBindsOrderAndBounds(t *testing.T) {
+	accepted := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	catalog := &memoryCatalog{records: []content.Record{
+		{ID: "record_a", Source: content.Source{CorpusID: "corpus_a", Namespace: "feed", RecordKey: "a"}, CurrentAcceptedAt: &accepted},
+		{ID: "record_b", Source: content.Source{CorpusID: "corpus_a", Namespace: "feed", RecordKey: "b"}, CurrentAcceptedAt: &accepted},
+	}}
+	server, _ := catalogServer(t, catalog)
+	query := "&order=accepted_at_desc&accepted_after=2026-10-01T00:00:00Z&accepted_before=2026-10-03T00:00:00Z"
+	first := getJSON(t, server, recordsPath("corpus_a", "", 1)+query, catalogReader, 200)
+	cursor := first["next_page_cursor"].(string)
+	if catalog.lastQuery.Order != content.AcceptedAtDesc || catalog.lastQuery.AcceptedAfter == nil || catalog.lastQuery.AcceptedBefore == nil || !catalog.lastQuery.AcceptedAfter.Equal(accepted.Add(-24*time.Hour)) || !catalog.lastQuery.AcceptedBefore.Equal(accepted.Add(24*time.Hour)) {
+		t.Fatalf("date query mapping %+v", catalog.lastQuery)
+	}
+	path := recordsPath("corpus_a", cursor, 1)
+	// Equivalent offset representations are the same bounds.
+	getJSON(t, server, path+"&order=accepted_at_desc&accepted_after=2026-10-01T02:00:00%2B02:00&accepted_before=2026-10-03T00:00:00Z", catalogReader, 200)
+	if catalog.lastQuery.AfterID != "record_a" || catalog.lastQuery.AfterAcceptedAt == nil || !catalog.lastQuery.AfterAcceptedAt.Equal(accepted) {
+		t.Fatalf("cursor key mapping %+v", catalog.lastQuery)
+	}
+	count := getJSON(t, server, "/v0/records/count?corpus_id=corpus_a&accepted_after=2026-10-01T00:00:00Z&accepted_before=2026-10-03T00:00:00Z", catalogReader, 200)
+	if count["count"] != float64(2) || catalog.lastQuery.AcceptedAfter == nil || catalog.lastQuery.AcceptedBefore == nil {
+		t.Fatalf("count mapping %v, %+v", count, catalog.lastQuery)
+	}
+	for _, changed := range []string{
+		"&order=record_id&accepted_after=2026-10-01T00:00:00Z&accepted_before=2026-10-03T00:00:00Z",
+		"&order=accepted_at_desc&accepted_after=2026-09-30T00:00:00Z&accepted_before=2026-10-03T00:00:00Z",
+		"&order=accepted_at_desc&accepted_after=2026-10-01T00:00:00Z",
+	} {
+		if e := getJSON(t, server, path+changed, catalogReader, 409); e["code"] != "cursor_scope_changed" {
+			t.Fatal(e)
+		}
+	}
+	getJSON(t, server, recordsPath("corpus_b", cursor, 1)+query, catalogScoped, 404)
+	getJSON(t, server, path+query, catalogDenied, 403)
+	getJSON(t, server, path+query, catalogScoped, 409)
+
+	// Valid RFC3339 year limits can lie outside JSON's year range in UTC.
+	// Cursor encoding must retain a serializable representation of each bound.
+	extreme := url.Values{"corpus_id": {"corpus_a"}, "limit": {"1"}, "order": {"accepted_at_desc"},
+		"accepted_after": {"0000-01-01T00:00:00+23:59"}, "accepted_before": {"9999-12-31T23:59:59-23:59"}}
+	extremePage := getJSON(t, server, "/v0/records?"+extreme.Encode(), catalogReader, 200)
+	extremeCursor, ok := extremePage["next_page_cursor"].(string)
+	if !ok || extremeCursor == "" {
+		t.Fatalf("empty cursor at RFC3339 year limits: %v", extremePage)
+	}
+	extreme.Set("page_cursor", extremeCursor)
+	getJSON(t, server, "/v0/records?"+extreme.Encode(), catalogReader, 200)
+}
+
+func (c *memoryCatalog) CountRecords(_ context.Context, _, _ string, q content.RecordQuery) (int64, error) {
+	c.lastQuery = q
+	return int64(len(c.records)), c.fail
 }

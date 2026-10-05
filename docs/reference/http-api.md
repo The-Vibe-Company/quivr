@@ -23,6 +23,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | --- | --- | --- |
 | [`POST /v0/records`](#post-v0records) | `ingestRecord` | `content:write` |
 | [`GET /v0/records`](#get-v0records) | `listRecords` | `content:read` |
+| [`GET /v0/records/count`](#get-v0recordscount) | `countRecords` | `content:read` |
 | [`POST /v0/records/batch`](#post-v0recordsbatch) | `ingestBatch` | `content:write` |
 | [`POST /v0/records/withdrawals`](#post-v0recordswithdrawals) | `withdrawRecord` | `content:write` |
 | [`GET /v0/records/{record_id}`](#get-v0recordsrecord_id) | `getRecord` | `content:read` |
@@ -131,13 +132,16 @@ Commit durable input, Receipt and dispatch intent before responding. Same key an
 
 Operation `listRecords`. Requires `content:read`.
 
-Stable keyset traversal of one Corpus's authorized canonical Records in Record ID order, including withdrawn Records. Each page is an independent read, not an atomic historical snapshot. Capture a start-now Change Cursor before scanning, then consume changes after it as invalidations by rereading current resources; see resynchronization procedure. The opaque page cursor is not a Change Cursor and binds the Corpus filter and authorization scope; a page cursor for another filter or scope is 409 cursor_scope_changed with resync_url. This route, relative to the API base, is the resync_url of change-feed and catalog cursor errors.
+List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 
 **Parameters**
 
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
 | `corpus_id` | query | string | yes | Minimum length `1`. |
+| `order` | query | string |  | One of `record_id`, `accepted_at_desc`. Default `record_id`. |
+| `accepted_after` | query | string (date-time) |  | Inclusive lower bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits; clients convert local days into bounds. Quivr applies no time-zone rules. |
+| `accepted_before` | query | string (date-time) |  | Exclusive upper bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits. |
 | `page_cursor` | query | string |  | Minimum length `1`. |
 | `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
 
@@ -146,6 +150,27 @@ Stable keyset traversal of one Corpus's authorized canonical Records in Record I
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`RecordPage`](#recordpage) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `GET /v0/records/count`
+
+Operation `countRecords`. Requires `content:read`.
+
+Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | query | string | yes | Minimum length `1`. |
+| `accepted_after` | query | string (date-time) |  | Inclusive lower bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits; clients convert local days into bounds. Quivr applies no time-zone rules. |
+| `accepted_before` | query | string (date-time) |  | Exclusive upper bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`RecordCount`](#recordcount) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
 
 #### `POST /v0/records/batch`
@@ -7482,6 +7507,29 @@ properties:
     minLength: 1
 required:
   - items
+```
+
+</details>
+
+### `RecordCount`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `count` | integer (int64) | yes | Minimum `0`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  count:
+    type: integer
+    format: int64
+    minimum: 0
+required:
+  - count
 ```
 
 </details>
