@@ -152,8 +152,8 @@ serve an older unsigned discovery version. `quivr plugin dev` and `quivr plugin
 test` provision ephemeral keys when they launch the plugin; `plugin test
 --endpoint` uses `QUIVR_ENGINE_PLUGIN_KEYS` for that plugin.
 
-The Contract Runner executes the normative valid, expired, wrong-audience,
-tampered, unsigned and forged probes in
+The Contract Runner checks valid tokens and rejects missing or forged tokens,
+altered identities, targets, methods, bodies, timestamps, algorithms and encodings in
 `fixtures/authentication/cases.json`, then signs its ordinary Contribution
 fixtures. Their report check id is `authentication`.
 <!-- /engine-auth -->
