@@ -827,11 +827,11 @@ li[data-fresh] > .flow-row {
   font-weight: 600;
 }
 .admin-board > .admin-lower {
-  flex: 1 0 360px;
+  flex: 1 1 260px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(280px, 26vw, 380px);
   gap: 14px;
-  min-height: 360px;
+  min-height: 260px;
 }
 .admin-tabs {
   position: relative;
@@ -1257,3 +1257,45 @@ li[data-fresh] > .flow-row {
   }
 }
 
+
+/* Wide, the open document sits beside the flow: each scrolls on its own,
+   within the tab's height, so the document stays whole while the flow moves. */
+@media (min-width: 1100px) {
+  .admin-tabpanel:has(> .admin-main) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .admin-tabpanel > .admin-main {
+    flex: 1;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .admin-tabpanel > .admin-main > .admin-flow {
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .admin-tabpanel .timeline-panel {
+    position: static;
+    min-height: 0;
+    max-height: none;
+  }
+}
+/* The usage blocks follow the tab's width, not the window's: two side by
+   side only where their tables fit. The container is the grid's own wrapper:
+   on the whole tab panel, a browser that gives containers layout containment
+   would anchor the tab's window picker and the timeline drawer to it. */
+.admin-tabpanel .admin-section-body:has(> .usage-grid) {
+  container: admin-tab / inline-size;
+}
+@container admin-tab (max-width: 920px) {
+  .usage-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .usage-block:nth-child(even) {
+    border-left: 0;
+  }
+  .usage-block:nth-child(n + 2) {
+    border-top: 1px solid var(--line-soft);
+  }
+}
