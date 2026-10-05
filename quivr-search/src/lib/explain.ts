@@ -74,8 +74,10 @@ export function explain(node: KeywordNode): Piece[] {
   for (let item of items) {
     // Two NOTs cancel out.
     while ("not" in item && "not" in item.not) item = item.not.not;
-    if (isSource(item)) sources.push(item.equals);
-    else if ("any" in item && item.any.every(isSource))
+    // One source filter, or one choice of sources, reads "venus de …"; a
+    // second one asks for both at once and stays a part of the sentence.
+    if (isSource(item) && !sources.length) sources.push(item.equals);
+    else if ("any" in item && item.any.every(isSource) && !sources.length)
       sources.push(...item.any.map((f) => (f as { equals: string }).equals));
     // "Sauf ceux qui parlent de « a » ou de « b »" says NOT (a OR b) too.
     else if ("not" in item)

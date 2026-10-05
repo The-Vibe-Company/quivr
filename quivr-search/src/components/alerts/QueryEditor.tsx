@@ -32,6 +32,8 @@ function insert(query: string, start: number, end: number, hint: string): [strin
     return [head + selected + pair[1] + after, head.length, head.length + selected.length];
   }
   const head = space(before) + hint + (hint.endsWith(":") ? "" : " ");
+  // A selection is what the operator applies to: NOT football, source:nom.
+  if (selected) return [head + selected + after, head.length, head.length + selected.length];
   const tail = after.replace(/^\s+/, "");
   return [head + tail, head.length, head.length];
 }

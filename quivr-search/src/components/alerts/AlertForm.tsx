@@ -287,8 +287,10 @@ export function AlertForm({
                 type="button"
                 className="link-button"
                 onClick={() => {
-                  setFields(fitting || EMPTY_FORM);
-                  setWatched(fitting?.sources || []);
+                  // An empty query clears the form, except what wrote no query
+                  // in it (only words to avoid, sources): that comes back as it was.
+                  setFields(fitting || (built ? EMPTY_FORM : fields));
+                  setWatched(fitting?.sources || (built ? [] : watched));
                   switched.current = true;
                   setAdvanced(false);
                   changed();

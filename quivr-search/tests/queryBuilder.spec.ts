@@ -71,6 +71,11 @@ test("la phrase dit en français ce que l’alerte attrapera", () => {
       "Articles qui contiennent (au moins un des mots « orage » ou « grêle ») et au moins un des mots « port » ou « quai ».",
     ],
     ["NOT NOT orage", "Articles qui contiennent « orage »."],
+    // Two source filters ask for both: only the first reads "venus de".
+    [
+      "orage source:a (source:b OR source:c)",
+      "Articles qui contiennent « orage » et soit la source « b », soit la source « c », venus de « a ».",
+    ],
     [
       "tempête NOT (port quai) NOT NOT NOT grêle",
       "Articles qui contiennent « tempête », sauf ceux qui parlent de (à la fois « port » et « quai ») ou de « grêle ».",

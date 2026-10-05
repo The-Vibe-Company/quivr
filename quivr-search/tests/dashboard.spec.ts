@@ -483,12 +483,17 @@ test("le formulaire guidé et la requête avancée restent d’accord, et une er
   await page.goto("/?view=alerts");
   await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   const form = page.getByRole("form", { name: "Nouvelle alerte" });
-  await form.getByLabel("Tous ces mots").fill("tempête");
+  const query = form.getByLabel("Requête avancée");
+  // Words to avoid alone write no query; they survive a trip to the advanced field.
   await form.getByLabel("Aucun de ces mots").fill("football");
+  await form.getByRole("button", { name: "Écrire une requête avancée" }).click();
+  await expect(query).toHaveValue("");
+  await form.getByRole("button", { name: "Revenir au formulaire guidé" }).click();
+  await expect(form.getByLabel("Aucun de ces mots")).toHaveValue("football");
+  await form.getByLabel("Tous ces mots").fill("tempête");
 
   // The form's query goes to the advanced field as it is.
   await form.getByRole("button", { name: "Écrire une requête avancée" }).click();
-  const query = form.getByLabel("Requête avancée");
   await expect(query).toHaveValue("tempête AND NOT football");
   await expect(query).toBeFocused();
 
@@ -530,6 +535,10 @@ test("le formulaire guidé et la requête avancée restent d’accord, et une er
   await form.getByRole("button", { name: "Écrire une requête avancée" }).click();
   await form.getByRole("button", { name: "Utiliser l’exemple grève (port OR aéroport) NOT sondage" }).click();
   await expect(query).toHaveValue("grève (port OR aéroport) NOT sondage");
+  // An operator applies to the selected word.
+  await query.evaluate((el: HTMLInputElement) => el.setSelectionRange(0, 5));
+  await form.getByRole("group", { name: "Insérer dans la requête" }).getByRole("button", { name: /^NOT/ }).click();
+  await expect(query).toHaveValue("NOT grève (port OR aéroport) NOT sondage");
   await query.fill("(port AND grève) OR aéroport");
   await expect(form.locator(".query-unfit")).toContainText("Le formulaire guidé ne sait pas afficher cette requête");
   await expect(form.getByRole("button", { name: "Revenir au formulaire guidé" })).toHaveCount(0);
