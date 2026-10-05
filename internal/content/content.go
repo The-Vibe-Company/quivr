@@ -177,10 +177,11 @@ type Receipt struct {
 	NewRevision bool `json:"-"`
 }
 type Record struct {
-	ID               string `json:"record_id"`
-	Source           Source `json:"source"`
-	Withdrawn        bool   `json:"withdrawn"`
-	CurrentVersionID string `json:"current_version_id,omitempty"`
+	ID                string     `json:"record_id"`
+	Source            Source     `json:"source"`
+	Withdrawn         bool       `json:"withdrawn"`
+	CurrentVersionID  string     `json:"current_version_id,omitempty"`
+	CurrentAcceptedAt *time.Time `json:"-"`
 }
 type Version struct {
 	// SourceMediaType routes ingestion after normalization.
@@ -284,11 +285,11 @@ type MaterializationStore interface {
 	Publish(context.Context, Work, Publication) error
 }
 
-// RecordCatalog lists one Corpus's Records, withdrawn ones included, in stable
-// key order after an exclusive key. Each call is an independent short read:
-// traversal is not a snapshot, and the change journal covers concurrent writes.
+// RecordCatalog reads one Corpus's catalog, including withdrawn Records.
+// Each page is an independent read; the change journal covers concurrent writes.
 type RecordCatalog interface {
-	Records(ctx context.Context, org, corpusID, after string, limit int) ([]Record, error)
+	Records(context.Context, string, string, RecordQuery) ([]Record, error)
+	CountRecords(context.Context, string, string, RecordQuery) (int64, error)
 }
 type Blobs interface {
 	Put(context.Context, string, []byte) (Blob, error)
@@ -660,40 +661,6 @@ func (s Service) record(ctx context.Context, scope corpus.Scope, id string) (Rec
 	return r, err
 }
 
-// Records returns up to limit authorized Records of a Corpus after key after.
-func (s Service) Records(ctx context.Context, scope corpus.Scope, corpusID, after string, limit int, prepare ...func() (string, string, int, error)) ([]Record, error) {
-	if err := scope.Require(corpus.ActionContentRecords); err != nil {
-		return nil, err
-	}
-	if !scope.Contains(corpusID) {
-		return nil, corpus.ErrNotFound
-	}
-	if s.Corpora != nil {
-		if _, err := s.Corpora.Read(ctx, scope.Organization, corpusID); err != nil {
-			return nil, err
-		}
-	}
-	preparedCorpus := corpusID
-	for _, load := range prepare {
-		var err error
-		corpusID, after, limit, err = load()
-		if err != nil {
-			return nil, err
-		}
-	}
-	if corpusID != preparedCorpus {
-		if !scope.Contains(corpusID) {
-			return nil, corpus.ErrNotFound
-		}
-		if s.Corpora != nil {
-			if _, err := s.Corpora.Read(ctx, scope.Organization, corpusID); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return s.Catalog.Records(ctx, scope.Organization, corpusID, after, limit)
-}
 func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id string) (Version, error) {
 	if err := scope.Require(corpus.ActionContentVersion); err != nil {
 		return Version{}, err

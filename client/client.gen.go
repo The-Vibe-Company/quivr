@@ -1182,6 +1182,24 @@ func (e GetTopQueriesParamsWindow) Valid() bool {
 	}
 }
 
+// Defines values for ListRecordsParamsOrder.
+const (
+	AcceptedAtDesc ListRecordsParamsOrder = "accepted_at_desc"
+	RecordId       ListRecordsParamsOrder = "record_id"
+)
+
+// Valid indicates whether the value is a known member of the ListRecordsParamsOrder enum.
+func (e ListRecordsParamsOrder) Valid() bool {
+	switch e {
+	case AcceptedAtDesc:
+		return true
+	case RecordId:
+		return true
+	default:
+		return false
+	}
+}
+
 // ActionRequest defines model for ActionRequest.
 type ActionRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
@@ -2420,6 +2438,11 @@ type Record struct {
 	Withdrawn        bool           `json:"withdrawn"`
 }
 
+// RecordCount defines model for RecordCount.
+type RecordCount struct {
+	Count int64 `json:"count"`
+}
+
 // RecordPage defines model for RecordPage.
 type RecordPage struct {
 	Items          []Record `json:"items"`
@@ -3320,11 +3343,32 @@ type ListMatchesParams struct {
 
 // ListRecordsParams defines parameters for ListRecords.
 type ListRecordsParams struct {
-	CorpusId   string  `form:"corpus_id" json:"corpus_id"`
-	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+	CorpusId string                  `form:"corpus_id" json:"corpus_id"`
+	Order    *ListRecordsParamsOrder `form:"order,omitempty" json:"order,omitempty"`
+
+	// AcceptedAfter Inclusive lower bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits; clients convert local days into bounds. Quivr applies no time-zone rules.
+	AcceptedAfter *time.Time `form:"accepted_after,omitempty" json:"accepted_after,omitempty"`
+
+	// AcceptedBefore Exclusive upper bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits.
+	AcceptedBefore *time.Time `form:"accepted_before,omitempty" json:"accepted_before,omitempty"`
+	PageCursor     *string    `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
 
 	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListRecordsParamsOrder defines parameters for ListRecords.
+type ListRecordsParamsOrder string
+
+// CountRecordsParams defines parameters for CountRecords.
+type CountRecordsParams struct {
+	CorpusId string `form:"corpus_id" json:"corpus_id"`
+
+	// AcceptedAfter Inclusive lower bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits; clients convert local days into bounds. Quivr applies no time-zone rules.
+	AcceptedAfter *time.Time `form:"accepted_after,omitempty" json:"accepted_after,omitempty"`
+
+	// AcceptedBefore Exclusive upper bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits.
+	AcceptedBefore *time.Time `form:"accepted_before,omitempty" json:"accepted_before,omitempty"`
 }
 
 // ListSubscriptionsParams defines parameters for ListSubscriptions.
@@ -4183,7 +4227,7 @@ type ClientInterface interface {
 
 	// ListRecords performs a GET /v0/records (the `ListRecords` operationId) request.
 	//
-	// Stable keyset traversal of one Corpus's authorized canonical Records in Record ID order, including withdrawn Records. Each page is an independent read, not an atomic historical snapshot. Capture a start-now Change Cursor before scanning, then consume changes after it as invalidations by rereading current resources; see resynchronization procedure. The opaque page cursor is not a Change Cursor and binds the Corpus filter and authorization scope; a page cursor for another filter or scope is 409 cursor_scope_changed with resync_url. This route, relative to the API base, is the resync_url of change-feed and catalog cursor errors.
+	// List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 	ListRecords(ctx context.Context, params *ListRecordsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// IngestRecordWithBody performs a POST /v0/records (the `IngestRecord` operationId) request,
@@ -4209,6 +4253,11 @@ type ClientInterface interface {
 	//
 	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 	IngestBatch(ctx context.Context, body IngestBatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CountRecords performs a GET /v0/records/count (the `CountRecords` operationId) request.
+	//
+	// Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+	CountRecords(ctx context.Context, params *CountRecordsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// WithdrawRecordWithBody performs a POST /v0/records/withdrawals (the `WithdrawRecord` operationId) request,
 	// with any type of body and a specified content type.
@@ -5704,7 +5753,7 @@ func (c *Client) ResumeOperation(ctx context.Context, operationId string, body R
 
 // ListRecords performs a GET /v0/records (the `ListRecords` operationId) request.
 //
-// Stable keyset traversal of one Corpus's authorized canonical Records in Record ID order, including withdrawn Records. Each page is an independent read, not an atomic historical snapshot. Capture a start-now Change Cursor before scanning, then consume changes after it as invalidations by rereading current resources; see resynchronization procedure. The opaque page cursor is not a Change Cursor and binds the Corpus filter and authorization scope; a page cursor for another filter or scope is 409 cursor_scope_changed with resync_url. This route, relative to the API base, is the resync_url of change-feed and catalog cursor errors.
+// List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 func (c *Client) ListRecords(ctx context.Context, params *ListRecordsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListRecordsRequest(c.Server, params)
 	if err != nil {
@@ -5771,6 +5820,21 @@ func (c *Client) IngestBatchWithBody(ctx context.Context, contentType string, bo
 // Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 func (c *Client) IngestBatch(ctx context.Context, body IngestBatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewIngestBatchRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CountRecords performs a GET /v0/records/count (the `CountRecords` operationId) request.
+//
+// Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+func (c *Client) CountRecords(ctx context.Context, params *CountRecordsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCountRecordsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -9364,6 +9428,42 @@ func NewListRecordsRequest(server string, params *ListRecordsParams) (*http.Requ
 			}
 		}
 
+		if params.Order != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "order", *params.Order, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AcceptedAfter != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "accepted_after", *params.AcceptedAfter, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AcceptedBefore != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "accepted_before", *params.AcceptedBefore, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if params.PageCursor != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "page_cursor", *params.PageCursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
@@ -9478,6 +9578,80 @@ func NewIngestBatchRequestWithBody(server string, contentType string, body io.Re
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewCountRecordsRequest constructs an http.Request for the CountRecords method
+func NewCountRecordsRequest(server string, params *CountRecordsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/records/count")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "corpus_id", params.CorpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if params.AcceptedAfter != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "accepted_after", *params.AcceptedAfter, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.AcceptedBefore != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "accepted_before", *params.AcceptedBefore, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -11121,7 +11295,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListRecordsWithResponse performs a GET /v0/records (the `ListRecords` operationId) request.
 	//
-	// Stable keyset traversal of one Corpus's authorized canonical Records in Record ID order, including withdrawn Records. Each page is an independent read, not an atomic historical snapshot. Capture a start-now Change Cursor before scanning, then consume changes after it as invalidations by rereading current resources; see resynchronization procedure. The opaque page cursor is not a Change Cursor and binds the Corpus filter and authorization scope; a page cursor for another filter or scope is 409 cursor_scope_changed with resync_url. This route, relative to the API base, is the resync_url of change-feed and catalog cursor errors.
+	// List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ListRecordsWithResponse(ctx context.Context, params *ListRecordsParams, reqEditors ...RequestEditorFn) (*ListRecordsResponse, error)
@@ -11153,6 +11327,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Initial bound: 100 entries (413 batch_too_large), envelope 10 MiB (413 request_too_large). Validate envelope structure/size first, then each entry independently against IngestCommand, including wrong types or missing fields. Each raw entry is also held to the 1 MiB single-request bound (entry error entry_too_large), so the same entry bytes are never refused for size alone. HTTP 200 carries Receipt or Error per entry, with the same error codes as single submission. Same ingestion family/key as single submission. Each entry has a fresh 5-second acceptance budget, bounded by an 8-second deadline for the whole batch, including envelope decoding and validation. Caller cancellation or an earlier caller deadline also applies. An entry that times out, and every remaining entry after the batch deadline, returns retryable content_unavailable. Retry with the same entry keys to recover the original Receipts. If the envelope cannot be read before the deadline, HTTP 503 returns retryable content_unavailable without attempting entries. Reuse entry keys after unknown transport outcomes.
 	IngestBatchWithResponse(ctx context.Context, body IngestBatchJSONRequestBody, reqEditors ...RequestEditorFn) (*IngestBatchResponse, error)
+
+	// CountRecordsWithResponse performs a GET /v0/records/count (the `CountRecords` operationId) request.
+	//
+	// Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CountRecordsWithResponse(ctx context.Context, params *CountRecordsParams, reqEditors ...RequestEditorFn) (*CountRecordsResponse, error)
 
 	// WithdrawRecordWithBodyWithResponse performs a POST /v0/records/withdrawals (the `WithdrawRecord` operationId) request,
 	// with any type of body and a specified content type.
@@ -14549,6 +14730,54 @@ func (r IngestBatchResponse) ContentType() string {
 	return ""
 }
 
+type CountRecordsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RecordCount
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CountRecordsResponse) GetJSON200() *RecordCount {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CountRecordsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CountRecordsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CountRecordsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CountRecordsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CountRecordsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type WithdrawRecordResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -16772,7 +17001,7 @@ func (c *ClientWithResponses) ResumeOperationWithResponse(ctx context.Context, o
 
 // ListRecordsWithResponse performs a GET /v0/records (the `ListRecords` operationId) request.
 //
-// Stable keyset traversal of one Corpus's authorized canonical Records in Record ID order, including withdrawn Records. Each page is an independent read, not an atomic historical snapshot. Capture a start-now Change Cursor before scanning, then consume changes after it as invalidations by rereading current resources; see resynchronization procedure. The opaque page cursor is not a Change Cursor and binds the Corpus filter and authorization scope; a page cursor for another filter or scope is 409 cursor_scope_changed with resync_url. This route, relative to the API base, is the resync_url of change-feed and catalog cursor errors.
+// List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) ListRecordsWithResponse(ctx context.Context, params *ListRecordsParams, reqEditors ...RequestEditorFn) (*ListRecordsResponse, error) {
@@ -16833,6 +17062,19 @@ func (c *ClientWithResponses) IngestBatchWithResponse(ctx context.Context, body 
 		return nil, err
 	}
 	return ParseIngestBatchResponse(rsp)
+}
+
+// CountRecordsWithResponse performs a GET /v0/records/count (the `CountRecords` operationId) request.
+//
+// Exact count of one Corpus's authorized Records within optional current-Version acceptance-time bounds. Includes withdrawn Records, as the listing does. Records without a current Version are counted only when neither bound is supplied. Uses content:read and the same Corpus scope as listRecords. This is an independent read, not a snapshot shared with listing pages. Equal bounds count zero; reversed bounds, malformed dates, duplicate or unknown parameters return 422 invalid_query.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CountRecordsWithResponse(ctx context.Context, params *CountRecordsParams, reqEditors ...RequestEditorFn) (*CountRecordsResponse, error) {
+	rsp, err := c.CountRecords(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCountRecordsResponse(rsp)
 }
 
 // WithdrawRecordWithBodyWithResponse performs a POST /v0/records/withdrawals (the `WithdrawRecord` operationId) request,
@@ -19537,6 +19779,39 @@ func ParseIngestBatchResponse(rsp *http.Response) (*IngestBatchResponse, error) 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest BatchResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCountRecordsResponse parses an HTTP response from a CountRecordsWithResponse call
+func ParseCountRecordsResponse(rsp *http.Response) (*CountRecordsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CountRecordsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RecordCount
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

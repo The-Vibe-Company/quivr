@@ -320,6 +320,41 @@ Then read the current Version of each document, as in [Update your copy](#update
 
 A rebuild restores the current state of your documents, not the notices you missed. For alerts, `GET /v0/matches?subscription_id=…` lists first matches and corrections that still match ([keyword alerts](/guides/keyword-alerts#read-what-matched)); `match.no_longer_matches` and `match.withdrawn` store no Match, so those missed notices are gone. The [catalog reference](https://docs.quivr.thevibecompany.co/api-reference/records/list-records) lists every parameter.
 
+### List by acceptance time
+
+For a date-based feed, use `GET /v0/records` with `order=accepted_at_desc`.
+It lists Records by the time Quivr accepted their current Version, newest first;
+a correction moves a Record when the replacement Version becomes current.
+Set `accepted_after` for an inclusive start and `accepted_before` for an exclusive end.
+Both take RFC 3339 timestamps with an offset and at most 9 fractional-second digits.
+Convert days in your own time zone
+into these bounds; Quivr applies no time-zone rules. Use local midnight at the
+start of the day and local midnight at the start of the next day, computing each
+offset separately if daylight-saving time changes.
+
+Repeat the order and bounds when following `next_page_cursor`. Changing them
+returns `409 cursor_scope_changed`. Newer arrivals do not shift later pages;
+pages remain independent reads, so reconcile concurrent corrections and readiness
+changes through the change feed. Reread the current Version on an invalidation
+and reapply your bounds. Withdrawn Records remain included and marked.
+Records without a current Version appear last in an unbounded date listing;
+either time bound excludes them.
+
+Use [Count records](https://docs.quivr.thevibecompany.co/api-reference/records/count-records), `GET /v0/records/count`,
+with the same Corpus and time bounds to get an exact `count` without listing pages.
+It uses the listing's inclusion rules for withdrawn and undated Records, and
+needs the same `content:read` permission and Corpus scope. The count is an
+independent read, so it can change between listing requests.
+
+The [CLI](/reference/cli#quivr-records) exposes these reads as `quivr records`:
+`--corpus` selects the Corpus, `--order accepted_at_desc` selects newest first,
+`--accepted-after` and `--accepted-before` set the bounds, and `--page-cursor`
+continues one page at a time. It prints the API JSON, including the next cursor.
+Use `--limit` to select 1 to 100 Records per page. Use `--count` with the Corpus
+and optional bounds to count; omit `--order`, `--page-cursor` and `--limit`.
+ID order remains the default for the rebuild procedure above.
+
+
 ## What the notices mean
 
 The `type` says what happened, and `resource.kind` and `resource.id` say to what. Every change to a document produces at least one notice with `resource.kind` `record` and that document's ID.

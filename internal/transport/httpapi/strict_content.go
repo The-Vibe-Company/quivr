@@ -52,3 +52,7 @@ func (a *API) GetUpload(ctx context.Context, in transport.GetUploadRequestObject
 func (a *API) GetBlob(ctx context.Context, in transport.GetBlobRequestObject) (transport.GetBlobResponseObject, error) {
 	return transport.GetBlobResponseFunc(func(w http.ResponseWriter) { a.handleGetBlob(w, in.HTTPRequest, requestScope(ctx), in.BlobId) }), nil
 }
+
+func (a *API) CountRecords(ctx context.Context, in transport.CountRecordsRequestObject) (transport.CountRecordsResponseObject, error) {
+	return transport.CountRecordsResponseFunc(func(w http.ResponseWriter) { a.countRecords(w, in.HTTPRequest, requestScope(ctx)) }), nil
+}
