@@ -45,7 +45,7 @@ def start(stack):
     if not key_file.exists():
         ring = {'active': 'local', 'keys': [{'id': 'local',
                 'secret': base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=')}]}
-        with key_file.open('x', opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
+        with open(key_file, 'x', opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
             json.dump(ring, output)
     ring = json.loads(key_file.read_text())
     env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port(stack)),
