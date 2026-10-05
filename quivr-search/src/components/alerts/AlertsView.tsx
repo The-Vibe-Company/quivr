@@ -51,7 +51,7 @@ import {
 import { MoreMenu } from "../MoreMenu";
 import { AlertForm } from "./AlertForm";
 import { CaughtItem } from "./CaughtItem";
-import { EmptyState, LiveBadge, LoadingState, Notice } from "../ui";
+import { EmptyState, LiveBadge, LoadingState, Notice, liveFeed } from "../ui";
 
 type Status = "loading" | "ready" | "unavailable" | "error";
 
@@ -100,6 +100,18 @@ function SourceLogos({
 }
 
 /**
+ * The page as last shown. Coming back to it, it shows at once (no loading
+ * flash between two pages), then reads its alerts again.
+ */
+let visited: {
+  corpus: string;
+  alerts: Alert[];
+  matched: Record<string, string[]>;
+  described: boolean;
+  detail: Detail | null;
+} | null = null;
+
+/**
  * The Alertes page: every alert in a table (what it caught, the last seven
  * days, when it was created, its state), and under it the selected alert:
  * its analytics on the left (growth, frequency, trend, sources, hours) and
@@ -140,24 +152,29 @@ export function AlertsView({
   notify: (text: string) => void;
   onUnauthorized: () => void;
 }) {
-  const [status, setStatus] = useState<Status>("loading");
+  const last = visited?.corpus === corpus ? visited : null;
+  const [status, setStatus] = useState<Status>(last ? "ready" : "loading");
   const [error, setError] = useState("");
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [described, setDescribed] = useState(false);
-  const [detail, setDetail] = useState<Detail | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>(last?.alerts ?? []);
+  const [described, setDescribed] = useState(last?.described ?? false);
+  const [detail, setDetail] = useState<Detail | null>(last?.detail ?? null);
   const [detailError, setDetailError] = useState("");
-  const [live, setLive] = useState(false);
+  const [live, setLive] = useState(liveFeed.seen);
   const [attempt, setAttempt] = useState(0);
   const [grown, setGrown] = useState<Set<string>>(new Set());
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Alert | null>(null);
   // The form panel: closed, writing a new alert, or editing `editing`.
   const [composing, setComposing] = useState(false);
-  const [matched, setMatched] = useState<Record<string, string[]>>({});
+  const [matched, setMatched] = useState<Record<string, string[]>>(last?.matched ?? {});
   const [now, setNow] = useState(() => Date.now());
   const counts = useRef(new Map<string, number>());
   const seen = useRef<{ id: string; matches: Set<string> } | null>(null);
   const listHeading = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (status === "ready") visited = { corpus, alerts, matched, described, detail };
+  });
 
   // The alert shown under the table: the one picked, else the first.
   const current = alerts.find((a) => a.alert_id === selected) || alerts[0] || null;
@@ -218,7 +235,8 @@ export function AlertsView({
 
   useEffect(() => {
     const controller = new AbortController();
-    setStatus("loading");
+    // Coming back, the last list stays on screen while it is read again.
+    setStatus((s) => (s === "ready" ? s : "loading"));
     reload(controller.signal).catch((e) => {
       if (!controller.signal.aborted) failed(e);
     });
@@ -240,7 +258,10 @@ export function AlertsView({
         await reload(signal);
         if (currentID) await reloadDetail(currentID, signal);
       },
-      onLive: setLive,
+      onLive: (on) => {
+        liveFeed.seen = on;
+        setLive(on);
+      },
       onUnauthorized,
     });
   }, [status, currentID, reload, reloadDetail, onUnauthorized]);

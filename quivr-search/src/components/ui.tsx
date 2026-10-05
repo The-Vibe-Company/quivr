@@ -24,6 +24,14 @@ export function PageHeader({
   );
 }
 
+/**
+ * Whether the change feed answered when a page last followed it. It is the
+ * deployment's, so a page that opens starts its badge from it rather than
+ * from "off" for the moment its first read takes; before any answer it
+ * assumes the feed, and a deployment without one says so once.
+ */
+export const liveFeed = { seen: true };
+
 /** Whether a page follows its data live; colour is never the only cue. */
 export function LiveBadge({
   live,

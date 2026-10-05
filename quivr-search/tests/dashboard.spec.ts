@@ -620,6 +620,37 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
   await expect(page.getByRole("heading", { name: "Vos sources" })).toBeFocused();
 });
 
+test("revenir sur Alertes ou Sources les montre aussitôt, le temps de les relire", async ({
+  page,
+}) => {
+  const nav = page.getByRole("navigation", { name: "Sections" });
+  await page.goto("/?view=alerts");
+  await expect(page.getByRole("heading", { name: "Vos alertes" })).toBeVisible();
+  await nav.getByRole("link", { name: /^Sources/ }).click();
+  await expect(page.getByRole("heading", { name: "Vos sources" })).toBeVisible();
+  // From now on, both lists and the change feed answer only once released:
+  // coming back, each page is already there, live as last seen, not a
+  // loading state between two pages.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => ["/demo/alerts", "/v0/connectors", "/v0/changes"].includes(url.pathname),
+    async (route) => {
+      await held;
+      await route.fallback();
+    },
+  );
+  try {
+    await nav.getByRole("link", { name: /^Alertes/ }).click();
+    await expect(page.getByRole("heading", { name: "Vos alertes" })).toBeVisible();
+    await expect(page.locator(".live-badge")).toHaveText("En direct");
+    await nav.getByRole("link", { name: /^Sources/ }).click();
+    await expect(page.getByRole("heading", { name: "Vos sources" })).toBeVisible();
+  } finally {
+    release();
+  }
+});
+
 test("le tableau de bord tient sur un téléphone, en clair et en sombre", async ({
   page,
 }, info) => {
