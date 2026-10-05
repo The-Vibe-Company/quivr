@@ -91,6 +91,58 @@ class Lifecycle(unittest.TestCase):
         self.store = campaign_store.CampaignStore(self.dsn)
         self.store.register(self.value, 'a' * 40, 'sha256:fixture')
 
+    def test_network_gap_recovers_same_owner_and_watchdog_fences_cleanup_after_grace(self):
+        import psycopg
+        import search_campaign
+        name = self.value['name']
+        with mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='600'):
+            owner = self.store.acquire(name)
+        resource = self.store.intent(name, owner)
+        self.store.bind(name, owner, resource['id'], 'ap-survivor')
+        connect = psycopg.connect
+        with connect(self.dsn) as db:
+            db.execute("UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp()-interval '240 seconds' WHERE campaign=%s", (name,))
+        compute = mock.Mock()
+        with self.assertRaises(control_store.LeaseBusy):
+            self.store.acquire(name)
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.intent(name, owner)  # expired lease cannot admit a new app
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.renew_owner(name, 'foreign-owner')
+        attempts, waits = [0], []
+        def reconnect(*args, **kwargs):
+            attempts[0] += 1
+            if attempts[0] <= 2:
+                raise psycopg.OperationalError('network unavailable secret')
+            return connect(*args, **kwargs)
+        with mock.patch('psycopg.connect', side_effect=reconnect), \
+             mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='600'), \
+             mock.patch('time.sleep', side_effect=waits.append):
+            self.assertFalse(search_campaign.watchdog_once(self.store, name, compute)['stopped'])
+        self.assertEqual(waits, [1, 2])
+        compute.stop.assert_not_called()
+        self.store.renew_owner(name, owner)
+        state = self.store.snapshot(name)
+        self.assertTrue(state['live'])
+        self.assertEqual(state['owner'], owner)
+        self.assertEqual(state['resources'][resource['id']]['app_id'], 'ap-survivor')
+        with connect(self.dsn) as db:
+            db.execute("UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp()-interval '721 seconds' WHERE campaign=%s", (name,))
+        compute.find.return_value = ['ap-survivor']
+        compute.running.return_value = False
+        def stop(_):
+            # Once cleanup starts, even a former owner cannot revive its fence.
+            with self.assertRaises(control_store.LeaseLost):
+                self.store.renew_owner(name, owner)
+        compute.stop.side_effect = stop
+        search_campaign.watchdog_once(self.store, name, compute)
+        compute.stop.assert_called_once_with('ap-survivor')
+        self.assertEqual(self.store.snapshot(name)['resources'][resource['id']]['status'], 'closed')
+        replacement = self.store.acquire(name)
+        self.assertNotEqual(replacement, owner)
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.renew_owner(name, owner)
+
     def test_three_cache_validators_leave_watchdog_responsive_and_claims_unique(self):
         # SQL races alone miss locks held by the caller while reading a volume.
         # Hold all three actual trial readers; the watchdog must finish before
@@ -336,7 +388,7 @@ class Lifecycle(unittest.TestCase):
         owner = self.store.acquire(self.value['name'])
         intent = self.store.intent(self.value['name'], owner)
         with psycopg.connect(self.dsn) as db:
-            db.execute("UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp()-interval '1 second' WHERE campaign=%s", (self.value['name'],))
+            db.execute("UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp()-interval '3601 seconds' WHERE campaign=%s", (self.value['name'],))
         with self.assertRaises(campaign_store.CleanupPending):
             self.store.acquire(self.value['name'])
         # External Modal app exists, even though app-ID registration crashed.

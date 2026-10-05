@@ -18,6 +18,7 @@ import public_sets
 import results
 import search_trial
 import private_working
+import network_recovery
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 COMPUTE_NOTICE = ('The compute cap covers compute reserved by this runner, not the full Modal invoice; '
@@ -191,6 +192,10 @@ def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, out
         return completed(store, campaign, key, row, tracking, 'complete')
     except embeddings.BudgetExceeded:
         status, reason = 'capped', 'daily reservation cap reached or usage bound exceeded'
+    except network_recovery.Outage:
+        # The same invocation may still be running. Keep its reservation and
+        # measurement lease until the watchdog acknowledges app termination.
+        raise
     except Exception:
         status, reason = 'failed', 'measurement or evidence publication failed; uncertain charges retained'
     try:
@@ -303,6 +308,28 @@ def shipped_trial():
     return remote_trial
 
 
+def invoke(remote, request, check):
+    """Spawn once; result retries attach to the acknowledged call identity."""
+    import modal
+    check()  # reservation reconnects may have outlasted the supervisor lease
+    try:
+        call_id = remote.spawn(request).object_id
+    except Exception as error:
+        if not network_recovery.modal_unreachable(error):
+            raise
+        raise network_recovery.Outage('Modal spawn acknowledgement unavailable; reconcile before retrying') from None
+    def retrieve():
+        check()  # recover ownership before any following paid invocation
+        return modal.FunctionCall.from_id(call_id).get(timeout=10)
+    while True:
+        try:
+            return network_recovery.retry(retrieve, network_recovery.modal_unreachable,
+                                          campaign=request['campaign'])
+        except TimeoutError:
+            # A reachable server with an unfinished trial is not an outage.
+            continue
+
+
 def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quivr-search-measurement',
            on_app=lambda identity: None, check=lambda: None):
     import modal
@@ -336,14 +363,15 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
         for name in ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py', 'private_working.py', 'protected_inputs.py')})
     pairs, work = {}, {}
     check()
-    with app.run():
+    with app.run(detach=True):
         on_app(app.app_id)
         for name in policy['sets']:
             pair = {}
             sides = (('candidate', candidate),) if 'input' in policy['sets'][name] else (('baseline', policy['baseline']), ('candidate', candidate))
             for side, cfg in sides:
                 check()
-                outcome = dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, remote.remote, outbox, fresh_latency)
+                outcome = dispatch(store, campaign, policy, cfg, name, sha, scorer_digest,
+                                   lambda request: invoke(remote, request, check), outbox, fresh_latency)
                 work[name + '/' + side] = {k: v for k, v in outcome.items() if k not in ('record', 'baseline_record', 'baseline_receipt')}
                 if outcome['status'] in ('complete', 'reused'):
                     row = outcome['record']

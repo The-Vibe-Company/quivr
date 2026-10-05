@@ -13,8 +13,10 @@ import math
 import os
 import pathlib
 import re
+import sys
 
 import control_store
+import network_recovery
 import campaign_store
 import modal_search
 import results
@@ -158,7 +160,8 @@ class Loop:
         self.store.renew_owner(self.name, self.owner)
         try:
             report = aggregate(self.measure(value['config']), self.spec['policy']['sets'])
-        except (control_store.LeaseLost, control_store.Unavailable, control_store.Contention, campaign_store.CleanupPending):
+        except (control_store.LeaseLost, control_store.Unavailable, control_store.Contention,
+                campaign_store.CleanupPending, network_recovery.Outage):
             raise
         except Exception:
             report = aggregate({'status': 'failed'}, self.spec['policy']['sets'])
@@ -248,7 +251,8 @@ def open_study(name, url, seed=42):
             args['sslmode'] = info['sslmode']
         optuna.logging.set_verbosity(optuna.logging.WARNING)
         storage = optuna.storages.RDBStorage(parsed.set(drivername='postgresql+psycopg').render_as_string(hide_password=False),
-            engine_kwargs={'pool_pre_ping': True, 'pool_size': 4, 'max_overflow': 0, 'connect_args': args})
+            engine_kwargs={'pool_pre_ping': True, 'pool_size': 4, 'max_overflow': 0,
+                           'creator': lambda: network_recovery.connect(dsn, **args)})
         try:
             yield optuna.create_study(study_name=name, storage=storage, load_if_exists=True,
                 sampler=optuna.samplers.NSGAIISampler(seed=seed), directions=['maximize', 'minimize', 'minimize'])
@@ -266,7 +270,7 @@ def watchdog_once(store, name, compute):
         if state['owner']:
             store.release_owner(name, state['owner'])
         campaign_store.cleanup(store, name, compute)
-    elif not state['live']:
+    elif not state['live'] and not state.get('recoverable'):
         campaign_store.cleanup(store, name, compute)
     return available
 
@@ -301,7 +305,7 @@ def guard(store, name, owner, compute, stop_requested=None):
             except control_store.Contention:
                 next_check = time.monotonic() + 10
             except Exception as error:
-                failures.append(type(error).__name__)
+                failures.append(error)
                 return
     thread = threading.Thread(target=poll, daemon=True)
     thread.start()
@@ -315,6 +319,8 @@ def guard(store, name, owner, compute, stop_requested=None):
     try:
         yield
         if failures:
+            if isinstance(failures[0], (network_recovery.Outage, control_store.LeaseLost)):
+                raise failures[0]
             raise control_store.Unavailable('campaign guard unavailable; no further scheduling')
     finally:
         done.set()
@@ -574,12 +580,13 @@ def _supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_
             if not store.availability(name)['paused'] and not store.availability(name)['stopped']:
                 raise
         finally:
-            store.release_owner(name, owner)
-            try:
-                campaign_store.cleanup(store, name, compute)
-            except campaign_store.CleanupPending:
-                if once:
-                    raise
+            if not isinstance(sys.exc_info()[1], network_recovery.Outage):
+                store.release_owner(name, owner)
+                try:
+                    campaign_store.cleanup(store, name, compute)
+                except campaign_store.CleanupPending:
+                    if once:
+                        raise
         if once:
             return public_status(store, name, study)
 

@@ -75,6 +75,28 @@ the end date and the trial limit stop the campaign. Conservative reservations
 include uncertain charges; Modal builds/storage and other account charges need
 separate budgeting. No measurements run in CI.
 
+Short network outages retry from 1 to 10 seconds for up to ten minutes. Configure
+`EVAL_NETWORK_OUTAGE_SECONDS` in the supervisor/watchdog environment (0–3600 seconds,
+default 600; 0 disables retries). Authentication/configuration refusals and uncertain
+transaction commits are not replayed. Local paid reservations pause while the Modal
+connection recovers. A detached exploration app runs independently of your machine.
+Once Modal returns a call ID, retrieval reconnects to that same call without another
+reservation or spawn. Measurements can keep progressing while only your machine is offline.
+
+Full-engine confirmations use a separate disconnect watchdog and may terminate
+after its keepalive deadline; the detached-call recovery above covers exploration.
+
+Ownership renews every ten seconds and expires after 120 seconds. The watchdog waits
+until lease expiry plus the recovery window recorded by that owner. This waiting
+period is the recovery grace: only that unreleased owner can renew during it, and
+paid work requires a current lease. Stop/release bypass grace.
+Past the retry window, the process exits unsuccessfully and the managed watchdog
+stops registered apps after grace and waits for termination acknowledgement. Lost
+app/spawn acknowledgements require that reconciliation. An app absent from a listing
+still leaves creation uncertain; an operator must resolve it with Modal before takeover.
+Uncertain charges and completed evidence stay recorded. A hard kill also waits grace.
+Adopt this behavior on the next campaign: `resume` requires its frozen checkout.
+
 ## Check and stop
 
 `status` returns aggregate results, Pareto objectives, spending and held-out reads

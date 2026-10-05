@@ -6,6 +6,12 @@ import uuid
 import control_store
 import modal_search
 import search_trial
+import network_recovery
+
+# Server time and durable owner state are shared by supervisor and watchdog.
+RECOVERABLE = """owner IS NOT NULL
+    AND NOT COALESCE((state->>'owner_released')::boolean,false)
+    AND expires_at+COALESCE((state->>'outage_seconds')::integer,0)*interval '1 second'>clock_timestamp()"""
 
 
 class CleanupPending(RuntimeError):
@@ -31,11 +37,11 @@ class CampaignStore(control_store.Store):
     def snapshot(self, name):
         with self.transaction() as db:
             self.lock(db, name)
-            row = db.execute('SELECT spec,git_sha,scorer_digest,state,owner,expires_at>clock_timestamp(),generation FROM eval_control.campaign_runs WHERE campaign=%s', (name,)).fetchone()
+            row = db.execute('SELECT spec,git_sha,scorer_digest,state,owner,expires_at>clock_timestamp(),generation,' + RECOVERABLE + ' FROM eval_control.campaign_runs WHERE campaign=%s', (name,)).fetchone()
             if not row:
                 raise ValueError('campaign supervisor has not been registered')
         return {**row[3], 'spec': row[0], 'git_sha': row[1], 'scorer_digest': row[2],
-                'owner': row[4], 'live': bool(row[5]), 'generation': row[6]}
+                'owner': row[4], 'live': bool(row[5]), 'generation': row[6], 'recoverable': bool(row[7])}
 
     @control_store.retry_contention
     def confirmation_configuration(self, name, configuration):
@@ -97,38 +103,44 @@ class CampaignStore(control_store.Store):
             policy, stopped = self.lock(db, name)
             if self.terminal(db, name, policy, stopped):
                 raise control_store.LeaseLost('campaign stopped or ended')
-            row = db.execute('SELECT owner,expires_at>clock_timestamp(),state FROM eval_control.campaign_runs WHERE campaign=%s FOR UPDATE', (name,)).fetchone()
+            row = db.execute('SELECT owner,expires_at>clock_timestamp(),state,' + RECOVERABLE + ' FROM eval_control.campaign_runs WHERE campaign=%s FOR UPDATE', (name,)).fetchone()
             if row is None:
                 raise ValueError('campaign supervisor has not been registered')
-            if row[0] and row[1]:
+            if row[0] and (row[1] or row[3]):
                 raise control_store.LeaseBusy('campaign supervisor is still live')
             if any(r['status'] != 'closed' for r in row[2]['resources'].values()):
                 raise CleanupPending('reconcile prior compute before supervisor takeover')
             owner = uuid.uuid4().hex
-            db.execute("UPDATE eval_control.campaign_runs SET owner=%s,expires_at=clock_timestamp()+%s*interval '1 second',generation=generation+1 WHERE campaign=%s", (owner, ttl, name))
+            state = {**row[2], 'owner_released': False, 'outage_seconds': network_recovery.window()}
+            db.execute("UPDATE eval_control.campaign_runs SET owner=%s,expires_at=clock_timestamp()+%s*interval '1 second',generation=generation+1,state=%s::jsonb WHERE campaign=%s", (owner, ttl, json.dumps(state), name))
         return owner
 
     @contextlib.contextmanager
-    def mutation(self, name, owner=None, *, cleanup=False):
+    def mutation(self, name, owner=None, *, cleanup=False, recovering=False):
         with self.transaction() as db:
             policy, stopped = self.lock(db, name)
             stopped = self.terminal(db, name, policy, stopped)
-            row = db.execute('SELECT owner,expires_at>clock_timestamp(),state,generation FROM eval_control.campaign_runs WHERE campaign=%s FOR UPDATE', (name,)).fetchone()
+            row = db.execute('SELECT owner,expires_at>clock_timestamp(),state,generation,' + RECOVERABLE + ' FROM eval_control.campaign_runs WHERE campaign=%s FOR UPDATE', (name,)).fetchone()
             if not row:
                 raise ValueError('campaign supervisor has not been registered')
             if cleanup:
-                if not stopped and row[0] and row[1]:
+                if not stopped and row[0] and (row[1] or row[4]):
                     raise control_store.LeaseBusy('cannot reconcile compute of a live supervisor')
-            elif stopped or not owner or owner != row[0] or not row[1]:
+            elif (stopped or not owner or owner != row[0] or row[2].get('owner_released')
+                  or not (row[1] or (recovering and row[4]))):
                 raise control_store.LeaseLost('supervisor stopped, expired or replaced')
             state = row[2]
+            if cleanup:
+                # Commit the fence before external stop/listing I/O. A late
+                # renewal must not race a watchdog that already began cleanup.
+                state['owner_released'] = True
             yield db, state, row[3]
             db.execute('UPDATE eval_control.campaign_runs SET state=%s::jsonb WHERE campaign=%s', (json.dumps(state, allow_nan=False), name))
 
     @control_store.retry_contention
     def renew_owner(self, name, owner, ttl=120):
         control_store.lease_batch([], ttl)
-        with self.mutation(name, owner) as (db, _, __):
+        with self.mutation(name, owner, recovering=True) as (db, _, __):
             db.execute("UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp()+%s*interval '1 second' WHERE campaign=%s", (ttl, name))
 
     @control_store.retry_contention
@@ -136,7 +148,7 @@ class CampaignStore(control_store.Store):
         # Release only our ownership; a stopped campaign can still drain safely.
         with self.transaction() as db:
             self.lock(db, name)
-            db.execute('UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp() WHERE campaign=%s AND owner=%s', (name, owner))
+            db.execute("UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp(),state=jsonb_set(state,'{owner_released}','true') WHERE campaign=%s AND owner=%s", (name, owner))
 
     @control_store.retry_contention
     def intent(self, name, owner):
@@ -207,6 +219,8 @@ def cleanup(store, name, compute):
                 if compute.running(app):
                     raise CleanupPending('Modal termination is not acknowledged')
             store.closed(name, identity)
+        except network_recovery.Outage:
+            raise
         except Exception:
             pending = True
     if pending:
