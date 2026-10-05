@@ -93,6 +93,8 @@ export function QueryEditor({
         className="form-input"
         value={value}
         autoComplete="off"
+        autoCapitalize="none"
+        autoCorrect="off"
         spellCheck={false}
         placeholder="orage AND (grêle OR vent) NOT football"
         aria-invalid={parsed.state === "invalid" || undefined}

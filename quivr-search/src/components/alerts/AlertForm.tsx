@@ -11,7 +11,7 @@ import {
 import type { FeedItem } from "../../lib/feed";
 import { print } from "../../lib/notation";
 import { sourceName } from "../../lib/alertForm";
-import { EMPTY_FORM, build, positiveTerms, unbuild } from "../../lib/queryBuilder";
+import { EMPTY_FORM, build, fieldTerms, positiveTerms, unbuild } from "../../lib/queryBuilder";
 import { FilterMenu, MenuOption } from "../feed/FilterMenu";
 import { SourceLogo } from "../feed/SourceLogo";
 import { DescribedIcon, KeywordsIcon, PlusIcon, SourcesIcon } from "../RailIcons";
@@ -337,7 +337,7 @@ export function AlertForm({
               id={`${id}-sentence`}
               parsed={built ? { state: "valid", expression: built } : { state: "empty" }}
               empty={
-                fields.none.trim()
+                fieldTerms(fields.none).length
                   ? "Ajoutez aussi des mots à chercher : « Aucun de ces mots » seul attraperait tout le reste."
                   : "La requête et ce qu’elle attrapera s’écrivent ici à mesure que vous remplissez les champs."
               }

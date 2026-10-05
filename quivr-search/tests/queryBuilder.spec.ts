@@ -71,6 +71,10 @@ test("la phrase dit en français ce que l’alerte attrapera", () => {
       "Articles qui contiennent (au moins un des mots « orage » ou « grêle ») et au moins un des mots « port » ou « quai ».",
     ],
     ["NOT NOT orage", "Articles qui contiennent « orage »."],
+    [
+      "tempête NOT (port quai) NOT NOT NOT grêle",
+      "Articles qui contiennent « tempête », sauf ceux qui parlent de (à la fois « port » et « quai ») ou de « grêle ».",
+    ],
   ];
   for (const [query, expected] of cases) expect(sentence(parse(query).match), query).toBe(expected);
 });

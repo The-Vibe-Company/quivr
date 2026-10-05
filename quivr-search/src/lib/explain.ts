@@ -71,9 +71,10 @@ export function explain(node: KeywordNode): Piece[] {
   const sources: string[] = [];
   const excluded: KeywordNode[] = [];
   const wanted: KeywordNode[] = [];
-  for (const item of items) {
-    if ("not" in item && "not" in item.not) wanted.push(item.not.not);
-    else if (isSource(item)) sources.push(item.equals);
+  for (let item of items) {
+    // Two NOTs cancel out.
+    while ("not" in item && "not" in item.not) item = item.not.not;
+    if (isSource(item)) sources.push(item.equals);
     else if ("any" in item && item.any.every(isSource))
       sources.push(...item.any.map((f) => (f as { equals: string }).equals));
     // "Sauf ceux qui parlent de « a » ou de « b »" says NOT (a OR b) too.
@@ -99,7 +100,7 @@ export function explain(node: KeywordNode): Piece[] {
     out.push(
       ", sauf ceux qui parlent de ",
       ...list(
-        excluded.map((n) => ("term" in n && !/\s/u.test(n.term) ? [{ keyword: n.term }] : part(n))),
+        excluded.map((n) => ("term" in n && !/\s/u.test(n.term) ? [{ keyword: n.term }] : inner(n))),
         "ou de",
       ),
     );
