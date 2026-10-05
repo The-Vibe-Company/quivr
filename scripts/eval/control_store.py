@@ -8,6 +8,7 @@ import decimal
 import datetime
 import functools
 import json
+import logging
 import os
 import re
 import tempfile
@@ -40,12 +41,16 @@ def retry_contention(operation):
     """Retry SQL-only operations after rollback; never replay connection errors."""
     @functools.wraps(operation)
     def run(*args, **kwargs):
+        deadline = time.monotonic() + 30
         delay = 1
         while True:
             try:
                 return operation(*args, **kwargs)
             except Contention:
-                time.sleep(delay)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(delay, remaining))
                 delay = min(delay * 2, 10)
     return run
 
@@ -193,8 +198,11 @@ class Store:
         try:
             yield claims
         except BaseException:
-            self.release_many(name, {key: claim['owner'] for key, claim in claims.items()
-                                     if claim['status'] == 'claimed'})
+            try:
+                self.release_many(name, {key: claim['owner'] for key, claim in claims.items()
+                                         if claim['status'] == 'claimed'})
+            except (Unavailable, Contention):
+                logging.getLogger(__name__).warning('unpublished claim release deferred; store unavailable or contended')
             raise
 
     @retry_contention

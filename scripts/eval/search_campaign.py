@@ -158,7 +158,7 @@ class Loop:
         self.store.renew_owner(self.name, self.owner)
         try:
             report = aggregate(self.measure(value['config']), self.spec['policy']['sets'])
-        except (control_store.LeaseLost, control_store.Unavailable, campaign_store.CleanupPending):
+        except (control_store.LeaseLost, control_store.Unavailable, control_store.Contention, campaign_store.CleanupPending):
             raise
         except Exception:
             report = aggregate({'status': 'failed'}, self.spec['policy']['sets'])
@@ -297,6 +297,8 @@ def guard(store, name, owner, compute, stop_requested=None):
                 if available['paused'] or available['stopped']:
                     return
                 store.renew_owner(name, owner)
+                next_check = time.monotonic() + 10
+            except control_store.Contention:
                 next_check = time.monotonic() + 10
             except Exception as error:
                 failures.append(type(error).__name__)
@@ -496,6 +498,29 @@ def public_status(store, name, study=None):
 
 def supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_requested=None,
               confirmation_adapter=None):
+    recovering = False
+    while True:
+        try:
+            return _supervise(store, name, study, outbox, once=once, poll_seconds=poll_seconds,
+                              stop_requested=stop_requested, confirmation_adapter=confirmation_adapter)
+        except control_store.Contention:
+            recovering = True
+        except control_store.LeaseBusy:
+            # A failed release after contention can leave our prior lease live.
+            # Wait for fenced cleanup rather than treating it as a new failure.
+            if not recovering:
+                raise
+        if once:
+            return retrying_status(name)
+        time.sleep(poll_seconds)
+
+
+def retrying_status(name):
+    return {'campaign': name, 'status': 'retrying', 'reason': 'control store contended; no new paid work admitted'}
+
+
+def _supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_requested=None,
+               confirmation_adapter=None):
     import campaign_store
     import campaign_compute
     compute = campaign_compute.ModalCompute()
@@ -657,9 +682,12 @@ def main(argv=None):
             output = public_status(store, name)
         elif args.command == 'watchdog':
             while True:
-                watchdog_once(store, name, campaign_compute.ModalCompute())
-                output = public_status(store, name)
-                if args.once or output['stopped']:
+                try:
+                    watchdog_once(store, name, campaign_compute.ModalCompute())
+                    output = public_status(store, name)
+                except control_store.Contention:
+                    output = retrying_status(name)
+                if args.once or output.get('stopped'):
                     break
                 time.sleep(15)
         else:
@@ -689,6 +717,9 @@ def main(argv=None):
             return 0 if output['status'] in ('confirmed', 'opened') else 2
         if args.command == 'digest' and args.send:
             return 0 if all(v['status'] == 'delivered' for v in output.values()) else 2
+        return 0
+    except control_store.Contention:
+        print(results.encode(retrying_status(name)))
         return 0
     except campaign_store.CleanupPending:
         print(results.encode({'status': 'cleanup_pending', 'reason': 'compute termination is not acknowledged; retry stop or watchdog'}))

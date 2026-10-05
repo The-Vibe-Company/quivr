@@ -200,6 +200,51 @@ class Lifecycle(unittest.TestCase):
             with self.subTest(signal=kind):
                 self.assert_signal_cleanup(kind)
 
+    def test_persistent_contention_exhausts_the_sql_retry_window(self):
+        import psycopg
+        name = self.value['name']
+        connect = psycopg.connect
+        clock, waits = [0], []
+        with connect(self.dsn) as blocker:
+            blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
+            def bounded(*args, **kwargs):
+                kwargs['options'] = '-c lock_timeout=25'
+                return connect(*args, **kwargs)
+            def backoff(delay):
+                waits.append(delay)
+                clock[0] += 31
+                if len(waits) > 1:
+                    self.fail('SQL retry window never returned control to the caller')
+            with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch('time.sleep', side_effect=backoff):
+                with self.assertRaises(control_store.Contention):
+                    self.store.availability(name)
+            self.assertEqual(waits, [1])
+            clock[0], waits[:] = 0, []
+            import search_campaign
+            with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch('time.sleep', side_effect=backoff):
+                status = search_campaign.supervise(self.store, name, None, '.', once=True)
+            self.assertEqual(status['status'], 'retrying')
+            self.assertEqual(waits, [1])
+            blocker.rollback()
+            self.store.stop(name)
+            blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
+            clock[0], waits[:] = 0, []
+            def recover(delay):
+                waits.append(delay)
+                if delay == 7:
+                    blocker.rollback()
+                else:
+                    clock[0] += 31
+                if len(waits) > 2:
+                    self.fail('supervisor did not recover after contention cleared')
+            with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch('time.sleep', side_effect=recover), mock.patch('campaign_reporting.Notifications.send'):
+                recovered = search_campaign.supervise(self.store, name, None, '.', poll_seconds=7)
+            self.assertEqual(recovered['stopped'], 'operator stop')
+            self.assertEqual(waits, [1, 7])
+
     def assert_signal_cleanup(self, requested_signal):
         import threading
         import uuid

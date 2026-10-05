@@ -6,9 +6,11 @@ import re
 import uuid
 import urllib.request
 
+import control_store
 import search_trial
 
 
+@control_store.retry_contention
 def ingest_usage(store, name, receipt):
     from search_campaign import IDENTIFIER
     fields = {'provider', 'session', 'turn', 'input_tokens', 'output_tokens', 'cached_input_tokens'}
@@ -51,6 +53,7 @@ def inside(key, value, distribution):
     return low <= value <= high and math.isclose((value - low) / step, round((value - low) / step), abs_tol=1e-8)
 
 
+@control_store.retry_contention
 def propose(store, name, proposal):
     """Only expand numeric ranges; safety and the measured baseline stay frozen."""
     from search_campaign import IDENTIFIER, specification
@@ -236,45 +239,62 @@ class Notifications:
         return receipt
 
 
-def digest(store, name, *, automatic=False):
-    """Freeze once per UTC day and retry each destination with a durable ID."""
-    snapshot = store.snapshot(name)
-    available, ledger = store.availability(name), store.summary(name)
-    body = digest_body(snapshot, available, ledger)
+@control_store.retry_contention
+def _freeze_digest(store, name, snapshot, available, body):
     with store.edit(name) as (_, state):
         days = state.setdefault('digests', {})
         days.setdefault(available['day'], {'body': body, 'ticket': snapshot['spec']['ticket'],
             'slack_channel': os.environ.get('EVAL_SLACK_CHANNEL'),
             'deliveries': {d: {'id': str(uuid.uuid4()), 'status': 'pending'} for d in ('linear', 'slack')}})
+
+
+@control_store.retry_contention
+def _claim_delivery(store, name, day, destination, owner, automatic):
+    with store.edit(name) as (db, state):
+        item = state['digests'][day]
+        delivery = item['deliveries'][destination]
+        if delivery['status'] == 'delivered':
+            return None
+        now = db.execute('SELECT extract(epoch FROM clock_timestamp())').fetchone()[0]
+        if delivery.get('expires', 0) > now or (automatic and delivery.get('retry_after', 0) > now):
+            return None
+        # Freeze the channel when first provisioned, then keep it on retries.
+        if not item['slack_channel']:
+            item['slack_channel'] = os.environ.get('EVAL_SLACK_CHANNEL')
+        delivery.update(owner=owner, expires=float(now) + 120, status='sending')
+    return item, delivery
+
+
+@control_store.retry_contention
+def _finish_delivery(store, name, day, destination, owner, receipt):
+    with store.edit(name) as (db, state):
+        delivery = state['digests'][day]['deliveries'][destination]
+        if delivery.get('owner') == owner:
+            now = db.execute('SELECT extract(epoch FROM clock_timestamp())').fetchone()[0]
+            delivery.update(status='delivered' if receipt else 'retry', receipt=receipt, expires=0,
+                            retry_after=float(now) + 60)
+
+
+def digest(store, name, *, automatic=False):
+    """Freeze once per UTC day and retry each destination with a durable ID."""
+    snapshot = store.snapshot(name)
+    available, ledger = store.availability(name), store.summary(name)
+    _freeze_digest(store, name, snapshot, available, digest_body(snapshot, available, ledger))
     # Retry old days too. A completed destination never sends again.
     for day in sorted(store.snapshot(name)['digests']):
         for destination in ('linear', 'slack'):
             owner = uuid.uuid4().hex
-            with store.edit(name) as (db, state):
-                item = state['digests'][day]
-                delivery = item['deliveries'][destination]
-                if delivery['status'] == 'delivered':
-                    continue
-                now = db.execute('SELECT extract(epoch FROM clock_timestamp())').fetchone()[0]
-                if delivery.get('expires', 0) > now or (automatic and delivery.get('retry_after', 0) > now):
-                    continue
-                # Channel may be provisioned after the first wave. Freeze it
-                # when first available; retries keep the original destination.
-                if not item['slack_channel']:
-                    item['slack_channel'] = os.environ.get('EVAL_SLACK_CHANNEL')
-                delivery.update(owner=owner, expires=float(now) + 120, status='sending')
+            claimed = _claim_delivery(store, name, day, destination, owner, automatic)
+            if claimed is None:
+                continue
+            item, delivery = claimed
             try:
                 if destination == 'slack' and not item['slack_channel']:
                     raise ValueError('Slack channel not provisioned')
                 receipt = Notifications().send(destination, item, delivery['id'])
             except Exception:
                 receipt = None
-            with store.edit(name) as (db, state):
-                delivery = state['digests'][day]['deliveries'][destination]
-                if delivery.get('owner') == owner:
-                    now = db.execute('SELECT extract(epoch FROM clock_timestamp())').fetchone()[0]
-                    delivery.update(status='delivered' if receipt else 'retry', receipt=receipt, expires=0,
-                                    retry_after=float(now) + 60)
+            _finish_delivery(store, name, day, destination, owner, receipt)
     return store.snapshot(name)['digests'][available['day']]['deliveries']
 
 

@@ -97,6 +97,16 @@ class Reporting(unittest.TestCase):
         from unittest import mock
         import campaign_reporting as reporting
         import campaign_store
+        import psycopg
+        connect = psycopg.connect
+        blocker = connect(self.dsn)
+        waits = []
+        def timeout_connect(*args, **kwargs):
+            kwargs['options'] = '-c lock_timeout=25'
+            return connect(*args, **kwargs)
+        def backoff(delay):
+            waits.append(delay)
+            blocker.rollback()
         owner = self.store.acquire(self.name)
         report = {'status': 'exploration_finalist', 'verdict': 'better',
                   'gates': {k: {'passed': True} for k in ('quality', 'no_loss', 'latency', 'price')},
@@ -109,6 +119,7 @@ class Reporting(unittest.TestCase):
         self.store.reserve(self.name, 'provider', .25, lease=('digest-cost', lease['owner']))
         requests = []
         fail_slack = True
+        name = self.name
         class Response(io.BytesIO):
             def __enter__(self):
                 return self
@@ -126,9 +137,13 @@ class Reporting(unittest.TestCase):
                     return Response(b'{"ok":true,"ts":"123.4"}')
                 if 'commentCreate' not in body['query']:
                     return Response(b'{"data":{"comment":null}}')
+                # Contend only after the transport has acknowledged delivery.
+                blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
                 return Response(json.dumps({'data': {'commentCreate': {'success': True, 'comment': {'id': body['variables']['input']['id']}}}}).encode())
-        with mock.patch.dict(os.environ, EVAL_LINEAR_TOKEN='fixture-linear', EVAL_SLACK_BOT_TOKEN='fixture-slack', EVAL_SLACK_CHANNEL='Cfixture'), \
-             mock.patch('urllib.request.build_opener', return_value=HTTP()):
+        with blocker, mock.patch.dict(os.environ, EVAL_LINEAR_TOKEN='fixture-linear', EVAL_SLACK_BOT_TOKEN='fixture-slack', EVAL_SLACK_CHANNEL='Cfixture'), \
+             mock.patch('urllib.request.build_opener', return_value=HTTP()), \
+             mock.patch('psycopg.connect', side_effect=timeout_connect), \
+             mock.patch('control_store.time.sleep', side_effect=backoff):
             first = reporting.digest(self.store, self.name)
             self.assertEqual(first['linear']['status'], 'delivered')
             self.assertEqual(first['slack']['status'], 'retry')
@@ -137,6 +152,7 @@ class Reporting(unittest.TestCase):
             self.assertEqual(second['slack']['status'], 'delivered')
             reporting.digest(restarted, self.name)
         self.assertEqual(len(requests), 4)
+        self.assertEqual(waits, [1])
         rendered = requests[1][1]['variables']['input']['body']
         self.assertIn('unknown', rendered)
         self.assertIn('0.25', rendered)

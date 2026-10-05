@@ -101,8 +101,13 @@ A running supervisor resumes automatically that day; a dead one needs managed
 restart or `resume`. Ownership leases last 120 seconds and renew every 10 seconds. Total
 exhaustion, the end timestamp, an operator stop or the trial limit ends the campaign.
 SQL admission checks every paid reservation against the same shared caps. The
-watchdog checks independently of a blocked measurement. Temporary database failures
-refuse further paid admission; there is no local budget fallback.
+watchdog checks independently of a blocked measurement. Trials reserve cache entries
+in SQL before validating files, so file reads do not hold the campaign row lock. SQL lock conflicts
+and timeouts retry with exponential backoff from 1 to 10 seconds within a 30-second
+retry window. If contention persists, the supervisor and watchdog defer their next
+pass; `--once` returns `status: retrying` without new paid work. A normal process
+continues when contention clears. An unreachable database refuses further paid
+admission; there is no local budget fallback.
 
 `status` returns aggregate trial reports, the Pareto trial numbers/objectives,
 confirmed plus uncertain ledger amounts, held-out reads left and `cleanup_pending`.

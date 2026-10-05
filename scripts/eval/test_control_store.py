@@ -312,6 +312,22 @@ class Control(unittest.TestCase):
         with self.assertRaises(control_store.Unavailable):
             control_store.Store('postgresql://localhost:1/absent?connect_timeout=1').campaign('x', self.policy)
 
+    def test_validation_error_survives_unavailable_claim_release(self):
+        dsn = self.store.dsn
+        try:
+            with self.assertLogs('control_store', level='WARNING') as messages:
+                with self.assertRaisesRegex(ValueError, '^cache validation failed$'):
+                    with self.store.claim_batch(self.name, ['release-outage']) as claims:
+                        self.store.dsn = 'postgresql://localhost:1/absent?connect_timeout=1'
+                        raise ValueError('cache validation failed')
+            self.assertEqual(messages.output, ['WARNING:control_store:unpublished claim release deferred; store unavailable or contended'])
+        finally:
+            self.store.dsn = dsn
+        # A failed compensation retains its fence, then can be released later.
+        self.assertEqual(self.store.claim(self.name, 'release-outage')['status'], 'leased')
+        self.store.release_many(self.name, {'release-outage': claims['release-outage']['owner']})
+        self.assertEqual(self.store.claim(self.name, 'release-outage')['status'], 'claimed')
+
 
 if __name__ == '__main__':
     unittest.main()
