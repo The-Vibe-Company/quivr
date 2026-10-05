@@ -620,6 +620,8 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
       return json(200, { items: [], next_cursor: "c0", has_more: false });
     if (url.pathname === "/v0/records") {
       assert.equal(url.searchParams.get("corpus_id"), "demo");
+      // Newest first, so a restart keeps the latest articles.
+      assert.equal(url.searchParams.get("order"), "accepted_at_desc");
       return json(200, {
         items: Object.keys(records).map((record_id) => ({ record_id })),
       });
@@ -779,6 +781,110 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
   );
 });
 
+test("an older day of the feed is listed by date and day counts are cached", async (t) => {
+  const seen = [];
+  const record = (id, extra = {}) => ({
+    record_id: id,
+    source: { corpus_id: "demo", namespace: "wire", record_key: id },
+    withdrawn: false,
+    current_version_id: `v_${id}`,
+    ...extra,
+  });
+  const upstream = http.createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    seen.push(url);
+    const json = (status, data) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+    };
+    if (url.pathname === "/v0/records/count") {
+      const after = url.searchParams.get("accepted_after");
+      const before = url.searchParams.get("accepted_before");
+      if (!after && !before) return json(200, { count: 1234 });
+      if (!after) return json(200, { count: before.startsWith("2026-10-02") ? 7 : 0 });
+      return json(200, { count: after.startsWith("2026-10-03") ? 3 : 5 });
+    }
+    if (url.pathname === "/v0/records") {
+      if (url.searchParams.get("page_cursor") === "stale")
+        return json(409, { code: "cursor_scope_changed" });
+      return json(200, {
+        items: [
+          record("old1"),
+          record("gone", { withdrawn: true }),
+          record("pending", { current_version_id: undefined }),
+          record("old2"),
+        ],
+        next_page_cursor: "p2",
+      });
+    }
+    const version = url.pathname.match(/^\/v0\/records\/(\w+)\/versions\/(\w+)$/);
+    if (version)
+      return json(200, {
+        record_id: version[1],
+        version_id: version[2],
+        accepted_at: "2026-10-02T09:00:00Z",
+        manifest: {
+          parts: [{ key: "title", role: "title", content: { kind: "text", text: `Title ${version[1]}` } }],
+        },
+      });
+    json(404, { code: "not_found" });
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  const base = await startDemo(t, upstream.address().port);
+
+  // A day in the browser's time zone, newest first, from the page before.
+  const after = "2026-10-02T00:00:00+02:00";
+  const before = "2026-10-03T00:00:00+02:00";
+  const day = new URLSearchParams({ after, before, cursor: "p1" });
+  const page = await (await fetch(`${base}/demo/feed/page?${day}`)).json();
+  const listed = seen.find((u) => u.pathname === "/v0/records");
+  assert.deepEqual(Object.fromEntries(listed.searchParams), {
+    corpus_id: "demo",
+    order: "accepted_at_desc",
+    accepted_after: after,
+    accepted_before: before,
+    limit: "40",
+    page_cursor: "p1",
+  });
+  assert.deepEqual(
+    page.items.map((item) => [item.record_id, item.title, item.received_at]),
+    [
+      ["old1", "Title old1", "2026-10-02T09:00:00.000Z"],
+      ["old2", "Title old2", "2026-10-02T09:00:00.000Z"],
+    ],
+    "withdrawn Records and Records without a Version stay out, in listing order",
+  );
+  assert.equal(page.next_cursor, "p2");
+  const stale = await fetch(`${base}/demo/feed/page?${new URLSearchParams({ after, before, cursor: "stale" })}`);
+  assert.equal(stale.status, 409);
+  for (const bad of [
+    { after: "2026-10-02", before },
+    { after: before, before: after },
+    { after: "2026-10-02T00:00:00", before },
+  ]) {
+    const refused = await fetch(`${base}/demo/feed/page?${new URLSearchParams(bad)}`);
+    assert.equal(refused.status, 422, JSON.stringify(bad));
+  }
+
+  // Counts: the total, one per day between the bounds, and what is older.
+  const bounds = ["2026-10-04T00:00:00+02:00", "2026-10-03T00:00:00+02:00", "2026-10-02T00:00:00+02:00"].join(",");
+  const counted = await (await fetch(`${base}/demo/feed/days?${new URLSearchParams({ bounds })}`)).json();
+  assert.deepEqual({ ...counted, as_of: undefined }, { total: 1234, days: [3, 5], older: 7, as_of: undefined });
+  assert.ok(!Number.isNaN(Date.parse(counted.as_of)));
+  const calls = seen.filter((u) => u.pathname === "/v0/records/count").length;
+  assert.equal(calls, 4);
+  const again = await (await fetch(`${base}/demo/feed/days?${new URLSearchParams({ bounds })}`)).json();
+  assert.deepEqual(again, counted, "a second reader within a minute shares the counts");
+  assert.equal(seen.filter((u) => u.pathname === "/v0/records/count").length, calls);
+  const reversed = await fetch(`${base}/demo/feed/days?${new URLSearchParams({ bounds: bounds.split(",").reverse().join(",") })}`);
+  assert.equal(reversed.status, 422);
+});
+
 test("the Veille feed and Admin routes need the demo session", async (t) => {
   const seen = [];
   const upstream = http.createServer((req, res) => {
@@ -798,6 +904,8 @@ test("the Veille feed and Admin routes need the demo session", async (t) => {
   for (const route of [
     "/demo/feed",
     "/demo/feed/stream",
+    "/demo/feed/page",
+    "/demo/feed/days",
     "/demo/admin",
     "/demo/admin/stream",
     "/demo/admin/documents/v/timeline",

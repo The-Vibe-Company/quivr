@@ -396,6 +396,8 @@ const server = http.createServer(async (req, res) => {
       path.startsWith("/demo/sources/logo/") ||
       path === "/demo/feed" ||
       path === "/demo/feed/stream" ||
+      path === "/demo/feed/page" ||
+      path === "/demo/feed/days" ||
       path === "/demo/alerts" ||
       path.startsWith("/demo/alerts/") ||
       path === "/demo/admin" ||
@@ -415,6 +417,15 @@ const server = http.createServer(async (req, res) => {
       ) {
         if (path === "/demo/feed") send(res, 200, await feedFor(id).snapshot());
         else await feedFor(id).subscribe(req, res);
+        return;
+      }
+      // Older days of the feed: one period, newest first, and day counts.
+      if (path === "/demo/feed/page" && req.method === "GET") {
+        send(res, 200, await feedFor(id).page(url.searchParams));
+        return;
+      }
+      if (path === "/demo/feed/days" && req.method === "GET") {
+        send(res, 200, await feedFor(id).days(url.searchParams));
         return;
       }
       const logo = path.match(/^\/demo\/sources\/logo\/([\w-]+)$/);

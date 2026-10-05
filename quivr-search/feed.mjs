@@ -1,8 +1,10 @@
 // Live feed of the demo Corpus, kept by the facade. It follows the public
 // resynchronization procedure once, server-side: capture a start-now change
-// cursor, scan the Record catalog, then consume the change stream with the
-// server key and reread each Record an event names. Browsers read a snapshot
-// and a fan-out SSE stream; the core key and cursors never reach them.
+// cursor, scan the Record catalog newest first, then consume the change
+// stream with the server key and reread each Record an event names. Browsers
+// read a snapshot and a fan-out SSE stream; the core key and change cursors
+// never reach them. Older days are read on demand: one range of the catalog
+// by acceptance date, and cached counts per day.
 //
 // An item's arrival time is when Quivr accepted its current Version, read
 // from the Version itself, so Records found by a catalog scan after a restart
@@ -19,6 +21,20 @@ const IDLE_MS = 45000;
 const TITLE_CHARS = 300; // the page cuts titles to one line, the tooltip shows them whole
 const EXCERPT_CHARS = 320;
 const RSS_EXTENSION = "connector.rss";
+const DAY_PAGE = 40;
+const MAX_BOUNDS = 15;
+const COUNT_CONCURRENCY = 4;
+const COUNT_TTL_MS = 60000;
+const MAX_COUNTS = 100;
+// What the engine accepts as a bound: RFC 3339 with an offset.
+const RFC3339 =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+const instant = (value) =>
+  typeof value === "string" &&
+  RFC3339.test(value) &&
+  !Number.isNaN(Date.parse(value))
+    ? value
+    : undefined;
 
 const collapse = (text) => (text || "").replace(/\s+/g, " ").trim();
 function clip(text, size) {
@@ -132,6 +148,16 @@ const unavailable = (status) =>
         "La veille n’est pas activée : la clé du moteur n’a pas accès aux changements.",
       )
     : failure(503, "La veille est momentanément indisponible. Réessayez.");
+// What a browser is told when a day cannot be listed or counted.
+const unlisted = (status) =>
+  status === 409
+    ? failure(409, "La liste de ce jour a changé. Choisissez-le à nouveau.")
+    : failure(
+        status === 422 ? 422 : 503,
+        status === 422
+          ? "Cette période n’est pas valide."
+          : "Les articles de ce jour sont momentanément indisponibles. Réessayez.",
+      );
 
 export function createFeed({ core, key, corpus, upstream }) {
   const items = new Map();
@@ -213,8 +239,9 @@ export function createFeed({ core, key, corpus, upstream }) {
     const position = start.data.next_cursor;
     const ids = [];
     let page;
+    // Newest first, so the items kept are the latest ones.
     for (let n = 0; n < CATALOG_PAGES; n++) {
-      const extra = { limit: "100" };
+      const extra = { order: "accepted_at_desc", limit: "100" };
       if (page?.next_page_cursor) extra.page_cursor = page.next_page_cursor;
       const response = await upstream(`/v0/records?${query(extra)}`);
       if (response.status !== 200) throw unavailable(response.status);
@@ -335,6 +362,72 @@ export function createFeed({ core, key, corpus, upstream }) {
     notify("reset");
   }
 
+  // The feed item of each listed Record, the one in memory when it shows the
+  // same Version. A Record that cannot be read is left out of the page.
+  async function describeListed(records) {
+    const out = [];
+    const queue = records
+      .filter(
+        (record) =>
+          !record.withdrawn &&
+          record.current_version_id &&
+          record.source?.corpus_id === corpus,
+      )
+      .map((record, index) => ({ record, index }));
+    await Promise.all(
+      Array.from({ length: HYDRATE_CONCURRENCY }, async () => {
+        for (let next; (next = queue.shift()); ) {
+          const { record, index } = next;
+          const known = items.get(record.record_id);
+          if (known?.version_id === record.current_version_id) {
+            out[index] = known;
+            continue;
+          }
+          const version = await upstream(
+            `/v0/records/${encodeURIComponent(record.record_id)}/versions/${encodeURIComponent(record.current_version_id)}`,
+          ).catch(() => null);
+          if (version?.status !== 200) continue;
+          out[index] = describe(record, version.data, date(version.data.accepted_at));
+        }
+      }),
+    );
+    return out.filter(Boolean);
+  }
+
+  // Cached day counts, by the bounds asked: browsers of one time zone ask the
+  // same ones, so opening the date filter does not count again for each.
+  const counts = new Map();
+  async function count(extra) {
+    const response = await upstream(`/v0/records/count?${query(extra)}`);
+    if (response.status !== 200) throw unlisted(response.status);
+    return response.data.count;
+  }
+  async function countRanges(bounds) {
+    const as_of = new Date().toISOString();
+    const ranges = [
+      {},
+      ...bounds.slice(1).map((after, i) => ({
+        accepted_after: after,
+        accepted_before: bounds[i],
+      })),
+      { accepted_before: bounds.at(-1) },
+    ];
+    const results = new Array(ranges.length);
+    const queue = ranges.map((range, index) => ({ range, index }));
+    await Promise.all(
+      Array.from({ length: COUNT_CONCURRENCY }, async () => {
+        for (let next; (next = queue.shift()); )
+          results[next.index] = await count(next.range);
+      }),
+    );
+    return {
+      total: results[0],
+      days: results.slice(1, -1),
+      older: results.at(-1),
+      as_of,
+    };
+  }
+
   function start() {
     started ||= sync().then(
       () => {
@@ -366,6 +459,58 @@ export function createFeed({ core, key, corpus, upstream }) {
         items: [...items.values()].sort(newestFirst).slice(0, SNAPSHOT_ITEMS),
         live,
       };
+    },
+    /**
+     * One page of a period, newest first: ?after=…&before=… (RFC 3339, the
+     * browser's local day) and the cursor of the page before, if any.
+     */
+    async page(params) {
+      const after = instant(params.get("after"));
+      const before = instant(params.get("before"));
+      if (!after || !before || Date.parse(after) >= Date.parse(before))
+        throw unlisted(422);
+      const extra = {
+        order: "accepted_at_desc",
+        accepted_after: after,
+        accepted_before: before,
+        limit: String(DAY_PAGE),
+      };
+      const cursor = params.get("cursor");
+      if (cursor) extra.page_cursor = cursor;
+      const response = await upstream(`/v0/records?${query(extra)}`);
+      if (response.status !== 200) throw unlisted(response.status);
+      const page = { items: await describeListed(response.data.items) };
+      if (response.data.next_page_cursor)
+        page.next_cursor = response.data.next_page_cursor;
+      return page;
+    },
+    /**
+     * Articles per period, from ?bounds=t0,t1,…,tn (RFC 3339, newest first):
+     * the collection's total, one count per [t(i+1), t(i)), and how many are
+     * older than tn. as_of says when they were counted.
+     */
+    async days(params) {
+      const bounds = (params.get("bounds") || "").split(",");
+      if (
+        bounds.length > MAX_BOUNDS ||
+        bounds.some((bound) => !instant(bound)) ||
+        bounds.some((bound, i) => i && Date.parse(bound) >= Date.parse(bounds[i - 1]))
+      )
+        throw unlisted(422);
+      const key = bounds.join(",");
+      const now = Date.now();
+      for (const [cached, entry] of counts)
+        if (now - entry.at >= COUNT_TTL_MS) counts.delete(cached);
+      let entry = counts.get(key);
+      if (!entry) {
+        entry = { at: now, answer: countRanges(bounds) };
+        counts.set(key, entry);
+        if (counts.size > MAX_COUNTS) counts.delete(counts.keys().next().value);
+        entry.answer.catch(() => {
+          if (counts.get(key) === entry) counts.delete(key);
+        });
+      }
+      return entry.answer;
     },
     async subscribe(req, res) {
       await start();
