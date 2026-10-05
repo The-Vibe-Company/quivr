@@ -73,7 +73,7 @@ make verify-demo
 
 ### Speed budgets
 
-`perf/budgets.json` sets them: every page's largest paint (LCP) within 2 s and layout shift (CLS) under 0.1 on a mid laptop over a 4G-class link, every interaction answered within 200 ms (INP), the JavaScript a first visit loads, and the p95 of the facade's main endpoints. `npm run build` checks the bundle sizes, so CI does too. The rest is measured on a machine, never in CI:
+`perf/budgets.json` sets them: every page's largest paint (LCP) within 2 s and layout shift (CLS) under 0.1 on a mid laptop over a 4G-class link, each scripted interaction (open, step through and close an article, switch tabs, type and clear a search) answered within 200 ms (INP), the JavaScript a first visit loads, and the p95 of the facade's main endpoints. `npm run build` checks the bundle sizes, so CI does too. The rest is measured on a machine, never in CI:
 
 ```sh
 make demo-perf                                   # seeds a stack of its own, measures it, fails on a broken budget

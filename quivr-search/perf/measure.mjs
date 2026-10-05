@@ -15,6 +15,7 @@
 // local stack only: a remote deployment's endpoints are reported, not checked.
 import { readFileSync, writeFileSync } from "node:fs";
 import { chromium } from "@playwright/test";
+import { breaches as check, worstStatus } from "./check.mjs";
 
 const base = (process.env.QUIVR_DEMO_URL || "http://127.0.0.1:5183").replace(/\/$/, "");
 const password = process.env.QUIVR_DEMO_PASSWORD || "";
@@ -186,7 +187,7 @@ async function endpoints() {
   for (const [name, [path, init]] of Object.entries(calls)) {
     const times = [];
     const core = [];
-    let status = 0;
+    const statuses = [];
     let bytes = 0;
     let wire = 0;
     for (let i = 0; i < 20; i++) {
@@ -196,13 +197,13 @@ async function endpoints() {
       // Sent compressed when the facade compresses, else as read.
       wire = Number(response.headers.get("content-length")) || bytes;
       times.push(performance.now() - started);
-      // The worst answer is kept: a refusal among successes still shows.
-      if (status < 300) status = response.status;
+      statuses.push(response.status);
       const timing = /core;dur=([\d.]+);desc="(\d+)/.exec(response.headers.get("server-timing") || "");
       if (timing) core.push([Number(timing[1]), Number(timing[2])]);
     }
     out[name] = {
-      status,
+      // A refusal among successes still shows.
+      status: worstStatus(statuses),
       p50_ms: Math.round(percentile(times, 0.5)),
       p95_ms: Math.round(percentile(times, 0.95)),
       kb: +(bytes / 1024).toFixed(1),
@@ -276,22 +277,7 @@ report.inp_ms = Math.max(0, ...Object.values(report.interactions));
 report.endpoints = await endpoints();
 if (process.env.PERF_ALERT_LAG === "1") report.alert_lag = await alertLag();
 
-const breaches = [];
-for (const [name, page] of Object.entries(report.pages)) {
-  if (page.lcp_ms > budgets.pages.lcp_ms) breaches.push(`${name}: LCP ${page.lcp_ms} ms > ${budgets.pages.lcp_ms}`);
-  if (page.cls > budgets.pages.cls) breaches.push(`${name}: CLS ${page.cls} > ${budgets.pages.cls}`);
-  if (page.js_kb > budgets.pages.js_kb)
-    breaches.push(`${name}: JavaScript ${page.js_kb} KB > ${budgets.pages.js_kb}`);
-}
-if (report.inp_ms > budgets.inp_ms) breaches.push(`INP ${report.inp_ms} ms > ${budgets.inp_ms}`);
-// A fast refusal is not a pass, wherever the demo runs.
-for (const [name, row] of Object.entries(report.endpoints))
-  if (row.status < 200 || row.status > 299) breaches.push(`${name}: HTTP ${row.status}`);
-if (local)
-  for (const [name, row] of Object.entries(report.endpoints)) {
-    const budget = budgets.endpoints[name];
-    if (budget && row.p95_ms > budget) breaches.push(`${name}: p95 ${row.p95_ms} ms > ${budget}`);
-  }
+const breaches = check(report, budgets, { local });
 report.breaches = breaches;
 
 console.log(`\n${base} — ${profile.about}\n`);
