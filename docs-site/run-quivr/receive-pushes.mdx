@@ -1,12 +1,18 @@
 ---
 title: "Receive and secure pushes"
-description: "Give a sender access to one source, control admission, and inspect pushed deliveries."
+description: "Let a third party send records to one source, with its own token and admission limits, and inspect each attempt."
 keywords: ["push source", "instance token", "rotation", "replay", "audit"]
 ---
 
 A push is an HTTP request in which a third party sends records to Quivr as they change, instead of waiting for the next scheduled fetch. You give the sender access to one source instance; Quivr answers accepted record deliveries with Receipts, acknowledgements used to follow processing.
 
 A Corpus is a collection of Records. A Connector Instance selects the source plugin's kind, configuration and destination. Its Source Namespace groups the stable Record Keys; a changed source `revision` creates a new Version of that Record.
+
+**On this page**
+
+- [Steps](#steps): create a source instance, issue it a token, and push a first record.
+- Day to day: [give access](#give-access), [manage tokens](#manage-tokens), [set admission limits](#set-admission-limits) and [inspect attempts](#inspect-attempts).
+- [How retries behave](#how-retries-behave) and [troubleshooting](#troubleshooting).
 
 ## Prerequisites
 
