@@ -1,0 +1,31 @@
+version: 1
+name: single-30
+seed: 42
+corpus:
+  records: 300
+  words_per_record: 100
+duration_seconds: 60
+drain_seconds: 120
+search:
+  concurrency: 30
+  users: 300
+  mix:
+    lexical: 1
+    semantic: 1
+    hybrid: 1
+    deep: 1
+ingestion:
+  per_second: 1
+  concurrency: 8
+  burst:
+    at_seconds: 20
+    duration_seconds: 10
+    multiplier: 5
+alerts: 5
+replicas:
+  api: 1
+  worker: 1
+fake_latency_ms:
+  embedding: 5
+  reranking: 10
+  judge: 5

@@ -1,0 +1,113 @@
+---
+title: "Run local load tests"
+description: "Measure search throughput and ingestion and alert delays with synthetic providers, without paid model calls."
+keywords: ["load", "latency", "throughput", "replicas", "fake providers"]
+---
+
+Run `make load` from a Quivr checkout to measure search, ingestion and alerts on your machine.
+It starts isolated dependencies, uses deterministic fake models, and writes JSON and Markdown reports.
+
+## Prerequisites
+
+Use Linux x86_64 or macOS with Apple Silicon, with the tools from the
+[Quickstart](/quickstart): Go at the version in `go.mod`, Docker with Compose,
+Python 3.12, and PyYAML from `contracts/http/v0/checks/requirements.txt`.
+Keep enough free disk space for the pinned dependency images and data.
+The first run downloads images and Go modules; it downloads no model weights.
+
+You need no existing deployment or API key. Each run creates its own stack,
+ports, credentials and synthetic documents. Existing development stacks can stay running.
+
+## Choose a scenario
+
+The versioned YAML files in `tests/load/scenarios/` describe the workload.
+Defaults run 30 concurrent search workers on one API and worker, then 60 on
+two replicas of each, then 60 while killing one API and worker halfway through.
+Each uses 300 rotating simulated client users and a fivefold ingestion burst.
+Quivr has no user accounts: these clients share one Organization credential.
+
+For a short first run, use the smoke scenario:
+
+```bash
+make load args='--scenario tests/load/smoke.yaml --out .scratch/load/smoke'
+```
+
+Run all three default scenarios with:
+
+```bash
+make load
+```
+
+To change the workload, copy a YAML file and pass its path with `--scenario`.
+Repeat that flag to run several files in order. Change the corpus size and
+words per document, duration, drain deadline, search concurrency and mode
+weights, alert count, ingestion rate and burst, replicas, or fake model delays.
+Durations are in seconds; fake delays are in milliseconds. Search mode weights
+set relative request frequency: four weights of `1` give an equal mix.
+`drain_seconds` is the time allowed for accepted work to finish after ingestion stops.
+Unknown fields, invalid values and killing the only replica are refused.
+The local driver also refuses more than one million scheduled ingestion arrivals.
+Validate a file without starting anything:
+
+```bash
+make load args='--scenario tests/load/smoke.yaml --validate'
+```
+
+## Read the report
+
+The command prints the path to `report.md`; `report.json` is beside it.
+The default output directory is `.scratch/load/<UTC timestamp>/`.
+The reports contain machine and tool versions, dependency image digests,
+Git revision and dirty state, and the full scenario with its hash.
+
+Request statistics include p50, p95 and maximum latency, HTTP and transport
+errors, and achieved attempts and successes per second. Percentiles use
+nearest rank and include failed requests. Search workers continuously issue
+requests; ingestion follows an independent arrival schedule. A full driver
+queue records dropped arrivals rather than slowing the requested rate silently.
+Simulated users rotate across completed request slots; `users_exercised` says
+how many were actually used.
+
+Lag starts at the scheduled document arrival. Searchable means a public hybrid
+search returned that document version with an embedding. Alerted means the
+local webhook receiver saw the first notice; the report also gives the time to
+receive all expected alerts. These are observed upper bounds: polling and probe
+backlog add delay. The initial corpus and warmup are outside timed statistics.
+Lag percentiles cover successful observations; always read missing documents
+and missing alerts alongside them.
+The JSON `work` object names these `missing_searchable` and `missing_alerts`.
+Every generated document matches every configured alert, so `expected_alerts`
+is accepted documents times the scenario's alert count. During timed load, receipt
+and search probes share a limit of 10 HTTP requests per second and rotate across live APIs.
+Setup and drain probes are uncapped, so this limit cannot make large runs miss
+their verification deadline.
+Receipt probes identify the stored record version from its acceptance receipt.
+The JSON `probes` object records `total_attempts` and `timed_window` statistics
+separately from workload requests.
+They share API capacity with the workload and can influence its latency.
+A pass over many pending documents can take longer than 100 ms.
+
+A run fails if requests fail, the driver drops arrivals, or accepted documents
+or expected notices remain missing at the drain deadline. A killed API may
+produce failed requests already in flight; those stay in the report. No latency
+threshold is assumed. Stack logs remain under `.scratch/quivr-load-<run id>/`.
+The harness stops its processes and removes its containers and volumes on exit.
+Running again starts fresh synthetic data; reusing `--out` overwrites its reports.
+
+## Share evidence
+
+Attach both reports to your requirements or release record. Compare runs with
+the same scenario, hardware, versions and fake delays. The local-only harness
+refuses execution in CI and accepts no external stack or provider configuration.
+Only `tests/fakes/load-plugin` is pinned: it implements the public embedding,
+ranking and alert plugin interfaces and has no provider client, URL or secret.
+
+Real PostgreSQL, Temporal, SeaweedFS and Weaviate handle the work. Replicas
+share these dependencies and one fake plugin process on the same machine.
+The numbers measure engine behaviour with synthetic model work; they do not
+predict paid model latency, relevance or performance across several machines.
+
+## Next
+
+- [Record search measurements](/run-quivr/record-search-measurements) to measure relevance.
+- [Deploy and configure Quivr](/run-quivr/deploy) to prepare your own deployment.
