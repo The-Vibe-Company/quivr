@@ -29,7 +29,7 @@ PRIVATE_FAILURE_MESSAGES = frozenset({
     'provider omitted confirmed usage; measurement rejected',
     'provider transport failed after 8 attempts',
     'provider response exceeds size limit', 'invalid provider response',
-    'invalid provider embeddings', 'provider attempts exhausted',
+    'invalid provider embeddings',
 } | {f'provider HTTP {code}' for code in (400, 401, 403, 404, 408, 413, 422, 429, 500, 502, 503, 504)})
 PRIVATE_FAILURES = {
     RuntimeError: ('RuntimeError', PRIVATE_FAILURE_MESSAGES),

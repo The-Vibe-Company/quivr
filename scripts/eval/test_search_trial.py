@@ -137,13 +137,19 @@ class Trial(unittest.TestCase):
                 data = {'corpus': {str(i): {'text': f'passage{i:03}'} for i in range(512)},
                         'queries': {'q': 'question'}, 'qrels': {'q': {'0': 1}}}
                 barrier, lock = threading.Barrier(4), threading.Lock()
-                attempted = set()
+                attempted, query_calls = set(), 0
                 def respond(request, timeout):
+                    nonlocal query_calls
                     body = json.loads(request.data)
                     first = body['texts'][0]
                     with lock:
-                        # Fail one attempt per task, plus the quality query.
-                        retry = first not in attempted and (len(attempted) < 4 or body['input_type'] == 'search_query')
+                        # Fail each document task, the quality query, and
+                        # the timed query (after one successful warmup).
+                        if body['input_type'] == 'search_query':
+                            query_calls += 1
+                            retry = query_calls in (1, 4)
+                        else:
+                            retry = first not in attempted and len(attempted) < 4
                         attempted.add(first)
                     if retry:
                         if body['input_type'] == 'search_document':
@@ -157,12 +163,22 @@ class Trial(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond), \
                         mock.patch.object(direct_bakeoff.time, 'sleep'):
                     commit = mock.Mock()
+                    private_vectors = {}
                     measured = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
-                                                   budget, client, prices, 0, flush=commit)
+                                                   budget, client, prices, 0, flush=commit, private_vectors=private_vectors)
                     self.assertEqual(measured['metrics']['ndcg@10'], 1)
                     self.assertEqual(measured['cost']['provider']['confirmed_input_tokens'], 515)
-                    self.assertEqual(measured['cost']['provider']['reserved_input_tokens'], 4624)
-                    self.assertAlmostEqual(store.summary(campaign)['provider']['unknown_usd'], .00036992)
+                    self.assertEqual(measured['cost']['provider']['reserved_input_tokens'], 4640)
+                    self.assertAlmostEqual(store.summary(campaign)['provider']['unknown_usd'], .0003712)
+                    # 512 confirmed + 4 * 1152 uncertain document tokens;
+                    # a timed query has 1 confirmed + 16 uncertain tokens.
+                    self.assertAlmostEqual(measured['metrics']['cost_per_1000_documents_usd'], .0008)
+                    self.assertAlmostEqual(measured['metrics']['cost_per_search_usd'], .00000136)
+                    replay = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
+                        budget, client, prices, 0, fresh_latency=False, flush=commit, private_vectors=private_vectors)
+                    self.assertAlmostEqual(replay['metrics']['cost_per_1000_documents_usd'], .0008)
+                    self.assertAlmostEqual(replay['metrics']['cost_per_search_usd'], .00000136)
+                    self.assertEqual(query_calls, 5)
                     store.publish(campaign, 'trial', lease['owner'], {'metrics': measured['metrics'], 'cost': measured['cost']})
                     self.assertEqual(store.claim(campaign, 'trial')['status'], 'done')
                     if private:

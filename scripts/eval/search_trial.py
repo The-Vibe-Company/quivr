@@ -250,7 +250,8 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                         client = copy.copy(hosted)
                         client.budget = task_budget
                         vectors = embed(texts, mode, client)
-                    return vectors, task_budget.summary()['confirmed_input_tokens'], time.monotonic() - started
+                    usage = task_budget.summary()
+                    return vectors, usage['confirmed_input_tokens'] + usage['reserved_input_tokens'], time.monotonic() - started
                 started = time.monotonic()
                 try:
                     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
@@ -313,7 +314,7 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         if fresh:
             budget.store.renew(budget.campaign, *budget.lease)
         query = data['queries'][qid]
-        before = budget.summary()['confirmed_cost_usd']
+        before = budget.summary()['cost_upper_bound_usd']
         started = time.monotonic()
         if not semantic:
             vector, query_tokens, embedding_seconds = None, 0, 0
@@ -330,7 +331,7 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                 raise ValueError('reranker secret is absent')
             selected = rerank(query, {d: docs[doc_ids.index(d)] for d in selected}, budget, rerank_key, prices['jev-1.13.0'])
         elapsed = time.monotonic() - started
-        spend = budget.summary()['confirmed_cost_usd'] - before
+        spend = budget.summary()['cost_upper_bound_usd'] - before
         return selected[:10], elapsed, spend + query_tokens * provider_rate + (elapsed + embedding_seconds + batch_seconds) * compute_rate
 
     # Bound temporary piece-score memory while batching quality-only work.
@@ -378,7 +379,7 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             'per_query': scores['per_query'], 'cost': {'provider': budget.summary(),
                 'index_tokens_attributed': index_tokens, 'index_embedding_seconds_attributed': index_seconds,
                 'cache_hits': cache_hits, 'latency_sample': sample, 'latency_method': 'serial fresh query embedding+retrieval+rerank; fixed hash sample up to 50; one fixed first-query warmup' if fresh_latency else 'cached exploration; p95 unavailable',
-                'price_basis': 'frozen rates, original embedding usage; includes attributable compute'},
+                'price_basis': 'frozen rates, original embedding usage upper bound; includes attributable compute'},
             'machine': socket.gethostname()}
 
 

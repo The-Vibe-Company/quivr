@@ -69,8 +69,8 @@ class FailureLogging(unittest.TestCase):
             (RuntimeError(ChangingMessage()), 'RuntimeError', 'provider HTTP 429'),
             (type('PrivateDocumentId42', (RuntimeError,), {})('provider HTTP 429'), 'RuntimeError', 'protected measurement failed'),
         )
-        for error, kind, expected in cases:
-            with self.subTest(error=type(error).__name__):
+        for case, (error, kind, expected) in enumerate(cases):
+            with self.subTest(case=case, kind=kind):
                 request = {'config': search_trial.configuration({}),
                            'policy': {'sets': {'private-example': {'split': 'dev', 'input': {}}}, 'max_seconds': 30},
                            'dataset': 'private-example', 'campaign': 'fixture', 'lease_key': 'trial', 'owner': 'owner'}
