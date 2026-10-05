@@ -363,6 +363,9 @@ func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte,
 		deadline, hasDeadline := r.Context().Deadline()
 		if errors.As(err, &large) {
 			writeError(w, publicerr.RequestTooLarge, nil)
+		} else if r.Method == "POST" && r.URL.Path == "/v0/subscription-previews" &&
+			(errors.Is(r.Context().Err(), context.DeadlineExceeded) || hasDeadline && !time.Now().Before(deadline)) {
+			writeError(w, publicerr.PreviewDeadlineExceeded, nil)
 		} else if r.Method == "POST" && r.URL.Path == "/v0/records/batch" &&
 			(r.Context().Err() != nil || hasDeadline && !time.Now().Before(deadline)) {
 			// The connection's read deadline may fire before the context timer.

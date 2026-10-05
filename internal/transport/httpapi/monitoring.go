@@ -439,8 +439,11 @@ func (a *API) previewSubscription(w http.ResponseWriter, r *http.Request, scope 
 		return
 	}
 	var in monitoring.PreviewInput
-	result, err := a.Monitoring.Preview(r.Context(), scope, monitoring.PreviewInput{}, func() (monitoring.PreviewInput, error) {
-		if !a.decodeMonitoring(w, r, a.schemas["SubscriptionPreviewRequest"], &in) {
+	result, err := a.Monitoring.Preview(r.Context(), scope, monitoring.PreviewInput{}, func(ctx context.Context) (monitoring.PreviewInput, error) {
+		deadline, _ := ctx.Deadline()
+		controller := http.NewResponseController(w)
+		_ = controller.SetReadDeadline(deadline)
+		if !a.decodeMonitoring(w, r.WithContext(ctx), a.schemas["SubscriptionPreviewRequest"], &in) {
 			return monitoring.PreviewInput{}, errResponseWritten
 		}
 

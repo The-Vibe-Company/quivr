@@ -100,19 +100,9 @@ type PreviewResult struct {
 // written: a preview has no Subscription, so it creates no Match, Delivery or
 // event. Evaluator calls run under a time budget; Records still undecided when
 // it runs out are left out, and an evaluator error fails the whole preview.
-func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInput, prepare ...func() (PreviewInput, error)) (result PreviewResult, err error) {
+func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInput, prepare ...func(context.Context) (PreviewInput, error)) (result PreviewResult, err error) {
 	if err := scope.Require(corpus.ActionMonitoringPreview); err != nil {
 		return PreviewResult{}, err
-	}
-	for _, load := range prepare {
-		var err error
-		in, err = load()
-		if err != nil {
-			return PreviewResult{}, err
-		}
-	}
-	if s.Recent == nil || s.Versions == nil {
-		return PreviewResult{}, ErrNotFound
 	}
 	parent := ctx
 	budget := s.PreviewBudget
@@ -122,10 +112,23 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	defer func() {
-		if err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded)) {
+		if errors.Is(err, context.DeadlineExceeded) {
 			err = ErrPreviewTimeout
 		}
 	}()
+	for _, load := range prepare {
+		var err error
+		in, err = load(ctx)
+		if err != nil {
+			return PreviewResult{}, err
+		}
+	}
+	if ctx.Err() != nil {
+		return PreviewResult{}, ctx.Err()
+	}
+	if s.Recent == nil || s.Versions == nil {
+		return PreviewResult{}, ErrNotFound
+	}
 	query, err := s.previewQuery(ctx, scope, in)
 	if err != nil {
 		return PreviewResult{}, err

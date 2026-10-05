@@ -598,7 +598,7 @@ test("l’aperçu explique les pannes et ne confond pas un délai avec aucun art
   await page.goto("/?view=alerts");
   await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   const form = page.getByRole("form", { name: "Nouvelle alerte" });
-  const words = form.getByLabel("Mots à surveiller");
+  const words = form.getByLabel("Tous ces mots");
   for (const [index, sample] of [
     { status: 503, body: { code: "storage_unavailable", message: "storage unavailable" }, text: "Les articles sont temporairement indisponibles. Réessayez dans un instant." },
     { status: 504, body: { code: "preview_deadline_exceeded", message: "preview deadline exceeded" }, text: "Le test de l’alerte a pris trop de temps. Réessayez dans un instant." },

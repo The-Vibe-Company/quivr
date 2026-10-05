@@ -178,6 +178,10 @@ func TestPreviewFailuresAndBudget(t *testing.T) {
 			t.Fatalf("an unreachable evaluator fails the preview with evaluator_unavailable, got %v", err)
 		}
 		slow := monitoring.Evaluator{PluginID: "test.blocking", Version: "1", Configuration: map[string]any{"decisions": map[string]any{"strike": "match"}}}
+		failure := monitoring.Evaluator{PluginID: "test.blocking", Version: "1", Configuration: map[string]any{"decisions": map[string]any{"boom": "error"}}}
+		if _, err := s.Preview(ctx, writer, monitoring.PreviewInput{Definition: inline("corpus_a"), Evaluator: failure}); !errors.Is(err, monitoring.ErrPreviewFailed) {
+			t.Fatalf("an early evaluator failure must survive another evaluation exhausting the budget, got %v", err)
+		}
 		// The default service budget must leave time to answer within the HTTP
 		// request's five-second deadline. Fake time exercises that ordering.
 		s.PreviewBudget = 0
@@ -208,6 +212,16 @@ func TestPreviewPreparationSharesBudget(t *testing.T) {
 		_, err := s.Preview(ctx, writer, monitoring.PreviewInput{Definition: inline("corpus_a"), Evaluator: fixture()})
 		if !errors.Is(err, monitoring.ErrPreviewTimeout) || ctx.Err() != nil {
 			t.Fatalf("preparation must report its timeout before the caller deadline, got %v, caller %v", err, ctx.Err())
+		}
+		s, _, _ = previewService()
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err = s.Preview(ctx, writer, monitoring.PreviewInput{}, func(ctx context.Context) (monitoring.PreviewInput, error) {
+			<-ctx.Done()
+			return monitoring.PreviewInput{}, ctx.Err()
+		})
+		if !errors.Is(err, monitoring.ErrPreviewTimeout) || ctx.Err() != nil {
+			t.Fatalf("input preparation must share the budget, got %v, caller %v", err, ctx.Err())
 		}
 	})
 }

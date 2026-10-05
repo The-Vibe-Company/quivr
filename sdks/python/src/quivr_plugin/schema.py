@@ -46,15 +46,15 @@ def protocol_errors(schema_file: str, value: Any) -> list[str]:
 
 
 @lru_cache(maxsize=128)
-def _declared_validator(document: str) -> Draft202012Validator:
+def _checked_schema(document: str) -> Any:
     # Copy the schema from its content key: callers may mutate their input,
-    # while concurrent invocations reuse these checked, immutable rules.
+    # while each invocation constructs its own validator from checked rules.
     schema = json.loads(document)
     Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema)
+    return schema
 
 
 def schema_errors(schema: Any, value: Any) -> list[str]:
     """Validate value against a plugin-declared JSON Schema 2020-12 document."""
     document = json.dumps(schema, sort_keys=True, separators=(",", ":"))
-    return _format(_declared_validator(document).iter_errors(value))
+    return _format(Draft202012Validator(_checked_schema(document)).iter_errors(value))
