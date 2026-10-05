@@ -165,6 +165,27 @@ class LoggingCorrelation(Base):
 
 
 class HTTPTransport(Base):
+    def test_invocation_continues_w3c_context(self):
+        from opentelemetry import trace
+        observed = []
+        @self.plugin.normalizer
+        def normalize(invocation):
+            observed.append(trace.get_current_span().get_span_context().trace_id)
+            raise TerminalError("observed", "observed")
+        server = self.plugin.make_server("127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/v0/contributions/normalizer",
+            data=json.dumps(make_request(self.doc).to_dict()).encode(),
+            headers={"traceparent": "00-11111111111111111111111111111111-2222222222222222-01"},
+        )
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request, timeout=5)
+        caught.exception.close()
+        self.assertEqual(observed, [int("11111111111111111111111111111111", 16)])
+
     def test_disconnected_caller_does_not_raise_a_server_error(self):
         entered, release, finished = (threading.Event() for _ in range(3))
 

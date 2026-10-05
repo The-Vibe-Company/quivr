@@ -2,6 +2,8 @@ package devhost
 
 import (
 	"net/http"
+
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"sync/atomic"
 )
 
@@ -11,7 +13,7 @@ var configuredClient atomic.Pointer[http.Client]
 // plugins registered after startup and work pinned to earlier plans. Call once
 // before serving. CLI callers keep the default transport. Redirects stay refused.
 func SetTransport(transport http.RoundTripper) {
-	configuredClient.Store(&http.Client{Transport: transport, CheckRedirect: client.CheckRedirect})
+	configuredClient.Store(&http.Client{Transport: telemetry.Transport(transport, "plugin.call"), CheckRedirect: client.CheckRedirect})
 }
 
 func httpClient() *http.Client {

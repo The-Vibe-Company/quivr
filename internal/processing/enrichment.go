@@ -34,7 +34,7 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 	out := s.enrich(ctx, org, v)
 	err = out.Retry
 	if out.Terminal != nil {
-		s.outcome(org, "enrichment", "blocked", receiptID, v, started, out.Terminal.Code)
+		s.outcome(ctx, org, "enrichment", "blocked", receiptID, v, started, out.Terminal.Code)
 		if out.Terminal.Code == content.CodeEnrichmentTimeout {
 			return s.Content.EnrichmentProgress(ctx, org, v.ID, "blocked", out.Terminal.Code)
 		}
@@ -51,19 +51,19 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 			state, code = "blocked", "derivation_conflict"
 			// Name why: a plugin whose segments with vectors differ from the
 			// segments it returned alone at baseline, or another refusal.
-			slog.Warn("enrichment blocked", "component", "worker", "version_id", v.ID, "error", err.Error())
+			slog.WarnContext(ctx, "enrichment blocked", "component", "worker", "version_id", v.ID, "error", err.Error())
 		} else {
 			// Name what is retried: a deadline, an outage, a plugin error.
-			slog.Warn("enrichment retrying", "component", "worker", "version_id", v.ID, "error", err.Error())
+			slog.WarnContext(ctx, "enrichment retrying", "component", "worker", "version_id", v.ID, "error", err.Error())
 		}
-		s.outcome(org, "enrichment", state, receiptID, v, started, code)
+		s.outcome(ctx, org, "enrichment", state, receiptID, v, started, code)
 		_ = s.Content.EnrichmentProgress(ctx, org, v.ID, state, code)
 		if state == "blocked" {
 			return nil
 		}
 		return errors.New("enrichment unavailable")
 	}
-	s.outcome(org, "enrichment", "succeeded", receiptID, v, started, "")
+	s.outcome(ctx, org, "enrichment", "succeeded", receiptID, v, started, "")
 	if s.Observer != nil {
 		s.Observer.Enriched(ctx, org, receiptID, time.Since(started))
 	}

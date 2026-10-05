@@ -13,6 +13,7 @@ import datetime
 import json
 import logging
 import sys
+from .tracing import log_fields
 from collections.abc import Iterator
 
 _invocation: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar("quivr_plugin_invocation", default=None)
@@ -44,6 +45,8 @@ class InvocationFilter(logging.Filter):
         value = _invocation.get()
         record.invocation_id = value[0] if value else getattr(record, "invocation_id", None)
         record.idempotency_key = value[1] if value else None
+        for key, field in log_fields().items():
+            setattr(record, key, field)
         return True
 
 
