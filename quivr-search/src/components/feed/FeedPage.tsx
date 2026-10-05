@@ -1,5 +1,7 @@
 import {
   Fragment,
+  memo,
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -391,6 +393,18 @@ export function FeedPage({
     scroller.current?.scrollTo({ top: 0 });
   };
   const timeline = query ? [] : moments(rows, (r) => when(r.item) || undefined, now);
+  // Coming back to the Fil, or from a search to the feed, mounts the first
+  // rows at once and the others right after, without holding the frame that
+  // answers the click.
+  const listing = query ? "search" : "feed";
+  const [complete, setComplete] = useState("");
+  useEffect(() => startTransition(() => setComplete(listing)), [listing]);
+  let left = complete === listing ? Infinity : FIRST_ROWS;
+  const take = (list: Row[]) => {
+    const shown = list.slice(0, Math.max(0, left));
+    left -= shown.length;
+    return shown;
+  };
   const toggle = (key: string) =>
     setFolded((current) => {
       const next = new Set(current);
@@ -526,6 +540,18 @@ export function FeedPage({
   const older = !query && !day && feed.status === "ready" && rows.length > 0 &&
     !!counts && counts.total > feed.items.length;
 
+  // Rows only render again when what they show changes; their handlers read
+  // the current filter and reader through this ref.
+  const latest = useRef({ filter, onFilter, open });
+  latest.current = { filter, onFilter, open };
+  const pickAlert = useCallback((id: string) => {
+    const { filter, onFilter } = latest.current;
+    onFilter({
+      ...filter,
+      alerts: filter.alerts.length === 1 && filter.alerts[0] === id ? [] : [id],
+    });
+  }, []);
+  const openItem = useCallback((item: FeedItem) => latest.current.open(item), []);
   const row = ({ item, hit }: Row) => (
     <FeedRow
       key={item.record_id}
@@ -534,18 +560,14 @@ export function FeedPage({
       terms={terms}
       now={now}
       logo={logoOf.get(item.namespace)}
+      source={item.namespace && sourceName(item.namespace)}
       unread={reading.isUnread(item)}
       selected={doc?.record === item.record_id}
       fresh={feed.fresh.has(item.record_id)}
       caught={caughtBy(item.record_id)}
       picked={filter.alerts}
-      onAlert={(id) =>
-        onFilter({
-          ...filter,
-          alerts: filter.alerts.length === 1 && filter.alerts[0] === id ? [] : [id],
-        })
-      }
-      onOpen={() => open(item)}
+      onAlert={pickAlert}
+      onOpen={openItem}
     />
   );
   return (
@@ -892,7 +914,7 @@ export function FeedPage({
           {rows.length > 0 && (!query || searching === "ready") && (
             <ol className="feed-rows" aria-label="Derniers éléments">
               {query
-                ? rows.map(row)
+                ? take(rows).map(row)
                 : timeline.map((moment) => (
                     <Fragment key={moment.key}>
                       <li className="moment" role="none">
@@ -915,7 +937,7 @@ export function FeedPage({
                           </span>
                         </button>
                       </li>
-                      {!folded.has(moment.key) && moment.rows.map(row)}
+                      {!folded.has(moment.key) && take(moment.rows).map(row)}
                     </Fragment>
                   ))}
             </ol>
@@ -1004,25 +1026,14 @@ function MoreRows({ loading, onMore }: { loading: boolean; onMore: () => void })
   );
 }
 
-function FeedRow({
-  item,
-  hit,
-  terms,
-  now,
-  logo,
-  unread,
-  selected,
-  fresh,
-  caught,
-  picked,
-  onAlert,
-  onOpen,
-}: {
+type RowProps = {
   item: FeedItem;
   hit?: Hit;
   terms: string[];
   now: number;
   logo?: string;
+  /** The source's name as shown, so a renamed source renders again. */
+  source: string;
   unread: boolean;
   selected: boolean;
   fresh: boolean;
@@ -1031,8 +1042,36 @@ function FeedRow({
   picked: string[];
   /** Filters the feed on one alert, from its tag. */
   onAlert: (id: string) => void;
-  onOpen: () => void;
-}) {
+  onOpen: (item: FeedItem) => void;
+};
+// The alerts a row shows are rebuilt on every list; they are the same while
+// their ids and names are.
+const sameAlerts = (a: Alert[], b: Alert[]) =>
+  a.length === b.length &&
+  a.every((x, i) => x.alert_id === b[i].alert_id && x.name === b[i].name);
+const FeedRow = memo(
+  FeedRowView,
+  (a, b) =>
+    (Object.keys(a) as (keyof RowProps)[]).every(
+      (key) => key === "caught" || a[key] === b[key],
+    ) && sameAlerts(a.caught, b.caught),
+);
+
+function FeedRowView({
+  item,
+  hit,
+  terms,
+  now,
+  logo,
+  source,
+  unread,
+  selected,
+  fresh,
+  caught,
+  picked,
+  onAlert,
+  onOpen,
+}: RowProps) {
   const at = item.received_at || item.published_at;
   const href = `?record=${encodeURIComponent(item.record_id)}&doc=${encodeURIComponent(item.version_id)}`;
   // A title cut to one line shows whole in a tooltip, on hover or focus.
@@ -1049,7 +1088,7 @@ function FeedRow({
       data-alerted={caught.length > 0 || undefined}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest("a, button")) return;
-        onOpen();
+        onOpen(item);
       }}
     >
       <span className="row-node">
@@ -1070,7 +1109,7 @@ function FeedRow({
             onClick={(event) => {
               if (!event.metaKey && !event.ctrlKey && !event.shiftKey) {
                 event.preventDefault();
-                onOpen();
+                onOpen(item);
               }
             }}
           >
@@ -1084,9 +1123,7 @@ function FeedRow({
         )}
         <div className="row-meta">
           {unread && <span className="visually-hidden">Non lu.</span>}
-          {item.namespace && (
-            <span className="row-source">{sourceName(item.namespace)}</span>
-          )}
+          {source && <span className="row-source">{source}</span>}
           {at ? (
             <time
               className="row-when"
@@ -1133,6 +1170,9 @@ function FeedRow({
     </li>
   );
 }
+
+// Rows mounted in the first frame of the Fil; the rest follow in a transition.
+const FIRST_ROWS = 40;
 
 const DEEP_HINT =
   "Re-classe les résultats selon leur chance de répondre à la recherche. Plus lent, quelques secondes, et peut faire un appel payant.";

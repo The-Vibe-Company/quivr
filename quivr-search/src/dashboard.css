@@ -1102,6 +1102,17 @@ button.moment-pill:hover {
 .row:hover {
   --row-bg: var(--panel);
 }
+/* Rows off screen skip style, layout and paint, which a long feed otherwise
+   redoes on each click. The row under the pointer or the focus is not
+   contained, so its title's tooltip shows whole. */
+.row {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 64px;
+}
+.row:hover,
+.row:focus-within {
+  content-visibility: visible;
+}
 /* A new arrival lights up, then fades back. */
 .row[data-fresh] {
   animation: row-fresh 2.8s var(--ease-out);

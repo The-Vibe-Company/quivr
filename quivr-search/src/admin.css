@@ -1027,6 +1027,21 @@ li[data-fresh] > .flow-row {
 .admin-section[data-section="bottlenecks"] > .admin-section-loading {
   padding: 0;
 }
+/* While it loads, the pipeline keeps about its loaded height (five steps on
+   one row, three per row below 1180 px), so the panels under it stay put. */
+.admin-section[data-section="bottlenecks"]:has(> .admin-section-loading) {
+  min-height: 238px;
+}
+@media (max-width: 1180px) {
+  .admin-section[data-section="bottlenecks"]:has(> .admin-section-loading) {
+    min-height: 460px;
+  }
+}
+@media (max-width: 760px) {
+  .admin-section[data-section="bottlenecks"]:has(> .admin-section-loading) {
+    min-height: 334px;
+  }
+}
 .admin-section[data-section="bottlenecks"] .neck-verdict:not(.visually-hidden) {
   margin: 0 0 12px;
   font-size: 13.5px;

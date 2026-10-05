@@ -1,0 +1,33 @@
+{
+  "profile": {
+    "about": "A mid laptop on a 4G-class link: Chrome's Fast 4G figures and the CPU slowed by half, on a 1440 × 900 window with a cold cache.",
+    "latency_ms": 165,
+    "download_kbps": 9216,
+    "upload_kbps": 1536,
+    "cpu_slowdown": 2
+  },
+  "bundle": {
+    "about": "Gzip sizes (level 9) of the built files, checked by `npm run build` and so by CI.",
+    "initial_js_kb": 120,
+    "initial_css_kb": 25,
+    "chunk_js_kb": 30
+  },
+  "pages": {
+    "lcp_ms": 2000,
+    "cls": 0.1,
+    "initial_js_kb": 120
+  },
+  "inp_ms": 200,
+  "endpoints": {
+    "about": "p95 in ms on the seeded local stack (make demo-perf), measured from the same machine. Reported, not checked, for a remote deployment.",
+    "GET /demo/feed": 150,
+    "GET /demo/feed/days": 150,
+    "GET /demo/feed/page": 200,
+    "GET /demo/alerts": 300,
+    "GET /demo/alerts/:id": 300,
+    "GET /demo/admin": 150,
+    "GET /v0/connectors": 100,
+    "POST /v0/search lexical": 300,
+    "POST /v0/search hybrid": 300
+  }
+}

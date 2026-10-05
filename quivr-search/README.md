@@ -70,6 +70,17 @@ make verify-demo
 
 `make verify` also runs these browser/HTTP tests against an isolated real core. Feeds come from a local test site (`scripts/fake_feeds.py`), so no test reaches the internet. Chromium system dependencies can be installed with `npx --yes --package=@playwright/test@1.63.0 playwright install-deps chromium`. Screenshots and reports live under `.scratch/quivr-demo-verify-*/`. Browser traces may contain demo passwords/texts and remain local; CI uploads only screenshots and reports. Test data are synthetic.
 
+### Speed budgets
+
+`perf/budgets.json` sets them: every page's largest paint (LCP) within 2 s and layout shift (CLS) under 0.1 on a mid laptop over a 4G-class link, every interaction answered within 200 ms (INP), the JavaScript a first visit loads, and the p95 of the facade's main endpoints. `npm run build` checks the bundle sizes, so CI does too. The rest is measured on a machine, never in CI:
+
+```sh
+make demo-perf                                   # seeds a stack of its own, measures it, fails on a broken budget
+QUIVR_DEMO_URL=https://… QUIVR_DEMO_PASSWORD=… npm run perf --prefix quivr-search   # any deployment, read-only
+```
+
+`make demo-perf` adds 12 synthetic sources of 100 articles and six alerts, then also times how long an alert takes to catch a new text; its report is `.scratch/quivr-demo-perf-*/perf.json`. A remote deployment's endpoint times include the network: they are reported, not checked. The facade compresses its answers (brotli or gzip), revalidates reads with an ETag, and names in `Server-Timing` the time and calls each one spent in the core. The Fil ships with the page; the other tabs load when the browser is idle.
+
 ## Server configuration
 
 `npm run build --prefix quivr-search` then `npm start --prefix quivr-search` uses:
