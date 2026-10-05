@@ -109,6 +109,7 @@ var (
 	SavedQueryDeleted                = declare("saved_query_deleted", ConflictClass, false)
 	SavedQueryInUse                  = declare("saved_query_in_use", ConflictClass, false)
 	SearchDeadlineExceeded           = declare("search_deadline_exceeded", DeadlineClass, false)
+	PreviewDeadlineExceeded          = declare("preview_deadline_exceeded", DeadlineClass, true)
 	SearchUnavailable                = declare("search_unavailable", UnavailableClass, true)
 	SourceFilterUnavailable          = declare("source_filter_unavailable", InvalidClass, false)
 	SourceNamespaceInUse             = declare("source_namespace_in_use", ConflictClass, false)
