@@ -285,6 +285,10 @@ x-public-errors:
     status_class: 504
     retryable: false
     operations: [searchRecords]
+  preview_deadline_exceeded:
+    status_class: 504
+    retryable: true
+    operations: [previewSubscription]
   search_unavailable:
     status_class: 503
     retryable: true
@@ -1712,10 +1716,13 @@ paths:
         Version; the pair is validated as at Subscription creation (422 unsupported_evaluator,
         invalid_expression, invalid_subscription_configuration). Each Record Version costs one evaluator
         call, sent with the synthetic Subscription reference preview. At most limit Record Versions
-        (1 to 50, default 20) are judged, within a time budget of a few seconds; those still undecided
+        (1 to 50, default 20) are judged, within a four-second budget including preparation and storage
+        reads; those still undecided
         when it runs out are left out and complete is false. An evaluator that cannot be reached or
         reports a transient failure fails the preview with 503 evaluator_unavailable, and one that
-        refuses or breaks an evaluation with 502 evaluator_error. Quivr applies no rate or cost rule; a
+        refuses or breaks an evaluation with 502 evaluator_error. A deadline during preparation or
+        an earlier caller deadline returns retryable 504 preview_deadline_exceeded. A storage failure
+        remains 503 storage_unavailable. Quivr applies no rate or cost rule; a
         layer above can limit who previews and how often.
       x-required-permissions:
       - monitoring:write
