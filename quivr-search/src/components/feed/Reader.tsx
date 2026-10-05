@@ -247,8 +247,11 @@ export function Reader({
     // feedById changes with every arrival; the neighbours need not follow.
   }, [seed, corpus, doc.record]);
 
+  // Focused in the next frame's work rather than in the click's, which would
+  // lay the page out twice (THE-1056).
   useEffect(() => {
-    heading.current?.focus({ preventScroll: true });
+    const frame = requestAnimationFrame(() => heading.current?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
   }, [doc.record]);
 
   const highlight = useMemo(
