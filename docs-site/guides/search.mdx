@@ -152,6 +152,10 @@ EOF
 
 These outputs come from the `make dev` stack, where `deep` maps to `core.retrieve/deep`. An unknown profile is refused with `422 unsupported_profile`.
 
+## Retry a busy search
+
+When the API has no search capacity left, it returns `503 search_unavailable` with `retryable: true` and a `Retry-After` header. Wait at least that many seconds before retrying, and limit concurrent searches in your client. A dependency outage can return the same code without the header; use bounded backoff for those failures. The [API reference](/api-reference/overview) states the capacity and error contract.
+
 ## Search from the command line
 
 `quivr search` sends the same request from a terminal, with the same `QUIVR_API_URL` and `QUIVR_API_KEY`:
