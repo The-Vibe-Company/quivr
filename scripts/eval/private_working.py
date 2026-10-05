@@ -125,9 +125,4 @@ def trial(request, store):
             'latency_comparable': verdict['gates']['latency']['details'][name]['comparable'] is True}}
         # Both canonical rows are aggregate-only. The candidate lease fences
         # the invocation; a separate baseline row preserves confirmation APIs.
-        claim = store.claim(request['campaign'], baseline_key, policy['max_seconds'])
-        if claim['status'] != 'claimed':
-            raise RuntimeError('private baseline evidence unavailable')
-        store.publish_many(request['campaign'], {baseline_key: (claim['owner'], rows['baseline']),
-                                                 lease[0]: (lease[1], rows['candidate'])})
-        return rows['candidate']
+        return search_trial.publish_pair(store, request, rows)
