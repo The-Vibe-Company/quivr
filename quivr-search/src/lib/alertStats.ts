@@ -1,7 +1,8 @@
 // What an alert's sheet shows about it: how often it catches something, the
 // trend, where and when. The core dates neither Matches nor Subscriptions, so
-// times come from the feed's articles the alert caught (when the facade saw
-// them arrive) and from the date the facade noted when it created the alert.
+// times come from the facade's index of every article (when Quivr accepted
+// each one it caught: exact for the articles the feed read, to the hour for
+// older ones) and from the date the facade noted when it created the alert.
 import type { FeedItem } from "./feed";
 import { daily } from "./moments";
 
@@ -9,7 +10,11 @@ const HOUR = 3600000;
 const DAY = 24 * HOUR;
 const dayMonth = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" });
 
-export const arrivedAt = (item: FeedItem) => item.received_at || item.published_at || "";
+/** An article the index or the feed dates. */
+export type Dated = Pick<FeedItem, "record_id" | "version_id" | "namespace" | "received_at" | "published_at">;
+
+export const arrivedAt = (item: Pick<FeedItem, "received_at" | "published_at">) =>
+  item.received_at || item.published_at || "";
 
 export interface Bar {
   key: string;
@@ -28,24 +33,24 @@ export interface Growth {
 }
 
 export interface AlertStats {
-  /** Where the numbers start: its creation, else the feed's oldest article. */
+  /** Where the numbers start: its creation, else the oldest article indexed. */
   since: number | null;
   /** Whether `since` is the creation date the facade noted. */
   dated: boolean;
   /** Created less than seven days ago. */
   young: boolean;
-  /** The feed's oldest article: counts read from the feed start no earlier. */
+  /** The oldest article indexed: counts start no earlier. */
   feedSince: number | null;
-  /** Caught in the last seven days (or since creation when younger), in the feed. */
+  /** Caught in the last seven days (or since creation when younger). */
   week: number;
   /**
    * Against the seven days before, once the alert is two weeks old and the
-   * feed reaches that far back: a shorter feed would count nothing before.
+   * index reaches that far back: a shorter one would count nothing before.
    */
   growth: Growth | null;
   /** Caught per day since `since`; null when nothing was caught. */
   perDay: number | null;
-  /** Share of the feed's articles since `since` it caught. */
+  /** Share of the articles that arrived since `since` it caught. */
   share: number | null;
   /** Hour by hour over the last day for a young alert, else day by day. */
   mode: "hours" | "days";
@@ -60,31 +65,32 @@ export interface AlertStats {
 export function alertStats({
   createdAt,
   caught,
-  feed,
+  oldest,
+  arrived: arrivedSince,
   now,
   total,
 }: {
   createdAt?: string;
-  /** The feed's articles the alert caught, newest first. */
-  caught: FeedItem[];
-  /** Every article of the feed. */
-  feed: FeedItem[];
+  /** The articles the alert caught, dated, newest first. */
+  caught: Dated[];
+  /** When the oldest article indexed arrived, if any. */
+  oldest: number | null;
+  /** Articles that arrived since `since` (its creation, else `oldest`), as the facade counts them. */
+  arrived: number;
   now: number;
-  /** Matches counted by the facade, the feed's window aside. */
+  /** Matches counted by the facade. */
   total: number;
 }): AlertStats {
-  const parse = (items: FeedItem[]) => items.map((i) => Date.parse(arrivedAt(i))).filter((t) => !Number.isNaN(t));
-  const times = parse(caught);
-  const arrivals = parse(feed);
+  const times = caught.map((i) => Date.parse(arrivedAt(i))).filter((t) => !Number.isNaN(t));
   const created = createdAt ? Date.parse(createdAt) : NaN;
   const dated = !Number.isNaN(created);
-  // An alert older than the dates noted is measured over the feed's window.
-  const since = dated ? created : arrivals.length ? Math.min(...arrivals) : null;
+  // An alert older than the dates noted is measured over the index's window.
+  const since = dated ? created : oldest;
   const age = since === null ? 0 : Math.max(0, now - since);
   const between = (from: number, to: number) => times.filter((t) => t > from && t <= to).length;
 
   const week = between(now - 7 * DAY, now);
-  const feedSince = arrivals.length ? Math.min(...arrivals) : null;
+  const feedSince = oldest;
   const growth = since !== null && age >= 14 * DAY && feedSince !== null && feedSince <= now - 14 * DAY
     ? (() => {
         const before = between(now - 14 * DAY, now - 7 * DAY);
@@ -92,11 +98,10 @@ export function alertStats({
       })()
     : null;
 
-  // Since its creation every Match counts; otherwise only what the feed shows.
+  // Since its creation every Match counts; otherwise only what the index dates.
   const count = dated ? total : times.length;
   const perDay = count && since !== null ? count / Math.max(age / DAY, 1 / 24) : null;
-  const arrived = since === null ? 0 : arrivals.filter((t) => t >= since).length;
-  const share = since !== null && arrived ? Math.min(1, between(since - 1, now) / arrived) : null;
+  const share = since !== null && arrivedSince ? Math.min(1, between(since - 1, now) / arrivedSince) : null;
 
   let mode: AlertStats["mode"] = "days";
   let bars: Bar[];

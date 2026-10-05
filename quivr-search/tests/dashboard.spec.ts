@@ -237,6 +237,39 @@ test("le filtre Date liste chaque jour jusqu’au premier article, compté par Q
   await page.screenshot({ path: info.outputPath("date-menu-mobile.png"), animations: "disabled" });
 });
 
+test("les sujets, les barres et les sources comptent aussi les articles plus anciens que le fil", async ({
+  page,
+}) => {
+  // The feed loads 8 articles; 3 more of "Dépêches exemple" are days older.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(8);
+  const topics = side(page).getByRole("list").first().locator(".topic-label");
+  // Two older titles share "rouvre": a topic of the last seven days.
+  await expect(side(page).locator(".side-total").first()).toHaveText("7 derniers jours");
+  await expect(topics.filter({ hasText: /^Rouvre$/ })).toHaveCount(1);
+
+  // A source narrows the menus, the bars and the topics over every article.
+  const sources = await menu(page, "Sources");
+  await expect(
+    sources.getByRole("button", { name: /^Dépêches exemple/ }).locator(".menu-count"),
+  ).toHaveText("7");
+  await page.keyboard.press("Escape");
+  await pick(page, "Sources", /^Dépêches exemple/);
+  // Bars run oldest first: three days ago holds the port and the market.
+  await expect(side(page).locator(".pulse-column").nth(3)).toHaveAttribute("aria-label", /: 2 articles$/);
+  await expect(topics.filter({ hasText: /^Rouvre$/ })).toHaveCount(1);
+  await pick(page, "Sources", /^Dépêches exemple/);
+  await pick(page, "Sources", /^Revue technique/);
+  await expect(side(page).locator(".pulse-column").nth(3)).toHaveAttribute("aria-label", /: 1 article$/);
+  await expect(topics.filter({ hasText: /^Rouvre$/ })).toHaveCount(0);
+
+  // The Sources page counts the source's articles in all, not the feed's.
+  await page.goto("/?view=sources");
+  const card = page.locator(".source-card").filter({ hasText: "Dépêches exemple" });
+  await expect(card.locator(".sc-stats dd").nth(1)).toHaveText("7");
+});
+
 test("la recherche passe des mots exacts aux idées proches et devient une alerte", async ({
   page,
 }) => {
@@ -431,10 +464,14 @@ test("le formulaire guidé compose tous ces mots, une phrase, l’un de ces mots
   // the seven before, how often, and when it was created (noted by the facade).
   const storm = rowOf("Orages et grêle");
   await storm.getByRole("button", { name: "Orages et grêle" }).click();
-  // The feed only reaches a few hours back: no growth is claimed, and the
-  // week says how far it goes.
-  await expect(sheet.locator(".kpi dd")).toHaveText(["2", "2", "0,1", "25 %"]);
-  await expect(sheet.locator(".kpi dt").nth(1)).toHaveText(/^depuis \d h$/);
+  // The facade's index reaches five days back, the archive beyond the feed
+  // included: no growth is claimed, the week says how far it goes, and the
+  // share counts every article since then (2 of 12), not only the feed's.
+  await expect(sheet.locator(".kpi dd")).toHaveText(["2", "2", "0,1", "17 %"]);
+  // Five days and some hours, rounded as the sheet does, so a late run holds.
+  const oldest = Math.min(...[...engine.ws.articles, ...engine.ws.archive].map((a) => Date.parse(a.received_at!)));
+  const reach = Math.round(Math.round((Date.now() - oldest) / 3600000) / 24);
+  await expect(sheet.locator(".kpi dt").nth(1)).toHaveText(`depuis ${reach} jours`);
   await expect(sheet.locator(".insight")).toHaveCount(0);
   await expect(sheet.locator(".rule-created")).toHaveText(/^créée le \d{1,2} \S+$/);
 
