@@ -341,6 +341,41 @@ export function alertRoutes({
     };
   }
 
+  // Every open page rereads the list on each change it sees, and the list
+  // reads every Match of every alert. A list is read again only once the
+  // demo corpus's change feed has moved: its head cursor, an opaque token,
+  // is the same while nothing changed. Concurrent callers share one read.
+  let shared = null;
+  async function sharedList(corpus) {
+    const head = await upstream(
+      `/v0/changes?${new URLSearchParams({ corpus_id: corpus, limit: "1" })}`,
+    );
+    const position = head.status === 200 ? head.data?.next_cursor : undefined;
+    if (typeof position !== "string" || !position) return listed(corpus);
+    if (shared?.corpus === corpus && shared.position === position)
+      return shared.answer;
+    const entry = { corpus, position, answer: listed(corpus) };
+    shared = entry;
+    const drop = () => {
+      if (shared === entry) shared = null;
+    };
+    // Only a full list is reused: not a refusal, nor "alerts not enabled",
+    // which a key given monitoring rights must stop saying at once.
+    entry.answer.then((response) => {
+      if (response.status !== 200 || !response.data?.available) drop();
+    }, drop);
+    return entry.answer;
+  }
+  // A change made here shows in the next list, even one already on its way.
+  async function changing(action) {
+    shared = null;
+    try {
+      return await action();
+    } finally {
+      shared = null;
+    }
+  }
+
   async function create(req, corpus) {
     const body = await jsonBody(req);
     const idem = key(body);
@@ -549,9 +584,9 @@ export function alertRoutes({
     try {
       if (path === "/demo/alerts")
         return req.method === "GET"
-          ? await listed(corpus)
+          ? await sharedList(corpus)
           : req.method === "POST"
-            ? await create(req, corpus)
+            ? await changing(() => create(req, corpus))
             : undefined;
       if (path === "/demo/alerts/preview")
         return req.method === "POST" ? await preview(req, corpus) : undefined;
@@ -562,9 +597,18 @@ export function alertRoutes({
           ? await detail(match[1], corpus)
           : undefined;
       return req.method === "POST"
-        ? await act(req, match[1], match[2], corpus)
+        ? await changing(() => act(req, match[1], match[2], corpus))
         : undefined;
     } catch (error) {
+      if (path === "/demo/alerts/preview" && error?.name === "TimeoutError")
+        return {
+          status: 504,
+          data: {
+            code: "preview_deadline_exceeded",
+            message: "Le test de l’alerte a pris trop de temps. Réessayez dans un instant.",
+            retryable: true,
+          },
+        };
       // A core answer thrown out of a loop is relayed as is.
       if (error && typeof error.status === "number" && "data" in error)
         return error;

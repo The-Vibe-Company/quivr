@@ -1143,6 +1143,23 @@ button.moment-pill:hover {
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent);
   }
 }
+/* Rows off screen skip style, layout and paint, which a long feed otherwise
+   redoes on each click. The row under the pointer or the focus is not
+   contained, so its title's tooltip shows whole. */
+.row {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 64px;
+}
+.row:hover,
+.row:focus-within {
+  content-visibility: visible;
+}
+/* Touch layouts wrap titles on two lines more often. */
+@media (pointer: coarse) {
+  .row {
+    contain-intrinsic-block-size: auto 86px;
+  }
+}
 /* A new arrival lights up, then fades back. */
 .row[data-fresh] {
   animation: row-fresh 2.8s var(--ease-out);

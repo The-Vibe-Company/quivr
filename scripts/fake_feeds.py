@@ -11,11 +11,13 @@ links and into their titles, so each test run gets its own sources.
 - GET /feeds/ticker.xml  RSS whose every fetch adds one new item
 - GET /feeds/alerts.xml  RSS for the keyword alert tests: every item carries the run
                          id as a word, one about a storm and one about a flower market
+- GET /feeds/bulk.xml?source=<n>&items=<k>  RSS of k synthetic articles (at most 500), the
+                         same on every fetch, for the demo's performance corpus (make demo-perf)
 - GET /_hits?path=/feeds/ticker.xml&run=<id>  {"hits": n} fetches of that feed
 
 All content is synthetic.
 """
-import email.utils, html, http.server, json, threading, time, urllib.parse
+import email.utils, html, http.server, json, random, threading, time, urllib.parse
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -71,6 +73,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, 'application/rss+xml; charset=utf-8', rss('La Vigie exemple' + suffix, [
                 ('alert-1', f'Grêle et orage sur le vignoble {run}', f'Un orage de grêle a couché les vignes du coteau ({run}).'),
                 ('alert-2', f'Le marché aux fleurs rouvre {run}', f'Les fleuristes reviennent sur le quai ({run}).')], run))
+        if url.path == '/feeds/bulk.xml':
+            source = int(query.get('source', ['0'])[0] or 0)
+            items = min(500, int(query.get('items', ['100'])[0] or 100))
+            return self.send(200, 'application/rss+xml; charset=utf-8', bulk(source, items))
         if url.path == '/feeds/ticker.xml':
             items = [(f'tick-{n}', f'Bulletin numéro {n}', f'Bulletin automatique numéro {n} du fil continu.') for n in range(max(1, count - 4), count + 1)]
             return self.send(200, 'application/rss+xml; charset=utf-8', rss('Fil continu exemple' + suffix, items, run))
@@ -88,6 +94,30 @@ def rss(title, items, run):
         f'<item><guid isPermaLink="false">{key}-{html.escape(run)}</guid><title>{html.escape(t)}</title>'
         f'<description>{html.escape(d)}</description><pubDate>{now}</pubDate></item>' for key, t, d in items)
     return f'<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel><title>{html.escape(title)}</title><link>http://example.invalid/</link><description>Flux de test</description>{body}</channel></rss>'
+
+
+WORDS = ('port quai grève marché orage vignoble phare lagune canal récolte conseil budget école hôpital '
+         'train gare route pont tunnel énergie solaire éolien barrage rivière forêt incendie pluie neige '
+         'festival musée théâtre concert livre auteur prix vote élection maire région ministre loi réforme '
+         'usine emploi salaire entreprise banque bourse export pêche bateau navire recherche université '
+         'laboratoire santé vaccin climat température sécheresse inondation').split()
+BULK_EPOCH = 1790000000  # fixed dates: a later fetch re-dates nothing
+
+
+def bulk(source, count):
+    """count articles of a synthetic news source, identical on every fetch."""
+    rng = random.Random(source)
+    sentence = lambda n: ' '.join(rng.choice(WORDS) for _ in range(n)).capitalize() + '.'
+    items = []
+    for k in range(count):
+        title = sentence(rng.randint(6, 14))
+        body = ' '.join(sentence(rng.randint(10, 25)) for _ in range(rng.randint(3, 8)))
+        date = email.utils.formatdate(BULK_EPOCH - k * 1800 - source * 60, usegmt=True)
+        items.append(f'<item><guid isPermaLink="false">bulk-{source}-{k}</guid><title>{html.escape(title)}</title>'
+                     f'<link>https://news{source}.example.org/a/{k}</link><description>{html.escape(body)}</description>'
+                     f'<pubDate>{date}</pubDate></item>')
+    return (f'<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel><title>Source exemple {source}</title>'
+            f'<link>https://news{source}.example.org/</link><description>Flux synthétique</description>{"".join(items)}</channel></rss>')
 
 
 def atom(title, items, run):

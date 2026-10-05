@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node perf/bundle-budget.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "start": "node server.mjs",
-    "test": "node --test tests/server.test.mjs tests/stats.test.mjs tests/feeds.test.mjs tests/alerts.test.mjs tests/admin.test.mjs tests/admin-plugins.test.mjs && playwright test"
+    "test": "node --test tests/server.test.mjs tests/perf-check.test.mjs tests/stats.test.mjs tests/feeds.test.mjs tests/alerts.test.mjs tests/admin.test.mjs tests/admin-plugins.test.mjs && playwright test",
+    "perf": "node perf/measure.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
