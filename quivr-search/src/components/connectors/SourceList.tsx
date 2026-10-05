@@ -101,10 +101,13 @@ export function WeekSpark({
   week,
   most,
   now,
+  counted = true,
 }: {
   week: { day: string; count: number }[];
   most: number;
   now: number;
+  /** False until the facade counted them: no day claims zero meanwhile. */
+  counted?: boolean;
 }) {
   return (
     <div
@@ -112,14 +115,14 @@ export function WeekSpark({
       role="img"
       tabIndex={0}
       data-tips
-      aria-label={`Articles reçus sur 7 jours : ${week.map((d) => d.count).join(", ")}`}
+      aria-label={`Articles reçus sur 7 jours : ${counted ? week.map((d) => d.count).join(", ") : "comptage en cours"}`}
     >
       {week.map((d, i) => (
         <span
           key={d.day}
           data-now={i === week.length - 1 || undefined}
           data-zero={!d.count || undefined}
-          data-tip={`${dayLabel(d.day, now)} · ${plural(d.count, "article")}`}
+          data-tip={counted ? `${dayLabel(d.day, now)} · ${plural(d.count, "article")}` : undefined}
           style={d.count ? { height: `${Math.max(8, (d.count / most) * 100)}%` } : undefined}
         />
       ))}
@@ -494,7 +497,7 @@ function SourceCard({
           </div>
         </dl>
       )}
-      <WeekSpark week={week} most={most} now={now} />
+      <WeekSpark week={week} most={most} now={now} counted={!!stats} />
       {confirming ? (
         <div className="sc-foot row-actions" role="group" aria-label={`Retirer ${name}`}>
           <span className="row-confirm">Retirer cette source ? Les articles déjà reçus restent.</span>

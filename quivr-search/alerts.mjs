@@ -504,12 +504,19 @@ export function alertRoutes({
   // behind it, so counting never waits for Matches to be paged.
   let asked = null;
   let known = null;
+  let order = 0;
+  let knownOrder = 0;
   function listed(corpus) {
     const pending = list(corpus);
+    const mine = ++order;
     asked = { at: Date.now(), pending };
     pending.then(
       (result) => {
-        if (result.status === 200) known = result.data.matched;
+        // A slower, older list never replaces a newer one.
+        if (result.status === 200 && mine > knownOrder) {
+          known = result.data.matched;
+          knownOrder = mine;
+        }
       },
       () => {},
     );

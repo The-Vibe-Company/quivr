@@ -1190,4 +1190,7 @@ test("the demo's numbers count every article of the corpus, beyond the feed's la
   for (const bad of [{ buckets: [...bounds].reverse() }, { read: "some" }, { sources: "Revue technique" }])
     assert.equal((await stats(bad)).status, 422, JSON.stringify(bad));
   assert.equal((await fetch(`${base}/demo/feed/topics`)).status, 422);
+  // Topics cover a week or a day: a longer period would read too many titles.
+  const long = new URLSearchParams({ after: iso(now - 9 * DAY), before: iso(now) });
+  assert.equal((await fetch(`${base}/demo/feed/topics?${long}`)).status, 422);
 });

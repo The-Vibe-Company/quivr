@@ -23,6 +23,9 @@ export function useNumbers<T extends { building: boolean }>(
 ) {
   const [data, setData] = useState<{ key: string; value: T } | null>(null);
   const [tick, setTick] = useState(0);
+  const [failures, setFailures] = useState(0);
+  // A refresh waits for the answer on its way rather than cancel it.
+  const busy = useRef(false);
   const loader = useRef(load);
   loader.current = load;
   const unauthorized = useRef(onUnauthorized);
@@ -34,6 +37,7 @@ export function useNumbers<T extends { building: boolean }>(
     const controller = new AbortController();
     // The first answer is asked at once; later ones wait for the filter to settle.
     const timer = setTimeout(() => {
+      busy.current = true;
       loader
         .current(controller.signal)
         .then((value) => {
@@ -44,27 +48,36 @@ export function useNumbers<T extends { building: boolean }>(
           if (controller.signal.aborted) return;
           if (error instanceof APIError && error.status === 401) unauthorized.current();
           // Otherwise the last numbers stay until the next refresh.
+          else setFailures((n) => n + 1);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) busy.current = false;
         });
     }, fetched.current ? DEBOUNCE_MS : 0);
     return () => {
       clearTimeout(timer);
       controller.abort();
+      busy.current = false;
     };
   }, [key, tick]);
 
   useEffect(() => {
     if (key === null) return;
     const timer = setTimeout(
-      () => setTick((n) => n + 1),
+      () => {
+        if (!busy.current) setTick((n) => n + 1);
+      },
       data?.value.building ? BUILDING_MS : REFRESH_MS,
     );
     return () => clearTimeout(timer);
-  }, [key, data, tick]);
+  }, [key, data, tick, failures]);
 
   useEffect(() => {
     if (arrivals === undefined || !fetched.current) return;
     const wait = Math.max(0, fetched.current + every - Date.now());
-    const timer = setTimeout(() => setTick((n) => n + 1), wait);
+    const timer = setTimeout(() => {
+      if (!busy.current) setTick((n) => n + 1);
+    }, wait);
     return () => clearTimeout(timer);
   }, [arrivals, every]);
 

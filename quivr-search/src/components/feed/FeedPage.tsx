@@ -174,10 +174,9 @@ export function FeedPage({
     since: reading.since,
     read_ids: reading.readIds,
   };
+  const readKey = `${reading.readIds.length}:${reading.readIds.at(-1)}`;
   const counted = useNumbers(
-    query
-      ? null
-      : JSON.stringify({ ...statsQuery, read_ids: `${reading.readIds.length}:${reading.readIds.at(-1)}` }),
+    query ? null : JSON.stringify({ ...statsQuery, read_ids: readKey }),
     (signal) => fetchFeedStats(statsQuery, signal),
     onUnauthorized,
     // Counted in memory by the facade: arrivals show in the counts at once.
@@ -406,18 +405,24 @@ export function FeedPage({
   // counts them, and they show once it answered.
   const numbers = counted?.value;
   const local = !!query;
-  const allCount =
-    inQuivr && facetFree ? (day ? days.get(day) || 0 : everyDay) : local ? readable.length : numbers?.all;
+  let allCount = numbers?.all;
+  if (local) allCount = readable.length;
+  else if (inQuivr && facetFree) allCount = day ? days.get(day) || 0 : everyDay;
   const unreadCount = local ? readable.filter((i) => reading.isUnread(i)).length : numbers?.unread;
   // The side column's bars: Quivr's day counts without a filter, else the
-  // facade's for this filter, else (in a search) the articles found.
-  const bars = counted?.current ? numbers!.buckets : null;
-  const weekCounts =
-    inQuivr && facetFree && filter.read === "all"
-      ? days
-      : bars && !day
-        ? new Map(bars.map((n, i) => [dayOf(Date.parse(week[i + 1])), n]))
-        : undefined;
+  // facade's for this filter, else (in a search) the articles found. Reading
+  // an article changes them only when unread articles are picked.
+  const barsKey = JSON.stringify({
+    ...statsQuery,
+    since: filter.read === "unread" ? statsQuery.since : "",
+    read_ids: filter.read === "unread" ? readKey : "",
+  });
+  const lastBars = useRef<{ key: string; buckets: number[] } | null>(null);
+  if (counted?.current) lastBars.current = { key: barsKey, buckets: counted.value.buckets };
+  const bars = lastBars.current?.key === barsKey ? lastBars.current.buckets : null;
+  let weekCounts: Map<string, number> | undefined;
+  if (inQuivr && facetFree && filter.read === "all") weekCounts = days;
+  else if (bars && !day) weekCounts = new Map(bars.map((n, i) => [dayOf(Date.parse(week[i + 1])), n]));
   const hourCounts =
     bars && hours
       ? hours.hours.reduce(
@@ -856,14 +861,18 @@ export function FeedPage({
                 Tout effacer
               </button>
             )}
-            {(local || !numbers ? readable.some((i) => reading.isUnread(i)) : numbers.unread > 0) && (
+            {/* With nothing picked it reads every article, so Quivr's count
+                decides; otherwise it reads the articles shown. */}
+            {(numbers && !local && !day && facetFree
+              ? numbers.unread > 0
+              : readable.some((i) => reading.isUnread(i))) && (
               <button
                 type="button"
                 className="mark-read"
                 title="Marquer comme lus les articles affichés"
                 onClick={() => {
                   // With nothing picked, every article so far, loaded or not.
-                  if (numbers && !day && facetFree) reading.markEverythingRead();
+                  if (numbers && !local && !day && facetFree) reading.markEverythingRead();
                   else reading.markAllRead(readable.filter((i) => reading.isUnread(i)));
                   // The button goes once all is read: the focus moves to the filters.
                   document.querySelector<HTMLElement>(".filters .chip")?.focus();

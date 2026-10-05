@@ -27,6 +27,12 @@ const MAX_RECORDS = 200000;
 const REBUILD_MS = 6 * HOUR;
 const RETRY_MS = 30000;
 const MAX_TITLES = 30000;
+// Topics count at most the newest titles of a period of at most eight days
+// (seven local days and a clock change), so one period never evicts itself.
+const TOPIC_TITLES = 20000;
+const MAX_TOPIC_SPAN = 8 * DAY;
+// A Version whose title could not be read is tried again after this.
+const UNREADABLE_MS = 10 * 60000;
 const TOPICS = 10;
 const TOPICS_FRESH_MS = 15000;
 const TOPICS_TTL_MS = 60000;
@@ -106,8 +112,10 @@ export function statsQuery(body) {
 export function topicsQuery(params) {
   if (!params.get("after") || !params.get("before")) throw invalid();
   const list = (name) => strings(params.getAll(name), MAX_FACETS).sort();
+  const span = period(params.get("after"), params.get("before"));
+  if (span.before - span.after > MAX_TOPIC_SPAN) throw invalid();
   return {
-    ...period(params.get("after"), params.get("before")),
+    ...span,
     sources: list("source"),
     muted: list("muted"),
     alerts: list("alert"),
@@ -119,6 +127,7 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
   const entries = new Map();
   const titles = new Map();
   const wanted = new Map();
+  const unreadable = new Map();
   let generation = 0;
   let build = null;
   let builtAt = 0;
@@ -127,6 +136,8 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
   // The index is whole for every article accepted at or after this time.
   let completeAfter = Infinity;
   let pumping = false;
+  // The newest MAX_RECORDS are indexed; older ones are left out (`partial`).
+  let capped = false;
 
   const query = (extra) =>
     new URLSearchParams({ corpus_id: corpus, ...extra }).toString();
@@ -144,6 +155,7 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
   // Every Record accepted in one hour, dated by that hour unless the index
   // already knows its exact time for the same Version.
   async function listHour(start, round) {
+    const at = round.at;
     let cursor;
     do {
       const extra = {
@@ -162,18 +174,22 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
           continue;
         }
         const known = entries.get(record.record_id);
-        if (known?.version_id === record.current_version_id) {
-          known.seen = round;
+        if (round.listed >= MAX_RECORDS) {
+          round.skipped += 1;
           continue;
         }
-        if (!known && entries.size >= MAX_RECORDS) continue;
+        round.listed += 1;
+        if (known?.version_id === record.current_version_id) {
+          known.seen = at;
+          continue;
+        }
         entries.set(record.record_id, {
           record_id: record.record_id,
           version_id: record.current_version_id,
           namespace: record.source?.namespace || "",
           at: start,
           exact: false,
-          seen: round,
+          seen: at,
         });
         generation += 1;
       }
@@ -187,13 +203,13 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
     // The feed's first catalog scan goes first: the page shows sooner, and
     // the index starts with the latest articles' exact times and titles.
     await ready();
-    const round = Date.now();
+    const round = { at: Date.now(), listed: 0, skipped: 0 };
     const first = !builtAt;
-    let top = utcDay(round) + DAY;
+    let top = utcDay(round.at) + DAY;
+    let older = 0;
     for (let done = 0; done < MAX_DAYS; done += CHUNK_DAYS) {
       const days = Array.from({ length: CHUNK_DAYS }, (_, i) => top - (i + 1) * DAY);
       const counts = new Map();
-      let older = 0;
       await pool([...days, "older"], CONCURRENCY, async (day) => {
         if (day === "older") older = await count(undefined, days.at(-1));
         else counts.set(day, await count(day, day + DAY));
@@ -201,19 +217,20 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
       for (const day of days) {
         if (counts.get(day)) {
           const hours = Array.from({ length: 24 }, (_, i) => day + (23 - i) * HOUR).filter(
-            (hour) => hour <= round,
+            (hour) => hour <= round.at,
           );
           await pool(hours, CONCURRENCY, (hour) => listHour(hour, round));
         }
         if (first) completeAfter = day;
       }
       top = days.at(-1);
-      if (!older || entries.size >= MAX_RECORDS) break;
+      if (!older || round.listed >= MAX_RECORDS) break;
     }
+    capped = round.skipped > 0 || (round.listed >= MAX_RECORDS && older > 0);
     // What the listing no longer holds, and the feed did not note since,
     // was withdrawn or left the corpus.
     for (const [id, entry] of entries)
-      if (entry.seen !== round && !(entry.exact && entry.noted >= round)) {
+      if (entry.seen !== round.at && !(entry.exact && entry.noted >= round.at)) {
         entries.delete(id);
         generation += 1;
       }
@@ -238,8 +255,18 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
       });
   }
 
+  // Live arrivals past the cap push the oldest entries out, a batch at a time.
+  function trim() {
+    if (entries.size <= MAX_RECORDS * 1.05) return;
+    const oldest = [...entries.values()].sort((a, b) => a.at - b.at);
+    for (const entry of oldest.slice(0, entries.size - MAX_RECORDS)) entries.delete(entry.record_id);
+    capped = true;
+    generation += 1;
+  }
+
   const status = () => ({
     building: !!build || !builtAt,
+    partial: capped,
     complete_after: Number.isFinite(completeAfter) ? iso(Math.max(completeAfter, 0)) : null,
   });
 
@@ -256,8 +283,17 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
           const response = await upstream(
             `/v0/records/${encodeURIComponent(entry.record_id)}/versions/${encodeURIComponent(entry.version_id)}`,
           ).catch(() => ({ status: 503 }));
-          if (response.status !== 200) return;
-          remember(entry.version_id, describe({ record_id: entry.record_id }, response.data).title);
+          const title =
+            response.status === 200
+              ? describe({ record_id: entry.record_id }, response.data).title
+              : undefined;
+          if (title === undefined) {
+            unreadable.delete(entry.version_id);
+            unreadable.set(entry.version_id, Date.now());
+            if (unreadable.size > MAX_TITLES) unreadable.delete(unreadable.keys().next().value);
+            return;
+          }
+          remember(entry.version_id, title);
           const exact = Date.parse(response.data.accepted_at);
           const known = entries.get(entry.record_id);
           if (known?.version_id === entry.version_id && !Number.isNaN(exact)) {
@@ -301,10 +337,14 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
       return hit.value;
     const matched = q.alerts.length ? await matchedMap() : new Map();
     const keep = filterOf({ ...q, read: "all" }, matched);
+    let period = [];
+    for (const entry of entries.values()) if (keep(entry)) period.push(entry);
+    if (period.length > TOPIC_TITLES)
+      period = period.sort((a, b) => b.at - a.at).slice(0, TOPIC_TITLES);
     const known = [];
     let missing = 0;
-    for (const entry of entries.values()) {
-      if (!keep(entry)) continue;
+    for (const entry of period) {
+      if (now - (unreadable.get(entry.version_id) ?? -Infinity) < UNREADABLE_MS) continue;
       const title = titles.get(entry.version_id);
       if (title !== undefined) known.push(title);
       else {
@@ -312,7 +352,8 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
         if (wanted.size < MAX_TITLES) wanted.set(entry.version_id, entry);
       }
     }
-    if (missing) void pump();
+    if (missing)
+      pump().catch((error) => console.warn(`Index: titles not read (${error.message})`));
     const value = {
       items: topics(known, TOPICS),
       ...status(),
@@ -331,7 +372,6 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
       const at = Date.parse(item.received_at || "");
       if (Number.isNaN(at)) return;
       const known = entries.get(item.record_id);
-      if (!known && entries.size >= MAX_RECORDS) return;
       entries.set(item.record_id, {
         record_id: item.record_id,
         version_id: item.version_id,
@@ -343,6 +383,7 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
       });
       remember(item.version_id, item.title);
       generation += 1;
+      trim();
     },
     /** A Record withdrawn, or gone from the corpus. */
     drop(id) {

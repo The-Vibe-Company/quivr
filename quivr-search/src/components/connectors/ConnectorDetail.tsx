@@ -129,7 +129,7 @@ export function ConnectorDetail({
               <dd>{stats ? stats.caught : "—"}</dd>
             </div>
           </dl>
-          <WeekSpark week={week} most={most} now={now} />
+          <WeekSpark week={week} most={most} now={now} counted={!!stats} />
           <dl className="settings-facts">
             <dt>Dernier article</dt>
             <dd>
