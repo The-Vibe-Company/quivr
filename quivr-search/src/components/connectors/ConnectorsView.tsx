@@ -24,7 +24,7 @@ import { Dialog } from "../Dialog";
 import { AddSource } from "./AddSource";
 import { NO_ARTICLES, SourceList, groupSources, nameOf, type SourceStats } from "./SourceList";
 import { PlusIcon } from "../RailIcons";
-import { InBar, LiveBadge, LoadingState, Notice, liveFeed, type Bar } from "../ui";
+import { InBar, LoadingState, Notice, type Bar } from "../ui";
 import type { FeedItem } from "../../lib/feed";
 import { needsCheck } from "../../lib/format";
 import { displayState } from "./HealthBadge";
@@ -77,7 +77,6 @@ export function ConnectorsView({
   const [connectors, setConnectors] = useState<Connector[]>(seen?.connectors ?? []);
   const [selected, setSelected] = useState<string | null>(initialSelected);
   const [creating, setCreating] = useState(false);
-  const [live, setLive] = useState(liveFeed.seen);
   const [announcement, setAnnouncement] = useState("");
   const [now, setNow] = useState(Date.now());
   const [attempt, setAttempt] = useState(0);
@@ -220,8 +219,6 @@ export function ConnectorsView({
                   },
                 );
               cursor = page.next_cursor;
-              liveFeed.seen = true;
-              setLive(true);
               if (!page.has_more) break;
             }
             if (arrivals || Date.now() - refreshed > LIVE_INTERVAL * 3) {
@@ -235,8 +232,6 @@ export function ConnectorsView({
             cursor = null;
           } else if (e instanceof APIError && e.status === 403) {
             feed = false;
-            liveFeed.seen = false;
-            setLive(false);
           } else if (e instanceof APIError && e.status === 401) {
             onUnauthorized();
             return;
@@ -390,7 +385,7 @@ export function ConnectorsView({
       )}
       {status === "ready" && catalog && (
         <section className="sources-page" aria-labelledby="sources-title">
-          {/* The counts, the live state and "Ajouter une source" sit in the top bar. */}
+          {/* The counts and "Ajouter une source" sit in the top bar. */}
           <h2 id="sources-title" className="visually-hidden" ref={listHeading} tabIndex={-1}>
             Vos sources
           </h2>
@@ -408,7 +403,6 @@ export function ConnectorsView({
             )}
           </InBar>
           <InBar to={bar.actions}>
-            <LiveBadge live={live} />
             {catalog.items.length > 0 && (
               <button type="button" className="button alerts-new" onClick={openAdd}>
                 <PlusIcon size={16} />

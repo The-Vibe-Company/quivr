@@ -231,11 +231,9 @@ const LIVE_INTERVAL = 3000;
  */
 export function followMonitoring({
   onChange,
-  onLive,
   onUnauthorized,
 }: {
   onChange: (signal: AbortSignal) => Promise<void>;
-  onLive?: (live: boolean) => void;
   onUnauthorized: () => void;
 }): () => void {
   const controller = new AbortController();
@@ -253,7 +251,6 @@ export function followMonitoring({
               /^(match|subscription|saved_query)\./.test(e.type),
             );
             cursor = page.next_cursor;
-            onLive?.(true);
             if (!page.has_more) break;
           }
         if (changed) await onChange(controller.signal);
@@ -263,7 +260,6 @@ export function followMonitoring({
           cursor = null;
         else if (e instanceof APIError && e.status === 403) {
           feed = false;
-          onLive?.(false);
         } else if (e instanceof APIError && e.status === 401) {
           onUnauthorized();
           return;

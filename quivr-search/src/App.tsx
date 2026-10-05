@@ -501,7 +501,7 @@ function Dashboard({
             </kbd>
           )}
         </form>
-        {/* A page's live state and main action, at the top right. */}
+        {/* A page's main action, at the top right. */}
         <div className="bar-actions" ref={setBarActions} />
       </header>
       {view === "feed" ? (

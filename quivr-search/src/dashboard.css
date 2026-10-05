@@ -336,9 +336,9 @@ mark {
   position: sticky;
   top: 0;
   z-index: 20;
-  /* The title at the left, the search in the middle, the page's live state
-     and main action at the right: both sides share the rest, so the search
-     stays centred and gives way first when the bar is short. */
+  /* The title at the left, the search in the middle, the page's main
+     action at the right: both sides share the rest, so the search stays
+     centred and gives way first when the bar is short. */
   display: grid;
   grid-template-columns: minmax(max-content, 1fr) minmax(0, 460px) minmax(max-content, 1fr);
   align-items: center;
@@ -409,20 +409,6 @@ mark {
 }
 .bar-meta .list-count {
   white-space: nowrap;
-}
-/* Short of room, the live state keeps its dot; its words stay for screen readers. */
-@media (max-width: 1100px) {
-  .bar-actions .live-badge {
-    gap: 0;
-  }
-  .bar-actions .live-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
 }
 .bar-search {
   grid-column: 2;
@@ -581,9 +567,6 @@ mark {
 }
 .list-count[data-tone="ok"] {
   color: var(--success);
-}
-.list-head .live-badge {
-  margin-left: auto;
 }
 .list-empty {
   padding: 60px 24px;
@@ -2389,15 +2372,7 @@ button.moment-pill:hover {
     grid-column: 2;
     grid-row: 1;
   }
-  /* The live state and the action keep their words for screen readers; on
-     screen, the action is its "+" alone. */
-  .bar-actions .live-badge {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
+  /* The action keeps its name for screen readers, and only its "+" on screen. */
   .bar-actions .alerts-new {
     width: 36px;
     padding: 0;
