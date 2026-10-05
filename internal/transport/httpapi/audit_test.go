@@ -17,6 +17,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
@@ -89,7 +90,7 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 	connectorRegistry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("fixture-audit-credential-key-0123456789")
 	connectorStore := &memoryConnectors{items: map[string]connectors.Instance{}}
-	handler, err := httpapi.New(auditCorpora{}, content.Service{Submissions: auditWithdrawals{}}, retrieval.Service{}, uploads.Service{}, keys, catalogCursorKey, httpapi.WithAudit(sink), httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: connectorRegistry, Sealer: sealer, Tokens: auditTokens{}}), httpapi.WithBackfills(backfill.Service{Store: estimateStore, Registry: estimateStore, Plans: backfillPlans{}}, backfill.Promotions{}), httpapi.WithQuarantine(quarantine.Service{Store: quarantineStore{estimates: map[string][]byte{}}}))
+	handler, err := httpapi.New(auditCorpora{}, content.Service{Submissions: auditWithdrawals{}}, retrieval.Service{}, uploads.Service{}, keys, catalogCursorKey, httpapi.WithAudit(sink), httpapi.WithMonitoring(monitoring.Service{Evaluations: &evaluationAdministration{}}), httpapi.WithConnectors(connectors.Service{Store: connectorStore, Registry: connectorRegistry, Sealer: sealer, Tokens: auditTokens{}}), httpapi.WithBackfills(backfill.Service{Store: estimateStore, Registry: estimateStore, Plans: backfillPlans{}}, backfill.Promotions{}), httpapi.WithQuarantine(quarantine.Service{Store: quarantineStore{estimates: map[string][]byte{}}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +134,7 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 		{"POST", "/v0/operations/operation_a/resume", "operation.resume", "operation", "operation_a"},
 		{"POST", "/v0/admin/backfills", "operation.backfill", "operation", ""},
 		{"POST", "/v0/admin/quarantine/reprocess", "operation.reprocess", "operation", ""},
+		{"POST", "/v0/admin/subscriptions/evaluation-retirements", "evaluation.retire", "evaluation_retirement", ""},
 		{"POST", "/v0/admin/spaces/space_a/promote", "vector_space.promote", "vector_space", "space_a"},
 	} {
 		before := len(sink.events)
@@ -152,10 +154,10 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 	if len(sink.events) != before {
 		t.Fatal("read or search audited")
 	}
+	logs.Reset()
 	w = request("POST", "/v0/corpora", "unknown-key-secret", `{}`)
-	anonymous := sink.events[len(sink.events)-1]
-	if w.Code != 401 || anonymous.Actor != "" || anonymous.Organization != "" || anonymous.Detail.ErrorCode != "invalid_api_key" {
-		t.Fatalf("unauthenticated event %+v status=%d", anonymous, w.Code)
+	if w.Code != 401 || len(sink.events) != before || !strings.Contains(logs.String(), `"error_code":"invalid_api_key"`) || strings.Contains(logs.String(), `"event":"quivr.audit"`) {
+		t.Fatalf("anonymous admission status=%d events=%d log=%s", w.Code, len(sink.events), logs.String())
 	}
 	// Successful estimates do not enter the audit, but the subsequent
 	// confirmation remains usable and produces the operation target.
@@ -174,6 +176,17 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 		if w.Code != 202 || len(sink.events) != before+1 || sink.events[before].TargetID == "" {
 			t.Fatalf("confirmation %s status=%d events=%+v body=%s", path, w.Code, sink.events, w.Body.String())
 		}
+	}
+	// Retirement uses 200 for both an estimate and a real command. Only the
+	// successful real command is audited, with its resolved retirement ID.
+	before = len(sink.events)
+	w = request("POST", "/v0/admin/subscriptions/evaluation-retirements", token, `{"key":"retire","plugin_id":"alert-rules","version":"1.0.0","reason":"Retire old build","dry_run":true}`)
+	if w.Code != 200 || len(sink.events) != before {
+		t.Fatalf("retirement estimate status=%d events=%d", w.Code, len(sink.events))
+	}
+	w = request("POST", "/v0/admin/subscriptions/evaluation-retirements", token, `{"key":"retire","plugin_id":"alert-rules","version":"1.0.0","reason":"Retire old build","dry_run":false}`)
+	if w.Code != 200 || len(sink.events) != before+1 || sink.events[before].TargetID != "retirement_1" || sink.events[before].Action != "evaluation.retire" {
+		t.Fatalf("retirement command status=%d events=%+v", w.Code, sink.events)
 	}
 	// Credential deposits and generated token secrets pass through production
 	// services; only their public metadata may reach the audit sink or logger.

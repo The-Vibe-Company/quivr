@@ -2512,21 +2512,27 @@ paths:
       parameters:
       - name: since
         in: query
+        description: Inclusive RFC3339 timestamp.
         schema: {type: string, format: date-time}
       - name: until
         in: query
+        description: Exclusive RFC3339 timestamp.
         schema: {type: string, format: date-time}
       - name: actor
         in: query
+        description: Exact API key identifier; no substring matching.
         schema: {type: string}
       - name: action
         in: query
+        description: Exact audit action name; no substring matching.
         schema: {type: string}
       - name: target_type
         in: query
+        description: Exact target type; no substring matching.
         schema: {type: string}
       - name: target_id
         in: query
+        description: Exact target identifier; no substring matching.
         schema: {type: string}
       - name: limit
         in: query

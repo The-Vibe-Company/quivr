@@ -1366,12 +1366,12 @@ List immutable sensitive-action entries for the API key's organization, newest f
 
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
-| `since` | query | string (date-time) |  |  |
-| `until` | query | string (date-time) |  |  |
-| `actor` | query | string |  |  |
-| `action` | query | string |  |  |
-| `target_type` | query | string |  |  |
-| `target_id` | query | string |  |  |
+| `since` | query | string (date-time) |  | Inclusive RFC3339 timestamp. |
+| `until` | query | string (date-time) |  | Exclusive RFC3339 timestamp. |
+| `actor` | query | string |  | Exact API key identifier; no substring matching. |
+| `action` | query | string |  | Exact audit action name; no substring matching. |
+| `target_type` | query | string |  | Exact target type; no substring matching. |
+| `target_id` | query | string |  | Exact target identifier; no substring matching. |
 | `limit` | query | integer |  | Default `50`. Minimum `1`. Maximum `200`. |
 | `page_cursor` | query | string |  |  |
 

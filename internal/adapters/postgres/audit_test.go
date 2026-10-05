@@ -11,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
+	"github.com/jackc/pgx/v5"
 )
 
 // The storage owner proves request-wide atomicity over a single-statement
@@ -121,6 +122,29 @@ func TestAuditTransactionAndAppendOnlyRetention(t *testing.T) {
 	if err != nil || len(other) != 0 {
 		t.Fatalf("organization isolation: %+v %v", other, err)
 	}
+	// PUBLIC must not be able to invoke owner-privileged retention. Operators
+	// grant a separate runtime role explicitly; the migration owner still works.
+	func() {
+		conn, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Release()
+		role := pgx.Identifier{fmt.Sprintf("audit_untrusted_%d", time.Now().UnixNano())}.Sanitize()
+		if _, err = conn.Exec(ctx, "CREATE ROLE "+role); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			_, _ = conn.Exec(context.WithoutCancel(ctx), "RESET ROLE")
+			_, _ = conn.Exec(context.WithoutCancel(ctx), "DROP ROLE "+role)
+		}()
+		if _, err = conn.Exec(ctx, "SET ROLE "+role); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = conn.Exec(ctx, `SELECT prune_audit_events(12,1000)`); err == nil {
+			t.Fatal("untrusted role invoked privileged audit pruning")
+		}
+	}()
 	// Seed historical INSERTs instead of sleeping or mutating immutable rows.
 	if _, err = pool.Exec(ctx, `INSERT INTO audit_events(occurred_at,actor,action,target_type,target_id,organization,outcome,request_id,detail) VALUES(now()-interval '13 months','key-id','old','corpus','old',$1,'accepted','old','{}')`, org); err != nil {
 		t.Fatal(err)

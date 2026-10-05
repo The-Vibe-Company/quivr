@@ -54,6 +54,7 @@ var auditedRoutes = map[string]auditedRoute{
 	"POST /v0/operations/{operation_id}/resume":                   {"operation.resume", "operation", "operation_id"},
 	"POST /v0/admin/backfills":                                    {"operation.backfill", "operation", ""},
 	"POST /v0/admin/quarantine/reprocess":                         {"operation.reprocess", "operation", ""},
+	"POST /v0/admin/subscriptions/evaluation-retirements":         {"evaluation.retire", "evaluation_retirement", ""},
 	"POST /v0/admin/spaces/{vector_space_id}/promote":             {"vector_space.promote", "vector_space", "vector_space_id"},
 }
 
@@ -63,14 +64,17 @@ func (a *API) serveSensitive(w http.ResponseWriter, r *http.Request) {
 		a.servePushAudited(w, r)
 		return
 	}
+	// Unknown keys have no authenticated actor or organization. Refuse them
+	// before database admission; the access log preserves the bounded refusal.
+	token, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	scope, known := a.Keys[token]
+	if !bearer || !known {
+		a.servePushAudited(w, r)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
-	event := audit.Event{Action: route.action, TargetType: route.target, RequestID: logging.RequestID(ctx)}
-	token, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if scope, ok := a.Keys[token]; bearer && ok {
-		event.Actor = apiKeyID(token)
-		event.Organization = scope.Organization
-	}
+	event := audit.Event{Action: route.action, TargetType: route.target, Actor: apiKeyID(token), Organization: scope.Organization, RequestID: logging.RequestID(ctx)}
 	pattern, parts := strings.Split(r.Pattern, "/"), strings.Split(r.URL.Path, "/")
 	for i, p := range pattern {
 		if p == "{"+route.parameter+"}" && i < len(parts) {
@@ -105,6 +109,7 @@ func (a *API) serveSensitive(w http.ResponseWriter, r *http.Request) {
 				OperationID    string `json:"operation_id"`
 				PlanID         string `json:"plan_id"`
 				RetirementID   string `json:"retirement_id"`
+				DryRun         bool   `json:"dry_run"`
 				Credential     *struct {
 					Version int `json:"version"`
 				} `json:"credential"`
@@ -121,7 +126,7 @@ func (a *API) serveSensitive(w http.ResponseWriter, r *http.Request) {
 				event.TargetType = "connector_token"
 				event.TargetID = boundedAuditID(result.Token.ID)
 			}
-			if buffered.status == 200 && (route.action == "operation.backfill" || route.action == "operation.reprocess") {
+			if buffered.status == 200 && (route.action == "operation.backfill" || route.action == "operation.reprocess" || (route.action == "evaluation.retire" && result.DryRun)) {
 				return audit.ErrReadOnly
 			}
 			if event.TargetID == "" {

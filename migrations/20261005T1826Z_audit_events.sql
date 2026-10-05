@@ -54,3 +54,6 @@ BEGIN
  RETURN removed;
 END;
 $$;
+
+-- Database operators grant this privilege to their worker role explicitly.
+REVOKE EXECUTE ON FUNCTION public.prune_audit_events(integer,integer) FROM PUBLIC;

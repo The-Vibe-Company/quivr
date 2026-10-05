@@ -3220,14 +3220,25 @@ type WithdrawalCommand struct {
 
 // ListAuditEventsParams defines parameters for ListAuditEvents.
 type ListAuditEventsParams struct {
-	Since      *time.Time `form:"since,omitempty" json:"since,omitempty"`
-	Until      *time.Time `form:"until,omitempty" json:"until,omitempty"`
-	Actor      *string    `form:"actor,omitempty" json:"actor,omitempty"`
-	Action     *string    `form:"action,omitempty" json:"action,omitempty"`
-	TargetType *string    `form:"target_type,omitempty" json:"target_type,omitempty"`
-	TargetId   *string    `form:"target_id,omitempty" json:"target_id,omitempty"`
-	Limit      *int       `form:"limit,omitempty" json:"limit,omitempty"`
-	PageCursor *string    `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+	// Since Inclusive RFC3339 timestamp.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// Until Exclusive RFC3339 timestamp.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
+
+	// Actor Exact API key identifier; no substring matching.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// Action Exact audit action name; no substring matching.
+	Action *string `form:"action,omitempty" json:"action,omitempty"`
+
+	// TargetType Exact target type; no substring matching.
+	TargetType *string `form:"target_type,omitempty" json:"target_type,omitempty"`
+
+	// TargetId Exact target identifier; no substring matching.
+	TargetId   *string `form:"target_id,omitempty" json:"target_id,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
 }
 
 // ListAdminDocumentsParams defines parameters for ListAdminDocuments.
