@@ -95,6 +95,7 @@ class Lifecycle(unittest.TestCase):
         # Own intent lifecycle at the supervisor adapter; a busy slot should
         # leave nothing for the watchdog. Only Modal launch/termination is fake.
         import campaign_compute
+        import network_recovery
         name = self.value['name']
         owner = self.store.acquire(name)
         slot_key = 'campaign-measurement-slot'
@@ -107,6 +108,8 @@ class Lifecycle(unittest.TestCase):
                 if not admitted[0]:
                     return {'status': 'leased'}
                 self.assertTrue(kwargs['app_name']((slot_key, slot['owner'])))
+                if fail_setup[0] == 'outage':
+                    raise network_recovery.Outage('control store unavailable')
                 if fail_setup[0]:
                     # Known local setup failure before any AppCreate attempt.
                     with self.store.transaction() as db:
@@ -128,16 +131,24 @@ class Lifecycle(unittest.TestCase):
                 self.assertEqual(self.store.snapshot(name).get('resources', {}), {})
                 compute.stop.assert_not_called()
                 slot = self.store.claim(name, slot_key)
+                fail_setup[0] = 'outage'
+                with mock.patch.object(self.store, 'abandon_intent', wraps=self.store.abandon_intent) as abandon:
+                    with self.assertRaises(network_recovery.Outage):
+                        measure({})
+                    abandon.assert_not_called()
+                resource = next(iter(self.store.snapshot(name)['resources'].values()))
+                self.assertEqual(resource['status'], 'pending')
+                self.store.abandon_intent(name, owner, resource['id'])
                 fail_setup[0] = True
                 with self.assertRaises(control_store.LeaseLost):
                     measure({})
                 resources = list(self.store.snapshot(name)['resources'].values())
-                self.assertEqual([r['status'] for r in resources], ['closed'])
+                self.assertEqual([r['status'] for r in resources], ['closed', 'closed'])
                 compute.stop.assert_not_called()
                 fail_setup[0] = False
                 self.assertEqual(measure({})['status'], 'rejected')
             resources = list(self.store.snapshot(name)['resources'].values())
-            self.assertEqual(len(resources), 2)
+            self.assertEqual(len(resources), 3)
             self.assertTrue(all(r['status'] == 'closed' for r in resources))
             compute.stop.assert_called_once_with('ap-tracked')
 

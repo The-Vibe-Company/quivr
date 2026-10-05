@@ -364,7 +364,7 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
         store.renew(campaign, slot_key, slot['owner'], ttl)
     # Cover preparation too: concurrent indexing would contaminate provider latency.
     # Ambiguous detached calls retain the slot until their bounded lifetime expires.
-    completed = False
+    completed, launch_attempted = False, False
     try:
         image = (modal.Image.debian_slim(python_version='3.12')
                  .apt_install('age')
@@ -387,6 +387,7 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
         pairs, work = {}, {}
         slot_check()
         on_launch()
+        launch_attempted = True
         with app.run(detach=True):
             on_app(app.app_id)
             for name in policy['sets']:
@@ -421,7 +422,7 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
         return verdict
 
     finally:
-        if completed:
+        if completed or (not launch_attempted and not isinstance(sys.exc_info()[1], network_recovery.Outage)):
             store.release_many(campaign, {slot_key: slot['owner']})
 
 

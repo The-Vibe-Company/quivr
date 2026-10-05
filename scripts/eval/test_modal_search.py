@@ -396,12 +396,15 @@ class Dispatch(unittest.TestCase):
         store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
         policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
             'price_revision': 'fixture-v1', 'max_seconds': 30, 'startup_seconds': 10})
-        for lost_owner in (False, True):
-            with self.subTest(lost_owner=lost_owner), tempfile.TemporaryDirectory() as temp:
+        for failure in ('setup', 'outage', 'owner'):
+            lost_owner = failure == 'owner'
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
                 campaign = uuid.uuid4().hex
                 app, remote, spawned = mock.MagicMock(), mock.Mock(), []
                 app.function.return_value = lambda _: remote
                 app.app_id = 'ap-detached'
+                if failure == 'setup':
+                    app.function.side_effect = ValueError('local setup failed')
                 label = mock.Mock(return_value='tracked-app')
                 def spawn(request):
                     spawned.append(request)
@@ -417,8 +420,13 @@ class Dispatch(unittest.TestCase):
                         mock.patch('modal.Secret'), mock.patch('modal.Volume'), mock.patch('modal_search.shipped_trial'), \
                         mock.patch('modal_search.subprocess.run', return_value=subprocess.CompletedProcess([], 0)), \
                         mock.patch('modal_search.subprocess.check_output', side_effect=lambda args, **kw: b'' if 'ls-files' in args else 'a' * 40):
-                    with self.assertRaises(control_store.LeaseLost if lost_owner else network_recovery.Outage):
+                    with self.assertRaises(ValueError if failure == 'setup' else control_store.LeaseLost if lost_owner else network_recovery.Outage):
                         modal_search.launch(policy, search_trial.configuration({}), campaign, temp, True, check=check, app_name=label)
+                    if failure == 'setup':
+                        app.run.assert_not_called()
+                        self.assertEqual(spawned, [])
+                        self.assertEqual(store.claim(campaign, 'campaign-measurement-slot')['status'], 'claimed')
+                        continue
                     blocked = modal_search.launch(policy, search_trial.configuration({'dense_weight': .5}), campaign, temp, True, app_name=label)
                     self.assertEqual(blocked['status'], 'leased')
                     self.assertEqual(len(spawned), 1)

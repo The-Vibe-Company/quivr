@@ -85,6 +85,8 @@ class Measurement:
             return resource['label']
         def on_launch():
             nonlocal attempted
+            # Entering SDK startup may already send AppCreate; failed entry
+            # does not prove its absence. Preserve uncertain SDK attempts.
             attempted = True
         try:
             return modal_search.launch(state['spec']['policy'], config, self.name, self.outbox, True,
@@ -105,7 +107,7 @@ class Measurement:
             # failure before AppCreate can safely abandon its own intent.
             current = (self.store.snapshot(self.name)['resources'][resource['id']]
                        if resource and not isinstance(sys.exc_info()[1], network_recovery.Outage) else None)
-            if resource and not attempted:
+            if resource and not attempted and not isinstance(sys.exc_info()[1], network_recovery.Outage):
                 self.store.abandon_intent(self.name, self.owner, resource['id'])
             elif current and current['app_id']:
                 self.compute.stop(current['app_id'])
