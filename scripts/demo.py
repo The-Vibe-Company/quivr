@@ -11,6 +11,7 @@ import time
 import urllib.request
 import uuid
 import connector_plugin
+import demo_perf
 import fake_feeds
 import gotest
 import subscription_plugin
@@ -20,12 +21,14 @@ from local import DEMO_DESTINATION, ROOT, Stack, port, run
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['dev', 'verify', 'reset'])
+    parser.add_argument('command', choices=['dev', 'verify', 'perf', 'reset'])
     args = parser.parse_args()
     verify = args.command == 'verify'
-    suffix = uuid.uuid4().hex[:10] if verify else hashlib.sha256(str(ROOT).encode()).hexdigest()[:10]
-    stack = Stack(('quivr-demo-verify-' if verify else 'quivr-demo-') + suffix)
-    stack.verifying = verify
+    # verify and perf run on a stack of their own, removed afterwards.
+    isolated = args.command in ('verify', 'perf')
+    suffix = uuid.uuid4().hex[:10] if isolated else hashlib.sha256(str(ROOT).encode()).hexdigest()[:10]
+    stack = Stack(f'quivr-demo-{args.command}-' + suffix if isolated else 'quivr-demo-' + suffix)
+    stack.verifying = isolated
     if args.command == 'reset':
         stack.down(True)
         return
@@ -40,7 +43,7 @@ def main():
     try:
         run(['npm', 'ci', '--prefix', 'quivr-search'])
         run(['npm', 'run', 'build', '--prefix', 'quivr-search'])
-        if verify:
+        if isolated:
             run(['quivr-search/node_modules/.bin/playwright', 'install', 'chromium'])
         # The Alertes tab needs the alerts plugin, whatever QUIVR_ALERTS says. Described
         # alerts are judged by the fake System One server in verification, by TypeSafe
@@ -50,8 +53,8 @@ def main():
         # The demo's feeds need the first-party connector plugins, whatever QUIVR_<ID> says.
         connector_plugin.select_first_party(stack, [row['id'] for row in connector_plugin.FIRST_PARTY])
         stack.up()
-        demo_port = port() if verify else int(os.environ.get('DEMO_PORT', '5183'))
-        demo_password = secrets.token_hex(24) if verify else os.environ.get('DEMO_PASSWORD', '')
+        demo_port = port() if isolated else int(os.environ.get('DEMO_PORT', '5183'))
+        demo_password = secrets.token_hex(24) if isolated else os.environ.get('DEMO_PASSWORD', '')
         env = {**os.environ, 'HOST': '127.0.0.1', 'PORT': str(demo_port),
                'QUIVR_API_URL': f"http://127.0.0.1:{stack.state['api_port']}",
                'QUIVR_API_KEY': stack.state['demo'], 'DEMO_PASSWORD': demo_password,
@@ -60,8 +63,8 @@ def main():
                'QUIVR_DEMO_DESTINATION_ID': DEMO_DESTINATION, 'QUIVR_DEMO_ALERTS_EVALUATOR': subscription_plugin.KEYWORD_EVALUATOR,
                'DEMO_DESCRIBED_ALERTS': 'true' if described != 'off' else ''}
         feeds_url = None
-        if verify:
-            # Browser tests add feeds from a local test site, never from the internet.
+        if isolated:
+            # Browser tests and the performance corpus use feeds from a local test site, never the internet.
             feeds_server, feeds_url = fake_feeds.start(port=port())
             env.update(DEMO_FEED_PRIVATE_ORIGINS=feeds_url, DEMO_FEED_SUGGESTIONS=json.dumps([
                 {'title': 'Fil continu exemple', 'url': feeds_url + '/feeds/ticker.xml?run=suggested'},
@@ -94,12 +97,14 @@ def main():
                     for failure in failures:
                         failure['log'] = str(stack.directory / 'browser.log')
                     raise
+        elif args.command == 'perf':
+            demo_perf.run(base, demo_password, feeds_url, stack.directory, ROOT)
         else:
             print(f'Demo: {base} — Ctrl+C to stop; texts persist until make demo-reset.', flush=True)
             process.wait()
         status = 'passed'
     except KeyboardInterrupt:
-        if verify:
+        if isolated:
             raise
     finally:
         if process is not None and process.poll() is None:
@@ -112,12 +117,14 @@ def main():
         try:
             stack.capture()
         finally:
-            stack.down(verify)
-        (stack.directory / 'demo-report.json').write_text(json.dumps({
-            'status': status, 'duration_seconds': round(time.monotonic() - started, 3),
-            'scope': 'Real core + production demo facade + Chromium browser and HTTP tests',
-            'tests': verify_report.browser_results(browser_report)[0], 'failures': failures,
-        }, indent=2))
+            stack.down(isolated)
+        # perf writes its own report (perf.json); no return here, which would swallow its failure.
+        if args.command != 'perf':
+            (stack.directory / 'demo-report.json').write_text(json.dumps({
+                'status': status, 'duration_seconds': round(time.monotonic() - started, 3),
+                'scope': 'Real core + production demo facade + Chromium browser and HTTP tests',
+                'tests': verify_report.browser_results(browser_report)[0], 'failures': failures,
+            }, indent=2))
         for failure in failures:
             print(f"\n--- FAIL: {failure['test']} (log {failure['log']})\n" + '\n'.join('    ' + line for line in failure['excerpt'].splitlines()), flush=True)
         print('Demo artifacts:', stack.directory)
