@@ -116,7 +116,7 @@ type Observer interface {
 }
 
 // outcome reports one stage outcome to the Observer and a correlated log line.
-func (s Service) outcome(org, stage, outcome, receiptID string, v content.Version, started time.Time, code string) {
+func (s Service) outcome(ctx context.Context, org, stage, outcome, receiptID string, v content.Version, started time.Time, code string) {
 	if s.Observer != nil {
 		s.Observer.Outcome(org, stage, outcome, code, time.Since(started))
 	}
@@ -124,7 +124,7 @@ func (s Service) outcome(org, stage, outcome, receiptID string, v content.Versio
 	if outcome != "succeeded" {
 		level = slog.LevelWarn
 	}
-	slog.Log(context.Background(), level, "processing outcome", "component", "worker", "stage", stage, "outcome", outcome, "code", code,
+	slog.Log(ctx, level, "processing outcome", "component", "worker", "stage", stage, "outcome", outcome, "code", code,
 		"receipt_id", receiptID, "record_id", v.RecordID, "version_id", v.ID, "duration_ms", time.Since(started).Milliseconds())
 }
 
@@ -163,7 +163,7 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 		out := Derive(ctx, org, s.Plugin, s.Content, DerivationRequest{CorpusID: rt.corpusID, Version: v, Target: rt.generation, Kind: Segments, AllowLegacy: rt.legacy})
 		result, err = out.Segmentation, out.Retry
 		if out.Terminal != nil {
-			s.outcome(org, "baseline", "blocked", receiptID, v, started, out.Terminal.Code)
+			s.outcome(ctx, org, "baseline", "blocked", receiptID, v, started, out.Terminal.Code)
 			return s.Content.QuarantineVersion(ctx, org, v.ID, *out.Terminal)
 		}
 	}
@@ -171,11 +171,11 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 		err = s.Retrieval.Index(ctx, org, v, result)
 	}
 	if err != nil {
-		s.outcome(org, "baseline", "retrying", receiptID, v, started, "baseline_unavailable")
+		s.outcome(ctx, org, "baseline", "retrying", receiptID, v, started, "baseline_unavailable")
 		_ = s.Content.BaselineProgress(ctx, org, v.ID, "retrying", "baseline_unavailable", false)
 		return errors.New("baseline processing unavailable")
 	}
-	s.outcome(org, "baseline", "succeeded", receiptID, v, started, "")
+	s.outcome(ctx, org, "baseline", "succeeded", receiptID, v, started, "")
 	if s.Observer != nil {
 		s.Observer.Searchable(ctx, org, receiptID)
 	}

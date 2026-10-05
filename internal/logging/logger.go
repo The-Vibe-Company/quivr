@@ -4,6 +4,7 @@ package logging
 import (
 	"context"
 	"errors"
+	"go.opentelemetry.io/otel/trace"
 	"io"
 	"log/slog"
 	"net/url"
@@ -143,6 +144,7 @@ func (h *safeHandler) Enabled(ctx context.Context, level slog.Level) bool {
 func (h *safeHandler) Handle(ctx context.Context, record slog.Record) error {
 	clean := slog.NewRecord(record.Time, record.Level, h.sanitizeString(record.Message), record.PC)
 	id := RequestID(ctx)
+	sc := trace.SpanContextFromContext(ctx)
 	for _, attr := range h.attrs {
 		clean.AddAttrs(withoutRequestID(attr, id != ""))
 	}
@@ -155,12 +157,16 @@ func (h *safeHandler) Handle(ctx context.Context, record slog.Record) error {
 	if id != "" {
 		clean.AddAttrs(slog.String("request_id", h.sanitizeString(id)))
 	}
+	clean.AddAttrs(slog.String("trace_id", traceID(sc)), slog.String("span_id", spanID(sc)))
 	return h.next.Handle(ctx, clean)
 }
 
 func withoutRequestID(attr slog.Attr, remove bool) slog.Attr {
-	if !remove {
+	if !remove && attr.Key != "trace_id" && attr.Key != "span_id" {
 		return attr
+	}
+	if attr.Key == "trace_id" || attr.Key == "span_id" {
+		return slog.Attr{}
 	}
 	if attr.Key == "request_id" {
 		return slog.Attr{}
@@ -356,4 +362,17 @@ func errorKey(key string) bool {
 		return true
 	}
 	return strings.HasSuffix(lower, "_error") || strings.HasSuffix(lower, ".error")
+}
+
+func traceID(sc trace.SpanContext) string {
+	if sc.IsValid() {
+		return sc.TraceID().String()
+	}
+	return ""
+}
+func spanID(sc trace.SpanContext) string {
+	if sc.IsValid() {
+		return sc.SpanID().String()
+	}
+	return ""
 }

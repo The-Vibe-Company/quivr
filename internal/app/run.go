@@ -47,7 +47,8 @@ import (
 )
 
 type Config struct {
-	TLS TLSConfig `json:"tls"`
+	TLS       TLSConfig        `json:"tls"`
+	Telemetry telemetry.Config `json:"telemetry"`
 	// TEIURL encodes queries for generations built before the core.ingest
 	// plugin (THE-777), which serve the legacy E5 space until rebuilt.
 	TEIURL          string                  `json:"tei_url"`
@@ -211,12 +212,32 @@ func Run(command string) error {
 	if err != nil {
 		return err
 	}
+	if cfg.Telemetry.ResourceAttributes == nil {
+		cfg.Telemetry.ResourceAttributes = map[string]string{}
+	}
+	for key, value := range map[string]string{"service.name": "quivr." + command, "service.version": plugins.EngineVersion, "service.instance.id": cfg.Instance, "deployment.environment.name": cfg.Environment} {
+		if _, ok := cfg.Telemetry.ResourceAttributes[key]; !ok && value != "" {
+			cfg.Telemetry.ResourceAttributes[key] = value
+		}
+	}
+	telemetryRuntime, err := telemetry.Init(context.Background(), cfg.Telemetry)
+	if err != nil {
+		return err
+	}
+
 	events := newProcessEvents(slog.Default(), cfg.processSummary(grace))
 	graceExpired := false
 	defer func() {
 		deadline, cancel := shutdownDeadline(events.shutdownStart(), grace)
 		defer cancel()
 		events.stop(deadline, graceExpired)
+	}()
+	defer func() {
+		deadline, cancel := shutdownDeadline(events.shutdownStart(), grace)
+		defer cancel()
+		if telemetryRuntime.Shutdown(deadline) != nil {
+			slog.Warn("telemetry shutdown failed", "event", "quivr.telemetry.shutdown_failed")
+		}
 	}()
 	slog.Debug("debug logging enabled", "event", "quivr.debug")
 	tlsSettings, err := cfg.validateTLS()

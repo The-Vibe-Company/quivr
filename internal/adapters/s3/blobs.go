@@ -13,6 +13,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -39,7 +40,7 @@ const canonicalIdleConnections = 128
 func newWithTransport(cfg Config, transport *http.Transport) *Store {
 	transport.MaxIdleConnsPerHost = canonicalIdleConnections
 	transport.MaxIdleConns = canonicalIdleConnections
-	client := awss3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")), HTTPClient: &http.Client{Timeout: 5 * time.Second, Transport: transport, CheckRedirect: outbound.CheckRedirect}}, func(o *awss3.Options) { o.BaseEndpoint = aws.String(cfg.Endpoint); o.UsePathStyle = true })
+	client := awss3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")), HTTPClient: &http.Client{Timeout: 5 * time.Second, Transport: telemetry.Transport(transport, "s3.request"), CheckRedirect: outbound.CheckRedirect}}, func(o *awss3.Options) { o.BaseEndpoint = aws.String(cfg.Endpoint); o.UsePathStyle = true })
 	return &Store{client: client, bucket: cfg.Bucket}
 }
 func (s *Store) Bootstrap(ctx context.Context) error {

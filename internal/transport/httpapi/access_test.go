@@ -61,7 +61,7 @@ func TestAccessEventsDescribeFinalResponsesWithoutRequestSecrets(t *testing.T) {
 			req.RemoteAddr = "192.0.2.7:4321"
 			req.Header.Set("Authorization", "Bearer "+tc.key)
 			req.Header.Set("X-Forwarded-For", "198.51.100.9")
-			req.Header.Set("X-Request-ID", "secret-client-id")
+			req.Header.Set("X-Request-ID", "secret client id")
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			if rec.Code != tc.status {
@@ -82,7 +82,7 @@ func TestAccessEventsDescribeFinalResponsesWithoutRequestSecrets(t *testing.T) {
 				t.Fatal("authenticated key identifier missing")
 			}
 			encoded, _ := json.Marshal(event)
-			for _, secret := range []string{tc.key, "secret-query", "secret-body", "corpus-secret-path", "secret-unknown-path", "secret-client-id"} {
+			for _, secret := range []string{tc.key, "secret-query", "secret-body", "corpus-secret-path", "secret-unknown-path", "secret client id"} {
 				if bytes.Contains(encoded, []byte(secret)) {
 					t.Fatalf("access event leaked %q", secret)
 				}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -203,7 +204,7 @@ SELECT $1,$8,v.id,v.record_id,rc.id,coalesce(v.quarantine_stage,'ingestion'),`+r
 	if _, err = tx.Exec(ctx, `INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES('operation',$1,$2,$3)`, org, id, plan); err != nil {
 		return operations.Operation{}, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id) VALUES($1,$2)`, org, id); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id,trace_context) VALUES($1,$2,$3)`, org, id, telemetry.Encode(ctx)); err != nil {
 		return operations.Operation{}, err
 	}
 	if err = operationEvent(ctx, tx, org, f.CorpusID, id, operations.StateQueued); err != nil {
