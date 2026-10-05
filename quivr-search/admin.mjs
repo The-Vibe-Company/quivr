@@ -18,6 +18,11 @@
 // The other sections of the tab read the engine's rollups through
 // `/demo/admin/stats/{kind}`, cached a few seconds so browsers polling them
 // cost the core one read per window.
+//
+// The documents stored per day (THE-1034) come from the engine's exact count
+// of the demo corpus's Records, `GET /v0/records/count`, bounded by the
+// acceptance time of their current Version: one read per local day of the
+// browser's time zone, cached, and a few reads to find the first day.
 
 const LIVE = 50;
 const PAGE = 100;
@@ -44,6 +49,13 @@ const STATS_KINDS = new Set([
 const LIMITED_KINDS = new Set(["received", "top-queries"]);
 const STATS_WINDOWS = new Set(["1h", "24h", "7d"]);
 const STATS_MS = 10000;
+// At most a year of days, four counts in flight, a handful of time zones.
+const HISTORY_DAYS = 366;
+const TODAY_MS = 30000;
+const PAST_MS = 10 * MINUTE;
+const FIRST_DAY_MS = HOUR;
+const COUNTS_IN_FLIGHT = 4;
+const MAX_ZONES = 8;
 
 /**
  * The five steps a document is shown going through. Each is timed from the
@@ -326,6 +338,64 @@ export function withRollups(own, rollups) {
   return merged;
 }
 
+const zones = new Map();
+/** The wall clock of `tz` at `ms`, or a RangeError for an unknown zone. */
+function wall(ms, tz) {
+  let format = zones.get(tz);
+  if (!format) {
+    if (zones.size >= 64) zones.clear();
+    format = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    zones.set(tz, format);
+  }
+  const part = Object.fromEntries(
+    format.formatToParts(new Date(ms)).map((p) => [p.type, p.value]),
+  );
+  return {
+    day: `${part.year}-${part.month}-${part.day}`,
+    utc: Date.UTC(
+      +part.year,
+      part.month - 1,
+      +part.day,
+      +part.hour,
+      +part.minute,
+      +part.second,
+    ),
+  };
+}
+/** Minutes `tz` is ahead of UTC at `ms`. */
+const offset = (ms, tz) =>
+  Math.round((wall(ms, tz).utc - Math.floor(ms / 1000) * 1000) / MINUTE);
+const plusDays = (day, n) =>
+  new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
+/**
+ * The start of a local day as RFC 3339 with that moment's own offset, so a
+ * day when the clocks change lasts 23 or 25 hours.
+ */
+function midnight(day, tz) {
+  const local = Date.parse(`${day}T00:00:00Z`);
+  // With the offsets before and after any change around midnight, the
+  // earliest instant still on that day; a midnight the clocks skip starts
+  // the day at the change.
+  const at = Math.min(
+    ...[local - DAY / 2, local + DAY / 2]
+      .map((near) => local - offset(near, tz) * MINUTE)
+      .filter((instant) => wall(instant, tz).day === day),
+  );
+  const minutes = offset(at, tz);
+  const abs = Math.abs(minutes);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${new Date(at + minutes * MINUTE).toISOString().slice(0, 19)}${minutes < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}
+
 const failure = (status, message) =>
   Object.assign(new Error(message), { status });
 const unavailable = (status) =>
@@ -358,6 +428,16 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
   const rollups = new Map();
   let overlay = null;
   let overlayAt = 0;
+
+  // The engine's counts, by query, each for its own time; the first day of
+  // each time zone and when each zone was last asked for; and the counts in
+  // flight.
+  const counts = new Map();
+  const firstDays = new Map();
+  const zonesSeen = new Map();
+  const zoneTotals = new Map();
+  let inFlight = 0;
+  const queued = [];
 
   const view = (doc, now) => ({ ...doc, flow: flow(doc, limit, now) });
   const shown = () => [...day.values()].sort(newestFirst).slice(0, LIVE);
@@ -395,6 +475,68 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
     } catch {
       // The scan's numbers stand in until the next read.
     }
+  }
+
+  /**
+   * One exact count, shared while it is fresh. A read whose `stop.failed`
+   * was set while it waited for a slot gives up without calling the core.
+   */
+  async function countRecords(bounds, ttl, stop) {
+    const path = `/v0/records/count?${new URLSearchParams({ corpus_id: corpus, ...bounds })}`;
+    const cached = counts.get(path);
+    if (cached && clock() - cached.at < cached.ttl) return cached.count;
+    const pending = (async () => {
+      if (inFlight >= COUNTS_IN_FLIGHT)
+        await new Promise((resolve) => queued.push(resolve));
+      else inFlight++;
+      try {
+        if (stop?.failed)
+          throw failure(503, "Le compte des documents est momentanément indisponible. Réessayez.");
+        const response = await upstream(path);
+        if (response.status === 200) return response.data.count;
+        throw response.status === 403
+          ? failure(403, "La clé du moteur de la démo ne peut pas lire les documents.")
+          : failure(503, "Le compte des documents est momentanément indisponible. Réessayez.");
+      } finally {
+        // The slot passes to the next count waiting, if any.
+        const next = queued.shift();
+        if (next) next();
+        else inFlight--;
+      }
+    })();
+    counts.set(path, { at: clock(), ttl, count: pending });
+    try {
+      return await pending;
+    } catch (error) {
+      counts.delete(path);
+      throw error;
+    }
+  }
+  /**
+   * How many days back the first document is, at most HISTORY_DAYS - 1: the
+   * smallest number of days back with nothing before it. The count before a
+   * day only falls as the day goes back, so a binary search finds it.
+   */
+  async function daysBack(tz, today) {
+    const cached = firstDays.get(tz);
+    if (cached && cached.today === today && clock() - cached.at < FIRST_DAY_MS)
+      return cached.back;
+    const before = async (back) =>
+      (await countRecords(
+        { accepted_before: midnight(plusDays(today, -back), tz) },
+        PAST_MS,
+      )) > 0;
+    let low = 0;
+    let high = HISTORY_DAYS - 1;
+    const truncated = await before(high);
+    while (!truncated && low < high) {
+      const middle = (low + high) >> 1;
+      if (await before(middle)) low = middle + 1;
+      else high = middle;
+    }
+    const back = { days: high, truncated };
+    firstDays.set(tz, { today, back, at: clock() });
+    return back;
   }
 
   function broadcast(event, data) {
@@ -577,6 +719,78 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
       );
       if (response.status === 403) throw unavailable(403);
       return response;
+    },
+    // The documents stored, in all and per local day of the browser's time
+    // zone, from the first one to today. Withdrawn documents count, as in
+    // the engine's count; Records without a current Version count in the
+    // total only.
+    async history(url) {
+      let tz;
+      try {
+        // The zone's own name, so "europe/paris" is "Europe/Paris".
+        tz = new Intl.DateTimeFormat("en-US", {
+          timeZone: url.searchParams.get("tz") || "UTC",
+        }).resolvedOptions().timeZone;
+      } catch {
+        throw failure(422, "Fuseau horaire inconnu.");
+      }
+      const now = clock();
+      for (const [key, entry] of counts)
+        if (now - entry.at >= entry.ttl) counts.delete(key);
+      for (const [key, at] of zonesSeen)
+        if (now - at >= FIRST_DAY_MS) zonesSeen.delete(key);
+      for (const [key, entry] of zoneTotals)
+        if (now - entry.at >= TODAY_MS) zoneTotals.delete(key);
+      for (const [key, entry] of firstDays)
+        if (now - entry.at >= FIRST_DAY_MS) firstDays.delete(key);
+      if (!zonesSeen.has(tz) && zonesSeen.size >= MAX_ZONES)
+        throw failure(503, "Trop de fuseaux horaires à la fois. Réessayez.");
+      zonesSeen.set(tz, now);
+      const today = wall(now, tz).day;
+      // Every Record, and every Record with a date: the difference has no
+      // current Version, so no day. Both are read and kept together, per
+      // zone, so the difference compares two reads of the same moment.
+      let totals = zoneTotals.get(tz);
+      if (!totals || now - totals.at >= TODAY_MS) {
+        const pair = Promise.all([
+          countRecords({}, 0),
+          countRecords({ accepted_before: midnight(plusDays(today, 1), tz) }, 0),
+        ]);
+        totals = { at: now, pair };
+        zoneTotals.set(tz, totals);
+        pair.catch(() => zoneTotals.delete(tz));
+      }
+      const back = await daysBack(tz, today);
+      const days = Array.from({ length: back.days + 1 }, (_, i) =>
+        plusDays(today, i - back.days),
+      );
+      // The first failed day stops the days still waiting for a slot.
+      const stop = { failed: false };
+      const perDay = await Promise.all(
+        days.map((day) =>
+          countRecords(
+            {
+              accepted_after: midnight(day, tz),
+              accepted_before: midnight(plusDays(day, 1), tz),
+            },
+            day === today ? TODAY_MS : PAST_MS,
+            stop,
+          ).catch((error) => {
+            stop.failed = true;
+            throw error;
+          }),
+        ),
+      );
+      const [total, dated] = await totals.pair;
+      return {
+        time_zone: tz,
+        total,
+        undated: Math.max(0, total - dated),
+        first_day: days[0],
+        today,
+        truncated: back.truncated,
+        days: days.map((day, i) => ({ day, count: perDay[i] })),
+      };
     },
     // One document's steps in time order; a Version outside the demo corpus
     // is reported missing.

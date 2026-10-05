@@ -802,6 +802,7 @@ test("the Veille feed and Admin routes need the demo session", async (t) => {
     "/demo/admin/stream",
     "/demo/admin/documents/v/timeline",
     "/demo/admin/stats/steps",
+    "/demo/admin/history",
     "/demo/sources/logo/connector_any",
   ])
     assert.equal((await fetch(base + route)).status, 401, route);

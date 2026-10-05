@@ -1,9 +1,11 @@
-// The Admin tab's rules (admin.mjs): how each step of a document is judged
-// and what the KPIs and the per-hour chart count. The facade routes are
+// The Admin tab's rules (admin.mjs): how each step of a document is judged,
+// what the KPIs and the per-hour chart count, and the documents stored per
+// day. The facade routes are
 // covered in server.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  createAdmin,
   flow,
   fromRollups,
   limits,
@@ -286,4 +288,142 @@ test("the header prefers the rollups, but not over a document they do not count 
   assert.equal(merged.per_minute_window, "10min");
   assert.equal(merged.searchable_p95_ms, 2200);
   assert.equal(withRollups(own, null).hours_of, "received");
+});
+
+// The engine's count API over synthetic Records: one acceptance time each,
+// or null for a Record without a current Version. Each count answers on a
+// later turn, so reads overlap as they would against the core.
+function counting(times) {
+  const calls = [];
+  const flight = { now: 0, max: 0 };
+  const upstream = async (path) => {
+    calls.push(path);
+    flight.max = Math.max(flight.max, ++flight.now);
+    await new Promise((resolve) => setImmediate(resolve));
+    flight.now--;
+    const url = new URL(path, "http://core");
+    assert.equal(url.pathname, "/v0/records/count");
+    assert.equal(url.searchParams.get("corpus_id"), "demo");
+    const after = url.searchParams.get("accepted_after");
+    const before = url.searchParams.get("accepted_before");
+    const count = times.filter((t) =>
+      after || before
+        ? t !== null &&
+          (!after || Date.parse(t) >= Date.parse(after)) &&
+          (!before || Date.parse(t) < Date.parse(before))
+        : true,
+    ).length;
+    return { status: 200, data: { count } };
+  };
+  return { upstream, calls, flight };
+}
+const history = (admin, tz) =>
+  admin.history(new URL(`http://demo/demo/admin/history?tz=${tz}`));
+
+test("documents are counted per local day since the first one, empty days at zero", async () => {
+  const { upstream, calls } = counting([
+    "2026-10-23T23:30:00+02:00",
+    // Both on the day the clocks go back, a 25-hour day in Paris.
+    "2026-10-25T00:30:00+02:00",
+    "2026-10-25T23:30:00+01:00",
+    "2026-10-27T10:00:00+01:00",
+    null,
+  ]);
+  const clock = () => Date.parse("2026-10-27T12:00:00Z");
+  const admin = createAdmin({ upstream, corpus: "demo", clock });
+  const paris = await history(admin, "Europe/Paris");
+  assert.deepEqual(paris, {
+    time_zone: "Europe/Paris",
+    total: 5,
+    undated: 1,
+    first_day: "2026-10-23",
+    today: "2026-10-27",
+    truncated: false,
+    days: [
+      { day: "2026-10-23", count: 1 },
+      { day: "2026-10-24", count: 0 },
+      { day: "2026-10-25", count: 2 },
+      { day: "2026-10-26", count: 0 },
+      { day: "2026-10-27", count: 1 },
+    ],
+  });
+  assert.ok(
+    calls.includes(
+      "/v0/records/count?corpus_id=demo&accepted_after=2026-10-25T00%3A00%3A00%2B02%3A00&accepted_before=2026-10-26T00%3A00%3A00%2B01%3A00",
+    ),
+    "each bound carries its own offset",
+  );
+  const utc = await history(admin, "utc");
+  assert.equal(utc.time_zone, "UTC");
+  assert.deepEqual(
+    utc.days.map((d) => d.count),
+    [1, 1, 1, 0, 1],
+  );
+  await assert.rejects(history(admin, "Mars/Olympus"), { status: 422 });
+
+  // Where the clocks skip midnight, the day starts at the change.
+  const skipped = counting(["2026-09-06T12:00:00-03:00"]);
+  await history(
+    createAdmin({
+      upstream: skipped.upstream,
+      corpus: "demo",
+      clock: () => Date.parse("2026-09-06T18:00:00Z"),
+    }),
+    "America/Santiago",
+  );
+  assert.ok(
+    skipped.calls.includes(
+      "/v0/records/count?corpus_id=demo&accepted_after=2026-09-06T01%3A00%3A00-03%3A00&accepted_before=2026-09-07T00%3A00%3A00-03%3A00",
+    ),
+    skipped.calls.join("\n"),
+  );
+});
+
+test("past days are reread less often than today, and history is capped", async () => {
+  let now = Date.parse("2026-10-27T12:00:00Z");
+  const { upstream, calls, flight } = counting([
+    "2026-10-20T10:00:00Z",
+    "2026-10-27T10:00:00Z",
+  ]);
+  const admin = createAdmin({ upstream, corpus: "demo", clock: () => now });
+  await history(admin, "UTC");
+  assert.equal(flight.max, 4, "at most four counts in flight");
+  calls.length = 0;
+  now += 60_000;
+  await history(admin, "UTC");
+  assert.deepEqual(calls, [
+    "/v0/records/count?corpus_id=demo",
+    "/v0/records/count?corpus_id=demo&accepted_before=2026-10-28T00%3A00%3A00%2B00%3A00",
+    "/v0/records/count?corpus_id=demo&accepted_after=2026-10-27T00%3A00%3A00%2B00%3A00&accepted_before=2026-10-28T00%3A00%3A00%2B00%3A00",
+  ]);
+  calls.length = 0;
+  now += 15 * 60_000;
+  await history(admin, "UTC");
+  assert.ok(calls.length > 8, "every day is reread once the cache expires");
+
+  const old = counting(["2025-01-01T10:00:00Z", "2026-10-27T10:00:00Z"]);
+  const capped = await history(
+    createAdmin({ upstream: old.upstream, corpus: "demo", clock: () => now }),
+    "UTC",
+  );
+  assert.equal(capped.truncated, true);
+  assert.equal(capped.days.length, 366);
+  assert.equal(capped.days.at(-1).day, "2026-10-27");
+  assert.ok(old.calls.length < 400, `${old.calls.length} calls`);
+
+  // A day the core fails to count stops the days still waiting.
+  const failing = counting(["2025-12-01T10:00:00Z"]);
+  const broken = async (path) =>
+    path.includes("accepted_after=2025-12-01")
+      ? { status: 503, data: {} }
+      : failing.upstream(path);
+  await assert.rejects(
+    history(createAdmin({ upstream: broken, corpus: "demo", clock: () => now }), "UTC"),
+    { status: 503 },
+  );
+  // Let any count still queued reach the core before counting the reads.
+  for (let turn = 0; turn < 3 || failing.flight.now; turn++)
+    await new Promise((resolve) => setImmediate(resolve));
+  const dayReads = failing.calls.filter((c) => c.includes("accepted_after"));
+  assert.ok(dayReads.length < 10, `${dayReads.length} day reads after the failure`);
 });
