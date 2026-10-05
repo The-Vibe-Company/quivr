@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo measure measure-backfill measure-upgrade eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary
+.PHONY: dev env check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -12,6 +12,9 @@ demo-reset:
 	GO=$(GO) python3 scripts/demo.py reset
 verify-demo:
 	GO=$(GO) python3 scripts/demo.py verify
+# The demo's speed against quivr-search/perf/budgets.json on a seeded stack of its own (THE-1041); not part of verify.
+demo-perf:
+	GO=$(GO) python3 scripts/demo.py perf
 # Everything that needs no Docker stack; run it before pushing (about two minutes on a laptop).
 check: docs denylist migrations contracts image-context plugin-boundary test
 # make check, then every part of the stack verification one after another, then the demo.

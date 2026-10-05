@@ -83,15 +83,20 @@ export function Bottlenecks({
   const [window, setWindow] = useState<StatsWindow>("1h");
   const steps = useAdminStats("steps", window, onUnauthorized);
   const pluginCalls = useAdminStats("plugins", window, onUnauthorized);
+  const active = useActivePlugins(onUnauthorized);
   // A window switch keeps the previous numbers on show while the next ones
-  // load, so the bars move to their new length instead of blinking.
+  // load, so the bars move to their new length instead of blinking. The first
+  // time, the steps wait for their plugins, so the page below moves once.
   const status =
-    steps.data && steps.status === "loading" ? "ready" : steps.status;
+    steps.data && steps.status === "loading"
+      ? "ready"
+      : steps.status === "ready" && active.status === "loading"
+        ? "loading"
+        : steps.status;
   // The alerts row reads plugin calls: only over the same window as the rest.
   const calls =
     pluginCalls.data?.window === steps.data?.window ? pluginCalls.data : null;
   const rows = stepRows(steps.data, calls, stats?.waiting_by_step);
-  const active = useActivePlugins(onUnauthorized);
   const hour = useAdminStats("plugins", "1h", onUnauthorized);
   const plugins = pluginRows(active.items || [], pluginCalls.data, hour.data);
   const now = Date.now();

@@ -1,7 +1,10 @@
 // Same-origin demo entrypoint. Core credentials and corpus scope stay server-side.
 import http from "node:http";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
+import zlib from "node:zlib";
+import { readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { feedGuard, parseSuggestions } from "./feeds.mjs";
@@ -180,7 +183,22 @@ async function jsonBody(req) {
     throw fail(400, "Requête invalide.");
   }
 }
+// What the request being answered waited on in the core, for its
+// Server-Timing header: calls made and time spent in them.
+const coreTime = new AsyncLocalStorage();
 async function upstream(path, method = "GET", body, timeout = 8000) {
+  const spent = coreTime.getStore();
+  const started = performance.now();
+  try {
+    return await upstreamCall(path, method, body, timeout);
+  } finally {
+    if (spent) {
+      spent.calls++;
+      spent.ms += performance.now() - started;
+    }
+  }
+}
+async function upstreamCall(path, method, body, timeout) {
   const response = await fetch(core + path, {
     method,
     headers: {
@@ -229,13 +247,113 @@ function authenticated(req) {
     equal(signature, sign(expires))
   );
 }
-function send(res, status, data) {
-  res.writeHead(status, {
+// Answers are compressed when the browser accepts it: brotli, else gzip.
+const brotli = promisify(zlib.brotliCompress);
+const gzip = promisify(zlib.gzip);
+const COMPRESS_MIN = 1024;
+function encoding(req) {
+  // Codings the client accepts, "br;q=0" (refused) left out.
+  const accepted = new Set(
+    (req.headers["accept-encoding"] || "")
+      .split(",")
+      .map((part) => part.trim().split(/\s*;\s*/))
+      .filter(([, q]) => !/^q=0(\.0*)?$/.test(q || ""))
+      .map(([name]) => name.toLowerCase()),
+  );
+  return accepted.has("br") ? "br" : accepted.has("gzip") ? "gzip" : "";
+}
+async function compress(body, coding) {
+  if (coding === "br")
+    return brotli(body, {
+      params: {
+        [zlib.constants.BROTLI_PARAM_QUALITY]: 5,
+        [zlib.constants.BROTLI_PARAM_SIZE_HINT]: body.length,
+      },
+    });
+  return gzip(body);
+}
+const tag = (body) =>
+  `"${createHash("sha256").update(body).digest("base64url").slice(0, 27)}"`;
+const fresh = (req, etag) =>
+  (req.headers["if-none-match"] || "")
+    .split(",")
+    .some((value) => value.trim().replace(/^W\//, "") === etag);
+// A JSON answer. A successful read carries an ETag and is revalidated on each
+// use, so a browser reading the same snapshot or list again gets a 304.
+async function send(res, status, data, headers = {}) {
+  const req = res.req;
+  const body = Buffer.from(JSON.stringify(data));
+  const head = {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
-  });
-  res.end(JSON.stringify(data));
+    ...headers,
+  };
+  const spent = coreTime.getStore();
+  if (spent?.calls)
+    head["Server-Timing"] =
+      `core;dur=${spent.ms.toFixed(1)};desc="${spent.calls} call${spent.calls > 1 ? "s" : ""}"`;
+  if (status === 200 && req.method === "GET" && !headers["Cache-Control"]) {
+    head.ETag = tag(body);
+    head["Cache-Control"] = "private, no-cache";
+    if (fresh(req, head.ETag)) {
+      res.writeHead(304, head);
+      res.end();
+      return;
+    }
+  }
+  await reply(res, status, head, body);
 }
+// `encoded`: the body's compressed forms, or null for one sent as is.
+async function reply(res, status, head, body, encoded) {
+  const coding =
+    body.length >= COMPRESS_MIN && encoded !== null ? encoding(res.req) : "";
+  head.Vary = "Accept-Encoding";
+  if (coding) {
+    body = encoded?.[coding] || (await compress(body, coding));
+    head["Content-Encoding"] = coding;
+  }
+  head["Content-Length"] = body.length;
+  res.writeHead(status, head);
+  res.end(res.req.method === "HEAD" ? undefined : body);
+}
+// Built files, read and compressed once: the bundle does not change while
+// the server runs (a new build means a new deploy).
+const files = new Map();
+async function builtFile(file) {
+  if (files.has(file)) return files.get(file);
+  const loading = readFile(file).then(async (raw) => {
+    // Images and fonts are compressed already: they go as they are.
+    const packed = /\.(png|woff2)$/.test(file);
+    return {
+      raw,
+      etag: tag(raw),
+      encoded: packed
+        ? null
+        : raw.length < COMPRESS_MIN
+          ? {}
+          : {
+              br: await brotli(raw, {
+                params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 },
+              }),
+              gzip: await gzip(raw, { level: 9 }),
+            },
+    };
+  });
+  files.set(file, loading);
+  // A missing file is not kept: it answers 404 each time it is asked.
+  loading.catch(() => files.delete(file));
+  return loading;
+}
+// Compressed as the server starts, off the request path: a request in the
+// first second waits for the same work, never redoes it. Listening does not
+// wait, so a restart answers its health check at once.
+readdir(resolve(root, "assets"))
+  .then((names) => [
+    resolve(root, "index.html"),
+    ...names.map((name) => resolve(root, "assets", name)),
+  ])
+  .catch(() => [])
+  .then((paths) => paths.forEach((path) => builtFile(path).catch(() => {})));
 async function authorizeRecord(id) {
   const record = await upstream(`/v0/records/${id}`);
   if (record.status >= 500) return record;
@@ -360,7 +478,10 @@ async function removeSource(req, corpus) {
   await saveState();
   return { status: 200, data: { removed: siblings.map((c) => c.connector_id) } };
 }
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) =>
+  coreTime.run({ calls: 0, ms: 0 }, () => handle(req, res)),
+);
+async function handle(req, res) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "same-origin");
   res.setHeader(
@@ -399,7 +520,7 @@ const server = http.createServer(async (req, res) => {
         "Set-Cookie",
         `quivr_demo=${expires}.${sign(expires)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400${secure ? "; Secure" : ""}`,
       );
-      send(res, 200, { authenticated: true });
+      await send(res, 200, { authenticated: true });
       return;
     }
     if (
@@ -425,7 +546,7 @@ const server = http.createServer(async (req, res) => {
         throw fail(401, "Ouvrez la démo pour continuer.");
       const id = await readyCorpus();
       if (path === "/demo/session" && req.method === "GET") {
-        send(res, 200, { corpus_id: id, name: "Espace démo" });
+        await send(res, 200, { corpus_id: id, name: "Espace démo" });
         return;
       }
       // The Veille page: a snapshot and a live stream of the demo corpus.
@@ -433,30 +554,30 @@ const server = http.createServer(async (req, res) => {
         (path === "/demo/feed" || path === "/demo/feed/stream") &&
         req.method === "GET"
       ) {
-        if (path === "/demo/feed") send(res, 200, await feedFor(id).snapshot());
+        if (path === "/demo/feed") await send(res, 200, await feedFor(id).snapshot());
         else await feedFor(id).subscribe(req, res);
         return;
       }
       // Older days of the feed: one period, newest first, and day counts.
       if (path === "/demo/feed/page" && req.method === "GET") {
-        send(res, 200, await feedFor(id).page(url.searchParams));
+        await send(res, 200, await feedFor(id).page(url.searchParams));
         return;
       }
       if (path === "/demo/feed/days" && req.method === "GET") {
-        send(res, 200, await feedFor(id).days(url.searchParams));
+        await send(res, 200, await feedFor(id).days(url.searchParams));
         return;
       }
       // The demo's numbers, over every article of the corpus (catalog.mjs).
       if (path === "/demo/feed/stats" && req.method === "POST") {
-        send(res, 200, await indexFor(id).feed(statsQuery(await jsonBody(req))));
+        await send(res, 200, await indexFor(id).feed(statsQuery(await jsonBody(req))));
         return;
       }
       if (path === "/demo/feed/topics" && req.method === "GET") {
-        send(res, 200, await indexFor(id).topics(topicsQuery(url.searchParams)));
+        await send(res, 200, await indexFor(id).topics(topicsQuery(url.searchParams)));
         return;
       }
       if (path === "/demo/sources/stats" && req.method === "GET") {
-        send(res, 200, await indexFor(id).sources(boundsOf(url.searchParams.get("bounds"))));
+        await send(res, 200, await indexFor(id).sources(boundsOf(url.searchParams.get("bounds"))));
         return;
       }
       const logo = path.match(/^\/demo\/sources\/logo\/([\w-]+)$/);
@@ -464,7 +585,17 @@ const server = http.createServer(async (req, res) => {
         const current = await ownConnector(logo[1], id);
         const feedURL = current.data?.kind === "rss" && current.data.config?.url;
         const image = typeof feedURL === "string" && (await logoFor(feedURL));
-        if (!image) throw fail(404, "Logo introuvable.");
+        // A source without a logo is not asked again for an hour, like the
+        // server's own cache of misses.
+        if (!image) {
+          await send(
+            res,
+            404,
+            { code: "demo_request_failed", message: "Logo introuvable.", retryable: false },
+            { "Cache-Control": `private, max-age=${LOGO_MISS_TTL / 1000}` },
+          );
+          return;
+        }
         res.writeHead(200, {
           "Content-Type": image.type,
           "Content-Length": image.bytes.length,
@@ -476,7 +607,7 @@ const server = http.createServer(async (req, res) => {
       // The Admin tab, read-only: a snapshot, a live stream, one timeline, the
       // engine's rollups and the documents stored per day.
       if (path === "/demo/admin" && req.method === "GET") {
-        send(res, 200, await adminFor(id).snapshot());
+        await send(res, 200, await adminFor(id).snapshot());
         return;
       }
       if (path === "/demo/admin/stream" && req.method === "GET") {
@@ -560,7 +691,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       if (!response) throw fail(404, "Page introuvable.");
-      send(res, response.status, response.data);
+      await send(res, response.status, response.data);
       return;
     }
     if (req.method !== "GET" && req.method !== "HEAD")
@@ -573,7 +704,7 @@ const server = http.createServer(async (req, res) => {
     if (!file.startsWith(root + sep)) throw fail(404, "Page introuvable.");
     let data;
     try {
-      data = await readFile(file);
+      data = await builtFile(file);
     } catch {
       throw fail(404, "Page introuvable.");
     }
@@ -586,16 +717,23 @@ const server = http.createServer(async (req, res) => {
         ".png": "image/png",
         ".woff2": "font/woff2",
       }[extname(file)] || "application/octet-stream";
-    res.writeHead(200, {
+    const head = {
       "Content-Type": mime,
       "Cache-Control": relative.startsWith("/assets/")
         ? "public,max-age=31536000,immutable"
         : "no-cache",
-    });
-    res.end(req.method === "HEAD" ? undefined : data);
+      ETag: data.etag,
+    };
+    if (fresh(req, data.etag)) {
+      res.writeHead(304, head);
+      res.end();
+      return;
+    }
+    await reply(res, 200, head, data.raw, data.encoded);
   } catch (error) {
+    if (res.headersSent) return void res.destroy();
     const status = error.status || 503;
-    send(res, status, {
+    await send(res, status, {
       code:
         error.status && error.code
           ? error.code
@@ -608,7 +746,7 @@ const server = http.createServer(async (req, res) => {
       retryable: status === 503,
     });
   }
-});
+}
 server.requestTimeout = 15000;
 server.headersTimeout = 10000;
 server.listen(port, host, () =>
