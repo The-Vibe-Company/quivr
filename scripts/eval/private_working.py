@@ -75,15 +75,19 @@ def trial(request, store):
         dataset = {'name': name, 'version': entry['version'], 'split': 'dev',
                    'fingerprint': entry['fingerprint'], 'private': True}
         pairs, rows, private_vectors = {}, {}, {}
-        for side, cfg in (('baseline', policy['baseline']), ('candidate', request['config'])):
+        configs = {'baseline': policy['baseline'], 'candidate': request['config']}
+        budgets, clients = {}, {}
+        for side, cfg in configs.items():
             store.renew(request['campaign'], *lease, ttl=policy['max_seconds'])
-            budget = control_store.Budget(store, request['campaign'], lease)
-            hosted = None if cfg['model'] == direct_bakeoff.E5_MODEL else direct_bakeoff.Hosted(
-                os.environ['AZURE_FOUNDRY_ENDPOINT'], os.environ['AZURE_FOUNDRY_KEY'], budget, name, policy['prices'])
-            started = time.monotonic()
-            measured = search_trial.measure(cfg, data, dataset, root / 'vectors', budget, hosted,
-                policy['prices'], float(policy['modal_usd_per_second']), request['fresh_latency'],
-                os.environ.get('TYPESAFE_API_KEY', ''), private_vectors=private_vectors)
+            budgets[side] = control_store.Budget(store, request['campaign'], lease)
+            clients[side] = None if cfg['model'] == direct_bakeoff.E5_MODEL else direct_bakeoff.Hosted(
+                os.environ['AZURE_FOUNDRY_ENDPOINT'], os.environ['AZURE_FOUNDRY_KEY'], budgets[side], name, policy['prices'])
+        started = time.monotonic()
+        measurements = search_trial.measure_pair(configs, data, dataset, root / 'vectors', budgets, clients,
+            policy['prices'], float(policy['modal_usd_per_second']), request['fresh_latency'],
+            os.environ.get('TYPESAFE_API_KEY', ''), private_vectors=private_vectors)
+        for side, cfg in configs.items():
+            measured = measurements[side]
             measured['duration_seconds'] = time.monotonic() - started
             measured['cost']['resource_class'] = 'cpu8-memory16384'
             full_cfg = {**cfg, 'paired_side': side, 'profile': policy['profile'], 'campaign': request['campaign'],
@@ -97,9 +101,12 @@ def trial(request, store):
             # Explicit output fields only: latency IDs, per-query scores and
             # arbitrary dependency metadata never become durable evidence.
             rows[side] = {**pairs[side], 'per_query': {}, 'cost': {
-                'provider': budget.summary(), 'resource_class': 'cpu8-memory16384',
+                'provider': budgets[side].summary(), 'resource_class': 'cpu8-memory16384',
                 'latency_method': measured['cost']['latency_method'],
-                'price_basis': measured['cost']['price_basis']}}
+                'price_basis': measured['cost']['price_basis'],
+                'search_timing_ms': measured['cost']['search_timing_ms'],
+                'search_provider_usd': measured['cost']['search_provider_usd'],
+                'search_compute_usd': measured['cost']['search_compute_usd']}}
         verdict = gates.evaluate({name: pairs}, {**policy, 'sets': {name: policy['sets'][name]}})
         if verdict['missing_or_incompatible_sets']:
             raise ValueError('incomplete private pairing')

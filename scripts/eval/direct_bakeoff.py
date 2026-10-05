@@ -5,6 +5,7 @@ No engine or vector database is involved. Provider attempts share a fail-closed
 input-token/USD budget; credentials are read only from the environment.
 """
 import argparse
+import contextlib
 import datetime
 import email.utils
 import http.client
@@ -18,6 +19,7 @@ import math
 import re
 import random
 import time
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -120,6 +122,47 @@ class OpenAI:
         return vectors
 
 
+class DocumentAdmission:
+    """Shared request admission: halve on throttling, recover one slot slowly."""
+    def __init__(self, maximum=4):
+        self.maximum = self.limit = maximum
+        self.active = self.clean = self.generation = 0
+        self.condition = threading.Condition()
+
+    @contextlib.contextmanager
+    def request(self):
+        with self.condition:
+            self.condition.wait_for(lambda: self.active < self.limit)
+            self.active += 1
+            generation = self.generation
+        try:
+            yield
+        except urllib.error.HTTPError as error:
+            with self.condition:
+                self.clean = 0
+                if error.code == 429:
+                    self.limit = max(1, self.limit // 2)
+                    self.generation += 1
+            raise
+        except BaseException:
+            with self.condition:
+                self.clean = 0
+            raise
+        else:
+            with self.condition:
+                # A success already in flight when throttling happened is
+                # not evidence that the reduced rate can safely grow.
+                if generation == self.generation:
+                    self.clean += 1
+                    if self.clean >= 16 * self.limit and self.limit < self.maximum:
+                        self.limit += 1
+                        self.clean = 0
+        finally:
+            with self.condition:
+                self.active -= 1
+                self.condition.notify_all()
+
+
 class Hosted:
     def __init__(self, endpoint, key, budget, set_name, prices=None):
         target = urllib.parse.urlsplit(endpoint)
@@ -130,17 +173,38 @@ class Hosted:
         self.budget, self.set_name = budget, set_name
         self.prices = PRICES if prices is None else prices
         self.opener = urllib.request.build_opener(embeddings.NoRedirect())
+        # Shallow task copies retain this limiter across all document batches.
+        self.documents = DocumentAdmission()
+        self.blocked_seconds = self.http_seconds = 0.
+
+    @contextlib.contextmanager
+    def blocked(self):
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            self.blocked_seconds += time.monotonic() - started
+
+    def read(self, request, mode):
+        admission = self.documents.request() if mode == 'document' else contextlib.nullcontext()
+        with self.blocked(), admission:
+            started = time.monotonic()
+            try:
+                with self.opener.open(request, timeout=120) as response:
+                    return response.read(embeddings.MAX_RESPONSE_BYTES + 1)
+            finally:
+                self.http_seconds += time.monotonic() - started
 
     def post(self, path, body, texts, label, model, mode):
         # The shared gate's supported byte/subword bound, including special tokens.
         tokens = embeddings.estimate_tokens(texts)
         for attempt in range(8):
-            call = self.budget.reserve(label, self.set_name, mode, tokens, self.prices[model])
+            with self.blocked():
+                call = self.budget.reserve(label, self.set_name, mode, tokens, self.prices[model])
             request = urllib.request.Request(self.endpoint + path, data=json.dumps(body).encode(),
                                              headers={'Content-Type': 'application/json', 'api-key': self.key}, method='POST')
             try:
-                with self.opener.open(request, timeout=120) as response:
-                    raw = response.read(embeddings.MAX_RESPONSE_BYTES + 1)
+                raw = self.read(request, mode)
                 if len(raw) > embeddings.MAX_RESPONSE_BYTES:
                     raise RuntimeError('provider response exceeds size limit')
                 try:
@@ -151,12 +215,18 @@ class Hosted:
                     raise RuntimeError('invalid provider response') from None
                 if type(used) is not int or used < 0:
                     raise RuntimeError('provider omitted confirmed usage; measurement rejected')
-                self.budget.settle(call, used)
+                with self.blocked():
+                    self.budget.settle(call, used)
                 return result
             except urllib.error.HTTPError as error:
                 code = error.code
                 retry_after = error.headers.get('Retry-After', '')
                 error.close()
+                # This hosted adapter's rate-limit rejection is unbilled.
+                # Do not infer the billing outcome of other error statuses.
+                if code == 429:
+                    with self.blocked():
+                        self.budget.settle(call, 0)
                 if code not in (429, 500, 502, 503, 504) or attempt == 7:
                     raise RuntimeError(f'provider HTTP {code}') from None
                 try:
@@ -168,8 +238,9 @@ class Hosted:
                 if attempt == 7:
                     raise RuntimeError('provider transport failed after 8 attempts') from None
                 delay = 0
-            # Failed and unknown attempts stay reserved; retries must reserve again.
-            time.sleep(min(60, max(2 ** attempt, delay) + random.uniform(0, 1)))
+            # Unknown attempts stay reserved; retries must reserve again.
+            with self.blocked():
+                time.sleep(min(60, max(2 ** attempt, delay) + random.uniform(0, 1)))
         raise RuntimeError('provider attempts exhausted')
 
     def embed(self, model, texts, mode, batch=None, dimensions=None, label=None):

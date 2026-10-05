@@ -1,4 +1,6 @@
 """Offline owner contracts for the developer-local direct comparison."""
+import concurrent.futures
+import threading
 import importlib.util
 import email.utils
 import http.client
@@ -133,7 +135,7 @@ class Providers(unittest.TestCase):
 
     def test_retry_and_unknown_usage_cannot_escape_run_cap_or_leak_errors(self):
         client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(20, 1), 'scifact')
-        error = urllib.error.HTTPError('https://example.com', 429, 'reflected secret', {}, io.BytesIO(b'sensitive body'))
+        error = urllib.error.HTTPError('https://example.com', 503, 'reflected secret', {}, io.BytesIO(b'sensitive body'))
         with mock.patch.object(client.opener, 'open', side_effect=error) as network, mock.patch.object(bakeoff.time, 'sleep'):
             with self.assertRaises(embeddings.BudgetExceeded):
                 client.embed('Cohere-Embed-V5-Pro', ['abc'], 'document')
@@ -161,6 +163,8 @@ class Providers(unittest.TestCase):
                         mock.patch('random.uniform', return_value=.5):
                     self.assertEqual(client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2), [[1, 0]])
                 sleep.assert_called_once_with(expected)
+                self.assertEqual(client.budget.summary()['reserved_input_tokens'], 0 if code == 429 else 9)
+                self.assertEqual(client.budget.summary()['confirmed_input_tokens'], 1)
         for code in (429, 503, None):
             client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(1000, 1), 'tiny')
             def fail(*args, **kwargs):
@@ -174,7 +178,69 @@ class Providers(unittest.TestCase):
                     client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2)
             self.assertEqual(network.call_count, 8)
             self.assertEqual(sleep.call_count, 7)
-            self.assertEqual(client.budget.summary()['reserved_input_tokens'], 72)
+            self.assertEqual(client.budget.summary()['reserved_input_tokens'], 0 if code == 429 else 72)
+
+    def test_document_admission_reduces_after_429_and_recovers_slowly(self):
+        # Own request-level pacing at the transport boundary. Blocking fake
+        # responses expose admission without wall-clock sleeps or polling.
+        client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(10000, 1), 'tiny')
+        failure = urllib.error.HTTPError('https://example.com', 429, 'limited', {}, io.BytesIO())
+        def success(*args, **kwargs):
+            return io.BytesIO(b'{"embeddings":{"float":[[1,0]]},"meta":{"billed_units":{"input_tokens":1}}}')
+        with mock.patch.object(client.opener, 'open', side_effect=[failure, success()]), mock.patch.object(bakeoff.time, 'sleep'):
+            client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2)
+        # After one rejection, only two of four workers may enter transport.
+        admitted, release, lock = threading.Event(), threading.Event(), threading.Lock()
+        active = maximum = entered = 0
+        def held(*args, **kwargs):
+            nonlocal active, maximum, entered
+            with lock:
+                active += 1
+                entered += 1
+                maximum = max(maximum, active)
+                if entered == 2:
+                    admitted.set()
+            if not release.wait(timeout=5):
+                raise AssertionError('test transport was not released')
+            with lock:
+                active -= 1
+            return success()
+        with mock.patch.object(client.opener, 'open', side_effect=held), concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(client.embed, 'Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2) for _ in range(4)]
+            try:
+                self.assertTrue(admitted.wait(timeout=5))
+                with lock:
+                    self.assertEqual(entered, 2)
+            finally:
+                release.set()
+            for future in futures:
+                self.assertEqual(future.result(), [[1, 0]])
+        self.assertLessEqual(maximum, 2)
+        # A brief clean stretch must not restore the original burst size.
+        with mock.patch.object(client.opener, 'open', side_effect=success):
+            for _ in range(40):
+                client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2)
+        # Recovery becomes observable by admitting at least three held calls.
+        entered = active = maximum = 0
+        release.clear()
+        admitted.clear()
+        def recovered(*args, **kwargs):
+            nonlocal entered
+            with lock:
+                entered += 1
+                if entered == 3:
+                    admitted.set()
+            if not release.wait(timeout=5):
+                raise AssertionError('recovery transport was not released')
+            return success()
+        with mock.patch.object(client.opener, 'open', side_effect=recovered), concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(client.embed, 'Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2) for _ in range(3)]
+            try:
+                self.assertTrue(admitted.wait(timeout=5))
+            finally:
+                release.set()
+            for future in futures:
+                future.result()
 
     def test_response_read_failures_retry_without_confirming_partial_usage(self):
         # Request setup failures are covered above; a truncated/reset body

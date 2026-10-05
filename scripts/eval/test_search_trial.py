@@ -120,6 +120,63 @@ class Reranker(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN') and importlib.util.find_spec('ranx'), 'needs eval dependencies and disposable PostgreSQL')
 class Trial(unittest.TestCase):
+    def test_serving_compute_excludes_hosted_wait_and_cached_usage_reprices(self):
+        # Own unit price decomposition: fake time advances only at provider I/O
+        # and ranking. SQL admission, cache and scorer remain real.
+        data = {'corpus': {'a': {'text': 'apple'}}, 'queries': {'q': 'apple'}, 'qrels': {'q': {'a': 1}}}
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        original_rank = search_trial.SearchIndex.rank
+        cases = (
+            ('hosted', 'none', .00002008, 10020, .00000008, 20, 10000, .00004008, .00008),
+            ('hosted', 'jev', .00002029, 20020, .00000029, 20, 20000, .00004029, .00008),
+            ('local', 'none', .00005, 50, 0, 50, 0, .0001, .06),
+        )
+        for private in (False, True):
+            for model, reranker, price, latency, provider_usd, local_ms, provider_ms, replay_price, index_price in cases:
+                with self.subTest(private=private, model=model, reranker=reranker), tempfile.TemporaryDirectory() as temp:
+                    cfg = search_trial.configuration({'reranker': reranker, **({
+                        'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2} if model == 'hosted' else {})})
+                    campaign = uuid.uuid4().hex
+                    store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
+                    lease = store.claim(campaign, 'trial')
+                    budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+                    prices = {'Cohere-Embed-V5-Fast': .08, 'jev-1.13.0': .042}
+                    client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+                    clock = [0.]
+                    def provider(request, timeout):
+                        clock[0] += 10
+                        if 'texts' not in json.loads(request.data):
+                            return io.BytesIO(b'{"model":"jev-1.13.0","usage":{"input_tokens":5},"answers":{"a":{"noul":1}}}')
+                        count = len(json.loads(request.data)['texts'])
+                        return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                            'meta': {'billed_units': {'input_tokens': count}}}).encode())
+                    def rank(index, *args, **kwargs):
+                        clock[0] += .02
+                        return original_rank(index, *args, **kwargs)
+                    def local_embed(encoder, texts, mode):
+                        clock[0] += .03
+                        return [[1] + [0] * 383 for _ in texts]
+                    vectors = {}
+                    with mock.patch.object(search_trial.time, 'monotonic', side_effect=lambda: clock[0]), \
+                            mock.patch('urllib.request.OpenerDirector.open', side_effect=provider) as network, \
+                            mock.patch.object(search_trial.SearchIndex, 'rank', rank), \
+                            mock.patch.object(direct_bakeoff.E5, 'embed', local_embed):
+                        measured = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
+                            budget, client, prices, .001, rerank_key='fixture-key', private_vectors=vectors)
+                        self.assertAlmostEqual(measured['metrics']['cost_per_search_usd'], price, delta=1e-12)
+                        self.assertAlmostEqual(measured['metrics']['latency_p95_ms'], latency)
+                        self.assertAlmostEqual(measured['cost']['search_provider_usd'], provider_usd, delta=1e-12)
+                        self.assertAlmostEqual(measured['cost']['search_compute_usd'], price - provider_usd, delta=1e-12)
+                        self.assertAlmostEqual(measured['cost']['search_timing_ms']['provider_p95'], provider_ms)
+                        self.assertAlmostEqual(measured['cost']['search_timing_ms']['local_p95'], local_ms)
+                        before = network.call_count
+                        replay = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
+                            budget, client, prices, .002, fresh_latency=False, rerank_key='fixture-key', private_vectors=vectors)
+                        self.assertEqual(network.call_count, before + (reranker == 'jev'))
+                        self.assertAlmostEqual(replay['metrics']['cost_per_search_usd'], replay_price, delta=1e-12)
+                        self.assertAlmostEqual(replay['metrics']['cost_per_1000_documents_usd'], index_price, delta=1e-12)
+
+
     def test_concurrent_retries_complete_with_uncertain_spend(self):
         # Own retry acceptance at the measurement/ledger boundary. Each of
         # four overlapping tasks fails its first HTTP attempt, then succeeds.
@@ -168,16 +225,16 @@ class Trial(unittest.TestCase):
                                                    budget, client, prices, 0, flush=commit, private_vectors=private_vectors)
                     self.assertEqual(measured['metrics']['ndcg@10'], 1)
                     self.assertEqual(measured['cost']['provider']['confirmed_input_tokens'], 515)
-                    self.assertEqual(measured['cost']['provider']['reserved_input_tokens'], 4640)
-                    self.assertAlmostEqual(store.summary(campaign)['provider']['unknown_usd'], .0003712)
-                    # 512 confirmed + 4 * 1152 uncertain document tokens;
-                    # a timed query has 1 confirmed + 16 uncertain tokens.
-                    self.assertAlmostEqual(measured['metrics']['cost_per_1000_documents_usd'], .0008)
-                    self.assertAlmostEqual(measured['metrics']['cost_per_search_usd'], .00000136)
+                    self.assertEqual(measured['cost']['provider']['reserved_input_tokens'], 3456)
+                    self.assertAlmostEqual(store.summary(campaign)['provider']['unknown_usd'], .00027648)
+                    # 512 confirmed + 3 * 1152 uncertain 503 document tokens;
+                    # document/query 429 attempts settle zero.
+                    self.assertAlmostEqual(measured['metrics']['cost_per_1000_documents_usd'], .00062)
+                    self.assertAlmostEqual(measured['metrics']['cost_per_search_usd'], .00000008)
                     replay = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
                         budget, client, prices, 0, fresh_latency=False, flush=commit, private_vectors=private_vectors)
-                    self.assertAlmostEqual(replay['metrics']['cost_per_1000_documents_usd'], .0008)
-                    self.assertAlmostEqual(replay['metrics']['cost_per_search_usd'], .00000136)
+                    self.assertAlmostEqual(replay['metrics']['cost_per_1000_documents_usd'], .00062)
+                    self.assertAlmostEqual(replay['metrics']['cost_per_search_usd'], .00000008)
                     self.assertEqual(query_calls, 5)
                     store.publish(campaign, 'trial', lease['owner'], {'metrics': measured['metrics'], 'cost': measured['cost']})
                     self.assertEqual(store.claim(campaign, 'trial')['status'], 'done')
@@ -211,6 +268,7 @@ class Trial(unittest.TestCase):
                 return search_trial.measure(cfg, data, dataset, temp, budget, client, prices, .001,
                                             fresh_latency=False, flush=flush)
             identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
+            identity['timing'] = 'local-compute-v2'
             busy_key = 'embedding/' + search_trial.digest({'config': identity, 'mode': 'document',
                 'text_hash': hashlib.sha256('passage 1'.encode()).hexdigest()})
             store.claim(campaign, busy_key, ttl=86400)
@@ -366,7 +424,9 @@ class Trial(unittest.TestCase):
                 mock.patch.object(search_trial.time, 'monotonic', side_effect=lambda: clock[0]):
             measured = search_trial.measure(cfg, data, {'split': 'dev', 'private': False}, temp,
                                            budget, client, prices, .001, fresh_latency=False)
-        self.assertAlmostEqual(measured['metrics']['cost_per_1000_documents_usd'], 8.50008)
+        # Ten seconds preparing titles, two billed tokens; seven seconds of
+        # hosted document HTTP and quality-query preparation are excluded.
+        self.assertAlmostEqual(measured['metrics']['cost_per_1000_documents_usd'], 5.00008)
 
     def test_parallel_missing_usage_drains_accounting_without_publishing(self):
         # A sibling in-flight reservation must not reject a valid response,
