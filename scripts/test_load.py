@@ -11,6 +11,29 @@ from load_stack import LoadStack, local_docker_host
 
 
 class LoadContracts(unittest.TestCase):
+    def test_probe_budget_paces_only_the_measured_window(self):
+        stack = SimpleNamespace(state={'admin': 'local'},
+            endpoints=lambda: ['http://127.0.0.1:1', 'http://127.0.0.1:2'])
+        workload = Workload(stack, {}, None)
+        clock, starts = [0.0], []
+        def wait(seconds):
+            clock[0] += seconds
+            return False
+        def transport(base, *args):
+            starts.append((base, clock[0]))
+            return {'ms': 0, 'status': 200, 'error': ''}, {}
+        # Instant responses expose observer pacing without real sleeps. Setup
+        # and drain must not acquire the synthetic limit of the timed window.
+        with mock.patch('load.time.monotonic', side_effect=lambda: clock[0]), \
+                mock.patch.object(workload.observe_stop, 'wait', side_effect=wait), \
+                mock.patch('load.call', side_effect=transport):
+            for paced in (False, False, True, True, False, False):
+                workload.probe_throttled = paced
+                workload.probe('GET', '/v0/ingestion-receipts/local')
+        self.assertEqual([at for _, at in starts], [0, 0, 0, .1, .1, .1])
+        self.assertEqual([base for base, _ in starts],
+            ['http://127.0.0.1:1', 'http://127.0.0.1:2']*3)
+
     def test_cleanup_removes_containers_when_a_child_exits_before_signal(self):
         # The process manager and Docker are external boundaries. A vanished
         # process must never prevent teardown of our own stack.

@@ -119,6 +119,7 @@ class Workload:
         self.driver_errors = []
         self.started = None
         self.probe_next = 0
+        self.probe_throttled = False
         self.probe_requests = []
 
     def guarded(self, function, *args):
@@ -198,10 +199,12 @@ class Workload:
     def probe(self, method, path, body=None):
         # One observer shares a global budget across both receipt and search
         # probes, and rotates over live replicas instead of loading only API0.
-        if self.observe_stop.wait(max(0, self.probe_next-time.monotonic())):
+        delay = max(0, self.probe_next-time.monotonic()) if self.probe_throttled else 0
+        if self.observe_stop.wait(delay):
             return {'status': None}, {}
         started = time.monotonic()
-        self.probe_next = started + 1/PROBE_HTTP_PER_SECOND
+        if self.probe_throttled:
+            self.probe_next = started + 1/PROBE_HTTP_PER_SECOND
         at = started-self.started if self.started is not None else None
         row, result = call(self.endpoint(len(self.probe_requests)), self.token, method, path, body)
         self.probe_requests.append({'at_seconds': at, **row})
@@ -272,6 +275,7 @@ class Workload:
         self.setup()
         started = time.monotonic()
         self.started = started
+        self.probe_throttled = True
         end = started + self.s['duration_seconds']
         pending = queue.Queue(maxsize=2*self.s['ingestion']['concurrency'])
         def ingest():
@@ -309,8 +313,10 @@ class Workload:
                 thread.join()
             pending.join()
             elapsed = time.monotonic()-started
+            self.probe_throttled = False
             complete = self.drain()
         finally:
+            self.probe_throttled = False
             self.stop.set()
             for thread in controls + searches:
                 if thread.ident:
@@ -348,7 +354,7 @@ class Workload:
                 self.s['search']['mix'] if self.s['search']['mix'][op]) else 'failed',
                 'elapsed_seconds': round(elapsed, 3), 'users_exercised': len(self.users),
                 'requests': summaries, 'lag': lag, 'faults': self.faults, 'fault_windows': fault_windows,
-                'probes': {'http_per_second_limit': PROBE_HTTP_PER_SECOND,
+                'probes': {'timed_http_per_second_limit': PROBE_HTTP_PER_SECOND,
                     'total_attempts': len(self.probe_requests), 'timed_window': request_summary([
                         row for row in self.probe_requests if row['at_seconds'] is not None and
                         0 <= row['at_seconds'] < elapsed], elapsed, 200)},

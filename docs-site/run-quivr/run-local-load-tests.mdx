@@ -77,8 +77,10 @@ Lag percentiles cover successful observations; always read missing documents
 and missing alerts alongside them.
 The JSON `work` object names these `missing_searchable` and `missing_alerts`.
 Every generated document matches every configured alert, so `expected_alerts`
-is accepted documents times the scenario's alert count. Receipt and search probes
-share a limit of 10 HTTP requests per second and rotate across live APIs.
+is accepted documents times the scenario's alert count. During timed load, receipt
+and search probes share a limit of 10 HTTP requests per second and rotate across live APIs.
+Setup and drain probes are uncapped, so this limit cannot make large runs miss
+their verification deadline.
 Receipt probes identify the stored record version from its acceptance receipt.
 The JSON `probes` object records `total_attempts` and `timed_window` statistics
 separately from workload requests.
