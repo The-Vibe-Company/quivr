@@ -1,0 +1,35 @@
+quivr-search/tests/sources.spec.ts
+  s_c21c70c5aa40f0::t_6413c403df8d81 206
+quivr-search/tests/dashboard.spec.ts
+  s_c21c70c5aa40f0::t_6413c403df8d81 772,811-838
+  s_c21c70c5aa40f0::t_3df5a5cd900b8e 839-840
+quivr-search/src/components/connectors/ConnectorsView.tsx
+  s_c21c70c5aa40f0::t_76a676415ff21e 92-95,108-110,133,169,402,420,426-430
+  s_c21c70c5aa40f0::t_b6192914b76a66 91,98,400
+quivr-search/src/components/ChartTip.tsx
+  s_c21c70c5aa40f0::t_b5b90122878aa2 54
+  s_c21c70c5aa40f0::t_372aaa6a27189f 52-53,57-58
+quivr-search/src/components/connectors/SourceList.tsx
+  s_c21c70c5aa40f0::t_76a676415ff21e 172
+quivr-search/src/components/alerts/AlertsView.tsx
+  s_c21c70c5aa40f0::t_00c6cf714bfce3 182,186,478
+  s_c21c70c5aa40f0::t_230a62a4ef0fca 180-181,183-185,187,202-204,228,307,438,450,455-459
+quivr-search/src/dashboard.css
+  s_c21c70c5aa40f0::t_7ca56fa3105327 2801-2806
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "94ea7b2564520be8411e1202c452d7ef922d8cf4",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}
