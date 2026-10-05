@@ -158,6 +158,10 @@ test("le filtre Date liste chaque jour jusqu’au premier article, compté par Q
   const all = chips(page).getByRole("button", { name: /^Tout\b/ }).first();
   await expect(all.locator(".chip-count")).toHaveText(String(total));
   await expect(page.getByText(/Les articles plus anciens restent dans Quivr/)).toBeVisible();
+  // An article arriving live after Quivr counted adds one, once.
+  engine.arrive();
+  await expect(rows(page)).toHaveCount(9);
+  await expect(all.locator(".chip-count")).toHaveText(String(total + 1));
 
   // Every day back to the first article, five days ago, newest first.
   const label = (iso: string) => {
@@ -178,7 +182,7 @@ test("le filtre Date liste chaque jour jusqu’au premier article, compté par Q
     "Hier",
     ...[2, 3, 4, 5].map((n) => label(daysAgo(n, 12))),
   ]);
-  await expect(options.first().locator(".menu-count")).toHaveText(String(total));
+  await expect(options.first().locator(".menu-count")).toHaveText(String(total + 1));
   const old = options.filter({ hasText: label(daysAgo(3, 12)) });
   await expect(old.locator(".menu-count")).toHaveText("3");
   await expect(options.filter({ hasText: label(daysAgo(4, 12)) }).locator(".menu-count")).toHaveText("0");
@@ -208,7 +212,7 @@ test("le filtre Date liste chaque jour jusqu’au premier article, compté par Q
   }
   await page.emulateMedia({ colorScheme: "light" });
   await chips(page).getByRole("button", { name: "Tout effacer" }).click();
-  await expect(rows(page)).toHaveCount(8);
+  await expect(rows(page)).toHaveCount(9);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await pick(page, "Date", new RegExp(`^${label(daysAgo(5, 12))}`));

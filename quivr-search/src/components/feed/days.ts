@@ -18,8 +18,6 @@ const REFRESH_MS = 60000;
 
 export interface DayCounts {
   total: number;
-  /** The articles already shown when the counts came, counted or not. */
-  counted: Set<string>;
   /** Every day from today back to the first article, newest first. */
   days: [string, number][];
   /** When Quivr counted them. */
@@ -30,17 +28,11 @@ export interface DayCounts {
  * Articles per day, from today back to the first article. Read once, then
  * every minute and whenever `refresh` is called (the date menu opens).
  */
-export function useDayCounts(
-  today: string,
-  shown: () => FeedItem[],
-  onUnauthorized: () => void,
-) {
+export function useDayCounts(today: string, onUnauthorized: () => void) {
   const [counts, setCounts] = useState<DayCounts | null>(null);
   const [ask, setAsk] = useState(0);
   const unauthorized = useRef(onUnauthorized);
   unauthorized.current = onUnauthorized;
-  const shownRef = useRef(shown);
-  shownRef.current = shown;
   useEffect(() => {
     const controller = new AbortController();
     (async () => {
@@ -64,8 +56,7 @@ export function useDayCounts(
       }
       // Today and yesterday always show; earlier days start at the first article.
       while (days.length > 2 && !days.at(-1)![1]) days.pop();
-      const counted = new Set(shownRef.current().map((i) => i.record_id));
-      setCounts({ total, counted, days, asOf });
+      setCounts({ total, days, asOf });
     })().catch((error) => {
       if (controller.signal.aborted) return;
       if (error instanceof APIError && error.status === 401)
@@ -82,14 +73,20 @@ export function useDayCounts(
   return { counts, refresh };
 }
 
-/** The articles that arrived live after Quivr counted, not counted yet. */
-export function liveSince(items: FeedItem[], counted: Set<string>, asOf: string) {
-  return items.filter(
-    (item) =>
-      !counted.has(item.record_id) &&
-      !!item.received_at &&
-      item.received_at > asOf,
-  );
+/**
+ * The articles that arrived live after Quivr counted. An article is dated by
+ * the first Version this page saw of it, so a new Version of an article it
+ * already showed is not counted twice.
+ */
+export function useLiveSince(items: FeedItem[]) {
+  const firstSeen = useRef(new Map<string, string>());
+  for (const item of items) {
+    const seen = firstSeen.current.get(item.record_id);
+    if (item.received_at && (!seen || item.received_at < seen))
+      firstSeen.current.set(item.record_id, item.received_at);
+  }
+  return (asOf: string) =>
+    items.filter((item) => (firstSeen.current.get(item.record_id) || "") > asOf);
 }
 
 /** The articles of one day ("" for none), newest first, a page at a time. */
@@ -97,7 +94,7 @@ export function useDayItems(day: string, onUnauthorized: () => void) {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [next, setNext] = useState<string | undefined>();
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{ message: string; stale: boolean } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const loading = useRef(false);
   const current = useRef<{ day: string; controller: AbortController } | null>(null);
@@ -122,7 +119,11 @@ export function useDayItems(day: string, onUnauthorized: () => void) {
       .catch((e) => {
         if (current.current !== run) return;
         if (e instanceof APIError && e.status === 401) return unauthorized.current();
-        setError(e instanceof Error ? e.message : "Ce jour ne s’affiche pas.");
+        setError({
+          message: e instanceof Error ? e.message : "Ce jour ne s’affiche pas.",
+          // The day changed under its page cursor: only a fresh start reads it.
+          stale: e instanceof APIError && e.status === 409,
+        });
         setStatus("error");
       })
       .finally(() => {
@@ -133,7 +134,7 @@ export function useDayItems(day: string, onUnauthorized: () => void) {
   useEffect(() => {
     setItems([]);
     setNext(undefined);
-    setError("");
+    setError(null);
     loading.current = false;
     if (!day) {
       current.current = null;
@@ -149,12 +150,13 @@ export function useDayItems(day: string, onUnauthorized: () => void) {
   const more = useCallback(() => {
     if (next) load(next);
   }, [next, load]);
-  // A failed first page starts the day over; a failed later page tries again.
+  // A failed later page tries again; a failed first page, or a cursor the day
+  // outgrew, starts the day over.
   const retry = useCallback(() => {
-    if (next) load(next);
+    if (next && !error?.stale) load(next);
     else setAttempt((n) => n + 1);
-  }, [next, load]);
-  return { items, next, status, error, more, retry };
+  }, [next, error, load]);
+  return { items, next, status, error: error?.message || "", more, retry };
 }
 
 /** Whether a day as "2026-10-03" is the one of a time. */

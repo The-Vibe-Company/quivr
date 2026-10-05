@@ -39,7 +39,7 @@ import { Reader } from "./Reader";
 import { SideColumn } from "./SideColumn";
 import { SourceLogo, logoIds } from "./SourceLogo";
 import { FilterMenu, MenuOption } from "./FilterMenu";
-import { liveSince, onDay, useDayCounts, useDayItems } from "./days";
+import { onDay, useDayCounts, useDayItems, useLiveSince } from "./days";
 
 /**
  * What the feed shows: every article or the unread ones; then, when any are
@@ -153,13 +153,8 @@ export function FeedPage({
   const terms = useMemo(() => tokenize(query), [query]);
   // The feed holds the latest articles; every day's count, and the articles
   // of a day picked in the Date menu, come from Quivr.
-  const shownItems = useRef(feed.items);
-  shownItems.current = feed.items;
-  const { counts, refresh: refreshCounts } = useDayCounts(
-    dayOf(now),
-    () => shownItems.current,
-    onUnauthorized,
-  );
+  const { counts, refresh: refreshCounts } = useDayCounts(dayOf(now), onUnauthorized);
+  const liveSince = useLiveSince(feed.items);
   const dayFeed = useDayItems(query ? "" : day, onUnauthorized);
 
   useEffect(() => {
@@ -349,7 +344,7 @@ export function FeedPage({
   // Out of a search, every day Quivr holds, with the articles that arrived
   // since it counted; the loaded articles' days until it answers.
   const inQuivr = !query && !!counts;
-  const live = counts ? liveSince(feed.items, counts.counted, counts.asOf) : [];
+  const live = counts ? liveSince(counts.asOf) : [];
   if (inQuivr) {
     for (const [d, n] of counts.days) days.set(d, n);
     for (const item of live) {

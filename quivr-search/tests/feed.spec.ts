@@ -158,12 +158,16 @@ test("le filtre Date compte et liste aujourd’hui depuis Quivr", async ({ page 
   const filters = page.getByRole("group", { name: "Filtrer le fil" });
   const counted = page.waitForResponse((r) => new URL(r.url()).pathname === "/demo/feed/days");
   await filters.getByRole("button", { name: /^Date/ }).click();
-  const counts = await (await counted).json();
-  expect(counts.total).toBeGreaterThanOrEqual(1);
-  expect(counts.days[0]).toBeGreaterThanOrEqual(1);
+  expect((await counted).status()).toBe(200);
+  // Quivr may have counted before the text arrived (the server keeps counts a
+  // minute): the page adds what arrived since, so today shows it either way.
   const dates = page.getByRole("dialog", { name: "Date" });
+  const today = dates.getByRole("button", { name: /^Aujourd’hui/ });
+  await expect
+    .poll(async () => Number(await today.locator(".menu-count").textContent()))
+    .toBeGreaterThanOrEqual(1);
   const listed = page.waitForResponse((r) => new URL(r.url()).pathname === "/demo/feed/page");
-  await dates.getByRole("button", { name: /^Aujourd’hui/ }).click();
+  await today.click();
   const day = await listed;
   expect(day.status()).toBe(200);
   expect((await day.json()).items.map((i: { title: string }) => i.title)).toContain(title);
