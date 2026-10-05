@@ -499,8 +499,45 @@ export function alertRoutes({
     };
   }
 
+  // What the alerts caught, for the demo's numbers (catalog.mjs): the last
+  // list read answers at once, and one older than a minute is read again
+  // behind it, so counting never waits for Matches to be paged.
+  let asked = null;
+  let known = null;
+  let order = 0;
+  let knownOrder = 0;
+  function listed(corpus) {
+    const pending = list(corpus);
+    const mine = ++order;
+    asked = { at: Date.now(), pending };
+    pending
+      .then(
+        (result) => {
+          // A slower, older list never replaces a newer one.
+          if (result.status === 200 && mine > knownOrder) {
+            known = result.data.matched;
+            knownOrder = mine;
+          }
+        },
+        () => {},
+      )
+      .finally(() => {
+        if (asked?.pending === pending) asked.done = true;
+      });
+    return pending;
+  }
+  async function matched(corpus) {
+    if (!destination) return {};
+    // A list still being read is waited for, never started again.
+    if (!asked || (asked.done && Date.now() - asked.at >= 60000))
+      void listed(corpus).catch(() => {});
+    if (known) return known;
+    const result = await asked.pending.catch(() => null);
+    return result?.status === 200 ? result.data.matched : {};
+  }
+
   /** The response for an alerts route, or undefined when the path is not one. */
-  return async function route(req, path, corpus) {
+  async function route(req, path, corpus) {
     if (path !== "/demo/alerts" && !path.startsWith("/demo/alerts/")) return;
     if (!destination)
       return path === "/demo/alerts" && req.method === "GET"
@@ -512,7 +549,7 @@ export function alertRoutes({
     try {
       if (path === "/demo/alerts")
         return req.method === "GET"
-          ? await list(corpus)
+          ? await listed(corpus)
           : req.method === "POST"
             ? await create(req, corpus)
             : undefined;
@@ -542,5 +579,7 @@ export function alertRoutes({
         return error;
       throw error;
     }
-  };
+  }
+  route.matched = matched;
+  return route;
 }

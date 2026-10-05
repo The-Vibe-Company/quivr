@@ -34,10 +34,11 @@ export const fetchFeed = (signal?: AbortSignal) =>
 
 export const FEED_STREAM = "/demo/feed/stream";
 
-const sortKey = (item: FeedItem) => item.received_at || item.published_at || "";
+type Dates = Pick<FeedItem, "record_id" | "received_at" | "published_at">;
+const sortKey = (item: Dates) => item.received_at || item.published_at || "";
 
 /** Newest first; items with no known date last. */
-export const newestFirst = (a: FeedItem, b: FeedItem) =>
+export const newestFirst = (a: Dates, b: Dates) =>
   sortKey(b).localeCompare(sortKey(a)) ||
   a.record_id.localeCompare(b.record_id);
 

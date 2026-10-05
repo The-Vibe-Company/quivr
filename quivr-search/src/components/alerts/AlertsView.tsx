@@ -11,6 +11,7 @@ import type { Doc } from "../../App";
 import { APIError, tokenize } from "../../lib/search";
 import {
   alertMessage,
+  catches,
   deleteAlert,
   fetchAlert,
   fetchAlerts,
@@ -19,6 +20,7 @@ import {
   resumeAlert,
   type Alert,
   type AlertDetail as Detail,
+  type AlertList,
 } from "../../lib/alerts";
 import { decompose, sourceName } from "../../lib/alertForm";
 import {
@@ -27,6 +29,7 @@ import {
   busiestPeriod,
   streakStart,
   type AlertStats,
+  type Dated,
 } from "../../lib/alertStats";
 import { HAND_NAMESPACE, type FeedItem } from "../../lib/feed";
 import type { Connector } from "../../lib/connectors";
@@ -134,8 +137,8 @@ export function AlertsView({
   onSimilar: (text: string) => void;
   connectors: Connector[];
   feedItems: FeedItem[];
-  isUnread: (item: FeedItem) => boolean;
-  onMarkAllRead: (items: FeedItem[]) => void;
+  isUnread: (item: Dated) => boolean;
+  onMarkAllRead: (items: Dated[]) => void;
   onChanged: () => void;
   notify: (text: string) => void;
   onUnauthorized: () => void;
@@ -154,6 +157,7 @@ export function AlertsView({
   // The form panel: closed, writing a new alert, or editing `editing`.
   const [composing, setComposing] = useState(false);
   const [matched, setMatched] = useState<Record<string, string[]>>({});
+  const [dated, setDated] = useState<AlertList["dated"]>();
   const [now, setNow] = useState(() => Date.now());
   const counts = useRef(new Map<string, number>());
   const seen = useRef<{ id: string; matches: Set<string> } | null>(null);
@@ -189,6 +193,7 @@ export function AlertsView({
     if (up.size) setGrown(up);
     setAlerts(list.items);
     setMatched(list.matched || {});
+    setDated(list.dated);
     setNow(Date.now());
     setDescribed(list.described === true);
     setStatus("ready");
@@ -272,18 +277,24 @@ export function AlertsView({
     listHeading.current?.focus();
   };
 
-  // What each alert caught among the feed's articles, newest first.
-  const caught = useMemo(() => {
-    const out = new Map<string, FeedItem[]>();
-    for (const item of [...feedItems].sort((a, b) => arrivedAt(b).localeCompare(arrivedAt(a))))
-      for (const id of matched[item.record_id] || []) {
-        const list = out.get(id);
-        if (list) list.push(item);
-        else out.set(id, [item]);
-      }
-    return out;
-  }, [feedItems, matched]);
+  // What each alert caught, newest first, dated by the facade's index.
+  const { byAlert: caught, byRecord: datedById } = useMemo(
+    () => catches({ available: true, described: false, items: [], matched, dated }, feedItems),
+    [matched, dated, feedItems],
+  );
   const byRecord = useMemo(() => new Map(feedItems.map((i) => [i.record_id, i])), [feedItems]);
+  // While the facade first indexes, what the alerts caught is dated as it
+  // goes: read again after 3 s, then less and less often.
+  const waited = useRef(0);
+  useEffect(() => {
+    if (!dated?.building) {
+      waited.current = 0;
+      return;
+    }
+    waited.current = Math.min(60000, waited.current ? waited.current * 2 : 3000);
+    const timer = setTimeout(() => void reload().catch(() => {}), waited.current);
+    return () => clearTimeout(timer);
+  }, [dated, reload]);
   const logoOf = useMemo(() => logoIds(connectors), [connectors]);
   const stats = useMemo(
     () =>
@@ -291,11 +302,12 @@ export function AlertsView({
       alertStats({
         createdAt: current.created_at,
         caught: caught.get(current.alert_id) || [],
-        feed: feedItems,
+        oldest: dated?.oldest ? Date.parse(dated.oldest) : null,
+        arrived: current.arrived ?? 0,
         now,
         total: current.match_count,
       }),
-    [current, caught, feedItems, now],
+    [current, caught, dated, now],
   );
 
   // Relative times and windows move on while the page stays open, and with
@@ -532,7 +544,7 @@ export function AlertsView({
                 ) : (
                   <ul className="caught-list" aria-label="Articles trouvés">
                     {shownDetail.matches.map((article) => {
-                      const item = byRecord.get(article.record_id);
+                      const item = datedById.get(article.record_id) || byRecord.get(article.record_id);
                       return (
                         <CaughtItem
                           key={article.match_id}
@@ -672,9 +684,9 @@ function AlertRow({
   onSelect,
 }: {
   alert: Alert;
-  /** The feed's articles it caught, newest first. */
-  caught: FeedItem[];
-  isUnread: (item: FeedItem) => boolean;
+  /** The articles it caught, dated, newest first. */
+  caught: Dated[];
+  isUnread: (item: Dated) => boolean;
   every: string[];
   logoOf: Map<string, string>;
   now: number;
