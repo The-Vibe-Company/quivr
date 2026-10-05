@@ -75,6 +75,15 @@ the end date and the trial limit stop the campaign. Conservative reservations
 include uncertain charges; Modal builds/storage and other account charges need
 separate budgeting. No measurements run in CI.
 
+Each dataset compares baseline and candidate in one container, alternating fresh
+queries after both indexes are ready. A campaign-wide slot serializes measurement,
+including preparation; busy trials wait for a later supervisor pass before paid dispatch.
+The latency gate measures local search work plus successful provider round trips.
+Retry HTTP, backoff, admission and ledger waits appear separately in
+`cost.search_timing_ms`, with wall time and the number of retried samples.
+See the [measurement guide](https://github.com/The-Vibe-Company/quivr/blob/main/docs/eval-modal.md)
+for the timing fields and replay behavior.
+
 Short network outages retry from 1 to 10 seconds for up to ten minutes. Configure
 `EVAL_NETWORK_OUTAGE_SECONDS` in the supervisor/watchdog environment (0–3600 seconds,
 default 600; 0 disables retries). Authentication/configuration refusals and uncertain

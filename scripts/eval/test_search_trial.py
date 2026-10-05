@@ -261,8 +261,21 @@ class Trial(unittest.TestCase):
                     prices = {'Cohere-Embed-V5-Fast': .08, 'jev-1.13.0': .042}
                     client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
                     clock = [0.]
+                    attempts = [0]
+                    reserve, settle = budget.reserve, budget.settle
+                    def ledger(operation, *args, **kwargs):
+                        clock[0] += 3
+                        return operation(*args, **kwargs)
+                    def backoff(seconds):
+                        clock[0] += seconds
                     def provider(request, timeout):
                         clock[0] += 10
+                        if 'texts' in json.loads(request.data):
+                            attempts[0] += 1
+                            # After cache fill and warmup, throttle the timed sample.
+                            if attempts[0] == 4:
+                                raise urllib.error.HTTPError(request.full_url, 429, 'throttle',
+                                    {'Retry-After': '7'}, io.BytesIO(b''))
                         if 'texts' not in json.loads(request.data):
                             return io.BytesIO(b'{"model":"jev-1.13.0","usage":{"input_tokens":5},"answers":{"a":{"noul":1}}}')
                         count = len(json.loads(request.data)['texts'])
@@ -278,7 +291,11 @@ class Trial(unittest.TestCase):
                     with mock.patch.object(search_trial.time, 'monotonic', side_effect=lambda: clock[0]), \
                             mock.patch('urllib.request.OpenerDirector.open', side_effect=provider) as network, \
                             mock.patch.object(search_trial.SearchIndex, 'rank', rank), \
-                            mock.patch.object(direct_bakeoff.E5, 'embed', local_embed):
+                            mock.patch.object(direct_bakeoff.E5, 'embed', local_embed), \
+                            mock.patch.object(budget, 'reserve', side_effect=lambda *a, **k: ledger(reserve, *a, **k)), \
+                            mock.patch.object(budget, 'settle', side_effect=lambda *a, **k: ledger(settle, *a, **k)), \
+                            mock.patch.object(direct_bakeoff.time, 'sleep', side_effect=backoff), \
+                            mock.patch.object(direct_bakeoff.random, 'uniform', return_value=0):
                         measured = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
                             budget, client, prices, .001, rerank_key='fixture-key', private_vectors=vectors)
                         self.assertAlmostEqual(measured['metrics']['cost_per_search_usd'], price, delta=1e-12)
@@ -287,6 +304,16 @@ class Trial(unittest.TestCase):
                         self.assertAlmostEqual(measured['cost']['search_compute_usd'], price - provider_usd, delta=1e-12)
                         self.assertAlmostEqual(measured['cost']['search_timing_ms']['provider_p95'], provider_ms)
                         self.assertAlmostEqual(measured['cost']['search_timing_ms']['local_p95'], local_ms)
+                        timing = measured['cost']['search_timing_ms']
+                        if model == 'hosted':
+                            self.assertEqual(timing['retried_samples'], 1)
+                            self.assertAlmostEqual(timing['retry_http_p95'], 10000)
+                            self.assertAlmostEqual(timing['backoff_p95'], 7000)
+                            self.assertAlmostEqual(timing['ledger_p95'], 12000 + (6000 if reranker == 'jev' else 0))
+                        else:
+                            self.assertEqual(timing['retried_samples'], 0)
+                        self.assertAlmostEqual(timing['retrieval_p95'], 20)
+                        self.assertGreaterEqual(timing['wall_p95'] + 1e-9, latency)
                         before = network.call_count
                         replay = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
                             budget, client, prices, .002, fresh_latency=False, rerank_key='fixture-key', private_vectors=vectors)
