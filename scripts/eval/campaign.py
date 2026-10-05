@@ -68,6 +68,7 @@ def hosted(binary, directory, candidate, gate):
     """Generate the dependency's manifest offline and run it without a provider key."""
     sys.path.insert(0, str(run.ROOT / 'scripts'))
     import ingestion_plugin
+    import plugin_environment
     import ports
     directory.mkdir(parents=True, exist_ok=True)
     directory.chmod(0o700)
@@ -87,7 +88,7 @@ def hosted(binary, directory, candidate, gate):
     space = next(iter(spaces))
     gate.plugin = declared['id']
     port = ports.allocate()
-    env = {k: v for k, v in os.environ.items() if k not in ('AZURE_FOUNDRY_KEY', 'AZURE_FOUNDRY_ENDPOINT', 'TYPESAFE_API_KEY')}
+    env = {k: v for k, v in plugin_environment.inherited().items() if k not in ('AZURE_FOUNDRY_KEY', 'AZURE_FOUNDRY_ENDPOINT', 'TYPESAFE_API_KEY')}
     env.update(QUIVR_PLUGIN_HOST='127.0.0.1', QUIVR_PLUGIN_PORT=str(port), QUIVR_PLUGIN_MANIFEST=str(manifest))
     log = directory / 'hosted-embedding.log'
     with log.open('ab') as output:

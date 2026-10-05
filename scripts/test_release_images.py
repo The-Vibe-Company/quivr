@@ -25,7 +25,7 @@ class ReleaseImagesTests(unittest.TestCase):
             (plugin / 'go.mod').write_text('module example.invalid/feed\n')
             result = release_images.inventory(root, 'example/quivr')
             self.assertEqual(json.loads(json.dumps(result))['include'][1], {
-                'plugin': 'feed', 'image': 'ghcr.io/example/quivr-plugin-example.feed',
+                'plugin': 'feed', 'plugin_id': 'example.feed', 'image': 'ghcr.io/example/quivr-plugin-example.feed',
                 'file': 'deploy/images/plugin.Dockerfile', 'target': 'go-plugin',
             })
             (plugin / 'go.mod').unlink()

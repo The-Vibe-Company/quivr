@@ -63,6 +63,7 @@ excluded = [
 "AGENTS.md" = { audience = "contributor", kind = "guide", summary = "rules every contributor and coding agent follows in this repository" }
 "CONTEXT.md" = { audience = "contributor", kind = "concept", summary = "the domain language: Corpus, Record, Version, Manifest and the other terms" }
 "README.md" = { audience = "functional", kind = "index", summary = "the project overview: why Quivr, architecture, quickstart and what works today" }
+"conformance/README.md" = { audience = "contributor", kind = "guide", summary = "contribute declarative requirements and run local conformance reports" }
 "contracts/http/v0/README.md" = { audience = "functional", kind = "concept", summary = "how the HTTP API contract is organised and checked" }
 "contracts/plugins/v0/README.md" = { audience = "plugin-author", kind = "concept", summary = "the plugin manifest, routes, schemas and fixtures" }
 "deploy/images/README.md" = { audience = "contributor", kind = "guide", summary = "configure release-please and publish signed engine and first-party plugin images" }
@@ -116,6 +117,7 @@ excluded = [
 
 # Maximum number of lines per page, in path order.
 [budgets]
+"conformance/README.md" = 125
 "docs/eval-private-working.md" = 90
 "docs/search-campaigns.md" = 172
 "docs/search-campaign-reporting.md" = 138

@@ -41,6 +41,7 @@ from the checked-out manifest and `version.txt`. It:
 1. Discovers first-party plugin manifests and their Go or Python runtimes.
 2. Builds `linux/amd64` images and pushes only their immutable digests.
 3. Checks the real images as UID/GID 10001 with a read-only root and `/tmp` tmpfs.
+   Plugin discovery uses an ephemeral signing key injected only at runtime.
 4. Signs and verifies each digest with cosign and GitHub OIDC.
 5. Attaches `images.txt` (signed digests) and release-please's `CHANGELOG.md` to
    the existing release. Its release notes already contain the changelog.

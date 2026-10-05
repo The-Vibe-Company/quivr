@@ -77,11 +77,12 @@ def start(stack, tokenizer, key):
 
 def launch(stack):
     from connector_plugin import healthy_port
+    import plugin_environment
     directory = stack.source / 'plugins' / 'jev-rerank'
     port = stack.state['jev_port']
     python = stack.state['jev_python']
     manifest = stack.state['jev_pin']['manifest']
-    env = {**os.environ, 'PYTHONPATH': os.pathsep.join([str(stack.source / 'sdks' / 'python' / 'src'), str(directory)]),
+    env = {**plugin_environment.inherited(), 'PYTHONPATH': os.pathsep.join([str(stack.source / 'sdks' / 'python' / 'src'), str(directory)]),
            'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest),
            'TYPESAFE_API_KEY': stack.jev_key}
     stack.jev_log = stack.directory / 'jev-rerank-plugin.log'

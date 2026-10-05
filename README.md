@@ -87,6 +87,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 ## What works today
 
 - **Release images and build identity.** Release-please manages alpha release PRs, versions and changelogs. Publishing a release builds signed engine and first-party plugin images on GHCR. `quivr --version`, `GET /v0/version`, startup logs and process metrics report the build. See [Deploy and configure Quivr](https://docs.quivr.thevibecompany.co/run-quivr/deploy).
+- **Declarative conformance cases**: contribute generic requirements and measure them locally with
+  `make conformance`; [case format and reports](conformance/README.md). CI never executes cases.
+
 - **Outgoing TLS** for Temporal, Weaviate, PostgreSQL, S3 and plugins, with verified
   certificates and configurable trust. Incoming HTTPS terminates at your platform;
   see [Run Quivr behind TLS](https://docs.quivr.thevibecompany.co/run-quivr/tls).
@@ -213,6 +216,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
   schemas, secrets and limits.
+- **Signed engine calls** (Plugin API 0.14): per-plugin HS256 tokens bind the operation and body, expire within 60 seconds, and support overlapping key rotation. Both SDKs reject invalid calls before dispatch. Older declared APIs remain unsigned with a startup warning. [Protocol reference](https://docs.quivr.thevibecompany.co/reference/plugin-protocol#signed-engine-requests).
 - **Plugin registry and activation without restart**: the plugins pinned at startup are
   recorded in the database, with the active Pipeline Plan saying which plugin serves each role
   (a media type, an alert rule, a connector kind, ingestion, retrieval). An operator key with

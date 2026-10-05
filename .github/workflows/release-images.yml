@@ -76,9 +76,10 @@ jobs:
         env:
           IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
           PLUGIN: ${{ matrix.plugin }}
+          PLUGIN_ID: ${{ matrix.plugin_id }}
           VERSION: ${{ needs.prepare.outputs.version }}
           REVISION: ${{ needs.prepare.outputs.revision }}
-        run: python3 scripts/image_smoke.py "$IMAGE" --plugin "$PLUGIN" --version "$VERSION" --revision "$REVISION"
+        run: python3 scripts/image_smoke.py "$IMAGE" --plugin "$PLUGIN" --plugin-id "$PLUGIN_ID" --version "$VERSION" --revision "$REVISION"
       - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: Sign and verify the immutable digest
         env:

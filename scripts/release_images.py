@@ -36,7 +36,8 @@ def inventory(root, repository):
             target = 'python-plugin'
         else:
             raise ValueError(f'no image runtime for {folder.name}')
-        images.append({'plugin': folder.name, 'image': f'ghcr.io/{owner}/quivr-plugin-{plugin_id}',
+        images.append({'plugin': folder.name, 'plugin_id': plugin_id,
+                       'image': f'ghcr.io/{owner}/quivr-plugin-{plugin_id}',
                        'file': 'deploy/images/plugin.Dockerfile', 'target': target})
     return {'include': images}
 
