@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -370,7 +369,7 @@ type common struct {
 // decode reads, schema-checks and semantically checks a request. It answers
 // the refusal itself and returns nil when the request is invalid.
 func (p *Plugin) decode(w http.ResponseWriter, r *http.Request, schema string, into any) (*kind, Credential) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
+	body, err := requestBody(r)
 	if err != nil || len(body) > maxRequestBytes {
 		refuse(w, 400, "invalid_request", "the request body is unreadable or larger than 16 MiB", Credential{})
 		return nil, Credential{}

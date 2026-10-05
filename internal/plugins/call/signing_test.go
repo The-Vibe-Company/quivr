@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,9 +28,9 @@ func TestEngineSignsDiscoveryAndEveryContribution(t *testing.T) {
 	t.Setenv(plugins.EnvSigningKeys, string(raw))
 	pin := policyPin()
 	pin.Manifest.Compatibility.PluginAPI = ">=0.14.0 <0.15.0"
-	received := 0
+	var received atomic.Int64
 	inspect := func(w http.ResponseWriter, r *http.Request) {
-		received++
+		received.Add(1)
 		body, _ := io.ReadAll(r.Body)
 		parts := strings.Split(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), ".")
 		if len(parts) != 3 {
@@ -70,12 +71,12 @@ func TestEngineSignsDiscoveryAndEveryContribution(t *testing.T) {
 			t.Fatalf("%s did not reach the wire: %v", op, err)
 		}
 	}
-	if received != 2*len(operations) {
-		t.Errorf("received %d signed requests, want %d", received, 2*len(operations))
+	if received.Load() != int64(2*len(operations)) {
+		t.Errorf("received %d signed requests, want %d", received.Load(), 2*len(operations))
 	}
 	t.Setenv(plugins.EnvSigningKeys, "")
-	before := received
-	if _, err := call.Discover(context.Background(), pin); err == nil || received != before {
+	before := received.Load()
+	if _, err := call.Discover(context.Background(), pin); err == nil || received.Load() != before {
 		t.Fatal("missing key reached the peer or was accepted")
 	}
 }

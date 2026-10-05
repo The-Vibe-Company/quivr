@@ -111,6 +111,10 @@ func verifyEngineToken(authorization, audience, method, target string, body []by
 	var selected []byte
 	for _, rawKey := range ring.Keys {
 		var key verificationKey
+		var fields map[string]json.RawMessage
+		if !jsonObject(rawKey, &fields) || bytes.Equal(bytes.TrimSpace(fields["not_before"]), []byte("null")) || bytes.Equal(bytes.TrimSpace(fields["not_after"]), []byte("null")) {
+			return false
+		}
 		if !jsonObject(rawKey, &key) {
 			return false
 		}
@@ -176,7 +180,21 @@ func (p *Plugin) authenticate(next http.Handler) http.Handler {
 			writeJSON(w, 401, envelope{Code: "invalid_engine_token", Message: "engine request authentication failed"})
 			return
 		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.Body = &authenticatedBody{Reader: bytes.NewReader(body), data: body}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// authenticatedBody lets SDK decoders reuse the bytes whose digest was verified.
+type authenticatedBody struct {
+	*bytes.Reader
+	data []byte
+}
+
+func (*authenticatedBody) Close() error { return nil }
+func requestBody(r *http.Request) ([]byte, error) {
+	if body, ok := r.Body.(*authenticatedBody); ok {
+		return body.data, nil
+	}
+	return io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
 }

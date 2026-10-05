@@ -13,9 +13,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from quivr_plugin import Plugin
+from quivr_plugin import Plugin, NormalizerResponse, ManifestContent, Part, TextContent
 from quivr_plugin.signing import ENV_KEYS
-from support import MANIFEST
+from support import MANIFEST, make_request
 
 
 CURRENT_SECRET = b"01234567890123456789012345678901"
@@ -31,7 +31,7 @@ def _encode(raw: bytes) -> str:
 
 def _token(secret: bytes, kid: str, *, audience: str, plugin_id: str, method: str,
            target: str, body: bytes, issued: int, expiry: int,
-           header_edits=None, claim_edits=None) -> str:
+           header_edits=None, claim_edits=None, encoding="utf-8") -> str:
     header = {"alg": "HS256", "typ": "quivr-engine+jwt", "kid": kid}
     contribution = "discovery"
     path = target.split("?", 1)[0]
@@ -51,8 +51,8 @@ def _token(secret: bytes, kid: str, *, audience: str, plugin_id: str, method: st
         header.update(header_edits)
     if claim_edits:
         claims.update(claim_edits)
-    header64 = _encode(json.dumps(header, separators=(",", ":")).encode())
-    claims64 = _encode(json.dumps(claims, separators=(",", ":")).encode())
+    header64 = _encode(json.dumps(header, separators=(",", ":")).encode(encoding))
+    claims64 = _encode(json.dumps(claims, separators=(",", ":")).encode(encoding))
     signing_input = f"{header64}.{claims64}".encode("ascii")
     signature = hmac.new(secret, signing_input, hashlib.sha256).digest()
     return f"Bearer {header64}.{claims64}.{_encode(signature)}"
@@ -171,6 +171,10 @@ class SignedCalls(unittest.TestCase):
     def test_invalid_tokens_are_rejected_before_dispatch(self):
         now = int(time.time())
         cases = [
+            ("UTF-16 JSON", lambda issued: _token(
+                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
+                method="GET", target=DISCOVERY_TARGET, body=b"", issued=issued-1,
+                expiry=issued+59, encoding="utf-16"), "GET", DISCOVERY_TARGET, b""),
             ("unsigned", lambda _: None, "GET", DISCOVERY_TARGET, b""),
             ("forged", lambda issued: _token(
                 b"wrong-signing-secret-012345678901", "current", audience=PLUGIN_ID,
@@ -221,6 +225,23 @@ class SignedCalls(unittest.TestCase):
                     token = make_token(now)
                     status, document, raw = self._request(server, method, target, body, token)
                     self._assert_invalid(status, document, raw)
+            calls = []
+            @plugin.normalizer
+            def record(invocation):
+                calls.append(invocation)
+                return NormalizerResponse(manifest=ManifestContent(parts=[
+                    Part(key="body", role="body", content=TextContent(text="authenticated"))]))
+            body = json.dumps(make_request(MANIFEST).to_dict()).encode()
+            with _environment(ring):
+                status, document, raw = self._request(server, "POST", "/v0/contributions/normalizer", body)
+                self._assert_invalid(status, document, raw)
+                self.assertEqual(calls, [])
+                token = _token(CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
+                               method="POST", target="/v0/contributions/normalizer", body=body,
+                               issued=now-1, expiry=now+59)
+                status, document, raw = self._request(server, "POST", "/v0/contributions/normalizer", body, token)
+                self.assertEqual(status, 200, raw)
+                self.assertEqual(len(calls), 1)
 
     def test_missing_or_malformed_key_configuration_fails_closed_without_echoing_secret(self):
         now = int(time.time())

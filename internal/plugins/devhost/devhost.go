@@ -105,7 +105,8 @@ func Start(opts Options) (*Process, error) {
 	cmd := exec.Command(opts.Command[0], opts.Command[1:]...)
 	cmd.Dir = opts.Dir
 	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, plugins.EnvSigningKeys+"=") && !strings.HasPrefix(entry, plugins.EnvPluginSigningKeys+"=") {
+		name, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(name, plugins.EnvSigningKeys) && !strings.EqualFold(name, plugins.EnvPluginSigningKeys) {
 			cmd.Env = append(cmd.Env, entry)
 		}
 	}

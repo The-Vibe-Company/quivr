@@ -11,7 +11,7 @@
   "properties": {
     "cases": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 6,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -55,8 +55,102 @@
               401
             ]
           }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "const": "valid"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expected_status": {
+                  "const": 200
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "expected_status": {
+                  "const": 401
+                }
+              }
+            }
+          }
+        ]
+      },
+      "maxItems": 6,
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "valid"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "expired"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "wrong-audience"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "tampered"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "unsigned"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "forged"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
         }
-      }
+      ]
     }
   }
 }

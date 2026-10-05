@@ -57,14 +57,15 @@ func LoadPins(configs []PinConfig) (*PinSet, error) {
 			return nil, err
 		}
 		pins[i] = pin
-		if !pin.Speaks(FeatureSignedCalls) {
-			slog.Warn("plugin calls are unsigned because the manifest declares an older Plugin API", "plugin_id", pin.Manifest.ID, "plugin_api", pin.PluginAPI())
-		}
 	}
 	if len(issues) > 0 {
 		return nil, &PinError{Path: "plugins", Issues: issues}
 	}
-	return NewPinSet(pins)
+	set, err := NewPinSet(pins)
+	if err == nil {
+		WarnUnsignedPins(set)
+	}
+	return set, err
 }
 
 // NewPinSet routes the Contributions of pins already validated one by one
@@ -271,4 +272,13 @@ func PinsExtensionRegistry(s *PinSet) (*content.ExtensionRegistry, error) {
 		}
 	}
 	return registry, nil
+}
+
+// WarnUnsignedPins records the compatibility risk for a startup plan.
+func WarnUnsignedPins(set *PinSet) {
+	for _, pin := range set.Pins() {
+		if !pin.Speaks(FeatureSignedCalls) {
+			slog.Warn("plugin calls are unsigned because the manifest declares an older Plugin API", "plugin_id", pin.Manifest.ID, "plugin_api", pin.PluginAPI())
+		}
+	}
 }

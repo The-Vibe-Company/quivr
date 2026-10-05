@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -54,13 +56,22 @@ func (k SigningKey) validAt(now int64) bool {
 // configuration must never leak into logs or public diagnostics.
 func ParseSigningKeys(raw []byte) (SigningKeys, error) {
 	var ring SigningKeys
-	if json.Unmarshal(raw, &ring) != nil || len(ring.Keys) == 0 || len(ring.Keys) > 16 || ring.Active == "" {
+	if !uniqueJSON(raw) || json.Unmarshal(raw, &ring) != nil || len(ring.Keys) == 0 || len(ring.Keys) > 16 || ring.Active == "" {
 		return SigningKeys{}, ErrSigningKeys
 	}
 	seen := map[string]bool{}
-	for _, key := range ring.Keys {
+	var fields struct {
+		Keys []map[string]json.RawMessage `json:"keys"`
+	}
+	if json.Unmarshal(raw, &fields) != nil {
+		return SigningKeys{}, ErrSigningKeys
+	}
+	for i, key := range ring.Keys {
+		if bytes.Equal(bytes.TrimSpace(fields.Keys[i]["not_before"]), []byte("null")) || bytes.Equal(bytes.TrimSpace(fields.Keys[i]["not_after"]), []byte("null")) {
+			return SigningKeys{}, ErrSigningKeys
+		}
 		secret, err := base64.RawURLEncoding.Strict().DecodeString(key.Secret)
-		if err != nil || len(secret) < 32 || key.ID == "" || seen[key.ID] || key.NotBefore < 0 || key.NotAfter < 0 || key.NotAfter != 0 && key.NotAfter <= key.NotBefore {
+		if err != nil || base64.RawURLEncoding.EncodeToString(secret) != key.Secret || len(secret) < 32 || key.ID == "" || seen[key.ID] || key.NotBefore < 0 || key.NotAfter < 0 || key.NotAfter != 0 && key.NotAfter <= key.NotBefore {
 			return SigningKeys{}, ErrSigningKeys
 		}
 		seen[key.ID] = true
@@ -74,7 +85,8 @@ func ParseSigningKeys(raw []byte) (SigningKeys, error) {
 // EngineSigningKeys resolves one plugin's secret ring, including registry pins.
 func EngineSigningKeys(id string) (SigningKeys, error) {
 	var all map[string]json.RawMessage
-	if json.Unmarshal([]byte(os.Getenv(EnvSigningKeys)), &all) != nil {
+	raw := []byte(os.Getenv(EnvSigningKeys))
+	if !uniqueJSON(raw) || json.Unmarshal(raw, &all) != nil {
 		return SigningKeys{}, ErrSigningKeys
 	}
 	return ParseSigningKeys(all[id])
@@ -152,4 +164,48 @@ func SigningContext(ctx context.Context, pin *Pin) (context.Context, error) {
 		return ctx, err
 	}
 	return WithRequestSigning(ctx, pin.Manifest.ID, ring), nil
+}
+
+// uniqueJSON refuses ambiguous operator key configuration at every object level.
+func uniqueJSON(raw []byte) bool {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	var value func() bool
+	value = func() bool {
+		token, err := d.Token()
+		if err != nil {
+			return false
+		}
+		switch token {
+		case json.Delim('{'):
+			seen := map[string]bool{}
+			for d.More() {
+				token, err := d.Token()
+				name, ok := token.(string)
+				if err != nil || !ok || seen[name] {
+					return false
+				}
+				seen[name] = true
+				if !value() {
+					return false
+				}
+			}
+			end, err := d.Token()
+			return err == nil && end == json.Delim('}')
+		case json.Delim('['):
+			for d.More() {
+				if !value() {
+					return false
+				}
+			}
+			end, err := d.Token()
+			return err == nil && end == json.Delim(']')
+		default:
+			return true
+		}
+	}
+	if !value() {
+		return false
+	}
+	_, err := d.Token()
+	return err == io.EOF
 }

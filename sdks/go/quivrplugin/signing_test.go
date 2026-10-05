@@ -276,10 +276,13 @@ func TestSigningKeyConfigurationFailsClosedWithoutEchoingSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	nullBounds := signingKey("current", currentSigningSecret, nil, nil)
+	nullBounds["not_after"] = nil
 	cases := []struct {
 		name string
 		ring string
 	}{
+		{name: "null expiry", ring: signingRing(t, "current", nullBounds)},
 		{name: "missing", ring: ""},
 		{name: "malformed JSON", ring: `{"active":"current","keys":`},
 		{name: "missing keys", ring: `{"active":"current"}`},

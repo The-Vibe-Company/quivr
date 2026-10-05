@@ -31,7 +31,7 @@ func (r *run) authentication(ctx context.Context) {
 		r.add(Check{ID: "authentication", Title: "authentication fixtures load", Issues: []plugins.Issue{{Code: CodeInvalidFixture, Message: "authentication fixtures unavailable"}}}, time.Now())
 		return
 	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for _, c := range fixture.Cases {
 		started := time.Now()
 		check := Check{ID: "authentication", Title: "engine request authentication: " + c.Name, Fixture: normativeFixturePrefix + "authentication/cases.json#" + c.Name}

@@ -32,7 +32,7 @@ def _object(pairs):
 
 
 def _json(raw):
-    return json.loads(raw, object_pairs_hook=_object)
+    return json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw, object_pairs_hook=_object)
 
 
 def _key(raw, now):
