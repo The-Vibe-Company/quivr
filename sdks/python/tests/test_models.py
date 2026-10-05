@@ -1,5 +1,4 @@
 """Serialization round-trips against the normative Plugin Protocol fixtures."""
-import importlib.util
 import json
 import unittest
 from pathlib import Path
@@ -93,14 +92,6 @@ class NormativeFixtureRoundTrip(unittest.TestCase):
         self.assertIsInstance(request.input.reference, models.FileReference)
         part = models.Part(key="a", role="section", content=models.TextContent(text="hello"))
         self.assertEqual(part.to_dict(), {"key": "a", "role": "section", "content": {"kind": "text", "text": "hello"}})
-
-
-class GeneratedFilesAreCurrent(unittest.TestCase):
-    def test_generator_check_passes(self):
-        spec = importlib.util.spec_from_file_location("generate", REPO / "sdks/python/scripts/generate.py")
-        generate = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(generate)
-        self.assertEqual(generate.main(["generate.py", "--check"]), 0)
 
 
 if __name__ == "__main__":

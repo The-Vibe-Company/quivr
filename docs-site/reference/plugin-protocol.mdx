@@ -90,8 +90,8 @@ serve an older unsigned discovery version. `quivr plugin dev` and `quivr plugin
 test` provision ephemeral keys when they launch the plugin; `plugin test
 --endpoint` uses `QUIVR_ENGINE_PLUGIN_KEYS` for that plugin.
 
-The Contract Runner executes the normative valid, expired, wrong-audience,
-tampered, unsigned and forged probes in
+The Contract Runner checks valid tokens and rejects missing or forged tokens,
+altered identities, targets, methods, bodies, timestamps, algorithms and encodings in
 `fixtures/authentication/cases.json`, then signs its ordinary Contribution
 fixtures. Their report check id is `authentication`.
 
@@ -577,19 +577,23 @@ Local test inputs that `quivr plugin dev` and `quivr plugin test` turn into requ
 
 ### Authentication fixture
 
-Normative authentication probes used by the Contract Runner. The plugin audience placeholder resolves to the tested plugin id. Tokens use the configured key, issued_seconds_ago relative to probe time, a 60-second lifetime and GET /v0/discovery. The unsigned and forged names omit or corrupt the token.
+Normative authentication probes used by the Contract Runner. The plugin audience placeholder resolves to the tested plugin id; other audiences and the other-plugin claim placeholder resolve to a distinct id. Tokens bind GET /v0/discovery?source=engine and the exact body. Optional claim, lifetime, algorithm and JSON encoding edits are applied before signing. Unsigned omits the token; forged changes a signature byte.
 
 Schema: `authentication-fixture.schema.json`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `cases` | array of object | yes | 6 to 6 items. |
-| `cases[].name` | `valid`, `expired`, `wrong-audience`, `tampered`, `unsigned`, `forged` | yes | — |
+| `cases` | array of object | yes | 13 to 13 items. |
+| `cases[].name` | `valid`, `expired`, `wrong-audience`, `tampered`, `unsigned`, `forged`, `wrong-plugin-id`, `wrong-route`, `wrong-method`, `future-iat`, `overlong-lifetime`, `alg-none`, `utf16` | yes | — |
 | `cases[].audience` | string | yes | — |
-| `cases[].issued_seconds_ago` | integer | yes | 0 to 3600. |
+| `cases[].issued_seconds_ago` | integer | yes | -3600 to 3600. |
 | `cases[].body` | string | yes | — |
 | `cases[].sent_body` | string | yes | — |
 | `cases[].expected_status` | `200`, `401` | yes | — |
+| `cases[].claims` | object | no | Signed claim replacements; other-plugin resolves to an id distinct from the tested plugin. |
+| `cases[].lifetime_seconds` | integer | no | Token lifetime before signature generation, including intentionally invalid lifetimes. 1 to 3600. Default `60`. |
+| `cases[].algorithm` | `HS256`, `none` | no | Default `"HS256"`. |
+| `cases[].json_encoding` | `utf-8`, `utf-16` | no | Encoding of both signed JSON parts; UTF-16 includes a little-endian BOM. Default `"utf-8"`. |
 
 ### Connector fixture
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://quivr.invalid/contracts/plugins/v0/authentication-fixture.schema.json",
   "title": "Engine authentication fixtures",
-  "description": "Normative authentication probes used by the Contract Runner. The plugin audience placeholder resolves to the tested plugin id. Tokens use the configured key, issued_seconds_ago relative to probe time, a 60-second lifetime and GET /v0/discovery. The unsigned and forged names omit or corrupt the token.",
+  "description": "Normative authentication probes used by the Contract Runner. The plugin audience placeholder resolves to the tested plugin id; other audiences and the other-plugin claim placeholder resolve to a distinct id. Tokens bind GET /v0/discovery?source=engine and the exact body. Optional claim, lifetime, algorithm and JSON encoding edits are applied before signing. Unsigned omits the token; forged changes a signature byte.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,7 +11,7 @@
   "properties": {
     "cases": {
       "type": "array",
-      "minItems": 6,
+      "minItems": 13,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -31,7 +31,14 @@
               "wrong-audience",
               "tampered",
               "unsigned",
-              "forged"
+              "forged",
+              "wrong-plugin-id",
+              "wrong-route",
+              "wrong-method",
+              "future-iat",
+              "overlong-lifetime",
+              "alg-none",
+              "utf16"
             ]
           },
           "audience": {
@@ -40,7 +47,7 @@
           },
           "issued_seconds_ago": {
             "type": "integer",
-            "minimum": 0,
+            "minimum": -3600,
             "maximum": 3600
           },
           "body": {
@@ -54,6 +61,49 @@
               200,
               401
             ]
+          },
+          "claims": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Signed claim replacements; other-plugin resolves to an id distinct from the tested plugin.",
+            "properties": {
+              "plugin_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "method": {
+                "enum": [
+                  "GET",
+                  "POST"
+                ]
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "lifetime_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "default": 60,
+            "description": "Token lifetime before signature generation, including intentionally invalid lifetimes."
+          },
+          "algorithm": {
+            "enum": [
+              "HS256",
+              "none"
+            ],
+            "default": "HS256"
+          },
+          "json_encoding": {
+            "enum": [
+              "utf-8",
+              "utf-16"
+            ],
+            "default": "utf-8",
+            "description": "Encoding of both signed JSON parts; UTF-16 includes a little-endian BOM."
           }
         },
         "allOf": [
@@ -82,7 +132,7 @@
           }
         ]
       },
-      "maxItems": 6,
+      "maxItems": 13,
       "allOf": [
         {
           "contains": {
@@ -144,6 +194,83 @@
             "properties": {
               "name": {
                 "const": "forged"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "wrong-plugin-id"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "wrong-route"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "wrong-method"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "future-iat"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "overlong-lifetime"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "alg-none"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "utf16"
               }
             }
           },
