@@ -196,10 +196,16 @@ export function useAlertList(onUnauthorized: () => void) {
       if (e instanceof APIError && e.status === 401) onUnauthorized();
     }
   }, [onUnauthorized]);
-  // While the facade still indexes, what the alerts caught is dated as it goes.
+  // While the facade first indexes, what the alerts caught is dated as it
+  // goes: read again after 3 s, then less and less often.
+  const waited = useRef(0);
   useEffect(() => {
-    if (!list?.dated?.building) return;
-    const timer = setTimeout(() => void reload(), 3000);
+    if (!list?.dated?.building) {
+      waited.current = 0;
+      return;
+    }
+    waited.current = Math.min(60000, waited.current ? waited.current * 2 : 3000);
+    const timer = setTimeout(() => void reload(), waited.current);
     return () => clearTimeout(timer);
   }, [list, reload]);
   useEffect(() => {

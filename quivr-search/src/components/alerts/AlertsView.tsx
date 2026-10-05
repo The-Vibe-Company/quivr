@@ -283,10 +283,16 @@ export function AlertsView({
     [matched, dated, feedItems],
   );
   const byRecord = useMemo(() => new Map(feedItems.map((i) => [i.record_id, i])), [feedItems]);
-  // While the facade still indexes, what the alerts caught is dated as it goes.
+  // While the facade first indexes, what the alerts caught is dated as it
+  // goes: read again after 3 s, then less and less often.
+  const waited = useRef(0);
   useEffect(() => {
-    if (!dated?.building) return;
-    const timer = setTimeout(() => void reload().catch(() => {}), 3000);
+    if (!dated?.building) {
+      waited.current = 0;
+      return;
+    }
+    waited.current = Math.min(60000, waited.current ? waited.current * 2 : 3000);
+    const timer = setTimeout(() => void reload().catch(() => {}), waited.current);
     return () => clearTimeout(timer);
   }, [dated, reload]);
   const logoOf = useMemo(() => logoIds(connectors), [connectors]);

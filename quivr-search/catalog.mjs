@@ -296,8 +296,10 @@ export function createCatalog({ upstream: read, corpus, caught, ready = async ()
     generation += 1;
   }
 
+  // Only the first build leaves numbers short: a rebuild keeps serving the
+  // index it replaces.
   const status = () => ({
-    building: !!build || !builtAt,
+    building: !builtAt,
     partial: capped,
     complete_after: Number.isFinite(completeAfter) ? iso(Math.max(completeAfter, 0)) : null,
   });
