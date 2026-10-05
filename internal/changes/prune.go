@@ -2,6 +2,8 @@ package changes
 
 import (
 	"context"
+
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"log/slog"
 	"time"
 
@@ -35,8 +37,8 @@ type Pruner struct {
 func (p Pruner) Run(ctx context.Context) {
 	ticker := time.NewTicker(p.Interval)
 	defer ticker.Stop()
-	for {
-		n, err := p.Store.PruneChanges(ctx, p.Retention, p.Organizations, PruneBatch, PruneBatches)
+	for ctx.Err() == nil {
+		n, err := p.Store.PruneChanges(lifecycle.WorkContext(ctx), p.Retention, p.Organizations, PruneBatch, PruneBatches)
 		p.Metrics.Pruned(n)
 		if err != nil && ctx.Err() == nil {
 			p.Metrics.Failed()

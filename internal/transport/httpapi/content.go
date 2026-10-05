@@ -85,7 +85,7 @@ func (a *API) handleIngestRecord(w http.ResponseWriter, r *http.Request, scope c
 			writeError(w, err, publicerr.ContentUnavailable)
 		} else {
 			a.Commands.Accepted(telemetry.CommandRecord, 1)
-			slog.Info("command accepted", "component", "api", "command", telemetry.CommandRecord, "request_id", w.Header().Get("X-Request-ID"), "receipt_id", receipt.ID, "record_id", receipt.RecordID)
+			slog.InfoContext(r.Context(), "command accepted", "component", "api", "command", telemetry.CommandRecord, "request_id", w.Header().Get("X-Request-ID"), "receipt_id", receipt.ID, "record_id", receipt.RecordID)
 			w.Header().Set("Location", "/v0/ingestion-receipts/"+receipt.ID)
 			send(w, 202, receiptToTransport(receipt))
 		}
@@ -133,7 +133,7 @@ func (a *API) handleIngestBatch(w http.ResponseWriter, r *http.Request, scope co
 			result.Items = append(result.Items, item)
 		}
 		a.Commands.Accepted(telemetry.CommandBatchEntry, receipts)
-		slog.Info("ingestion batch", "request_id", w.Header().Get("X-Request-ID"), "entries", len(entries), "receipts", receipts, "rejected", len(entries)-receipts, "retryable", retryable)
+		slog.InfoContext(r.Context(), "ingestion batch", "request_id", w.Header().Get("X-Request-ID"), "entries", len(entries), "receipts", receipts, "rejected", len(entries)-receipts, "retryable", retryable)
 		send(w, 200, result)
 		return nil
 	})
@@ -173,7 +173,7 @@ func (a *API) handleWithdrawRecord(w http.ResponseWriter, r *http.Request, scope
 		writeError(w, err, publicerr.ContentUnavailable)
 	} else {
 		a.Commands.Accepted(telemetry.CommandWithdrawal, 1)
-		slog.Info("command accepted", "component", "api", "command", telemetry.CommandWithdrawal, "request_id", w.Header().Get("X-Request-ID"), "receipt_id", receipt.ID, "record_id", receipt.RecordID)
+		slog.InfoContext(r.Context(), "command accepted", "component", "api", "command", telemetry.CommandWithdrawal, "request_id", w.Header().Get("X-Request-ID"), "receipt_id", receipt.ID, "record_id", receipt.RecordID)
 		w.Header().Set("Location", "/v0/ingestion-receipts/"+receipt.ID)
 		send(w, 202, receiptToTransport(receipt))
 	}

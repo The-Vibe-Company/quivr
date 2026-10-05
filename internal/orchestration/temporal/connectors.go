@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 
 	"go.temporal.io/sdk/activity"
 	sdktemporal "go.temporal.io/sdk/temporal"
@@ -100,7 +101,9 @@ func registerConnectors(w worker.Registry, c *Connectors, pins Pinner) {
 			}
 			err = c.Acquirer.Run(pinned, in.Organization, in.ConnectorID, in.Run)
 			if legacy && (err == nil || activity.GetInfo(ctx).Attempt >= acquireAttempts) {
-				if releaseErr := pins.Release(context.WithoutCancel(ctx), workConnectorRun, in.Organization, id); releaseErr != nil && err == nil {
+				release, cancel := lifecycle.CleanupContext(ctx, time.Second)
+				defer cancel()
+				if releaseErr := pins.Release(release, workConnectorRun, in.Organization, id); releaseErr != nil && err == nil {
 					err = releaseErr
 				}
 			}

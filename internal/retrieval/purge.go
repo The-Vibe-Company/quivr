@@ -2,7 +2,9 @@ package retrieval
 
 import (
 	"context"
+
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"io"
 	"log/slog"
 	"sync/atomic"
@@ -105,8 +107,8 @@ func (p Purger) Run(ctx context.Context) {
 	if interval <= 0 {
 		interval = time.Minute
 	}
-	for {
-		if _, err := p.Sweep(ctx); err != nil && ctx.Err() == nil {
+	for ctx.Err() == nil {
+		if _, err := p.Sweep(lifecycle.WorkContext(ctx)); err != nil && ctx.Err() == nil {
 			slog.Warn("projection purge sweep failed; retrying next interval", "error", err)
 		}
 		select {

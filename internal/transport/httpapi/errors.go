@@ -76,6 +76,9 @@ func errorResponse(err error, fallback *publicerr.Error, corpusID ...string) (in
 // A route supplies only its unavailable fallback and optional resync Corpus.
 func writeError(w http.ResponseWriter, err error, fallback *publicerr.Error, corpusID ...string) {
 	status, body := errorResponse(err, fallback, corpusID...)
+	if coded, ok := w.(interface{ SetErrorCode(string) }); ok {
+		coded.SetErrorCode(body.Code)
+	}
 	var plain *plainError
 	if errors.As(err, &plain) {
 		w.Header().Set("Content-Type", plain.contentType)
