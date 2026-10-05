@@ -492,7 +492,7 @@ class Plugin:
             def handle(self) -> None:
                 try:
                     super().handle()
-                except (BrokenPipeError, ConnectionResetError):
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     # The engine may give up at its invocation deadline. A
                     # disconnected peer is not a plugin failure or traceback.
                     self.close_connection = True
