@@ -224,7 +224,8 @@ async function alertLag() {
     alert = await (await api("/demo/alerts", {
       method: "POST",
       body: JSON.stringify({
-        idempotency_key: `perf-alert-lag-probe-${Date.now()}`,
+        // One key for every run: a retry after a half-made alert completes it.
+        idempotency_key: `perf-alert-lag-probe-${term}`,
         name: "Sonde de délai",
         expression: { kind: "keywords", match: { term } },
       }),

@@ -77,10 +77,10 @@ make verify-demo
 
 ```sh
 make demo-perf                                   # seeds a stack of its own, measures it, fails on a broken budget
-QUIVR_DEMO_URL=https://… QUIVR_DEMO_PASSWORD=… npm run perf --prefix quivr-search   # any deployment; adds nothing but its searches
+QUIVR_DEMO_URL=https://… QUIVR_DEMO_PASSWORD=… npm run perf --prefix quivr-search   # any deployment; by default adds nothing but its searches
 ```
 
-`make demo-perf` adds 12 synthetic sources of 100 articles and six alerts, then also times how long an alert takes to catch a new text; its report is `.scratch/quivr-demo-perf-*/perf.json`. A remote deployment's endpoint times include the network: they are reported, not checked. Its searches (`port grève`, 20 per mode) show in Admin's top queries where the core records query text. The facade compresses its answers (brotli or gzip), revalidates reads with an ETag, and names in `Server-Timing` the time and calls each one spent in the core. The Fil ships with the page; the other tabs load when the browser is idle.
+`make demo-perf` adds 12 synthetic sources of 100 articles and six alerts, then also times how long an alert takes to catch a new text (`PERF_ALERT_LAG=1`, which writes an alert and five texts to the demo it measures); its report is `.scratch/quivr-demo-perf-*/perf.json`. A remote deployment's endpoint times include the network: they are reported, not checked. Its searches (`port grève`, 20 per mode) show in Admin's top queries where the core records query text. The facade compresses its answers (brotli or gzip), revalidates reads with an ETag, and names in `Server-Timing` the time and calls each one spent in the core. The Fil ships with the page; the other tabs load when the browser is idle.
 
 ## Server configuration
 
