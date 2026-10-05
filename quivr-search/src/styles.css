@@ -413,6 +413,18 @@ mark {
     background-position: -200% 0;
   }
 }
+/* A load that ends quickly shows nothing: the skeleton appears only after
+   200 ms, and so does a page's own panel holding it, instead of flashing
+   between two pages. A card inside a page keeps its frame meanwhile. */
+.loading-state,
+main > .panel:has(> .loading-state) {
+  animation: loading-wait 200ms step-end both;
+}
+@keyframes loading-wait {
+  from {
+    visibility: hidden;
+  }
+}
 @media (max-width: 640px) {
   :root {
     --gutter: 20px;

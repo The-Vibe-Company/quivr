@@ -24,7 +24,7 @@ import { Dialog } from "../Dialog";
 import { AddSource } from "./AddSource";
 import { NO_ARTICLES, SourceList, groupSources, nameOf, type SourceStats } from "./SourceList";
 import { PlusIcon } from "../RailIcons";
-import { LiveBadge, LoadingState, Notice } from "../ui";
+import { LiveBadge, LoadingState, Notice, liveFeed } from "../ui";
 import type { FeedItem } from "../../lib/feed";
 import { needsCheck } from "../../lib/format";
 import { displayState } from "./HealthBadge";
@@ -36,6 +36,17 @@ const LIVE_INTERVAL = 5000;
 const RETRY_POLL = 2000;
 
 type Status = "loading" | "ready" | "unavailable" | "error";
+
+/**
+ * The page as last shown. Coming back to it, it shows at once (no loading
+ * flash between two pages), then reads its sources again.
+ */
+let visited: {
+  corpus: string;
+  catalog: KindCatalog;
+  connectors: Connector[];
+  suggestions: FeedChoice[];
+} | null = null;
 
 export function ConnectorsView({
   corpus,
@@ -56,23 +67,27 @@ export function ConnectorsView({
   notify: (text: string) => void;
   onUnauthorized: () => void;
 }) {
-  const [status, setStatus] = useState<Status>("loading");
+  const seen = visited?.corpus === corpus ? visited : null;
+  const [status, setStatus] = useState<Status>(seen ? "ready" : "loading");
   const [error, setError] = useState("");
-  const [catalog, setCatalog] = useState<KindCatalog | null>(null);
-  const [connectors, setConnectors] = useState<Connector[]>([]);
+  const [catalog, setCatalog] = useState<KindCatalog | null>(seen?.catalog ?? null);
+  const [connectors, setConnectors] = useState<Connector[]>(seen?.connectors ?? []);
   const [selected, setSelected] = useState<string | null>(initialSelected);
   const [creating, setCreating] = useState(false);
-  const [live, setLive] = useState(false);
+  const [live, setLive] = useState(liveFeed.seen);
   const [announcement, setAnnouncement] = useState("");
   const [now, setNow] = useState(Date.now());
   const [attempt, setAttempt] = useState(0);
-  const [suggestions, setSuggestions] = useState<FeedChoice[]>([]);
+  const [suggestions, setSuggestions] = useState<FeedChoice[]>(seen?.suggestions ?? []);
   const [highlight, setHighlight] = useState<string | null>(null);
   // Adding a source happens in a dialog, from the header's button or the "+" card.
   const [adding, setAdding] = useState(false);
   const openAdd = () => setAdding(true);
   const states = useRef(new Map<string, string>());
   const listHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (status === "ready" && catalog) visited = { corpus, catalog, connectors, suggestions };
+  });
   // The row is gone: keyboard focus lands on the list heading, once the
   // settings it was removed from have closed and handed the focus back.
   const [removals, setRemovals] = useState(0);
@@ -134,7 +149,8 @@ export function ConnectorsView({
 
   useEffect(() => {
     const controller = new AbortController();
-    setStatus("loading");
+    // Coming back, the last sources stay on screen while they are read again.
+    setStatus((s) => (s === "ready" ? s : "loading"));
     Promise.all([
       fetchKinds(controller.signal),
       reload(controller.signal),
@@ -201,6 +217,7 @@ export function ConnectorsView({
                   },
                 );
               cursor = page.next_cursor;
+              liveFeed.seen = true;
               setLive(true);
               if (!page.has_more) break;
             }
@@ -215,6 +232,7 @@ export function ConnectorsView({
             cursor = null;
           } else if (e instanceof APIError && e.status === 403) {
             feed = false;
+            liveFeed.seen = false;
             setLive(false);
           } else if (e instanceof APIError && e.status === 401) {
             onUnauthorized();
