@@ -118,9 +118,13 @@ func (cfg Config) logSecrets() []string {
 	// Collect their secrets while retaining non-secret plugin and key IDs.
 	if raw := os.Getenv(plugins.EnvSigningKeys); raw != "" {
 		secrets = append(secrets, raw)
-		var rings map[string]plugins.SigningKeys
+		var rings map[string]json.RawMessage
 		if json.Unmarshal([]byte(raw), &rings) == nil {
-			for _, ring := range rings {
+			for _, rawRing := range rings {
+				var ring plugins.SigningKeys
+				if json.Unmarshal(rawRing, &ring) != nil {
+					continue
+				}
 				for _, key := range ring.Keys {
 					secrets = append(secrets, key.Secret)
 				}

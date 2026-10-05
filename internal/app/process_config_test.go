@@ -51,7 +51,7 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	t.Setenv("QUIVR_SHUTDOWN_GRACE", "")
 	t.Setenv("EXAMPLE_WEBHOOK_SECRET", "sentinel-env-secret")
 	const signingSecret = "c2lnbmluZy1zZWNyZXQtc2VudGluZWwtMzItYnl0ZXM"
-	t.Setenv(plugins.EnvSigningKeys, `{"example-plugin":{"active":"primary","keys":[{"id":"primary","secret":"`+signingSecret+`"}]}}`)
+	t.Setenv(plugins.EnvSigningKeys, `{"malformed-plugin":{"keys":"invalid"},"example-plugin":{"active":"primary","keys":[{"id":"primary","secret":"`+signingSecret+`"}]}}`)
 	cfg := Config{LogDirectory: t.TempDir(), CursorKey: "sentinel-cursor-secret", CredentialKey: "sentinel-credential-secret",
 		DatabaseURL: "postgres://user:sentinel-db-secret@localhost/db", Keys: map[string]corpus.Scope{"sentinel-bearer-secret": {}},
 		Destinations: map[string]monitoring.Destination{"receiver": {SecretEnv: "EXAMPLE_WEBHOOK_SECRET"}},
