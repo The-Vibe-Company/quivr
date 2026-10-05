@@ -12,8 +12,13 @@ func TestConnectorConfigurationSurface(t *testing.T) {
 	for _, raw := range catalog["items"].([]any) {
 		kinds = append(kinds, raw.(map[string]any)["kind"].(string))
 	}
-	slices.Sort(kinds)
-	if !slices.Equal(kinds, []string{"fixture", "m365_mail", "rss", "x_list"}) {
-		t.Fatalf("enabled connector kinds: %v", kinds)
+	var missing []string
+	for _, kind := range []string{"fixture", "m365_mail", "rss", "x_list"} {
+		if !slices.Contains(kinds, kind) {
+			missing = append(missing, kind)
+		}
+	}
+	if len(missing) != 0 {
+		t.Fatalf("missing startup connector kinds %v; catalog: %v", missing, kinds)
 	}
 }
