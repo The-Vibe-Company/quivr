@@ -16,27 +16,45 @@ export class APIError extends Error {
     super(message);
   }
 }
+// Reads started as the page's script runs (main.tsx), before React's first
+// render; the first request for each path takes its answer.
+const early = new Map<string, Promise<Response | null>>();
+export function readEarly(paths: string[]) {
+  for (const path of paths)
+    early.set(
+      path,
+      fetch(path, { signal: AbortSignal.timeout(20000) }).catch(() => null),
+    );
+}
 export async function request<T>(
   path: string,
   body?: unknown,
   signal?: AbortSignal,
   method: "GET" | "POST" | "PUT" = body === undefined ? "GET" : "POST",
 ): Promise<T> {
-  const response = await fetch(path, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(20000)])
-      : AbortSignal.timeout(20000),
-  }).catch((error) => {
-    if (signal?.aborted) throw error;
-    throw new APIError(
-      503,
-      "Connexion interrompue. Réessayez dans un instant.",
-      true,
-    );
-  });
+  const started = method === "GET" ? early.get(path) : undefined;
+  early.delete(path);
+  // An early read that failed (signed out, say) is asked again; a caller that
+  // gave up meanwhile gets its abort, not the answer.
+  const ready = await started;
+  signal?.throwIfAborted();
+  const response = ready?.ok
+    ? ready
+    : await fetch(path, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(20000)])
+          : AbortSignal.timeout(20000),
+      }).catch((error) => {
+        if (signal?.aborted) throw error;
+        throw new APIError(
+          503,
+          "Connexion interrompue. Réessayez dans un instant.",
+          true,
+        );
+      });
   const data = await response.json();
   if (!response.ok)
     throw new APIError(

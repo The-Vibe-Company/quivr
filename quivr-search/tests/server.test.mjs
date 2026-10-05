@@ -4,6 +4,8 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
+import { existsSync, readFileSync } from "node:fs";
+import zlib from "node:zlib";
 
 test("upstream read failures remain retryable; out-of-corpus resources stay hidden", async (t) => {
   const upstream = http.createServer((req, res) => {
@@ -533,6 +535,9 @@ test("source logos: an RSS source of the demo corpus only, raster images served 
   // icon all answer 404.
   for (const id of ["rss_outside", "other_kind", "missing", "rss_bare"])
     assert.equal((await fetch(`${base}/demo/sources/logo/${id}`)).status, 404, id);
+  // A site without an icon is not asked again by the browser for an hour.
+  const bare = await fetch(`${base}/demo/sources/logo/rss_bare`);
+  assert.equal(bare.headers.get("cache-control"), "private, max-age=3600");
 });
 
 test("the Veille feed scans the catalog, relays live Records newest first and never exposes the key", async (t) => {
@@ -1083,6 +1088,82 @@ test("the Admin tab relays the demo corpus's documents live, fences timelines an
   assert.ok(seen.every((r) => r.auth === "Bearer fixture-server-key"));
   assert.ok(!received.includes("fixture-server-key"));
   assert.ok(!JSON.stringify(snapshot).includes("fixture-server-key"));
+});
+
+// A raw GET, so the test sees the bytes and headers on the wire.
+const raw = (url, headers = {}) =>
+  new Promise((resolve, reject) =>
+    http
+      .get(url, { headers }, (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () =>
+          resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }),
+        );
+      })
+      .on("error", reject),
+  );
+const decode = ({ headers, body }) =>
+  headers["content-encoding"] === "br"
+    ? zlib.brotliDecompressSync(body)
+    : headers["content-encoding"] === "gzip"
+      ? zlib.gunzipSync(body)
+      : body;
+
+test("answers are compressed, revalidated with an ETag and say what they waited on in the core", async (t) => {
+  const items = Array.from({ length: 50 }, (_, i) => ({
+    connector_id: `c${i}`,
+    corpus_id: "demo",
+    kind: "rss",
+    source_namespace: `Source ${i}`,
+    enabled: true,
+  }));
+  const upstream = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ items }));
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  const base = await startDemo(t, upstream.address().port);
+  for (const coding of ["br", "gzip"]) {
+    const first = await raw(`${base}/v0/connectors`, { "Accept-Encoding": coding });
+    assert.equal(first.status, 200);
+    assert.equal(first.headers["content-encoding"], coding);
+    assert.equal(first.headers.vary, "Accept-Encoding");
+    assert.deepEqual(JSON.parse(decode(first)).items, items);
+    assert.equal(first.headers["cache-control"], "private, no-cache");
+    assert.match(first.headers["server-timing"], /^core;dur=[\d.]+;desc="1 call"$/);
+    // The same answer read again is a 304 without a body.
+    const again = await raw(`${base}/v0/connectors`, {
+      "Accept-Encoding": coding,
+      "If-None-Match": first.headers.etag,
+    });
+    assert.equal(again.status, 304);
+    assert.equal(again.body.length, 0);
+  }
+  // A coding the client refuses (q=0) is never chosen.
+  const refused = await raw(`${base}/v0/connectors`, { "Accept-Encoding": "br;q=0, gzip" });
+  assert.equal(refused.headers["content-encoding"], "gzip");
+  // Without Accept-Encoding the answer is plain; errors are never stored.
+  const plain = await raw(`${base}/v0/connectors`);
+  assert.equal(plain.headers["content-encoding"], undefined);
+  assert.deepEqual(JSON.parse(plain.body).items, items);
+  const missing = await raw(`${base}/demo/unknown`);
+  assert.equal(missing.headers["cache-control"], "no-store");
+
+  // The built bundle, when present (npm run build runs before npm test).
+  const index = new URL("../dist/index.html", import.meta.url);
+  if (!existsSync(index)) return t.diagnostic("dist/ missing: run npm run build to check the bundle");
+  const script = readFileSync(index, "utf8").match(/src="(\/assets\/[^"]+\.js)"/)[1];
+  const asset = await raw(base + script, { "Accept-Encoding": "br, gzip" });
+  assert.equal(asset.headers["content-encoding"], "br");
+  assert.equal(asset.headers["cache-control"], "public,max-age=31536000,immutable");
+  assert.deepEqual(decode(asset), readFileSync(new URL("../dist" + script, import.meta.url)));
+  assert.ok(asset.body.length < decode(asset).length / 3);
 });
 
 test("the demo's numbers count every article of the corpus, beyond the feed's latest 300", async (t) => {
