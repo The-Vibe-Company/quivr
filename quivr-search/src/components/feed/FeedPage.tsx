@@ -351,38 +351,38 @@ export function FeedPage({
   // picks it shows at once in the bar, the rows right after (THE-1056).
   const listed = useDeferredValue(filter);
   const stale = listed !== filter;
-  // A row passes every facet of the filter but `skip`, so each facet's
-  // counts read what picking it would show.
-  const pass = (row: Row, skip?: Facet) => {
+  // A row passes every facet of the filter (the listed one unless given)
+  // but `skip`, so each facet's counts read what picking it would show.
+  const pass = (row: Row, skip?: Facet, f: Filter = listed) => {
     const id = row.item.record_id;
     if (skip !== "read") {
-      if (listed.read === "unread" && !reading.isUnread(row.item)) return false;
+      if (f.read === "unread" && !reading.isUnread(row.item)) return false;
     }
-    if (skip !== "alerts" && listed.alerts.length) {
+    if (skip !== "alerts" && f.alerts.length) {
       const caught = list?.matched[id] || [];
-      if (!listed.alerts.some((a) => caught.includes(a))) return false;
+      if (!f.alerts.some((a) => caught.includes(a))) return false;
     }
     // The engine already searched within the chosen sources, so its hits pass
     // even when they are older than the feed and their source is unknown here.
     const engineNarrowed = !!query && searchedSources.length > 0;
     if (
       skip !== "sources" &&
-      listed.sources.length &&
+      f.sources.length &&
       !engineNarrowed &&
-      !listed.sources.includes(row.item.namespace)
+      !f.sources.includes(row.item.namespace)
     )
       return false;
     return true;
   };
   // Muted sources leave the feed, not the search, unless picked.
-  const shown = query
-    ? base
-    : base.filter(
-        (r) => !muted.has(r.item.namespace) || listed.sources.includes(r.item.namespace),
-      );
-  const dated = day
-    ? shown.filter((r) => when(r.item) && dayOf(when(r.item)) === day)
-    : shown;
+  const visible = (f: Filter) =>
+    query
+      ? base
+      : base.filter((r) => !muted.has(r.item.namespace) || f.sources.includes(r.item.namespace));
+  const ofDay = (list: Row[]) =>
+    day ? list.filter((r) => when(r.item) && dayOf(when(r.item)) === day) : list;
+  const shown = visible(listed);
+  const dated = ofDay(shown);
   const rows = dated.filter((r) => pass(r));
   const facet = (skip: Facet) => dated.filter((r) => pass(r, skip)).map((r) => r.item);
   const readable = facet("read");
@@ -900,7 +900,13 @@ export function FeedPage({
                 onClick={() => {
                   // With nothing picked, every article so far, loaded or not.
                   if (numbers && !local && !day && facetFree) reading.markEverythingRead();
-                  else reading.markAllRead(readable.filter((i) => reading.isUnread(i)));
+                  // The filter just picked, even while the list still shows the last one.
+                  else
+                    reading.markAllRead(
+                      ofDay(visible(filter))
+                        .filter((r) => pass(r, "read", filter) && reading.isUnread(r.item))
+                        .map((r) => r.item),
+                    );
                   // The button goes once all is read: the focus moves to the filters.
                   document.querySelector<HTMLElement>(".filters .chip")?.focus();
                 }}

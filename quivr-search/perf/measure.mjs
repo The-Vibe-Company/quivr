@@ -123,9 +123,10 @@ async function interactions(browser) {
     ["open an article", () => page.locator(".feed-rows .row-link").nth(2).click()],
     ["next article (↓)", () => page.keyboard.press("ArrowDown")],
     ["close it (Esc)", () => page.keyboard.press("Escape")],
-    // A feed whose articles no alert caught has no tag to click.
+    // A feed whose articles no alert caught has no tag to click: said, not measured.
     ["filter on an alert tag", async () => {
       if (await tag.count()) await tag.click();
+      else console.warn("No alert tag in the feed: the alert-tag steps are not measured.");
     }],
     ["clear the filters", async () => {
       const clear = page.locator(".filters-clear");
