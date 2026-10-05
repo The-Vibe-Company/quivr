@@ -78,6 +78,11 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		n := f.calls
 		f.requests = append(f.requests, req)
 		f.mu.Unlock()
+		if f.answer == nil {
+			// Hold the actual contribution call until its invocation deadline.
+			<-r.Context().Done()
+			return
+		}
 		status, answer := f.answer(n)
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(answer)
@@ -238,7 +243,9 @@ func TestNormalizeRecordsTheValidatedOutputOnce(t *testing.T) {
 	if !ok {
 		t.Fatal("no normalized output recorded")
 	}
-	wantKey := normalization.IdempotencyKey("startup:acme.markdown@1.0.0#"+f.pin.ManifestDigest, "normalizer", "org_a", "version_1", content.Hash(input))
+	// Independent SHA-256 vector of the fixture's generation, contribution,
+	// Organization, Version and input checksum; update deliberately with inputs.
+	const wantKey = "nk_f0b904db40fb0e01e7cc602455a2bd79fbf1c3b3b9a19b72c54a297e62cf73db"
 	p := stored.Provenance
 	if p.PluginID != "acme.markdown" || p.PluginVersion != "1.0.0" || p.PluginAPI != "0.1.0" || p.Contribution != "normalizer" || p.IdempotencyKey != wantKey || p.InputSHA256 != content.Hash(input) || !strings.HasPrefix(p.InvocationID, "inv_") {
 		t.Fatalf("provenance %+v", p)
@@ -500,10 +507,13 @@ func TestRetryBudget(t *testing.T) {
 		"retryable plugin error": {func(int) (int, any) {
 			return 503, map[string]any{"code": "busy", "message": "later", "retryable": true}
 		}, "normalizer_retries_exhausted"},
-		"timeout": {func(int) (int, any) { time.Sleep(1500 * time.Millisecond); return 200, textParts("late") }, "normalizer_timeout"},
+		"timeout": {nil, "normalizer_timeout"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := setup(t, tc.answer)
+			if tc.answer == nil {
+				f.pin.Manifest.Contributions.Normalizer.TimeoutMS = 50
+			}
 			// The fixture declares retry.max_attempts: 2.
 			if err := f.service.Normalize(context.Background(), "org_a", "receipt_1"); err == nil {
 				t.Fatal("the first budgeted failure must retry")
@@ -517,6 +527,12 @@ func TestRetryBudget(t *testing.T) {
 			got := f.store.saved["version_1"]
 			if got.Outcome != content.OutcomeFailed || got.Failure.Code != tc.code || !got.Failure.Retryable {
 				t.Fatalf("outcome %+v %+v", got, got.Failure)
+			}
+			f.plugin.mu.Lock()
+			calls := f.plugin.calls
+			f.plugin.mu.Unlock()
+			if calls != 2 {
+				t.Fatalf("retry budget must cover two actual contribution calls, got %d", calls)
 			}
 		})
 	}

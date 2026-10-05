@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -214,32 +215,35 @@ func TestPluginAnswersTheEngineRefuses(t *testing.T) {
 // A search past its objective still answers, and is flagged so the search
 // rollups count it (THE-828).
 func TestASearchMayRunPastItsObjective(t *testing.T) {
-	p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "a", GenerationID: "gen"}}}
-	var left time.Duration
-	answer := func(ctx context.Context, request plugins.SearchRequest) ([]byte, error) {
-		if deadline, ok := ctx.Deadline(); ok && left == 0 {
-			left = time.Until(deadline)
+	synctest.Test(t, func(t *testing.T) {
+		p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "a", GenerationID: "gen"}}}
+		var left time.Duration
+		answer := func(ctx context.Context, request plugins.SearchRequest) ([]byte, error) {
+			if deadline, ok := ctx.Deadline(); ok && left == 0 {
+				left = time.Until(deadline)
+			}
+			if request.Profile == "deep" {
+				// deep's objective is 50 ms, the shortest a manifest declares:
+				// the plugin outlasts it.
+				// Advance the bubble's virtual clock, without a wall-clock wait.
+				<-time.After(60 * time.Millisecond)
+			}
+			return passthrough(ctx, request)
 		}
-		if request.Profile == "deep" {
-			// deep's objective is 50 ms, the shortest a manifest declares:
-			// the plugin outlasts it.
-			time.Sleep(60 * time.Millisecond)
+		s := rankedService(p, &scriptedRanker{answer: answer})
+		for profile, over := range map[string]bool{"deep": true, "default": false} {
+			result, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: profile})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Usage == nil || result.Usage.OverObjective != over {
+				t.Fatalf("profile %s: usage %+v; want over its objective %v", profile, result.Usage, over)
+			}
 		}
-		return passthrough(ctx, request)
-	}
-	s := rankedService(p, &scriptedRanker{answer: answer})
-	for profile, over := range map[string]bool{"deep": true, "default": false} {
-		result, err := s.Search(context.Background(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: []string{"corpus"}, Profile: profile})
-		if err != nil {
-			t.Fatal(err)
+		if left < time.Second {
+			t.Fatalf("the first round had %s left under a 50 ms objective; want the hard bound, at least 2 s", left)
 		}
-		if result.Usage == nil || result.Usage.OverObjective != over {
-			t.Fatalf("profile %s: usage %+v; want over its objective %v", profile, result.Usage, over)
-		}
-	}
-	if left < time.Second {
-		t.Fatalf("the first round had %s left under a 50 ms objective; want the hard bound, at least 2 s", left)
-	}
+	})
 }
 
 // Profiles resolve against what the pinned retrieval plugin declares;
