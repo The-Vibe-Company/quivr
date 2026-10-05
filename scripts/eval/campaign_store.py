@@ -13,6 +13,7 @@ class CleanupPending(RuntimeError):
 
 
 class CampaignStore(control_store.Store):
+    @control_store.retry_contention
     def register(self, spec, sha, scorer):
         from search_campaign import specification
         spec = specification(spec)
@@ -26,6 +27,7 @@ class CampaignStore(control_store.Store):
             if row != (spec, sha, scorer):
                 raise ValueError('campaign spec and measurement lineage are immutable')
 
+    @control_store.retry_contention
     def snapshot(self, name):
         with self.transaction() as db:
             self.lock(db, name)
@@ -35,12 +37,14 @@ class CampaignStore(control_store.Store):
         return {**row[3], 'spec': row[0], 'git_sha': row[1], 'scorer_digest': row[2],
                 'owner': row[4], 'live': bool(row[5]), 'generation': row[6]}
 
+    @control_store.retry_contention
     def confirmation_configuration(self, name, configuration):
         """Freeze validated operator metadata independently of exploration state."""
         with self.edit(name) as (_, state):
             if state.setdefault('confirmation_configuration', configuration) != configuration:
                 raise ValueError('confirmation configuration is immutable')
 
+    @control_store.retry_contention
     def development_keys(self, name, trial):
         """Resolve synced aggregate result identities to canonical SQL leases.
 
@@ -86,6 +90,7 @@ class CampaignStore(control_store.Store):
             yield db, state
             db.execute('UPDATE eval_control.campaign_runs SET state=%s::jsonb WHERE campaign=%s', (json.dumps(state, allow_nan=False), name))
 
+    @control_store.retry_contention
     def acquire(self, name, ttl=120):
         control_store.lease_batch([], ttl)
         with self.transaction() as db:
@@ -120,17 +125,20 @@ class CampaignStore(control_store.Store):
             yield db, state, row[3]
             db.execute('UPDATE eval_control.campaign_runs SET state=%s::jsonb WHERE campaign=%s', (json.dumps(state, allow_nan=False), name))
 
+    @control_store.retry_contention
     def renew_owner(self, name, owner, ttl=120):
         control_store.lease_batch([], ttl)
         with self.mutation(name, owner) as (db, _, __):
             db.execute("UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp()+%s*interval '1 second' WHERE campaign=%s", (ttl, name))
 
+    @control_store.retry_contention
     def release_owner(self, name, owner):
         # Release only our ownership; a stopped campaign can still drain safely.
         with self.transaction() as db:
             self.lock(db, name)
             db.execute('UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp() WHERE campaign=%s AND owner=%s', (name, owner))
 
+    @control_store.retry_contention
     def intent(self, name, owner):
         identity = uuid.uuid4().hex
         with self.mutation(name, owner) as (db, state, generation):
@@ -144,6 +152,7 @@ class CampaignStore(control_store.Store):
             state['resources'][identity] = resource
         return resource
 
+    @control_store.retry_contention
     def bind(self, name, owner, identity, app_id):
         if not isinstance(app_id, str) or not app_id.startswith('ap-'):
             raise ValueError('invalid Modal app identity')
@@ -153,26 +162,33 @@ class CampaignStore(control_store.Store):
                 raise control_store.LeaseLost('resource was already closed or bound')
             resource.update(app_id=app_id, status='running')
 
+    @control_store.retry_contention
     def closed(self, name, identity, *, owner=None):
         with self.mutation(name, owner, cleanup=owner is None) as (_, state, __):
             state['resources'][identity]['status'] = 'closed'
 
+    @control_store.retry_contention
     def trial(self, name, owner, number, value):
         with self.mutation(name, owner) as (_, state, __):
             state['trials'][str(number)] = value
 
+    @control_store.retry_contention
     def clear_leases(self, name):
         with self.mutation(name, cleanup=True) as (db, state, _):
             if any(r['status'] != 'closed' for r in state['resources'].values()):
                 raise CleanupPending('compute termination is not acknowledged')
             db.execute('UPDATE eval_control.leases SET expires_at=clock_timestamp() WHERE campaign=%s AND payload IS NULL', (name,))
 
+    @control_store.retry_contention
+    def cleanup_state(self, name):
+        """Fence cleanup and read its intents before any external compute I/O."""
+        with self.mutation(name, cleanup=True) as (_, state, __):
+            return state
+
 
 def cleanup(store, name, compute):
     # Fence before network I/O. New launch/bind is now refused for expired/stopped owners.
-    with store.mutation(name, cleanup=True):
-        pass
-    state = store.snapshot(name)
+    state = store.cleanup_state(name)
     pending = False
     for identity, resource in state['resources'].items():
         if resource['status'] == 'closed':

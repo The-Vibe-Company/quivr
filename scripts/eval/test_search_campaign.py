@@ -6,7 +6,9 @@ import json
 import os
 import pathlib
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import control_store
@@ -89,11 +91,189 @@ class Lifecycle(unittest.TestCase):
         self.store = campaign_store.CampaignStore(self.dsn)
         self.store.register(self.value, 'a' * 40, 'sha256:fixture')
 
+    def test_three_cache_validators_leave_watchdog_responsive_and_claims_unique(self):
+        # SQL races alone miss locks held by the caller while reading a volume.
+        # Hold all three actual trial readers; the watchdog must finish before
+        # releasing them. Only provider I/O and unrelated scoring are fake.
+        import hashlib
+        import direct_bakeoff
+        import search_campaign
+        import search_trial
+        name = self.value['name']
+        self.store.acquire(name)
+        cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture', 'dimensions': 2})
+        identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
+        identity['timing'] = 'local-compute-v2'
+        prices = {'Cohere-Embed-V5-Fast': .08}
+        ready = [threading.Event() for _ in range(3)]
+        release = threading.Event()
+        readers = threading.local()
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp, 'cached.json')
+            entry = {'vectors': [[1, 0]], 'tokens': 1, 'embedding_seconds': 0}
+            path.write_text(json.dumps(entry))
+            key = 'embedding/' + search_trial.digest({'config': identity, 'mode': 'document',
+                'text_hash': hashlib.sha256(b'cached passage').hexdigest()})
+            claim = self.store.claim(name, key)
+            self.store.publish(name, key, claim['owner'], {'filename': path.name, 'digest': search_trial.digest(entry)})
+            read_text = pathlib.Path.read_text
+            def slow_read(cache_path, *args, **kwargs):
+                if cache_path == path:
+                    ready[readers.number].set()
+                    if not release.wait(5):
+                        raise AssertionError('watchdog did not release cache readers')
+                return read_text(cache_path, *args, **kwargs)
+            def respond(request, timeout):
+                count = len(json.loads(request.data)['texts'])
+                return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                    'meta': {'billed_units': {'input_tokens': count}}}).encode())
+            def trial(number):
+                readers.number = number
+                claim = self.store.claim(name, 'trial/' + str(number))
+                budget = control_store.Budget(self.store, name, ('trial/' + str(number), claim['owner']))
+                client = direct_bakeoff.Hosted('https://example.com', 'fixture', budget, 'tiny', prices)
+                client.opener.open = respond
+                data = {'corpus': {'a': {'text': 'fresh passage ' + str(number)}, 'b': {'text': 'cached passage'}},
+                        'queries': {'q': 'question ' + str(number)}, 'qrels': {'q': {'b': 1}}}
+                dataset = {'name': 'tiny', 'version': '1', 'split': 'dev', 'private': False}
+                return search_trial.measure(cfg, data, dataset, temp, budget, client, prices, .001, fresh_latency=False)
+            scores = {'mean': {'ndcg@10': 1}, 'per_query': {}}
+            with mock.patch.object(pathlib.Path, 'read_text', slow_read), mock.patch('scoring.score', return_value=scores):
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    futures = [pool.submit(trial, i) for i in range(3)]
+                    try:
+                        self.assertTrue(all(event.wait(2) for event in ready), 'three validators must enter cache reads')
+                        watchdog = pool.submit(search_campaign.watchdog_once, self.store, name, mock.Mock())
+                        self.assertFalse(watchdog.result(timeout=2)['stopped'])
+                        # A second claimer cannot steal any reader's fresh entry.
+                        with self.store.transaction() as db:
+                            keys = [row[0] for row in db.execute("SELECT key FROM eval_control.leases WHERE campaign=%s AND key LIKE 'embedding/%%' AND payload IS NULL", (name,)).fetchall()]
+                        self.assertEqual(len(keys), 3)
+                        self.assertTrue(all(c['status'] == 'leased' for c in self.store.claim_many(name, keys).values()))
+                    finally:
+                        release.set()
+                    self.assertEqual([f.result(timeout=5)['cost']['cache_hits'] for f in futures], [1, 1, 1])
+            self.assertTrue(all(c['status'] == 'done' for c in self.store.claim_many(name, keys).values()))
+
+    def test_watchdog_and_supervisor_retry_sql_contention_without_losing_ownership(self):
+        # Real lock/statement timeouts must not become an unavailable-store
+        # crash. Release the blocker at the retry wait, never by sleeping.
+        import psycopg
+        import search_campaign
+        name = self.value['name']
+        owner = self.store.acquire(name)
+        done = self.store.claim(name, 'evidence')
+        self.store.publish(name, 'evidence', done['owner'], {'canonical': True})
+        connect = psycopg.connect
+        for operation, timeout in (('watchdog', 'lock_timeout'), ('renew', 'statement_timeout'),
+                                   ('claims', 'lock_timeout'), ('evidence', 'statement_timeout')):
+            with self.subTest(operation=operation), connect(self.dsn) as blocker:
+                blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
+                def bounded(*args, **kwargs):
+                    kwargs['options'] = '-c statement_timeout=10000 -c ' + timeout + '=25'
+                    return connect(*args, **kwargs)
+                waits = []
+                def backoff(delay):
+                    waits.append(delay)
+                    if len(waits) == 2:
+                        blocker.rollback()
+                with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.sleep', side_effect=backoff):
+                    if operation == 'watchdog':
+                        status = search_campaign.watchdog_once(self.store, name, mock.Mock())
+                        self.assertFalse(status['paused'])
+                    elif operation == 'renew':
+                        self.store.renew_owner(name, owner)
+                    elif operation == 'claims':
+                        claims = self.store.claim_many(name, iter(['first', 'second']))
+                        self.assertEqual(set(claims), {'first', 'second'})
+                        self.assertTrue(all(c['status'] == 'claimed' for c in claims.values()))
+                    else:
+                        self.assertEqual(self.store.evidence(name, iter(['evidence'])), {'evidence': {'canonical': True}})
+                self.assertEqual(waits, [1, 2])
+                state = self.store.snapshot(name)
+                self.assertEqual(state['owner'], owner)
+                self.assertTrue(state['live'])
+
     def test_signal_stops_compute_before_blocked_measurement_futures_drain(self):
         import signal
         for kind in (signal.SIGTERM, signal.SIGINT):
             with self.subTest(signal=kind):
                 self.assert_signal_cleanup(kind)
+
+    def test_persistent_contention_exhausts_the_sql_retry_window(self):
+        import psycopg
+        name = self.value['name']
+        connect = psycopg.connect
+        clock, waits = [0], []
+        with connect(self.dsn) as blocker:
+            blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
+            def bounded(*args, **kwargs):
+                kwargs['options'] = '-c statement_timeout=10000 -c lock_timeout=25'
+                return connect(*args, **kwargs)
+            def backoff(delay):
+                waits.append(delay)
+                clock[0] += 31
+                if len(waits) > 1:
+                    self.fail('SQL retry window never returned control to the caller')
+            with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch('time.sleep', side_effect=backoff):
+                with self.assertRaises(control_store.Contention):
+                    self.store.availability(name)
+            self.assertEqual(waits, [1])
+            clock[0], waits[:] = 0, []
+            import search_campaign
+            with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch('time.sleep', side_effect=backoff):
+                status = search_campaign.supervise(self.store, name, None, '.', once=True)
+            self.assertEqual(status['status'], 'retrying')
+            self.assertEqual(waits, [1])
+            for command, expected in ((['stop', name, '--allow-paid'], 2), (['status', name], 2),
+                                      (['digest', name], 2), (['watchdog', name, '--allow-paid', '--once'], 0)):
+                clock[0], waits[:] = 0, []
+                with self.subTest(command=command), mock.patch.dict(os.environ, EVAL_CONTROL_DATABASE_URL=self.dsn, CI='false', GITHUB_ACTIONS='false'), \
+                     mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                     mock.patch('time.sleep', side_effect=backoff), mock.patch('sys.stdout', new_callable=io.StringIO) as output:
+                    self.assertEqual(search_campaign.main(command), expected)
+                    self.assertEqual(json.loads(output.getvalue())['status'], 'retrying')
+                self.assertEqual(waits, [1])
+            blocker.rollback()
+            self.assertIsNone(self.store.availability(name)['stopped'])
+            blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
+            clock[0], waits[:] = 0, []
+            foreign_owner = []
+            def takeover(delay):
+                waits.append(delay)
+                if delay == 7:
+                    blocker.rollback()
+                    if not foreign_owner:
+                        foreign_owner.append(self.store.acquire(name))
+                else:
+                    clock[0] += 31
+                if len(waits) > 2:
+                    self.fail('supervisor silently retried another live owner')
+            with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch('time.sleep', side_effect=takeover):
+                with self.assertRaises(control_store.LeaseBusy):
+                    search_campaign.supervise(self.store, name, None, '.', poll_seconds=7)
+            self.assertEqual(waits, [1, 7])
+            self.assertEqual(self.store.snapshot(name)['owner'], foreign_owner[0])
+            self.store.release_owner(name, foreign_owner[0])
+            self.store.stop(name)
+            blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
+            clock[0], waits[:] = 0, []
+            def recover(delay):
+                waits.append(delay)
+                if delay == 7:
+                    blocker.rollback()
+                else:
+                    clock[0] += 31
+                if len(waits) > 2:
+                    self.fail('supervisor did not recover after contention cleared')
+            with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch('time.sleep', side_effect=recover), mock.patch('campaign_reporting.Notifications.send'):
+                recovered = search_campaign.supervise(self.store, name, None, '.', poll_seconds=7)
+            self.assertEqual(recovered['stopped'], 'operator stop')
+            self.assertEqual(waits, [1, 7])
 
     def assert_signal_cleanup(self, requested_signal):
         import threading
