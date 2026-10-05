@@ -9,9 +9,23 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { alertRoutes } from "../alerts.mjs";
 
 const KEY = "fixture-server-key";
 const OWNER = "quivr-web-demo";
+
+test("a preview upstream deadline is a retryable timeout", async () => {
+  const route = alertRoutes({
+    upstream: async () => { throw new DOMException("deadline exceeded", "TimeoutError"); },
+    jsonBody: async () => ({ expression: { kind: "keywords", match: { term: "orage" } } }),
+    destination: "demo-webhook",
+    evaluator: "alerts@0.3.0",
+  });
+  const result = await route({ method: "POST" }, "/demo/alerts/preview", "demo");
+  assert.equal(result.status, 504);
+  assert.equal(result.data.code, "preview_deadline_exceeded");
+  assert.equal(result.data.retryable, true);
+});
 
 // A fake core holding Saved Query Versions, Subscriptions, Matches and Records.
 function fakeCore() {

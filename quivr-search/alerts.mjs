@@ -600,6 +600,15 @@ export function alertRoutes({
         ? await changing(() => act(req, match[1], match[2], corpus))
         : undefined;
     } catch (error) {
+      if (path === "/demo/alerts/preview" && error?.name === "TimeoutError")
+        return {
+          status: 504,
+          data: {
+            code: "preview_deadline_exceeded",
+            message: "Le test de l’alerte a pris trop de temps. Réessayez dans un instant.",
+            retryable: true,
+          },
+        };
       // A core answer thrown out of a loop is relayed as is.
       if (error && typeof error.status === "number" && "data" in error)
         return error;
