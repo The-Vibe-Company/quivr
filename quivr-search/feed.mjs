@@ -456,6 +456,10 @@ export function createFeed({ core, key, corpus, upstream, index }) {
     start() {
       start().catch(() => {});
     },
+    /** Settles once the first catalog scan is done (or failed). */
+    ready() {
+      return start().catch(() => {});
+    },
     /** Follows the change stream: watcher("change", event), ("status", live), ("reset"). */
     watch(watcher) {
       watchers.add(watcher);

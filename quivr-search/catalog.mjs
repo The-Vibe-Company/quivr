@@ -6,9 +6,9 @@
 // each Record by its hour; the Records the feed reads (its latest articles
 // and every live arrival) carry their exact time.
 //
-// The build is lazy: the first request for a number starts it, newest day
-// first, with a few calls at a time, and numbers are served from what is
-// indexed meanwhile (`building`). The feed's change stream keeps it current;
+// The build is lazy: the first request for a number starts it, once the
+// feed has read its latest articles, newest day first, with a few calls at a
+// time, and numbers are served from what is indexed meanwhile (`building`). The feed's change stream keeps it current;
 // it is rebuilt every few hours, and after the feed had to resynchronize, to
 // catch what the stream cannot say.
 //
@@ -114,7 +114,7 @@ export function topicsQuery(params) {
   };
 }
 
-export function createCatalog({ upstream, corpus, caught }) {
+export function createCatalog({ upstream, corpus, caught, ready = async () => {} }) {
   // record id → { record_id, version_id, namespace, at, exact, seen }
   const entries = new Map();
   const titles = new Map();
@@ -184,6 +184,9 @@ export function createCatalog({ upstream, corpus, caught }) {
   // Newest day first: a day's hours are listed once Quivr counts articles
   // in it, and the index is whole down to that day once it is done.
   async function run() {
+    // The feed's first catalog scan goes first: the page shows sooner, and
+    // the index starts with the latest articles' exact times and titles.
+    await ready();
     const round = Date.now();
     const first = !builtAt;
     let top = utcDay(round) + DAY;

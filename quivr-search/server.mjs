@@ -110,6 +110,7 @@ const catalogFor = (corpus) =>
     upstream,
     corpus,
     caught: () => alerts.matched(corpus),
+    ready: () => feedFor(corpus).ready(),
   }));
 const feedFor = (corpus) =>
   (feed ||= createFeed({ core, key, corpus, upstream, index: catalogFor(corpus) }));

@@ -500,26 +500,27 @@ export function alertRoutes({
   }
 
   // What the alerts caught, for the demo's numbers (catalog.mjs): the last
-  // list read, at most a minute old, so counting never pages Matches again.
-  let caught = null;
-  async function listed(corpus) {
-    const result = await list(corpus);
-    if (result.status === 200)
-      caught = { at: Date.now(), matched: Promise.resolve(result.data.matched) };
-    return result;
+  // list read answers at once, and one older than a minute is read again
+  // behind it, so counting never waits for Matches to be paged.
+  let asked = null;
+  let known = null;
+  function listed(corpus) {
+    const pending = list(corpus);
+    asked = { at: Date.now(), pending };
+    pending.then(
+      (result) => {
+        if (result.status === 200) known = result.data.matched;
+      },
+      () => {},
+    );
+    return pending;
   }
-  function matched(corpus) {
-    if (!destination) return Promise.resolve({});
-    if (!caught || Date.now() - caught.at >= 60000) {
-      const pending = list(corpus).then((result) =>
-        result.status === 200 ? result.data.matched : {},
-      );
-      caught = { at: Date.now(), matched: pending };
-      pending.catch(() => {
-        if (caught?.matched === pending) caught = null;
-      });
-    }
-    return caught.matched;
+  async function matched(corpus) {
+    if (!destination) return {};
+    if (!asked || Date.now() - asked.at >= 60000) void listed(corpus).catch(() => {});
+    if (known) return known;
+    const result = await asked.pending.catch(() => null);
+    return result?.status === 200 ? result.data.matched : {};
   }
 
   /** The response for an alerts route, or undefined when the path is not one. */

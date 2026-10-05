@@ -4,9 +4,9 @@
 import { useEffect, useRef, useState } from "react";
 import { APIError } from "./search";
 
-const DEBOUNCE_MS = 150;
+const DEBOUNCE_MS = 50;
 const REFRESH_MS = 60000;
-const BUILDING_MS = 3000;
+const BUILDING_MS = 1000;
 
 /**
  * The answer for `key` (null asks nothing), the previous one meanwhile:
@@ -32,6 +32,7 @@ export function useNumbers<T extends { building: boolean }>(
   useEffect(() => {
     if (key === null) return;
     const controller = new AbortController();
+    // The first answer is asked at once; later ones wait for the filter to settle.
     const timer = setTimeout(() => {
       loader
         .current(controller.signal)
@@ -44,7 +45,7 @@ export function useNumbers<T extends { building: boolean }>(
           if (error instanceof APIError && error.status === 401) unauthorized.current();
           // Otherwise the last numbers stay until the next refresh.
         });
-    }, DEBOUNCE_MS);
+    }, fetched.current ? DEBOUNCE_MS : 0);
     return () => {
       clearTimeout(timer);
       controller.abort();
