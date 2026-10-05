@@ -31,6 +31,7 @@ import { groupSources } from "./components/connectors/SourceList";
 import { displayState } from "./components/connectors/HealthBadge";
 import { needsCheck } from "./lib/format";
 import { currentTheme, onSystemTheme, saveTheme, type Theme } from "./lib/theme";
+import { ChartTip } from "./components/ChartTip";
 
 // The Fil ships with the page; the other tabs and the text form load on first
 // use, and are fetched while the browser is idle so a click does not wait.
@@ -608,6 +609,7 @@ function Dashboard({
           />
         )}
       </Suspense>
+      <ChartTip />
       <div className="toast-region" role="status" aria-live="polite">
         {toast && (
           <p className="toast" key={toast.at}>

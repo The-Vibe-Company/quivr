@@ -31,7 +31,7 @@ import {
 import { HAND_NAMESPACE, type FeedItem } from "../../lib/feed";
 import type { Connector } from "../../lib/connectors";
 import { longTime, plural } from "../../lib/format";
-import { daily } from "../../lib/moments";
+import { daily, dayLabel } from "../../lib/moments";
 import { print } from "../../lib/notation";
 import { groupSources } from "../connectors/SourceList";
 import { Reader } from "../feed/Reader";
@@ -297,7 +297,6 @@ export function AlertsView({
       }),
     [current, caught, feedItems, now],
   );
-  const active = alerts.filter((a) => a.enabled).length;
 
   // Relative times and windows move on while the page stays open, and with
   // each arrival in the feed.
@@ -398,9 +397,10 @@ export function AlertsView({
             Vos alertes
           </h2>
           {alerts.length > 0 && (
-            <p className="alerts-sum">
-              {plural(alerts.length, "alerte")} · {active} active{active > 1 ? "s" : ""}
-            </p>
+            <span className="head-count">
+              {alerts.length}
+              <span className="visually-hidden"> alerte{alerts.length > 1 ? "s" : ""}</span>
+            </span>
           )}
           <LiveBadge live={live} />
           <button type="button" className="button alerts-new" onClick={() => compose(null)}>
@@ -714,11 +714,18 @@ function AlertRow({
         <SourceLogos alert={alert} every={every} logoOf={logoOf} />
       </td>
       <td data-col="week">
-        <div className="spark" role="img" aria-label={`Repérés sur 7 jours : ${week.map((d) => d.count).join(", ")}`}>
+        <div
+          className="spark"
+          role="img"
+          tabIndex={0}
+          data-tips
+          aria-label={`Repérés sur 7 jours : ${week.map((d) => d.count).join(", ")}`}
+        >
           {week.map((d, i) => (
             <span
               key={d.day}
               data-now={i === week.length - 1 || undefined}
+              data-tip={`${dayLabel(d.day, now)} · ${plural(d.count, "repéré")}`}
               style={{ height: `${d.count ? Math.max(14, (d.count / most) * 100) : 8}%` }}
             />
           ))}
@@ -831,14 +838,18 @@ function Trend({ s }: { s: AlertStats }) {
       <div
         className="trend-plot"
         role="img"
+        tabIndex={0}
+        data-tips
         aria-label={`Repérés par ${s.mode === "hours" ? "heure" : "jour"} : ${s.bars.map((b) => b.count).join(", ")}`}
       >
-        {s.bars.map((b) => (
+        {s.bars.map((b, i) => (
           <span
             key={b.key}
             data-recent={b.recent || undefined}
             data-zero={!b.count || undefined}
-            title={`${b.label} : ${plural(b.count, "repéré")}`}
+            data-tip={`${b.label} · ${plural(b.count, "repéré")}${
+              s.average ? ` · moyenne 7 j : ${s.average[i].toLocaleString("fr", { maximumFractionDigits: 1 })}` : ""
+            }`}
             style={b.count ? { height: `${Math.max(6, (b.count / top) * 100)}%` } : undefined}
           />
         ))}
@@ -1039,9 +1050,14 @@ function AlertSheet({
         <div className="sheet-two">
           <div>
             <span className="sheet-label">Par source</span>
-            <div className="source-stack" aria-hidden="true">
+            <div className="source-stack" aria-hidden="true" data-tips>
               {shownSources.map((x, i) => (
-                <i key={x.namespace || "others"} data-rank={i} style={{ width: `${(x.count / feedTotal) * 100}%` }} />
+                <i
+                  key={x.namespace || "others"}
+                  data-rank={i}
+                  data-tip={`${x.namespace ? sourceName(x.namespace) : "Autres"} · ${plural(x.count, "article")} (${Math.round((x.count / feedTotal) * 100)} %)`}
+                  style={{ width: `${(x.count / feedTotal) * 100}%` }}
+                />
               ))}
             </div>
             <ul className="source-legend" aria-label="Par source">
@@ -1063,13 +1079,19 @@ function AlertSheet({
             <div
               className="hours"
               role="img"
+              tabIndex={0}
+              data-tips
               aria-label={`Repérés par heure de la journée : ${s.hours
                 .map((c, h) => (c ? `${h} h : ${c}` : ""))
                 .filter(Boolean)
                 .join(", ")}`}
             >
               {s.hours.map((c, h) => (
-                <span key={h} data-level={c ? Math.ceil((c / busiest) * 3) : 0} title={`${h} h : ${plural(c, "repéré")}`} />
+                <span
+                  key={h}
+                  data-level={c ? Math.ceil((c / busiest) * 3) : 0}
+                  data-tip={`${h} h – ${h + 1} h · ${plural(c, "repéré")}`}
+                />
               ))}
             </div>
             <div className="trend-axis">

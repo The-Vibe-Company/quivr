@@ -215,6 +215,7 @@ export function AddSource({
             ref={input}
             id={`${id}-url`}
             className="form-input"
+            data-autofocus
             data-state={error && !found ? "error" : found ? "found" : undefined}
             type="text"
             inputMode="url"

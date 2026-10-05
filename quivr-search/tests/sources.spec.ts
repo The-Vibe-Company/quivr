@@ -15,14 +15,17 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+const addressField = (page: Page) => page.getByLabel("Adresse du site");
+
+// The page, with the dialog that adds a source open.
 async function openSources(page: Page) {
   await page.goto("/?view=sources");
   await expect(
     page.getByRole("heading", { name: "Sources", level: 1 }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Ajouter une source", exact: true }).click();
+  await expect(addressField(page)).toBeFocused();
 }
-
-const addressField = (page: Page) => page.getByLabel("Adresse du site");
 
 // Entrée looks the address up at once (typing alone looks it up after a pause).
 async function discover(page: Page, address: string) {
@@ -71,7 +74,8 @@ test("coller l’adresse d’un site trouve son flux, dont les articles devienne
 
   const source = row(page, name);
   await expect(source).toBeVisible();
-  await expect(addressField(page)).toHaveValue("");
+  // Added: the dialog closes on the new card.
+  await expect(addForm(page)).toHaveCount(0);
   // Health follows the first run live: active, with the last article time.
   await expect(source.locator('[data-state="active"]')).toBeVisible({
     timeout: 60000,
@@ -105,7 +109,11 @@ test("un site qui annonce plusieurs flux laisse choisir lequel suivre", async ({
   await expect(confirm.getByLabel("Nom de la source")).toHaveValue(name);
   await confirm.getByRole("button", { name: "Commencer la collecte" }).click();
   const source = row(page, name);
-  await expect(source).toContainText("/feeds/tech.atom");
+  // The card shows no address; its name's tooltip has the feed followed.
+  await expect(source.getByRole("button", { name, exact: true })).toHaveAttribute(
+    "title",
+    /\/feeds\/tech\.atom/,
+  );
   await expect(source.locator('[data-state="active"]')).toBeVisible({
     timeout: 60000,
   });
@@ -119,9 +127,11 @@ test("une suggestion s’ajoute en un clic", async ({ page }, info) => {
   await chip.click();
   const source = row(page, "Fil continu exemple");
   await expect(source).toBeVisible();
+  await page.getByRole("button", { name: "Ajouter une source", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Fil continu exemple (déjà suivie)" }),
   ).toBeDisabled();
+  await page.keyboard.press("Escape");
   await expect(source.locator('[data-state="active"]')).toBeVisible({
     timeout: 60000,
   });

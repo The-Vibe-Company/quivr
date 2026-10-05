@@ -1,0 +1,92 @@
+---
+title: "Move meaning alerts to a new vector model"
+sidebarTitle: "Move meaning alerts"
+description: "Keep alerts that match by vector meaning working right after search switches to another vector space, or back."
+keywords: ["meaning alerts", "vectors", "Saved Query Version", "Subscription", "model switch"]
+---
+
+After search switches to another vector space, re-create each alert that matches by vector meaning, so its query vectors are in the same space as the documents' vectors.
+
+A Saved Query stores an alert definition; each immutable Saved Query Version fixes its query vectors. A Subscription pins one such Version and the evaluator that judges documents. Switching search does not re-encode those vectors or move those pins. Vectors from different spaces cannot be compared.
+
+## Prerequisites
+
+- Search has just switched vector space: you [activated another ingestion plugin](/run-quivr/switch-a-vector-model), [promoted another space](/run-quivr/backfill-a-vector-space) of the same plugin, or rolled either back.
+- `curl` and `jq` (`curl --version`, `jq --version`), your API address in `QUIVR_API_URL`, and a key with `monitoring:read` and `monitoring:write` in `QUIVR_ALERT_KEY`.
+- A label unique to this migration in `MIGRATION_ID`, such as the new space id followed by today's date. The requests use it only to build idempotency keys, so a later switch back to a space you used before still gets fresh keys.
+- Your application's inventory of alerts that use `meaning_check: vectors`. The API cannot list Saved Queries.
+
+<Warning>
+Migrate immediately after the switch. Until you do, these alerts return `not_ready` because the document and query vectors are in different spaces. Quivr records that result as final: it does not automatically re-check those documents when you migrate. A new Subscription Version takes effect from its commit, so documents accepted between the switch and migration can miss alerts permanently. The same gap opens after rollback; migrate immediately then too.
+</Warning>
+
+## Steps
+
+<Steps>
+<Step title="Create a new Saved Query Version">
+
+For every Saved Query using `meaning_check: vectors` in the affected Corpora, create a new Version **after** search switched space. Set `SAVED_QUERY_ID` to its id from your application's alert inventory. Preserve its definition:
+
+```bash
+curl -fsS "$QUIVR_API_URL/v0/saved-queries/$SAVED_QUERY_ID" \
+  -H "Authorization: Bearer $QUIVR_ALERT_KEY" \
+  | jq --arg key "model-switch-$SAVED_QUERY_ID-$MIGRATION_ID" \
+    '{idempotency_key:$key, definition:.current_version.definition}' > query-version.json
+curl -fsS -X POST "$QUIVR_API_URL/v0/saved-queries/$SAVED_QUERY_ID/versions" \
+  -H "Authorization: Bearer $QUIVR_ALERT_KEY" -H "Content-Type: application/json" \
+  -d @query-version.json | jq '{saved_query_id, version_id}'
+```
+
+Save its returned `version_id` as `QUERY_VERSION_ID`.
+
+</Step>
+<Step title="Move each Subscription to it">
+
+For each Subscription of this Saved Query, set `SUBSCRIPTION_ID` and create a new Version, retaining its evaluator settings and destination:
+
+```bash
+curl -fsS "$QUIVR_API_URL/v0/subscriptions/$SUBSCRIPTION_ID" \
+  -H "Authorization: Bearer $QUIVR_ALERT_KEY" \
+  | jq --arg key "model-switch-$SUBSCRIPTION_ID-$QUERY_VERSION_ID" \
+       --arg query "$QUERY_VERSION_ID" \
+    '{idempotency_key:$key, saved_query_version_id:$query,
+      evaluator:.current_version.evaluator, destination_id:.current_version.destination_id}' \
+    > subscription-version.json
+curl -fsS -X POST "$QUIVR_API_URL/v0/subscriptions/$SUBSCRIPTION_ID/versions" \
+  -H "Authorization: Bearer $QUIVR_ALERT_KEY" -H "Content-Type: application/json" \
+  -d @subscription-version.json | jq '{subscription_id, saved_query_version_id}'
+```
+
+The query Version must still be that Saved Query's current Version. Finish its Subscription migrations before creating another query Version. Replaying the same key and body returns the same Version; a changed body conflicts. Subscription edits preserve enabled state and affect future changes from their commit, without replaying past documents or rewriting existing Matches.
+
+Use your application’s inventory to include disabled Subscriptions before re-enabling them. The [Subscription API](/api-reference/overview) requires an owner filter and lists only enabled, non-deleted items; follow all pages for each owner and list global Subscriptions separately with `owner=none`. Gather Saved Query ids from those lists or your inventory.
+
+</Step>
+<Step title="Recalibrate the threshold">
+
+Similarity scores from different models are not comparable, so the copied threshold may now catch too much or too little. Tune it on your own examples; [Meaning alerts](/guides/described-alerts#keep-the-meaning-check-inside-the-installation) explains vector matching and its threshold. To apply a new value, repeat the previous step with a new idempotency key in `subscription-version.json` and the value in its `evaluator.configuration.threshold`, between 0.2 and 0.95.
+
+</Step>
+</Steps>
+
+## Check it worked
+
+Read each migrated Subscription and check that `current_version.saved_query_version_id` is the new query Version:
+
+```bash
+curl -fsS "$QUIVR_API_URL/v0/subscriptions/$SUBSCRIPTION_ID" \
+  -H "Authorization: Bearer $QUIVR_ALERT_KEY" | jq '.current_version.saved_query_version_id'
+```
+
+## After a rollback
+
+The migrations do not reverse themselves. Immediately after a rollback, set a new `MIGRATION_ID` and repeat these steps.
+
+## Clean up
+
+Delete the local `query-version.json` and `subscription-version.json` files. Stored alert Versions and Matches remain readable.
+
+## Next
+
+- [Try and switch a vector model](/run-quivr/switch-a-vector-model#check-it-worked) to finish checking the switch.
+- [Upgrade an alert rule](/run-quivr/upgrade-an-alert-rule) to move alerts to a new version of the alerts plugin, a separate task.

@@ -58,20 +58,48 @@
           {
             "group": "Run Quivr",
             "pages": [
-              "run-quivr/catalog",
-              "run-quivr/pin",
-              "run-quivr/receive-pushes",
-              "run-quivr/upgrade-a-plugin",
-              "run-quivr/upgrade-an-alert-rule",
-              "run-quivr/retire-alert-evaluations",
-              "run-quivr/configure-alert-fields",
-              "run-quivr/switch-a-vector-model",
-              "run-quivr/record-search-measurements",
-              "run-quivr/run-search-campaign",
-              "run-quivr/backfill-a-vector-space",
-              "run-quivr/reprocess-quarantined-versions",
-              "run-quivr/search-profiles",
-              "guides/rerank-with-jev"
+              "run-quivr/overview",
+              "run-quivr/deploy",
+              {
+                "group": "Plugins",
+                "pages": [
+                  "run-quivr/catalog",
+                  "run-quivr/pin",
+                  "run-quivr/upgrade-a-plugin",
+                  "run-quivr/reprocess-quarantined-versions"
+                ]
+              },
+              {
+                "group": "Sources",
+                "pages": [
+                  "run-quivr/receive-pushes"
+                ]
+              },
+              {
+                "group": "Search",
+                "pages": [
+                  "run-quivr/search-profiles",
+                  "run-quivr/rerank-with-jev",
+                  "run-quivr/switch-a-vector-model",
+                  "run-quivr/backfill-a-vector-space"
+                ]
+              },
+              {
+                "group": "Alerts",
+                "pages": [
+                  "run-quivr/configure-alert-fields",
+                  "run-quivr/upgrade-an-alert-rule",
+                  "run-quivr/move-meaning-alerts",
+                  "run-quivr/retire-alert-evaluations"
+                ]
+              },
+              {
+                "group": "Measure search",
+                "pages": [
+                  "run-quivr/record-search-measurements",
+                  "run-quivr/run-search-campaign"
+                ]
+              }
             ]
           },
           {
@@ -303,6 +331,14 @@
     {
       "source": "/plugins/switch-plugins-without-restarting",
       "destination": "/run-quivr/upgrade-a-plugin"
+    },
+    {
+      "source": "/guides/rerank-with-jev",
+      "destination": "/run-quivr/rerank-with-jev"
+    },
+    {
+      "source": "/run-quivr",
+      "destination": "/run-quivr/overview"
     }
   ]
 }

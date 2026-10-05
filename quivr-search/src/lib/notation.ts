@@ -25,7 +25,20 @@ export interface KeywordExpression {
   match: KeywordNode;
 }
 
-export class NotationError extends Error {}
+/**
+ * A mistake in a query, with where it is: the characters from `at` to `end`
+ * (end excluded, both in UTF-16 code units, as an input's selection counts
+ * them). At the end of the query, at and end both equal its length.
+ */
+export class NotationError extends Error {
+  constructor(
+    message: string,
+    readonly at = 0,
+    readonly end = at,
+  ) {
+    super(message);
+  }
+}
 
 const MAX_DEPTH = 6;
 const MAX_ITEMS = 64;
@@ -36,10 +49,14 @@ const SPACE = /\s/u;
 const hasWord = (text: string) => /[\p{L}\p{N}]/u.test(text);
 const length = (text: string) => [...text].length;
 
-type Token =
-  | { kind: "(" | ")" | "AND" | "OR" | "NOT" | "end" }
-  | { kind: "term"; text: string }
-  | { kind: "field"; name: string; text: string };
+// Where a token is in the query, for messages that point to it.
+type Span = { at: number; end: number };
+type Token = Span &
+  (
+    | { kind: "(" | ")" | "AND" | "OR" | "NOT" | "end" }
+    | { kind: "term"; text: string }
+    | { kind: "field"; name: string; text: string }
+  );
 
 function phrase(query: string, start: number): [string, number] {
   let out = "";
@@ -55,17 +72,25 @@ function phrase(query: string, start: number): [string, number] {
       i += 1;
     }
   }
-  throw new NotationError("Il manque le guillemet fermant d’une expression.");
+  throw new NotationError(
+    "Il manque le guillemet fermant d’une expression.",
+    start,
+    query.length,
+  );
 }
 
-function checked(text: string, what: string): string {
+function checked(text: string, what: string, at: number, end: number): string {
   if (length(text) > MAX_TEXT)
     throw new NotationError(
       `${what} « ${text.slice(0, 40)}… » dépasse ${MAX_TEXT} caractères.`,
+      at,
+      end,
     );
   if (!hasWord(text))
     throw new NotationError(
       `${what} « ${text} » ne contient ni lettre ni chiffre.`,
+      at,
+      end,
     );
   return text;
 }
@@ -77,12 +102,13 @@ function tokens(query: string): Token[] {
     const c = query[i];
     if (SPACE.test(c)) i += 1;
     else if (c === "(" || c === ")") {
-      out.push({ kind: c });
+      out.push({ kind: c, at: i, end: i + 1 });
       i += 1;
     } else if (c === '"') {
+      const at = i;
       const [text, next] = phrase(query, i);
       i = next;
-      out.push({ kind: "term", text: checked(text, "L’expression") });
+      out.push({ kind: "term", text: checked(text, "L’expression", at, i), at, end: i });
     } else {
       const start = i;
       while (
@@ -93,17 +119,19 @@ function tokens(query: string): Token[] {
         i += 1;
       const word = query.slice(start, i);
       if (OPERATORS.has(word)) {
-        out.push({ kind: word as "AND" | "OR" | "NOT" });
+        out.push({ kind: word as "AND" | "OR" | "NOT", at: start, end: i });
         continue;
       }
       if (word.startsWith("-"))
         throw new NotationError(
           `« ${word} » : écrivez NOT pour exclure un mot, par exemple NOT ${word.replace(/^-+/, "")}.`,
+          start,
+          i,
         );
       const field = FIELD.exec(word);
       if (!field || field[2].startsWith("/")) {
         // A URL such as https://example.com is text, not a field filter.
-        out.push({ kind: "term", text: checked(word, "Le mot") });
+        out.push({ kind: "term", text: checked(word, "Le mot", start, i), at: start, end: i });
         continue;
       }
       const name = field[1];
@@ -112,15 +140,19 @@ function tokens(query: string): Token[] {
       if (!value)
         throw new NotationError(
           `${name}: attend une valeur, par exemple ${name}:valeur ou ${name}:"deux mots".`,
+          start,
+          i,
         );
       if (length(value) > MAX_TEXT)
         throw new NotationError(
           `La valeur de ${name}: dépasse ${MAX_TEXT} caractères.`,
+          start,
+          i,
         );
-      out.push({ kind: "field", name, text: value });
+      out.push({ kind: "field", name, text: value, at: start, end: i });
     }
   }
-  out.push({ kind: "end" });
+  out.push({ kind: "end", at: query.length, end: query.length });
   return out;
 }
 
@@ -135,7 +167,11 @@ function describe(token: Token): string {
 
 const TOO_DEEP = `Les groupes et les NOT s’imbriquent sur plus de ${MAX_DEPTH} niveaux : simplifiez la requête.`;
 
-function group(operator: "all" | "any", items: KeywordNode[]): KeywordNode {
+function group(
+  operator: "all" | "any",
+  items: KeywordNode[],
+  span: Span,
+): KeywordNode {
   if (items.length === 1) return items[0];
   const flat: KeywordNode[] = [];
   for (const item of items)
@@ -145,6 +181,8 @@ function group(operator: "all" | "any", items: KeywordNode[]): KeywordNode {
   if (flat.length > MAX_ITEMS)
     throw new NotationError(
       `Un groupe compte ${flat.length} éléments ; ${MAX_ITEMS} au plus sont acceptés.`,
+      span.at,
+      span.end,
     );
   return operator === "all" ? { all: flat } : { any: flat };
 }
@@ -166,30 +204,36 @@ class Parser {
   take() {
     return this.items[this.at++];
   }
-  enter() {
+  enter(token: Token) {
     // Bounds recursion on pathological input; the depth rule is checked on the tree.
-    if (++this.nesting > 4 * MAX_DEPTH + 8) throw new NotationError(TOO_DEEP);
+    if (++this.nesting > 4 * MAX_DEPTH + 8)
+      throw new NotationError(TOO_DEEP, token.at, token.end);
+  }
+  // From the start of the token at `from` to the end of the last one taken.
+  span(from: number): Span {
+    return { at: this.items[from].at, end: this.items[this.at - 1].end };
   }
   or(): KeywordNode {
+    const from = this.at;
     const items = [this.and()];
     while (this.peek().kind === "OR") {
       this.take();
       items.push(this.and());
     }
-    return group("any", items);
+    return group("any", items, this.span(from));
   }
   and(): KeywordNode {
+    const from = this.at;
     const items = [this.unary()];
     while (!["OR", ")", "end"].includes(this.peek().kind)) {
       if (this.peek().kind === "AND") this.take();
       items.push(this.unary());
     }
-    return group("all", items);
+    return group("all", items, this.span(from));
   }
   unary(): KeywordNode {
     if (this.peek().kind !== "NOT") return this.primary();
-    this.take();
-    this.enter();
+    this.enter(this.take());
     const node = { not: this.unary() };
     this.nesting -= 1;
     return node;
@@ -197,25 +241,36 @@ class Parser {
   primary(): KeywordNode {
     const token = this.take();
     if (token.kind === "(") {
-      this.enter();
+      this.enter(token);
       const node = this.or();
       this.nesting -= 1;
+      // The parenthesis left open is the one to close.
       if (this.take().kind !== ")")
-        throw new NotationError("Il manque une parenthèse fermante.");
+        throw new NotationError(
+          "Il manque une parenthèse fermante.",
+          token.at,
+          token.end,
+        );
       return node;
     }
     if (token.kind === "term") return { term: token.text };
     if (token.kind === "field")
       return { field: token.name, equals: token.text };
     if (token.kind === "end") {
-      const previous = this.at >= 2 ? this.items[this.at - 2].kind : "";
-      throw new NotationError(
-        previous
-          ? `La requête s’arrête après ${previous} : ajoutez un mot.`
-          : "La requête est vide.",
-      );
+      const previous = this.at >= 2 ? this.items[this.at - 2] : null;
+      throw previous
+        ? new NotationError(
+            `La requête s’arrête après ${previous.kind} : ajoutez un mot.`,
+            previous.at,
+            previous.end,
+          )
+        : new NotationError("La requête est vide.");
     }
-    throw new NotationError(`${capital(describe(token))} est inattendu ici.`);
+    throw new NotationError(
+      `${capital(describe(token))} est inattendu ici.`,
+      token.at,
+      token.end,
+    );
   }
 }
 
@@ -227,11 +282,15 @@ export function parse(query: string): KeywordExpression {
   if (parser.peek().kind === "end")
     throw new NotationError("La requête est vide.");
   const node = parser.or();
-  if (parser.peek().kind !== "end")
+  const extra = parser.peek();
+  if (extra.kind !== "end")
     throw new NotationError(
-      `${capital(describe(parser.peek()))} est inattendu ici.`,
+      `${capital(describe(extra))} est inattendu ici.`,
+      extra.at,
+      extra.end,
     );
-  if (depth(node) > MAX_DEPTH) throw new NotationError(TOO_DEEP);
+  if (depth(node) > MAX_DEPTH)
+    throw new NotationError(TOO_DEEP, 0, query.length);
   return { kind: "keywords", match: node };
 }
 

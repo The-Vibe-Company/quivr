@@ -11,7 +11,7 @@ Install the Python SDK and this package, then run `python3 -m jev_rerank`
 with `QUIVR_PLUGIN_MANIFEST` pointing at its `quivr-plugin.yaml`. Put
 `TYPESAFE_API_KEY` in the sidecar environment, never in a pin. The optional
 `TYPESAFE_API_URL` selects a test or private gateway; the default is TypeSafe.
-See [Re-rank with Jev](../../docs-site/guides/rerank-with-jev.mdx) for pinning.
+See [Re-rank with Jev](../../docs-site/run-quivr/rerank-with-jev.mdx) for pinning.
 
 The manifest defines the settings: `candidate_count` (20, 30 or 50),
 `trim_tokens` (`128`, `256` or `full`), `ranking` (`noul` or `rrf`), and

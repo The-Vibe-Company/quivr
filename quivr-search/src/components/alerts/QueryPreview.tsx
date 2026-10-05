@@ -10,7 +10,7 @@ import { Interpretation } from "./Interpretation";
 export type Parsed =
   | { state: "empty" }
   | { state: "valid"; expression: KeywordExpression }
-  | { state: "invalid"; message: string };
+  | { state: "invalid"; message: string; at: number; end: number };
 
 export function useParsed(query: string): Parsed {
   return useMemo(() => {
@@ -19,39 +19,72 @@ export function useParsed(query: string): Parsed {
       return { state: "valid", expression: parse(query) };
     } catch (error) {
       if (error instanceof NotationError)
-        return { state: "invalid", message: error.message };
+        return { state: "invalid", message: error.message, at: error.at, end: error.end };
       throw error;
     }
   }, [query]);
 }
 
 /**
- * Live reading of the query under its field: how the alert understands it,
- * or what to fix. Screen readers get it through aria-describedby, not as an
- * announcement at every keystroke.
+ * Live reading of the query under its field: the sentence of what the alert
+ * will catch, or what to fix and where, the faulty characters marked in a
+ * copy of the query (pressing it puts the caret there). Screen readers get
+ * it through aria-describedby, not as an announcement at every keystroke.
  */
-export function QueryPreview({ id, parsed }: { id: string; parsed: Parsed }) {
+export function QueryPreview({
+  id,
+  parsed,
+  query = "",
+  empty,
+  onLocate,
+}: {
+  id: string;
+  parsed: Parsed;
+  /** The query as typed, to show where a mistake is. */
+  query?: string;
+  /** What to say while there is no query. */
+  empty: string;
+  /** Selects the faulty characters in the field. */
+  onLocate?: (at: number, end: number) => void;
+}) {
   if (parsed.state === "empty")
     return (
       <p id={id} className="query-preview muted">
-        Des mots, une expression entre guillemets, AND, OR, NOT et des
-        parenthèses.
+        {empty}
       </p>
     );
-  if (parsed.state === "invalid")
+  if (parsed.state === "invalid") {
+    const { at, end } = parsed;
     return (
-      <p id={id} className="query-preview" data-state="invalid">
+      <div id={id} className="query-preview" data-state="invalid">
         <WarningCircle size={16} aria-hidden="true" />
-        <span>{parsed.message}</span>
-      </p>
+        <div className="query-error">
+          <span>{parsed.message}</span>
+          {query && onLocate && (
+            <button
+              type="button"
+              className="query-error-where"
+              title="Placer le curseur sur l’erreur"
+              onClick={() => onLocate(at, end)}
+            >
+              <span className="visually-hidden">
+                Placer le curseur sur l’erreur, caractère {at + 1} :{" "}
+              </span>
+              <code>
+                {query.slice(0, at)}
+                <mark data-end={at === end || undefined}>{query.slice(at, end) || " "}</mark>
+                {query.slice(end)}
+              </code>
+            </button>
+          )}
+        </div>
+      </div>
     );
+  }
   return (
     <p id={id} className="query-preview" data-state="valid">
       <CheckCircle size={16} aria-hidden="true" />
-      <span>
-        <span className="muted">Articles avec </span>
-        <Interpretation node={parsed.expression.match} />
-      </span>
+      <Interpretation node={parsed.expression.match} />
     </p>
   );
 }
