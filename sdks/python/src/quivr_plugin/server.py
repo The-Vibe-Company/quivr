@@ -47,6 +47,8 @@ from .manifest import LoadedManifest, load_manifest
 from .models import Discovery, Health, NormalizerRequest, NormalizerResponse, PluginIdentity, SearchRequest, SearchResponse, SubscriptionRequest
 from .schema import protocol_errors
 from .subscription import SubscriptionInvocation, as_response, response_problems
+from .signing import verify
+from .api_versions import FEATURE_SINCE
 
 DISCOVERY_PATH = "/v0/discovery"
 HEALTH_PATH = "/v0/health"
@@ -513,7 +515,15 @@ class Plugin:
                 else:
                     body = self.rfile.read(length) if length else b""
                     try:
-                        reply = plugin.handle(method, self.path, body)
+                        signed = tuple(map(int, plugin.manifest.plugin_api.split("."))) >= tuple(map(int, FEATURE_SINCE["signed_calls"].split(".")))
+                        health = method == "GET" and self.path.split("?", 1)[0] == HEALTH_PATH
+                        if signed and not health and (len(self.headers.get_all("Authorization", [])) != 1 or not verify(
+                            self.headers.get("Authorization", ""), plugin.manifest.model.id,
+                            method, self.path, body,
+                        )):
+                            reply = _error(401, "invalid_engine_token", "engine request authentication failed")
+                        else:
+                            reply = plugin.handle(method, HEALTH_PATH if health else self.path, body)
                     except Exception:  # last resort: every answer carries the envelope
                         log.exception("unexpected error while handling %s %s", method, self.path)
                         reply = _error(500, "internal_error", "the plugin failed to handle the request; see the plugin logs")

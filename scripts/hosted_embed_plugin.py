@@ -1,4 +1,5 @@
 """Fake-only certification and local-stack pin/search of hosted.embed."""
+import plugin_environment
 import argparse
 import json
 import os
@@ -79,7 +80,7 @@ def verify(stack):
                     with manifest.open('w') as output:
                         subprocess.run([str(binary), 'configure', str(config_path)], stdout=output, check=True)
                 port = ports.allocate()
-                env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port),
+                env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port),
                        'QUIVR_PLUGIN_MANIFEST': str(manifest), 'AZURE_FOUNDRY_KEY': 'fake-key'}
                 log = directory / f'{format}.log'
                 with log.open('w') as output:
@@ -133,7 +134,7 @@ def verify_redeploy(stack):
             port = ports.allocate()
 
             def start(executable, declaration, name):
-                env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port),
+                env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port),
                        'QUIVR_PLUGIN_MANIFEST': str(declaration), 'AZURE_FOUNDRY_KEY': 'fake-key'}
                 log = directory / (name + '.log')
                 with log.open('w') as output:

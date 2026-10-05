@@ -201,7 +201,7 @@ class Stack:
             run([str(self.directory/'quivr'),'migrate'],env={**os.environ,'QUIVR_CONFIG':str(self.directory/'config.json')},stdout=log,stderr=log)
     def spawn(self,command,config):
         with (self.directory/(command+'-startup.log')).open('a') as log:
-            p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/config)},stdout=log,stderr=log,start_new_session=True)
+            p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env={**os.environ,**push_plugin.engine_environment(self),'QUIVR_CONFIG':str(self.directory/config)},stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid)
         if command in ('api','worker'):self.state[command+'_pid']=p.pid
         self.save()
@@ -280,7 +280,7 @@ class Stack:
         cfg=json.loads((self.directory/'config.json').read_text());s=self.state
         short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':SHORT_CHANGE_RETENTION}));short.chmod(0o600)
         with (self.directory/'short-api-startup.log').open('w') as log:
-            p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
+            p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,**push_plugin.engine_environment(self),'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid);self.save()
         self.await_ready('short_probe_port')
     def stop_processes(self):

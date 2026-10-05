@@ -44,6 +44,7 @@ func applyPluginConfiguration(ctx context.Context, service registry.Service, pin
 		slog.Error("the active pipeline plan cannot be resolved; serving the configured plugins until it changes", "plan", plan, "error", err)
 		return plan, pins, nil
 	}
+	plugins.WarnUnsignedPins(set)
 	return plan, set, nil
 }
 
