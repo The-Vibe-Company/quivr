@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +18,9 @@ func PoolConfig(dsn string, settings outbound.TLS) (*pgxpool.Config, error) {
 		// Parse errors may include connection-string contents. Keep credentials
 		// out of startup logs even when the supplied DSN is malformed.
 		return nil, errors.New("postgres TLS/configuration is invalid; check database_url and certificate paths")
+	}
+	if telemetry.Enabled() {
+		config.ConnConfig.Tracer = queryTracer{}
 	}
 	native := settings.Enabled == nil && !settings.HasSettings()
 	if native {

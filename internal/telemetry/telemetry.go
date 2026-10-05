@@ -1,5 +1,5 @@
-// Package telemetry exposes a few process metrics in the Prometheus text
-// format without a client library (THE-656, THE-662). Every label value comes
+// Package telemetry records process metrics through OpenTelemetry meters,
+// preserving the Prometheus text format. Every label value comes
 // from a fixed set declared at construction: an unknown value is dropped, so
 // an identifier or a secret can never become a label.
 package telemetry
@@ -9,106 +9,66 @@ import (
 	"io"
 	"math"
 	"slices"
-	"sort"
 	"strconv"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-// Counter counts events by bounded labels: only declared label value tuples are counted.
+// Counter counts events by declared, bounded label tuples.
 type Counter struct {
-	name, help string
-	labels     []string
-	series     [][]string
-	counts     []atomic.Int64
+	family *Family
+	series [][]string
 }
 
-// NewCounter declares a counter over labels whose value tuples are series.
 func NewCounter(name, help string, labels []string, series ...[]string) *Counter {
-	return &Counter{name: name, help: help, labels: labels, series: series, counts: make([]atomic.Int64, len(series))}
+	c := &Counter{family: NewFamily(name, help, labels, nil, len(series)), series: series}
+	for _, values := range series {
+		c.family.Add(0, values...)
+	}
+	return c
 }
-
-// Add counts n events for one declared tuple; anything else, or a nil counter, is ignored.
 func (c *Counter) Add(n int, values ...string) {
 	if c == nil || n <= 0 {
 		return
 	}
-	for i, s := range c.series {
+	for _, s := range c.series {
 		if slices.Equal(s, values) {
-			c.counts[i].Add(int64(n))
+			c.family.Add(int64(n), values...)
+			return
 		}
 	}
 }
-
-// Inc counts one event.
 func (c *Counter) Inc(values ...string) { c.Add(1, values...) }
-
-// Write renders the counter in the text exposition format.
 func (c *Counter) Write(w io.Writer) {
-	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n", c.name, c.help, c.name)
-	for i, s := range c.series {
-		pairs := make([]string, len(s))
-		for j, v := range s {
-			pairs[j] = fmt.Sprintf("%s=%q", c.labels[j], v)
-		}
-		fmt.Fprintf(w, "%s{%s} %d\n", c.name, strings.Join(pairs, ","), c.counts[i].Load())
+	if c != nil {
+		c.family.Write(w)
 	}
 }
 
-// Histogram observes durations (in seconds) or counts in fixed buckets.
-type Histogram struct {
-	name, help string
-	bounds     []float64
-	mu         sync.Mutex
-	counts     []uint64
-	sum        float64
-	total      uint64
-}
+// Histogram records non-negative values with SDK-owned explicit buckets.
+type Histogram struct{ family *Family }
 
-// NewHistogram declares a histogram with ascending upper bounds in seconds.
 func NewHistogram(name, help string, bounds ...float64) *Histogram {
-	sort.Float64s(bounds)
-	return &Histogram{name: name, help: help, bounds: bounds, counts: make([]uint64, len(bounds))}
+	if bounds == nil {
+		bounds = []float64{}
+	}
+	return &Histogram{NewFamily(name, help, nil, bounds, 1)}
 }
-
-// Observe records one duration; a nil histogram or a negative duration is ignored.
 func (h *Histogram) Observe(d time.Duration) {
-	if h == nil || d < 0 {
-		return
+	if h != nil && d >= 0 {
+		h.ObserveValue(d.Seconds())
 	}
-	h.ObserveValue(d.Seconds())
 }
-
-// ObserveValue records one non-negative value, such as a count per call; a
-// nil histogram or a negative value is ignored.
-func (h *Histogram) ObserveValue(s float64) {
-	if h == nil || s < 0 {
-		return
+func (h *Histogram) ObserveValue(value float64) {
+	if h != nil {
+		h.family.Observe(value)
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for i, b := range h.bounds {
-		if s <= b {
-			h.counts[i]++
-		}
-	}
-	h.sum += s
-	h.total++
 }
-
-// Write renders cumulative buckets, sum and count.
 func (h *Histogram) Write(w io.Writer) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s histogram\n", h.name, h.help, h.name)
-	for i, b := range h.bounds {
-		fmt.Fprintf(w, "%s_bucket{le=%q} %d\n", h.name, formatBound(b), h.counts[i])
+	if h != nil {
+		h.family.Write(w)
 	}
-	fmt.Fprintf(w, "%s_bucket{le=\"+Inf\"} %d\n%s_sum %s\n%s_count %d\n", h.name, h.total, h.name, strconv.FormatFloat(h.sum, 'g', -1, 64), h.name, h.total)
 }
-
 func formatBound(b float64) string {
 	if math.IsInf(b, 1) {
 		return "+Inf"
@@ -116,7 +76,8 @@ func formatBound(b float64) string {
 	return strconv.FormatFloat(b, 'g', -1, 64)
 }
 
-// Gauge writes one gauge value.
+// Gauge renders the established Prometheus representation. RegisterGauges
+// supplies live observations to the OTLP reader independently of scrapes.
 func Gauge(w io.Writer, name, help string, value float64) {
 	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s %s\n", name, help, name, name, strconv.FormatFloat(value, 'g', -1, 64))
 }
@@ -196,24 +157,33 @@ func (p *Processing) Write(w io.Writer) {
 
 // ChangePrune counts change events the journal prune physically deleted and
 // prune passes that failed (THE-697). The zero value is ready; nil ignores.
-type ChangePrune struct{ pruned, failures atomic.Int64 }
-
-// Pruned counts n deleted change events.
-func (p *ChangePrune) Pruned(n int) {
-	if p != nil && n > 0 {
-		p.pruned.Add(int64(n))
-	}
+type ChangePrune struct {
+	once             sync.Once
+	pruned, failures *Counter
 }
 
-// Failed counts one failed prune pass.
+func (p *ChangePrune) init() {
+	p.once.Do(func() {
+		p.pruned = NewCounter("quivr_change_events_pruned_total", "Change events physically deleted after the retention window.", nil, nil)
+		p.failures = NewCounter("quivr_change_prune_failures_total", "Change-journal prune passes that failed.", nil, nil)
+	})
+}
+func (p *ChangePrune) Pruned(n int) {
+	if p != nil {
+		p.init()
+		p.pruned.Add(n)
+	}
+}
 func (p *ChangePrune) Failed() {
 	if p != nil {
-		p.failures.Add(1)
+		p.init()
+		p.failures.Inc()
 	}
 }
-
-// Write renders the prune counters.
 func (p *ChangePrune) Write(w io.Writer) {
-	fmt.Fprintf(w, "# HELP quivr_change_events_pruned_total Change events physically deleted after the retention window.\n# TYPE quivr_change_events_pruned_total counter\nquivr_change_events_pruned_total %d\n", p.pruned.Load())
-	fmt.Fprintf(w, "# HELP quivr_change_prune_failures_total Change-journal prune passes that failed.\n# TYPE quivr_change_prune_failures_total counter\nquivr_change_prune_failures_total %d\n", p.failures.Load())
+	if p != nil {
+		p.init()
+		p.pruned.Write(w)
+		p.failures.Write(w)
+	}
 }

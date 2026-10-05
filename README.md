@@ -193,8 +193,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   - worker: processing outcomes, time from acceptance to searchable, and delivery
     attempts and durations.
 
-  JSON logs link request, Receipt, Record and Version IDs
-  ([harness](docs/quivr-v2-local-harness.md)).
+  JSON logs link caller request IDs, trace/span IDs, Receipts, Records and Versions.
+  Opt-in OpenTelemetry exports traces and metrics to an OTLP collector, carrying
+  one trace through durable ingestion, Temporal, plugin calls and webhooks
+  ([configuration](docs-site/reference/configuration.mdx#opentelemetry)).
 - **Local load measurement** (`make load`) with deterministic free providers,
   versioned scenarios, ingestion bursts and replica failure. Reports include
   latency, errors, throughput and delays until documents are searchable and alerted;
