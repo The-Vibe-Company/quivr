@@ -1,0 +1,7 @@
+id: EXNF-CONFIG-001
+check: config_refuses_invalid
+parameters:
+  fixture: unknown_field
+threshold:
+  exit_code: 1
+  diagnostic: unknown field

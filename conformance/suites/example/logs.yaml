@@ -1,0 +1,6 @@
+id: EXNF-OBSV-002
+check: log_format
+parameters:
+  stream: stdout
+threshold:
+  fields: [time, level, msg]
