@@ -32,9 +32,15 @@ class CaseLoader(yaml.SafeLoader):
 def load_cases(suite):
     schema = json.loads((ROOT / 'conformance/schema/case.schema.json').read_text())
     Draft202012Validator.check_schema(schema)
-    conditions = [rule['if']['properties']['check'] for rule in schema['allOf']]
-    shaped = {condition['const'] for condition in conditions if 'const' in condition}
-    known = {name for condition in conditions if 'not' in condition for name in condition['not']['enum']}
+    conditions = []
+    for rule in schema.get('allOf', []):
+        condition = rule.get('if') if isinstance(rule, dict) else None
+        if not isinstance(condition, dict):continue
+        check = condition.get('properties', {}).get('check')
+        if isinstance(check, dict):conditions.append(check)
+    shaped = {condition['const'] for condition in conditions if isinstance(condition.get('const'), str)}
+    known = {name for condition in conditions if isinstance(condition.get('not'), dict)
+             for name in condition['not'].get('enum', []) if isinstance(name, str)}
     if shaped != set(CHECKS) or known != set(CHECKS):
         raise ValueError('check registry and schema must register the same check types')
     validator = Draft202012Validator(schema)

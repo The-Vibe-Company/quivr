@@ -7,7 +7,7 @@ import tempfile
 import types
 import sys
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, MagicMock
 
 from conformance import runner
 from conformance.checks import CHECKS, Context, Observation, Skip
@@ -48,6 +48,15 @@ class ConformanceTests(unittest.TestCase):
             with patch.dict(CHECKS, {'future_check': lambda *args: None}):
                 with self.assertRaisesRegex(ValueError, 'registry'):
                     runner.load_cases(suite)
+            path.write_text(base)
+            schema_root = suite / 'schema-root'
+            schema_dir = schema_root / 'conformance/schema'
+            schema_dir.mkdir(parents=True)
+            schema = json.loads((runner.ROOT / 'conformance/schema/case.schema.json').read_text())
+            schema['allOf'].extend([True, {'if': True, 'then': True}, {'properties': {'id': {'minLength': 2}}}])
+            (schema_dir / 'case.schema.json').write_text(json.dumps(schema))
+            with patch.object(runner, 'ROOT', schema_root):
+                self.assertEqual(len(runner.load_cases(suite)), 1)
 
     def test_explicit_suite_selection_accepts_both_cli_spellings(self):
         # Argparse accepts --suite=name too; silently validating all suites is false success.
@@ -200,7 +209,6 @@ class ConformanceTests(unittest.TestCase):
             def output(*args, **kwargs):
                 raw = json.dumps([inspection]).encode()
                 if 'stdout' in kwargs:kwargs['stdout'].write(raw)
-                run.return_value.stdout = raw
                 return run.return_value
             run.side_effect = output
             result = CHECKS['image_property'](context, {}, {'non_root': True, 'labels': ['org.opencontainers.image.version']})
@@ -249,14 +257,21 @@ class ConformanceTests(unittest.TestCase):
             yield context
         case = {'id': 'EX-001', 'check': 'http_probe', 'parameters': {'target': 'probe', 'path': '/healthz'},
                 'threshold': {'status': 204, 'max_latency_ms': 100}}
+        response = MagicMock(code=204, headers={})
+        response.__enter__.return_value = response
+        response.read.return_value = b''
+        opener = Mock()
+        opener.open.return_value = response
         with tempfile.TemporaryDirectory() as directory, patch.object(runner, 'target', selected), \
              patch.object(runner, 'load_cases', return_value=[(pathlib.Path('health.yaml'), case)]), \
-             patch.object(Context, 'request', return_value=(204, {}, b'', 1)), \
+             patch('conformance.checks.urllib.request.build_opener', return_value=opener), \
+             patch('conformance.checks.time.monotonic', side_effect=[1, 1.001]), \
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             self.assertEqual(runner.main(['--probe-url', 'http://127.0.0.1:9090', '--output', directory]), 0)
             report = json.loads((pathlib.Path(directory) / 'report.json').read_text())
             self.assertEqual(report['target_mode'], 'existing')
             self.assertEqual(report['target']['probe_url'], 'http://127.0.0.1:9090')
+            self.assertEqual(opener.open.call_args.args[0].full_url, 'http://127.0.0.1:9090/healthz')
             self.assertEqual(next(case for case in report['results'] if case['check'] == 'http_probe')['status'], 'met')
 
     def test_config_rejection_requires_expected_diagnostic_not_a_crash(self):
