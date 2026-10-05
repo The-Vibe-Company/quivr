@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"io"
 	"net"
 	"net/http"
@@ -165,7 +167,7 @@ func TestOTLPConfigurationExportsAndFlushes(t *testing.T) {
 			}
 		})
 	}
-	for _, cfg := range []Config{{Endpoint: "secret-invalid"}, {Endpoint: "http://collector.invalid", Protocol: "bad"}, {Endpoint: "http://collector.invalid", SamplingRatio: func() *float64 { v := 1.1; return &v }()}} {
+	for _, cfg := range []Config{{Endpoint: "https://collector.invalid/v1/traces"}, {Endpoint: "https://collector.invalid/prefix/v1/metrics"}, {Endpoint: "secret-invalid"}, {Endpoint: "http://collector.invalid", Protocol: "bad"}, {Endpoint: "http://collector.invalid", SamplingRatio: func() *float64 { v := 1.1; return &v }()}} {
 		if _, err := Init(context.Background(), cfg); err == nil {
 			t.Fatal("invalid config accepted")
 		} else if strings.Contains(err.Error(), "secret-invalid") {
@@ -221,4 +223,20 @@ func (r metricReceiver) Export(ctx context.Context, request *metricspb.ExportMet
 	defer r.collector.mu.Unlock()
 	r.collector.metrics = append(r.collector.metrics, request)
 	return &metricspb.ExportMetricsServiceResponse{}, nil
+}
+
+func TestDurableContextBoundsVendorStateWithoutLosingParent(t *testing.T) {
+	var state []string
+	for i := 0; i < 32; i++ {
+		state = append(state, fmt.Sprintf("v%d=%s", i, strings.Repeat("a", 256)))
+	}
+	ctx := Extract(logging.WithRequestID(context.Background(), "durable-request"), http.Header{"Traceparent": {"00-11111111111111111111111111111111-2222222222222222-01"}, "Tracestate": {strings.Join(state, ",")}})
+	if len(Capture(ctx).Tracestate) < 4096 {
+		t.Fatal("fixture did not supply maximal valid vendor state")
+	}
+	encoded := Encode(ctx)
+	got := Capture(Restore(context.Background(), encoded))
+	if len(encoded) > 4096 || got.Traceparent != Capture(ctx).Traceparent || got.RequestID != "durable-request" {
+		t.Fatal("durable envelope lost the parent or caller identity")
+	}
 }

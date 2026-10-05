@@ -443,7 +443,11 @@ func (p *Plugin) recoverPanic(w http.ResponseWriter, log *slog.Logger) {
 func (p *Plugin) requestLogger(ctx context.Context, credential Credential, invocation string) *slog.Logger {
 	sc := trace.SpanContextFromContext(ctx)
 	id, _ := ctx.Value(requestIDKey{}).(string)
-	return slog.New(redactingHandler{next: p.logger.Handler(), credential: credential}).With("invocation_id", invocation, "trace_id", sc.TraceID().String(), "span_id", sc.SpanID().String(), "request_id", id)
+	traceID, spanID := "", ""
+	if sc.IsValid() {
+		traceID, spanID = sc.TraceID().String(), sc.SpanID().String()
+	}
+	return slog.New(redactingHandler{next: p.logger.Handler(), credential: credential}).With("invocation_id", invocation, "trace_id", traceID, "span_id", spanID, "request_id", id)
 }
 
 func (p *Plugin) serveFetch(w http.ResponseWriter, r *http.Request) {

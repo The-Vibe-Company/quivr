@@ -3,6 +3,7 @@ package monitoring
 import (
 	"context"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"go.opentelemetry.io/otel/trace"
 
 	"encoding/json"
 	"errors"
@@ -135,7 +136,7 @@ type pending struct {
 // evaluation intents of one Record Version pinned to one evaluator (up to the
 // group bound), decided in batches of distinct evaluations. It returns false
 // when no work was due.
-func (e Engine) Step(ctx context.Context) (bool, error) {
+func (e Engine) Step(ctx context.Context) (worked bool, stepErr error) {
 	in, err := e.Store.Claim(ctx, e.lease())
 	if errors.Is(err, ErrNoWork) {
 		return false, nil
@@ -145,13 +146,13 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 	}
 	ctx = telemetry.Restore(ctx, in.TraceContext)
 	ctx, span := telemetry.Start(ctx, "monitoring.evaluate")
-	defer span.End()
+	defer func() { telemetry.Fail(span, stepErr); span.End() }()
 	if in.Kind == IntentWithdrawal {
 		outcome, err := e.Store.CommitWithdrawal(ctx, in)
 		if err != nil {
 			return true, e.retry(ctx, in, "storage_unavailable")
 		}
-		slog.Info("withdrawal notification committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_id", in.RecordID, "outcome", outcome)
+		slog.InfoContext(ctx, "withdrawal notification committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_id", in.RecordID, "outcome", outcome)
 		return true, nil
 	}
 	first, ok, err := e.admit(ctx, in)
@@ -168,12 +169,12 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 		related, err := e.Store.ClaimRelated(ctx, in, first.target.Subscription.Evaluator, limit-1, e.lease())
 		if err != nil {
 			// The first intent alone still makes progress.
-			slog.Warn("related evaluation claim unavailable", "error", boundedError(err))
+			slog.WarnContext(ctx, "related evaluation claim unavailable", "error", boundedError(err))
 		}
 		for _, r := range related {
 			p, ok, err := e.admit(ctx, r)
 			if err != nil {
-				slog.Warn("evaluation admission unavailable", "error", boundedError(err))
+				slog.WarnContext(ctx, "evaluation admission unavailable", "error", boundedError(err))
 			}
 			if !ok {
 				continue
@@ -198,7 +199,20 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 	e.Metrics.observeRecordVersion(calls)
 	var errs []error
 	for _, p := range group {
-		if err := e.apply(ctx, p, article.Parts, outcomes[p.item]); err != nil {
+		commitCtx := ctx
+		var commitSpan trace.Span
+		if p.in.TraceContext != in.TraceContext {
+			// Grouped intents can originate in another request. Keep their
+			// durable parent for delivery, without replacing this step's span.
+			commitCtx, commitSpan = telemetry.Start(telemetry.Restore(ctx, p.in.TraceContext), "monitoring.commit", trace.WithLinks(trace.Link{SpanContext: trace.SpanContextFromContext(ctx)}))
+		}
+		telemetry.Fail(span, outcomes[p.item].Err)
+		err := e.apply(commitCtx, p, article.Parts, outcomes[p.item])
+		if commitSpan != nil {
+			telemetry.Fail(commitSpan, err)
+			commitSpan.End()
+		}
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -384,11 +398,11 @@ func (e Engine) apply(ctx context.Context, p pending, parts []Part, result Outco
 	}
 	switch result.Decision {
 	case DecisionNoMatch:
-		outcome, err := e.Store.CommitNoMatch(telemetry.Restore(ctx, in.TraceContext), in)
+		outcome, err := e.Store.CommitNoMatch(ctx, in)
 		if err != nil {
 			return e.retry(ctx, in, "storage_unavailable")
 		}
-		slog.Info("evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
+		slog.InfoContext(ctx, "evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
 		return nil
 	case DecisionNotReady:
 		// A later trigger (for example enrichment) creates a new intent.
@@ -401,14 +415,14 @@ func (e Engine) apply(ctx context.Context, p pending, parts []Part, result Outco
 	if !validEvidence(evidence, parts) {
 		return e.retry(ctx, in, "evaluation_invalid")
 	}
-	outcome, err := e.Store.CommitMatch(telemetry.Restore(ctx, in.TraceContext), in, evidence)
+	outcome, err := e.Store.CommitMatch(ctx, in, evidence)
 	if err != nil {
 		return e.retry(ctx, in, "storage_unavailable")
 	}
 	if outcome == OutcomeMatched && e.Matched != nil {
 		e.Matched(in.Organization, evidence.Evaluator.PluginID)
 	}
-	slog.Info("evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
+	slog.InfoContext(ctx, "evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
 	return nil
 }
 

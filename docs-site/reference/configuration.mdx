@@ -66,7 +66,7 @@ Set `telemetry.endpoint` in every engine process to export traces and metrics to
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `endpoint` | Empty (export off) | Collector base URL, such as `https://collector.example.com:4318`. HTTP appends `/v1/traces` and `/v1/metrics`; gRPC permits no path. URLs with credentials, queries or fragments are refused. |
+| `endpoint` | Empty (export off) | Collector base URL, such as `https://collector.example.com:4318`. HTTP appends `/v1/traces` and `/v1/metrics`; signal-specific URLs ending in either path are refused. gRPC permits no path. URLs with credentials, queries or fragments are refused. |
 | `protocol` | `http/protobuf` | `http/protobuf` or `grpc`. Use an `https` endpoint for verified TLS, or `http` for plaintext to a trusted local collector. |
 | `headers` | `{}` | Collector authentication headers, used for both signals. Values are excluded from logs. |
 | `sampling_ratio` | `1` | Root trace sampling probability, from `0` to `1`. Children honor their parent's sampled flag, including incoming W3C context. |

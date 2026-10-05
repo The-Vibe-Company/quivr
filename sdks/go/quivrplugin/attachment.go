@@ -348,7 +348,6 @@ func put(ctx context.Context, g *UploadGrant, path string) error {
 	if req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", g.MediaType)
 	}
-	InjectTrace(ctx, req.Header)
 	resp, err := uploadClient.Do(req)
 	if err != nil {
 		return TransientError("upload_unavailable", "storage did not answer the upload")

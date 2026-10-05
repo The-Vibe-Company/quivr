@@ -79,6 +79,9 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 	if cfg.Protocol == "grpc" && u.Path != "" && u.Path != "/" {
 		return nil, errors.New("telemetry gRPC endpoint must not have a path")
 	}
+	if cfg.Protocol == "http/protobuf" && (strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/v1/traces") || strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/v1/metrics")) {
+		return nil, errors.New("telemetry HTTP endpoint must be a collector base URL, not a signal URL")
+	}
 	attrs := []attribute.KeyValue{attribute.String("service.name", "quivr")}
 	for k, v := range cfg.ResourceAttributes {
 		attrs = append(attrs, attribute.String(k, v))
@@ -186,6 +189,12 @@ type tracedTransport struct {
 	name string
 }
 
+func (t tracedTransport) CloseIdleConnections() {
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 func (t tracedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	ctx, span := Start(r.Context(), t.name, trace.WithSpanKind(trace.SpanKindClient), trace.WithAttributes(attribute.String("http.request.method", r.Method)))
 	defer span.End()
@@ -209,6 +218,15 @@ func Encode(ctx context.Context) string {
 		return ""
 	}
 	b, _ := json.Marshal(c)
+	if len(b) > 4096 {
+		// Preserve the parent and caller identity when a maximal W3C tracestate
+		// exceeds the durable envelope budget. Optional vendor state is dropped.
+		c.Tracestate = ""
+		b, _ = json.Marshal(c)
+	}
+	if len(b) > 4096 {
+		return ""
+	}
 	return string(b)
 }
 func Restore(ctx context.Context, encoded string) context.Context {

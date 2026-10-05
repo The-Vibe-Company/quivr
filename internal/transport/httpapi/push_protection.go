@@ -132,7 +132,9 @@ func (a *API) servePushAudited(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buffered := &pushResponse{header: make(http.Header)}
-	buffered.header.Set("X-Request-ID", w.Header().Get("X-Request-ID"))
+	for _, key := range []string{"X-Request-ID", "X-Trace-ID", "X-Span-ID"} {
+		buffered.header.Set(key, w.Header().Get(key))
+	}
 	a.serve(buffered, r)
 	ctx, cancel := lifecycle.CleanupContext(r.Context(), 2*time.Second)
 	defer cancel()

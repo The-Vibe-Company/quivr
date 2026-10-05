@@ -34,6 +34,9 @@ type Family struct {
 
 func NewFamily(name, help string, labels []string, bounds []float64, limit int) *Family {
 	f := &Family{name: name, help: help, labels: append([]string(nil), labels...), bounds: append([]float64(nil), bounds...), series: map[string][]string{}, limit: limit, reader: sdkmetric.NewManualReader()}
+	if bounds != nil {
+		f.bounds = append([]float64{}, bounds...)
+	}
 	sort.Float64s(f.bounds)
 	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(f.reader)).Meter("quivr")
 	exported := otel.Meter("quivr")

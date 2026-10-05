@@ -49,6 +49,9 @@ func (c *Counter) Write(w io.Writer) {
 type Histogram struct{ family *Family }
 
 func NewHistogram(name, help string, bounds ...float64) *Histogram {
+	if bounds == nil {
+		bounds = []float64{}
+	}
 	return &Histogram{NewFamily(name, help, nil, bounds, 1)}
 }
 func (h *Histogram) Observe(d time.Duration) {

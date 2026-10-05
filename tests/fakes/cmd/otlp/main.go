@@ -14,6 +14,7 @@ import (
 
 	"encoding/hex"
 	collector "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	common "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/protobuf/proto"
 	"io"
 	"sync"
@@ -50,11 +51,11 @@ func main() {
 // This receiver accepts real OTLP protobuf. Its bounded read view is only test
 // evidence; it does not synthesize tracing behavior or inspect engine storage.
 type observedSpan struct {
-	Name       string            `json:"name"`
-	TraceID    string            `json:"trace_id"`
-	SpanID     string            `json:"span_id"`
-	ParentID   string            `json:"parent_span_id"`
-	Attributes map[string]string `json:"attributes"`
+	Name       string         `json:"name"`
+	TraceID    string         `json:"trace_id"`
+	SpanID     string         `json:"span_id"`
+	ParentID   string         `json:"parent_span_id"`
+	Attributes map[string]any `json:"attributes"`
 }
 
 func collectorHandler() http.Handler {
@@ -84,9 +85,9 @@ func collectorHandler() http.Handler {
 					if len(spans[id]) >= 4096 {
 						continue
 					}
-					attrs := map[string]string{}
+					attrs := map[string]any{}
 					for _, a := range span.Attributes {
-						attrs[a.Key] = a.Value.String()
+						attrs[a.Key] = decodedValue(a.Value)
 					}
 					spans[id] = append(spans[id], observedSpan{span.Name, id, hex.EncodeToString(span.SpanId), hex.EncodeToString(span.ParentSpanId), attrs})
 				}
@@ -105,4 +106,36 @@ func collectorHandler() http.Handler {
 		_ = json.NewEncoder(w).Encode(map[string]any{"spans": spans[r.PathValue("trace_id")]})
 	})
 	return mux
+}
+
+func decodedValue(value *common.AnyValue) any {
+	if value == nil {
+		return nil
+	}
+	switch v := value.Value.(type) {
+	case *common.AnyValue_StringValue:
+		return v.StringValue
+	case *common.AnyValue_BoolValue:
+		return v.BoolValue
+	case *common.AnyValue_IntValue:
+		return v.IntValue
+	case *common.AnyValue_DoubleValue:
+		return v.DoubleValue
+	case *common.AnyValue_BytesValue:
+		return string(v.BytesValue)
+	case *common.AnyValue_ArrayValue:
+		values := make([]any, len(v.ArrayValue.Values))
+		for i, item := range v.ArrayValue.Values {
+			values[i] = decodedValue(item)
+		}
+		return values
+	case *common.AnyValue_KvlistValue:
+		values := map[string]any{}
+		for _, item := range v.KvlistValue.Values {
+			values[item.Key] = decodedValue(item.Value)
+		}
+		return values
+	default:
+		return nil
+	}
 }

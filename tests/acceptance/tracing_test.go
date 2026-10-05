@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -72,7 +73,10 @@ func TestTraceIngestionAndPluginSearch(t *testing.T) {
 	// Wait for published availability before the first search. Querying an empty
 	// Corpus caches zero space coverage for ten seconds, outside this test budget.
 	// Poll only public receipt/version state, bounded by the same deadline.
-	receiptID := accepted["receipt_id"].(string)
+	receiptID, ok := accepted["receipt_id"].(string)
+	if !ok || receiptID == "" {
+		t.Fatal("accepted command has no receipt ID")
+	}
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -99,18 +103,18 @@ func TestTraceIngestionAndPluginSearch(t *testing.T) {
 		}
 		hits = call("POST", "/v0/search", searchTrace, map[string]any{"query": "Traceprivacy", "corpus_ids": []string{corpus}, "mode": "lexical"}, 200)["items"].([]any)
 	}
-	if accepted["receipt_id"] == nil {
-		t.Fatalf("missing receipt: %v", accepted)
-	}
 	type span struct {
-		Name       string            `json:"name"`
-		ID         string            `json:"span_id"`
-		Parent     string            `json:"parent_span_id"`
-		Attributes map[string]string `json:"attributes"`
+		Name       string         `json:"name"`
+		ID         string         `json:"span_id"`
+		Parent     string         `json:"parent_span_id"`
+		Attributes map[string]any `json:"attributes"`
 	}
 	read := func(id string) []span {
 		t.Helper()
-		req, _ := http.NewRequestWithContext(ctx, "GET", collector+"/traces/"+id, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", collector+"/traces/"+id, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		response, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -142,7 +146,7 @@ func TestTraceIngestionAndPluginSearch(t *testing.T) {
 			}
 			select {
 			case <-ctx.Done():
-				t.Fatalf("trace %s missing operations %v, got %+v", id, names, spans)
+				t.Fatalf("trace %s missing required operations %v (%d spans observed)", id, names, len(spans))
 			case <-ticker.C:
 			}
 		}
@@ -152,11 +156,11 @@ func TestTraceIngestionAndPluginSearch(t *testing.T) {
 		}
 		for _, s := range spans {
 			if s.Parent == "" || !ids[s.Parent] {
-				t.Fatalf("detached span in trace %s: %+v", id, s)
+				t.Fatalf("detached span %s with parent %s in trace %s", s.ID, s.Parent, id)
 			}
-			encoded, _ := json.Marshal(s)
+			values := s.Name + fmt.Sprint(s.Attributes)
 			for _, private := range []string{contentText, "Traceprivacy", corpus, token} {
-				if strings.Contains(string(encoded), private) {
+				if strings.Contains(values, private) {
 					t.Fatalf("trace %s exports forbidden request data in span %s", id, s.ID)
 				}
 			}
