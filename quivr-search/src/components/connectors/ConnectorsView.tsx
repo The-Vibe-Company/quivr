@@ -20,6 +20,7 @@ import {
 import { healthLabel } from "./HealthBadge";
 import { CreateConnector } from "./CreateConnector";
 import { ConnectorDetail } from "./ConnectorDetail";
+import { Dialog } from "../Dialog";
 import { AddSource } from "./AddSource";
 import { SourceList, groupSources, nameOf } from "./SourceList";
 import { PlusIcon } from "../RailIcons";
@@ -69,8 +70,17 @@ export function ConnectorsView({
   const [attempt, setAttempt] = useState(0);
   const [suggestions, setSuggestions] = useState<FeedChoice[]>([]);
   const [highlight, setHighlight] = useState<string | null>(null);
+  // Adding a source happens in a dialog, from the header's button or the "+" card.
+  const [adding, setAdding] = useState(false);
+  const openAdd = () => setAdding(true);
   const states = useRef(new Map<string, string>());
   const listHeading = useRef<HTMLHeadingElement>(null);
+  // The row is gone: keyboard focus lands on the list heading, once the
+  // settings it was removed from have closed and handed the focus back.
+  const [removals, setRemovals] = useState(0);
+  useEffect(() => {
+    if (removals) listHeading.current?.focus();
+  }, [removals]);
 
   const failed = useCallback(
     (e: unknown) => {
@@ -288,8 +298,7 @@ export function ConnectorsView({
       drop([...removed, c.connector_id]);
       notify(`« ${nameOf(c)} » retirée. Les articles déjà reçus restent dans le fil.`);
       onChanged();
-      // The row is gone: land keyboard focus on the list heading.
-      listHeading.current?.focus();
+      setRemovals((n) => n + 1);
     });
 
   // The name is the facade's, for every instance of the source.
@@ -357,24 +366,19 @@ export function ConnectorsView({
               Vos sources
             </h2>
             {sources.length > 0 && (
-              <p className="alerts-sum">
-                {sources.length} source{sources.length > 1 ? "s" : ""} ·{" "}
-                <span className="list-count" data-tone={toCheck ? "warn" : "ok"}>
-                  {toCheck ? `${toCheck} à vérifier` : "Tout est à jour"}
-                </span>
-              </p>
+              <span className="head-count">
+                {sources.length}
+                <span className="visually-hidden"> source{sources.length > 1 ? "s" : ""}</span>
+              </span>
+            )}
+            {toCheck > 0 && (
+              <span className="list-count" data-tone="warn">
+                {toCheck} à vérifier
+              </span>
             )}
             <LiveBadge live={live} />
-            {catalog.items.some((k) => k.kind === "rss") && (
-              <button
-                type="button"
-                className="button alerts-new"
-                onClick={() => {
-                  const field = document.querySelector<HTMLInputElement>(".source-add .form-input");
-                  field?.scrollIntoView({ block: "center", behavior: "smooth" });
-                  field?.focus({ preventScroll: true });
-                }}
-              >
+            {catalog.items.length > 0 && (
+              <button type="button" className="button alerts-new" onClick={openAdd}>
                 <PlusIcon size={16} />
                 Ajouter une source
               </button>
@@ -396,54 +400,85 @@ export function ConnectorsView({
               onResume={onResume}
               onRemove={onRemove}
               extra={
-                <>
-                  {catalog.items.some((k) => k.kind === "rss") ? (
-                    <AddSource
-                      catalog={catalog}
-                      corpus={corpus}
-                      suggestions={suggestions}
-                      existing={connectors}
-                      onCreated={(c, message) => {
-                        upsert(c);
-                        setHighlight(c.connector_id);
-                        notify(message);
-                        onChanged();
-                      }}
-                    />
-                  ) : (
-                    <div className="form-intro">
-                      <h2>Ajouter une source</h2>
-                      <p>Les fils d’actualités ne sont pas disponibles sur ce déploiement.</p>
-                    </div>
-                  )}
-                  <div className="form-aside">
-                    <p>
-                      Vous pouvez aussi{" "}
-                      <button type="button" className="link-button" onClick={onAdd}>
-                        ajouter un texte à la main
-                      </button>
-                      , par exemple une note ou un communiqué : il apparaîtra dans le fil sous « Ajouté à la
-                      main ».
-                    </p>
-                    {catalog.items.length > 0 && (
-                      <p>
-                        <button type="button" className="link-button" onClick={() => setCreating(true)}>
-                          Ajouter un connecteur d’un autre type
-                        </button>
-                      </p>
-                    )}
-                    {catalog.credential_deposits === "unavailable" && (
-                      <p className="inline-note">
-                        <Key size={16} aria-hidden="true" /> Le dépôt d’identifiants est désactivé sur ce
-                        déploiement : seules les sources sans identifiant peuvent être ajoutées.
-                      </p>
-                    )}
-                  </div>
-                </>
+                <div className="add-card">
+                  <button type="button" className="add-cta" onClick={openAdd}>
+                    <span className="add-plus" aria-hidden="true">
+                      <PlusIcon size={22} />
+                    </span>
+                    <span className="add-label">Ajouter une source</span>
+                    <span className="add-hint">
+                      {catalog.items.some((k) => k.kind === "rss")
+                        ? "Un site, un journal ou un flux RSS"
+                        : catalog.items.length
+                          ? "Un texte ou un connecteur d’un autre type"
+                          : "Un texte ajouté à la main"}
+                    </span>
+                  </button>
+                </div>
               }
             />
           )}
         </section>
+      )}
+      {adding && catalog && (
+        <Dialog title="Ajouter une source" closeLabel="Fermer l’ajout de source" onClose={() => setAdding(false)}>
+          <div className="add-modal">
+            {catalog.items.some((k) => k.kind === "rss") ? (
+              <AddSource
+                catalog={catalog}
+                corpus={corpus}
+                suggestions={suggestions}
+                existing={connectors}
+                onCreated={(c, message) => {
+                  upsert(c);
+                  // Added: the dialog closes on the new card.
+                  setAdding(false);
+                  setHighlight(c.connector_id);
+                  notify(message);
+                  onChanged();
+                }}
+              />
+            ) : (
+              <p className="form-note">Les fils d’actualités ne sont pas disponibles sur ce déploiement.</p>
+            )}
+            <div className="form-aside">
+              <p>
+                Vous pouvez aussi{" "}
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => {
+                    setAdding(false);
+                    onAdd();
+                  }}
+                >
+                  ajouter un texte à la main
+                </button>
+                , par exemple une note ou un communiqué : il apparaîtra dans le fil sous « Ajouté à la main ».
+              </p>
+              {catalog.items.length > 0 && (
+                <p>
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => {
+                      setAdding(false);
+                      setCreating(true);
+                    }}
+                  >
+                    Ajouter un connecteur d’un autre type
+                  </button>
+                </p>
+              )}
+              {catalog.credential_deposits === "unavailable" && (
+                <p className="inline-note">
+                  <Key size={16} aria-hidden="true" /> Le dépôt d’identifiants est désactivé sur ce déploiement :
+                  seules les sources sans identifiant peuvent être ajoutées.
+                </p>
+              )}
+            </div>
+          </div>
+        </Dialog>
       )}
       {creating && catalog && (
         <CreateConnector
@@ -463,11 +498,15 @@ export function ConnectorsView({
           connector={current}
           kind={kindOf(current.kind)}
           catalog={catalog}
+          stats={stats.get(current.source_namespace)}
+          now={now}
           onClose={() => setSelected(null)}
           onChanged={(c) => {
             upsert(c);
             onChanged();
           }}
+          onRename={onRename}
+          onRemove={onRemove}
         />
       )}
     </main>

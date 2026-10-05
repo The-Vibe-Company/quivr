@@ -1346,48 +1346,6 @@ fieldset[data-invalid="true"] > legend {
   color: var(--success);
   font-size: var(--text-sm);
 }
-.connector-detail h1 {
-  overflow-wrap: anywhere;
-}
-.connector-detail section {
-  padding: 22px 0;
-  border-top: 1px solid var(--border);
-}
-.connector-detail section h2 {
-  font-size: var(--text-md);
-  margin-bottom: 12px;
-}
-.connector-detail section > p {
-  font-size: var(--text-md);
-}
-.detail-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  font-size: var(--text-sm);
-}
-.facts {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 20px;
-  margin: 0;
-  font-size: var(--text-md);
-}
-.facts dt {
-  color: var(--muted);
-}
-.facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.fact-row {
-  display: contents;
-}
-.config-value {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 .inline-form {
   margin-top: 8px;
 }
@@ -1439,13 +1397,6 @@ fieldset[data-invalid="true"] > legend {
     gap: 2px;
     padding: 0 var(--space-1);
     font-size: var(--text-xs);
-  }
-  .facts {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
-  }
-  .facts dd {
-    margin-bottom: 10px;
   }
 }
 /* Sources (THE-732) */

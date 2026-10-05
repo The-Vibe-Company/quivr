@@ -10,11 +10,15 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-async function openConnectors(page: Page) {
+async function openConnectors(page: Page, { add = true } = {}) {
   await page.goto("/?view=sources");
   await expect(
     page.getByRole("heading", { name: "Sources", level: 1 }),
   ).toBeVisible();
+  if (!add) return;
+  // Other kinds are offered from the dialog that adds a source.
+  await page.getByRole("button", { name: "Ajouter une source", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Ajouter un connecteur" })).toBeVisible();
 }
 
 /** The secret must be gone from markup, form values and storage. */
@@ -64,8 +68,8 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
   });
   await dialog.getByRole("button", { name: "Créer le connecteur" }).click();
 
-  // The new instance opens in its detail view; the secret is gone.
-  const detail = page.getByRole("dialog", { name: /^Connecteur Test fixture/ });
+  // The new instance opens in its settings; the secret is gone.
+  const detail = page.getByRole("dialog", { name: `Réglages de wire-${run}` });
   await expect(
     detail.getByRole("heading", { name: `wire-${run}`, level: 1 }),
   ).toBeVisible();
@@ -97,33 +101,34 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
     timeout: 30000,
   });
 
-  // Interval change through the schedule route.
-  await detail.getByLabel("Nouvel intervalle (secondes)").fill("3");
-  await detail.getByRole("button", { name: "Changer l’intervalle" }).click();
-  await expect(detail.getByText("Intervalle enregistré.")).toBeVisible();
-  await expect(detail.getByText("Toutes les 3 s.")).toBeVisible();
-
-  // Disable is confirmed, then absorbing.
+  // Interval change through the schedule route; saving closes the settings.
   await detail
-    .getByRole("button", { name: "Désactiver ce connecteur" })
+    .getByRole("group", { name: "Vérifier les nouveautés toutes les…" })
+    .getByRole("button", { name: "5 min", exact: true })
     .click();
-  await detail
-    .getByRole("button", { name: "Confirmer la désactivation" })
-    .click();
-  await expect(detail.locator('[data-state="disabled"]')).toBeVisible();
-  await expect(
-    detail.getByRole("button", { name: "Remplacer l’identifiant" }),
-  ).toHaveCount(0);
-  await detail.getByRole("button", { name: "Fermer le connecteur" }).click();
-
-  // The disabled instance stays listed as a paused source; a credentialed
-  // one cannot be resumed from the list (its secret is never read back).
+  await detail.getByRole("button", { name: "Enregistrer" }).click();
+  await expect(detail).toHaveCount(0);
   const row = page
     .getByRole("list", { name: "Sources" })
     .getByRole("listitem")
     .filter({ has: page.getByRole("button", { name: `wire-${run}` }) });
+  await expect(row.locator(".source-state")).toHaveAttribute(
+    "title",
+    "Vérifiée toutes les 5 min",
+  );
+
+  // Pausing is absorbing for a credentialed source: it stays listed as
+  // paused and cannot be resumed (its secret is never read back).
+  await row.getByRole("button", { name: `Mettre en pause wire-${run}` }).click();
   await expect(row.locator('[data-state="paused"]')).toBeVisible();
   await expect(row.getByRole("button", { name: /^Reprendre/ })).toHaveCount(0);
+  await row.getByRole("button", { name: `Plus d’actions pour wire-${run}` }).click();
+  await row.getByRole("menuitem", { name: "Réglages" }).click();
+  await expect(detail.locator('[data-state="paused"]')).toBeVisible();
+  await expect(
+    detail.getByRole("button", { name: "Remplacer l’identifiant" }),
+  ).toHaveCount(0);
+  await detail.getByRole("button", { name: "Fermer les réglages" }).click();
   await expectNoSecret(page, revoked);
   await expectNoSecret(page, valid);
   await page.screenshot({
@@ -162,7 +167,7 @@ test("les refus de validation désignent le champ fautif, au clavier", async ({
   await dialog.getByRole("button", { name: "Créer le connecteur" }).focus();
   await page.keyboard.press("Enter");
   await expect(
-    page.getByRole("dialog", { name: /^Connecteur Test fixture/ }),
+    page.getByRole("dialog", { name: /^Réglages de invalid-/ }),
   ).toBeVisible();
 });
 
@@ -249,7 +254,7 @@ test("un déploiement sans permission connecteurs l’annonce", async ({
       json: { code: "forbidden", message: "forbidden", retryable: false },
     }),
   );
-  await openConnectors(page);
+  await openConnectors(page, { add: false });
   await expect(
     page.getByText("Les connecteurs ne sont pas activés sur ce déploiement."),
   ).toBeVisible();
@@ -268,7 +273,7 @@ test("mobile sombre : liste et détail lisibles", async ({ page }, info) => {
     fullPage: true,
   });
   await dialog.getByRole("button", { name: "Créer le connecteur" }).click();
-  const detail = page.getByRole("dialog", { name: /^Connecteur Test fixture/ });
+  const detail = page.getByRole("dialog", { name: `Réglages de mobile-${run}` });
   await expect(
     detail.getByRole("heading", { name: `mobile-${run}`, level: 1 }),
   ).toBeVisible();
@@ -276,7 +281,7 @@ test("mobile sombre : liste et détail lisibles", async ({ page }, info) => {
     path: info.outputPath("mobile-dark-detail.png"),
     fullPage: true,
   });
-  await detail.getByRole("button", { name: "Fermer le connecteur" }).click();
+  await detail.getByRole("button", { name: "Fermer les réglages" }).click();
   await expect(
     page.getByRole("button", { name: `mobile-${run}`, exact: true }),
   ).toBeVisible();

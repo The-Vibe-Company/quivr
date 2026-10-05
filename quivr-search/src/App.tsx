@@ -33,6 +33,7 @@ import { groupSources } from "./components/connectors/SourceList";
 import { displayState } from "./components/connectors/HealthBadge";
 import { needsCheck } from "./lib/format";
 import { currentTheme, onSystemTheme, saveTheme, type Theme } from "./lib/theme";
+import { ChartTip } from "./components/ChartTip";
 
 type Auth = "loading" | "login" | "ready" | "error";
 type View = "feed" | "alerts" | "sources" | "admin";
@@ -579,6 +580,7 @@ function Dashboard({
           onUnauthorized={onUnauthorized}
         />
       )}
+      <ChartTip />
       <div className="toast-region" role="status" aria-live="polite">
         {toast && (
           <p className="toast" key={toast.at}>
