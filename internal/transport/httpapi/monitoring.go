@@ -281,14 +281,14 @@ func (a *API) decodeMonitoring(w http.ResponseWriter, r *http.Request, schema *j
 		if schema == a.schemas["SubscriptionCreate"] && connectors.SchemaPointer(err) == "/owner" {
 			writeError(w, publicerr.InvalidOwner, nil)
 		} else {
-			writeError(w, publicerr.InvalidSchema, nil)
+			writeDecodeError(w, r, publicerr.InvalidSchema)
 		}
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
 	if err := decoder.Decode(v); err != nil {
-		writeError(w, publicerr.InvalidSchema, nil)
+		writeDecodeError(w, r, publicerr.InvalidSchema)
 		return false
 	}
 	return true

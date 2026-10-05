@@ -336,6 +336,18 @@ func (w *responseWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
+// writeDecodeError preserves the preview deadline when decoding finishes late.
+// Size and header errors keep their own precedence before JSON decoding.
+func writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Method == "POST" && r.URL.Path == "/v0/subscription-previews" {
+		deadline, hasDeadline := r.Context().Deadline()
+		if errors.Is(r.Context().Err(), context.DeadlineExceeded) || hasDeadline && !time.Now().Before(deadline) {
+			err = publicerr.PreviewDeadlineExceeded
+		}
+	}
+	writeError(w, err, nil)
+}
+
 func decodeRequest(w http.ResponseWriter, r *http.Request, schema *jsonschema.Schema) (any, bool) {
 	raw, _, ok := readJSON(w, r, maxRequestBytes)
 	if !ok {
@@ -363,20 +375,17 @@ func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte,
 		deadline, hasDeadline := r.Context().Deadline()
 		if errors.As(err, &large) {
 			writeError(w, publicerr.RequestTooLarge, nil)
-		} else if r.Method == "POST" && r.URL.Path == "/v0/subscription-previews" &&
-			(errors.Is(r.Context().Err(), context.DeadlineExceeded) || hasDeadline && !time.Now().Before(deadline)) {
-			writeError(w, publicerr.PreviewDeadlineExceeded, nil)
 		} else if r.Method == "POST" && r.URL.Path == "/v0/records/batch" &&
 			(r.Context().Err() != nil || hasDeadline && !time.Now().Before(deadline)) {
 			// The connection's read deadline may fire before the context timer.
 			writeError(w, publicerr.ContentUnavailable, nil)
 		} else {
-			writeError(w, publicerr.MalformedJson, nil)
+			writeDecodeError(w, r, publicerr.MalformedJson)
 		}
 		return nil, nil, false
 	}
 	if !utf8.Valid(payload) {
-		writeError(w, publicerr.MalformedJson, nil)
+		writeDecodeError(w, r, publicerr.MalformedJson)
 		return nil, nil, false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
@@ -387,12 +396,12 @@ func readJSON(w http.ResponseWriter, r *http.Request, limit int64) (any, []byte,
 		if errors.As(err, &large) {
 			writeError(w, publicerr.RequestTooLarge, nil)
 		} else {
-			writeError(w, publicerr.MalformedJson, nil)
+			writeDecodeError(w, r, publicerr.MalformedJson)
 		}
 		return nil, nil, false
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		writeError(w, publicerr.MalformedJson, nil)
+		writeDecodeError(w, r, publicerr.MalformedJson)
 		return nil, nil, false
 	}
 	return raw, payload, true

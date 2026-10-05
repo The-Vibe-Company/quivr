@@ -277,11 +277,20 @@ func TestSubscriptionPreviewRoute(t *testing.T) {
 	ctx, cancel := context.WithDeadline(req.Context(), time.Now().Add(-time.Second))
 	defer cancel()
 	req = req.WithContext(ctx)
-	req.Body = deadlineBody{}
-	response := httptest.NewRecorder()
-	server.Config.Handler.ServeHTTP(response, req)
-	if response.Code != http.StatusGatewayTimeout || !strings.Contains(response.Body.String(), `"code":"preview_deadline_exceeded"`) {
-		t.Fatalf("a body-read deadline must return a preview timeout, got %d: %s", response.Code, response.Body.String())
+	for name, body := range map[string]io.ReadCloser{
+		"body read":       deadlineBody{},
+		"JSON decoding":   io.NopCloser(strings.NewReader(`{`)),
+		"schema decoding": io.NopCloser(strings.NewReader(`{}`)),
+	} {
+		t.Run("deadline during "+name, func(t *testing.T) {
+			req := req.Clone(ctx)
+			req.Body = body
+			response := httptest.NewRecorder()
+			server.Config.Handler.ServeHTTP(response, req)
+			if response.Code != http.StatusGatewayTimeout || !strings.Contains(response.Body.String(), `"code":"preview_deadline_exceeded"`) {
+				t.Fatalf("a decoding deadline must return a preview timeout, got %d: %s", response.Code, response.Body.String())
+			}
+		})
 	}
 	want := map[string]any{
 		"evaluated": float64(3), "matched": float64(1), "not_ready": float64(1), "complete": true,
