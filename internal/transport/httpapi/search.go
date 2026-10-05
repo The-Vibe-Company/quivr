@@ -11,6 +11,10 @@ import (
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
+// maxConcurrentSearches bounds storage fan-out per API process across callers.
+// Excess work is rejected immediately; there is no unbounded search queue.
+const maxConcurrentSearches = 64
+
 func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope) {
 	raw, ok := decodeRequest(w, r, a.schemas["SearchRequest"])
 	if !ok {
@@ -46,6 +50,15 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 		q.Space = *wire.EvaluationSpace
 	}
 	started := time.Now()
+	select {
+	case a.searches <- struct{}{}:
+		defer func() { <-a.searches }()
+	default:
+		a.recordSearch(scope.Organization, q, retrieval.Result{}, started, publicerr.SearchUnavailable)
+		w.Header().Set("Retry-After", "1")
+		writeError(w, publicerr.SearchUnavailable, nil)
+		return
+	}
 	result, err := a.Retrieval.Search(r.Context(), scope, q)
 	a.recordSearch(scope.Organization, q, result, started, err)
 	if err != nil {
