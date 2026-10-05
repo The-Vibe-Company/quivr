@@ -19,11 +19,11 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       revision: ${{ steps.release.outputs.revision }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - run: pip install -r contracts/http/v0/checks/requirements.txt
@@ -46,7 +46,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.prepare.outputs.revision }}
           persist-credentials: false
@@ -69,7 +69,7 @@ jobs:
             VERSION=${{ needs.prepare.outputs.version }}
             REVISION=${{ needs.prepare.outputs.revision }}
             PLUGIN=${{ matrix.plugin }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
       - name: Check the published runtime before signing
@@ -96,7 +96,7 @@ jobs:
           mkdir -p signed-images
           image_name="${IMAGE%%@*}"
           printf '%s\n' "$IMAGE" > "signed-images/${image_name##*/}.txt"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: image-${{ matrix.plugin || 'engine' }}
           path: signed-images/
@@ -108,7 +108,7 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: image-*
           merge-multiple: true

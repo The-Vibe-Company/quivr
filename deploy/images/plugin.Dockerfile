@@ -1,5 +1,5 @@
 # Select go-plugin, python-plugin or core-ingest, using the release inventory.
-FROM golang:1.27.1-bookworm AS go-build
+FROM golang:1.27.1-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195 AS go-build
 WORKDIR /src
 COPY sdks/go ./sdks/go
 COPY plugins ./plugins
@@ -26,7 +26,7 @@ USER 10001:10001
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/plugin"]
 
-FROM python:3.12-slim-bookworm AS python-build
+FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python-build
 WORKDIR /src
 COPY contracts/http/v0/checks/requirements.txt /tmp/constraints.txt
 COPY sdks/python ./sdks/python
@@ -38,7 +38,7 @@ RUN python -m venv /opt/venv \
  && mkdir /out && cp "plugins/${PLUGIN}/quivr-plugin.yaml" /out/quivr-plugin.yaml \
  && /opt/venv/bin/pip uninstall -y pip setuptools wheel
 
-FROM python:3.12-slim-bookworm AS tokenizer
+FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS tokenizer
 WORKDIR /app
 COPY scripts/prepare_tokenizer.py ./scripts/
 COPY third_party/tokenizer ./third_party/tokenizer
@@ -47,7 +47,7 @@ RUN python scripts/prepare_tokenizer.py \
  && .scratch/tokenizer/venv/bin/pip uninstall -y pip setuptools wheel
 
 # The interpreter is required at runtime; package installers and headers are not.
-FROM python:3.12-slim-bookworm AS python-runtime
+FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python-runtime
 RUN rm -rf /usr/local/lib/python3.12/site-packages/pip* \
       /usr/local/lib/python3.12/site-packages/setuptools* \
       /usr/local/lib/python3.12/site-packages/pkg_resources* \
