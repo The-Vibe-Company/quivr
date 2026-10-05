@@ -2,7 +2,7 @@
 // the state lives in localStorage only: an article is unread when it arrived
 // after this browser's first visit (minus an hour, so a first visit is not
 // empty) and was not opened here since.
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FeedItem } from "./feed";
 
 const KEY = "quivr-demo.read.v1";
@@ -47,9 +47,12 @@ function save(state: Stored) {
 
 export function useReadState() {
   const [state, setState] = useState(load);
-  // Read outside a render: marking an article already read asks for none.
+  // The committed state, for handlers and effects: marking an article
+  // already read then asks for no render.
   const current = useRef(state);
-  current.current = state;
+  useLayoutEffect(() => {
+    current.current = state;
+  }, [state]);
   const read = useMemo(() => new Set(state.read), [state.read]);
   const isUnread = useCallback(
     (item: Pick<FeedItem, "record_id" | "version_id" | "received_at" | "published_at">) => {

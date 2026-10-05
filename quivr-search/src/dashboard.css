@@ -632,9 +632,16 @@ mark {
 .mark-read svg {
   color: var(--accent);
 }
-.mark-read:hover {
+.mark-read:hover:not(:disabled) {
   background: var(--hover);
   color: var(--ink);
+}
+/* Waiting for the list to show the filter picked: dimmed only when that
+   takes long enough to be seen. */
+.mark-read:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transition: opacity 120ms 200ms;
 }
 /* Fixed widths, so that counts and picks never shift the bar. */
 /* Counts read like a moment's: a small pill, wide enough for three
@@ -2476,6 +2483,10 @@ button.moment-pill:hover {
 @media (prefers-reduced-motion: reduce) {
   .bar-live[data-state="live"] .bar-live-dot::after {
     animation: none;
+  }
+  .feed-rows,
+  .mark-read:disabled {
+    transition: none;
   }
   .peek,
   .toast {
