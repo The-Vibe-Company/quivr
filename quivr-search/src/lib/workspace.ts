@@ -10,6 +10,9 @@ import { fetchConnectors, type Connector } from "./connectors";
 type Status = "loading" | "ready" | "error";
 
 const FRESH_MS = 2800;
+// Articles arriving together (a source just added brings dozens) are shown
+// together: the page renders once per batch, not once per article.
+const ARRIVALS_MS = 250;
 
 /**
  * The feed of the demo corpus, newest first. An article that arrives while
@@ -60,6 +63,38 @@ export function useFeedStream(
     const controller = new AbortController();
     let retry: ReturnType<typeof setTimeout>;
     let loads = 0;
+    // The batch of live changes not shown yet: the lists are already in the
+    // refs, the render, the highlight and the announcement wait for the batch.
+    let batch: ReturnType<typeof setTimeout> | undefined;
+    let arrived: string[] = [];
+    // An article joined those waiting during the batch.
+    let held = false;
+    const stage = (nextItems: FeedItem[], nextPending: FeedItem[]) => {
+      itemsRef.current = nextItems;
+      pendingRef.current = nextPending;
+      batch ??= setTimeout(() => {
+        batch = undefined;
+        commit(itemsRef.current, pendingRef.current);
+        // Articles removed before the batch was shown are neither lit nor told.
+        const shown = arrived.filter((id) =>
+          itemsRef.current.some((i) => i.record_id === id),
+        );
+        flash(shown);
+        const waiting = pendingRef.current.length;
+        if (waiting && held)
+          setAnnouncement(
+            `${waiting} nouvel${waiting > 1 ? "s" : ""} article${waiting > 1 ? "s" : ""} en attente.`,
+          );
+        else if (shown.length > 1)
+          setAnnouncement(`${shown.length} nouveaux articles.`);
+        else if (shown.length === 1)
+          setAnnouncement(
+            `Nouveau : ${itemsRef.current.find((i) => i.record_id === shown[0])?.title}`,
+          );
+        arrived = [];
+        held = false;
+      }, ARRIVALS_MS);
+    };
     // Live changes seen while a snapshot is in flight, replayed over it so an
     // article that arrives meanwhile is not dropped (null marks a removal).
     let replay: Map<string, FeedItem | null> | null = null;
@@ -71,26 +106,22 @@ export function useFeedStream(
       const waiting = pendingRef.current;
       if (shown.some((i) => i.record_id === item.record_id)) {
         // A new Version of a shown article updates it in place.
-        commit(
+        stage(
           [...without(shown, item.record_id), item].sort(newestFirst),
           waiting,
         );
         return;
       }
       if (waiting.length || holdRef.current()) {
-        commit(shown, [item, ...without(waiting, item.record_id)]);
-        const n = pendingRef.current.length;
-        setAnnouncement(
-          `${n} nouvel${n > 1 ? "s" : ""} article${n > 1 ? "s" : ""} en attente.`,
-        );
+        stage(shown, [item, ...without(waiting, item.record_id)]);
+        held = true;
         return;
       }
-      commit([item, ...shown].sort(newestFirst), waiting);
-      flash([item.record_id]);
-      setAnnouncement(`Nouveau : ${item.title}`);
+      stage([item, ...shown].sort(newestFirst), waiting);
+      arrived.push(item.record_id);
     };
     const drop = (id: string) =>
-      commit(without(itemsRef.current, id), without(pendingRef.current, id));
+      stage(without(itemsRef.current, id), without(pendingRef.current, id));
 
     const load = () => {
       const ticket = ++loads;
@@ -151,6 +182,7 @@ export function useFeedStream(
       source.close();
       controller.abort();
       clearTimeout(retry);
+      clearTimeout(batch);
     };
   }, [attempt, onUnauthorized, commit, flash]);
 
