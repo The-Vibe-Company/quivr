@@ -30,19 +30,30 @@ export function ChartTip() {
       const r = bar.getBoundingClientRect();
       // Above the bar, or below it when the window's top is too close.
       const below = r.top / zoom < 44;
-      setTip({
+      const next = {
         text: bar.getAttribute("data-tip") || "",
         x: (r.left + r.width / 2) / zoom,
         y: (below ? r.bottom : r.top) / zoom,
         below,
         host: bar.closest("dialog[open]") || document.body,
-      });
+      };
+      // Unchanged, the tip keeps its state: drawing it is a mutation too.
+      setTip((t) =>
+        t &&
+        t.text === next.text &&
+        t.x === next.x &&
+        t.y === next.y &&
+        t.below === next.below &&
+        t.host === next.host
+          ? t
+          : next,
+      );
     };
+    // A refresh may change the bar's words or height, or remove it.
     const watch = new MutationObserver(() => {
       const bar = shown.current;
       if (!bar?.isConnected) return show(null);
-      const text = bar.getAttribute("data-tip") || "";
-      setTip((t) => (t && t.text !== text ? { ...t, text } : t));
+      place(bar);
     });
     function show(bar: Element | null) {
       if (bar === shown.current) return;
@@ -58,7 +69,7 @@ export function ChartTip() {
         subtree: true,
         childList: true,
         attributes: true,
-        attributeFilter: ["data-tip"],
+        attributeFilter: ["data-tip", "style"],
       });
     }
     const bars = (chart: Element) => [...chart.querySelectorAll("[data-tip]")];
@@ -98,7 +109,8 @@ export function ChartTip() {
       if (!chart?.matches("[data-tips]") || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.key === "Escape") return show(null);
       const list = bars(chart);
-      const at = shown.current ? list.indexOf(shown.current) : list.length - 1;
+      // From the bar shown, unless the pointer moved it to another chart.
+      const at = shown.current && list.includes(shown.current) ? list.indexOf(shown.current) : list.length - 1;
       const to: Record<string, number> = {
         ArrowLeft: at - 1,
         ArrowRight: at + 1,
