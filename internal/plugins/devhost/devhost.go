@@ -170,7 +170,7 @@ func get(ctx context.Context, url string, timeout time.Duration) (int, []byte, e
 	if err != nil {
 		return 0, nil, err
 	}
-	resp, err := client.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -476,7 +476,7 @@ func invoke(ctx context.Context, baseURL, route string, request []byte, maxRespo
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("POST %s: %w", route, err)
 	}
