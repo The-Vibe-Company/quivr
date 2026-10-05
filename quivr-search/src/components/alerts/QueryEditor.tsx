@@ -33,7 +33,12 @@ function insert(query: string, start: number, end: number, hint: string): [strin
   }
   const head = space(before) + hint + (hint.endsWith(":") ? "" : " ");
   // A selection is what the operator applies to: NOT football, source:nom.
-  if (selected) return [head + selected + after, head.length, head.length + selected.length];
+  // Several words stay together: NOT (marché aux fleurs), source:"Météo locale".
+  if (selected) {
+    const several = /\s/u.test(selected.trim()) && !/^[("].*[)"]$/su.test(selected.trim());
+    const operand = !several ? selected : hint === "source:" ? `"${selected.trim()}"` : hint === "NOT" ? `(${selected.trim()})` : selected;
+    return [head + operand + after, head.length, head.length + operand.length];
+  }
   const tail = after.replace(/^\s+/, "");
   return [head + tail, head.length, head.length];
 }

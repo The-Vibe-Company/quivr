@@ -539,6 +539,11 @@ test("le formulaire guidé et la requête avancée restent d’accord, et une er
   await query.evaluate((el: HTMLInputElement) => el.setSelectionRange(0, 5));
   await form.getByRole("group", { name: "Insérer dans la requête" }).getByRole("button", { name: /^NOT/ }).click();
   await expect(query).toHaveValue("NOT grève (port OR aéroport) NOT sondage");
+  // Several selected words stay together under NOT.
+  await query.fill("orage marché aux fleurs");
+  await query.evaluate((el: HTMLInputElement) => el.setSelectionRange(6, 23));
+  await form.getByRole("group", { name: "Insérer dans la requête" }).getByRole("button", { name: /^NOT/ }).click();
+  await expect(query).toHaveValue("orage NOT (marché aux fleurs)");
   await query.fill("(port AND grève) OR aéroport");
   await expect(form.locator(".query-unfit")).toContainText("Le formulaire guidé ne sait pas afficher cette requête");
   await expect(form.getByRole("button", { name: "Revenir au formulaire guidé" })).toHaveCount(0);
