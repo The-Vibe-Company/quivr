@@ -51,7 +51,11 @@ export function useHistory(onUnauthorized: () => void) {
           if (e instanceof APIError && e.status === 401)
             return onUnauthorized();
           setError(e instanceof Error ? e.message : "Chiffres indisponibles.");
-          setStatus("error");
+          if (e instanceof APIError && e.status === 403) {
+            // The key cannot read documents: polling will not change that.
+            clearInterval(timer);
+            setStatus("unavailable");
+          } else setStatus("error");
         });
     setStatus("loading");
     void read();

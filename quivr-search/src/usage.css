@@ -557,8 +557,7 @@
 @media (forced-colors: active) {
   .usage-segment,
   .usage-swatch,
-  .usage-trend span,
-  .history-zero {
+  .usage-trend span {
     background: CanvasText;
     forced-color-adjust: none;
   }
@@ -634,6 +633,13 @@
 }
 .history-days tr[data-empty] > * {
   color: var(--warning);
+}
+@media (forced-colors: active) {
+  .history-zero,
+  .usage-slot[data-current] .history-zero {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
 }
 @media (max-width: 700px) {
   .history-figures {

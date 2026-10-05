@@ -343,6 +343,7 @@ const zones = new Map();
 function wall(ms, tz) {
   let format = zones.get(tz);
   if (!format) {
+    if (zones.size >= 64) zones.clear();
     format = new Intl.DateTimeFormat("en-US", {
       timeZone: tz,
       hourCycle: "h23",
@@ -381,8 +382,14 @@ const plusDays = (day, n) =>
  */
 function midnight(day, tz) {
   const local = Date.parse(`${day}T00:00:00Z`);
-  let at = local - offset(local, tz) * MINUTE;
-  at = local - offset(at, tz) * MINUTE;
+  // With the offsets before and after any change around midnight, the
+  // earliest instant still on that day; a midnight the clocks skip starts
+  // the day at the change.
+  const at = Math.min(
+    ...[local - DAY / 2, local + DAY / 2]
+      .map((near) => local - offset(near, tz) * MINUTE)
+      .filter((instant) => wall(instant, tz).day === day),
+  );
   const minutes = offset(at, tz);
   const abs = Math.abs(minutes);
   const pad = (n) => String(n).padStart(2, "0");
@@ -470,7 +477,11 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
     }
   }
 
-  async function countRecords(bounds, ttl) {
+  /**
+   * One exact count, shared while it is fresh. A read whose `stop.failed`
+   * was set while it waited for a slot gives up without calling the core.
+   */
+  async function countRecords(bounds, ttl, stop) {
     const path = `/v0/records/count?${new URLSearchParams({ corpus_id: corpus, ...bounds })}`;
     const cached = counts.get(path);
     if (cached && clock() - cached.at < cached.ttl) return cached.count;
@@ -479,6 +490,8 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
         await new Promise((resolve) => queued.push(resolve));
       else inFlight++;
       try {
+        if (stop?.failed)
+          throw failure(503, "Le compte des documents est momentanément indisponible. Réessayez.");
         const response = await upstream(path);
         if (response.status === 200) return response.data.count;
         throw response.status === 403
@@ -751,6 +764,8 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
       const days = Array.from({ length: back.days + 1 }, (_, i) =>
         plusDays(today, i - back.days),
       );
+      // The first failed day stops the days still waiting for a slot.
+      const stop = { failed: false };
       const perDay = await Promise.all(
         days.map((day) =>
           countRecords(
@@ -759,7 +774,11 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
               accepted_before: midnight(plusDays(day, 1), tz),
             },
             day === today ? TODAY_MS : PAST_MS,
-          ),
+            stop,
+          ).catch((error) => {
+            stop.failed = true;
+            throw error;
+          }),
         ),
       );
       const [total, dated] = await totals.pair;

@@ -360,6 +360,23 @@ test("documents are counted per local day since the first one, empty days at zer
     [1, 1, 1, 0, 1],
   );
   await assert.rejects(history(admin, "Mars/Olympus"), { status: 422 });
+
+  // Where the clocks skip midnight, the day starts at the change.
+  const skipped = counting(["2026-09-06T12:00:00-03:00"]);
+  await history(
+    createAdmin({
+      upstream: skipped.upstream,
+      corpus: "demo",
+      clock: () => Date.parse("2026-09-06T18:00:00Z"),
+    }),
+    "America/Santiago",
+  );
+  assert.ok(
+    skipped.calls.includes(
+      "/v0/records/count?corpus_id=demo&accepted_after=2026-09-06T01%3A00%3A00-03%3A00&accepted_before=2026-09-07T00%3A00%3A00-03%3A00",
+    ),
+    skipped.calls.join("\n"),
+  );
 });
 
 test("past days are reread less often than today, and history is capped", async () => {
@@ -393,4 +410,20 @@ test("past days are reread less often than today, and history is capped", async 
   assert.equal(capped.days.length, 366);
   assert.equal(capped.days.at(-1).day, "2026-10-27");
   assert.ok(old.calls.length < 400, `${old.calls.length} calls`);
+
+  // A day the core fails to count stops the days still waiting.
+  const failing = counting(["2025-12-01T10:00:00Z"]);
+  const broken = async (path) =>
+    path.includes("accepted_after=2025-12-01")
+      ? { status: 503, data: {} }
+      : failing.upstream(path);
+  await assert.rejects(
+    history(createAdmin({ upstream: broken, corpus: "demo", clock: () => now }), "UTC"),
+    { status: 503 },
+  );
+  // Let any count still queued reach the core before counting the reads.
+  for (let turn = 0; turn < 3 || failing.flight.now; turn++)
+    await new Promise((resolve) => setImmediate(resolve));
+  const dayReads = failing.calls.filter((c) => c.includes("accepted_after"));
+  assert.ok(dayReads.length < 10, `${dayReads.length} day reads after the failure`);
 });

@@ -273,7 +273,11 @@ export async function fakeAdmin(page: Page): Promise<AdminFake> {
   // Records without a current Version counted in the total only.
   const stored = [3, 5, 4, 0, 6, 8, 7, 5, 9, 0, 4, 6, 7, 8, 5, 6, 9, 11, 10, 8, 12];
   const history = (url: URL) => {
-    const today = Date.parse(new Date().toISOString().slice(0, 10));
+    const today = Date.parse(
+      new Date().toLocaleDateString("en-CA", {
+        timeZone: url.searchParams.get("tz") || "UTC",
+      }),
+    );
     const days = stored.map((count, i) => ({
       day: new Date(today - (stored.length - 1 - i) * 86400000)
         .toISOString()
