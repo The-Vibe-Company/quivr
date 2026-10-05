@@ -35,6 +35,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	orchestration "github.com/The-Vibe-Company/quivr/internal/orchestration/temporal"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
 	pluginregistry "github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/quarantine"
@@ -46,6 +47,7 @@ import (
 )
 
 type Config struct {
+	TLS TLSConfig `json:"tls"`
 	// TEIURL encodes queries for generations built before the core.ingest
 	// plugin (THE-777), which serve the legacy E5 space until rebuilt.
 	TEIURL          string                  `json:"tei_url"`
@@ -201,6 +203,10 @@ func Run(command string) error {
 	if len(cfg.M365) > 0 && string(cfg.M365) != "null" {
 		return errors.New("m365 moved to the connector.m365_mail plugin's configuration; pin plugins/m365-mail with login_endpoint and graph_endpoint (https://docs.quivr.thevibecompany.co/guides/microsoft-365)")
 	}
+	tlsSettings, err := cfg.validateTLS()
+	if err != nil {
+		return err
+	}
 	// Validate the pins before logs move to files, so a refusal is reported on stderr.
 	pins, err := cfg.loadPins(command)
 	if err != nil {
@@ -338,7 +344,11 @@ func Run(command string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	poolConfig, err := postgres.PoolConfig(cfg.DatabaseURL, cfg.TLS.Postgres)
+	if err != nil {
+		return err
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return errors.New("invalid database configuration")
 	}
@@ -346,7 +356,11 @@ func Run(command string) error {
 	if cfg.WeaviateURL == "" || cfg.TemporalAddress == "" || cfg.S3.Endpoint == "" || cfg.S3.Bucket == "" || cfg.S3.AccessKey == "" || cfg.S3.SecretKey == "" {
 		return errors.New("Temporal and S3 configuration required")
 	}
-	blobs := s3store.New(cfg.S3)
+	blobs, err := s3store.NewWithTLS(cfg.S3, cfg.TLS.S3)
+	if err != nil {
+		return err
+	}
+	devhost.SetTransport(tlsSettings.plugins)
 	materialization := postgres.MaterializationStore{Pool: pool}
 	normalizations := postgres.NormalizationStore{Pool: pool}
 	baseline := postgres.ProjectionStore{Pool: pool}
@@ -377,7 +391,10 @@ func Run(command string) error {
 	contents := content.Service{Submissions: submissions, Receipts: receipts, RecordStore: records, Versions: versions, Materialization: materialization, Catalog: records, Blobs: blobs, Baseline: baseline, Embeddings: embeddings, BlobSource: uploadStore, Relations: records, Extensions: live, Normalizations: normalizations, Supersession: normalizations, Routes: live,
 		Received: recorder.Received}
 	uploadService := uploads.Service{Store: uploadStore, Transfer: blobs}
-	projection := weaviate.New(cfg.WeaviateURL)
+	projection, err := weaviate.NewWithTLS(cfg.WeaviateURL, cfg.TLS.Weaviate)
+	if err != nil {
+		return err
+	}
 	projection.LegacySpace = tei.Space().ID
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -750,7 +767,7 @@ func Run(command string) error {
 				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, struct {
 					orchestration.ReceiptDispatchStore
 					orchestration.OperationDispatchStore
-				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner, cfg.IngestionEvaluationConcurrency)
+				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner, cfg.IngestionEvaluationConcurrency, tlsSettings.temporal)
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()

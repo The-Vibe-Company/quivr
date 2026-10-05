@@ -1,0 +1,55 @@
+---
+title: Run Quivr behind TLS
+description: Terminate incoming HTTPS at your platform and verify Quivr's outgoing connections.
+keywords: [TLS, HTTPS, certificates, deployment]
+---
+Put a load balancer, ingress or service mesh in front of Quivr to serve HTTPS. Configure outgoing TLS separately for each dependency in your engine configuration.
+
+## Prerequisites
+
+You need operator access to your platform and the [engine configuration](/run-quivr/deploy), plus TLS endpoints for your dependencies. For a private certificate authority (CA), mount its PEM certificate bundle where the API, worker and `quivr migrate` process can read it. For Temporal, Weaviate, PostgreSQL or S3 client authentication, also mount a matching PEM certificate and private key for those processes.
+
+## Steps
+
+1. Configure your platform to terminate HTTPS and forward traffic to Quivr's `listen` address over HTTP. Restrict that address to the platform's network. Keep both API and worker `probe_listen` addresses private: their readiness and metrics endpoints have no authentication. Quivr serves plain HTTP on these addresses.
+2. Set `public_url` to the public HTTPS address if your connector plugins receive source webhooks. If your platform forwards source addresses, configure only its trusted network ranges in `connector_push.trusted_proxy_cidrs`.
+3. Set `https://` URLs for Weaviate, S3 and plugins. Set `tls.temporal.enabled` to `true`; Temporal uses a `host:port` address. Set `tls.postgres.enabled` to `true`, or use `sslmode=verify-full` in `database_url`. See [Outbound TLS](/reference/configuration#outbound-tls) for defaults and all fields.
+4. Add `ca_file` for a private CA. Omit it to use system roots. Add `server_name` only when the certificate names a different host from the connection address. Configure `cert_file` and `key_file` together when the dependency requires a client certificate; plugin client certificates are not supported.
+5. Apply the same settings to the API and worker, then restart both. Rerun `quivr migrate` with those settings when preparing a deployment.
+
+For example, this unrun configuration excerpt enables Temporal client authentication with mounted certificates. Replace the paths and name with those issued for your deployment:
+
+```json
+{
+  "tls": {
+    "temporal": {
+      "enabled": true,
+      "ca_file": "/run/certs/ca.pem",
+      "cert_file": "/run/certs/client.pem",
+      "key_file": "/run/certs/client-key.pem",
+      "server_name": "temporal.example.com"
+    }
+  }
+}
+```
+
+The files must exist inside each engine container, at the configured paths. Changing certificate files requires restarting the processes to load them again. Clients using S3 upload or download URLs also need to trust the S3 endpoint and supply client certificates if it requires them.
+
+## Check it worked
+
+Check that your public API address presents your platform's certificate and forwards API requests. Check `GET /readyz` on the API and on the private worker probe address; `204` means ready and `503` means unavailable: the API checks its database schema and search warm-up, and the worker also checks Temporal, S3 and Weaviate. A plugin's availability is checked when Quivr calls it; an unavailable plugin does not prevent startup.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| Startup names a dependency and `ca_file` | Mount a readable PEM CA bundle at that path. |
+| Startup names `cert_file` or `key_file` | Supply both files, with a matching certificate and key. |
+| Startup says the switch conflicts with the URL | Use `https://` with enabled TLS and `http://` with disabled TLS. Connectors permit HTTP only on loopback hosts, such as `localhost`, `127.0.0.1` or `::1`. Other connector endpoints require HTTPS even when `tls.plugins.enabled` is `false`; keep their HTTPS URL and set the switch to `true` or omit it. |
+| PostgreSQL refuses SSL fallback | Use `sslmode=verify-full` or explicit `tls.postgres` settings. `sslmode=disable` selects plaintext. |
+| A dependency stays unready with TLS enabled | Check its certificate chain, expiry and name, and whether it requires client authentication. There is no setting to skip certificate verification. |
+
+## Next
+
+- [Configuration reference](/reference/configuration#outbound-tls) for the exact TLS settings.
+- [Operate a Quivr deployment](/run-quivr/overview) for other operator tasks.
