@@ -102,7 +102,7 @@ tokens using core.ingest's pinned E5 tokenizer, and caches up to 4096 pairs.
 An uncached deep search is estimated at about **0.06 cent**, with a **1-cent
 maximum** including retries; actual cost depends on provider input tokens.
 Provider failures return hybrid order with an explicit unavailable explanation.
-See [Re-rank with Jev](https://docs.quivr.thevibecompany.co/guides/rerank-with-jev)
+See [Re-rank with Jev](https://docs.quivr.thevibecompany.co/run-quivr/rerank-with-jev)
 for usage reporting, caching and fallback behavior.
 
 To turn it off, unset `QUIVR_DEMO_JEV_RERANK` or set it to `0` on api and worker, then redeploy both.

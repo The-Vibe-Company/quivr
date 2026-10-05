@@ -1,0 +1,59 @@
+---
+title: "Operate a Quivr deployment"
+sidebarTitle: "Overview"
+description: "What an operator of a Quivr deployment does, what you need first, and which page covers each task."
+keywords: ["operator", "deployment", "administration", "operations"]
+---
+
+This section is for the operator: the person who deploys Quivr, chooses the plugins it calls, and keeps search and alerts working for the applications built on it. If you write an application that calls Quivr's API, start with the [Guides](/guides/add-content) instead.
+
+## What you need first
+
+- **A running Quivr.** On your machine, `make dev` starts one; see the [Quickstart](/quickstart). For your own servers, read [Deploy and configure Quivr](/run-quivr/deploy).
+- **Its configuration file**, the JSON file named by `QUIVR_CONFIG`, and the right to restart the `api` and `worker` processes. Plugins, API keys and most limits are set there.
+- **An operator API key.** Runtime plugin changes, backfills and vector space promotions need `plugins:admin`; following their progress needs `operations:read`. Each page lists the exact permissions it uses. The [API keys reference](/reference/configuration#api-keys) lists every permission.
+- **`curl` and `jq`** for the requests on these pages.
+
+Some changes need a restart and others do not. A change to the configuration file takes effect when the `api` and `worker` processes restart. Registering or activating a plugin, filling a vector space, reprocessing documents and retiring alert evaluations are API requests that apply while Quivr runs.
+
+## Deploy and configure
+
+- [Deploy and configure Quivr](/run-quivr/deploy): what a deployment runs, the order to start it in, and how to check it is ready.
+- [Configuration](/reference/configuration): every field of the configuration file.
+
+## Plugins
+
+Plugins are separate HTTP services that read files, cut and embed passages, rank results and judge alerts. [How plugins work](/plugins/overview) explains their roles.
+
+- [First-party plugins](/run-quivr/catalog): the plugins that ship with Quivr and their settings.
+- [Pin a plugin](/run-quivr/pin): make Quivr call a plugin at startup.
+- [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin): replace a plugin while Quivr runs, and roll back.
+- [Reprocess quarantined documents](/run-quivr/reprocess-quarantined-versions): run the documents a plugin refused or failed on again, once it is fixed.
+
+## Sources
+
+- [Receive and secure pushes](/run-quivr/receive-pushes): let a third party send records to Quivr, with its own token and limits.
+
+## Search
+
+- [Search profiles](/run-quivr/search-profiles): what `default` and `deep` mean, and how to choose the plugin behind each.
+- [Re-rank deep searches with Jev](/run-quivr/rerank-with-jev): add an optional paid re-ranker to `deep`.
+- [Try and switch a vector model](/run-quivr/switch-a-vector-model): compare a second embedding model, then switch search to it.
+- [Fill a new vector space](/run-quivr/backfill-a-vector-space): compute vectors for documents you already have.
+
+## Alerts
+
+- [Configure alert fields](/run-quivr/configure-alert-fields): name metadata fields that keyword alerts can filter on.
+- [Upgrade an alert rule](/run-quivr/upgrade-an-alert-rule): move existing alerts to a new version of their rule.
+- [Move meaning alerts to a new vector model](/run-quivr/move-meaning-alerts): keep alerts that match by meaning working after search changes vector space.
+- [Retire alert evaluations](/run-quivr/retire-alert-evaluations): abandon evaluations whose old rule cannot come back.
+
+## Measure search
+
+- [Record search measurements](/run-quivr/record-search-measurements): store evaluation results and compare runs.
+- [Run a search campaign](/run-quivr/run-search-campaign): explore search settings over several days, within a spending cap.
+
+## Next
+
+- [Deploy and configure Quivr](/run-quivr/deploy) if you have no deployment yet.
+- [Pin a plugin](/run-quivr/pin) to add your first plugin.

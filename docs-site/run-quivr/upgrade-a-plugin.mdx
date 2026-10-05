@@ -1,12 +1,19 @@
 ---
 title: "Upgrade or switch a plugin"
-description: "Run a new plugin beside the old one, check it, switch the plan, watch it drain, and roll back when needed."
+description: "Replace a plugin while Quivr runs, check the new one before it serves, and roll back if needed."
 keywords: ["plugin registry", "activate", "rollback", "pipeline plan", "plugins:admin", "upgrade", "zero downtime"]
 ---
 
 Run the new plugin beside the old one, let Quivr check it, then activate it without restarting Quivr. Keep the old process running until its work drains; if needed, roll back after Quivr checks the returning plugins.
 
 For a first installation through configuration, use [Pin a plugin](/run-quivr/pin). The examples here use the plugin from [Write an ingestion plugin](/plugins/write-an-ingestion-plugin); replace its manifest, address and settings with yours.
+
+**On this page**
+
+- [Steps](#steps): register the new version, let Quivr check it, activate it, and stop the old one once it drains. [Roll back](#roll-back) if it misbehaves.
+- [Plugin lifecycle](#plugin-lifecycle) and [work pinned to a version](#work-finishes-on-the-version-it-started-with): when an old version may stop.
+- Other cases: [redeploy a configured build](#redeploy-a-configured-build), [promote an evaluation plugin](#promote-an-evaluation-plugin), [alert rules](#upgrade-an-alert-rule) and [vector spaces](#fill-a-new-vector-space).
+- Background: [restarts](#restarts-during-an-upgrade), [the configuration and the plan](#the-configuration-and-the-plan), and [limits](#limits).
 
 ## Prerequisites
 
@@ -224,7 +231,7 @@ A saved rollback plan may name the replaced build, even as an evaluation member.
 
 ## Promote an evaluation plugin
 
-For a plugin already active in `ingestion.evaluation`, follow [Try a vector model and switch to it](/run-quivr/switch-a-vector-model). It covers filling every Corpus across the deployment, comparing search results, activating the evaluation registration, migrating meaning alerts and rolling back. Activation moves the previous owner into evaluation, so keep it running to fill new documents while rollback remains necessary.
+For a plugin already active in `ingestion.evaluation`, follow [Try and switch a vector model](/run-quivr/switch-a-vector-model). It covers filling every Corpus across the deployment, comparing search results, activating the evaluation registration, migrating meaning alerts and rolling back. Activation moves the previous owner into evaluation, so keep it running to fill new documents while rollback remains necessary.
 
 Pending Versions retain their original work pins. A separate job, pinned to the new plan, produces the new owner's projection before publishing the Version. Until then, the previous current Version remains searchable. Late results and refusals from the old owner cannot advance currentness or quarantine the new served path.
 
@@ -234,12 +241,12 @@ Pending Versions retain their original work pins. A separate job, pinned to the 
 
 ## Fill a new vector space
 
-For another space of the same ingestion owner, [Fill a new vector space](/run-quivr/backfill-a-vector-space) owns the dry run, backfill and space promotion. For another ingestion owner, [Try a vector model and switch to it](/run-quivr/switch-a-vector-model) owns the complete comparison and switch procedure.
+For another space of the same ingestion owner, [Fill a new vector space](/run-quivr/backfill-a-vector-space) owns the dry run, backfill and space promotion. For another ingestion owner, [Try and switch a vector model](/run-quivr/switch-a-vector-model) owns the complete comparison and switch procedure.
 
 ## Work finishes on the version it started with
 
 <Accordion title="Work finishes on the version it started with">
-The processing of a receipt, a connector run and a rebuild each record the plan that was active when they started. Their retries, their later steps and a worker restart keep calling that plan's plugins, so an article is never processed half by one version and half by the other. Keep the old version running until it is `inactive`.
+The processing of a receipt, a connector run and a rebuild each record the plan that was active when they started. Their retries, their later steps and a worker restart keep calling that plan's plugins, so a document is never processed half by one version and half by the other. Keep the old version running until it is `inactive`.
 
 If the old version cannot be reached while it drains, its pinned work retries with backoff, up to `pinned_plugin_attempts` attempts (10 by default). The work then stops with the diagnostic `pinned_plugin_unavailable`, which names the plan and the plugin: a Version still waiting for its text is quarantined, a searchable Version keeps its text and its enrichment stops, and a rebuild fails. The work is never moved to the new version. A plugin of the active plan, in contrast, may be unreachable for any time: its work keeps retrying. Each ingestion registration counts only its routed receipts and backfills. A rebuild shares enrichment's budget of three reached embedding deadlines per Version; outages do not consume it. Backfill keeps its skip-on-deadline policy. Do not terminate pinned work by hand in Temporal, since its count would never be released. After a fix or a rollback, run quarantined Versions through the active plan: [reprocess them](/run-quivr/reprocess-quarantined-versions).
 </Accordion>

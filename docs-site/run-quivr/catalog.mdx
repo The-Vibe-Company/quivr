@@ -1,6 +1,6 @@
 ---
 title: "First-party plugins"
-description: "The plugins that ship with Quivr: what each provides, its configuration, and where it runs."
+description: "The plugins that ship with Quivr: what each one does, its settings, and where it runs."
 keywords: ["pdf-text", "alerts", "core-ingest", "hosted-embed", "core-retrieve", "jev-rerank", "rss", "m365-mail", "x-list", "push-source", "catalog"]
 ---
 
@@ -42,7 +42,7 @@ Keyword and local-vector checks need no classifier key. Jev checks need a `TYPES
 | `described` | Jev by default, local vectors with `meaning_check: vectors` | Yes, unless `meaning_check: vectors` |
 | `keywords_or_meaning` / `keywords_and_meaning` | Keyword and meaning checks, with an explicit `meaning_check` | With `meaning_check: jev` |
 
-Vector checks embed the description with the deployment's embedding provider, which also embeds every article. With the default `core-ingest` and an embedding server you run, that text stays inside the installation; with a hosted provider, it goes to that provider.
+Vector checks embed the description with the deployment's embedding provider, which also embeds every document. With the default `core-ingest` and an embedding server you run, that text stays inside the installation; with a hosted provider, it goes to that provider.
 
 The pin's `kinds` lists the alert kinds the deployment accepts. For keyword and local meaning checks without a TypeSafe key, pin `"kinds": ["keywords", "meaning", "keywords_or_meaning", "keywords_and_meaning"]`, as `make dev` does. Use `kind: meaning` for a local description, and `meaning_check: vectors` for every meaning check. This pin excludes `described`, so that kind is refused with `422 invalid_expression` even when it selects vectors. The kind list alone does not prevent a mixed expression from selecting Jev.
 
@@ -56,7 +56,7 @@ To offer Jev checks:
 
 | Configuration | Default | Meaning |
 | --- | --- | --- |
-| `fields` | `{}` | Filter names mapped to JSON Pointers into article metadata, such as `{"author": "/extensions/example.news/data/author"}` |
+| `fields` | `{}` | Filter names mapped to JSON Pointers into document metadata, such as `{"author": "/extensions/example.news/data/author"}` |
 | `text_roles` | `["title", "body"]` | Part roles that keyword terms search and Jev checks; local meaning checks use all supplied vectors |
 | `described.threshold` | `0.5` | Default Jev probability threshold, 0.2 to 0.95 |
 | `vectors.threshold` | `0.8` | Default local-vector cosine similarity threshold, 0.2 to 0.95 |
@@ -82,11 +82,11 @@ Generate an immutable manifest from the configuration before installing it. Each
 
 The default retrieval plugin follows the search mode: `bm25` on the title and body for `lexical`, `near_vector` in every served space for `semantic`, and `hybrid` in every served space for `hybrid`. It merges candidates by score, keeps each segment once and breaks score ties by segment id. Optional pin settings select `dense_weight`, `candidate_count` and `hybrid_fusion`; defaults remain alpha 0.5, the search limit and relative-score fusion. See [Core retrieval settings](/run-quivr/search-profiles#core-retrieval-settings) for bounds and an example.
 
-It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent). Its `deep` ranks like `default`; to re-rank, install `jev.rerank` and map the short name `deep` to `jev.rerank/deep` in `retrieval.profiles`. See [Re-rank with Jev](/guides/rerank-with-jev) for that configuration. The api refuses to start without a retrieval plugin.
+It declares `default` (500 ms, no paid call) and `deep` (3 s, 1 cent). Its `deep` ranks like `default`; to re-rank, install `jev.rerank` and map the short name `deep` to `jev.rerank/deep` in `retrieval.profiles`. See [Re-rank deep searches with Jev](/run-quivr/rerank-with-jev) for that configuration. The api refuses to start without a retrieval plugin.
 
 ## jev-rerank
 
-The optional `jev.rerank` retrieval plugin declares only `deep`. It asks `core.retrieve/default` for a hybrid shortlist, then scores it in one batch with Jev, TypeSafe's paid model. A `deep` search can make paid calls; usage reports the calls and cost, and each re-ranked hit explains its probability. Without a TypeSafe key, or on errors and deadlines, it returns the original hybrid order without a Jev score. It can shorten passages, drop overlapping hits and cache scores. See [Re-rank with Jev](/guides/rerank-with-jev) for configuration and settings, and [Search profiles](/run-quivr/search-profiles) for how it builds on `core.retrieve/default`.
+The optional `jev.rerank` retrieval plugin declares only `deep`. It asks `core.retrieve/default` for a hybrid shortlist, then scores it in one batch with Jev, TypeSafe's paid model. A `deep` search can make paid calls; usage reports the calls and cost, and each re-ranked hit explains its probability. Without a TypeSafe key, or on errors and deadlines, it returns the original hybrid order without a Jev score. It can shorten passages, drop overlapping hits and cache scores. See [Re-rank deep searches with Jev](/run-quivr/rerank-with-jev) for configuration and settings, and [Search profiles](/run-quivr/search-profiles) for how it builds on `core.retrieve/default`.
 
 ## rss
 
