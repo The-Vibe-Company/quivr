@@ -18,6 +18,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 | [`quivr plugin inspect`](#quivr-plugin-inspect) | nothing: works offline | Validate a plugin manifest and print what the plugin declares. |
 | [`quivr plugin test`](#quivr-plugin-test) | nothing: works offline | Certify that the engine can safely invoke every Contribution the plugin declares. |
 | [`quivr search`](#quivr-search) | a running server | Search one or more Corpora of a running Quivr and print ranked hits with their provenance. |
+| [`quivr records`](#quivr-records) | a running server | List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists. |
 | [`quivr mcp`](#quivr-mcp) | a running server | Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one profile. |
 
 ## Engine commands
@@ -137,6 +138,51 @@ Flags:
     	search profile name, as GET /v0/search/profiles lists them (server default: default)
   -source value
     	keep only Records from this Source Namespace, ranked among themselves; repeat or separate with commas
+
+This command needs a running Quivr server. It reads the server address from
+QUIVR_API_URL and the API key from QUIVR_API_KEY; --api-url and --api-key
+override them. It talks to the server only through its public HTTP API.
+
+Exit codes:
+  0  success
+  1  unexpected failure
+  2  invalid arguments, or a missing or malformed API URL
+  3  API key rejected, or not allowed on a requested resource (401, 403)
+  4  request rejected as invalid (400, 404, 409, 422)
+  5  server unreachable or unavailable (connection error, timeout, 5xx)
+  130  interrupted
+```
+
+### quivr records
+
+List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists.
+
+`quivr records --help` prints:
+
+```text
+usage: quivr records --corpus <corpus-id> [--order record_id|accepted_at_desc] [--accepted-after <RFC3339>] [--accepted-before <RFC3339>] [--page-cursor <cursor>] [--limit <1-100>] [--count] [--api-url <url>] [--api-key <key>]
+
+List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists.
+
+Flags:
+  -accepted-after string
+        inclusive current-Version acceptance time, RFC 3339 with an offset, at most 9 fractional digits
+  -accepted-before string
+        exclusive current-Version acceptance time, RFC 3339 with an offset, at most 9 fractional digits
+  -api-key string
+        API key sent as a bearer token (default $QUIVR_API_KEY)
+  -api-url string
+        Quivr API base URL (default $QUIVR_API_URL)
+  -corpus string
+        Corpus ID (required; needs content:read)
+  -count
+        print the exact count with optional time bounds; omit order, page-cursor and limit
+  -limit int
+        page size, 1 to 100 (default 100)
+  -order string
+        record_id for resynchronization (default), or accepted_at_desc for newest current Versions first
+  -page-cursor string
+        next_page_cursor from the preceding response; repeat its order and bounds
 
 This command needs a running Quivr server. It reads the server address from
 QUIVR_API_URL and the API key from QUIVR_API_KEY; --api-url and --api-key

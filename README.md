@@ -95,7 +95,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   rechecks on every hit, optionally within chosen Source Namespaces (filtered before
   ranking).
 - **Change feed** through polling and resumable SSE, plus **catalog resync** after
-  cursor expiry.
+  cursor expiry. List a Corpus's Records newest first by current-Version acceptance
+  time, filter by time bounds, and read exact range counts through the API or CLI.
 - **Saved Queries and Subscriptions**, pinned and versioned; enabled Subscriptions turn
   newly searchable Versions into unique **Matches** (`/v0/matches`), each with a
   Delivery. Matching is decided by a pinned alert-rule plugin (the

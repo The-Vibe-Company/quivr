@@ -3,10 +3,13 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,9 +26,58 @@ func (s RecordStore) Record(ctx context.Context, org, id string) (content.Record
 	return r, notFound(err)
 }
 
-// Records reads one keyset page of a Corpus catalog in a single statement.
-func (s RecordStore) Records(ctx context.Context, org, corpusID, after string, limit int) ([]content.Record, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,'') FROM records WHERE organization=$1 AND corpus_id=$2 AND id > $3 COLLATE "C" ORDER BY id COLLATE "C" LIMIT $4`, org, corpusID, after, limit)
+// catalogTimeSQL maps undated Records below every finite acceptance timestamp.
+// The matching expression index permits one tuple seek across dated and undated
+// pages, without an OR predicate that scans earlier pages.
+const catalogTimeSQL = "coalesce(current_accepted_at,'-infinity'::timestamptz)"
+
+// PostgreSQL dates lie on a microsecond lattice. Ceil either bound so >= and <
+// preserve their meaning when the RFC3339 input has nanosecond precision.
+func catalogBound(t time.Time) time.Time {
+	micro := t.Truncate(time.Microsecond)
+	if !micro.Equal(t) {
+		micro = micro.Add(time.Microsecond)
+	}
+	return micro
+}
+
+func catalogRange(q content.RecordQuery, args *[]any) string {
+	where := "organization=$1 AND corpus_id=$2"
+	if q.AcceptedAfter != nil || q.AcceptedBefore != nil {
+		where += " AND current_accepted_at IS NOT NULL"
+	}
+	if q.AcceptedAfter != nil {
+		*args = append(*args, catalogBound(*q.AcceptedAfter))
+		where += fmt.Sprintf(" AND %s >= $%d", catalogTimeSQL, len(*args))
+	}
+	if q.AcceptedBefore != nil {
+		*args = append(*args, catalogBound(*q.AcceptedBefore))
+		where += fmt.Sprintf(" AND %s < $%d", catalogTimeSQL, len(*args))
+	}
+	return where
+}
+
+// Records reads one keyset page, defaulting to the original byte-wise ID order.
+func (s RecordStore) Records(ctx context.Context, org, corpusID string, q content.RecordQuery) ([]content.Record, error) {
+	args := []any{org, corpusID}
+	where := catalogRange(q, &args)
+	order := `id COLLATE "C"`
+	if q.Order == content.AcceptedAtDesc {
+		order = catalogTimeSQL + ` DESC,id COLLATE "C" DESC`
+		if q.AfterID != "" {
+			after := pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true}
+			if q.AfterAcceptedAt != nil {
+				after = pgtype.Timestamptz{Time: *q.AfterAcceptedAt, Valid: true}
+			}
+			args = append(args, after, q.AfterID)
+			where += fmt.Sprintf(` AND (%s,id COLLATE "C") < ($%d,$%d)`, catalogTimeSQL, len(args)-1, len(args))
+		}
+	} else {
+		args = append(args, q.AfterID)
+		where += fmt.Sprintf(` AND id > $%d COLLATE "C"`, len(args))
+	}
+	args = append(args, q.Limit)
+	rows, err := s.Pool.Query(ctx, `SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,''),current_accepted_at FROM records WHERE `+where+` ORDER BY `+order+fmt.Sprintf(" LIMIT $%d", len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -33,12 +85,19 @@ func (s RecordStore) Records(ctx context.Context, org, corpusID, after string, l
 	records := []content.Record{}
 	for rows.Next() {
 		var r content.Record
-		if err = rows.Scan(&r.ID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Withdrawn, &r.CurrentVersionID); err != nil {
+		if err = rows.Scan(&r.ID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Withdrawn, &r.CurrentVersionID, &r.CurrentAcceptedAt); err != nil {
 			return nil, err
 		}
 		records = append(records, r)
 	}
 	return records, rows.Err()
+}
+
+func (s RecordStore) CountRecords(ctx context.Context, org, corpusID string, q content.RecordQuery) (int64, error) {
+	args := []any{org, corpusID}
+	var count int64
+	err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM records WHERE "+catalogRange(q, &args), args...).Scan(&count)
+	return count, err
 }
 
 // Resolve expands immutable Record-target Relations against canonical

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +76,7 @@ func TestRecordCatalogKeysetTraversal(t *testing.T) {
 	var got []string
 	after := ""
 	for {
-		page, err := service.Records(ctx, scope, a.ID, after, 2)
+		page, err := service.Records(ctx, scope, a.ID, content.RecordQuery{AfterID: after, Limit: 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +97,220 @@ func TestRecordCatalogKeysetTraversal(t *testing.T) {
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("keyset traversal %v, want %v", got, want)
 	}
-	if foreign, err := store.Records(ctx, other.Organization, a.ID, "", 10); err != nil || len(foreign) != 0 {
+	if foreign, err := store.Records(ctx, other.Organization, a.ID, content.RecordQuery{Limit: 10}); err != nil || len(foreign) != 0 {
 		t.Fatalf("catalog crossed Organizations: %v %v", foreign, err)
+	}
+}
+
+// Owns the storage contracts for current-Version dates, range counts, and tuple
+// paging under arrivals. The ID-order owner above covers resynchronization.
+func TestRecordCatalogAcceptanceTraversal(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	pool := adapterPool(t, ctx)
+	store := contentStores(pool)
+	scope := corpus.Scope{Organization: "adapter-catalog-dates", Actions: []string{"corpora:write", "content:write", "content:read"}, Corpora: []string{"*"}}
+	corpora := corpus.Service{Store: postgres.Store{Pool: pool}}
+	c, _, err := corpora.Create(ctx, scope, corpus.CreateInput{Key: "dates", Name: "Dates"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := corpora.Create(ctx, scope, corpus.CreateInput{Key: "other", Name: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := content.Service{Corpora: postgres.Store{Pool: pool}, Submissions: store, Materialization: store, Catalog: store}
+	day := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	publish := func(corpusID, key, text string, at time.Time, current bool) content.Work {
+		t.Helper()
+		receipt, err := service.Accept(ctx, scope, content.Command{Key: key + text, Source: content.Source{CorpusID: corpusID, Namespace: "date-test", RecordKey: key}, Content: content.Text{Kind: "text", Text: text}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, "UPDATE ingestion_receipts SET accepted_at=$3 WHERE organization=$1 AND id=$2", scope.Organization, receipt.ID, at); err != nil {
+			t.Fatal(err)
+		}
+		work, _, err := store.Work(ctx, scope.Organization, receipt.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		blob := content.Blob{Key: "date-test/" + text, SHA256: "date-test-" + text, Size: int64(len(text))}
+		if err = store.Publish(ctx, work, publication(blob, blob)); err != nil {
+			t.Fatal(err)
+		}
+		if current {
+			if _, err = pool.Exec(ctx, "UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2", scope.Organization, work.RecordID, work.VersionID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return work
+	}
+	oldest := publish(c.ID, "oldest", "old", day.Add(-time.Hour), true)
+	low := publish(c.ID, "lower", "low", day, true)
+	tie := publish(c.ID, "tie", "tie", day, true)
+	high := publish(c.ID, "upper", "high", day.Add(24*time.Hour), true)
+	publish(other.ID, "elsewhere", "other", day, true)
+	// A pending Record and a first-seen withdrawal have no current Version.
+	pending, err := service.Accept(ctx, scope, content.Command{Key: "pending", Source: content.Source{CorpusID: c.ID, Namespace: "date-test", RecordKey: "pending"}, Content: content.Text{Kind: "text", Text: "pending"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tombstone, err := service.Withdraw(ctx, scope, content.Withdrawal{Key: "unseen-wd", Source: content.Source{CorpusID: c.ID, Namespace: "date-test", RecordKey: "unseen"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Withdraw(ctx, scope, content.Withdrawal{Key: "low-wd", Source: content.Source{CorpusID: c.ID, Namespace: "date-test", RecordKey: "lower"}}); err != nil {
+		t.Fatal(err)
+	}
+	ids := func(rows []content.Record) []string {
+		result := make([]string, len(rows))
+		for i, r := range rows {
+			result[i] = r.ID
+		}
+		return result
+	}
+	check := func(q content.RecordQuery, want []string) []content.Record {
+		t.Helper()
+		rows, err := service.Records(ctx, scope, c.ID, q)
+		if err != nil || fmt.Sprint(ids(rows)) != fmt.Sprint(want) {
+			t.Fatalf("query %+v: records %v, want %v; err %v", q, ids(rows), want, err)
+		}
+		return rows
+	}
+	ties := []string{low.RecordID, tie.RecordID}
+	sort.Sort(sort.Reverse(sort.StringSlice(ties)))
+	nulls := []string{pending.RecordID, tombstone.RecordID}
+	sort.Sort(sort.Reverse(sort.StringSlice(nulls)))
+	want := append([]string{high.RecordID}, ties...)
+	want = append(want, oldest.RecordID)
+	want = append(want, nulls...)
+	q := content.RecordQuery{Order: content.AcceptedAtDesc, Limit: 20}
+	rows := check(q, want)
+	for _, r := range rows {
+		if r.Withdrawn != (r.ID == low.RecordID || r.ID == tombstone.RecordID) {
+			t.Fatalf("withdrawn flag %+v", r)
+		}
+	}
+	before := day.Add(24 * time.Hour)
+	bounded := content.RecordQuery{Order: content.AcceptedAtDesc, AcceptedAfter: &day, AcceptedBefore: &before, Limit: 20}
+	check(bounded, ties)
+	// PostgreSQL stores microseconds. A fractional bound must compare against
+	// that stored instant, rather than being rounded down by the parameter codec.
+	fraction := day.Add(time.Nanosecond)
+	check(content.RecordQuery{Order: content.AcceptedAtDesc, AcceptedAfter: &fraction, Limit: 20}, []string{high.RecordID})
+	check(content.RecordQuery{Order: content.AcceptedAtDesc, AcceptedBefore: &fraction, Limit: 20}, append(append([]string{}, ties...), oldest.RecordID))
+
+	// Each bound also works alone, excluding undated Records.
+	check(content.RecordQuery{Order: content.AcceptedAtDesc, AcceptedAfter: &day, Limit: 20}, append([]string{high.RecordID}, ties...))
+	check(content.RecordQuery{Order: content.AcceptedAtDesc, AcceptedBefore: &before, Limit: 20}, append(append([]string{}, ties...), oldest.RecordID))
+	for _, tc := range []struct {
+		q    content.RecordQuery
+		want int64
+	}{
+		{q, 6}, {bounded, 2}, {content.RecordQuery{AcceptedAfter: &day, AcceptedBefore: &day}, 0},
+	} {
+		if count, err := service.CountRecords(ctx, scope, c.ID, tc.q); err != nil || count != tc.want {
+			t.Fatalf("count %+v = %d, want %d; err %v", tc.q, count, tc.want, err)
+		}
+	}
+	for _, org := range []string{scope.Organization, "adapter-catalog-foreign"} {
+		corpusID := c.ID
+		if org == scope.Organization {
+			corpusID = other.ID
+		}
+		expected := int64(0)
+		if org == scope.Organization {
+			expected = 1
+		}
+		if count, err := store.CountRecords(ctx, org, corpusID, bounded); err != nil || count != expected {
+			t.Fatalf("isolated count %s/%s = %d, want %d; err %v", org, corpusID, count, expected, err)
+		}
+	}
+	// Freeze the first exclusive tuple, insert a newer Record, then finish the
+	// original traversal. Neither tie nor null pages shift under that arrival.
+	q.Limit = 2
+	first := check(q, want[:2])
+	publish(c.ID, "arrival", "new", day.Add(48*time.Hour), true)
+	got := ids(first)
+	last := first[len(first)-1]
+	for {
+		q.AfterID, q.AfterAcceptedAt = last.ID, last.CurrentAcceptedAt
+		page, err := service.Records(ctx, scope, c.ID, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		got = append(got, ids(page)...)
+		last = page[len(page)-1]
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("arrival traversal %v, want %v", got, want)
+	}
+	// An accepted correction dates the Record only after it becomes current.
+	correction := publish(c.ID, "oldest", "corrected", day.Add(72*time.Hour), false)
+	page, err := service.Records(ctx, scope, c.ID, content.RecordQuery{Order: content.AcceptedAtDesc, Limit: 1})
+	if err != nil || len(page) != 1 || page[0].ID == oldest.RecordID {
+		t.Fatalf("pending correction changed date: %+v, %v", page, err)
+	}
+	if _, err = pool.Exec(ctx, "UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2", scope.Organization, correction.RecordID, correction.VersionID); err != nil {
+		t.Fatal(err)
+	}
+	page = check(content.RecordQuery{Order: content.AcceptedAtDesc, Limit: 1}, []string{oldest.RecordID})
+	if page[0].CurrentAcceptedAt == nil || !page[0].CurrentAcceptedAt.Equal(day.Add(72*time.Hour)) {
+		t.Fatalf("correction date %+v", page[0])
+	}
+	if count, err := service.CountRecords(ctx, scope, c.ID, content.RecordQuery{AcceptedBefore: &day}); err != nil || count != 0 {
+		t.Fatalf("old correction range count %d, %v", count, err)
+	}
+}
+
+// Owns upgrade backfill on existing data; the traversal owner exercises ongoing
+// pointer changes. A newer duplicate receipt must not redate a current Version.
+func TestRecordCatalogAcceptanceMigrationBackfillsCurrentVersion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	all := embedded(t, regexp.MustCompile(`.`))
+	var migrationName string
+	for name := range all {
+		if strings.HasSuffix(name, "_record_catalog_acceptance_time.sql") {
+			migrationName = name
+			break
+		}
+	}
+	if migrationName == "" {
+		t.Fatal("catalog acceptance migration is not embedded")
+	}
+	migration := all[migrationName]
+	delete(all, migrationName)
+	if err := postgres.MigrateFS(ctx, pool, all); err != nil {
+		t.Fatal(err)
+	}
+	_, err := pool.Exec(ctx, `
+INSERT INTO corpora(organization,id,request_key,canonical_request,name,retrieval) VALUES('catalog-upgrade','corpus','create','{}','Catalog upgrade','{}');
+INSERT INTO records(organization,id,corpus_id,namespace,record_key,current_version_id) VALUES
+ ('catalog-upgrade','record','corpus','fixture','dated','version_current'),
+ ('catalog-upgrade','pending','corpus','fixture','undated',NULL);
+INSERT INTO content_blobs(organization,blob_id,object_key,sha256,byte_length) VALUES('catalog-upgrade','blob','fixture','fixture',1);
+INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,text_blob_id,manifest_blob_id,provenance) VALUES
+ ('catalog-upgrade','version_old','record','old','old',1,'','blob','blob','{}'),
+ ('catalog-upgrade','version_current','record','current','current',2,'','blob','blob','{}');
+INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,version_id,accepted_at) VALUES
+ ('catalog-upgrade','original','original','{}','{}','corpus','record',1,'old','old','version_old','2026-10-01T00:00:00Z'),
+ ('catalog-upgrade','correction','correction','{}','{}','corpus','record',2,'current','current','version_current','2026-10-02T00:00:00Z'),
+ ('catalog-upgrade','duplicate','duplicate','{}','{}','corpus','record',3,'current','current','version_current','2026-10-03T00:00:00Z');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all[migrationName] = migration
+	if err = postgres.MigrateFS(ctx, pool, all); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := (postgres.RecordStore{Pool: pool}).Records(ctx, "catalog-upgrade", "corpus", content.RecordQuery{Order: content.AcceptedAtDesc, Limit: 10})
+	expected := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	if err != nil || len(rows) != 2 || rows[0].ID != "record" || rows[0].CurrentAcceptedAt == nil || !rows[0].CurrentAcceptedAt.Equal(expected) || rows[1].ID != "pending" || rows[1].CurrentAcceptedAt != nil {
+		t.Fatalf("backfilled catalog %+v, want current acceptance %s then undated pending; err %v", rows, expected, err)
 	}
 }

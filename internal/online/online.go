@@ -75,7 +75,7 @@ type Env struct {
 var Commands []Command
 
 func init() {
-	Commands = []Command{searchCommand, mcpCommand}
+	Commands = []Command{searchCommand, recordsCommand, mcpCommand}
 }
 
 // Lookup returns the online command called name.
