@@ -769,7 +769,7 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
   await weatherSettings.getByRole("group", { name: "Retirer Météo locale" }).getByRole("button", { name: "Oui, retirer" }).click();
   await expect(weatherSettings).toHaveCount(0);
   await expect(list.getByRole("button", { name: "Météo locale", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Vos sources" })).toBeFocused();
+  await expect(list).toBeFocused();
 });
 
 test("revenir sur Alertes ou Sources les montre aussitôt, le temps de les relire", async ({
@@ -806,6 +806,36 @@ test("revenir sur Alertes ou Sources les montre aussitôt, le temps de les relir
   } finally {
     release();
   }
+});
+
+test("une relecture qui échoue garde Alertes et Sources à l’écran et le dit", async ({
+  page,
+}) => {
+  const nav = page.getByRole("navigation", { name: "Sections" });
+  const alertsShown = page.getByRole("table", { name: "Alertes" });
+  const sourcesShown = page.getByRole("list", { name: "Sources" });
+  await page.goto("/?view=alerts");
+  await expect(alertsShown).toBeVisible();
+  await nav.getByRole("link", { name: /^Sources/ }).click();
+  await expect(sourcesShown).toBeVisible();
+  // The lists now fail to load: coming back, each page keeps its last list.
+  const failing = (url: URL) => ["/demo/alerts", "/v0/connectors"].includes(url.pathname);
+  await page.route(failing, (route) =>
+    route.fulfill({ status: 503, json: { code: "unavailable", message: "unavailable", retryable: true } }),
+  );
+  await nav.getByRole("link", { name: /^Alertes/ }).click();
+  await expect(alertsShown).toBeVisible();
+  const alertsNotice = page.getByRole("alert").filter({ hasText: "Les alertes n’ont pas pu être relues." });
+  await expect(alertsNotice).toBeVisible();
+  await nav.getByRole("link", { name: /^Sources/ }).click();
+  await expect(sourcesShown).toBeVisible();
+  const sourcesNotice = page.getByRole("alert").filter({ hasText: "Les sources n’ont pas pu être relues." });
+  await expect(sourcesNotice).toBeVisible();
+  // Once the engine answers again, Réessayer rereads and the notice goes.
+  await page.unroute(failing);
+  await sourcesNotice.getByRole("button", { name: "Réessayer" }).click();
+  await expect(sourcesNotice).toHaveCount(0);
+  await expect(sourcesShown).toBeVisible();
 });
 
 test("le tableau de bord tient sur un téléphone, en clair et en sombre", async ({

@@ -203,7 +203,7 @@ test("la pause arrête la collecte, la reprise la relance, le retrait masque la 
     .getByRole("button", { name: "Oui, retirer" })
     .click();
   await expect(row(page, name)).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: /^Vos sources/ })).toBeFocused();
+  await expect(page.getByRole("list", { name: "Sources" })).toBeFocused();
   await page.waitForTimeout(2000);
   const removed = await hits(page, feed);
   await page.reload();

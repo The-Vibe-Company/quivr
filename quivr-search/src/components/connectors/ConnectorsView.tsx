@@ -88,12 +88,14 @@ export function ConnectorsView({
   const [adding, setAdding] = useState(false);
   const openAdd = () => setAdding(true);
   const states = useRef(new Map<string, string>());
-  const listHeading = useRef<HTMLHeadingElement>(null);
-  // The row is gone: keyboard focus lands on the list heading, once the
-  // settings it was removed from have closed and handed the focus back.
+  const sourcesPage = useRef<HTMLElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  // The card is gone: keyboard focus lands on the list (or on "Ajouter une
+  // source" without one), once the settings it was removed from have closed
+  // and handed the focus back.
   const [removals, setRemovals] = useState(0);
   useEffect(() => {
-    if (removals) listHeading.current?.focus();
+    if (removals) (sourcesPage.current?.querySelector<HTMLElement>(".source-cards") ?? addButton.current)?.focus();
   }, [removals]);
 
   const failed = useCallback(
@@ -103,7 +105,9 @@ export function ConnectorsView({
         setStatus("unavailable");
       else {
         setError(connectorMessage(e));
-        setStatus("error");
+        // Sources on screen (a return visit) stay, with a notice above them;
+        // without them, the page is the error.
+        setStatus((s) => (s === "ready" ? s : "error"));
       }
     },
     [onUnauthorized],
@@ -126,6 +130,7 @@ export function ConnectorsView({
       const list = await fetchConnectors(signal);
       track(list);
       setConnectors(list);
+      setError("");
     },
     [track],
   );
@@ -161,6 +166,7 @@ export function ConnectorsView({
       .then(([kinds, , offered]) => {
         setCatalog(kinds);
         setSuggestions(offered.items);
+        setError("");
         setStatus("ready");
       })
       .catch((e) => {
@@ -391,9 +397,9 @@ export function ConnectorsView({
         </section>
       )}
       {status === "ready" && catalog && (
-        <section className="sources-page" aria-labelledby="sources-title">
+        <section className="sources-page" aria-labelledby="sources-title" ref={sourcesPage}>
           {/* The counts and "Ajouter une source" sit in the top bar. */}
-          <h2 id="sources-title" className="visually-hidden" ref={listHeading} tabIndex={-1}>
+          <h2 id="sources-title" className="visually-hidden">
             Vos sources
           </h2>
           <InBar to={bar.meta}>
@@ -411,12 +417,17 @@ export function ConnectorsView({
           </InBar>
           <InBar to={bar.actions}>
             {catalog.items.length > 0 && (
-              <button type="button" className="button alerts-new" onClick={openAdd}>
+              <button type="button" className="button alerts-new" ref={addButton} onClick={openAdd}>
                 <PlusIcon size={16} />
                 <span className="bar-action-label">Ajouter une source</span>
               </button>
             )}
           </InBar>
+          {error && (
+            <Notice title="Les sources n’ont pas pu être relues." onRetry={() => setAttempt((n) => n + 1)}>
+              {error} Les sources affichées sont celles de la dernière lecture.
+            </Notice>
+          )}
           {sources.length === 0 && !catalog.items.length ? (
             <p className="list-empty">Aucun type de source n’est disponible sur ce déploiement.</p>
           ) : (

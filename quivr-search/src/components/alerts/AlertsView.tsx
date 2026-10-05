@@ -177,7 +177,14 @@ export function AlertsView({
   const [now, setNow] = useState(() => Date.now());
   const counts = useRef(new Map<string, number>());
   const seen = useRef<{ id: string; matches: Set<string> } | null>(null);
-  const listHeading = useRef<HTMLHeadingElement>(null);
+  // After a removal, the focus lands on the list, or on "Nouvelle alerte"
+  // once no alert is left (see `removals`).
+  const alertTable = useRef<HTMLTableElement>(null);
+  const newAlert = useRef<HTMLButtonElement>(null);
+  const [removals, setRemovals] = useState(0);
+  useEffect(() => {
+    if (removals) (alertTable.current ?? newAlert.current)?.focus();
+  }, [removals]);
 
   useEffect(() => {
     if (status === "ready") visited = { corpus, alerts, matched, dated, described, detail };
@@ -192,7 +199,9 @@ export function AlertsView({
       if (e instanceof APIError && e.status === 401) onUnauthorized();
       else {
         setError(alertMessage(e));
-        setStatus("error");
+        // A list on screen (a return visit) stays, with a notice above it;
+        // without one, the page is the error.
+        setStatus((s) => (s === "ready" ? s : "error"));
       }
     },
     [onUnauthorized],
@@ -216,6 +225,7 @@ export function AlertsView({
     setDated(list.dated);
     setNow(Date.now());
     setDescribed(list.described === true);
+    setError("");
     setStatus("ready");
   }, []);
 
@@ -294,7 +304,7 @@ export function AlertsView({
     if (selected === alert.alert_id) onSelect(null);
     notify(`Alerte « ${alert.name} » supprimée.`);
     onChanged();
-    listHeading.current?.focus();
+    setRemovals((n) => n + 1);
   };
 
   // What each alert caught, newest first, dated by the facade's index.
@@ -425,7 +435,7 @@ export function AlertsView({
       <h1 className="visually-hidden">Alertes</h1>
       <section className="alerts-page" aria-labelledby="alerts-list-title">
         {/* The count and "Nouvelle alerte" sit in the top bar. */}
-        <h2 id="alerts-list-title" className="visually-hidden" ref={listHeading} tabIndex={-1}>
+        <h2 id="alerts-list-title" className="visually-hidden">
           Vos alertes
         </h2>
         <InBar to={bar.meta}>
@@ -437,11 +447,16 @@ export function AlertsView({
           )}
         </InBar>
         <InBar to={bar.actions}>
-          <button type="button" className="button alerts-new" onClick={() => compose(null)}>
+          <button type="button" className="button alerts-new" ref={newAlert} onClick={() => compose(null)}>
             <PlusIcon size={16} />
             <span className="bar-action-label">Nouvelle alerte</span>
           </button>
         </InBar>
+        {error && (
+          <Notice title="Les alertes n’ont pas pu être relues." onRetry={() => setAttempt((n) => n + 1)}>
+            {error} Les alertes affichées sont celles de la dernière lecture.
+          </Notice>
+        )}
         {alerts.length === 0 || !current || !stats ? (
           <div className="alerts-empty">
             <span className="kind-tile" aria-hidden="true">
@@ -460,7 +475,7 @@ export function AlertsView({
         ) : (
           <>
             <div className="alerts-table-wrap">
-              <table className="alerts-table" aria-label="Alertes">
+              <table className="alerts-table" aria-label="Alertes" ref={alertTable} tabIndex={-1}>
                 <thead>
                   <tr>
                     <th scope="col">Alerte</th>

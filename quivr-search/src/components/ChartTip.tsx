@@ -49,11 +49,13 @@ export function ChartTip() {
           : next,
       );
     };
-    // A refresh may change the bar's words or height, or remove it.
-    const watch = new MutationObserver(() => {
+    // A refresh may change the bar's words or height, move it within its
+    // chart, or remove it; other changes of the page leave the tip where it is.
+    const watch = new MutationObserver((records) => {
       const bar = shown.current;
       if (!bar?.isConnected) return show(null);
-      place(bar);
+      const chart = bar.closest("[data-tips]") || bar;
+      if (records.some((record) => chart.contains(record.target))) place(bar);
     });
     function show(bar: Element | null) {
       if (bar === shown.current) return;

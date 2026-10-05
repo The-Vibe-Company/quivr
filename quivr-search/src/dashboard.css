@@ -2798,6 +2798,12 @@ button.moment-pill:hover {
 .alerts-new svg {
   color: var(--rail-accent);
 }
+/* The lists a removal hands the focus to: the ring inside, where their
+   frames do not clip it. */
+.alerts-table:focus-visible,
+.source-cards:focus-visible {
+  outline-offset: -3px;
+}
 .alerts-table-wrap,
 .alert-sheet,
 .alert-caught {
