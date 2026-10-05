@@ -311,24 +311,25 @@ class Store:
                 'confirmation_reads_left': policy.get('confirmation_limit', 10) - reads}
 
     @retry_contention
-    def reserve(self, name, kind, usd, metadata=None, lease=None):
+    def reserve(self, name, kind, usd, metadata=None, lease=None, *, extra_leases=()):
         gate = network_recovery.admission(name)
         while True:
             gate.wait()
             try:
-                return self._reserve(name, kind, usd, metadata, lease, gate)
+                return self._reserve(name, kind, usd, metadata, lease, gate, extra_leases)
             except network_recovery.AdmissionPaused:
                 continue
 
-    def _reserve(self, name, kind, usd, metadata, lease, gate):
+    def _reserve(self, name, kind, usd, metadata, lease, gate, extra_leases):
         amount, refused = money(usd), False
         if kind not in ('provider', 'modal'):
             raise ValueError('unsupported ledger kind')
         rid = uuid.uuid4().hex
+        leases = ([lease] if lease else []) + list(extra_leases)
         with contextlib.ExitStack() as admission_fence, self.transaction() as db:
             policy, stopped = self.lock(db, name)
-            if lease:
-                self.fence(db, name, *lease)
+            for fence in leases:
+                self.fence(db, name, *fence)
             stopped = self.terminal(db, name, policy, stopped)
             day = db.execute("SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date").fetchone()[0]
             db.execute('INSERT INTO eval_control.days(campaign,day,kind) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING', (name, day, kind))
@@ -348,9 +349,9 @@ class Store:
                 # and network latency, just like the measurement lease fence.
                 predicate = ' WHERE (%s::timestamptz IS NULL OR clock_timestamp()<%s::timestamptz)'
                 parameters = (policy.get('end_at'), policy.get('end_at'))
-                if lease:
+                for fence in leases:
                     predicate += ' AND EXISTS (SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL)'
-                    parameters += (name, *lease)
+                    parameters += (name, *fence)
                 row = db.execute('INSERT INTO eval_control.reservations(id,campaign,day,kind,reserved_usd,charged_usd,metadata) SELECT %s,%s,%s,%s,%s,%s,%s::jsonb' + predicate + ' RETURNING id', values + parameters).fetchone()
                 if row is None:
                     if self.terminal(db, name, policy, stopped):
