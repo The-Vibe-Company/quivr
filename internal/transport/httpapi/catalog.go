@@ -13,8 +13,8 @@ import (
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
-// recordPage binds the Corpus, authorization scope, order and normalized time
-// bounds. Version 1 ID cursors remain valid for the original unbounded catalog.
+// recordPage binds the Corpus, authorization scope, order and time-bound
+// instants. Version 1 ID cursors remain valid for the original unbounded catalog.
 type recordPage struct {
 	Version         int                 `json:"v"`
 	Corpus          string              `json:"c"`
@@ -107,7 +107,6 @@ func recordTime(w http.ResponseWriter, values url.Values, key string) (*time.Tim
 		writeError(w, publicerr.InvalidQuery, nil)
 		return nil, false
 	}
-	t = t.UTC()
 	return &t, true
 }
 

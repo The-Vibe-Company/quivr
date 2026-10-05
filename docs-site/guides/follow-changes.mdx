@@ -349,9 +349,10 @@ independent read, so it can change between listing requests.
 The [CLI](/reference/cli#quivr-records) exposes these reads as `quivr records`:
 `--corpus` selects the Corpus, `--order accepted_at_desc` selects newest first,
 `--accepted-after` and `--accepted-before` set the bounds, and `--page-cursor`
-continues one page at a time. It prints the API JSON, including the next cursor.
+continues one page at a time. It prints the API JSON; list pages include the next cursor when another page exists.
 Use `--limit` to select 1 to 100 Records per page. Use `--count` with the Corpus
 and optional bounds to count; omit `--order`, `--page-cursor` and `--limit`.
+Count responses contain only `count`, without a continuation cursor.
 ID order remains the default for the rebuild procedure above.
 
 

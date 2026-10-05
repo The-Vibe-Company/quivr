@@ -317,6 +317,18 @@ func TestRecordDateCursorBindsOrderAndBounds(t *testing.T) {
 	getJSON(t, server, recordsPath("corpus_b", cursor, 1)+query, catalogScoped, 404)
 	getJSON(t, server, path+query, catalogDenied, 403)
 	getJSON(t, server, path+query, catalogScoped, 409)
+
+	// Valid RFC3339 year limits can lie outside JSON's year range in UTC.
+	// Cursor encoding must retain a serializable representation of each bound.
+	extreme := url.Values{"corpus_id": {"corpus_a"}, "limit": {"1"}, "order": {"accepted_at_desc"},
+		"accepted_after": {"0000-01-01T00:00:00+23:59"}, "accepted_before": {"9999-12-31T23:59:59-23:59"}}
+	extremePage := getJSON(t, server, "/v0/records?"+extreme.Encode(), catalogReader, 200)
+	extremeCursor, ok := extremePage["next_page_cursor"].(string)
+	if !ok || extremeCursor == "" {
+		t.Fatalf("empty cursor at RFC3339 year limits: %v", extremePage)
+	}
+	extreme.Set("page_cursor", extremeCursor)
+	getJSON(t, server, "/v0/records?"+extreme.Encode(), catalogReader, 200)
 }
 
 func (c *memoryCatalog) CountRecords(_ context.Context, _, _ string, q content.RecordQuery) (int64, error) {

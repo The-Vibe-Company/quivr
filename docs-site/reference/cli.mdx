@@ -19,7 +19,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 | [`quivr plugin inspect`](#quivr-plugin-inspect) | nothing: works offline | Validate a plugin manifest and print what the plugin declares. |
 | [`quivr plugin test`](#quivr-plugin-test) | nothing: works offline | Certify that the engine can safely invoke every Contribution the plugin declares. |
 | [`quivr search`](#quivr-search) | a running server | Search one or more Corpora of a running Quivr and print ranked hits with their provenance. |
-| [`quivr records`](#quivr-records) | a running server | List one page of a Corpus's Records or count its Records in a time range. Prints the API JSON, including the continuation cursor. |
+| [`quivr records`](#quivr-records) | a running server | List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists. |
 | [`quivr mcp`](#quivr-mcp) | a running server | Serve Quivr to an AI agent over MCP on stdin and stdout, with the tools of one profile. |
 
 ## Engine commands {#engine-commands}
@@ -156,14 +156,14 @@ Exit codes:
 
 ### quivr records {#quivr-records}
 
-List one page of a Corpus's Records or count its Records in a time range. Prints the API JSON, including the continuation cursor.
+List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists.
 
 `quivr records --help` prints:
 
 ```text
 usage: quivr records --corpus <corpus-id> [--order record_id|accepted_at_desc] [--accepted-after <RFC3339>] [--accepted-before <RFC3339>] [--page-cursor <cursor>] [--limit <1-100>] [--count] [--api-url <url>] [--api-key <key>]
 
-List one page of a Corpus's Records or count its Records in a time range. Prints the API JSON, including the continuation cursor.
+List one page of a Corpus's Records or get an exact count, with optional time bounds. Prints the API JSON; list pages include a continuation cursor when another page exists.
 
 Flags:
   -accepted-after string
@@ -177,7 +177,7 @@ Flags:
   -corpus string
         Corpus ID (required; needs content:read)
   -count
-        print the exact range count; omit order, page-cursor and limit
+        print the exact count with optional time bounds; omit order, page-cursor and limit
   -limit int
         page size, 1 to 100 (default 100)
   -order string

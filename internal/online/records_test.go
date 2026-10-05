@@ -14,7 +14,7 @@ import (
 func TestRecordsMapsListingAndCount(t *testing.T) {
 	for _, count := range []bool{false, true} {
 		t.Run(map[bool]string{false: "page", true: "count"}[count], func(t *testing.T) {
-			var got *http.Request
+			requests := make(chan *http.Request, 1)
 			body := `{"items":[],"next_page_cursor":"next-page"}`
 			path := "/v0/records"
 			if count {
@@ -22,7 +22,7 @@ func TestRecordsMapsListingAndCount(t *testing.T) {
 				body = `{"count":7}`
 			}
 			server := httptest.NewServer(apicontract.Handler(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				got = r
+				requests <- r
 				w.Header().Set("Content-Type", "application/json")
 				w.Write([]byte(body))
 			})))
@@ -41,6 +41,7 @@ func TestRecordsMapsListingAndCount(t *testing.T) {
 			if result.code != online.ExitOK || result.stdout != body+"\n" {
 				t.Fatalf("exit %d, stdout %q, stderr %q", result.code, result.stdout, result.stderr)
 			}
+			got := <-requests
 			if got == nil || got.Method != http.MethodGet || got.URL.Path != path || got.URL.Query().Encode() != want.Encode() || got.Header.Get("Authorization") != "Bearer test-key" {
 				t.Fatalf("request %+v, want GET %s?%s", got, path, want.Encode())
 			}

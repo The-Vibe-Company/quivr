@@ -17,7 +17,7 @@ BEGIN
   WHERE v.organization=NEW.organization AND v.id=NEW.current_version_id
  );
  RETURN NEW;
-END
+END;
 $$;
 CREATE TRIGGER record_catalog_acceptance_time
 BEFORE INSERT OR UPDATE OF current_version_id ON records
