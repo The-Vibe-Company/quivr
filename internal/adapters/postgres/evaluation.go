@@ -354,7 +354,11 @@ func (s EvaluationStore) Backlog(ctx context.Context) (monitoring.Backlog, error
 // Match on a correction of an already matched Record links its predecessor
 // and is announced as match.corrected.
 func (s EvaluationStore) CommitMatch(ctx context.Context, in monitoring.Intent, evidence monitoring.MatchEvidence) (string, error) {
-	return s.commit(ctx, in, func(tx pgx.Tx) (string, error) { return commitMatch(ctx, tx, in, evidence) })
+	outcomes, err := s.CommitMatches(ctx, []monitoring.MatchCommit{{Intent: in, Evidence: evidence}})
+	if err != nil {
+		return "", err
+	}
+	return outcomes[0], nil
 }
 
 // CommitNoMatch records a negative decision. On an eligible correction of a

@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -25,37 +26,45 @@ func TestIngestionBacklogLeavesInArrivalOrder(t *testing.T) {
 	}
 	store := contentStores(pool)
 	expected := acceptDispatchBacklog(t, ctx, store, 512)
-	for offset := 0; offset < len(expected); offset += 32 {
-		got, err := store.Claim(ctx, 32)
-		if err != nil || len(got) != 32 {
-			t.Fatalf("batch at %d: got %d receipts (%v), want 32", offset, len(got), err)
-		}
-		for i, d := range got {
-			if d != expected[offset+i] {
-				t.Fatalf("arrival %d: got %+v, want %+v", offset+i, d, expected[offset+i])
-			}
-			if err = store.Dispatched(ctx, d); err != nil {
-				t.Fatal(err)
-			}
-		}
+	first, err := store.ClaimIngestionBatches(ctx, 1)
+	if err != nil || len(first) != 1 || len(first[0].Receipts) != 32 || !reflect.DeepEqual(first[0].Receipts, expected[:32]) {
+		t.Fatalf("first bounded arrival batch: %+v (%v), want first 32 receipts", first, err)
 	}
-	// A newly connected worker cannot redispatch any acknowledged receipt.
-	// Reconnect to the isolated database, rather than the shared suite database.
-	nextPool, err := pgxpool.NewWithConfig(ctx, pool.Config())
+	// Reconnect and advance the durable lease clock: no wall-clock wait.
+	otherPool, err := pgxpool.NewWithConfig(ctx, pool.Config())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer nextPool.Close()
-	restarted := contentStores(nextPool)
-	if got, err := restarted.Claim(ctx, 32); err != nil || len(got) != 0 {
-		t.Fatalf("after restart got %+v (%v), want drained queue", got, err)
-	}
-	var intents, receipts, events int
-	if err = pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM ingestion_outbox),(SELECT count(*) FROM ingestion_receipts),(SELECT count(*) FROM change_events WHERE event_type='receipt.pending')").Scan(&intents, &receipts, &events); err != nil {
+	defer otherPool.Close()
+	other := postgres.MaterializationStore{Pool: otherPool}
+	if _, err = pool.Exec(ctx, "UPDATE ingestion_batches SET lease_until='-infinity'"); err != nil {
 		t.Fatal(err)
 	}
-	if intents != 0 || receipts != 512 || events != 512 {
-		t.Fatalf("after acknowledgement: %d intents, %d receipts, %d audit events", intents, receipts, events)
+	recovered, err := other.ClaimIngestionBatches(ctx, 1)
+	if err != nil || !reflect.DeepEqual(recovered, first) {
+		t.Fatalf("lost acknowledgement regrouped work: got %+v (%v), want %+v", recovered, err, first)
+	}
+	if err = other.IngestionBatchDispatched(ctx, recovered[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	rest, err := other.ClaimIngestionBatches(ctx, 32)
+	if err != nil || len(rest) != 15 {
+		t.Fatalf("remaining arrivals: %+v (%v), want fifteen remaining batches", rest, err)
+	}
+	for i, b := range rest {
+		if len(b.Receipts) != 32 || !reflect.DeepEqual(b.Receipts, expected[(i+1)*32:(i+2)*32]) {
+			t.Fatalf("batch %d lost arrival order: %+v", i+1, b)
+		}
+		if err = other.IngestionBatchDispatched(ctx, b.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := store.ClaimIngestionBatches(ctx, 8); err != nil || len(got) != 0 {
+		t.Fatalf("acknowledged work returned: %+v (%v)", got, err)
+	}
+	var pending, receipts int
+	if err = pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM ingestion_outbox)+(SELECT count(*) FROM ingestion_batches),(SELECT count(*) FROM ingestion_receipts)").Scan(&pending, &receipts); err != nil || pending != 0 || receipts != 512 {
+		t.Fatalf("transfer lost audit or left work: %d pending, %d receipts (%v)", pending, receipts, err)
 	}
 }
 
@@ -82,7 +91,7 @@ func acceptDispatchBacklog(t *testing.T, ctx context.Context, store fixtureConte
 
 // Row locks are skipped immediately, and a second connection cannot take a
 // live lease. Expiring a dead worker's lease makes precisely that work recoverable.
-func TestIngestionClaimsSkipLocksAndRecoverAbandonedLeases(t *testing.T) {
+func TestIngestionClaimsSkipLockedReceiptsAndLiveBatchLeases(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
@@ -99,45 +108,41 @@ func TestIngestionClaimsSkipLocksAndRecoverAbandonedLeases(t *testing.T) {
 	if _, err = tx.Exec(ctx, "SELECT 1 FROM ingestion_outbox WHERE organization=$1 AND receipt_id=$2 FOR UPDATE", expected[0].Organization, expected[0].ReceiptID); err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.Claim(ctx, 1)
-	if err != nil || len(got) != 1 || got[0] != expected[1] {
-		t.Fatalf("locked oldest: got %+v (%v), want %+v", got, err, expected[1])
+	first, err := store.ClaimIngestionBatches(ctx, 1)
+	if err != nil || len(first) != 1 || !reflect.DeepEqual(first[0].Receipts, expected[1:]) {
+		t.Fatalf("locked oldest: got %+v (%v), want two unlocked arrivals", first, err)
 	}
 	otherPool, err := pgxpool.NewWithConfig(ctx, pool.Config())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer otherPool.Close()
-	other := contentStores(otherPool)
-	got, err = other.Claim(ctx, 32)
-	if err != nil || len(got) != 1 || got[0] != expected[2] {
-		t.Fatalf("live lease: got %+v (%v), want %+v", got, err, expected[2])
+	other := postgres.MaterializationStore{Pool: otherPool}
+	// An older locked receipt cannot hold up a recoverable batch. Advancing
+	// the durable lease directly avoids any wall-clock wait.
+	if _, err = pool.Exec(ctx, "UPDATE ingestion_batches SET lease_until='-infinity'"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := other.ClaimIngestionBatches(ctx, 1); err != nil || !reflect.DeepEqual(got, first) {
+		t.Fatalf("locked older receipt blocked batch recovery: %+v (%v), want %+v", got, err, first)
+	}
+	if got, err := other.ClaimIngestionBatches(ctx, 8); err != nil || len(got) != 0 {
+		t.Fatalf("locked receipt and live batch lease returned %+v (%v)", got, err)
 	}
 	if err = tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	got, err = other.Claim(ctx, 32)
-	if err != nil || len(got) != 1 || got[0] != expected[0] {
-		t.Fatalf("unlocked oldest: got %+v (%v), want %+v", got, err, expected[0])
+	last, err := other.ClaimIngestionBatches(ctx, 8)
+	if err != nil || len(last) != 1 || !reflect.DeepEqual(last[0].Receipts, expected[:1]) {
+		t.Fatalf("unlocked oldest: got %+v (%v), want %+v", last, err, expected[0])
 	}
-	for _, d := range []content.Dispatch{expected[0], expected[1]} {
-		if err = store.Dispatched(ctx, d); err != nil {
+	for _, b := range append(first, last...) {
+		if err = other.IngestionBatchDispatched(ctx, b.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// Advance the durable lease clock directly, without a wall-clock wait.
-	if _, err = pool.Exec(ctx, "UPDATE ingestion_outbox SET lease_until='-infinity'"); err != nil {
-		t.Fatal(err)
-	}
-	got, err = other.Claim(ctx, 32)
-	if err != nil || len(got) != 1 || got[0] != expected[2] {
-		t.Fatalf("expired lease: got %+v (%v), want %+v", got, err, expected[2])
-	}
-	if err = other.Dispatched(ctx, got[0]); err != nil {
-		t.Fatal(err)
-	}
-	if got, err = store.Claim(ctx, 32); err != nil || len(got) != 0 {
-		t.Fatalf("drained queue: got %+v (%v)", got, err)
+	if got, err := store.ClaimIngestionBatches(ctx, 8); err != nil || len(got) != 0 {
+		t.Fatalf("drained queue: %+v (%v)", got, err)
 	}
 }
 
@@ -187,8 +192,8 @@ func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
 	if !enqueued.Equal(first.Add(time.Second)) {
 		t.Fatalf("backfilled arrival %v, want %v", enqueued, first.Add(time.Second))
 	}
-	got, err := store.Claim(ctx, 32)
-	if err != nil || len(got) != 1 || got[0] != expected[1] {
+	got, err := store.ClaimIngestionBatches(ctx, 1)
+	if err != nil || len(got) != 1 || len(got[0].Receipts) != 1 || got[0].Receipts[0] != expected[1] {
 		t.Fatalf("upgrade claim: got %+v (%v), want %+v", got, err, expected[1])
 	}
 }

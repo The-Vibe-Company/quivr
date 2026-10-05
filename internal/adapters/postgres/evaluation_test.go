@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/monitoring"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // TestEvaluationDispatchAndAtomicMatchCommit proves the evaluation boundaries
@@ -359,6 +361,126 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	}
 	if evaluated() == nil {
 		t.Fatal("evaluated step missing once every Subscription decided")
+	}
+
+	// A same-Version group is a single durable boundary: a SQL failure on its
+	// second positive rolls back the first positive, its completed intent and
+	// the journal allocation. The number is valid JSON but exceeds PostgreSQL's
+	// numeric range, so this fails during the real writes, after the first one.
+	groupRecord, groupVersion := searchable(a.ID, "group")
+	drain()
+	rows, err = pool.Query(ctx, `SELECT subscription_id,subscription_version_id,sequence FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2`, org, groupVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupIntents := map[string]monitoring.Intent{}
+	for rows.Next() {
+		in := monitoring.Intent{Kind: monitoring.IntentEvaluation, Organization: org, CorpusID: a.ID, RecordID: groupRecord, VersionID: groupVersion}
+		if err = rows.Scan(&in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence); err != nil {
+			t.Fatal(err)
+		}
+		groupIntents[in.SubscriptionID] = in
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(groupIntents) != 2 {
+		t.Fatalf("group dispatch: got %d intents, want 2 enabled Subscriptions", len(groupIntents))
+	}
+	group := []monitoring.MatchCommit{{Intent: groupIntents[subs[2].ID], Evidence: evidence}, {Intent: groupIntents[subs[0].ID], Evidence: evidence}}
+	head := func() int64 {
+		t.Helper()
+		var n int64
+		if err := pool.QueryRow(ctx, `SELECT last_sequence FROM organization_journals WHERE organization=$1`, org).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	facts := func() map[string]int {
+		t.Helper()
+		out := map[string]int{}
+		for _, table := range []string{"matches", "deliveries", "monitoring_notices", "delivery_outbox", "change_events"} {
+			out[table] = count(`SELECT count(*) FROM `+table+` WHERE organization=$1`, org)
+		}
+		return out
+	}
+	beforeHead, beforeFacts := head(), facts()
+	badGroup := append([]monitoring.MatchCommit(nil), group...)
+	badGroup[1].Evidence.Details = map[string]any{"score": json.Number("1e1000000")}
+	var sqlError *pgconn.PgError
+	if _, err = evaluation.CommitMatches(ctx, badGroup); !errors.As(err, &sqlError) || sqlError.Code != "22003" {
+		t.Fatalf("group must reach the numeric-range SQL failure: %v", err)
+	}
+	if got := head(); got != beforeHead {
+		t.Fatalf("failed group exposed journal head %d, want %d", got, beforeHead)
+	}
+	for table, got := range facts() {
+		if got != beforeFacts[table] {
+			t.Fatalf("failed group committed %s facts: got %d, want %d", table, got, beforeFacts[table])
+		}
+	}
+	if got := count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='pending'`, org, groupVersion); got != 2 {
+		t.Fatalf("failed group left %d pending intents, want both retryable", got)
+	}
+	activity, err := store.VersionActivity(ctx, org, groupVersion)
+	if err != nil || activity.Steps.Evaluated != nil {
+		t.Fatalf("failed group recorded evaluation: %+v %v", activity.Steps, err)
+	}
+
+	// A refused item keeps its place among two new positives. Both positives
+	// share the transaction time and receive consecutive journal positions in
+	// input order; the immutable bodies keep the existing field encoding.
+	disabled := group[0].Intent
+	disabled.SubscriptionID, disabled.SubscriptionVersionID = subs[1].ID, subs[1].Current.VersionID
+	group = []monitoring.MatchCommit{group[0], {Intent: disabled, Evidence: evidence}, group[1]}
+	outcomes, err := evaluation.CommitMatches(ctx, group)
+	if err != nil || fmt.Sprint(outcomes) != fmt.Sprint([]string{monitoring.OutcomeMatched, monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeMatched}) {
+		t.Fatalf("group outcomes: %v %v", outcomes, err)
+	}
+	if got := head(); got != beforeHead+2 {
+		t.Fatalf("group journal head: got %d, want %d", got, beforeHead+2)
+	}
+	for table, got := range facts() {
+		if got != beforeFacts[table]+2 {
+			t.Fatalf("committed group %s facts: got %d, want %d", table, got, beforeFacts[table]+2)
+		}
+	}
+	if got := count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='done' AND outcome='matched'`, org, groupVersion); got != 2 {
+		t.Fatalf("committed group completed %d intents, want 2", got)
+	}
+	activity, err = store.VersionActivity(ctx, org, groupVersion)
+	if err != nil || activity.Steps.Evaluated == nil {
+		t.Fatalf("committed group omitted evaluation: %+v %v", activity.Steps, err)
+	}
+	window, err := store.ReadChanges(ctx, org, a.ID, beforeHead, 10, time.Hour)
+	if err != nil || len(window.Events) != 2 {
+		t.Fatalf("group feed: %+v %v", window, err)
+	}
+	for i, match := range []monitoring.MatchCommit{group[0], group[2]} {
+		in := match.Intent
+		id := content.StableID("match", org, in.SubscriptionVersionID, groupVersion)
+		deliveryID := content.StableID("delivery", org, id, "dest", monitoring.NoticeCreated)
+		eventID := content.StableID("event", org, monitoring.NoticeCreated, "match", id)
+		m, err := store.Match(ctx, org, id)
+		if err != nil || m.Position != beforeHead+int64(i)+1 || m.SavedQueryID != q.ID || m.SavedQueryVersionID != q.Current.VersionID || m.PreviousMatchID != "" {
+			t.Fatalf("group Match %s: %+v %v", id, m, err)
+		}
+		e := window.Events[i]
+		if e.ID != eventID || e.Type != monitoring.NoticeCreated || e.ResourceID != id || e.ResourceKind != "match" || e.Monitoring == nil || e.Monitoring.DeliveryID != deliveryID || !e.OccurredAt.Equal(window.Events[0].OccurredAt) {
+			t.Fatalf("group feed event %d: %+v", i, e)
+		}
+		delivery, err := store.Delivery(ctx, org, deliveryID)
+		if err != nil || delivery.State != "pending" || delivery.AttemptCount != 0 || !delivery.Admission.Allowed {
+			t.Fatalf("group Delivery %s: %+v %v", deliveryID, delivery, err)
+		}
+		wantBody, err := json.Marshal(monitoring.Notice{EventID: eventID, Type: monitoring.NoticeCreated, SchemaVersion: "1", OccurredAt: e.OccurredAt.UTC(), References: monitoring.NoticeReferences{MatchID: id, RecordID: groupRecord, RecordVersionID: groupVersion, SubscriptionID: in.SubscriptionID, SubscriptionVersionID: in.SubscriptionVersionID, DeliveryID: deliveryID}})
+		if err != nil || string(delivery.Event) != string(wantBody) {
+			t.Fatalf("group notice bytes: got %s, want %s (%v)", delivery.Event, wantBody, err)
+		}
+	}
+	if outcomes, err = evaluation.CommitMatches(ctx, group); err != nil || fmt.Sprint(outcomes) != fmt.Sprint([]string{monitoring.OutcomeDuplicate, monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeDuplicate}) || head() != beforeHead+2 {
+		t.Fatalf("group replay: %v %v, head %d", outcomes, err, head())
 	}
 }
 

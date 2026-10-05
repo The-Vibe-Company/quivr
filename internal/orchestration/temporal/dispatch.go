@@ -44,7 +44,8 @@ func (i dispatchIntent) Complete(ctx context.Context) error { return i.complete(
 func (i dispatchIntent) Retry(ctx context.Context) error    { return i.retry(ctx) }
 
 const dispatchAttempt = 3 * time.Second
-const ingestionDispatchBatch = 32
+const ingestionDispatchBatch = 8
+const ingestionStartConcurrency = 8
 const operationDispatchBatch = 32
 
 // One dispatcher runs independent source lanes. A stalled connector start
@@ -52,25 +53,25 @@ const operationDispatchBatch = 32
 // same bounded batch/start protocol.
 func (r *Runtime) dispatch(ctx context.Context) {
 	var lanes sync.WaitGroup
-	poll := func(period time.Duration, source IntentSource) {
+	poll := func(period time.Duration, source IntentSource, starts int) {
 		lanes.Add(1)
-		go func() { defer lanes.Done(); r.pollIntents(ctx, period, source) }()
+		go func() { defer lanes.Done(); r.pollIntents(ctx, period, source, starts) }()
 	}
-	poll(200*time.Millisecond, r.ingestionIntents())
-	poll(200*time.Millisecond, r.operationIntents())
+	poll(200*time.Millisecond, r.ingestionIntents(), ingestionStartConcurrency)
+	poll(200*time.Millisecond, r.operationIntents(), 1)
 	if r.Connectors != nil {
-		poll(500*time.Millisecond, r.connectorIntents())
+		poll(500*time.Millisecond, r.connectorIntents(), 1)
 	}
 	if r.Evaluation != nil {
-		poll(time.Second, r.ingestionEvaluationIntents())
+		poll(time.Second, r.ingestionEvaluationIntents(), 1)
 		if r.Evaluation.Serving != nil {
-			poll(200*time.Millisecond, r.servingProjectionIntents())
+			poll(200*time.Millisecond, r.servingProjectionIntents(), 1)
 		}
 	}
 	lanes.Wait()
 }
 
-func (r *Runtime) pollIntents(ctx context.Context, period time.Duration, source IntentSource) {
+func (r *Runtime) pollIntents(ctx context.Context, period time.Duration, source IntentSource, starts int) {
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
 	for {
@@ -78,7 +79,7 @@ func (r *Runtime) pollIntents(ctx context.Context, period time.Duration, source 
 			return
 		}
 		attempt, cancel := context.WithTimeout(ctx, dispatchAttempt)
-		r.dispatchBatch(attempt, source)
+		r.dispatchBatch(attempt, source, starts)
 		cancel()
 		select {
 		case <-ctx.Done():
@@ -89,43 +90,75 @@ func (r *Runtime) pollIntents(ctx context.Context, period time.Duration, source 
 
 }
 
-func (r *Runtime) dispatchBatch(ctx context.Context, source IntentSource) {
+// dispatchBatch starts only the claimed arrival-ordered batch, with bounded
+// parallelism. It joins all attempts before another claim; an expired attempt
+// leaves unstarted receipts leased for recovery under the same workflow IDs.
+func (r *Runtime) dispatchBatch(ctx context.Context, source IntentSource, starts int) {
 	batch, err := source.Claim(ctx)
 	if err != nil {
 		slog.Warn("background intents temporarily unavailable")
 		return
 	}
+	if starts == 1 {
+		for _, intent := range batch {
+			if ctx.Err() != nil {
+				return
+			}
+			r.dispatchIntent(ctx, intent)
+		}
+		return
+	}
+	pending := make(chan Intent, len(batch))
 	for _, intent := range batch {
-		if ctx.Err() != nil {
-			return
-		}
-		options, name, input := intent.Start()
-		_, err = r.Client.ExecuteWorkflow(ctx, options, name, input)
-		var already *serviceerror.WorkflowExecutionAlreadyStarted
-		if err == nil || errors.As(err, &already) {
-			err = intent.Complete(ctx)
-		}
-		if err != nil {
-			_ = intent.Retry(ctx)
-			slog.Warn("background dispatch pending", "workflow_id", options.ID)
-		}
+		pending <- intent
+	}
+	close(pending)
+	var running sync.WaitGroup
+	for i := 0; i < min(starts, len(batch)); i++ {
+		running.Go(func() {
+			for intent := range pending {
+				if ctx.Err() != nil {
+					return
+				}
+				r.dispatchIntent(ctx, intent)
+			}
+		})
+	}
+	running.Wait()
+}
+
+func (r *Runtime) dispatchIntent(ctx context.Context, intent Intent) {
+	options, name, input := intent.Start()
+	_, err := r.Client.ExecuteWorkflow(ctx, options, name, input)
+	var already *serviceerror.WorkflowExecutionAlreadyStarted
+	if err == nil || errors.As(err, &already) {
+		err = intent.Complete(ctx)
+	}
+	if err != nil {
+		_ = intent.Retry(ctx)
+		slog.Warn("background dispatch pending", "workflow_id", options.ID)
 	}
 }
 
 func (r *Runtime) ingestionIntents() IntentSource {
 	return intentSource(func(ctx context.Context) ([]Intent, error) {
-		batch, err := r.Store.Claim(ctx, ingestionDispatchBatch)
+		batch, err := r.Store.ClaimIngestionBatches(ctx, ingestionDispatchBatch)
 		if err != nil {
 			return nil, err
 		}
 		intents := make([]Intent, 0, len(batch))
-		for _, d := range batch {
+		for _, b := range batch {
 			intents = append(intents, dispatchIntent{
-				options: client.StartWorkflowOptions{ID: content.StableID("ingestion-e5-v4", d.Organization, d.ReceiptID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
-				name:    "process-e5-v3", input: Input{Organization: d.Organization, ReceiptID: d.ReceiptID},
-				complete: func(ctx context.Context) error { return r.Store.Dispatched(ctx, d) },
+				options: client.StartWorkflowOptions{ID: b.ID, TaskQueue: ingestionBatchQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
+				name:    ingestionBatchWorkflow, input: b,
+				complete: func(ctx context.Context) error { return r.Store.IngestionBatchDispatched(ctx, b.ID) },
 				retry: func(ctx context.Context) error {
-					return r.Store.Progress(ctx, d.Organization, d.ReceiptID, "retrying", "dispatch_unavailable")
+					for _, d := range b.Receipts {
+						if err := r.Store.Progress(ctx, d.Organization, d.ReceiptID, "retrying", "dispatch_unavailable"); err != nil {
+							return err
+						}
+					}
+					return nil
 				},
 			})
 		}

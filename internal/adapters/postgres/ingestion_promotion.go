@@ -21,6 +21,17 @@ func lockProjectionRouting(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
+// lockProcessingVersion serializes artifact and progress writes for one
+// Version, under the same route-cutover fence as publication. These writes
+// emit no events and do not need to hold up other Versions' journal commits.
+// They never acquire a journal lock after the Version lock.
+func lockProcessingVersion(ctx context.Context, tx pgx.Tx, org, id string) error {
+	batch := &pgx.Batch{}
+	batch.Queue("SELECT pg_advisory_xact_lock_shared($1)", projectionRoutingLock)
+	batch.Queue("SELECT id FROM record_versions WHERE organization=$1 AND id=$2 FOR UPDATE", org, id)
+	return tx.SendBatch(ctx, batch).Close()
+}
+
 // applyIngestionRouting swaps only source types whose serving owner changes.
 // Missing owner projections are gaps even if the old owner's cuts have vectors.
 func applyIngestionRouting(ctx context.Context, tx pgx.Tx, previous registry.Plan, next registry.Activation) (bool, error) {
@@ -200,7 +211,7 @@ func updatePinnedVersion(ctx context.Context, pool *pgxpool.Pool, org, id, sql s
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
+	if err = lockProcessingVersion(ctx, tx, org, id); err != nil {
 		return err
 	}
 	serves, err := pinnedOwnerServes(ctx, tx, org, id)

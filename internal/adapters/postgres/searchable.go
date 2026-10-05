@@ -131,7 +131,7 @@ func (s ProjectionStore) SaveSegmentation(ctx context.Context, org string, resul
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
+	if err = lockProcessingVersion(ctx, tx, org, result.VersionID); err != nil {
 		return err
 	}
 	digest := content.SegmentationDigest(result)
@@ -270,12 +270,18 @@ func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Se
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
-		return err
-	}
+
 	var recordID, corpusID, desired string
 	var withdrawn, quarantined, ready, active bool
-	err = tx.QueryRow(ctx, `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),`+recordGoneSQL+`,v.quarantined,v.baseline_ready FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, org, seg.VersionID).Scan(&recordID, &corpusID, &desired, &withdrawn, &quarantined, &ready)
+	var digest, sourceMediaType *string
+	var routing []byte
+	err = readJournal(ctx, tx, org, `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),`+recordGoneSQL+`,v.quarantined,v.baseline_ready,
+ $3=`+routedGenerationSQL("r.organization", "r.corpus_id")+`,
+ (SELECT digest FROM segmentations WHERE organization=$1 AND id=$4 AND version_id=$2),
+ (SELECT ingestion_routing FROM projection_generations WHERE id=$3),
+ (SELECT coalesce(nullif(ar.source_media_type,''),'text/plain') FROM accepted_revisions ar WHERE (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot))
+ FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
+ WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, []any{org, seg.VersionID, g.ID, seg.ID}, &recordID, &corpusID, &desired, &withdrawn, &quarantined, &ready, &active, &digest, &routing, &sourceMediaType)
 	if err != nil {
 		return err
 	}
@@ -289,27 +295,24 @@ func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Se
 		}
 		return tx.Commit(ctx)
 	}
-	if err = tx.QueryRow(ctx, `SELECT $3=`+routedGenerationSQL("$1", "$2"), org, corpusID, g.ID).Scan(&active); err != nil {
-		return err
-	}
 	if !active {
 		return ErrGenerationChanged
 	}
-	var digest string
-	if err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2 AND version_id=$3`, org, seg.ID, seg.VersionID).Scan(&digest); err != nil {
-		return err
+	if digest == nil {
+		return pgx.ErrNoRows
 	}
-	if digest != content.SegmentationDigest(seg) {
+	if *digest != content.SegmentationDigest(seg) {
 		return content.ErrConflict
 	}
-	if err = loadGenerationIngestion(ctx, tx, &g); err != nil {
-		return err
+	if len(routing) > 0 {
+		if err = json.Unmarshal(routing, &g.IngestionRouting); err != nil {
+			return err
+		}
 	}
-	var sourceMediaType string
-	if err = tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(ar.source_media_type,''),'text/plain') FROM record_versions v JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot) WHERE v.organization=$1 AND v.id=$2`, org, seg.VersionID).Scan(&sourceMediaType); err != nil {
-		return err
+	if sourceMediaType == nil {
+		return pgx.ErrNoRows
 	}
-	if g.IngestionRouting != nil && g.IngestionRouting.For(sourceMediaType) != "" && g.IngestionRouting.For(sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
+	if g.IngestionRouting != nil && g.IngestionRouting.For(*sourceMediaType) != "" && g.IngestionRouting.For(*sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
 		if err = coverOwnerProjection(ctx, tx, org, g, seg, nil); err != nil {
 			return err
 		}
@@ -318,22 +321,19 @@ func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Se
 		}
 		return tx.Commit(ctx)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET baseline_ready=true,processing='idle',error_code='',retrieval_ready_at=`+firstStep("retrieval_ready_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
-		return err
-	}
+	writes := &pgx.Batch{}
+	writes.Queue(`INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID)
+	writes.Queue(`UPDATE record_versions SET baseline_ready=true,processing='idle',error_code='',retrieval_ready_at=`+firstStep("retrieval_ready_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID)
 	if desired == seg.VersionID {
-		if _, err = tx.Exec(ctx, `UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, org, recordID, seg.VersionID); err != nil {
-			return err
-		}
+		writes.Queue(`UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, org, recordID, seg.VersionID)
 	}
 	if !ready {
-		if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID), VersionID: seg.VersionID}); err != nil {
-			return err
-		}
+		queueEvent(writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID), VersionID: seg.VersionID})
 	}
+	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
+		return err
+	}
+
 	return tx.Commit(ctx)
 }
 
