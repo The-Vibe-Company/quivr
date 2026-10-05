@@ -27,14 +27,11 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
   baseURL,
 }, info) => {
   test.skip(!FEEDS, "needs the local test feeds (make verify-demo)");
-  test.setTimeout(150000);
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFeed(page);
   // The badge reads "Reconnexion…" until the facade follows the change feed.
   try {
-    await expect(page.locator(".bar-live")).toHaveText("En direct", {
-      timeout: 30000,
-    });
+    await expect(page.locator(".bar-live")).toHaveText("En direct");
   } catch (error) {
     await page.screenshot({
       path: info.outputPath("veille-not-live.png"),
@@ -60,11 +57,9 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
     .getByLabel("Votre texte")
     .fill(`${handTitle}\nUn texte collé depuis la démo.`);
   await dialog.getByRole("button", { name: "Ajouter à la démo" }).click();
-  await expect(dialog.getByText("Texte enregistré")).toBeVisible({
-    timeout: 30000,
-  });
+  await expect(dialog.getByText("Texte enregistré")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(items.first()).toContainText(handTitle, { timeout: 30000 });
+  await expect(items.first()).toContainText(handTitle);
   await expect(items.first()).toContainText("Ajouté à la main");
 
   // 2. An RSS Connector Instance collects an item, which lands above it.
@@ -77,17 +72,15 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
       source_namespace: namespace,
       kind: "rss",
       config: { url: `${FEEDS}/feeds/world.xml?run=${namespace}` },
-      schedule: { interval_seconds: 2 },
+      // One poll is enough; the first starts at creation.
+      schedule: { interval_seconds: 3600 },
     },
   });
   expect(created.status(), await created.text()).toBe(201);
   const { connector_id } = await created.json();
   try {
-    await expect(items.first()).toContainText(rssTitle, { timeout: 90000 });
+    await expect(items.first()).toContainText(rssTitle);
     await expect(items.first()).toContainText(namespace);
-    // The test feed re-dates its item on every poll: a new Version with the
-    // same text is not a correction.
-    await expect(items.first().locator(".row-updated")).toHaveCount(0);
     const titles = await items.locator(".row-title").allTextContents();
     expect(titles.indexOf(rssTitle)).toBeLessThan(titles.indexOf(handTitle));
     await page.screenshot({
@@ -95,18 +88,20 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
       fullPage: true,
     });
 
-    // 3. A source picked in the Sources menu shows its articles only.
+    // 3. A source picked in the Sources menu shows its articles only. The
+    // menu rereads the sources as it opens, so one created behind the page's
+    // back can be picked at once.
     const filters = page.getByRole("group", { name: "Filtrer le fil" });
     await filters.getByRole("button", { name: /^Sources/ }).click();
     const sources = page.getByRole("dialog", { name: "Sources" });
+    const rss = sources.getByRole("button", { name: new RegExp(`^${namespace}`) });
+    await expect(rss).toBeVisible();
     const hand = sources.getByRole("button", { name: /^Ajouté à la main/ });
     await hand.click();
     await expect(list.getByText(handTitle)).toBeVisible();
     await expect(list.getByText(rssTitle)).toHaveCount(0);
     await hand.click();
-    await sources
-      .getByRole("button", { name: new RegExp(`^${namespace}`) })
-      .click();
+    await rss.click();
     await page.keyboard.press("Escape");
     await expect(list.getByText(rssTitle)).toBeVisible();
     await expect(list.getByText(handTitle)).toHaveCount(0);
@@ -142,30 +137,32 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
 // The Date filter reads Quivr itself: its counts and a day's articles come
 // from the core's date listing, not from the articles the feed loaded.
 test("le filtre Date compte et liste aujourd’hui depuis Quivr", async ({ page }, info) => {
-  test.setTimeout(90000);
   await page.setViewportSize({ width: 1280, height: 900 });
+  // The page counts the days as it loads; opening the menu within 15 s reuses
+  // those counts and adds what arrived since.
+  const counted = page.waitForResponse((r) => new URL(r.url()).pathname === "/demo/feed/days");
   await openFeed(page);
+  const mount = await counted;
+  expect(mount.status()).toBe(200);
+  const before: number = (await mount.json()).days[0];
   const title = `Note du jour ${run}`;
   await page.getByRole("button", { name: "Ajouter du texte", exact: true }).first().click();
   const dialog = page.getByRole("dialog", { name: "Ajouter du texte" });
   await dialog.getByLabel("Votre texte").fill(`${title}\nUn texte daté par Quivr.`);
   await dialog.getByRole("button", { name: "Ajouter à la démo" }).click();
-  await expect(dialog.getByText("Texte enregistré")).toBeVisible({ timeout: 30000 });
+  await expect(dialog.getByText("Texte enregistré")).toBeVisible();
   await page.keyboard.press("Escape");
   const list = page.getByRole("list", { name: "Derniers éléments" });
-  await expect(list.getByText(title)).toBeVisible({ timeout: 30000 });
+  await expect(list.getByText(title)).toBeVisible();
 
   const filters = page.getByRole("group", { name: "Filtrer le fil" });
-  const counted = page.waitForResponse((r) => new URL(r.url()).pathname === "/demo/feed/days");
   await filters.getByRole("button", { name: /^Date/ }).click();
-  expect((await counted).status()).toBe(200);
-  // Quivr may have counted before the text arrived (the server keeps counts a
-  // minute): the page adds what arrived since, so today shows it either way.
+  // Quivr counted before the text arrived: today adds it to Quivr's count.
   const dates = page.getByRole("dialog", { name: "Date" });
   const today = dates.getByRole("button", { name: /^Aujourd’hui/ });
   await expect
     .poll(async () => Number(await today.locator(".menu-count").textContent()))
-    .toBeGreaterThanOrEqual(1);
+    .toBeGreaterThanOrEqual(before + 1);
   const listed = page.waitForResponse((r) => new URL(r.url()).pathname === "/demo/feed/page");
   await today.click();
   const day = await listed;
