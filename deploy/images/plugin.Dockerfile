@@ -50,7 +50,10 @@ RUN rm -rf /usr/local/lib/python3.12/site-packages/pip* \
       /usr/local/lib/python3.12/site-packages/setuptools* \
       /usr/local/lib/python3.12/site-packages/pkg_resources* \
       /usr/local/lib/python3.12/site-packages/wheel* \
-      /usr/local/bin/pip* /usr/local/include /root/.cache
+      /usr/local/bin/pip* /usr/local/bin/python*-config \
+      /usr/local/lib/python3.12/ensurepip /usr/local/lib/python3.12/config-* \
+      /usr/local/lib/pkgconfig /usr/local/include /root/.cache \
+      /usr/bin/apt* /usr/bin/dpkg* /usr/sbin/dpkg* /usr/lib/apt
 ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/The-Vibe-Company/quivr" \

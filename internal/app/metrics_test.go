@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"maps"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -21,9 +20,9 @@ import (
 // metrics handler. Build identity must remain scrapeable during an outage.
 func TestBuildMetricsSurvivesDependencyFailure(t *testing.T) {
 	w := httptest.NewRecorder()
-	buildMetrics(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	})).ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	buildMetrics(apiMetrics(telemetry.NewCommands(), func(context.Context) (int64, time.Duration, error) {
+		return 0, 0, errors.New("storage unavailable")
+	}, func(io.Writer) {})).ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
 	if !strings.Contains(w.Body.String(), `quivr_build_info{version="dev",revision="unknown"} 1`) {
 		t.Fatal(w.Body.String())
 	}

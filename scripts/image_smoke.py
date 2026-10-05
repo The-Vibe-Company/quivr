@@ -8,7 +8,9 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
+import sys
 import tarfile
 import time
 import urllib.error
@@ -36,12 +38,14 @@ def check(args):
             with tarfile.open(fileobj=process.stdout, mode='r|') as archive:
                 for member in archive:
                     path = pathlib.PurePosixPath(member.name)
-                    if (path.name in {'go', 'gcc', 'g++', 'cc', 'make', 'pip', 'pip3', 'pip3.12'}
-                            and any(part in {'bin', 'sbin'} for part in path.parts)):
+                    if ('ensurepip' in path.parts or path.name == 'python-config.py'
+                            or (any(part in {'bin', 'sbin'} for part in path.parts)
+                                and (path.name in {'go', 'gcc', 'g++', 'cc', 'make'}
+                                     or re.fullmatch(r'pip(?:[0-9.]+)?|python(?:[0-9.]+)?-config|(?:apt|dpkg)(?:-.*)?', path.name)))):
                         raise RuntimeError(f'build tool in runtime: {path}')
         finally:
             process.stdout.close()
-            if process.wait() != 0:
+            if process.wait() != 0 and sys.exc_info()[0] is None:
                 raise RuntimeError('cannot inspect image filesystem')
         if not args.plugin:
             output = docker('start', '--attach', container)
