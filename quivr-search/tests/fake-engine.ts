@@ -6,6 +6,9 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Page, Route } from "@playwright/test";
+// The facade's own counting, over this workspace's articles.
+import { feedStats, filterOf, sourceStats } from "../stats.mjs";
+import { topics } from "../topics.mjs";
 
 const minutes = (n: number) => new Date(Date.now() - n * 60000).toISOString();
 /** A local time `n` days ago, at that hour. */
@@ -256,6 +259,16 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
   const stored = () => [...ws.articles, ...ws.archive];
   const find = (id: string) => stored().find((a) => a.record_id === id);
   const arrived = (a: Article) => Date.parse(a.received_at!);
+  // What the facade's index holds: every article, dated, and what alerts caught.
+  const rows = () =>
+    stored().map((a) => ({ record_id: a.record_id, version_id: a.version_id, namespace: a.namespace, at: arrived(a) }));
+  const catchesOf = () => {
+    const out = new Map<string, string[]>();
+    for (const a of ws.alerts)
+      for (const record of Object.keys(a.caught)) out.set(record, [...(out.get(record) || []), a.alert_id]);
+    return out;
+  };
+  const instant = (value?: string) => (value ? Date.parse(value) : undefined);
 
   await page.route("**/demo/feed/stream", (route) =>
     route.continue({ url: streamURL }),
@@ -301,6 +314,47 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
         items: day.slice(start, start + 2).map(feedItem),
         next_cursor: start + 2 < day.length ? String(start + 2) : undefined,
       });
+    }
+    if (path === "/demo/feed/stats" && method === "POST")
+      return json(route, {
+        ...feedStats(
+          rows(),
+          {
+            after: instant(body.after),
+            before: instant(body.before),
+            buckets: (body.buckets || []).map(Date.parse),
+            sources: body.sources,
+            muted: body.muted,
+            alerts: body.alerts,
+            read: body.read,
+            since: instant(body.since),
+            readIds: body.read_ids,
+          },
+          catchesOf(),
+        ),
+        building: false,
+      });
+    if (path === "/demo/feed/topics") {
+      const p = url.searchParams;
+      const keep = filterOf(
+        {
+          after: instant(p.get("after") || undefined),
+          before: instant(p.get("before") || undefined),
+          sources: p.getAll("source"),
+          muted: p.getAll("muted"),
+          alerts: p.getAll("alert"),
+        },
+        catchesOf(),
+      );
+      const all = rows();
+      const titles = stored()
+        .filter((_, i) => keep(all[i]))
+        .map((a) => a.title);
+      return json(route, { items: topics(titles, 10), building: false });
+    }
+    if (path === "/demo/sources/stats") {
+      const bounds = (url.searchParams.get("bounds") || "").split(",").map(Date.parse);
+      return json(route, { sources: sourceStats(rows(), bounds, catchesOf()), building: false });
     }
     if (path === "/v0/changes")
       return json(route, { items: [], next_cursor: "c0", has_more: false });
@@ -407,11 +461,22 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       for (const a of ws.alerts)
         for (const record of Object.keys(a.caught))
           (matched[record] ||= []).push(a.alert_id);
+      const all = rows();
+      const namespaces = [...new Set(all.map((r) => r.namespace))];
+      const oldest = Math.min(...all.map((r) => r.at));
+      const records: Record<string, [string, number, number]> = {};
+      for (const r of all)
+        if (matched[r.record_id])
+          records[r.record_id] = [r.version_id, namespaces.indexOf(r.namespace), Math.round(r.at / 1000)];
       return json(route, {
         available: true,
         described: true,
-        items: ws.alerts.map(alertView),
+        items: ws.alerts.map((a) => {
+          const start = "created_at" in a && a.created_at ? Date.parse(a.created_at) : oldest;
+          return { ...alertView(a), arrived: all.filter((r) => r.at >= start).length };
+        }),
         matched,
+        dated: { namespaces, records, oldest: new Date(oldest).toISOString(), building: false },
       });
     }
     if (path === "/demo/alerts" && method === "POST") {
@@ -419,6 +484,8 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
         alert_id: `alert_${ws.alerts.length + 1}`,
         name: body.name,
         enabled: true,
+        // The facade notes when it creates an alert.
+        created_at: new Date().toISOString(),
         kind: body.expression.kind,
         expression: body.expression,
         caught: {},

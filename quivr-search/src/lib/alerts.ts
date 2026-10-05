@@ -6,6 +6,8 @@ import { APIError, request } from "./search";
 import { pollChanges } from "./connectors";
 import { displayName } from "./sourceNames";
 import type { KeywordExpression } from "./notation";
+import { newestFirst, type FeedItem } from "./feed";
+import type { Dated } from "./alertStats";
 
 export interface DescribedExpression {
   kind: "described";
@@ -24,6 +26,8 @@ interface AlertBase {
   capped: boolean;
   /** When the demo created it (ISO), unknown for older alerts. */
   created_at?: string;
+  /** Articles that arrived since its creation (else since the oldest indexed). */
+  arrived?: number;
 }
 
 export type Alert = AlertBase &
@@ -63,6 +67,48 @@ export interface AlertList {
   items: Alert[];
   /** Record id → ids of the alerts that caught it. */
   matched: Record<string, string[]>;
+  /** The facade's index dates what they caught (quivr-search/catalog.mjs). */
+  dated?: {
+    namespaces: string[];
+    /** Record id → [current Version, index in namespaces, accepted at in seconds]. */
+    records: Record<string, [string, number, number]>;
+    /** The oldest article indexed. */
+    oldest: string | null;
+    building: boolean;
+  };
+}
+
+/**
+ * What each alert caught, newest first, dated by the facade's index; the
+ * feed's articles stand in while the index does not hold them yet.
+ */
+export function catches(list: AlertList | null, feed: FeedItem[]) {
+  const byRecord = new Map<string, Dated>();
+  const byAlert = new Map<string, Dated[]>();
+  if (!list?.available) return { byRecord, byAlert };
+  const loaded = new Map(feed.map((item) => [item.record_id, item]));
+  const records = list.dated?.records || {};
+  const namespaces = list.dated?.namespaces || [];
+  for (const [id, alerts] of Object.entries(list.matched)) {
+    const indexed = records[id];
+    const item: Dated | undefined =
+      loaded.get(id) ||
+      (indexed && {
+        record_id: id,
+        version_id: indexed[0],
+        namespace: namespaces[indexed[1]] || "",
+        received_at: new Date(indexed[2] * 1000).toISOString(),
+      });
+    if (!item) continue;
+    byRecord.set(id, item);
+    for (const alert of alerts) {
+      const caught = byAlert.get(alert);
+      if (caught) caught.push(item);
+      else byAlert.set(alert, [item]);
+    }
+  }
+  for (const caught of byAlert.values()) caught.sort(newestFirst);
+  return { byRecord, byAlert };
 }
 
 const path = (id: string) => `/demo/alerts/${encodeURIComponent(id)}`;

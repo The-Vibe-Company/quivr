@@ -69,23 +69,29 @@ export function groupSources(connectors: Connector[]) {
 export const resumable = (c: Connector, kind?: ConnectorKind) =>
   !c.enabled && !c.credential && kind?.credential !== "required";
 
+/** A source's numbers, counted by the facade over all its articles. */
 export interface SourceStats {
-  /** Articles of the source in the feed. */
+  /** Articles of the source in all. */
   all: number;
   /** Of which an alert caught. */
   caught: number;
-  /** When each of them arrived. */
-  times: string[];
+  /** Articles per day over the last seven days, oldest first. */
+  week: number[];
+  /** When its oldest article arrived, in milliseconds. */
+  first: number;
 }
+
+/** A source the facade counted no article for. */
+export const NO_ARTICLES: SourceStats = { all: 0, caught: 0, week: [], first: Infinity };
 
 /**
  * Articles per day over the last week, or since the source was added: a
  * resumed source is a new instance, so its first article may be older.
  */
-export function weekRates(c: Connector, stats: SourceStats | undefined, now: number) {
-  const week = daily(stats?.times || [], now);
+export function weekRates(c: Connector, stats: SourceStats | null | undefined, now: number) {
+  const week = daily([], now).map((d, i) => ({ ...d, count: stats?.week[i] || 0 }));
   const lastWeek = week.reduce((n, d) => n + d.count, 0);
-  const start = Math.min(Date.parse(c.created_at), ...(stats?.times || []).map((t) => Date.parse(t)));
+  const start = Math.min(Date.parse(c.created_at), stats?.all ? stats.first : Infinity);
   const days = Math.min(7, Math.max(1, Math.ceil((now - start) / 86400000)));
   return { week, perDay: Math.round(lastWeek / days), most: Math.max(1, ...week.map((d) => d.count)) };
 }
@@ -95,10 +101,13 @@ export function WeekSpark({
   week,
   most,
   now,
+  counted = true,
 }: {
   week: { day: string; count: number }[];
   most: number;
   now: number;
+  /** False until the facade counted them: no day claims zero meanwhile. */
+  counted?: boolean;
 }) {
   return (
     <div
@@ -106,14 +115,14 @@ export function WeekSpark({
       role="img"
       tabIndex={0}
       data-tips
-      aria-label={`Articles reçus sur 7 jours : ${week.map((d) => d.count).join(", ")}`}
+      aria-label={`Articles reçus sur 7 jours : ${counted ? week.map((d) => d.count).join(", ") : "comptage en cours"}`}
     >
       {week.map((d, i) => (
         <span
           key={d.day}
           data-now={i === week.length - 1 || undefined}
-          data-zero={!d.count || undefined}
-          data-tip={`${dayLabel(d.day, now)} · ${plural(d.count, "article")}`}
+          data-zero={(counted && !d.count) || undefined}
+          data-tip={counted ? `${dayLabel(d.day, now)} · ${plural(d.count, "article")}` : undefined}
           style={d.count ? { height: `${Math.max(8, (d.count / most) * 100)}%` } : undefined}
         />
       ))}
@@ -132,6 +141,7 @@ export function SourceList({
   sources,
   kindOf,
   stats,
+  whole,
   highlight,
   now,
   extra,
@@ -144,7 +154,10 @@ export function SourceList({
 }: {
   sources: Connector[];
   kindOf: (kind: string) => ConnectorKind | undefined;
-  stats: Map<string, SourceStats>;
+  /** Null until the facade counted them. */
+  stats: Map<string, SourceStats> | null;
+  /** The facade indexed every article: a source it did not count has none. */
+  whole: boolean;
   highlight: string | null;
   now: number;
   extra?: ReactNode;
@@ -162,7 +175,7 @@ export function SourceList({
           key={c.source_namespace}
           connector={c}
           kind={kindOf(c.kind)}
-          stats={stats.get(c.source_namespace)}
+          stats={stats && (stats.get(c.source_namespace) || (whole ? NO_ARTICLES : null))}
           highlight={highlight === c.connector_id}
           now={now}
           onOpen={onOpen}
@@ -276,7 +289,8 @@ function SourceCard({
 }: {
   connector: Connector;
   kind?: ConnectorKind;
-  stats?: SourceStats;
+  /** Null until the facade counted them. */
+  stats: SourceStats | null;
   highlight: boolean;
   now: number;
   onOpen: (id: string) => void;
@@ -474,19 +488,19 @@ function SourceCard({
         <dl className="sc-stats">
           <div>
             <dt>par jour</dt>
-            <dd>{perDay}</dd>
+            <dd>{stats ? perDay : "—"}</dd>
           </div>
           <div>
             <dt>dans le fil</dt>
-            <dd>{stats?.all || 0}</dd>
+            <dd>{stats ? stats.all : "—"}</dd>
           </div>
           <div>
             <dt>repérés</dt>
-            <dd>{stats?.caught || 0}</dd>
+            <dd>{stats ? stats.caught : "—"}</dd>
           </div>
         </dl>
       )}
-      <WeekSpark week={week} most={most} now={now} />
+      <WeekSpark week={week} most={most} now={now} counted={!!stats} />
       {confirming ? (
         <div className="sc-foot row-actions" role="group" aria-label={`Retirer ${name}`}>
           <span className="row-confirm">Retirer cette source ? Les articles déjà reçus restent.</span>
