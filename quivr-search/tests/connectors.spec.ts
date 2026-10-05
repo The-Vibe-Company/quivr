@@ -36,6 +36,20 @@ async function expectNoSecret(page: Page, secret: string) {
   expect(leaked).toBe(false);
 }
 
+/**
+ * Waits until the core reports `state` for the instance in `namespace`, then
+ * moves the page's clock past its 5 s live check, which shows it.
+ */
+async function healthReaches(page: Page, namespace: string, state: string) {
+  await expect
+    .poll(async () => {
+      const { items } = await (await page.request.get("/v0/connectors")).json();
+      return items.find((c: { source_namespace: string }) => c.source_namespace === namespace)?.health.state;
+    })
+    .toBe(state);
+  await page.clock.fastForward(5000);
+}
+
 async function startFixture(page: Page, namespace: string, script: string) {
   await page.getByRole("button", { name: "Ajouter un connecteur" }).click();
   const dialog = page.getByRole("dialog", { name: "Ajouter un connecteur" });
@@ -50,6 +64,7 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
 }, info) => {
   const revoked = `fixture-revoked-ui-${run}`;
   const valid = `fixture-ok-ui-${run}`;
+  await page.clock.install();
   await openConnectors(page);
   const dialog = await startFixture(
     page,
@@ -77,9 +92,8 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
   await expectNoSecret(page, revoked);
 
   // Live health: the refused credential shows without reloading the page.
-  await expect(detail.locator('[data-state="access_error"]')).toBeVisible({
-    timeout: 30000,
-  });
+  await healthReaches(page, `wire-${run}`, "access_error");
+  await expect(detail.locator('[data-state="access_error"]')).toBeVisible();
   await expect(detail.getByText("unauthorized")).toBeVisible();
   await page.screenshot({
     path: info.outputPath("connector-access-error.png"),
@@ -97,9 +111,8 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
   ).toBeVisible();
   await expect(detail.getByText(/Présent · version 2/)).toBeVisible();
   await expectNoSecret(page, valid);
-  await expect(detail.locator('[data-state="active"]')).toBeVisible({
-    timeout: 30000,
-  });
+  await healthReaches(page, `wire-${run}`, "active");
+  await expect(detail.locator('[data-state="active"]')).toBeVisible();
 
   // Interval change through the schedule route; saving closes the settings.
   await detail

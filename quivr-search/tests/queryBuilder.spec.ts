@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { parse, print } from "../src/lib/notation";
 import { EMPTY_FORM, build, fieldTerms, unbuild } from "../src/lib/queryBuilder";
-import { sentence } from "../src/lib/explain";
+import { explain } from "../src/lib/explain";
 
 // The guided form of a keyword alert writes the plugin's notation, and reads
 // back any query of its shape, so the form and the advanced query stay in sync.
@@ -81,5 +81,10 @@ test("la phrase dit en français ce que l’alerte attrapera", () => {
       "Articles qui contiennent « tempête », sauf ceux qui parlent de (à la fois « port » et « quai ») ou de « grêle ».",
     ],
   ];
-  for (const [query, expected] of cases) expect(sentence(parse(query).match), query).toBe(expected);
+  // The sentence as plain text, keywords in French quotes.
+  const sentence = (query: string) =>
+    explain(parse(query).match)
+      .map((p) => (typeof p === "string" ? p : `« ${p.keyword} »`))
+      .join("");
+  for (const [query, expected] of cases) expect(sentence(query), query).toBe(expected);
 });

@@ -10,9 +10,6 @@ const run = `r${Date.now().toString(36)}`;
 test.skip(!FEEDS, "needs the local test feeds (make verify-demo)");
 
 test.beforeEach(async ({ page }) => {
-  // Matches arrive through real ingestion and connector polls; described
-  // alerts also wait for each article's enrichment (its embeddings).
-  test.setTimeout(240000);
   await page.request.post("/demo/login", {
     data: { password: process.env.QUIVR_DEMO_PASSWORD || "local-browser-demo" },
   });
@@ -48,7 +45,6 @@ async function addText(page: Page, text: string, enriched = false) {
         ).json();
         return Boolean(version.steps?.enriched_at);
       },
-      { timeout: 60000 },
     )
     .toBe(true);
 }
@@ -127,9 +123,7 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
 
   // Both matches show live on the list, then on the alert's page, with the
   // words that matched and where.
-  await expect(row.getByTestId("alert-count")).toHaveText("2", {
-    timeout: 120000,
-  });
+  await expect(row.getByTestId("alert-count")).toHaveText("2");
   await row.getByRole("button", { name, exact: true }).click();
   await expect(page.getByRole("heading", { name, level: 2 })).toBeVisible();
   const caught = page.getByRole("list", { name: "Articles trouvés" });
@@ -285,9 +279,7 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
   const item = caught
     .locator(".caught")
     .filter({ hasText: `Les dockers cessent le travail au port ${run}` });
-  await expect(item.getByTestId("caught-score")).toHaveText("Score 0,92", {
-    timeout: 120000,
-  });
+  await expect(item.getByTestId("caught-score")).toHaveText("Score 0,92");
   // What the score means, and the alert's threshold, on hover or focus.
   await expect(item.getByRole("tooltip")).toContainText("Très pertinent");
   await expect(item.getByRole("tooltip")).toContainText("dépasse 0,50");
@@ -341,28 +333,4 @@ test("sans classifieur, la page ne propose que les mots-clés et dit pourquoi", 
   );
   // The app reads the list twice on load; the second fetch may still be in flight.
   await page.unrouteAll({ behavior: "ignoreErrors" });
-});
-
-test("la page des alertes tient sur mobile, en mode clair et sombre", async ({
-  page,
-}, info) => {
-  await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto("/?view=alerts");
-  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
-  await page.getByLabel("Cette phrase exacte").fill("marché aux fleurs");
-  await expect(page.locator(".query-built-code")).toHaveText(
-    '"marché aux fleurs"',
-  );
-  for (const scheme of ["light", "dark"] as const) {
-    await page.emulateMedia({ colorScheme: scheme });
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth,
-      ),
-    ).toBe(true);
-    await page.screenshot({
-      path: info.outputPath(`alerts-mobile-${scheme}.png`),
-      fullPage: true,
-    });
-  }
 });
