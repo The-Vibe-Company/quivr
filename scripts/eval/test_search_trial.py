@@ -248,8 +248,12 @@ class Trial(unittest.TestCase):
             return findall(pattern, text)
         with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond), \
                 mock.patch.object(search_trial.re, 'findall', side_effect=tokenize), \
-                mock.patch.object(direct_bakeoff, 'normalize', side_effect=normalize_once):
+                mock.patch.object(direct_bakeoff, 'normalize', side_effect=normalize_once), \
+                mock.patch.object(store, 'renew', wraps=store.renew) as renew:
             measured = search_trial.measure(cfg, data, dataset, temp, budget, client, prices, 0)
+            # Paid attempts and fresh retrieval renew independently. Quality
+            # batches must not add one remote control-plane call per query.
+            self.assertLessEqual(renew.call_count - len(calls) - search_trial.LATENCY_SAMPLE_SIZE - 1, 10)
             self.assertEqual(len(tokenised), 513)
             self.assertEqual(normalised[513], 1)
             self.assertEqual(peak, 4)

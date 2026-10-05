@@ -46,10 +46,13 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import types
 import uuid
+import threading
+import collections
 from unittest import mock
 
 import control_store
@@ -75,23 +78,15 @@ class Runner(unittest.TestCase):
         self.identity = self.root / 'identity.txt'
         subprocess.run(['age-keygen', '-o', str(self.identity)], check=True, capture_output=True)
         self.recipient = subprocess.check_output(['age-keygen', '-y', str(self.identity)], text=True).strip()
-        data = self.root / 'data'
-        trec.write(data, {'secret-doc-a': {'text': 'apple private-passage-sentinel'},
-                         'secret-doc-b': {'text': 'pear other-passage-sentinel'}},
-                   {f'secret-query-{i}': 'apple private-question-sentinel ' + str(i) for i in range(20)},
-                   {f'secret-query-{i}': {'secret-doc-a': 1} for i in range(20)})
-        archive = self.root / 'working.tar.gz'
-        with tarfile.open(archive, 'w:gz') as out:
-            for path in data.iterdir():
-                out.add(path, arcname=path.name)
-        self.artifact = self.mount / 'working.tar.gz.age'
-        subprocess.run(['age', '-r', self.recipient, '-o', str(self.artifact), str(archive)], check=True, capture_output=True)
         self.value = policy()
         self.value['baseline'] = {'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1',
                                   'dimensions': 2, 'dense_weight': 1}
-        self.value['sets'][self.name]['input'].update(digest=trec.sha256_file(self.artifact), fingerprint=trec.fingerprint(data))
+        self.encrypt_fixture({'secret-doc-a': {'text': 'apple private-passage-sentinel'},
+                              'secret-doc-b': {'text': 'pear other-passage-sentinel'}},
+                   {f'secret-query-{i}': 'apple private-question-sentinel ' + str(i) for i in range(20)},
+                   {f'secret-query-{i}': {'secret-doc-a': 1} for i in range(20)})
         self.policy = modal_search.policy(self.value)
-        self.config = search_trial.configuration({**self.policy['baseline'], 'dense_weight': 0})
+        self.config = search_trial.configuration({**self.policy['baseline'], 'dense_weight': .5})
         self.reference = {'volume': 'working-fixture', 'artifact': self.artifact.name, 'secret': 'working-fixture',
                           'identity_env': 'EVAL_WORKING_AGE_EXAMPLE', 'provider_consent': True}
         self.calls = []
@@ -101,6 +96,91 @@ class Runner(unittest.TestCase):
                             'EVAL_CONTROL_DATABASE_URL': os.environ['EVAL_CONTROL_TEST_DSN'],
                             'AZURE_FOUNDRY_ENDPOINT': 'https://example.com', 'AZURE_FOUNDRY_KEY': 'fixture-key',
                             'MLFLOW_TRACKING_URI': '', 'MLFLOW_PRIVATE_TRACKING_URI': ''}
+
+    def encrypt_fixture(self, corpus, queries, qrels):
+        data = self.root / 'data'
+        trec.write(data, corpus, queries, qrels)
+        archive = self.root / 'working.tar.gz'
+        with tarfile.open(archive, 'w:gz') as out:
+            for path in data.iterdir():
+                out.add(path, arcname=path.name)
+        self.artifact = self.mount / 'working.tar.gz.age'
+        subprocess.run(['age', '-r', self.recipient, '-o', str(self.artifact), str(archive)],
+                       check=True, capture_output=True)
+        self.value['sets'][self.name]['input'].update(
+            digest=trec.sha256_file(self.artifact), fingerprint=trec.fingerprint(data))
+
+    def test_private_pair_batches_once_with_bounded_concurrency_and_fresh_sample(self):
+        # The encrypted invocation owns reuse, batch accounting and privacy.
+        # A transport barrier exposes serial fills without timing assertions.
+        self.encrypt_fixture({f'secret-doc-{i}': {'text': f'private-passage-sentinel {i}'} for i in range(513)},
+            {f'secret-query-{i}': f'private-question-sentinel {i}' for i in range(61)},
+            {f'secret-query-{i}': {'secret-doc-0': 1} for i in range(61)})
+        self.policy = modal_search.policy(self.value)
+        self.config = search_trial.configuration({**self.policy['baseline'], 'dense_weight': .7})
+        barrier, lock = threading.Barrier(4), threading.Lock()
+        active, peak = 0, 0
+        def provider(request, timeout):
+            nonlocal active, peak
+            body = json.loads(request.data)
+            self.assertFalse(any((path / 'vectors').exists() for path in self.ephemeral_paths))
+            with lock:
+                self.calls.append(body)
+                active += 1
+                peak = max(peak, active)
+                document_call = sum(c['input_type'] == 'search_document' for c in self.calls)
+            if body['input_type'] == 'search_document' and document_call <= 4:
+                barrier.wait(timeout=5)
+            with lock:
+                active -= 1
+            count = len(body['texts'])
+            return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                'meta': {'billed_units': {'input_tokens': count}}}).encode())
+        with self.assertLogs(level='INFO') as logs:
+            outcome = self.run_trial(provider=provider)
+        self.assertEqual(outcome['status'], 'complete')
+        self.assertEqual(peak, 4)
+        documents = [c for c in self.calls if c['input_type'] == 'search_document']
+        queries = [c for c in self.calls if c['input_type'] == 'search_query']
+        self.assertEqual(sorted(len(c['texts']) for c in documents), [1] + [64] * 8)
+        self.assertEqual([len(c['texts']) for c in queries], [61] + [1] * 102)
+        baseline, candidate = outcome['baseline_record'], outcome['record']
+        self.assertEqual(baseline['cost']['provider']['confirmed_input_tokens'], 625)
+        self.assertEqual(candidate['cost']['provider']['confirmed_input_tokens'], 51)
+        self.assertEqual(baseline['cost']['provider']['reserved_input_tokens'], 0)
+        self.assertEqual(candidate['cost']['provider']['reserved_input_tokens'], 0)
+        self.assertEqual(candidate['metrics']['ndcg@10'], baseline['metrics']['ndcg@10'])
+        self.assertEqual(candidate['provenance']['private_pair']['statistics']['queries'], 61)
+        with self.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM eval_control.leases WHERE campaign=%s',
+                                       (self.campaign,)).fetchone()[0], 2)
+            self.assertEqual(db.execute("SELECT count(*) FROM eval_control.reservations WHERE campaign=%s AND kind='provider' AND settled",
+                                       (self.campaign,)).fetchone()[0], len(self.calls))
+        for phase in ('decrypting', 'embedding', 'indexing', 'search', 'scoring'):
+            self.assertTrue(any(phase in line for line in logs.output), phase)
+        self.assertFalse(any('private-passage-sentinel' in line or 'private-question-sentinel' in line
+                             or 'secret-doc-' in line or 'secret-query-' in line for line in logs.output))
+        self.assertFalse(any((path / 'vectors').exists() for path in self.ephemeral_paths))
+
+    def test_private_reuse_requires_full_embedding_identity_and_ends_with_invocation(self):
+        for field, value in ((None, None), ('revision', 'fixture-v2'), ('dimensions', 3),
+                ('model', 'Cohere-Embed-V5-Pro'), ('window_chars', 1900), ('overlap_chars', 100)):
+            with self.subTest(field=field):
+                self.campaign = uuid.uuid4().hex
+                self.calls.clear()
+                self.config = search_trial.configuration({**self.policy['baseline'],
+                    'dense_weight': .7, 'candidate_count': 40, **({field: value} if field else {})})
+                def provider(request, timeout):
+                    body = json.loads(request.data)
+                    self.calls.append(body)
+                    count, dimensions = len(body['texts']), body['output_dimension']
+                    return io.BytesIO(json.dumps({'embeddings': {'float': [[1] + [0] * (dimensions - 1)] * count},
+                        'meta': {'billed_units': {'input_tokens': count}}}).encode())
+                outcome = self.run_trial(provider=provider)
+                self.assertEqual(outcome['status'], 'complete')
+                counts = collections.Counter(c['input_type'] for c in self.calls)
+                self.assertEqual(counts['search_document'], 2 if field else 1)
+                self.assertEqual(counts['search_query'], 44 if field else 43)
 
     def provider(self, request, timeout):
         self.calls.append(json.loads(request.data))
@@ -121,13 +201,23 @@ class Runner(unittest.TestCase):
             directory = temporary_directory(*args, **kwargs)
             self.ephemeral_paths.append(pathlib.Path(directory.name))
             return directory
-        with mock.patch.object(private_working.tempfile, 'TemporaryDirectory', side_effect=ephemeral), \
-                mock.patch.dict('sys.modules', {'modal': modal}), mock.patch.dict(os.environ, self.environment), \
-                mock.patch.object(private_working, 'MOUNT_ROOT', self.root / 'mount'), \
-                mock.patch.object(results, 'Results', side_effect=outbox), \
-                mock.patch('urllib.request.OpenerDirector.open', side_effect=patches.get('provider', self.provider)):
-            return modal_search.dispatch(self.store, self.campaign, self.policy, self.config, self.name,
-                'a' * 40, 'sha256:fixture', modal_search.remote_trial, self.root / 'local-outbox', True)
+        # Replace only Modal: patch.dict restores the whole module registry and
+        # unloads lazily imported scorer/JIT modules between paired invocations.
+        previous_modal = sys.modules.get('modal')
+        sys.modules['modal'] = modal
+        try:
+            with mock.patch.object(private_working.tempfile, 'TemporaryDirectory', side_effect=ephemeral), \
+                    mock.patch.dict(os.environ, self.environment), \
+                    mock.patch.object(private_working, 'MOUNT_ROOT', self.root / 'mount'), \
+                    mock.patch.object(results, 'Results', side_effect=outbox), \
+                    mock.patch('urllib.request.OpenerDirector.open', side_effect=patches.get('provider', self.provider)):
+                return modal_search.dispatch(self.store, self.campaign, self.policy, self.config, self.name,
+                    'a' * 40, 'sha256:fixture', modal_search.remote_trial, self.root / 'local-outbox', True)
+        finally:
+            if previous_modal is None:
+                sys.modules.pop('modal', None)
+            else:
+                sys.modules['modal'] = previous_modal
 
     def test_encrypted_pair_exports_only_aggregates_and_replays_without_input(self):
         with self.assertLogs(level='INFO') as logs:
