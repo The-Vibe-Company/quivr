@@ -81,13 +81,13 @@ test("coller l’adresse d’un site trouve son flux, dont les articles devienne
     fullPage: true,
   });
 
-  // The articles are searchable within a minute.
+  // The articles soon become searchable.
   await expect(async () => {
     await page.goto("/?q=gardiens%20phare%20ocre&mode=lexical");
     await expect(page.locator(".row").first()).toContainText("teinte ocre", {
       timeout: 3000,
     });
-  }).toPass();
+  }).toPass({ timeout: 10000 });
 });
 
 test("un site qui annonce plusieurs flux laisse choisir lequel suivre", async ({

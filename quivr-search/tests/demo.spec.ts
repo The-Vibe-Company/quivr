@@ -4,7 +4,8 @@ test("ajouter du texte, le retrouver et lire la source exacte", async ({
   page,
 }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  const source = `À Marseille, les ferries pour la Corse circulent normalement.\n\nLe navire Étoile 🌟 reprend ses traversées après inspection. Témoignage démo ${Date.now()}.`;
+  const stamp = `Témoignage démo ${Date.now()}`;
+  const source = `À Marseille, les ferries pour la Corse circulent normalement.\n\nLe navire Étoile 🌟 reprend ses traversées après inspection. ${stamp}.`;
   await page.goto("/");
   // Verification always sets a password, so the page asks for it.
   const password = process.env.QUIVR_DEMO_PASSWORD;
@@ -49,9 +50,7 @@ test("ajouter du texte, le retrouver et lire la source exacte", async ({
     fullPage: true,
   });
   await page.locator(".row-link").first().click();
-  await expect(page.getByTestId("canonical-text")).toContainText(
-    "ferries pour la Corse",
-  );
+  await expect(page.getByTestId("canonical-text")).toContainText(stamp);
   await page.screenshot({
     path: info.outputPath("desktop-document.png"),
     fullPage: true,

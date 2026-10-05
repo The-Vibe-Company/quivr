@@ -37,15 +37,12 @@ async function expectNoSecret(page: Page, secret: string) {
 }
 
 /**
- * Waits until the core reports `state` for the instance in `namespace`, then
- * moves the page's clock past its 5 s live check, which shows it.
+ * Waits until the core reports `state` for the instance, then moves the page's
+ * clock past its 5 s live check, which shows it.
  */
-async function healthReaches(page: Page, namespace: string, state: string) {
+async function healthReaches(page: Page, id: string, state: string) {
   await expect
-    .poll(async () => {
-      const { items } = await (await page.request.get("/v0/connectors")).json();
-      return items.find((c: { source_namespace: string }) => c.source_namespace === namespace)?.health.state;
-    })
+    .poll(async () => (await (await page.request.get(`/v0/connectors/${id}`)).json()).health?.state)
     .toBe(state);
   await page.clock.fastForward(5000);
 }
@@ -81,7 +78,11 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
     path: info.outputPath("connector-create.png"),
     fullPage: true,
   });
+  const created = page.waitForResponse(
+    (r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/v0/connectors",
+  );
   await dialog.getByRole("button", { name: "Créer le connecteur" }).click();
+  const { connector_id: id } = await (await created).json();
 
   // The new instance opens in its settings; the secret is gone.
   const detail = page.getByRole("dialog", { name: `Réglages de wire-${run}` });
@@ -92,7 +93,7 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
   await expectNoSecret(page, revoked);
 
   // Live health: the refused credential shows without reloading the page.
-  await healthReaches(page, `wire-${run}`, "access_error");
+  await healthReaches(page, id, "access_error");
   await expect(detail.locator('[data-state="access_error"]')).toBeVisible();
   await expect(detail.getByText("unauthorized")).toBeVisible();
   await page.screenshot({
@@ -111,7 +112,7 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
   ).toBeVisible();
   await expect(detail.getByText(/Présent · version 2/)).toBeVisible();
   await expectNoSecret(page, valid);
-  await healthReaches(page, `wire-${run}`, "active");
+  await healthReaches(page, id, "active");
   await expect(detail.locator('[data-state="active"]')).toBeVisible();
 
   // Interval change through the schedule route; saving closes the settings.

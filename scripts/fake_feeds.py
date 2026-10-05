@@ -13,7 +13,6 @@ links and into their titles, so each test run gets its own sources.
                          id as a word, one about a storm and one about a flower market
 - GET /feeds/bulk.xml?source=<n>&items=<k>  RSS of k synthetic articles (at most 500), the
                          same on every fetch, for the demo's performance corpus (make demo-perf)
-- GET /_hits?path=/feeds/ticker.xml&run=<id>  {"hits": n} fetches of that feed
 
 All content is synthetic.
 """
@@ -46,10 +45,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             key = (url.path, run)
             self.hits[key] = self.hits.get(key, 0) + 1
             count = self.hits[key]
-        if url.path == '/_hits':
-            with self.lock:
-                hits = self.hits.get((query.get('path', [''])[0], run), 0)
-            return self.send(200, 'application/json', json.dumps({'hits': hits}))
         if url.path == '/site/':
             return self.send(200, 'text/html; charset=utf-8', page('Le Journal exemple' + suffix, [
                 ('application/rss+xml', '/feeds/news.xml' + tail, 'Le Journal exemple — À la une' + suffix)]))

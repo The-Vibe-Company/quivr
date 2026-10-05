@@ -142,9 +142,15 @@ test("le filtre Date compte et liste aujourd’hui depuis Quivr", async ({ page 
   // those counts and adds what arrived since.
   const counted = page.waitForResponse((r) => new URL(r.url()).pathname === "/demo/feed/days");
   await openFeed(page);
-  const mount = await counted;
-  expect(mount.status()).toBe(200);
-  const before: number = (await mount.json()).days[0];
+  expect((await counted).status()).toBe(200);
+  const filters = page.getByRole("group", { name: "Filtrer le fil" });
+  const dates = page.getByRole("dialog", { name: "Date" });
+  const today = dates.getByRole("button", { name: /^Aujourd’hui/ });
+  const todayCount = async () => Number(await today.locator(".menu-count").textContent());
+  await filters.getByRole("button", { name: /^Date/ }).click();
+  await expect(today.locator(".menu-count")).toHaveText(/^\d/);
+  const before = await todayCount();
+  await page.keyboard.press("Escape");
   const title = `Note du jour ${run}`;
   await page.getByRole("button", { name: "Ajouter du texte", exact: true }).first().click();
   const dialog = page.getByRole("dialog", { name: "Ajouter du texte" });
@@ -155,14 +161,9 @@ test("le filtre Date compte et liste aujourd’hui depuis Quivr", async ({ page 
   const list = page.getByRole("list", { name: "Derniers éléments" });
   await expect(list.getByText(title)).toBeVisible();
 
-  const filters = page.getByRole("group", { name: "Filtrer le fil" });
   await filters.getByRole("button", { name: /^Date/ }).click();
   // Quivr counted before the text arrived: today adds it to Quivr's count.
-  const dates = page.getByRole("dialog", { name: "Date" });
-  const today = dates.getByRole("button", { name: /^Aujourd’hui/ });
-  await expect
-    .poll(async () => Number(await today.locator(".menu-count").textContent()))
-    .toBeGreaterThanOrEqual(before + 1);
+  await expect.poll(todayCount).toBeGreaterThanOrEqual(before + 1);
   const listed = page.waitForResponse((r) => new URL(r.url()).pathname === "/demo/feed/page");
   await today.click();
   const day = await listed;
