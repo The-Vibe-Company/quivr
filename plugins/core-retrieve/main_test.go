@@ -13,42 +13,23 @@ import (
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
 )
 
-// The candidate request is what makes the ranking the engine's former one:
-// the Runner's fixtures see the primitive, not the field, weight, fusion or k
-// the index query receives.
-func TestAsksForTheEnginesFormerQuery(t *testing.T) {
-	for mode, want := range map[string]string{
-		"lexical":  `{"primitive":"bm25","query_text":"grève du port","field":"source","k":7}`,
-		"semantic": `{"primitive":"near_vector","query_text":"grève du port","space":"core.ingest.e5-small@1","k":7}`,
-		"hybrid":   `{"primitive":"hybrid","query_text":"grève du port","space":"core.ingest.e5-small@1","field":"source","alpha":0.5,"fusion":"relative_score","k":7}`,
-	} {
-		req := &quivrplugin.SearchRequest{Round: 1, Limit: 7, Spaces: []quivrplugin.SearchSpace{{ID: "other@1", Role: "evaluation"}, {ID: "core.ingest.e5-small@1", Role: "served"}}}
-		req.Query.Text, req.Query.Mode = "grève du port", mode
-		answer, err := retriever{}.Search(t.Context(), req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got, _ := json.Marshal(answer.Requests)
-		if string(got) != "["+want+"]" {
-			t.Errorf("%s asks %s, want [%s]", mode, got, want)
-		}
-	}
-}
-
 // Configuration changes the real candidate request, including the two
 // endpoints of the dense weight. The caller's result limit is independent.
 func TestConfiguredCandidateRequests(t *testing.T) {
 	for _, tc := range []struct {
-		mode, config, want string
+		mode, config, query, space, want string
 	}{
-		{"lexical", `{"candidate_count":100}`, `{"primitive":"bm25","query_text":"harbour","field":"source","k":100}`},
-		{"semantic", `{"candidate_count":1}`, `{"primitive":"near_vector","query_text":"harbour","space":"text@1","k":1}`},
-		{"hybrid", `{"dense_weight":0}`, `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":0,"fusion":"relative_score","k":7}`},
-		{"hybrid", `{"dense_weight":1,"candidate_count":100,"hybrid_fusion":"ranked"}`, `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":1,"fusion":"ranked","k":100}`},
-		{"hybrid", `{"dense_weight":0.7,"candidate_count":30,"hybrid_fusion":"relative_score"}`, `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":0.7,"fusion":"relative_score","k":30}`},
+		{"lexical", `{}`, "grève du port", "core.ingest.e5-small@1", `{"primitive":"bm25","query_text":"grève du port","field":"source","k":7}`},
+		{"semantic", `{}`, "grève du port", "core.ingest.e5-small@1", `{"primitive":"near_vector","query_text":"grève du port","space":"core.ingest.e5-small@1","k":7}`},
+		{"hybrid", `{}`, "grève du port", "core.ingest.e5-small@1", `{"primitive":"hybrid","query_text":"grève du port","space":"core.ingest.e5-small@1","field":"source","alpha":0.5,"fusion":"relative_score","k":7}`},
+		{"lexical", `{"candidate_count":100}`, "harbour", "text@1", `{"primitive":"bm25","query_text":"harbour","field":"source","k":100}`},
+		{"semantic", `{"candidate_count":1}`, "harbour", "text@1", `{"primitive":"near_vector","query_text":"harbour","space":"text@1","k":1}`},
+		{"hybrid", `{"dense_weight":0}`, "harbour", "text@1", `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":0,"fusion":"relative_score","k":7}`},
+		{"hybrid", `{"dense_weight":1,"candidate_count":100,"hybrid_fusion":"ranked"}`, "harbour", "text@1", `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":1,"fusion":"ranked","k":100}`},
+		{"hybrid", `{"dense_weight":0.7,"candidate_count":30,"hybrid_fusion":"relative_score"}`, "harbour", "text@1", `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":0.7,"fusion":"relative_score","k":30}`},
 	} {
-		req := &quivrplugin.SearchRequest{Round: 1, Limit: 7, Configuration: json.RawMessage(tc.config), Spaces: []quivrplugin.SearchSpace{{ID: "text@1", Role: "served"}}}
-		req.Query.Text, req.Query.Mode = "harbour", tc.mode
+		req := &quivrplugin.SearchRequest{Round: 1, Limit: 7, Configuration: json.RawMessage(tc.config), Spaces: []quivrplugin.SearchSpace{{ID: "other@1", Role: "evaluation"}, {ID: tc.space, Role: "served"}}}
+		req.Query.Text, req.Query.Mode = tc.query, tc.mode
 		answer, err := (retriever{}).Search(t.Context(), req)
 		if err != nil {
 			t.Fatal(err)

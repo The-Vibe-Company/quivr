@@ -47,6 +47,75 @@
       "body": "{}",
       "sent_body": "{}",
       "expected_status": 401
+    },
+    {
+      "name": "wrong-plugin-id",
+      "audience": "plugin",
+      "issued_seconds_ago": 0,
+      "body": "{}",
+      "sent_body": "{}",
+      "expected_status": 401,
+      "claims": {
+        "plugin_id": "other-plugin"
+      }
+    },
+    {
+      "name": "wrong-route",
+      "audience": "plugin",
+      "issued_seconds_ago": 0,
+      "body": "{}",
+      "sent_body": "{}",
+      "expected_status": 401,
+      "claims": {
+        "target": "/v0/discovery?source=other"
+      }
+    },
+    {
+      "name": "wrong-method",
+      "audience": "plugin",
+      "issued_seconds_ago": 0,
+      "body": "{}",
+      "sent_body": "{}",
+      "expected_status": 401,
+      "claims": {
+        "method": "POST"
+      }
+    },
+    {
+      "name": "future-iat",
+      "audience": "plugin",
+      "issued_seconds_ago": -10,
+      "body": "{}",
+      "sent_body": "{}",
+      "expected_status": 401,
+      "lifetime_seconds": 10
+    },
+    {
+      "name": "overlong-lifetime",
+      "audience": "plugin",
+      "issued_seconds_ago": 0,
+      "body": "{}",
+      "sent_body": "{}",
+      "expected_status": 401,
+      "lifetime_seconds": 71
+    },
+    {
+      "name": "alg-none",
+      "audience": "plugin",
+      "issued_seconds_ago": 0,
+      "body": "{}",
+      "sent_body": "{}",
+      "expected_status": 401,
+      "algorithm": "none"
+    },
+    {
+      "name": "utf16",
+      "audience": "plugin",
+      "issued_seconds_ago": 0,
+      "body": "{}",
+      "sent_body": "{}",
+      "expected_status": 401,
+      "json_encoding": "utf-16"
     }
   ]
 }
