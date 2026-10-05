@@ -19,7 +19,11 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `s3` | yes | Object storage for original bytes and derived artifacts. See [Object storage](#object-storage). |
 | `listen` | no | Address of the public HTTP API. Default `127.0.0.1:8080`. |
 | `probe_listen` | no | Private address of `/healthz`, `/readyz` and `/metrics`. Default `127.0.0.1:8081`; give each process its own. |
-| `log_directory` | no | Write JSON logs to rotating files in this folder instead of stderr |
+| `log_level` | no | Minimum log level: `debug`, `info` (default), `warn` or `error`. `QUIVR_LOG_LEVEL` overrides the file. |
+| `instance` | no | Process identity in each log event. Default hostname and PID; `QUIVR_INSTANCE` overrides the file. |
+| `environment` | no | Deployment environment label in each log event. Default `unspecified`; `QUIVR_ENVIRONMENT` overrides the file. |
+| `shutdown_grace` | no | Shared grace period for draining HTTP requests and background work after SIGTERM or SIGINT. Positive Go duration, default `60s`; `QUIVR_SHUTDOWN_GRACE` overrides the file. |
+| `log_directory` | no | Also write JSON logs to rotating files in this folder; stdout remains enabled. Four files per process, up to 1 MiB each. |
 | `retrieval` | no | Search profile aliases. See [Search profiles](#search-profiles). |
 | `plugins` | no | The plugins this deployment calls. See [Plugin pins](#plugin-pins). |
 | `ingestion_evaluation_concurrency` | no | Evaluation activities in flight per worker. Default `4`, range `1`–`32`; `0` selects the default. Served ingestion has separate capacity. |
@@ -43,7 +47,17 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `tei_url` | no | A Text Embeddings Inference server that encodes queries for Corpora built before the `core-ingest` plugin; not needed on a new deployment |
 | `m365` | no | Refused. The Microsoft 365 settings moved to the `m365-mail` plugin's pin configuration. |
 
-Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup with `invalid configuration JSON: json: unknown field "<field>"`. Remove the former `connector_fixtures` and `monitoring_fixture_evaluator` settings; the acceptance harness now pins its fixture plugin through `plugins`.
+Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup. Remove the former `connector_fixtures` and `monitoring_fixture_evaluator` settings; the acceptance harness now pins its fixture plugin through `plugins`.
+
+## Logs and shutdown
+
+Engine processes write one JSON event per line to stdout. Every event includes `ts`, `level`, `msg`, `service`, `version`, `instance` and `environment`; events within an HTTP request also include `request_id`. `service` distinguishes `quivr.api`, `quivr.worker` and `quivr.migrate`. `version` reports the engine build version. Debug events are hidden at the default `info` level. Nonempty environment overrides take precedence over the JSON file; unknown levels and nonpositive grace periods refuse startup.
+
+Each completed public or probe HTTP request writes an access event with `route`, `method`, `status`, `duration_ms`, `response_size` (bytes written), `client_ip`, `api_key_id`, `error_code` and `request_id`. Routes are registered templates, with `unmatched` for unknown paths. For public requests, client IP follows the trusted proxy policy in `connector_push.trusted_proxy_cidrs`; otherwise it is the socket peer. Probe requests use the socket peer. The key ID is a 128-bit SHA-256 fingerprint of a bearer token present in the configured `keys`; it is empty for instance tokens and requests without a configured API key. No bearer token, request body, query string or arbitrary request path is logged.
+
+Lifecycle events use `event`: `quivr.start`, `quivr.ready`, `quivr.draining` and `quivr.stop`. Startup includes an allowlisted summary of effective process settings, with counts and enabled flags for sensitive configuration. Credentials, plugin settings and connection URLs are excluded. Raw error details are redacted at the logging boundary; use stable event and error codes for routing.
+
+On SIGTERM or SIGINT, readiness becomes `503` before drain begins. New public requests are refused, public listeners close, and admitted work can finish within one `shutdown_grace` budget. Probes remain available during the drain. Work still running at the deadline is canceled, open HTTP connections are closed, and unfinished durable work can resume on another worker. Streaming connections count as in-flight requests and may use the whole grace period. The final counter flush shares this deadline.
 
 ## Outbound TLS
 

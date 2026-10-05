@@ -68,6 +68,35 @@ func (m *Mux) HandleAlias(alias, target string) error {
 	return fmt.Errorf("route alias %s has no contract target %s", alias, target)
 }
 
+// Pattern resolves a registered template before authentication. Unmatched paths
+// never become log fields; aliases and unsupported methods use the same routes.
+func (m *Mux) Pattern(req *http.Request) string {
+	path := req.URL.Path
+	if target, ok := m.aliases[path]; ok {
+		path = target
+	}
+	parts := strings.Split(path, "/")
+	chosen, anyMethod := -1, -1
+	for i, r := range m.routes {
+		if _, ok := match(r.segments, parts); !ok {
+			continue
+		}
+		if anyMethod < 0 || r.specificity > m.routes[anyMethod].specificity {
+			anyMethod = i
+		}
+		if r.method == req.Method && (chosen < 0 || r.specificity > m.routes[chosen].specificity) {
+			chosen = i
+		}
+	}
+	if chosen >= 0 {
+		return m.routes[chosen].path
+	}
+	if anyMethod >= 0 {
+		return m.routes[anyMethod].path
+	}
+	return "unmatched"
+}
+
 func (m *Mux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 	if target, ok := m.aliases[path]; ok {

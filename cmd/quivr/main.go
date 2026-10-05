@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/online"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/cli"
 )
 
@@ -21,15 +23,40 @@ func main() {
 			os.Exit(online.Run(os.Args[1], os.Args[2:]))
 		}
 	}
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	slog.SetDefault(bootstrapLogger())
 	if len(os.Args) != 2 {
 		slog.Error(usage())
 		os.Exit(2)
 	}
 	if err := app.Run(os.Args[1]); err != nil {
-		slog.Error("process failed", "error", err)
+		// Keep startup failures useful without serializing dependency or
+		// configuration diagnostics that may contain credentials.
+		app.LogFailure(err)
 		os.Exit(1)
 	}
+}
+
+func bootstrapLogger() *slog.Logger {
+	options := logging.Options{
+		Level:       os.Getenv("QUIVR_LOG_LEVEL"),
+		Service:     "quivr",
+		Version:     plugins.EngineVersion,
+		Instance:    os.Getenv("QUIVR_INSTANCE"),
+		Environment: os.Getenv("QUIVR_ENVIRONMENT"),
+	}
+	logger, err := logging.New(os.Stdout, options)
+	if err == nil {
+		return logger
+	}
+	// An invalid environment value must never echo back into startup output.
+	options.Level = ""
+	logger, err = logging.New(os.Stdout, options)
+	if err == nil {
+		return logger
+	}
+	// os.Stdout is a valid writer and the fallback level is valid, so this is
+	// unreachable unless the constructor's contract changes.
+	return logger
 }
 
 // usage names every command, from the engine and online command tables.
