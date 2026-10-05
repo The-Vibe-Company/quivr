@@ -114,31 +114,31 @@ MLDR-fr, WebFAQ-fr, TREC-COVID and MKQA-fr are diagnostic because of saturation,
 small samples or proxy questions; restricted-licence sets are also diagnostic.
 Their scores remain reported. Diagnostics cannot supply the qualifying gain.
 
-Quality covers every query with relevance judgments using batched, cached embeddings. Fresh latency
-uses up to 50 serial queries, ordered by SHA-256 of the ID (ID breaks ties), after
-warming up the lexicographically first judged ID, which may also be timed.
-Both configurations use the same sample and resource class.
-Private comparisons prepare both indexes, then alternate baseline/candidate
-warmups and each sampled query (A/B/A/B). Public standalone runs remain serial.
-For public sets, `cost.latency_sample` records timed IDs, warmup ID and policy;
-`gates.latency.samples` echoes both and rejects missing or mismatched evidence.
-Private samples stay inside the runner; only
-the verified comparability boolean is published.
-P95 includes query embedding, retrieval and reranking; its limit is 1.2 times baseline.
-Serving price uses the fresh sample; warmup charges stay outside per-search metrics.
-`--cached-exploration` reuses query vectors and cannot pass the unmeasured latency gate.
+Quality uses every judged query with batched, cached embeddings. Fresh latency samples
+up to 50 queries in SHA-256 ID order, after warming up the first judged ID (also eligible).
+Public/private pairs prepare both indexes in one container with the same resources,
+then alternate baseline/candidate warmups and samples (A/B/A/B).
+Each candidate gets its own paired baseline; completed pairs replay without provider calls.
+A campaign-wide slot serializes trials including indexing and quality, preventing
+preparation from competing with latency. Busy trials return `leased` before paid dispatch;
+ambiguous detached calls retain the slot through their bounded startup/invocation lifetime.
+Public `cost.latency_sample` records sample/warmup IDs and policy; `gates.latency.samples`
+rejects missing/mismatched evidence. Private samples remain internal; comparability is published.
+P95 includes local embedding/retrieval/reranking and successful provider round trips;
+its limit is 1.2 times baseline. Retry HTTP, backoff, admission and ledger waits are excluded.
+`cost.search_timing_ms` reports their p50/p95, embedding/retrieval/rerank/wall time and
+`retried_samples`. Wall time includes lease renewal; the service timer starts after renewal.
+Warmup charges stay outside fresh serving price; `--cached-exploration` cannot pass latency.
 
 Price limits are $0.0005/search for `default`, $0.05/search for `deep`, and
 $10/1,000 original documents. Override `min_gain`, `latency_ratio`, `search_usd` or
 `index_usd` in `gates`. Serving includes query embedding, reranking and compute.
-Indexing covers all document windows, excluding quality-query preparation. Cached
-usage is repriced by input bounds and local compute time; campaign usage stays exact.
-Serving compute excludes provider HTTP, retry and ledger waits. Actual invocation
-spend remains in the Modal ledger. `cost.search_provider_usd` and
-`cost.search_compute_usd` split the average search price; `cost.search_timing_ms`
-reports provider and local p50/p95 alongside the end-to-end latency metric.
-Timing-versioned cache entries prevent reuse of earlier wall-time attributions.
-
+Indexing covers document windows, excluding quality-query preparation. Cached usage is
+repriced by input bounds and local compute time; campaign usage stays exact.
+Serving compute excludes provider HTTP, retry and ledger waits; actual invocation spend
+remains in the Modal ledger. `cost.search_provider_usd` and `cost.search_compute_usd`
+split the average search price; `cost.search_timing_ms` splits provider and local time.
+Timing-versioned caches prevent reuse of wall-time attributions.
 Admission and planning share the UTF-8 byte-plus-eight-token bound at frozen prices.
 Confirmed responses release unused reservations. This Azure hosted adapter settles
 429 rejections at zero; other failed/unknown attempts stay reserved. Successful

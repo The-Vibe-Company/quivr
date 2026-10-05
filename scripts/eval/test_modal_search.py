@@ -16,6 +16,9 @@ import uuid
 from unittest import mock
 
 import control_store
+import direct_bakeoff
+import results
+import trec
 import modal_search
 import protected_inputs
 import search_trial
@@ -217,6 +220,66 @@ class FailureLogging(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN'), 'requires disposable PostgreSQL')
 class Dispatch(unittest.TestCase):
+    def test_public_trial_pairs_fresh_samples_and_replays_both_records(self):
+        # Own public pairing at the dispatch/remote/publication boundary. Real
+        # SQL, cache, ranking and scorer; fake only mounts, dataset and provider I/O.
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1',
+                                          'dimensions': 2, 'dense_weight': .7})
+        policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
+            'baseline': dict(cfg, dense_weight=.5), 'price_revision': 'fixture-v1'})
+        campaign, served, calls, clock = uuid.uuid4().hex, [], [], [0.]
+        original_rank, original_measure, original_results = search_trial.SearchIndex.rank, search_trial.measure_pair, results.Results
+        def rank(index, query, *args, **kwargs):
+            served.append((index.cfg['dense_weight'], query))
+            clock[0] += .02
+            return original_rank(index, query, *args, **kwargs)
+        def provider(request, timeout):
+            calls.append(json.loads(request.data))
+            clock[0] += .1 + .001 * len(calls)
+            count = len(calls[-1]['texts'])
+            return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                'meta': {'billed_units': {'input_tokens': count}}}).encode())
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            trec.write(root / 'data', {'a': {'text': 'apple'}, 'b': {'text': 'pear'}},
+                {f'q{i:02}': f'apple question {i}' for i in range(20)},
+                {f'q{i:02}': {'a': 1} for i in range(20)})
+            def measure(configs, data, dataset, cache, *args, **kwargs):
+                return original_measure(configs, data, dataset, root / 'vectors', *args, **kwargs)
+            def outbox(*args, **kwargs):
+                return original_results(directory=root / 'outbox')
+            environment = {'EVAL_CONTROL_DATABASE_URL': store.dsn, 'AZURE_FOUNDRY_ENDPOINT': 'https://example.com',
+                           'AZURE_FOUNDRY_KEY': 'fixture-key', 'MLFLOW_TRACKING_URI': ''}
+            with mock.patch.dict(os.environ, environment), mock.patch('modal.Volume'), \
+                    mock.patch.object(modal_search.public_sets, 'prepare', return_value=root / 'data'), \
+                    mock.patch.object(search_trial, 'measure_pair', side_effect=measure), \
+                    mock.patch.object(results, 'Results', side_effect=outbox), \
+                    mock.patch.object(search_trial.SearchIndex, 'rank', rank), \
+                    mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                    mock.patch('urllib.request.OpenerDirector.open', side_effect=provider):
+                def run(config):
+                    return modal_search.dispatch(store, campaign, policy, config, 'scifact', 'a' * 40,
+                        'sha256:fixture', modal_search.remote_trial, root / 'local', True)
+                outcome = run(cfg)
+                self.assertEqual(outcome['status'], 'complete')
+                self.assertIn('baseline_record', outcome)
+                fresh = served[40:]
+                self.assertEqual([weight for weight, _ in fresh], [.5, .7] * 21)
+                self.assertTrue(all(a[1] == b[1] for a, b in zip(fresh[::2], fresh[1::2])))
+                baseline, candidate = outcome['baseline_record'], outcome['record']
+                self.assertEqual(baseline['machine'], candidate['machine'])
+                self.assertEqual(baseline['cost']['latency_sample'], candidate['cost']['latency_sample'])
+                self.assertLess(candidate['metrics']['latency_p95_ms'] / baseline['metrics']['latency_p95_ms'], 1.02)
+                before = len(calls)
+                replay = run(cfg)
+                self.assertEqual(replay['status'], 'reused')
+                self.assertEqual(len(calls), before)
+                self.assertEqual(replay['baseline_record'], baseline)
+                other = run(dict(cfg, dense_weight=.8))
+                self.assertNotEqual(other['baseline_record']['config'], baseline['config'],
+                                    'each candidate needs its own paired baseline identity')
+
     def test_launch_survives_network_gap_with_detached_app_and_one_paid_spawn_per_measurement(self):
         import modal
         store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
@@ -227,6 +290,11 @@ class Dispatch(unittest.TestCase):
         app, remote = mock.MagicMock(), mock.Mock()
         app.function.return_value = lambda _: remote
         app.app_id = 'ap-survivor'
+        launch_started = mock.Mock()
+        def run_app(**kwargs):
+            launch_started.assert_called_once_with()
+            return mock.MagicMock()
+        app.run.side_effect = run_app
         requests, attachments, waits = [], [], []
         calls = {}
         def spawn(request):
@@ -244,8 +312,11 @@ class Dispatch(unittest.TestCase):
                     'metrics': {'ndcg@10': .5, 'latency_p95_ms': 10, 'cost_per_search_usd': .0001,
                                 'cost_per_1000_documents_usd': 1},
                     'per_query': {'ndcg@10': {'q1': .5, 'q2': .5}}}
-                store.publish(campaign, request['lease_key'], request['owner'], row)
-                return row
+                baseline = {**row, 'config': {**policy['baseline'], 'paired_side': 'baseline',
+                    'paired_candidate_hash': search_trial.digest(request['config'])}}
+                row['provenance'] = {'public_pair': {
+                    'baseline_lease_key': request['lease_key'] + '/' + request['owner'] + '/baseline'}}
+                return search_trial.publish_pair(store, request, {'baseline': baseline, 'candidate': row})
             call = mock.Mock(object_id=identity)
             call.get.side_effect = get
             calls[identity] = call
@@ -257,6 +328,9 @@ class Dispatch(unittest.TestCase):
         def backoff(seconds):
             waits.append(seconds)
             self.assertEqual(len(requests), 1, 'network retries cannot create paid invocations')
+            blocked = modal_search.launch(policy, search_trial.configuration({'dense_weight': .8}), campaign, temp, True)
+            self.assertEqual(blocked['status'], 'leased')
+            self.assertEqual(len(requests), 1, 'another trial cannot spawn while the slot is held')
             import network_recovery
             # Zero admission wait proves the other parallel trial is refused
             # while this transport is disconnected, without sleeping.
@@ -270,18 +344,90 @@ class Dispatch(unittest.TestCase):
              mock.patch('modal.FunctionCall.from_id', side_effect=attach), \
              mock.patch('modal_search.shipped_trial'), \
              mock.patch('modal_search.subprocess.run', return_value=subprocess.CompletedProcess([], 0)), \
-             mock.patch('modal_search.subprocess.check_output', side_effect=[b'', 'a' * 40]), \
+             mock.patch('modal_search.subprocess.check_output', side_effect=lambda args, **kw: b'' if 'ls-files' in args else 'a' * 40), \
              mock.patch('time.sleep', side_effect=backoff):
             report = modal_search.launch(policy, search_trial.configuration({'dense_weight': .5}),
-                                         campaign, temp, True)
+                                         campaign, temp, True, on_launch=launch_started)
         app.run.assert_called_once_with(detach=True)
         self.assertEqual(waits, [1, 2])
-        self.assertEqual(attachments, ['fc-1', 'fc-1', 'fc-1', 'fc-2'])
-        self.assertEqual(len(requests), 2)
+        self.assertEqual(attachments, ['fc-1', 'fc-1', 'fc-1'])
+        self.assertEqual(len(requests), 1)
         self.assertEqual(len(report['work']), 2)
         self.assertEqual(store.summary(campaign)['modal']['unknown_usd'], 0)
         self.assertNotIn('provider', store.summary(campaign))
         self.assertTrue(store.reserve(campaign, 'provider', .01), 'admission resumes after reconnection')
+        self.assertEqual(store.claim(campaign, 'campaign-measurement-slot')['status'], 'claimed',
+                         'acknowledged completion releases the slot')
+
+    def test_slot_expiry_during_admission_creates_no_modal_reservation(self):
+        # Own dual-lease admission at dispatch. Simulate an admission wait by
+        # expiring only the slot in SQL; the later trial lease remains valid.
+        import network_recovery
+        import psycopg
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        campaign = uuid.uuid4().hex
+        policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
+            'price_revision': 'fixture-v1', 'max_seconds': 30, 'startup_seconds': 10})
+        store.campaign(campaign, modal_search.frozen_policy(policy, 'a' * 40, 'sha256:fixture'))
+        slot_key = 'campaign-measurement-slot'
+        slot = store.claim(campaign, slot_key, 40)
+        def expire():
+            with psycopg.connect(store.dsn) as db:
+                db.execute("UPDATE eval_control.leases SET expires_at=clock_timestamp() WHERE campaign=%s AND key=%s",
+                           (campaign, slot_key))
+        def refuse_spawn(request):
+            store.renew(campaign, slot_key, slot['owner'], 40)
+            self.fail('expired slot must refuse before invoking Modal')
+        invoke = mock.Mock(side_effect=refuse_spawn)
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(os.environ, MLFLOW_TRACKING_URI=''), \
+                mock.patch.object(network_recovery.admission(campaign), 'wait', side_effect=expire):
+            with self.assertRaises(control_store.LeaseLost):
+                modal_search.dispatch(store, campaign, policy, search_trial.configuration({}), 'scifact',
+                    'a' * 40, 'sha256:fixture', invoke, temp, True, measurement_slot=(slot_key, slot['owner']))
+        invoke.assert_not_called()
+        self.assertNotIn('modal', store.summary(campaign), 'unspawned work cannot consume a cap')
+
+    def test_campaign_slot_retains_detached_work_after_outage_or_owner_loss(self):
+        # Own slot failure lifecycle: losing an acknowledgement/owner cannot let
+        # another trial overlap detached work. Expiry uses SQL, never wall time.
+        import modal
+        import network_recovery
+        import psycopg
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
+            'price_revision': 'fixture-v1', 'max_seconds': 30, 'startup_seconds': 10})
+        for lost_owner in (False, True):
+            with self.subTest(lost_owner=lost_owner), tempfile.TemporaryDirectory() as temp:
+                campaign = uuid.uuid4().hex
+                app, remote, spawned = mock.MagicMock(), mock.Mock(), []
+                app.function.return_value = lambda _: remote
+                app.app_id = 'ap-detached'
+                label = mock.Mock(return_value='tracked-app')
+                def spawn(request):
+                    spawned.append(request)
+                    if not lost_owner:
+                        raise modal.exception.ConnectionError('lost acknowledgement')
+                    return mock.Mock(object_id='fc-detached')
+                remote.spawn.side_effect = spawn
+                def check():
+                    if lost_owner and spawned:
+                        raise control_store.LeaseLost('owner replaced')
+                with mock.patch.dict(os.environ, EVAL_CONTROL_DATABASE_URL=store.dsn), \
+                        mock.patch('modal.App', return_value=app), mock.patch('modal.Image'), \
+                        mock.patch('modal.Secret'), mock.patch('modal.Volume'), mock.patch('modal_search.shipped_trial'), \
+                        mock.patch('modal_search.subprocess.run', return_value=subprocess.CompletedProcess([], 0)), \
+                        mock.patch('modal_search.subprocess.check_output', side_effect=lambda args, **kw: b'' if 'ls-files' in args else 'a' * 40):
+                    with self.assertRaises(control_store.LeaseLost if lost_owner else network_recovery.Outage):
+                        modal_search.launch(policy, search_trial.configuration({}), campaign, temp, True, check=check, app_name=label)
+                    blocked = modal_search.launch(policy, search_trial.configuration({'dense_weight': .5}), campaign, temp, True, app_name=label)
+                    self.assertEqual(blocked['status'], 'leased')
+                    self.assertEqual(len(spawned), 1)
+                    self.assertEqual(app.run.call_count, 1, 'busy trials must not start paid apps')
+                    label.assert_called_once()
+                with psycopg.connect(store.dsn) as db:
+                    db.execute("UPDATE eval_control.leases SET expires_at=clock_timestamp() WHERE campaign=%s AND key=%s",
+                               (campaign, 'campaign-measurement-slot'))
+                self.assertEqual(store.claim(campaign, 'campaign-measurement-slot')['status'], 'claimed')
 
     def test_compute_cap_precedes_second_call_and_completed_result_is_replayed(self):
         store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])

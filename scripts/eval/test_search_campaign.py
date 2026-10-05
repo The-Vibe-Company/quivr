@@ -91,6 +91,56 @@ class Lifecycle(unittest.TestCase):
         self.store = campaign_store.CampaignStore(self.dsn)
         self.store.register(self.value, 'a' * 40, 'sha256:fixture')
 
+    def test_busy_measurement_allocates_no_compute_intent(self):
+        # Own intent lifecycle at the supervisor adapter; a busy slot should
+        # leave nothing for the watchdog. Only Modal launch/termination is fake.
+        import campaign_compute
+        name = self.value['name']
+        owner = self.store.acquire(name)
+        slot_key = 'campaign-measurement-slot'
+        slot = self.store.claim(name, slot_key)
+        compute = mock.Mock()
+        compute.running.return_value = False
+        with tempfile.TemporaryDirectory() as temp:
+            measure = campaign_compute.Measurement(self.store, name, owner, temp, compute)
+            def launch(*args, **kwargs):
+                if not admitted[0]:
+                    return {'status': 'leased'}
+                self.assertTrue(kwargs['app_name']((slot_key, slot['owner'])))
+                if fail_setup[0]:
+                    # Known local setup failure before any AppCreate attempt.
+                    with self.store.transaction() as db:
+                        db.execute('UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp() WHERE campaign=%s', (name,))
+                    raise control_store.LeaseLost('setup lost its owner')
+                kwargs['on_launch']()
+                kwargs['on_app']('ap-tracked')
+                return {'status': 'rejected'}
+            admitted, fail_setup = [False], [False]
+            with mock.patch('modal_search.launch', side_effect=launch):
+                self.assertEqual(measure({})['status'], 'leased')
+                self.assertEqual(self.store.snapshot(name).get('resources', {}), {})
+                compute.stop.assert_not_called()
+                admitted[0] = True
+                with self.store.transaction() as db:
+                    db.execute('UPDATE eval_control.leases SET expires_at=clock_timestamp() WHERE campaign=%s AND key=%s', (name, slot_key))
+                with self.assertRaises(control_store.LeaseLost):
+                    measure({})
+                self.assertEqual(self.store.snapshot(name).get('resources', {}), {})
+                compute.stop.assert_not_called()
+                slot = self.store.claim(name, slot_key)
+                fail_setup[0] = True
+                with self.assertRaises(control_store.LeaseLost):
+                    measure({})
+                resources = list(self.store.snapshot(name)['resources'].values())
+                self.assertEqual([r['status'] for r in resources], ['closed'])
+                compute.stop.assert_not_called()
+                fail_setup[0] = False
+                self.assertEqual(measure({})['status'], 'rejected')
+            resources = list(self.store.snapshot(name)['resources'].values())
+            self.assertEqual(len(resources), 2)
+            self.assertTrue(all(r['status'] == 'closed' for r in resources))
+            compute.stop.assert_called_once_with('ap-tracked')
+
     def test_network_gap_recovers_same_owner_and_watchdog_fences_cleanup_after_grace(self):
         import psycopg
         import search_campaign
