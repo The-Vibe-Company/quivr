@@ -57,9 +57,11 @@ Each dependency accepts these optional fields:
 | `ca_file` | System roots | Readable PEM CA bundle path, added to system roots. |
 | `cert_file` | None | PEM client certificate path, configured with `key_file`. Refused for plugins. |
 | `key_file` | None | Matching PEM private key path. Refused for plugins. |
-| `server_name` | Endpoint host | Certificate name to verify and send as TLS server name. |
+| `server_name` | Endpoint host | DNS hostname or IP address to verify; DNS names are also sent as TLS server name. |
 
 Temporal defaults to plaintext; enable it with `tls.temporal.enabled: true`. Its address stays `host:port`. Weaviate and S3 select TLS from their `https://` endpoint when `enabled` is omitted. An explicit switch never rewrites a URL: `true` requires HTTPS and `false` requires HTTP. TLS settings on a disabled connection refuse startup.
+
+Weaviate and S3 redirects must stay on the endpoint's origin (scheme, hostname and port). Redirects to plaintext or another origin are refused before connecting, so client certificates remain with the configured dependency.
 
 PostgreSQL uses `database_url` when `tls.postgres` is omitted: `sslmode=verify-full` verifies the certificate and hostname, with system roots unless the URL supplies `sslrootcert`. `sslmode=disable` selects plaintext. Opportunistic or unverified modes (`prefer`, the driver's default, `allow`, `require`, `verify-ca`) are refused. Explicit `tls.postgres` settings override the URL's TLS policy for every configured host and remove plaintext fallbacks; omitted `enabled` with certificate settings enables TLS. Prefer configuring trust in one place. URL certificate file options are still parsed, so remove obsolete file paths when switching to `tls.postgres`.
 

@@ -7,6 +7,9 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,22 +56,58 @@ func TestTLSAuthenticatesBothPeers(t *testing.T) {
 	}
 }
 
-// A trusted HTTPS endpoint cannot downgrade a dependency call via a redirect.
-func TestTLSRedirectCannotReachPlaintext(t *testing.T) {
-	reached := false
-	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true }))
+// Redirects cannot downgrade a call or disclose its client identity to another
+// origin; redirects within the dependency's origin still work.
+func TestTLSRedirectStaysOnDependency(t *testing.T) {
+	f := tlsfixture.New(t)
+	var reached atomic.Bool
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached.Store(true) }))
 	defer plain.Close()
-	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, plain.URL, http.StatusTemporaryRedirect)
-	}))
-	defer secure.Close()
-	client := secure.Client()
-	client.CheckRedirect = outbound.CheckRedirect
-	response, err := client.Get(secure.URL)
-	if response != nil {
-		response.Body.Close()
+	other := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	other.TLS = &tls.Config{
+		Certificates: []tls.Certificate{f.Server}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: f.Roots,
+		VerifyConnection: func(tls.ConnectionState) error { reached.Store(true); return nil },
 	}
-	if err == nil || reached {
-		t.Fatalf("downgrade error=%v plaintext reached=%v", err, reached)
+	other.StartTLS()
+	defer other.Close()
+	secure := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/done" {
+			w.WriteHeader(204)
+			return
+		}
+		http.Redirect(w, r, r.URL.Query().Get("target"), http.StatusTemporaryRedirect)
+	}))
+	secure.TLS = &tls.Config{Certificates: []tls.Certificate{f.Server}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: f.Roots}
+	secure.StartTLS()
+	defer secure.Close()
+	config, err := (outbound.TLS{CAFile: f.CAFile, ServerName: "dependency.test", CertFile: f.CertFile, KeyFile: f.KeyFile}).Build(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := outbound.Transport(config)
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, CheckRedirect: outbound.CheckRedirect, Timeout: time.Second}
+	for _, tc := range []struct{ name, target, refusal string }{
+		{"plaintext", plain.URL, "plaintext"},
+		{"different TLS origin", other.URL, "origin"},
+		{"same origin", secure.URL + "/done", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reached.Store(false)
+			response, err := client.Get(secure.URL + "?target=" + url.QueryEscape(tc.target))
+			if response != nil {
+				response.Body.Close()
+			}
+			if tc.refusal == "" {
+				if err != nil || response.StatusCode != 204 {
+					t.Fatalf("same-origin redirect response=%v error=%v", response, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.refusal) {
+				t.Fatalf("redirect error=%v, want %s refusal", err, tc.refusal)
+			}
+			if reached.Load() {
+				t.Fatal("redirect reached another origin or sent it the client certificate")
+			}
+		})
 	}
 }

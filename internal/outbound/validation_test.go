@@ -29,6 +29,12 @@ func TestMalformedTLSSettingsAreRefused(t *testing.T) {
 		"key without certificate": {outbound.TLS{KeyFile: f.KeyFile}, "cert_file"},
 		"mismatched identity":     {outbound.TLS{CertFile: f.CertFile, KeyFile: other.KeyFile}, "cert_file"},
 		"URL as server name":      {outbound.TLS{ServerName: "https://dependency.test"}, "server_name"},
+		"invalid name character":  {outbound.TLS{ServerName: "db?.internal"}, "server_name"},
+		"empty DNS label":         {outbound.TLS{ServerName: "db..internal"}, "server_name"},
+		"leading DNS hyphen":      {outbound.TLS{ServerName: "-db.internal"}, "server_name"},
+		"trailing DNS hyphen":     {outbound.TLS{ServerName: "db-.internal"}, "server_name"},
+		"oversized DNS label":     {outbound.TLS{ServerName: strings.Repeat("a", 64) + ".internal"}, "server_name"},
+		"oversized DNS name":      {outbound.TLS{ServerName: strings.Repeat(strings.Repeat("a", 63)+".", 4)}, "server_name"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := tc.settings.Build(true)
@@ -54,9 +60,20 @@ func TestTLSSwitchCannotDisagreeWithEndpoint(t *testing.T) {
 		{"http://localhost", &enabled, false},
 		{"ftp://dependency.test", nil, false},
 	} {
-		_, err := (outbound.TLS{Enabled: tc.enabled}).ForURL(tc.endpoint)
+		config, err := (outbound.TLS{Enabled: tc.enabled}).ForURL(tc.endpoint)
 		if (err == nil) != tc.ok {
 			t.Fatalf("endpoint %s enabled=%v error=%v want valid=%v", tc.endpoint, tc.enabled, err, tc.ok)
+		}
+		if tc.ok && (config != nil) != strings.HasPrefix(tc.endpoint, "https://") {
+			t.Fatalf("endpoint %s TLS config present=%v", tc.endpoint, config != nil)
+		}
+	}
+}
+
+func TestTLSServerNamesAcceptDNSAndIPAddresses(t *testing.T) {
+	for _, name := range []string{"", "localhost", "db.internal", "DB.internal.", "127.0.0.1", "::1", "2001:db8::1", strings.Repeat("a", 63) + ".internal"} {
+		if _, err := (outbound.TLS{ServerName: name}).Build(true); err != nil {
+			t.Fatalf("valid server name %q refused: %v", name, err)
 		}
 	}
 }

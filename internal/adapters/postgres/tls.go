@@ -14,19 +14,21 @@ import (
 func PoolConfig(dsn string, settings outbound.TLS) (*pgxpool.Config, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
+		// Parse errors may include connection-string contents. Keep credentials
+		// out of startup logs even when the supplied DSN is malformed.
 		return nil, errors.New("postgres TLS/configuration is invalid; check database_url and certificate paths")
 	}
 	native := settings.Enabled == nil && !settings.HasSettings()
 	if native {
 		if config.ConnConfig.TLSConfig != nil {
 			if config.ConnConfig.TLSConfig.InsecureSkipVerify {
-				return nil, errors.New("postgres TLS: database_url must use sslmode=verify-full or explicit tls.postgres settings")
+				return nil, errors.New("postgres TLS: unverified modes, including the default sslmode=prefer, are refused; use sslmode=verify-full, sslmode=disable for plaintext, or explicit tls.postgres settings")
 			}
 			config.ConnConfig.TLSConfig.MinVersion = tls.VersionTLS12
 		}
 		for _, fallback := range config.ConnConfig.Fallbacks {
 			if (fallback.TLSConfig == nil) != (config.ConnConfig.TLSConfig == nil) || (fallback.TLSConfig != nil && fallback.TLSConfig.InsecureSkipVerify) {
-				return nil, errors.New("postgres TLS: plaintext or unverified SSL fallback refused; use sslmode=verify-full or explicit tls.postgres settings")
+				return nil, errors.New("postgres TLS: plaintext or unverified SSL fallback refused; use sslmode=verify-full, sslmode=disable for plaintext, or explicit tls.postgres settings")
 			}
 			if fallback.TLSConfig != nil {
 				fallback.TLSConfig.MinVersion = tls.VersionTLS12
