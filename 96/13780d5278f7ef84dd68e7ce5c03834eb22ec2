@@ -1,0 +1,153 @@
+internal/orchestration/temporal/ingestion.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 6,151,164
+docs-site/run-quivr/deploy.mdx
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 78-79
+internal/transport/httpapi/monitoring_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 6,228-238,274-294,310-327
+quivr-search/README.md
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 74-84
+quivr-search/src/admin.css
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1030-1044
+quivr-search/src/components/admin/Bottlenecks.tsx
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 86,88-89,91-95
+quivr-search/tests/perf-check.test.mjs
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-63
+internal/adapters/s3/tls_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-38
+internal/adapters/s3/tls.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-15
+sdks/python/src/quivr_plugin/schema.py
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 5,48-56,59-60
+quivr-search/perf/budgets.json
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-36
+docs-site/run-quivr/tls.mdx
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-55
+internal/orchestration/temporal/client.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-17
+internal/testutil/tlsfixture/tlsfixture.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-66
+internal/publicerr/catalog.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 112
+quivr-search/tests/server.test.mjs
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 7-8,538-540,1093-1166
+  s_c21c70c5aa40f0::t_a5ddb8004a2b52 1167-1168
+internal/plugins/devhost/transport.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-22
+quivr-search/perf/bundle-budget.mjs
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-31
+contracts/http/v0/openapi.yaml
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 288-291,1700-1701,1704-1706
+internal/adapters/postgres/tls.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-73
+docs/reference/http-api.md
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 923
+quivr-search/src/main.tsx
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 5,12-13
+internal/app/tls.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-85
+README.md
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 89-92
+client/client.gen.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 4362,4368,6118,6134,11460,11468,17304,17318
+internal/monitoring/monitoring.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 243
+docs-site/openapi.yaml
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1000-1004,2621-2625
+docs-site/docs.json
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 63
+internal/outbound/validation_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-79
+quivr-search/perf/measure.mjs
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-294
+quivr-search/src/components/alerts/AlertPreview.tsx
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 67-75,143-145
+internal/orchestration/temporal/client_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-69
+internal/outbound/tls.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-140
+quivr-search/perf/check.mjs
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-30
+quivr-search/alerts.mjs
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 344-378,587,589,600,603-611
+internal/adapters/pluginhttp/tls_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-55
+internal/adapters/weaviate/tls_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-54
+quivr-search/tests/alerts.test.mjs
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 12,17-29,39-40,174-175,205,648-676
+quivr-search/src/dashboard.css
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1146-1162
+quivr-search/src/lib/workspace.ts
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 13-15,66-97,109,116-117,120-121,124,185
+scripts/fake_feeds.py
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 14-15,20,76-79,99-120
+  s_c21c70c5aa40f0::t_85e01e3cc78b9d 121-122
+internal/monitoring/preview_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 9,167-226
+quivr-search/server.mjs
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 3,5-7,186-188,190-201,250-286,289-340,342-345,347-356,481-484,523,549,557,563,567,572,576,580,588-598,610,694,707,720,725-732,734,736,749
+internal/monitoring/preview.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 21-23,38-40,103,107-118,121,126-128,183,187,195,217-219
+internal/transport/httpapi/api.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 339-350,383,388,399,404
+quivr-search/src/lib/search.ts
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 19-28,35-57
+internal/app/run.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 38,50,206-209,347-351,359-363,394-397,770
+Makefile
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 2,15-17
+scripts/demo_perf.py
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-92
+internal/transport/httpapi/monitoring.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 284,291,442-446
+sdks/python/tests/test_server.py
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 3,135-144
+  s_c21c70c5aa40f0::t_cd4ddc65356ef8 145
+docs-site/reference/configuration.mdx
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 13,17,48-70
+  s_c21c70c5aa40f0::t_a45535eee1f956 71
+internal/adapters/weaviate/tls.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-18
+quivr-search/package.json
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 8,12-13
+quivr-search/src/App.tsx
+  s_c21c70c5aa40f0::t_270c8df36fcb0a 592,634
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 2,4-6,26,39-62,109-130,288,554-591,593-633,635-644,654-672
+scripts/demo.py
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 14,24,27-31,46,56-57,66-67,100-101,107,120-127
+internal/plugins/devhost/devhost.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 173,479
+quivr-search/src/components/feed/FeedPage.tsx
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 3-4,466-477,613-624,633,639-640,1005,1028,1116,1122-1123,1132-1161,1178,1199,1213,1261-1262
+  s_c21c70c5aa40f0::t_3100b5fb9d5df1 1263
+quivr-search/tests/alerts.spec.ts
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 25,40-50,67,83-84,94-95,247,259-262
+quivr-search/tests/dashboard.spec.ts
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 650-667
+internal/outbound/tls_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-113
+internal/app/tls_config_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-48
+internal/adapters/postgres/tls_test.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 1-66
+internal/adapters/s3/blobs.go
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 15,33-36
+quivr-search/vite.config.ts
+  s_c21c70c5aa40f0::t_5cf77a3cdadfaf 6-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9613780d5278f7ef84dd68e7ce5c03834eb22ec2",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}
