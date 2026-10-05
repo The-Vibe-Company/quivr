@@ -35,8 +35,15 @@ function insert(query: string, start: number, end: number, hint: string): [strin
   // A selection is what the operator applies to: NOT football, source:nom.
   // Several words stay together: NOT (marché aux fleurs), source:"Météo locale".
   if (selected) {
-    const several = /\s/u.test(selected.trim()) && !/^[("].*[)"]$/su.test(selected.trim());
-    const operand = !several ? selected : hint === "source:" ? `"${selected.trim()}"` : hint === "NOT" ? `(${selected.trim()})` : selected;
+    const text = selected.trim();
+    const several = /\s/u.test(text);
+    // Extra brackets are harmless; a value keeps its own quotes escaped.
+    const operand =
+      several && hint === "NOT"
+        ? `(${text})`
+        : several && hint === "source:" && !/^"[^"]*"$/u.test(text)
+          ? `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+          : selected;
     return [head + operand + after, head.length, head.length + operand.length];
   }
   const tail = after.replace(/^\s+/, "");
