@@ -22,8 +22,15 @@ test("a refusal among successful samples is the endpoint's status", () => {
   assert.equal(worstStatus([200, 404, 503]), 404);
 });
 
-test("numbers within every budget break none", () => {
+test("numbers within every budget break none, a limit reached included", () => {
   assert.deepEqual(breaches(report(), budgets, { local: true }), []);
+  // Budgets are "at most", as Core Web Vitals rate 2.5 s, 200 ms or 0.1 as good.
+  const atLimit = report({
+    pages: { Fil: { lcp_ms: 2000, cls: 0.1, js_kb: 130 } },
+    inp_ms: 200,
+    endpoints: { "GET /demo/feed": { status: 200, p95_ms: 150 } },
+  });
+  assert.deepEqual(breaches(atLimit, budgets, { local: true }), []);
 });
 
 test("each page, INP and endpoint limit is checked; endpoint times only on the local stack", () => {
