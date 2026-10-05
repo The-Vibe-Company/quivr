@@ -27,6 +27,7 @@ import { Notice } from "./components/ui";
 import { APIError, login, searchProfiles, session } from "./lib/search";
 import { offersDeep } from "./lib/deep";
 import { useAlertList, useConnectorList, useFeedStream } from "./lib/workspace";
+import { catches } from "./lib/alerts";
 import { useReadState } from "./lib/readState";
 import { rememberSourceNames } from "./lib/sourceNames";
 import { groupSources } from "./components/connectors/SourceList";
@@ -304,10 +305,11 @@ function Dashboard({
     return () => window.removeEventListener("keydown", listener);
   }, [adding]);
 
-  // Articles an alert caught that this browser has not read yet.
-  const alertCount = alerts.list?.available
-    ? feed.items.filter((item) => alerts.list!.matched[item.record_id]?.length && reading.isUnread(item)).length
-    : 0;
+  // Articles an alert caught that this browser has not read yet, dated by
+  // the facade's index (every catch, not only the feed's latest articles).
+  const caught = useMemo(() => catches(alerts.list, feed.items).byRecord, [alerts.list, feed.items]);
+  let alertCount = 0;
+  for (const item of caught.values()) if (reading.isUnread(item)) alertCount += 1;
   const toCheck = groupSources(sources.connectors).filter((c) =>
     needsCheck(displayState(c)),
   ).length;
@@ -572,7 +574,6 @@ function Dashboard({
         <ConnectorsView
           corpus={corpus}
           feedItems={feed.items}
-          matched={alerts.list?.matched || {}}
           initialSelected={openSource}
           onChanged={() => void sources.reload()}
           onAdd={() => setAdding(true)}

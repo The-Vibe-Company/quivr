@@ -22,13 +22,14 @@ import { CreateConnector } from "./CreateConnector";
 import { ConnectorDetail } from "./ConnectorDetail";
 import { Dialog } from "../Dialog";
 import { AddSource } from "./AddSource";
-import { SourceList, groupSources, nameOf } from "./SourceList";
+import { NO_ARTICLES, SourceList, groupSources, nameOf, type SourceStats } from "./SourceList";
 import { PlusIcon } from "../RailIcons";
 import { LiveBadge, LoadingState, Notice } from "../ui";
 import type { FeedItem } from "../../lib/feed";
 import { needsCheck } from "../../lib/format";
 import { displayState } from "./HealthBadge";
-import type { SourceStats } from "./SourceList";
+import { useNumbers } from "../../lib/numbers";
+import { fetchSourceStats, weekBounds } from "../../lib/stats";
 
 const LIVE_INTERVAL = 5000;
 // How often a retried source is read until its check is recorded.
@@ -39,7 +40,6 @@ type Status = "loading" | "ready" | "unavailable" | "error";
 export function ConnectorsView({
   corpus,
   feedItems,
-  matched,
   initialSelected,
   onChanged,
   onAdd,
@@ -47,10 +47,8 @@ export function ConnectorsView({
   onUnauthorized,
 }: {
   corpus: string;
-  /** The feed, for each source's article counts. */
+  /** The feed's latest articles: their arrival counts again. */
   feedItems: FeedItem[];
-  /** Record id → alerts that caught it. */
-  matched: Record<string, string[]>;
   /** A source to open on arrival (from the feed's "Renouveler"). */
   initialSelected: string | null;
   onChanged: () => void;
@@ -316,15 +314,25 @@ export function ConnectorsView({
       onChanged();
     });
 
-  const stats = new Map<string, SourceStats>();
-  for (const item of feedItems) {
-    const s = stats.get(item.namespace) || { all: 0, caught: 0, times: [] };
-    s.all += 1;
-    if (matched[item.record_id]?.length) s.caught += 1;
-    const at = item.received_at || item.published_at;
-    if (at) s.times.push(at);
-    stats.set(item.namespace, s);
-  }
+  // Each source's numbers, counted by the facade over every article.
+  const week = weekBounds(now);
+  const counted = useNumbers(
+    week.join(","),
+    (signal) => fetchSourceStats(week, signal),
+    onUnauthorized,
+    feedItems,
+  );
+  // Only numbers for this week; while the facade still indexes, a source it
+  // has not reached yet stays uncounted rather than zero.
+  const stats = counted?.current
+    ? new Map<string, SourceStats>(
+        Object.entries(counted.value.sources).map(([namespace, s]) => [
+          namespace,
+          { all: s.all, caught: s.caught, week: [...s.days].reverse(), first: s.first },
+        ]),
+      )
+    : null;
+  const whole = !!counted?.current && !counted.value.building;
   const toCheck = sources.filter((c) => needsCheck(displayState(c))).length;
 
   return (
@@ -391,6 +399,7 @@ export function ConnectorsView({
               sources={sources}
               kindOf={kindOf}
               stats={stats}
+              whole={whole}
               highlight={highlight}
               now={now}
               onOpen={setSelected}
@@ -498,7 +507,7 @@ export function ConnectorsView({
           connector={current}
           kind={kindOf(current.kind)}
           catalog={catalog}
-          stats={stats.get(current.source_namespace)}
+          stats={stats && (stats.get(current.source_namespace) || (whole ? NO_ARTICLES : null))}
           now={now}
           onClose={() => setSelected(null)}
           onChanged={(c) => {

@@ -49,7 +49,7 @@ export function useReadState() {
   const [state, setState] = useState(load);
   const read = useMemo(() => new Set(state.read), [state.read]);
   const isUnread = useCallback(
-    (item: FeedItem) => {
+    (item: Pick<FeedItem, "record_id" | "version_id" | "received_at" | "published_at">) => {
       const at = item.received_at || item.published_at;
       return !!at && at > state.since && !read.has(id(item));
     },
@@ -74,5 +74,20 @@ export function useReadState() {
       return next;
     });
   }, []);
-  return { isUnread, markRead, markAllRead };
+  // "Tout marquer comme lu" with nothing picked: every article so far, the
+  // ones the page never loaded included, so the counts Quivr gives agree.
+  const markEverythingRead = useCallback(() => {
+    const next = { since: new Date().toISOString(), read: [] };
+    save(next);
+    setState(next);
+  }, []);
+  return {
+    isUnread,
+    markRead,
+    markAllRead,
+    markEverythingRead,
+    /** For the facade's counts: the first visit and the articles read since. */
+    since: state.since,
+    readIds: state.read,
+  };
 }
