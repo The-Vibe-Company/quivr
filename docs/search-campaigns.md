@@ -102,12 +102,14 @@ restart or `resume`. Ownership leases last 120 seconds and renew every 10 second
 exhaustion, the end timestamp, an operator stop or the trial limit ends the campaign.
 SQL admission checks every paid reservation against the same shared caps. The
 watchdog checks independently of a blocked measurement. Trials reserve cache entries
-in SQL before validating files, so file reads do not hold the campaign row lock. SQL lock conflicts
-and timeouts retry with exponential backoff from 1 to 10 seconds within a 30-second
-retry window. If contention persists, the supervisor and watchdog defer their next
-pass; `--once` returns `status: retrying` without new paid work. A normal process
-continues when contention clears. An unreachable database refuses further paid
-admission; there is no local budget fallback.
+in SQL before validating files, so file reads do not hold the campaign row lock.
+Unpaid cache reservations expire within ten minutes if release fails; leases extend
+for paid work only after validation. SQL lock conflicts and timeouts retry with
+exponential backoff from 1 to 10 seconds within a 30-second retry window.
+Persistent contention defers supervisor/watchdog passes. Their `--once` mode returns
+`status: retrying` and exit 0; other incomplete commands return `retrying` and exit 2.
+Normal processes continue when contention clears. An unreachable database refuses
+further paid admission; there is no local budget fallback.
 
 `status` returns aggregate trial reports, the Pareto trial numbers/objectives,
 confirmed plus uncertain ledger amounts, held-out reads left and `cleanup_pending`.

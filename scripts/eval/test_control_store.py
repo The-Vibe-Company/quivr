@@ -317,12 +317,16 @@ class Control(unittest.TestCase):
         try:
             with self.assertLogs('control_store', level='WARNING') as messages:
                 with self.assertRaisesRegex(ValueError, '^cache validation failed$'):
-                    with self.store.claim_batch(self.name, ['release-outage']) as claims:
+                    with self.store.claim_batch(self.name, ['release-outage'], ttl=86400) as claims:
                         self.store.dsn = 'postgresql://localhost:1/absent?connect_timeout=1'
                         raise ValueError('cache validation failed')
             self.assertEqual(messages.output, ['WARNING:control_store:unpublished claim release deferred; store unavailable or contended'])
         finally:
             self.store.dsn = dsn
+        import psycopg
+        with psycopg.connect(dsn) as db:
+            remaining = db.execute("SELECT extract(epoch FROM expires_at-clock_timestamp()) FROM eval_control.leases WHERE campaign=%s AND key='release-outage'", (self.name,)).fetchone()[0]
+        self.assertLessEqual(remaining, 600)
         # A failed compensation retains its fence, then can be released later.
         self.assertEqual(self.store.claim(self.name, 'release-outage')['status'], 'leased')
         self.store.release_many(self.name, {'release-outage': claims['release-outage']['owner']})

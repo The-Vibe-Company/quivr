@@ -498,18 +498,23 @@ def public_status(store, name, study=None):
 
 def supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_requested=None,
               confirmation_adapter=None):
-    recovering = False
+    previous_owner = None
+    def acquired(owner):
+        nonlocal previous_owner
+        previous_owner = owner
     while True:
         try:
-            return _supervise(store, name, study, outbox, once=once, poll_seconds=poll_seconds,
-                              stop_requested=stop_requested, confirmation_adapter=confirmation_adapter)
+            try:
+                return _supervise(store, name, study, outbox, once=once, poll_seconds=poll_seconds,
+                                  stop_requested=stop_requested, confirmation_adapter=confirmation_adapter,
+                                  owner_acquired=acquired)
+            except control_store.LeaseBusy:
+                # Only our own failed release is recoverable. Refuse another
+                # live supervisor even after an earlier contention episode.
+                if previous_owner is None or store.snapshot(name)['owner'] != previous_owner:
+                    raise
         except control_store.Contention:
-            recovering = True
-        except control_store.LeaseBusy:
-            # A failed release after contention can leave our prior lease live.
-            # Wait for fenced cleanup rather than treating it as a new failure.
-            if not recovering:
-                raise
+            pass
         if once:
             return retrying_status(name)
         time.sleep(poll_seconds)
@@ -520,7 +525,7 @@ def retrying_status(name):
 
 
 def _supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_requested=None,
-               confirmation_adapter=None):
+               confirmation_adapter=None, owner_acquired=None):
     import campaign_store
     import campaign_compute
     compute = campaign_compute.ModalCompute()
@@ -547,6 +552,8 @@ def _supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_
             time.sleep(poll_seconds)
             continue
         owner = store.acquire(name)
+        if owner_acquired:
+            owner_acquired(owner)
         try:
             loop = Loop(store, name, owner, study, campaign_compute.Measurement(store, name, owner, outbox, compute))
             with guard(store, name, owner, compute, stop_requested):
@@ -720,7 +727,7 @@ def main(argv=None):
         return 0
     except control_store.Contention:
         print(results.encode(retrying_status(name)))
-        return 0
+        return 2
     except campaign_store.CleanupPending:
         print(results.encode({'status': 'cleanup_pending', 'reason': 'compute termination is not acknowledged; retry stop or watchdog'}))
         return 2

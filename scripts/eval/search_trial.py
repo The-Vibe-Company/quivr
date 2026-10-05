@@ -229,7 +229,7 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                             # Claims commit before volume I/O; validation failure
                             # releases claims across the unstarted wave.
                             claims = validation.enter_context(budget.store.claim_batch(
-                                budget.campaign, keyed, ttl=86400, require_available=True))
+                                budget.campaign, keyed, ttl=control_store.VALIDATION_LEASE_TTL, require_available=True))
                             for cache_key, text in keyed.items():
                                 claim = claims[cache_key]
                                 if claim['status'] == 'done':
@@ -250,13 +250,16 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                         LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
                     if pending:
                         if not dataset['private']:
-                            budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=86400)
+                            budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=control_store.VALIDATION_LEASE_TTL)
                         budget.store.renew(budget.campaign, *budget.lease)
                         wave.append(pending)
             if wave:
                 task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease) for _ in wave]
                 def fill(item):
                     pending, task_budget = item
+                    if not dataset['private']:
+                        # Extend only validated work, immediately before admission.
+                        budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=86400)
                     texts = [piece for _, pieces, _, _ in pending for piece in pieces]
                     if cfg['model'] == direct.E5_MODEL:
                         vectors, compute_seconds, _ = embed(texts, mode)

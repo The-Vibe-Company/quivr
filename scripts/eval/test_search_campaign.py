@@ -170,7 +170,7 @@ class Lifecycle(unittest.TestCase):
             with self.subTest(operation=operation), connect(self.dsn) as blocker:
                 blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
                 def bounded(*args, **kwargs):
-                    kwargs['options'] = '-c ' + timeout + '=25'
+                    kwargs['options'] = '-c statement_timeout=10000 -c ' + timeout + '=25'
                     return connect(*args, **kwargs)
                 waits = []
                 def backoff(delay):
@@ -208,7 +208,7 @@ class Lifecycle(unittest.TestCase):
         with connect(self.dsn) as blocker:
             blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
             def bounded(*args, **kwargs):
-                kwargs['options'] = '-c lock_timeout=25'
+                kwargs['options'] = '-c statement_timeout=10000 -c lock_timeout=25'
                 return connect(*args, **kwargs)
             def backoff(delay):
                 waits.append(delay)
@@ -227,7 +227,37 @@ class Lifecycle(unittest.TestCase):
                 status = search_campaign.supervise(self.store, name, None, '.', once=True)
             self.assertEqual(status['status'], 'retrying')
             self.assertEqual(waits, [1])
+            for command, expected in ((['stop', name, '--allow-paid'], 2), (['status', name], 2),
+                                      (['digest', name], 2), (['watchdog', name, '--allow-paid', '--once'], 0)):
+                clock[0], waits[:] = 0, []
+                with self.subTest(command=command), mock.patch.dict(os.environ, EVAL_CONTROL_DATABASE_URL=self.dsn, CI='false', GITHUB_ACTIONS='false'), \
+                     mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                     mock.patch('time.sleep', side_effect=backoff), mock.patch('sys.stdout', new_callable=io.StringIO) as output:
+                    self.assertEqual(search_campaign.main(command), expected)
+                    self.assertEqual(json.loads(output.getvalue())['status'], 'retrying')
+                self.assertEqual(waits, [1])
             blocker.rollback()
+            self.assertIsNone(self.store.availability(name)['stopped'])
+            blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
+            clock[0], waits[:] = 0, []
+            foreign_owner = []
+            def takeover(delay):
+                waits.append(delay)
+                if delay == 7:
+                    blocker.rollback()
+                    if not foreign_owner:
+                        foreign_owner.append(self.store.acquire(name))
+                else:
+                    clock[0] += 31
+                if len(waits) > 2:
+                    self.fail('supervisor silently retried another live owner')
+            with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                 mock.patch('time.sleep', side_effect=takeover):
+                with self.assertRaises(control_store.LeaseBusy):
+                    search_campaign.supervise(self.store, name, None, '.', poll_seconds=7)
+            self.assertEqual(waits, [1, 7])
+            self.assertEqual(self.store.snapshot(name)['owner'], foreign_owner[0])
+            self.store.release_owner(name, foreign_owner[0])
             self.store.stop(name)
             blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
             clock[0], waits[:] = 0, []

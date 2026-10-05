@@ -102,7 +102,7 @@ class Reporting(unittest.TestCase):
         blocker = connect(self.dsn)
         waits = []
         def timeout_connect(*args, **kwargs):
-            kwargs['options'] = '-c lock_timeout=25'
+            kwargs['options'] = '-c statement_timeout=10000 -c lock_timeout=25'
             return connect(*args, **kwargs)
         def backoff(delay):
             waits.append(delay)

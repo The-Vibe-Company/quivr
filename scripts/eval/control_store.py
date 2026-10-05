@@ -18,6 +18,7 @@ import uuid
 import embeddings
 
 LEASE_BATCH_SIZE = 128
+VALIDATION_LEASE_TTL = 600
 
 
 def lease_batch(keys, ttl=3600):
@@ -192,9 +193,11 @@ class Store:
         """Validate committed claims without holding a database transaction.
 
         Release new unpublished owners on caller failure. Start paid work only
-        after the entire validation scope exits successfully.
+        after the entire validation scope exits successfully. Unpaid reservations
+        expire within ten minutes if compensation cannot reach the store.
         """
-        claims = self.claim_many(name, keys, ttl, require_available=require_available)
+        lease_batch([], ttl)
+        claims = self.claim_many(name, keys, min(ttl, VALIDATION_LEASE_TTL), require_available=require_available)
         try:
             yield claims
         except BaseException:
