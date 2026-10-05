@@ -183,6 +183,10 @@ func Discover(ctx context.Context, r Registration) error {
 	if err != nil {
 		return err
 	}
+	ctx, err = plugins.SigningContext(ctx, pin)
+	if err != nil {
+		return err
+	}
 	_, issues, err := devhost.Discover(ctx, r.Endpoint, plugins.Report{Path: "its registration", ManifestDigest: r.ManifestDigest, Manifest: &pin.Manifest})
 	if err != nil {
 		return err

@@ -1,0 +1,5 @@
+id: EXNF-API-001
+check: openapi_valid
+parameters: {}
+threshold:
+  valid: true
