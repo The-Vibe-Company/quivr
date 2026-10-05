@@ -998,6 +998,25 @@ mark {
   margin: 0;
   padding: 2px 0 32px;
 }
+.feed-more {
+  display: flex;
+  justify-content: center;
+  margin: -12px 0 0;
+  padding: 0 22px 32px;
+}
+.feed-end {
+  margin: -12px auto 0;
+  max-width: 52ch;
+  padding: 0 22px 32px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+.feed-end strong {
+  font-weight: 600;
+  color: var(--ink);
+}
 .moment {
   position: relative;
   display: flex;
@@ -2273,6 +2292,14 @@ button.moment-pill:hover {
     mask-image: linear-gradient(transparent, #000 28px, #000 calc(100% - 64px), transparent);
   }
   .feed-rows {
+    padding-bottom: 72px;
+  }
+  /* What follows the list clears the fade at the bottom instead. */
+  .feed-rows:has(+ .feed-more, + .feed-end) {
+    padding-bottom: 32px;
+  }
+  .feed-more,
+  .feed-end {
     padding-bottom: 72px;
   }
   .feed-scroll,

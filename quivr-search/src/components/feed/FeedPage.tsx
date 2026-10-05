@@ -11,7 +11,7 @@ import { Broadcast, Coins, NotePencil, Plus } from "@phosphor-icons/react";
 import { APIError, search, tokenize } from "../../lib/search";
 import { asPercent, elapsed, explain, paid, type Why } from "../../lib/deep";
 import type { SearchUsage } from "../../types";
-import { HAND_NAMESPACE, type FeedItem } from "../../lib/feed";
+import { HAND_NAMESPACE, newestFirst, type FeedItem } from "../../lib/feed";
 import { createAlert, alertMessage, type Alert } from "../../lib/alerts";
 import { NotationError, parse } from "../../lib/notation";
 import { sourceName } from "../../lib/alertForm";
@@ -39,6 +39,7 @@ import { Reader } from "./Reader";
 import { SideColumn } from "./SideColumn";
 import { SourceLogo, logoIds } from "./SourceLogo";
 import { FilterMenu, MenuOption } from "./FilterMenu";
+import { liveSince, onDay, useDayCounts, useDayItems } from "./days";
 
 /**
  * What the feed shows: every article or the unread ones; then, when any are
@@ -150,6 +151,16 @@ export function FeedPage({
   const [now, setNow] = useState(() => Date.now());
   const opener = useRef<string | null>(null);
   const terms = useMemo(() => tokenize(query), [query]);
+  // The feed holds the latest articles; every day's count, and the articles
+  // of a day picked in the Date menu, come from Quivr.
+  const shownItems = useRef(feed.items);
+  shownItems.current = feed.items;
+  const { counts, refresh: refreshCounts } = useDayCounts(
+    dayOf(now),
+    () => shownItems.current,
+    onUnauthorized,
+  );
+  const dayFeed = useDayItems(query ? "" : day, onUnauthorized);
 
   useEffect(() => {
     const clock = setInterval(() => setNow(Date.now()), 30000);
@@ -262,6 +273,16 @@ export function FeedPage({
   const logoOf = useMemo(() => logoIds(connectors), [connectors]);
 
   const base: Row[] = useMemo(() => {
+    if (!query && day) {
+      // A picked day: its pages from Quivr, and the live articles of that day,
+      // which know of corrections the pages may not.
+      const merged = new Map<string, FeedItem>();
+      for (const item of feed.items)
+        if (onDay(when(item), day)) merged.set(item.record_id, item);
+      for (const item of dayFeed.items)
+        if (!byId.has(item.record_id)) merged.set(item.record_id, item);
+      return [...merged.values()].sort(newestFirst).map((item) => ({ item }));
+    }
     if (!query) return feed.items.map((item) => ({ item }));
     if (!hits) return [];
     const words = terms.filter((w) => w.length > 2);
@@ -285,7 +306,7 @@ export function FeedPage({
     return sort === "recent"
       ? [...rows].sort((a, b) => when(b.item).localeCompare(when(a.item)))
       : rows;
-  }, [query, hits, searchedSources, feed.items, byId, sort, terms]);
+  }, [query, day, dayFeed.items, hits, searchedSources, feed.items, byId, sort, terms]);
 
   // A row passes every facet of the filter but `skip`, so each facet's
   // counts read what picking it would show.
@@ -325,11 +346,27 @@ export function FeedPage({
   // Every day of the list, for the date menu and the day-by-day chart.
   const span = shown.filter((r) => pass(r)).map((r) => r.item);
   const days = new Map<string, number>();
-  for (const item of span) {
-    const at = when(item);
-    if (at) days.set(dayOf(at), (days.get(dayOf(at)) || 0) + 1);
-  }
+  // Out of a search, every day Quivr holds, with the articles that arrived
+  // since it counted; the loaded articles' days until it answers.
+  const inQuivr = !query && !!counts;
+  const live = counts ? liveSince(feed.items, counts.counted, counts.asOf) : [];
+  if (inQuivr) {
+    for (const [d, n] of counts.days) days.set(d, n);
+    for (const item of live) {
+      const d = dayOf(item.received_at!);
+      days.set(d, (days.get(d) || 0) + 1);
+    }
+  } else
+    for (const item of span) {
+      const at = when(item);
+      if (at) days.set(dayOf(at), (days.get(dayOf(at)) || 0) + 1);
+    }
   if (day && !days.has(day)) days.set(day, 0);
+  const everyDay = inQuivr ? counts.total + live.length : span.length;
+  // Without a source or alert picked, Tout is what Quivr holds for the period.
+  const facetFree = !filter.alerts.length && !filter.sources.length;
+  const allCount =
+    inQuivr && facetFree ? (day ? days.get(day) || 0 : everyDay) : readable.length;
   const pick = (picked: string[], value: string) =>
     picked.includes(value) ? picked.filter((v) => v !== value) : [...picked, value];
   const alertItems = facet("alerts");
@@ -480,11 +517,18 @@ export function FeedPage({
             ? "Essayez un autre mot, ou créez une alerte : vous serez prévenu dès qu’un article en parlera."
             : "Activez « Idées proches » pour trouver aussi les articles qui en parlent avec d’autres mots.",
         };
-  else if (!query && feed.items.length && !rows.length)
+  else if (!query && day && dayFeed.status === "ready" && !dayFeed.next && !rows.length)
+    empty = base.length
+      ? { title: "Rien ici pour ce filtre.", text: "Retirez un filtre pour voir tout ce jour." }
+      : { title: "Aucun article ce jour-là.", text: "Choisissez un autre jour dans le filtre Date." };
+  else if (!query && !day && feed.items.length && !rows.length)
     empty =
-      filter.read === "unread" && !filter.alerts.length && !filter.sources.length && !day
+      filter.read === "unread" && !filter.alerts.length && !filter.sources.length
         ? { title: "Vous avez tout lu.", text: "Les prochains articles arriveront ici." }
         : { title: "Rien ici pour ce filtre.", text: "Retirez un filtre pour voir tout le fil." };
+  // The default list holds the latest articles only: the rest is a day away.
+  const older = !query && !day && feed.status === "ready" && rows.length > 0 &&
+    !!counts && counts.total > feed.items.length;
 
   const row = ({ item, hit }: Row) => (
     <FeedRow
@@ -615,7 +659,7 @@ export function FeedPage({
             <span className="segments">
               {(
                 [
-                  ["all", "Tout", readable.length],
+                  ["all", "Tout", allCount],
                   ["unread", "Non lus", readable.filter((i) => reading.isUnread(i)).length],
                 ] as const
               ).map(([value, label, n]) => (
@@ -635,8 +679,9 @@ export function FeedPage({
               title="Date"
               icon={<CalendarIcon />}
               summary={day ? dayLabel(day, now) : undefined}
+              onOpen={refreshCounts}
             >
-              <MenuOption single pressed={!day} onClick={() => pickDay("")} count={span.length}>
+              <MenuOption single pressed={!day} onClick={() => pickDay("")} count={everyDay}>
                 Tous les jours
               </MenuOption>
               {[...days]
@@ -762,7 +807,7 @@ export function FeedPage({
             event.currentTarget.toggleAttribute("data-scrolled", event.currentTarget.scrollTop > 4)
           }
         >
-          {!query && feed.status === "loading" && <LoadingState rows={5} />}
+          {!query && !day && feed.status === "loading" && <LoadingState rows={5} />}
           {!query && feed.status === "error" && (
             <Notice title="Le fil ne s’affiche pas." onRetry={feed.retry}>
               {feed.error}
@@ -804,7 +849,15 @@ export function FeedPage({
               {searchError}
             </Notice>
           )}
-          {!query && feed.status === "ready" && feed.items.length === 0 && (
+          {!query && day && dayFeed.status === "loading" && !rows.length && (
+            <LoadingState label="Chargement des articles de ce jour…" rows={5} />
+          )}
+          {!query && day && dayFeed.status === "error" && (
+            <Notice title="Ce jour ne s’affiche pas." onRetry={dayFeed.retry}>
+              {dayFeed.error}
+            </Notice>
+          )}
+          {!query && !day && feed.status === "ready" && feed.items.length === 0 && (
             <EmptyState
               className="feed-empty"
               icon={<Broadcast size={26} aria-hidden="true" />}
@@ -871,14 +924,24 @@ export function FeedPage({
                   ))}
             </ol>
           )}
+          {!query && day && dayFeed.next && dayFeed.status !== "error" && (
+            <MoreRows loading={dayFeed.status === "loading"} onMore={dayFeed.more} />
+          )}
+          {older && (
+            <p className="feed-end">
+              Les articles plus anciens restent dans Quivr : choisissez un jour
+              dans le filtre <strong>Date</strong> pour les afficher.
+            </p>
+          )}
         </div>
       </section>
       <SideColumn
-        titles={feed.items
+        titles={(day && !query ? base.map((r) => r.item) : feed.items)
           .filter((i) => !muted.has(i.namespace) && (!day || dayOf(when(i)) === day))
           .map((i) => i.title)}
         query={query}
         span={span}
+        counts={inQuivr && facetFree && filter.read === "all" ? days : undefined}
         day={day}
         onDay={pickDay}
         onSearch={(text) => {
@@ -917,6 +980,31 @@ export function FeedPage({
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * The end of a picked day's loaded articles: the next page loads once it
+ * scrolls into view, or on a click.
+ */
+function MoreRows({ loading, onMore }: { loading: boolean; onMore: () => void }) {
+  const end = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const target = end.current;
+    if (!target || loading) return;
+    // Observing again once a page has loaded fires at once if still in view.
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) onMore();
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loading, onMore]);
+  return (
+    <div className="feed-more" ref={end}>
+      <button type="button" className="button" disabled={loading} onClick={onMore}>
+        {loading ? "Chargement…" : "Afficher plus d’articles"}
+      </button>
+    </div>
   );
 }
 

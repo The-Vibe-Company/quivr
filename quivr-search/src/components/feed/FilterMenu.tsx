@@ -10,6 +10,7 @@ export function FilterMenu({
   summary,
   placeholder,
   icon,
+  onOpen,
   children,
 }: {
   title: string;
@@ -18,6 +19,8 @@ export function FilterMenu({
   /** What the button says when nothing is picked, if not the title. */
   placeholder?: string;
   icon?: ReactNode;
+  /** Called each time the panel opens. */
+  onOpen?: () => void;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -52,7 +55,10 @@ export function FilterMenu({
         aria-controls={id}
         aria-label={summary || placeholder ? `${title} : ${summary || placeholder}` : title}
         title={summary || placeholder || title}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (!open) onOpen?.();
+          setOpen(!open);
+        }}
       >
         {icon && <span className="menu-icon">{icon}</span>}
         <span className="menu-summary">{summary || placeholder || title}</span>
