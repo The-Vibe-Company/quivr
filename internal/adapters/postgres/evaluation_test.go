@@ -516,6 +516,91 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	}
 }
 
+// TestEvaluationFanOutEventBudgetAndPrefixRollback owns the per-call event
+// budget and atomic multi-event dispatch boundary; pagination eligibility is
+// covered by TestEvaluationDispatchAndAtomicMatchCommit.
+func TestEvaluationFanOutEventBudgetAndPrefixRollback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	first := newCorrectionFixture(t, ctx, "adapter-dispatch-a-")
+	second := newCorrectionFixture(t, ctx, "adapter-dispatch-b-")
+	fixtures := []*correctionFixture{first, second}
+	for _, f := range fixtures {
+		f.subscribe("s")
+	}
+	evaluation := postgres.EvaluationStore{Pool: first.pool}
+	// Initialize both real checkpoints before any trigger can be dispatched.
+	if _, err := evaluation.FanOut(ctx); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := func(f *correctionFixture) int64 {
+		t.Helper()
+		var position int64
+		var after string
+		if err := f.pool.QueryRow(ctx, `SELECT position,subscription_after FROM monitoring_checkpoints WHERE organization=$1`, f.org).Scan(&position, &after); err != nil || after != "" {
+			t.Fatalf("checkpoint for %s: position %d after %q, err %v", f.org, position, after, err)
+		}
+		return position
+	}
+	initial := map[string]int64{}
+	for _, f := range fixtures {
+		initial[f.org] = checkpoint(f)
+		record, version := f.publish("r", "r-1", "Neutral dispatch fixture")
+		// One real promotion plus 52 subsequent trigger events exercises the
+		// 50-event call boundary without 53 copies of publication setup.
+		if _, err := f.pool.Exec(ctx, `WITH positions AS (
+ UPDATE organization_journals SET last_sequence=last_sequence+52 WHERE organization=$1 RETURNING last_sequence
+) INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id)
+ SELECT $1,p.last_sequence-52+n,$2||n,$3,'record.retrieval_ready','record',$4,$5
+ FROM positions p CROSS JOIN generate_series(1,52) n`, f.org, "event_dispatch_"+f.run+"_", f.corpusID, record, version); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var failSequence int64
+	if err := first.pool.QueryRow(ctx, `SELECT sequence FROM change_events WHERE organization=$1 AND event_type='record.retrieval_ready' ORDER BY sequence LIMIT 1 OFFSET 1`, first.org).Scan(&failSequence); err != nil {
+		t.Fatal(err)
+	}
+	// Fail a real later intent INSERT after its earlier sibling was attempted.
+	if _, err := first.pool.Exec(ctx, `CREATE FUNCTION fail_fixture_dispatch_intent() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF NEW.organization=TG_ARGV[0] AND NEW.sequence=TG_ARGV[1]::bigint THEN RAISE EXCEPTION 'synthetic later dispatch interruption'; END IF;
+ RETURN NEW; END $$;`+fmt.Sprintf(`CREATE TRIGGER fail_fixture_dispatch_intent BEFORE INSERT ON evaluation_intents FOR EACH ROW EXECUTE FUNCTION fail_fixture_dispatch_intent('%s','%d')`, first.org, failSequence)); err != nil {
+		t.Fatal(err)
+	}
+	defer first.pool.Exec(context.Background(), "DROP TRIGGER IF EXISTS fail_fixture_dispatch_intent ON evaluation_intents; DROP FUNCTION IF EXISTS fail_fixture_dispatch_intent()")
+	var sqlError *pgconn.PgError
+	if _, err := evaluation.FanOut(ctx); !errors.As(err, &sqlError) || sqlError.Code != "P0001" || sqlError.Message != "synthetic later dispatch interruption" {
+		t.Fatalf("dispatch must reach later-event SQL failure: %v", err)
+	}
+	for _, f := range fixtures {
+		if got := checkpoint(f); got != initial[f.org] {
+			t.Fatalf("failed prefix advanced %s checkpoint to %d, want %d", f.org, got, initial[f.org])
+		}
+		if n := f.count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1`, f.org); n != 0 {
+			t.Fatalf("failed prefix exposed %d intents for %s", n, f.org)
+		}
+	}
+	if _, err := first.pool.Exec(ctx, "DROP TRIGGER fail_fixture_dispatch_intent ON evaluation_intents; DROP FUNCTION fail_fixture_dispatch_intent()"); err != nil {
+		t.Fatal(err)
+	}
+	for call, want := range []int{50, 53, 53} {
+		if _, err := evaluation.FanOut(ctx); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range fixtures {
+			if n := f.count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1`, f.org); n != want {
+				t.Fatalf("call %d dispatched %d events for %s, want %d", call+1, n, f.org, want)
+			}
+			var through int64
+			if err := f.pool.QueryRow(ctx, `SELECT sequence FROM change_events WHERE organization=$1 AND event_type='record.retrieval_ready' ORDER BY sequence LIMIT 1 OFFSET $2`, f.org, want-1).Scan(&through); err != nil {
+				t.Fatal(err)
+			}
+			if got := checkpoint(f); got != through {
+				t.Fatalf("call %d checkpoint for %s = %d, want %d", call+1, f.org, got, through)
+			}
+		}
+	}
+}
+
 // wholeBodySegmentation is a valid one-segment baseline derivation, so the
 // test needs no tokenizer; evaluation only depends on promotion facts.
 func wholeBodySegmentation(org string, v content.Version) content.Segmentation {

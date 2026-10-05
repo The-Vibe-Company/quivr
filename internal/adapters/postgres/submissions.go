@@ -47,6 +47,20 @@ func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c conte
 	if err != nil {
 		return content.Receipt{}, err
 	}
+	recordID := content.StableID("record", scope.Organization, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey)
+	receiptID := content.StableID("receipt", scope.Organization, "ingestion", c.Key)
+	digest := content.Digest(c)
+	slot := "digest:" + digest
+	if c.Revision != "" {
+		slot = "revision:" + c.Revision
+	}
+	created, err := acceptFirstRevision(ctx, s.Pool, scope.Organization, c, canonical, recordID, receiptID, slot, digest)
+	if err != nil {
+		return content.Receipt{}, err
+	}
+	if created {
+		return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: c.Source, Processing: content.Processing{State: "queued", Phase: "materialization"}, Diagnostics: []content.Diagnostic{}, NewRevision: true}, nil
+	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return content.Receipt{}, err
@@ -72,26 +86,8 @@ func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c conte
 		}
 		return (ReceiptStore{Pool: s.Pool}).Receipt(ctx, scope.Organization, *replayID)
 	}
-	var receiptID string
 	if !exists {
 		return content.Receipt{}, corpus.ErrNotFound
-	}
-	recordID := content.StableID("record", scope.Organization, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey)
-	receiptID = content.StableID("receipt", scope.Organization, "ingestion", c.Key)
-	digest := content.Digest(c)
-	slot := "digest:" + digest
-	if c.Revision != "" {
-		slot = "revision:" + c.Revision
-	}
-	created, err := acceptFirstRevision(ctx, tx, scope.Organization, c, canonical, recordID, receiptID, slot, digest)
-	if err != nil {
-		return content.Receipt{}, err
-	}
-	if created {
-		if err = tx.Commit(ctx); err != nil {
-			return content.Receipt{}, err
-		}
-		return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: c.Source, Processing: content.Processing{State: "queued", Phase: "materialization"}, Diagnostics: []content.Diagnostic{}, NewRevision: true}, nil
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO records(organization,id,corpus_id,namespace,record_key) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, scope.Organization, recordID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey)
 	if err != nil {

@@ -4,22 +4,26 @@ import (
 	"context"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // acceptFirstRevision writes a new Record's reservation, receipt, dispatch
-// intent and both journal facts in one statement. Existing Records take the
-// general revision path, including reverts and source-position arbitration.
-// The caller already holds the journal lock and checked the request key and
-// Corpus. Every ID is still computed by the domain's canonical hash function.
-func acceptFirstRevision(ctx context.Context, tx pgx.Tx, org string, c content.Command, canonical []byte, recordID, receiptID, slot, digest string) (bool, error) {
+// intent and both journal facts in one implicit transaction. Existing Records
+// take the general revision path after this batch closes, including reverts and
+// source-position arbitration. The separate journal guard statements
+// acquire the lock before the write statement takes its READ COMMITTED snapshot.
+// Every ID is still computed by the domain's canonical hash function.
+func acceptFirstRevision(ctx context.Context, pool *pgxpool.Pool, org string, c content.Command, canonical []byte, recordID, receiptID, slot, digest string) (bool, error) {
 	versionID := content.StableID("version", org, recordID, slot)
 	pending := eventInput{Organization: org, Kind: "receipt.pending", Resource: "receipt", ResourceID: receiptID}
 	accepted := eventInput{Organization: org, Kind: "record.accepted", Resource: "record", ResourceID: recordID, MutationID: receiptID}
-	var created bool
-	err := tx.QueryRow(ctx, `WITH record AS (
+	batch := journalBatch(org)
+	batch.Queue(`WITH record AS (
  INSERT INTO records(organization,id,corpus_id,namespace,record_key,acceptance_order,desired_order,desired_position,desired_version_id)
- VALUES($1,$2,$4,$5,$6,1,1,$7,$8) ON CONFLICT DO NOTHING RETURNING id
+ SELECT $1,$2,$4,$5,$6,1,1,$7,$8
+ WHERE EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$4)
+ AND NOT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND route_family='ingestion' AND request_key=$14)
+ ON CONFLICT DO NOTHING RETURNING id
 ), revision AS (
  INSERT INTO accepted_revisions(organization,record_id,slot,digest,version_id,acceptance_order,source_position,command,accepted_at,title,source_media_type)
  SELECT $1,id,$9,$10,$8,1,$7,convert_from($11::bytea,'UTF8')::jsonb,now(),nullif($12,''),coalesce(nullif($13,''),'text/plain') FROM record
@@ -40,6 +44,21 @@ func acceptFirstRevision(ctx context.Context, tx pgx.Tx, org string, c content.C
    ($15::text,'receipt.pending','receipt',$3::text,-1),
    ($16::text,'record.accepted','record',$2::text,0)
  ) e(id,kind,resource,resource_id,delta)
-) SELECT EXISTS(SELECT 1 FROM record)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, canonical, content.Title(c), c.SourceMediaType, c.Key, eventID(pending), eventID(accepted)).Scan(&created)
-	return created, err
+) SELECT EXISTS(SELECT 1 FROM record)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, canonical, content.Title(c), c.SourceMediaType, c.Key, eventID(pending), eventID(accepted))
+	results := pool.SendBatch(ctx, batch)
+	defer results.Close()
+	for range 3 {
+		if _, err := results.Exec(); err != nil {
+			return false, err
+		}
+	}
+	var created bool
+	err := results.QueryRow().Scan(&created)
+	closeErr := results.Close()
+	if err != nil {
+		return false, err
+	}
+	// Close consumes the transaction's final result before either success or
+	// fallback can escape. An interrupted batch never reports a committed receipt.
+	return created, closeErr
 }

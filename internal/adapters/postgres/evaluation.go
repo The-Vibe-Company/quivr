@@ -57,15 +57,25 @@ ON CONFLICT DO NOTHING`); err != nil {
 	}
 	progressed := 0
 	for _, org := range orgs {
-		for i := 0; i < fanOutEvents; i++ {
-			moved, err := s.dispatchStep(ctx, org)
+		for remaining := fanOutEvents; remaining > 0; {
+			processed, paged, err := s.dispatchPrefix(ctx, org, remaining)
 			if err != nil {
 				return progressed, err
 			}
-			if !moved {
+			if paged {
+				moved, err := s.dispatchStep(ctx, org)
+				if err != nil {
+					return progressed, err
+				}
+				if moved {
+					processed = 1
+				}
+			}
+			if processed == 0 {
 				break
 			}
-			progressed++
+			remaining -= processed
+			progressed += processed
 		}
 	}
 	return progressed, nil
