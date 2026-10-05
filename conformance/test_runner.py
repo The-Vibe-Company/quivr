@@ -43,6 +43,11 @@ class ConformanceTests(unittest.TestCase):
             (suite / 'duplicate.yaml').write_text(base)
             with self.assertRaisesRegex(ValueError, 'duplicate requirement'):
                 runner.load_cases(suite)
+            (suite / 'duplicate.yaml').unlink()
+            path.write_text('id: EX-001\ncheck: future_check\nparameters: {}\nthreshold: {}\nmaintainer_ticket: https://example.com/issues/1\n')
+            with patch.dict(CHECKS, {'future_check': lambda *args: None}):
+                with self.assertRaisesRegex(ValueError, 'registry'):
+                    runner.load_cases(suite)
 
     def test_explicit_suite_selection_accepts_both_cli_spellings(self):
         # Argparse accepts --suite=name too; silently validating all suites is false success.
@@ -140,6 +145,10 @@ class ConformanceTests(unittest.TestCase):
             ('counter', '# TYPE requests counter\n', False),
             ('counter', '# TYPE requests counter\nrequests garbage\n', False),
             ('counter', '# TYPE requests counter\nrequests{route="x"} 2\n', True),
+            ('counter', '# TYPE requests counter\nrequests{garbage} 2\n', False),
+            ('counter', '# TYPE requests counter\nrequests{route=unquoted} 2\n', False),
+            ('counter', '# TYPE requests counter\nrequests{route="x",route="y"} 2\n', False),
+            ('counter', '# TYPE requests counter\nrequests{route="x\\n\\\""} 2 123\n', True),
             ('counter', '# TYPE requests gauge\nrequests 2\n', False),
             ('histogram', '# TYPE requests histogram\nrequests 1\n', False),
             ('histogram', '# TYPE requests histogram\nrequests_bucket{le="1"} 2\n', True),
@@ -188,11 +197,21 @@ class ConformanceTests(unittest.TestCase):
         context = Context(image='example.invalid/quivr:local')
         inspection = {'Id': 'sha256:123', 'Config': {'User': '10001:10001', 'Labels': {'org.opencontainers.image.version': '1'}}}
         with patch('conformance.checks.subprocess.run') as run:
-            run.return_value.stdout = json.dumps([inspection]).encode()
+            def output(*args, **kwargs):
+                raw = json.dumps([inspection]).encode()
+                if 'stdout' in kwargs:kwargs['stdout'].write(raw)
+                run.return_value.stdout = raw
+                return run.return_value
+            run.side_effect = output
             result = CHECKS['image_property'](context, {}, {'non_root': True, 'labels': ['org.opencontainers.image.version']})
             self.assertTrue(result.met)
+            inspection['Config']['Labels']['org.opencontainers.image.version'] = ''
+            self.assertTrue(CHECKS['image_property'](context, {}, {'labels': ['org.opencontainers.image.version']}).met)
+            inspection['Config']['Labels']['oversized'] = 'x' * (4 * 1024 * 1024)
+            with self.assertRaises(ValueError):
+                CHECKS['image_property'](context, {}, {'non_root': True})
+            del inspection['Config']['Labels']['oversized']
             inspection['Config']['User'] = '00:10001'
-            run.return_value.stdout = json.dumps([inspection]).encode()
             self.assertFalse(CHECKS['image_property'](context, {}, {'non_root': True}).met)
             with self.assertRaises(Skip):
                 CHECKS['image_property'](context, {}, {'sbom': True})
@@ -203,6 +222,42 @@ class ConformanceTests(unittest.TestCase):
                                                  ('sha256:123', [], False)]:
                     context.sbom.write_text(json.dumps({'source': {'target': {'imageID': image_id}}, 'artifacts': artifacts}))
                     self.assertEqual(CHECKS['image_property'](context, {}, {'sbom': True}).met, met)
+
+    def test_openapi_invalid_syntax_is_unmet_and_evidence_identifies_evaluated_document(self):
+        # Invalid syntax is a failed requirement; formatting does not change the evaluated spec.
+        with tempfile.TemporaryDirectory() as directory:
+            context = Context(openapi=pathlib.Path(directory) / 'openapi.yaml')
+            context.openapi.write_text('openapi: [')
+            self.assertFalse(CHECKS['openapi_valid'](context, {}, {'valid': True}).met)
+            spec = {'openapi': '3.0.3', 'info': {'title': 'Example', 'version': '1'}, 'paths': {}}
+            context.openapi.write_text(json.dumps(spec))
+            first = CHECKS['openapi_valid'](context, {}, {'valid': True})
+            self.assertTrue(first.met)
+            context.openapi.write_text(json.dumps(spec, indent=2))
+            second = CHECKS['openapi_valid'](context, {}, {'valid': True})
+            self.assertEqual(first.evidence['contract_sha256'], second.evidence['contract_sha256'])
+            spec['info']['version'] = '2'
+            context.openapi.write_text(json.dumps(spec))
+            self.assertNotEqual(first.evidence['contract_sha256'], CHECKS['openapi_valid'](context, {}, {'valid': True}).evidence['contract_sha256'])
+
+    def test_probe_only_target_measures_selected_endpoint_without_stack(self):
+        # A probe URL is sufficient for probe checks; stack setup would replace the endpoint.
+        from contextlib import contextmanager
+        @contextmanager
+        def selected(context, source, isolated):
+            if isolated:raise OSError('unexpected stack')
+            yield context
+        case = {'id': 'EX-001', 'check': 'http_probe', 'parameters': {'target': 'probe', 'path': '/healthz'},
+                'threshold': {'status': 204, 'max_latency_ms': 100}}
+        with tempfile.TemporaryDirectory() as directory, patch.object(runner, 'target', selected), \
+             patch.object(runner, 'load_cases', return_value=[(pathlib.Path('health.yaml'), case)]), \
+             patch.object(Context, 'request', return_value=(204, {}, b'', 1)), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            self.assertEqual(runner.main(['--probe-url', 'http://127.0.0.1:9090', '--output', directory]), 0)
+            report = json.loads((pathlib.Path(directory) / 'report.json').read_text())
+            self.assertEqual(report['target_mode'], 'existing')
+            self.assertEqual(report['target']['probe_url'], 'http://127.0.0.1:9090')
+            self.assertEqual(next(case for case in report['results'] if case['check'] == 'http_probe')['status'], 'met')
 
     def test_config_rejection_requires_expected_diagnostic_not_a_crash(self):
         with tempfile.TemporaryDirectory() as directory:

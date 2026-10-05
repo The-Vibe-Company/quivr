@@ -90,6 +90,6 @@ migration-restamp:
 CONFORMANCE_PYTHON ?= python3
 conformance:
 	GO=$(GO) $(CONFORMANCE_PYTHON) conformance/runner.py --suite "$(or $(suite),example)" $(if $(version),--version "$(version)") $(args)
-# Static validation only; the existing CI check lane has the pinned contract requirements installed.
+# make check needs conformance/requirements.txt (the same pins installed by the CI contract lane).
 conformance-validate:
 	$(CONFORMANCE_PYTHON) conformance/runner.py --validate

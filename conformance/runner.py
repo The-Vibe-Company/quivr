@@ -32,6 +32,11 @@ class CaseLoader(yaml.SafeLoader):
 def load_cases(suite):
     schema = json.loads((ROOT / 'conformance/schema/case.schema.json').read_text())
     Draft202012Validator.check_schema(schema)
+    conditions = [rule['if']['properties']['check'] for rule in schema['allOf']]
+    shaped = {condition['const'] for condition in conditions if 'const' in condition}
+    known = {name for condition in conditions if 'not' in condition for name in condition['not']['enum']}
+    if shaped != set(CHECKS) or known != set(CHECKS):
+        raise ValueError('check registry and schema must register the same check types')
     validator = Draft202012Validator(schema)
     files = sorted(list(suite.glob('*.yaml')) + list(suite.glob('*.yml')))
     if not files:
@@ -260,12 +265,12 @@ def main(argv=None):
             report = {'format_version': 1, 'version': revision, 'source_working_tree_dirty': dirty,
                       'harness_working_tree_dirty': bool(git('status', '--porcelain')),
                       'suite': args.suite, 'started_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                      'target_mode': 'existing' if args.api_url else 'artifacts' if args.no_stack else 'isolated',
+                      'target_mode': 'existing' if args.api_url or args.probe_url else 'artifacts' if args.no_stack else 'isolated',
                       'harness_revision': git('rev-parse', 'HEAD'),
                       'target': {'api_url': context.api_url, 'probe_url': context.probe_url,
                                  'image': context.image, 'binary_sha256': None}}
             try:
-                with target(context, source, isolated=not args.api_url and not args.no_stack):
+                with target(context, source, isolated=not (args.api_url or args.probe_url or args.no_stack)):
                     report['results'] = run_cases(cases, context)
                     report['target'] = {'api_url': context.api_url, 'probe_url': context.probe_url,
                                         'image': context.image, 'binary_sha256': digest(context.binary.read_bytes()) if context.binary else None}

@@ -115,24 +115,24 @@ def openapi_valid(context, parameters, threshold):
     import yaml
     from openapi_spec_validator import validate
     raw = read_bytes(context.openapi)
-    spec = yaml.safe_load(raw)
-    # Bundle Quivr's split local contract using its source-owned helper when present.
-    bundle = context.openapi.parent / 'bundle.py'
-    if bundle.exists():
-        import importlib.util
-        module_spec = importlib.util.spec_from_file_location('conformance_openapi_bundle', bundle)
-        module = importlib.util.module_from_spec(module_spec)
-        module_spec.loader.exec_module(module)
-        spec = module.load()
+    evidence = {'source_sha256': digest(raw), 'file': str(context.openapi)}
     try:
+        spec = yaml.safe_load(raw)
+        # Bundle Quivr's split local contract using its source-owned helper when present.
+        bundle = context.openapi.parent / 'bundle.py'
+        if bundle.exists():
+            import importlib.util
+            module_spec = importlib.util.spec_from_file_location('conformance_openapi_bundle', bundle)
+            module = importlib.util.module_from_spec(module_spec)
+            module_spec.loader.exec_module(module)
+            spec = module.load()
+        evidence['contract_sha256'] = digest(json.dumps(spec, sort_keys=True, separators=(',', ':'), allow_nan=False).encode())
         validate(spec)
-        valid = True
     except Exception as error:
         # Do not publish contract values embedded in a validator exception.
-        valid = False
-        return Observation(False, {'valid': False}, {'contract_sha256': digest(raw),
-                           'validation_error': type(error).__name__}, 'OpenAPI validation failed')
-    return Observation(valid, {'valid': valid}, {'contract_sha256': digest(raw), 'file': str(context.openapi)})
+        evidence['validation_error'] = type(error).__name__
+        return Observation(False, {'valid': False}, evidence, 'OpenAPI validation failed')
+    return Observation(True, {'valid': True}, evidence)
 
 
 def metric_exposed(context, parameters, threshold):
@@ -140,12 +140,26 @@ def metric_exposed(context, parameters, threshold):
     name = re.escape(parameters['name'])
     text = body.decode('utf-8')
     types = re.findall(r'^# TYPE ' + name + r' (\w+)\s*$', text, re.MULTILINE)
-    suffix = ''
-    if threshold['type'] == 'histogram':
-        suffix = r'(?:_count|_sum|_bucket(?=\{(?:[^\n]*,)?[ \t]*le="))'
-    elif threshold['type'] == 'summary':
-        suffix = r'(?:_count|_sum|(?=\{(?:[^\n]*,)?[ \t]*quantile="))'
-    samples = re.findall(r'^' + name + suffix + r'(?:\{[^\n]*\})?[ \t]+(?:[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[+-]?Inf|NaN)(?:[ \t]|$)', text, re.MULTILINE)
+    label = r'([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*=[ \t]*"(?:[^"\\\n]|\\["\\n])*"'
+    labels_pattern = r'[ \t]*(?:' + label + r'(?:[ \t]*,[ \t]*' + label + r')*[ \t]*,?[ \t]*)?'
+    sample_pattern = re.compile(name + r'(?P<suffix>_count|_sum|_bucket)?(?:\{(?P<labels>[^\n]*)\})?[ \t]+(?:[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[+-]?Inf|NaN)(?:[ \t]+[+-]?[0-9]+)?[ \t]*')
+    samples = []
+    for line in text.splitlines():
+        match = sample_pattern.fullmatch(line)
+        if not match:continue
+        labels = match['labels'] or ''
+        if not re.fullmatch(labels_pattern, labels):continue
+        names = [item.group(1) for item in re.finditer(label, labels)]
+        if len(names) != len(set(names)):continue
+        suffix = match['suffix'] or ''
+        kind = threshold['type']
+        if kind == 'histogram':
+            valid = suffix in ('_count', '_sum') or suffix == '_bucket' and 'le' in names
+        elif kind == 'summary':
+            valid = suffix in ('_count', '_sum') or not suffix and 'quantile' in names
+        else:
+            valid = not suffix
+        if valid:samples.append(line)
     return Observation(status == 200 and types == [threshold['type']] and bool(samples),
                        {'status': status, 'types': types, 'samples': len(samples)},
                        {'body_sha256': digest(body), 'path': '/metrics'})
@@ -173,9 +187,14 @@ def log_format(context, parameters, threshold):
 def image_property(context, parameters, threshold):
     if not context.image:
         raise Skip('no image selected; host binaries do not prove image properties')
-    inspection = subprocess.run(['docker', 'image', 'inspect', context.image], check=True,
-                                capture_output=True, timeout=30)
-    image = parse_json(inspection.stdout)[0]
+    # Spool subprocess output to disk; never buffer an unbounded image configuration in memory.
+    with tempfile.TemporaryDirectory(prefix='image-inspect-', dir=context.evidence_dir) as directory:
+        path = pathlib.Path(directory) / 'stdout'
+        with path.open('wb') as stdout:
+            subprocess.run(['docker', 'image', 'inspect', context.image], check=True,
+                           stdout=stdout, stderr=subprocess.DEVNULL, timeout=30)
+        raw_inspection = read_bytes(path)
+    image = parse_json(raw_inspection)[0]
     config = image['Config']
     user = config.get('User', '').split(':')[0]
     if threshold.get('non_root') and user and user != 'root' and not user.isdigit():
@@ -183,8 +202,8 @@ def image_property(context, parameters, threshold):
     non_root = user.isdigit() and int(user) > 0
     labels = config.get('Labels') or {}
     measurement = {'user': user, 'non_root': non_root,
-                   'labels_present': {name: bool(labels.get(name)) for name in threshold.get('labels', [])}}
-    evidence = {'image_id': image['Id'], 'inspection_sha256': digest(inspection.stdout)}
+                   'labels_present': {name: name in labels for name in threshold.get('labels', [])}}
+    evidence = {'image_id': image['Id'], 'inspection_sha256': digest(raw_inspection)}
     met = (not threshold.get('non_root') or non_root) and all(measurement['labels_present'].values())
     if threshold.get('sbom'):
         if not context.sbom:
@@ -235,7 +254,7 @@ def config_refuses_invalid(context, parameters, threshold):
         with (directory / 'stdout').open('wb') as stdout, (directory / 'stderr').open('wb') as stderr:
             result = subprocess.run([str(context.binary.resolve()), 'api'],
                                     env={'PATH': os.environ.get('PATH', ''), 'QUIVR_CONFIG': str(config)},
-                                    stdout=stdout, stderr=stderr, timeout=context.timeout)
+                                    stdout=stdout, stderr=stderr, timeout=30)
         raw = read_bytes(directory / 'stderr')
         diagnostic_found = threshold['diagnostic'] in raw.decode('utf-8', errors='replace')
         return Observation(result.returncode == threshold['exit_code'] and diagnostic_found,

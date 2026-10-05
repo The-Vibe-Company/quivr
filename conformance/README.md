@@ -58,7 +58,7 @@ The runner writes `.scratch/conformance/report.json` and `.scratch/conformance/r
 | `error` | The check could not finish, for example a connection or capture failed. |
 | `skipped` | An input or check type is missing; the reason says which. |
 
-The runner's exit code 0 means every measured case passed; skipped cases can remain. Exit code 1 means a requirement failed or a run/check error occurred. Exit code 2 means input or schema validation failed. Make reports any nonzero runner exit as a failed target. An empty log stream is `not met`; an unsupplied capture is `skipped`. A skipped case never proves conformance.
+The runner's exit code 0 means every measured case passed; skipped cases can remain. Exit code 1 means a requirement failed or a run/check error occurred. Exit code 2 means input/schema validation or pre-run source/filesystem setup failed. Make reports any nonzero runner exit as a failed target. An empty log stream is `not met`; an unsupplied capture is `skipped`. A skipped case never proves conformance.
 
 The example includes a stdout logging requirement and image properties. These can fail or be skipped on today's stack. The suite records gaps as well as passes; it does not change engine behavior to satisfy them.
 
@@ -103,7 +103,7 @@ Every case needs `id`, `check`, `parameters` and `threshold`; `description` and 
 | `log_format` | `stream: stdout` or `stderr`. Threshold: `fields` array. Every captured line must be a JSON object containing those fields. |
 | `image_property` | Empty parameters. Threshold: one or more of `non_root: true`, `labels` array, `sbom: true`. Inspects a selected image and its bound inventory. |
 | `error_shape` | Same parameters as `http_probe`. Threshold: error `status`, `fields` mapping names to JSON types. Requires JSON content type and all typed fields; strings must be nonempty. |
-| `config_refuses_invalid` | `fixture`: `unknown_field`, `invalid_json` or `missing_required`. Threshold: nonzero `exit_code`, `diagnostic` substring on stderr. Runs the supplied binary's `api` command with a fixed invalid configuration. |
+| `config_refuses_invalid` | `fixture`: `unknown_field`, `invalid_json` or `missing_required`. Threshold: nonzero `exit_code`, `diagnostic` substring on stderr. Runs the supplied binary's `api` command with a fixed invalid configuration and a 30-second deadline independent of HTTP. |
 
 ## Request and implement a new check
 
