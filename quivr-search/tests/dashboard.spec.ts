@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { daysAgo, fakeEngine, type Engine } from "./fake-engine";
+import { fakeEngine, type Engine } from "./fake-engine";
 
 // The monitoring dashboard's flows against a fake engine behind the facade
 // routes (tests/fake-engine.ts): the real bundle and synthetic data, no core.
@@ -174,18 +174,32 @@ test("le filtre Date liste chaque jour jusqu’au premier article, compté par Q
     }).format(day);
     return text[0].toUpperCase() + text.slice(1);
   };
+  // Labels come from the fixture's own times, so a run across midnight holds.
+  const [port, , , first] = engine.ws.archive;
+  const portDay = new Date(port.received_at!);
+  const dayBefore = new Date(portDay);
+  dayBefore.setDate(dayBefore.getDate() - 1);
+  const firstDay = new Date(first.received_at!).toDateString();
+  const earlier: string[] = [];
+  for (let n = 2; earlier.length < 30; n++) {
+    const at = new Date();
+    at.setHours(12, 0, 0, 0);
+    at.setDate(at.getDate() - n);
+    earlier.push(label(at.toISOString()));
+    if (at.toDateString() === firstDay) break;
+  }
   const dates = await menu(page, "Date");
   const options = dates.locator(".menu-option");
   await expect(options.locator(".menu-label")).toHaveText([
     "Tous les jours",
     "Aujourd’hui",
     "Hier",
-    ...[2, 3, 4, 5].map((n) => label(daysAgo(n, 12))),
+    ...earlier,
   ]);
   await expect(options.first().locator(".menu-count")).toHaveText(String(total + 1));
-  const old = options.filter({ hasText: label(daysAgo(3, 12)) });
+  const old = options.filter({ hasText: label(port.received_at!) });
   await expect(old.locator(".menu-count")).toHaveText("3");
-  await expect(options.filter({ hasText: label(daysAgo(4, 12)) }).locator(".menu-count")).toHaveText("0");
+  await expect(options.filter({ hasText: label(dayBefore.toISOString()) }).locator(".menu-count")).toHaveText("0");
   await page.screenshot({ path: info.outputPath("date-menu-light.png") });
 
   // A day older than the feed loads from Quivr, newest first, page by page.
@@ -200,7 +214,7 @@ test("le filtre Date liste chaque jour jusqu’au premier article, compté par Q
   await expect(page.getByText(/Les articles plus anciens restent dans Quivr/)).toHaveCount(0);
   await expect(chips(page).getByRole("button", { name: /^Date/ })).toHaveAttribute(
     "aria-label",
-    `Date : ${label(daysAgo(3, 12))}`,
+    `Date : ${label(port.received_at!)}`,
   );
   // The source filter still applies to a day read from Quivr.
   await pick(page, "Sources", /^Revue technique/);
@@ -215,7 +229,7 @@ test("le filtre Date liste chaque jour jusqu’au premier article, compté par Q
   await expect(rows(page)).toHaveCount(9);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await pick(page, "Date", new RegExp(`^${label(daysAgo(5, 12))}`));
+  await pick(page, "Date", new RegExp(`^${label(first.received_at!)}`));
   await expect(rows(page)).toHaveCount(1);
   await expect(row(page, "Les archives municipales")).toBeVisible();
   expect(await noOverflow(page)).toBe(true);

@@ -272,10 +272,11 @@ export function FeedPage({
       // A picked day: its pages from Quivr, and the live articles of that day,
       // which know of corrections the pages may not.
       const merged = new Map<string, FeedItem>();
+      const shownIds = new Set(feed.items.map((item) => item.record_id));
       for (const item of feed.items)
         if (onDay(when(item), day)) merged.set(item.record_id, item);
       for (const item of dayFeed.items)
-        if (!byId.has(item.record_id)) merged.set(item.record_id, item);
+        if (!shownIds.has(item.record_id)) merged.set(item.record_id, item);
       return [...merged.values()].sort(newestFirst).map((item) => ({ item }));
     }
     if (!query) return feed.items.map((item) => ({ item }));

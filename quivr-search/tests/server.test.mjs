@@ -807,6 +807,8 @@ test("an older day of the feed is listed by date and day counts are cached", asy
     if (url.pathname === "/v0/records") {
       if (url.searchParams.get("page_cursor") === "stale")
         return json(409, { code: "cursor_scope_changed" });
+      if (url.searchParams.get("page_cursor") === "broken")
+        return json(200, { items: [record("broken")] });
       return json(200, {
         items: [
           record("old1"),
@@ -818,6 +820,7 @@ test("an older day of the feed is listed by date and day counts are cached", asy
       });
     }
     const version = url.pathname.match(/^\/v0\/records\/(\w+)\/versions\/(\w+)$/);
+    if (version?.[1] === "broken") return json(500, { code: "internal" });
     if (version)
       return json(200, {
         record_id: version[1],
@@ -862,6 +865,10 @@ test("an older day of the feed is listed by date and day counts are cached", asy
   assert.equal(page.next_cursor, "p2");
   const stale = await fetch(`${base}/demo/feed/page?${new URLSearchParams({ after, before, cursor: "stale" })}`);
   assert.equal(stale.status, 409);
+  // A Version that cannot be read now fails the page, to be retried, rather
+  // than leave its Record out of a day the cursor has moved past.
+  const broken = await fetch(`${base}/demo/feed/page?${new URLSearchParams({ after, before, cursor: "broken" })}`);
+  assert.equal(broken.status, 503);
   for (const bad of [
     { after: "2026-10-02", before },
     { after: before, before: after },

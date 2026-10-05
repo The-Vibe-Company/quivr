@@ -15,6 +15,8 @@ const CHUNK = 14;
 // Days are counted back to the first article, at most about a year.
 const MAX_CHUNKS = 27;
 const REFRESH_MS = 60000;
+// Opening the date menu rereads counts older than this.
+const STALE_MS = 15000;
 
 export interface DayCounts {
   total: number;
@@ -31,6 +33,7 @@ export interface DayCounts {
 export function useDayCounts(today: string, onUnauthorized: () => void) {
   const [counts, setCounts] = useState<DayCounts | null>(null);
   const [ask, setAsk] = useState(0);
+  const fetched = useRef(0);
   const unauthorized = useRef(onUnauthorized);
   unauthorized.current = onUnauthorized;
   useEffect(() => {
@@ -56,6 +59,7 @@ export function useDayCounts(today: string, onUnauthorized: () => void) {
       }
       // Today and yesterday always show; earlier days start at the first article.
       while (days.length > 2 && !days.at(-1)![1]) days.pop();
+      fetched.current = Date.now();
       setCounts({ total, days, asOf });
     })().catch((error) => {
       if (controller.signal.aborted) return;
@@ -69,7 +73,9 @@ export function useDayCounts(today: string, onUnauthorized: () => void) {
     const timer = setInterval(() => setAsk((n) => n + 1), REFRESH_MS);
     return () => clearInterval(timer);
   }, []);
-  const refresh = useCallback(() => setAsk((n) => n + 1), []);
+  const refresh = useCallback(() => {
+    if (Date.now() - fetched.current >= STALE_MS) setAsk((n) => n + 1);
+  }, []);
   return { counts, refresh };
 }
 
@@ -80,13 +86,15 @@ export function useDayCounts(today: string, onUnauthorized: () => void) {
  */
 export function useLiveSince(items: FeedItem[]) {
   const firstSeen = useRef(new Map<string, string>());
+  // Only articles still shown are kept, so one that comes back is dated anew.
+  const next = new Map<string, string>();
   for (const item of items) {
     const seen = firstSeen.current.get(item.record_id);
-    if (item.received_at && (!seen || item.received_at < seen))
-      firstSeen.current.set(item.record_id, item.received_at);
+    const at = seen && (!item.received_at || seen < item.received_at) ? seen : item.received_at;
+    if (at) next.set(item.record_id, at);
   }
-  return (asOf: string) =>
-    items.filter((item) => (firstSeen.current.get(item.record_id) || "") > asOf);
+  firstSeen.current = next;
+  return (asOf: string) => items.filter((item) => (next.get(item.record_id) || "") > asOf);
 }
 
 /** The articles of one day ("" for none), newest first, a page at a time. */

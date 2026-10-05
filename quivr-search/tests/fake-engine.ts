@@ -275,7 +275,9 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     // Like the facade: Quivr's counts per period, and a day newest first,
     // two articles a page so that paging shows.
     if (path === "/demo/feed/days") {
-      const bounds = url.searchParams.get("bounds")!.split(",").map(Date.parse);
+      const bounds = (url.searchParams.get("bounds") || "").split(",").map(Date.parse);
+      if (bounds.some((b, i) => Number.isNaN(b) || (i > 0 && b >= bounds[i - 1])))
+        return json(route, { message: "Cette période n’est pas valide." }, 422);
       const all = stored();
       return json(route, {
         total: all.length,
@@ -287,8 +289,10 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       });
     }
     if (path === "/demo/feed/page") {
-      const after = Date.parse(url.searchParams.get("after")!);
-      const before = Date.parse(url.searchParams.get("before")!);
+      const after = Date.parse(url.searchParams.get("after") || "");
+      const before = Date.parse(url.searchParams.get("before") || "");
+      if (Number.isNaN(after) || Number.isNaN(before) || after >= before)
+        return json(route, { message: "Cette période n’est pas valide." }, 422);
       const start = Number(url.searchParams.get("cursor") || 0);
       const day = stored()
         .filter((a) => arrived(a) >= after && arrived(a) < before)

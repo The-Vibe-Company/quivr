@@ -363,7 +363,8 @@ export function createFeed({ core, key, corpus, upstream }) {
   }
 
   // The feed item of each listed Record, the one in memory when it shows the
-  // same Version. A Record that cannot be read is left out of the page.
+  // same Version. A Version that is gone is left out; any other failure fails
+  // the page, so the browser retries it rather than skip the Record.
   async function describeListed(records) {
     const out = [];
     const queue = records
@@ -385,8 +386,9 @@ export function createFeed({ core, key, corpus, upstream }) {
           }
           const version = await upstream(
             `/v0/records/${encodeURIComponent(record.record_id)}/versions/${encodeURIComponent(record.current_version_id)}`,
-          ).catch(() => null);
-          if (version?.status !== 200) continue;
+          ).catch(() => ({ status: 503 }));
+          if (version.status === 404) continue;
+          if (version.status !== 200) throw unlisted(503);
           out[index] = describe(record, version.data, date(version.data.accepted_at));
         }
       }),
