@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -43,6 +44,12 @@ func TestSubscriptionOwnerReadsAndListing(t *testing.T) {
 	ctx := context.Background()
 	f := newOwnerFixture(t, ctx)
 	owned := f.mustCreate("owned", "user-123")
+	if replay, err := f.create("owned", "user-123"); err != nil || replay.ID != owned.ID {
+		t.Fatalf("owner replay: %+v %v", replay, err)
+	}
+	if changed, err := f.create("owned", "user-456"); !errors.Is(err, monitoring.ErrConflict) {
+		t.Fatalf("changed-owner replay must conflict: %+v %v", changed, err)
+	}
 	global := f.mustCreate("global", "")
 	if owned.Owner != "user-123" || owned.Current.Owner != "user-123" || global.Owner != "" || global.Current.Owner != "" {
 		t.Fatalf("owner on creation: %+v %+v", owned, global)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
@@ -31,21 +32,28 @@ func TestUploadRouteErrors(t *testing.T) {
 		status int
 		code   string
 	}{
+		{"missing upload", uploads.ErrNotFound, 404, "not_found"},
 		{"conflict", uploads.ErrConflict, 409, "idempotency_conflict"},
 		{"invalid upload", uploads.ErrInvalid, 422, "invalid_input"},
 		{"invalid content", content.ErrInvalid, 422, "invalid_input"},
 		{"storage outage", errors.New("private storage detail"), 503, "storage_unavailable"},
 	} {
-		t.Run(row.name, func(t *testing.T) {
-			handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{Store: refusedUploads{err: fmt.Errorf("private detail: %w", row.err)}},
-				map[string]corpus.Scope{adminKey: {Organization: "org_a", Actions: []string{"blobs:write"}, Corpora: []string{"*"}}}, catalogCursorKey)
-			if err != nil {
-				t.Fatal(err)
-			}
-			status, got := postJSON(t, checkedAPI(t, handler), "/v0/uploads", adminKey, map[string]any{"size_bytes": 1, "sha256": strings.Repeat("a", 64), "media_type": "text/plain"})
-			if status != row.status || got["code"] != row.code || got["retryable"] != (row.status == 503) || strings.Contains(fmt.Sprint(got), "private") {
-				t.Fatalf("want %d %s without private details, got %d %v", row.status, row.code, status, got)
-			}
-		})
+		for style, failure := range map[string]error{
+			"bare":     row.err,
+			"wrapped":  fmt.Errorf("private detail: %w", row.err),
+			"detailed": publicerr.WithDetail(row.err, "private detail"),
+		} {
+			t.Run(row.name+"/"+style, func(t *testing.T) {
+				handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{Store: refusedUploads{err: failure}},
+					map[string]corpus.Scope{adminKey: {Organization: "org_a", Actions: []string{"blobs:write"}, Corpora: []string{"*"}}}, catalogCursorKey)
+				if err != nil {
+					t.Fatal(err)
+				}
+				status, got := postJSON(t, checkedAPI(t, handler), "/v0/uploads", adminKey, map[string]any{"size_bytes": 1, "sha256": strings.Repeat("a", 64), "media_type": "text/plain"})
+				if status != row.status || got["code"] != row.code || got["retryable"] != (row.status == 503) || strings.Contains(fmt.Sprint(got), "private") {
+					t.Fatalf("want %d %s without private details, got %d %v", row.status, row.code, status, got)
+				}
+			})
+		}
 	}
 }
