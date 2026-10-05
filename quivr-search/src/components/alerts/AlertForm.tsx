@@ -72,6 +72,14 @@ export function AlertForm({
   // One key per alert being written, so a retried submit is not a second alert.
   const idempotency = useRef(crypto.randomUUID());
   const parsed = useParsed(query);
+  // Switching between the guided form and the advanced query removes the
+  // button pressed: focus goes to the first field of the side shown.
+  const switched = useRef(false);
+  useEffect(() => {
+    if (!switched.current) return;
+    switched.current = false;
+    document.getElementById(advanced ? "alert-query" : `${id}-all`)?.focus();
+  }, [advanced]);
 
   const reset = (next: Alert | null) => {
     setError("");
@@ -281,6 +289,7 @@ export function AlertForm({
                 onClick={() => {
                   setFields(fitting || EMPTY_FORM);
                   setWatched(fitting?.sources || []);
+                  switched.current = true;
                   setAdvanced(false);
                   changed();
                 }}
@@ -288,12 +297,11 @@ export function AlertForm({
                 Revenir au formulaire guidé
               </button>
             ) : (
-              parsed.state === "valid" && (
-                <p className="form-note query-unfit">
-                  Le formulaire guidé ne sait pas afficher cette requête (des groupes dans des groupes, plusieurs
-                  groupes OR, un NOT sur un groupe…) : elle reste telle quelle ici.
-                </p>
-              )
+              <p className="form-note query-unfit">
+                {parsed.state === "valid"
+                  ? "Le formulaire guidé ne sait pas afficher cette requête : elle reste telle quelle ici."
+                  : "Corrigez la requête pour pouvoir revenir au formulaire guidé."}
+              </p>
             )
           }
         />
@@ -316,6 +324,7 @@ export function AlertForm({
                 className="link-button"
                 onClick={() => {
                   setQuery(builtQuery);
+                  switched.current = true;
                   setAdvanced(true);
                   changed();
                 }}
@@ -327,7 +336,11 @@ export function AlertForm({
             <QueryPreview
               id={`${id}-sentence`}
               parsed={built ? { state: "valid", expression: built } : { state: "empty" }}
-              empty="La requête et ce qu’elle attrapera s’écrivent ici à mesure que vous remplissez les champs."
+              empty={
+                fields.none.trim()
+                  ? "Ajoutez aussi des mots à chercher : « Aucun de ces mots » seul attraperait tout le reste."
+                  : "La requête et ce qu’elle attrapera s’écrivent ici à mesure que vous remplissez les champs."
+              }
             />
           </div>
         </>

@@ -38,6 +38,8 @@ export function QueryBuilder({
             className="form-input"
             value={form[field]}
             autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
             placeholder={example}
             aria-describedby={`${id}-${field}-hint`}
             onChange={(event) => onChange({ ...form, [field]: event.target.value })}
@@ -47,8 +49,10 @@ export function QueryBuilder({
           </p>
         </div>
       ))}
-      <div className="qb-row qb-sources">
-        <span className="qb-label">Dans ces sources</span>
+      <div className="qb-row qb-sources" role="group" aria-labelledby={`${id}-sources`}>
+        <span className="qb-label" id={`${id}-sources`}>
+          Dans ces sources
+        </span>
         {sourcesMenu}
       </div>
     </fieldset>

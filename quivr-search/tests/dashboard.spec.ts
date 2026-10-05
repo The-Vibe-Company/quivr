@@ -490,6 +490,7 @@ test("le formulaire guidé et la requête avancée restent d’accord, et une er
   await form.getByRole("button", { name: "Écrire une requête avancée" }).click();
   const query = form.getByLabel("Requête avancée");
   await expect(query).toHaveValue("tempête AND NOT football");
+  await expect(query).toBeFocused();
 
   // A mistake says where it is and is announced; pressing the marked copy
   // puts the caret on it, all from the keyboard.
@@ -520,6 +521,7 @@ test("le formulaire guidé et la requête avancée restent d’accord, et une er
   // That query fits the form: going back fills its fields.
   await form.getByRole("button", { name: "Revenir au formulaire guidé" }).click();
   await expect(form.getByLabel("Tous ces mots")).toHaveValue("tempête");
+  await expect(form.getByLabel("Tous ces mots")).toBeFocused();
   await expect(form.getByLabel("Au moins un de ces mots")).toHaveValue("grêle vent");
   await expect(form.getByLabel("Aucun de ces mots")).toHaveValue("");
 

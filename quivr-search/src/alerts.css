@@ -90,7 +90,7 @@
 .qb-hint {
   grid-column: 2;
   margin: 0;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 12px;
 }
 .qb-sources .menu-button {

@@ -18,6 +18,8 @@ test("chaque champ du formulaire guidé écrit sa part de la requête", () => {
     'orage AND tempête AND "marché aux fleurs" AND (grêle OR "coup de vent") AND source:"Météo locale" AND NOT football',
   );
   expect(fieldTerms(' ,; "" ')).toEqual([]);
+  // Quotes as phones and French keyboards type them keep a phrase too.
+  expect(fieldTerms("« coup de vent » “marché aux fleurs” orage")).toEqual(["coup de vent", "marché aux fleurs", "orage"]);
   // Only words to avoid would catch everything else: not an alert yet.
   expect(build({ ...EMPTY_FORM, none: "football" })).toBeNull();
 });
@@ -57,8 +59,18 @@ test("la phrase dit en français ce que l’alerte attrapera", () => {
     ],
     [
       "(port AND grève) OR aéroport NOT (football OR rugby)",
-      "Articles qui contiennent soit à la fois « port » et « grève », soit « aéroport » mais sans « football » ni « rugby ».",
+      "Articles qui contiennent soit (à la fois « port » et « grève »), soit (« aéroport » mais sans « football » ni « rugby »).",
     ],
+    // A group is never read as going on into what follows it.
+    [
+      "(orage OR (grêle vent)) tempête",
+      "Articles qui contiennent « tempête » et soit « orage », soit (à la fois « grêle » et « vent »).",
+    ],
+    [
+      "(orage OR grêle) (port OR quai)",
+      "Articles qui contiennent (au moins un des mots « orage » ou « grêle ») et au moins un des mots « port » ou « quai ».",
+    ],
+    ["NOT NOT orage", "Articles qui contiennent « orage »."],
   ];
   for (const [query, expected] of cases) expect(sentence(parse(query).match), query).toBe(expected);
 });

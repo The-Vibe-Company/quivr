@@ -74,6 +74,12 @@ export function QueryEditor({
   }, [message]);
 
   const write = (next: string, start: number, end: number) => {
+    if (next === value) {
+      // Nothing to re-render: place the caret now.
+      field.current?.focus();
+      field.current?.setSelectionRange(start, end);
+      return;
+    }
     selection.current = [start, end];
     onChange(next);
   };

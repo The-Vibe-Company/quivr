@@ -40,6 +40,8 @@ test("une erreur dit où elle est dans la requête", () => {
     ["orage -football", "-football"],
     ["auteur: orage", "auteur:"],
     ["orage OR OR vent", "OR"],
+    // Positions count UTF-16 units, as an input's selection does.
+    ["orage🌩️ AND", "AND"],
   ];
   for (const [query, marked] of cases) {
     let error: unknown;

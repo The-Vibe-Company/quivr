@@ -24,6 +24,8 @@ export interface BuilderForm {
 export const EMPTY_FORM: BuilderForm = { all: "", phrase: "", any: "", none: "", sources: [] };
 
 const hasWord = (text: string) => /[\p{L}\p{N}]/u.test(text);
+// Curly and French quotes, as phones and keyboards type them, count as quotes.
+const straight = (text: string) => text.replace(/[“”„«»]/gu, '"');
 
 /**
  * The terms of a field: words separated by spaces or commas, and "several
@@ -33,13 +35,13 @@ const hasWord = (text: string) => /[\p{L}\p{N}]/u.test(text);
 export function fieldTerms(text: string): string[] {
   const out: string[] = [];
   const pattern = /"([^"]*)"?|[^\s,"]+/gu;
-  for (const [match, quoted] of text.matchAll(pattern)) out.push(quoted ?? match);
+  for (const [match, quoted] of straight(text).matchAll(pattern)) out.push(quoted ?? match);
   return cleanWords(out).filter(hasWord);
 }
 
 /** The phrase field: everything typed is one term, quotes around it or not. */
 const phraseTerm = (text: string) => {
-  const [term] = cleanWords([text.replace(/"/g, " ")]);
+  const [term] = cleanWords([straight(text).replace(/"/g, " ")]);
   return term && hasWord(term) ? term : null;
 };
 
