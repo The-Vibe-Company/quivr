@@ -15,7 +15,8 @@
   "pages": {
     "lcp_ms": 2000,
     "cls": 0.1,
-    "initial_js_kb": 120
+    "js_kb": 130,
+    "js_about": "On the wire: the shared bundle and the page's own tab chunk."
   },
   "inp_ms": 200,
   "endpoints": {

@@ -102,6 +102,10 @@ function urlState() {
   };
 }
 
+// The tab the address opens on loads with the page, not after the session.
+const opening = urlState().view;
+if (opening !== "feed") void loaders[opening]().catch(() => {});
+
 export default function App() {
   const [auth, setAuth] = useState<Auth>("loading");
   const [corpus, setCorpus] = useState("");

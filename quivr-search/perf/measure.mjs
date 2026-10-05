@@ -23,13 +23,16 @@ const budgets = JSON.parse(readFileSync(new URL("budgets.json", import.meta.url)
 const local = ["127.0.0.1", "localhost", "[::1]"].includes(new URL(base).hostname);
 const { profile } = budgets;
 
+// Each tab but the Fil has its own chunk (vite build); a page's JavaScript is
+// the shared bundle and its own chunk, not the others fetched when idle.
 const PAGES = [
   { name: "Fil", path: "/", ready: ".feed-rows .row" },
   { name: "Recherche", path: "/?q=port", ready: ".feed-rows .row" },
-  { name: "Alertes", path: "/?view=alerts", ready: ".alerts-table tbody tr, .alerts-empty, .empty-state" },
-  { name: "Sources", path: "/?view=sources", ready: ".source-cards .source-card" },
-  { name: "Admin", path: "/?view=admin", ready: ".flow-rows .flow-row, .admin-board .notice" },
+  { name: "Alertes", path: "/?view=alerts", ready: ".alerts-table tbody tr, .alerts-empty, .empty-state", chunk: "AlertsView" },
+  { name: "Sources", path: "/?view=sources", ready: ".source-cards .source-card", chunk: "ConnectorsView" },
+  { name: "Admin", path: "/?view=admin", ready: ".flow-rows .flow-row, .admin-board .notice", chunk: "AdminView" },
 ];
+const TAB_CHUNK = /\/assets\/(AlertsView|ConnectorsView|AdminView|AddText)-[^/]+\.js$/;
 
 const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 const percentile = (values, p) =>
@@ -81,21 +84,22 @@ async function load(browser, target) {
   await page.waitForSelector(target.ready, { timeout: 60000 });
   // LCP and layout shifts settle once the data has painted.
   await page.waitForTimeout(1500);
-  const sample = await page.evaluate(() => {
-    const [nav] = performance.getEntriesByType("navigation");
-    const scripts = performance
+  const scripts = await page.evaluate(() =>
+    performance
       .getEntriesByType("resource")
-      .filter((r) => r.name.endsWith(".js"));
-    const kb = (list) => list.reduce((sum, r) => sum + r.transferSize, 0) / 1024;
-    return {
-      lcp: window.__perf.lcp,
-      cls: window.__perf.cls,
-      // What the first visit needs: requested before the load event. The
-      // other tabs' chunks are fetched afterwards, when the browser is idle.
-      initialJS: kb(scripts.filter((r) => r.startTime < nav.loadEventStart)),
-      allJS: kb(scripts),
-    };
-  });
+      .filter((r) => r.name.endsWith(".js"))
+      .map((r) => ({ name: r.name, size: r.transferSize })),
+  );
+  const kb = (list) => list.reduce((sum, r) => sum + r.size, 0) / 1024;
+  const own = (r) => {
+    const tab = TAB_CHUNK.exec(r.name)?.[1];
+    return !tab || tab === target.chunk;
+  };
+  const sample = {
+    ...(await page.evaluate(() => ({ lcp: window.__perf.lcp, cls: window.__perf.cls }))),
+    pageJS: kb(scripts.filter(own)),
+    allJS: kb(scripts),
+  };
   await ctx.close();
   return sample;
 }
@@ -250,7 +254,7 @@ for (const target of PAGES) {
   report.pages[target.name] = {
     lcp_ms: Math.round(median(samples.map((s) => s.lcp))),
     cls: +Math.max(...samples.map((s) => s.cls)).toFixed(3),
-    initial_js_kb: +median(samples.map((s) => s.initialJS)).toFixed(1),
+    js_kb: +median(samples.map((s) => s.pageJS)).toFixed(1),
     all_js_kb: +median(samples.map((s) => s.allJS)).toFixed(1),
   };
 }
@@ -267,8 +271,8 @@ const breaches = [];
 for (const [name, page] of Object.entries(report.pages)) {
   if (page.lcp_ms > budgets.pages.lcp_ms) breaches.push(`${name}: LCP ${page.lcp_ms} ms > ${budgets.pages.lcp_ms}`);
   if (page.cls > budgets.pages.cls) breaches.push(`${name}: CLS ${page.cls} > ${budgets.pages.cls}`);
-  if (page.initial_js_kb > budgets.pages.initial_js_kb)
-    breaches.push(`${name}: JavaScript ${page.initial_js_kb} KB > ${budgets.pages.initial_js_kb}`);
+  if (page.js_kb > budgets.pages.js_kb)
+    breaches.push(`${name}: JavaScript ${page.js_kb} KB > ${budgets.pages.js_kb}`);
 }
 if (report.inp_ms > budgets.inp_ms) breaches.push(`INP ${report.inp_ms} ms > ${budgets.inp_ms}`);
 if (local)

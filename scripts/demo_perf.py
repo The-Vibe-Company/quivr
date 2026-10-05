@@ -36,6 +36,7 @@ class Demo:
 
 
 def wait_for(what, check, seconds):
+    print(f'demo-perf: waiting for {what} (at most {seconds} s)', flush=True)
     deadline = time.monotonic() + seconds
     while not check():
         if time.monotonic() > deadline:
@@ -75,6 +76,11 @@ def seed(demo, feeds_url):
             time.sleep(10)
         return done
     wait_for('alerts catching the last source', settled, 900)
+    # Measured on a quiet machine: nothing left waiting at any step (the
+    # embedding service shares the CPU with the browser).
+    idle = lambda: not any(step.get('count') for step in
+                           (demo.call('/demo/admin').get('stats') or {}).get('waiting_by_step', {}).values())
+    wait_for('the pipeline to be idle', idle, 900)
 
 
 def run(base, password, feeds_url, directory, root):
