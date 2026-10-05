@@ -631,6 +631,24 @@ test("l’aperçu d’une alerte montre les derniers articles qu’elle aurait a
   expect(sent("/demo/alerts")).toEqual([]);
 });
 
+test("l’aperçu explique les pannes et ne confond pas un délai avec aucun article", async ({ page }, info) => {
+  await page.goto("/?view=alerts");
+  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
+  const form = page.getByRole("form", { name: "Nouvelle alerte" });
+  const words = form.getByLabel("Tous ces mots");
+  for (const [index, sample] of [
+    { status: 503, body: { code: "storage_unavailable", message: "storage unavailable" }, text: "Les articles sont temporairement indisponibles. Réessayez dans un instant." },
+    { status: 504, body: { code: "preview_deadline_exceeded", message: "preview deadline exceeded" }, text: "Le test de l’alerte a pris trop de temps. Réessayez dans un instant." },
+    { status: 200, body: { evaluated: 0, matched: 0, complete: false, items: [] }, text: "Le moteur n’a pas pu terminer le test à temps. Réessayez dans un instant." },
+  ].entries()) {
+    await page.route("**/demo/alerts/preview", route => route.fulfill({ status: sample.status, json: sample.body }));
+    await words.fill(`orage${index}`);
+    await expect(form.locator(".alert-preview-title")).toHaveText(sample.text);
+    if (index === 0) await page.screenshot({ path: info.outputPath("preview-storage-failure.png"), fullPage: true });
+    await page.unroute("**/demo/alerts/preview");
+  }
+});
+
 test("Sources : l’adresse d’un site trouve son fil, une adresse privée est refusée", async ({
   page,
 }) => {

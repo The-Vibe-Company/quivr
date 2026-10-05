@@ -1,5 +1,6 @@
 """Protocol routes, error-class mapping, configuration validation and logging correlation."""
 import hashlib
+import copy
 import io
 import json
 import logging
@@ -130,6 +131,17 @@ class Configuration(Base):
         validate_configuration(None, {"anything": 1})
         with self.assertRaises(ConfigurationError):
             validate_configuration(None, [])
+
+        # Reusing a schema must still judge every value, and changing a
+        # caller-owned schema must not reuse the previous validation rules.
+        changed = copy.deepcopy(schema)
+        validate_configuration(changed, {"mode": "ok", "repeat": 3})
+        changed["properties"]["repeat"]["maximum"] = 2
+        for _ in range(2):
+            with self.assertRaises(ConfigurationError) as caught:
+                validate_configuration(changed, {"mode": "ok", "repeat": 3})
+            self.assertEqual([p.split(":")[0] for p in caught.exception.problems], ["/repeat"])
+            validate_configuration(changed, {"mode": "ok", "repeat": 2})
 
 
 class LoggingCorrelation(Base):

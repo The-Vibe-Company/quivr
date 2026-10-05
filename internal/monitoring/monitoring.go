@@ -240,7 +240,7 @@ type Service struct {
 	// are not served.
 	Recent   RecentReader
 	Versions VersionReader
-	// PreviewBudget bounds the evaluator calls of one preview (default 6 s).
+	// PreviewBudget bounds preparation, reads and evaluation of one preview (default 4 s).
 	PreviewBudget time.Duration
 }
 
