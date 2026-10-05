@@ -352,26 +352,29 @@ test("le lecteur dit pourquoi l’article est attrapé, propose le même sujet e
   await expect(page.getByRole("switch", { name: "Idées proches" })).toHaveAttribute("aria-checked", "true");
 });
 
-test("le formulaire d’alerte compose mots, exclusions et sources, et garde la requête avancée", async ({
+test("le formulaire guidé compose tous ces mots, une phrase, l’un de ces mots et aucun de ces mots, et garde la requête avancée", async ({
   page,
 }) => {
   await page.goto("/?view=alerts");
   // The form opens in a panel from the page's button.
   await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   const form = page.getByRole("form", { name: "Nouvelle alerte" });
-  const words = form.getByLabel("Mots à surveiller");
-  await words.fill("orage");
-  await words.press("Enter");
-  await words.fill("vent");
-  await words.press("Enter");
-  await expect(form.getByRole("list", { name: "Mots surveillés" }).getByRole("listitem")).toHaveText(["orage×", "vent×"]);
-  await form.getByRole("group", { name: "Combinaison des mots" }).getByRole("button", { name: "Tous ces mots" }).click();
-  await form.getByLabel(/Ignorer les articles/).fill("football, publicité");
-  // Sources are picked in the feed's source menu.
+  // Each field of the guided form writes its part of the query, shown live
+  // with the sentence of what it will catch.
+  await form.getByLabel("Tous ces mots").fill("orage");
+  await form.getByLabel("Cette phrase exacte").fill("coup de vent");
+  await form.getByLabel("Au moins un de ces mots").fill("grêle, rafales");
+  await form.getByLabel("Aucun de ces mots").fill("football publicité");
   await form.getByRole("button", { name: "Sources surveillées : Toutes les sources" }).click();
   await form.getByRole("dialog", { name: "Sources surveillées" }).getByRole("button", { name: "Météo locale" }).click();
   await page.keyboard.press("Escape");
   await expect(form.getByRole("button", { name: "Sources surveillées : Météo locale" })).toBeVisible();
+  await expect(form.locator(".query-built-code")).toHaveText(
+    'orage AND "coup de vent" AND (grêle OR rafales) AND source:"Météo locale" AND NOT football AND NOT publicité',
+  );
+  await expect(form.locator(".query-built .query-preview")).toHaveText(
+    "Articles qui contiennent orage, la phrase coup de vent et au moins un des mots grêle ou rafales, venus de Météo locale, sauf ceux qui parlent de football ou de publicité.",
+  );
   await form.getByLabel(/Nom de l’alerte/).fill("Vent et orage");
   await form.getByRole("button", { name: "Créer l’alerte" }).click();
   await expect(page.locator(".toast")).toContainText("« Vent et orage »");
@@ -382,7 +385,8 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
       match: {
         all: [
           { term: "orage" },
-          { term: "vent" },
+          { term: "coup de vent" },
+          { any: [{ term: "grêle" }, { term: "rafales" }] },
           { field: "source", equals: "Météo locale" },
           { not: { term: "football" } },
           { not: { term: "publicité" } },
@@ -397,11 +401,11 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
   // Saving closes the panel and selects the new alert: its sheet shows the rule.
   await expect(form).toHaveCount(0);
   await expect(sheet.getByRole("heading", { level: 2 })).toHaveText("Vent et orage");
-  await expect(sheet.locator(".sheet-rule .kw")).toHaveText(["orage", "vent", "football", "publicité"]);
-  await expect(sheet.locator(".sheet-rule .kw[data-not]")).toHaveText(["football", "publicité"]);
-  await expect(sheet.locator(".rule-sources").getByRole("img", { name: "Météo locale" })).toBeVisible();
+  await expect(sheet.locator(".sheet-rule .alert-query")).toHaveText(
+    'orage AND "coup de vent" AND (grêle OR rafales) AND source:"Météo locale" AND NOT football AND NOT publicité',
+  );
 
-  // An alert the chips cannot show opens in the advanced query; it can be renamed.
+  // An alert the guided form cannot show opens in the advanced query; it can be renamed.
   await rowOf("Ports et quais").getByRole("button", { name: "Ports et quais" }).click();
   await expect(sheet.locator(".rule-created")).toHaveCount(0);
   await actions.getByRole("button", { name: "Modifier" }).click();
@@ -434,14 +438,12 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
   await expect(sheet.locator(".insight")).toHaveCount(0);
   await expect(sheet.locator(".rule-created")).toHaveText(/^créée le \d{1,2} \S+$/);
 
-  // A simple keyword alert comes back as chips.
+  // A simple keyword alert comes back in the guided form.
   await actions.getByRole("button", { name: "Modifier" }).click();
-  await expect(
-    page.getByRole("form", { name: "Modifier l’alerte" }).getByRole("list", { name: "Mots surveillés" }).getByRole("listitem"),
-  ).toHaveText(["orage×", "grêle×"]);
-  await expect(
-    page.getByRole("form", { name: "Modifier l’alerte" }).getByRole("list", { name: "Mots ignorés" }).getByRole("listitem"),
-  ).toHaveText(["football×"]);
+  const editing = page.getByRole("form", { name: "Modifier l’alerte" });
+  await expect(editing.getByLabel("Au moins un de ces mots")).toHaveValue("orage grêle");
+  await expect(editing.getByLabel("Aucun de ces mots")).toHaveValue("football");
+  await expect(editing.getByLabel("Tous ces mots")).toHaveValue("");
   await page.getByRole("button", { name: "Annuler" }).click();
 
   // Described alerts: a sentence, limited to the chosen sources.
@@ -475,6 +477,85 @@ test("le formulaire d’alerte compose mots, exclusions et sources, et garde la 
   await expect(rowOf("Orages et grêle")).toHaveCount(0);
 });
 
+test("le formulaire guidé et la requête avancée restent d’accord, et une erreur dit où elle est", async ({
+  page,
+}) => {
+  await page.goto("/?view=alerts");
+  await page.getByRole("button", { name: "Nouvelle alerte" }).click();
+  const form = page.getByRole("form", { name: "Nouvelle alerte" });
+  const query = form.getByLabel("Requête avancée");
+  // Words to avoid alone write no query; they survive a trip to the advanced field.
+  await form.getByLabel("Aucun de ces mots").fill("football");
+  await form.getByRole("button", { name: "Écrire une requête avancée" }).click();
+  await expect(query).toHaveValue("");
+  await form.getByRole("button", { name: "Revenir au formulaire guidé" }).click();
+  await expect(form.getByLabel("Aucun de ces mots")).toHaveValue("football");
+  await form.getByLabel("Tous ces mots").fill("tempête");
+
+  // The form's query goes to the advanced field as it is.
+  await form.getByRole("button", { name: "Écrire une requête avancée" }).click();
+  await expect(query).toHaveValue("tempête AND NOT football");
+  await expect(query).toBeFocused();
+
+  // A mistake says where it is and is announced; pressing the marked copy
+  // puts the caret on it, all from the keyboard.
+  await query.fill("tempête AND (grêle OR");
+  const reading = form.locator("#alert-query-preview");
+  await expect(reading).toContainText("La requête s’arrête après OR : ajoutez un mot.");
+  await expect(query).toHaveAttribute("aria-invalid", "true");
+  await expect(reading.locator("mark")).toHaveText("OR");
+  await expect(form.locator('[aria-live="polite"]').filter({ hasText: "s’arrête après OR" })).toHaveCount(1);
+  await expect(form.getByRole("button", { name: "Revenir au formulaire guidé" })).toHaveCount(0);
+  await reading.getByRole("button", { name: /Placer le curseur sur l’erreur/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(query).toBeFocused();
+  expect(await query.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([19, 21]);
+
+  // The syntax buttons write at the caret: here, a word to close the group.
+  await query.press("End");
+  await form.getByRole("group", { name: "Insérer dans la requête" }).getByRole("button", { name: /^\( \)/ }).click();
+  await page.keyboard.type("vent");
+  await expect(query).toHaveValue("tempête AND (grêle OR (vent)");
+  await query.press("End");
+  await page.keyboard.type(")");
+  await expect(query).not.toHaveAttribute("aria-invalid");
+  await expect(reading).toHaveText(
+    "Articles qui contiennent tempête et au moins un des mots grêle ou vent.",
+  );
+
+  // That query fits the form: going back fills its fields.
+  await form.getByRole("button", { name: "Revenir au formulaire guidé" }).click();
+  await expect(form.getByLabel("Tous ces mots")).toHaveValue("tempête");
+  await expect(form.getByLabel("Tous ces mots")).toBeFocused();
+  await expect(form.getByLabel("Au moins un de ces mots")).toHaveValue("grêle vent");
+  await expect(form.getByLabel("Aucun de ces mots")).toHaveValue("");
+
+  // A query with groups inside groups does not: the form says so and the
+  // query stays as typed. An example is a click away.
+  await form.getByRole("button", { name: "Écrire une requête avancée" }).click();
+  await form.getByRole("button", { name: "Utiliser l’exemple grève (port OR aéroport) NOT sondage" }).click();
+  await expect(query).toHaveValue("grève (port OR aéroport) NOT sondage");
+  // An operator applies to the selected word.
+  await query.evaluate((el: HTMLInputElement) => el.setSelectionRange(0, 5));
+  await form.getByRole("group", { name: "Insérer dans la requête" }).getByRole("button", { name: /^NOT/ }).click();
+  await expect(query).toHaveValue("NOT grève (port OR aéroport) NOT sondage");
+  // Several selected words stay together under NOT.
+  await query.fill("orage marché aux fleurs");
+  await query.evaluate((el: HTMLInputElement) => el.setSelectionRange(6, 23));
+  await form.getByRole("group", { name: "Insérer dans la requête" }).getByRole("button", { name: /^NOT/ }).click();
+  await expect(query).toHaveValue("orage NOT (marché aux fleurs)");
+  await query.fill("(port AND grève) OR aéroport");
+  await expect(form.locator(".query-unfit")).toContainText("Le formulaire guidé ne sait pas afficher cette requête");
+  await expect(form.getByRole("button", { name: "Revenir au formulaire guidé" })).toHaveCount(0);
+  await expect(query).toHaveValue("(port AND grève) OR aéroport");
+  const created = posted(page, "/demo/alerts");
+  await query.press("Enter");
+  expect((await created).expression).toEqual({
+    kind: "keywords",
+    match: { any: [{ all: [{ term: "port" }, { term: "grève" }] }, { term: "aéroport" }] },
+  });
+});
+
 test("l’aperçu d’une alerte montre les derniers articles qu’elle aurait attrapés, sans rien enregistrer", async ({
   page,
 }) => {
@@ -482,16 +563,14 @@ test("l’aperçu d’une alerte montre les derniers articles qu’elle aurait a
   await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   const form = page.getByRole("form", { name: "Nouvelle alerte" });
   const preview = form.locator(".alert-preview");
-  const words = form.getByLabel("Mots à surveiller");
-  await words.fill("grêle");
-  await words.press("Enter");
+  await form.getByLabel("Tous ces mots").fill("grêle");
   await expect(preview.locator(".alert-preview-title")).toHaveText(
     "3 articles sur les 8 derniers",
   );
   await expect(preview.getByRole("listitem")).toHaveCount(3);
   // The words to ignore are part of the previewed alert.
   const excluded = posted(page, "/demo/alerts/preview");
-  await form.getByLabel(/Ignorer les articles/).fill("football");
+  await form.getByLabel("Aucun de ces mots").fill("football");
   expect((await excluded).expression).toEqual({
     kind: "keywords",
     match: { all: [{ term: "grêle" }, { not: { term: "football" } }] },

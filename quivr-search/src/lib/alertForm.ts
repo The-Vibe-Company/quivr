@@ -37,9 +37,6 @@ export function cleanWords(words: string[]) {
   return out;
 }
 
-/** "football, publicité" → ["football", "publicité"] */
-export const splitList = (text: string) => cleanWords(text.split(","));
-
 const group = (op: "all" | "any", items: KeywordNode[]): KeywordNode =>
   items.length === 1 ? items[0] : op === "all" ? { all: items } : { any: items };
 

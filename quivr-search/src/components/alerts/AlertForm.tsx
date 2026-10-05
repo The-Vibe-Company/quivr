@@ -10,17 +10,14 @@ import {
 } from "../../lib/alerts";
 import type { FeedItem } from "../../lib/feed";
 import { print } from "../../lib/notation";
-import {
-  cleanWords,
-  compose,
-  decompose,
-  sourceName,
-  splitList,
-} from "../../lib/alertForm";
+import { sourceName } from "../../lib/alertForm";
+import { EMPTY_FORM, build, fieldTerms, positiveTerms, unbuild } from "../../lib/queryBuilder";
 import { FilterMenu, MenuOption } from "../feed/FilterMenu";
 import { SourceLogo } from "../feed/SourceLogo";
 import { DescribedIcon, KeywordsIcon, PlusIcon, SourcesIcon } from "../RailIcons";
 import { QueryPreview, useParsed } from "./QueryPreview";
+import { QueryBuilder } from "./QueryBuilder";
+import { QueryEditor } from "./QueryEditor";
 import { DescribedNote } from "./DescribedNote";
 import { AlertPreview } from "./AlertPreview";
 
@@ -32,86 +29,13 @@ const KINDS: [Kind, string, string][] = [
 ];
 
 /**
- * Words as chips in a box: Enter or a comma adds what is typed, Backspace on
- * an empty field takes back the last one. What is typed and not yet added
- * counts too.
- */
-function ChipField({
-  id,
-  label,
-  listLabel,
-  chips,
-  onChips,
-  text,
-  onText,
-  placeholder,
-  tone,
-  onEmptyEnter,
-}: {
-  id: string;
-  label: string;
-  listLabel: string;
-  chips: string[];
-  onChips: (chips: string[]) => void;
-  text: string;
-  onText: (text: string) => void;
-  placeholder: string;
-  tone?: "not";
-  onEmptyEnter?: () => void;
-}) {
-  const field = useRef<HTMLInputElement>(null);
-  const add = () => {
-    onChips(cleanWords([...chips, ...splitList(text)]));
-    onText("");
-  };
-  return (
-    <div className="word-box" data-tone={tone} onClick={() => field.current?.focus()}>
-      <label className="visually-hidden" htmlFor={id}>
-        {label}
-      </label>
-      {chips.length > 0 && (
-        <ul className="word-chips" aria-label={listLabel}>
-          {chips.map((word) => (
-            <li key={word}>
-              <span>{word}</span>
-              <button
-                type="button"
-                aria-label={`Retirer « ${word} »`}
-                onClick={() => onChips(chips.filter((w) => w !== word))}
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <input
-        ref={field}
-        id={id}
-        value={text}
-        autoComplete="off"
-        placeholder={placeholder}
-        onChange={(event) => onText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === ",") {
-            event.preventDefault();
-            if (text.trim()) add();
-            else if (event.key === "Enter") onEmptyEnter?.();
-          } else if (event.key === "Backspace" && !text && chips.length) onChips(chips.slice(0, -1));
-        }}
-        onBlur={() => text.trim() && add()}
-      />
-    </div>
-  );
-}
-
-/**
- * Writes or edits an alert as one sentence: "Prévenez-moi quand un article
- * parle de … sauf s'il parle de … dans …", with the words as chips (any or
- * all of them); or a described subject when the deployment has a classifier;
- * or, for anything else, an advanced query in the plugin's notation. Its name
- * is the title, filled from the words until it is written. Under it, what the
- * alert would have caught among the newest articles.
+ * Writes or edits an alert: keywords in a guided form like a search engine's
+ * advanced search (all these words, this exact phrase, any of these words,
+ * none of these words), its query and what it will catch shown live; or the
+ * same query written by hand, the form taking it back while it fits; or a
+ * described subject when the deployment has a classifier. Its name is the
+ * title, filled from the words until it is written. Under it, what the alert
+ * would have caught among the newest articles.
  */
 export function AlertForm({
   described,
@@ -136,11 +60,8 @@ export function AlertForm({
 }) {
   const id = useId();
   const [kind, setKind] = useState<Kind>("keywords");
-  const [words, setWords] = useState<string[]>([]);
-  const [wordInput, setWordInput] = useState("");
-  const [mode, setMode] = useState<"any" | "all">("any");
-  const [exclude, setExclude] = useState<string[]>([]);
-  const [excludeInput, setExcludeInput] = useState("");
+  // The guided form's fields; its sources are `watched`, shared with described alerts.
+  const [fields, setFields] = useState(EMPTY_FORM);
   const [watched, setWatched] = useState<string[]>([]);
   const [advanced, setAdvanced] = useState(false);
   const [query, setQuery] = useState("");
@@ -151,19 +72,23 @@ export function AlertForm({
   // One key per alert being written, so a retried submit is not a second alert.
   const idempotency = useRef(crypto.randomUUID());
   const parsed = useParsed(query);
+  // Switching between the guided form and the advanced query removes the
+  // button pressed: focus goes to the first field of the side shown.
+  const switched = useRef(false);
+  useEffect(() => {
+    if (!switched.current) return;
+    switched.current = false;
+    document.getElementById(advanced ? "alert-query" : `${id}-all`)?.focus();
+  }, [advanced]);
 
   const reset = (next: Alert | null) => {
     setError("");
-    setWordInput("");
-    setExcludeInput("");
     idempotency.current = crypto.randomUUID();
     setName(next?.name || "");
     setDescription(next?.kind === "described" ? next.expression.description : "");
     setKind(next?.kind === "described" ? "described" : "keywords");
-    const form = next?.kind === "keywords" ? decompose(next.expression.match) : null;
-    setWords(form?.words || []);
-    setMode(form?.mode || "any");
-    setExclude(form?.exclude || []);
+    const form = next?.kind === "keywords" ? unbuild(next.expression.match) : null;
+    setFields(form || EMPTY_FORM);
     setWatched(next?.kind === "described" ? next.expression.sources || [] : form?.sources || []);
     const needsAdvanced = next?.kind === "keywords" && !form;
     setAdvanced(needsAdvanced);
@@ -175,9 +100,8 @@ export function AlertForm({
     setError("");
     if (!editing) idempotency.current = crypto.randomUUID();
   };
-  const allWords = cleanWords([...words, ...splitList(wordInput)]);
-  const allExcluded = cleanWords([...exclude, ...splitList(excludeInput)]);
-  const chipsExpression = compose({ words: allWords, mode, exclude: allExcluded, sources: watched });
+  const built = build({ ...fields, sources: watched });
+  const builtQuery = built ? (print(built.match) ?? "") : "";
   const isDescribed = kind === "described";
   const expression: AlertExpression | null = isDescribed
     ? description.trim().length >= DESCRIPTION.min
@@ -187,8 +111,11 @@ export function AlertForm({
       ? parsed.state === "valid"
         ? parsed.expression
         : null
-      : chipsExpression;
-  const fallbackName = (isDescribed ? description : advanced ? query : allWords.join(", ")).trim().slice(0, 80);
+      : built;
+  // The raw query goes back to the form only when the form shows it as it is.
+  const fitting = advanced && parsed.state === "valid" ? unbuild(parsed.expression.match) : null;
+  const terms = expression?.kind === "keywords" ? positiveTerms(expression.match) : [];
+  const fallbackName = (isDescribed ? description : advanced ? query : terms.join(", ")).trim().slice(0, 80);
 
   async function submit() {
     if (busy) return;
@@ -200,7 +127,7 @@ export function AlertForm({
             ? parsed.state === "invalid"
               ? parsed.message
               : "Écrivez la requête à surveiller."
-            : "Ajoutez au moins un mot à surveiller.",
+            : "Remplissez « Tous ces mots », « Cette phrase exacte » ou « Au moins un de ces mots ».",
       );
       return;
     }
@@ -324,144 +251,112 @@ export function AlertForm({
           demandent un classifieur externe.
         </p>
       )}
-      {advanced && !isDescribed ? (
-        <div className="form-field">
-          <label htmlFor="alert-query">Requête avancée</label>
-          <input
-            id="alert-query"
-            className="form-input"
-            value={query}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="orage AND (grêle OR vent) NOT football"
-            aria-describedby="alert-query-preview"
+      {isDescribed ? (
+        <div className="af-sentence">
+          <p className="af-line">Prévenez-moi quand un article parle de</p>
+          <label className="visually-hidden" htmlFor={`${id}-description`}>
+            Décrivez le sujet en une phrase
+          </label>
+          <textarea
+            id={`${id}-description`}
+            className="af-describe"
+            value={description}
+            maxLength={DESCRIPTION.max}
+            rows={2}
+            placeholder="des grèves dans les ports"
+            aria-describedby="alert-described-note"
             onChange={(event) => {
-              setQuery(event.target.value);
+              setDescription(event.target.value);
               changed();
             }}
           />
-          <QueryPreview id="alert-query-preview" parsed={parsed} />
-          <p className="form-help">
-            AND, OR et NOT en majuscules, des parenthèses, une expression entre guillemets, et{" "}
-            <code>source:nom</code> pour une source.
-          </p>
-          {(parsed.state === "empty" || (parsed.state === "valid" && decompose(parsed.expression.match))) && (
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => {
-                const form = parsed.state === "valid" ? decompose(parsed.expression.match) : null;
-                setWords(form?.words || []);
-                setMode(form?.mode || "any");
-                setExclude(form?.exclude || []);
-                setWatched(form?.sources || []);
-                setAdvanced(false);
-                changed();
-              }}
-            >
-              Revenir aux mots simples
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="af-sentence">
-          <p className="af-line">
-            Prévenez-moi quand un article parle de
-            {!isDescribed && allWords.length > 1 && (
-              <span className="af-mode" role="group" aria-label="Combinaison des mots">
-                {(
-                  [
-                    ["any", "l’un de ces mots"],
-                    ["all", "tous ces mots"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={mode === value}
-                    onClick={() => {
-                      setMode(value);
-                      changed();
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </span>
-            )}
-          </p>
-          {isDescribed ? (
-            <>
-              <label className="visually-hidden" htmlFor={`${id}-description`}>
-                Décrivez le sujet en une phrase
-              </label>
-              <textarea
-                id={`${id}-description`}
-                className="af-describe"
-                value={description}
-                maxLength={DESCRIPTION.max}
-                rows={2}
-                placeholder="des grèves dans les ports"
-                aria-describedby="alert-described-note"
-                onChange={(event) => {
-                  setDescription(event.target.value);
-                  changed();
-                }}
-              />
-              <DescribedNote id="alert-described-note" />
-            </>
-          ) : (
-            <>
-              <ChipField
-                id={`${id}-words`}
-                label="Mots à surveiller"
-                listLabel="Mots surveillés"
-                chips={words}
-                onChips={(next) => {
-                  setWords(next);
-                  changed();
-                }}
-                text={wordInput}
-                onText={(text) => {
-                  setWordInput(text);
-                  changed();
-                }}
-                placeholder={words.length ? "+ un mot, puis Entrée" : "orage, grêle, vent…"}
-                onEmptyEnter={() => void submit()}
-              />
-              <p className="af-line">sauf s’il parle de</p>
-              <ChipField
-                id={`${id}-exclude`}
-                label="Ignorer les articles qui parlent de"
-                listLabel="Mots ignorés"
-                tone="not"
-                chips={exclude}
-                onChips={(next) => {
-                  setExclude(next);
-                  changed();
-                }}
-                text={excludeInput}
-                onText={(text) => {
-                  setExcludeInput(text);
-                  changed();
-                }}
-                placeholder={exclude.length ? "+ un mot" : "football, publicité… (facultatif)"}
-              />
-            </>
-          )}
+          <DescribedNote id="alert-described-note" />
           <div className="af-line af-sources">dans {sourcesMenu}</div>
         </div>
+      ) : advanced ? (
+        <QueryEditor
+          value={query}
+          onChange={(next) => {
+            setQuery(next);
+            changed();
+          }}
+          parsed={parsed}
+          footer={
+            parsed.state === "empty" || fitting ? (
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => {
+                  // An empty query clears the form, except what wrote no query
+                  // in it (only words to avoid, sources): that comes back as it was.
+                  setFields(fitting || (built ? EMPTY_FORM : fields));
+                  setWatched(fitting?.sources || (built ? [] : watched));
+                  switched.current = true;
+                  setAdvanced(false);
+                  changed();
+                }}
+              >
+                Revenir au formulaire guidé
+              </button>
+            ) : (
+              <p className="form-note query-unfit">
+                {parsed.state === "valid"
+                  ? "Le formulaire guidé ne sait pas afficher cette requête : elle reste telle quelle ici."
+                  : "Corrigez la requête pour pouvoir revenir au formulaire guidé."}
+              </p>
+            )
+          }
+        />
+      ) : (
+        <>
+          <QueryBuilder
+            id={id}
+            form={fields}
+            onChange={(next) => {
+              setFields(next);
+              changed();
+            }}
+            sourcesMenu={sourcesMenu}
+          />
+          <div className="query-built">
+            <div className="query-built-head">
+              <span className="query-built-label">Requête</span>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => {
+                  setQuery(builtQuery);
+                  switched.current = true;
+                  setAdvanced(true);
+                  changed();
+                }}
+              >
+                Écrire une requête avancée
+              </button>
+            </div>
+            {built && <code className="query-built-code">{builtQuery}</code>}
+            <QueryPreview
+              id={`${id}-sentence`}
+              parsed={built ? { state: "valid", expression: built } : { state: "empty" }}
+              empty={
+                fieldTerms(fields.none).length
+                  ? "Ajoutez aussi des mots à chercher : « Aucun de ces mots » seul attraperait tout le reste."
+                  : "La requête et ce qu’elle attrapera s’écrivent ici à mesure que vous remplissez les champs."
+              }
+            />
+          </div>
+        </>
       )}
       {!isDescribed && !advanced && !expression && (
         <p className="alert-preview alert-preview-title" data-empty="true">
-          Ajoutez un mot pour voir ce que l’alerte aurait repéré.
+          Remplissez un champ pour voir ce que l’alerte aurait repéré.
         </p>
       )}
       {(isDescribed || !advanced || expression) && (
         <AlertPreview
           expression={expression}
           onDemand={isDescribed}
-          terms={isDescribed ? [] : allWords}
+          terms={terms}
           logoOf={logoOf}
           feedItems={feedItems}
           onUnauthorized={onUnauthorized}
@@ -480,19 +375,6 @@ export function AlertForm({
         <button type="button" className="button quiet" onClick={onCancel}>
           Annuler
         </button>
-        {!isDescribed && !advanced && (
-          <button
-            type="button"
-            className="link-button form-advanced"
-            onClick={() => {
-              setQuery(chipsExpression ? (print(chipsExpression.match) ?? "") : "");
-              setAdvanced(true);
-              changed();
-            }}
-          >
-            Écrire une requête avancée
-          </button>
-        )}
       </div>
     </form>
   );
