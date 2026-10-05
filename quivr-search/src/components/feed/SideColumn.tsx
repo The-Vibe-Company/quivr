@@ -1,7 +1,7 @@
 import { plural } from "../../lib/format";
 import type { FeedItem } from "../../lib/feed";
 import { daily, dayLabel, hourly, shortDay } from "../../lib/moments";
-import { topics } from "../../lib/topics";
+import type { Topic } from "../../lib/stats";
 
 /** "christa pike" reads "Christa Pike"; acronyms keep their capitals. */
 const titleCase = (text: string) =>
@@ -9,34 +9,40 @@ const titleCase = (text: string) =>
 
 /**
  * Beside the feed: the topics of the moment, the words and names that come
- * back most in the feed's titles (a click searches them, a second click
- * clears the search), and the articles of the last seven days, one bar per
- * day (a click picks the day), or of the day picked, hour by hour.
+ * back most in the titles of the period (a click searches them, a second
+ * click clears the search), and the articles of the last seven days, one bar
+ * per day (a click picks the day), or of the day picked, hour by hour.
  */
 export function SideColumn({
-  titles,
+  topics: subjects,
   query,
   span,
   counts,
+  hours: hourCounts,
   day,
   onDay,
   onSearch,
   now,
 }: {
-  /** The feed's titles of the period picked, whatever is searched. */
-  titles: string[];
+  /**
+   * The topics of the last seven days or of the day picked, counted by the
+   * facade over every article of the sources and alerts picked, whatever is
+   * searched.
+   */
+  topics: Topic[];
   query: string;
-  /** The articles of every day, for the day-by-day chart. */
+  /** The loaded articles of every day, when nothing better counts them. */
   span: FeedItem[];
-  /** Articles per day as Quivr counts them, when no filter narrows the feed. */
+  /** Articles per day over the filter, counted over every article. */
   counts?: Map<string, number>;
+  /** Articles per hour of the day picked, counted over every article. */
+  hours?: number[];
   /** The day chosen, as "2026-10-03", or "" for every day. */
   day: string;
   onDay: (day: string) => void;
   onSearch: (text: string) => void;
   now: number;
 }) {
-  const subjects = topics(titles, 10);
   const top = Math.max(1, ...subjects.map((t) => t.count));
   const fold = (text: string) =>
     text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
@@ -44,7 +50,9 @@ export function SideColumn({
   const week = daily(times, now).map((d) =>
     counts ? { ...d, count: counts.get(d.day) ?? d.count } : d,
   );
-  const { counts: hours, today } = hourly(times, day || week[week.length - 1].day, now);
+  const loaded = hourly(times, day || week[week.length - 1].day, now);
+  const today = loaded.today;
+  const hours = hourCounts || loaded.counts;
   const bars = day ? hours : week.map((d) => d.count);
   const total = bars.reduce((sum, n) => sum + n, 0);
   const most = Math.max(1, ...bars);
@@ -54,7 +62,7 @@ export function SideColumn({
         <section className="side-card" aria-labelledby="side-topics">
           <div className="side-head">
             <h2 id="side-topics">Sujets du moment</h2>
-            <span className="side-total">{day ? dayLabel(day, now) : "Tous les jours"}</span>
+            <span className="side-total">{day ? dayLabel(day, now) : "7 derniers jours"}</span>
           </div>
           <ol className="topics">
             {subjects.map((t, index) => {
