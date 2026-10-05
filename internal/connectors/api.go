@@ -177,17 +177,6 @@ var (
 	ErrPushItemRejected      = publicerr.ItemRejected
 )
 
-// DeliverAPI resolves a declared route and authorizes it before opening any
-// credential or calling the plugin. The resolved target and provider remain
-// fixed for this delivery, even if the active registry changes concurrently.
-func (r Relay) DeliverAPI(ctx context.Context, scope corpus.Scope, id, path string, req Relayed) (RelayAnswer, error) {
-	auth := APIAuth{}
-	if scope.Organization != "" {
-		auth.Scope = &scope
-	}
-	return r.DeliverAPIWithAuth(ctx, auth, id, path, req)
-}
-
 // APIAuth carries at most one bearer credential. Signature routes may be
 // called without one. A recognized key is never tried as an instance token.
 type APIAuth struct {

@@ -108,26 +108,21 @@ func TestDatabaseAtNumberedHeadMigratesForwardToStampedMigrations(t *testing.T) 
 	// Stamped at the end of time so it stays last whatever lands on main.
 	const probe = "99991231T2359Z_migration_probe.sql"
 	next[probe] = &fstest.MapFile{Data: []byte("CREATE TABLE migration_probe (id int PRIMARY KEY)")}
-	pending, err := postgres.PendingMigrations(ctx, pool, next)
-	if err != nil {
+	if err := postgres.SchemaReady(ctx, pool); !errors.Is(err, postgres.ErrMigrationsPending) {
+		t.Fatalf("numbered schema must need migration: %v", err)
+	}
+	if err := postgres.MigrateFS(ctx, pool, next); err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) == 0 || pending[len(pending)-1] != probe {
-		t.Fatalf("pending before upgrade = %v, want it to end with %s", pending, probe)
-	}
-
-	if err = postgres.MigrateFS(ctx, pool, next); err != nil {
-		t.Fatal(err)
-	}
-	if pending, err = postgres.PendingMigrations(ctx, pool, next); err != nil || len(pending) != 0 {
-		t.Fatalf("pending after upgrade = %v, %v", pending, err)
+	if err := postgres.SchemaReady(ctx, pool); err != nil {
+		t.Fatalf("upgraded schema not ready: %v", err)
 	}
 	var probed bool
-	if err = pool.QueryRow(ctx, "SELECT to_regclass('migration_probe') IS NOT NULL").Scan(&probed); err != nil || !probed {
+	if err := pool.QueryRow(ctx, "SELECT to_regclass('migration_probe') IS NOT NULL").Scan(&probed); err != nil || !probed {
 		t.Fatalf("probe table applied = %v, %v", probed, err)
 	}
 	// Rerunning is a no-op: the probe would fail if applied twice.
-	if err = postgres.MigrateFS(ctx, pool, next); err != nil {
+	if err := postgres.MigrateFS(ctx, pool, next); err != nil {
 		t.Fatal(err)
 	}
 }
