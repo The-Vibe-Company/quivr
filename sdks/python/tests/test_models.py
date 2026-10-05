@@ -20,6 +20,7 @@ MODELS = {
     "error.schema.json": models.ErrorEnvelope,
     "plugin-manifest.schema.json": models.PluginManifest,
     "plugin-fixture.schema.json": models.InvocationFixture,
+    "authentication-fixture.schema.json": models.AuthenticationFixture,
     "subscription-request.schema.json": models.SubscriptionRequest,
     "subscription-response.schema.json": models.SubscriptionResponse,
     "subscription-fixture.schema.json": models.SubscriptionFixture,

@@ -263,7 +263,7 @@ func (p *Plugin) Handler() (http.Handler, error) {
 		mux.HandleFunc("POST /v0/contributions/retrieval/search", p.serveSearch)
 	}
 	if p.m.Connector == nil {
-		return mux, nil
+		return p.protocolHandler(mux), nil
 	}
 	mux.HandleFunc("POST /v0/contributions/connector/fetch", p.serveFetch)
 	mux.HandleFunc("POST /v0/contributions/connector/check_credential", p.serveCheckCredential)
@@ -274,7 +274,14 @@ func (p *Plugin) Handler() (http.Handler, error) {
 		mux.HandleFunc("POST /v0/contributions/connector/describe_attachment", p.serveDescribeAttachment)
 		mux.HandleFunc("POST /v0/contributions/connector/upload_attachment", p.serveUploadAttachment)
 	}
-	return mux, nil
+	return p.protocolHandler(mux), nil
+}
+
+func (p *Plugin) protocolHandler(mux http.Handler) http.Handler {
+	if resolveAPIFeatures(p.m.pluginAPI).speaks("signed_calls") {
+		return p.authenticate(mux)
+	}
+	return mux
 }
 
 // contributions lists the declared Contributions for discovery.

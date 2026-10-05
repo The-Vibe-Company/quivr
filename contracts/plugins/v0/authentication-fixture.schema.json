@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quivr.invalid/contracts/plugins/v0/authentication-fixture.schema.json",
+  "title": "Engine authentication fixtures",
+  "description": "Normative authentication probes used by the Contract Runner. The plugin audience placeholder resolves to the tested plugin id. Tokens use the configured key, issued_seconds_ago relative to probe time, a 60-second lifetime and GET /v0/discovery. The unsigned and forged names omit or corrupt the token.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cases"
+  ],
+  "properties": {
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "audience",
+          "issued_seconds_ago",
+          "body",
+          "sent_body",
+          "expected_status"
+        ],
+        "properties": {
+          "name": {
+            "enum": [
+              "valid",
+              "expired",
+              "wrong-audience",
+              "tampered",
+              "unsigned",
+              "forged"
+            ]
+          },
+          "audience": {
+            "type": "string",
+            "minLength": 1
+          },
+          "issued_seconds_ago": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3600
+          },
+          "body": {
+            "type": "string"
+          },
+          "sent_body": {
+            "type": "string"
+          },
+          "expected_status": {
+            "enum": [
+              200,
+              401
+            ]
+          }
+        }
+      }
+    }
+  }
+}

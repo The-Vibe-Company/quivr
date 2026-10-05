@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -56,6 +57,9 @@ func LoadPins(configs []PinConfig) (*PinSet, error) {
 			return nil, err
 		}
 		pins[i] = pin
+		if !pin.Speaks(FeatureSignedCalls) {
+			slog.Warn("plugin calls are unsigned because the manifest declares an older Plugin API", "plugin_id", pin.Manifest.ID, "plugin_api", pin.PluginAPI())
+		}
 	}
 	if len(issues) > 0 {
 		return nil, &PinError{Path: "plugins", Issues: issues}
