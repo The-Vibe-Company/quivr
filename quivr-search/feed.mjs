@@ -4,7 +4,8 @@
 // stream with the server key and reread each Record an event names. Browsers
 // read a snapshot and a fan-out SSE stream; the core key and change cursors
 // never reach them. Older days are read on demand: one range of the catalog
-// by acceptance date, and cached counts per day.
+// by acceptance date, and cached counts per day. Every article it reads, or
+// sees withdrawn, is told to the index of the whole corpus (catalog.mjs).
 //
 // An item's arrival time is when Quivr accepted its current Version, read
 // from the Version itself, so Records found by a catalog scan after a restart
@@ -29,7 +30,7 @@ const MAX_COUNTS = 100;
 // What the engine accepts as a bound: RFC 3339 with an offset.
 const RFC3339 =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
-const instant = (value) =>
+export const instant = (value) =>
   typeof value === "string" &&
   RFC3339.test(value) &&
   !Number.isNaN(Date.parse(value))
@@ -159,7 +160,7 @@ const unlisted = (status) =>
           : "Les articles de ce jour sont momentanément indisponibles. Réessayez.",
       );
 
-export function createFeed({ core, key, corpus, upstream }) {
+export function createFeed({ core, key, corpus, upstream, index }) {
   const items = new Map();
   const clients = new Set();
   // Other views of the demo corpus (the Admin tab) told of each change as it
@@ -185,6 +186,7 @@ export function createFeed({ core, key, corpus, upstream }) {
     notify("status", live);
   }
   function upsert(item) {
+    index?.note(item);
     items.set(item.record_id, item);
     if (items.size > MAX_ITEMS) {
       const oldest = [...items.values()].sort(newestFirst).at(-1);
@@ -194,6 +196,7 @@ export function createFeed({ core, key, corpus, upstream }) {
     broadcast("item", item);
   }
   function remove(id) {
+    index?.drop(id);
     if (items.delete(id)) broadcast("remove", { record_id: id });
   }
 
@@ -357,6 +360,7 @@ export function createFeed({ core, key, corpus, upstream }) {
     }
   }
   async function resync() {
+    index?.invalidate();
     await sync();
     broadcast("reset", {});
     notify("reset");
@@ -448,6 +452,10 @@ export function createFeed({ core, key, corpus, upstream }) {
   keepalive.unref();
 
   return {
+    /** Reads the catalog once and follows the change stream from then on. */
+    start() {
+      start().catch(() => {});
+    },
     /** Follows the change stream: watcher("change", event), ("status", live), ("reset"). */
     watch(watcher) {
       watchers.add(watcher);

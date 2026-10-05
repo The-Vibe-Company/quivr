@@ -52,7 +52,8 @@ export function ConnectorDetail({
   connector: Connector;
   kind?: ConnectorKind;
   catalog: KindCatalog;
-  stats?: SourceStats;
+  /** Null until the facade counted them. */
+  stats: SourceStats | null;
   now: number;
   onClose: () => void;
   onChanged: (connector: Connector) => void;
@@ -121,11 +122,11 @@ export function ConnectorDetail({
           <dl className="sc-stats settings-stats">
             <div>
               <dt>par jour</dt>
-              <dd>{perDay}</dd>
+              <dd>{stats ? perDay : "—"}</dd>
             </div>
             <div>
               <dt>repérés</dt>
-              <dd>{stats?.caught || 0}</dd>
+              <dd>{stats ? stats.caught : "—"}</dd>
             </div>
           </dl>
           <WeekSpark week={week} most={most} now={now} />

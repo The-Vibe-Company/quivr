@@ -16,7 +16,8 @@ import { createAlert, alertMessage, type Alert } from "../../lib/alerts";
 import { NotationError, parse } from "../../lib/notation";
 import { sourceName } from "../../lib/alertForm";
 import { longTime, plural, shortTime } from "../../lib/format";
-import { dayLabel, dayOf, moments } from "../../lib/moments";
+import { dayBounds, dayLabel, dayOf, moments } from "../../lib/moments";
+import { fetchFeedStats, fetchTopics, hourBounds, weekBounds } from "../../lib/stats";
 import { loadMuted, saveMuted } from "../../lib/muted";
 import { formatAbsolute } from "../../lib/connectors";
 import type { Connector } from "../../lib/connectors";
@@ -40,6 +41,7 @@ import { SideColumn } from "./SideColumn";
 import { SourceLogo, logoIds } from "./SourceLogo";
 import { FilterMenu, MenuOption } from "./FilterMenu";
 import { onDay, useDayCounts, useDayItems, useLiveSince } from "./days";
+import { useNumbers } from "../../lib/numbers";
 
 /**
  * What the feed shows: every article or the unread ones; then, when any are
@@ -156,6 +158,45 @@ export function FeedPage({
   const { counts, refresh: refreshCounts } = useDayCounts(dayOf(now), onUnauthorized);
   const liveSince = useLiveSince(feed.items);
   const dayFeed = useDayItems(query ? "" : day, onUnauthorized);
+  // Out of a search, every number of the filter bar and of the side column
+  // is counted by the facade over every article, not over the loaded ones.
+  const week = weekBounds(now);
+  const hours = day ? hourBounds(day, now) : null;
+  const period = day ? dayBounds(day) : {};
+  const mutedList = [...muted].sort();
+  const statsQuery = {
+    ...period,
+    buckets: hours ? hours.bounds : week,
+    sources: filter.sources,
+    muted: mutedList,
+    alerts: filter.alerts,
+    read: filter.read,
+    since: reading.since,
+    read_ids: reading.readIds,
+  };
+  const counted = useNumbers(
+    query
+      ? null
+      : JSON.stringify({ ...statsQuery, read_ids: `${reading.readIds.length}:${reading.readIds.at(-1)}` }),
+    (signal) => fetchFeedStats(statsQuery, signal),
+    onUnauthorized,
+    // Counted in memory by the facade: arrivals show in the counts at once.
+    feed.items,
+    2000,
+  );
+  const topicsQuery = {
+    after: day ? dayBounds(day).after : week[week.length - 1],
+    before: day ? dayBounds(day).before : week[0],
+    sources: filter.sources,
+    muted: mutedList,
+    alerts: filter.alerts,
+  };
+  const topics = useNumbers(
+    JSON.stringify(topicsQuery),
+    (signal) => fetchTopics(topicsQuery, signal),
+    onUnauthorized,
+    feed.items,
+  );
 
   useEffect(() => {
     const clock = setInterval(() => setNow(Date.now()), 30000);
@@ -361,8 +402,32 @@ export function FeedPage({
   const everyDay = inQuivr ? counts.total + live.length : span.length;
   // Without a source or alert picked, Tout is what Quivr holds for the period.
   const facetFree = !filter.alerts.length && !filter.sources.length;
+  // In a search, the facets count the articles found; otherwise the facade
+  // counts them, and they show once it answered.
+  const numbers = counted?.value;
+  const local = !!query;
   const allCount =
-    inQuivr && facetFree ? (day ? days.get(day) || 0 : everyDay) : readable.length;
+    inQuivr && facetFree ? (day ? days.get(day) || 0 : everyDay) : local ? readable.length : numbers?.all;
+  const unreadCount = local ? readable.filter((i) => reading.isUnread(i)).length : numbers?.unread;
+  // The side column's bars: Quivr's day counts without a filter, else the
+  // facade's for this filter, else (in a search) the articles found.
+  const bars = counted?.current ? numbers!.buckets : null;
+  const weekCounts =
+    inQuivr && facetFree && filter.read === "all"
+      ? days
+      : bars && !day
+        ? new Map(bars.map((n, i) => [dayOf(Date.parse(week[i + 1])), n]))
+        : undefined;
+  const hourCounts =
+    bars && hours
+      ? hours.hours.reduce(
+          (out, hour, i) => {
+            out[hour] += bars[i];
+            return out;
+          },
+          new Array<number>(hours.length).fill(0),
+        )
+      : undefined;
   const pick = (picked: string[], value: string) =>
     picked.includes(value) ? picked.filter((v) => v !== value) : [...picked, value];
   const alertItems = facet("alerts");
@@ -656,7 +721,7 @@ export function FeedPage({
               {(
                 [
                   ["all", "Tout", allCount],
-                  ["unread", "Non lus", readable.filter((i) => reading.isUnread(i)).length],
+                  ["unread", "Non lus", unreadCount],
                 ] as const
               ).map(([value, label, n]) => (
                 <button
@@ -667,7 +732,7 @@ export function FeedPage({
                   onClick={() => onFilter({ ...filter, read: value })}
                 >
                   {label}
-                  <span className="chip-count">{n}</span>
+                  {n !== undefined && <span className="chip-count">{n}</span>}
                 </button>
               ))}
             </span>
@@ -707,7 +772,11 @@ export function FeedPage({
                         alerts: filter.alerts.length === everyAlert.length ? [] : everyAlert,
                       })
                     }
-                    count={alertItems.filter((i) => caughtBy(i.record_id).length > 0).length}
+                    count={
+                      local
+                        ? alertItems.filter((i) => caughtBy(i.record_id).length > 0).length
+                        : numbers?.any_alert
+                    }
                   >
                     Toutes les alertes
                   </MenuOption>
@@ -717,7 +786,11 @@ export function FeedPage({
                     key={a.alert_id}
                     pressed={filter.alerts.includes(a.alert_id)}
                     onClick={() => onFilter({ ...filter, alerts: pick(filter.alerts, a.alert_id) })}
-                    count={alertItems.filter((i) => list.matched[i.record_id]?.includes(a.alert_id)).length}
+                    count={
+                      local
+                        ? alertItems.filter((i) => list.matched[i.record_id]?.includes(a.alert_id)).length
+                        : numbers && (numbers.alerts[a.alert_id] || 0)
+                    }
                   >
                     {a.name}
                   </MenuOption>
@@ -740,7 +813,11 @@ export function FeedPage({
                     <MenuOption
                       pressed={filter.sources.includes(ns)}
                       onClick={() => onFilter({ ...filter, sources: pick(filter.sources, ns) })}
-                      count={sourceItems.filter((i) => i.namespace === ns).length}
+                      count={
+                        local
+                          ? sourceItems.filter((i) => i.namespace === ns).length
+                          : numbers && (numbers.sources[ns] || 0)
+                      }
                       lead={<SourceLogo namespace={ns} connectorId={logoOf.get(ns)} size="small" />}
                     >
                       {sourceName(ns)}
@@ -779,13 +856,15 @@ export function FeedPage({
                 Tout effacer
               </button>
             )}
-            {readable.some((i) => reading.isUnread(i)) && (
+            {(local || !numbers ? readable.some((i) => reading.isUnread(i)) : numbers.unread > 0) && (
               <button
                 type="button"
                 className="mark-read"
                 title="Marquer comme lus les articles affichés"
                 onClick={() => {
-                  reading.markAllRead(readable.filter((i) => reading.isUnread(i)));
+                  // With nothing picked, every article so far, loaded or not.
+                  if (numbers && !day && facetFree) reading.markEverythingRead();
+                  else reading.markAllRead(readable.filter((i) => reading.isUnread(i)));
                   // The button goes once all is read: the focus moves to the filters.
                   document.querySelector<HTMLElement>(".filters .chip")?.focus();
                 }}
@@ -932,12 +1011,11 @@ export function FeedPage({
         </div>
       </section>
       <SideColumn
-        titles={(day && !query ? base.map((r) => r.item) : feed.items)
-          .filter((i) => !muted.has(i.namespace) && (!day || dayOf(when(i)) === day))
-          .map((i) => i.title)}
+        topics={topics?.value.items || []}
         query={query}
         span={span}
-        counts={inQuivr && facetFree && filter.read === "all" ? days : undefined}
+        counts={query ? undefined : weekCounts}
+        hours={query ? undefined : hourCounts}
         day={day}
         onDay={pickDay}
         onSearch={(text) => {

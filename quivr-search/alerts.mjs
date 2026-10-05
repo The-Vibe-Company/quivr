@@ -499,8 +499,31 @@ export function alertRoutes({
     };
   }
 
+  // What the alerts caught, for the demo's numbers (catalog.mjs): the last
+  // list read, at most a minute old, so counting never pages Matches again.
+  let caught = null;
+  async function listed(corpus) {
+    const result = await list(corpus);
+    if (result.status === 200)
+      caught = { at: Date.now(), matched: Promise.resolve(result.data.matched) };
+    return result;
+  }
+  function matched(corpus) {
+    if (!destination) return Promise.resolve({});
+    if (!caught || Date.now() - caught.at >= 60000) {
+      const pending = list(corpus).then((result) =>
+        result.status === 200 ? result.data.matched : {},
+      );
+      caught = { at: Date.now(), matched: pending };
+      pending.catch(() => {
+        if (caught?.matched === pending) caught = null;
+      });
+    }
+    return caught.matched;
+  }
+
   /** The response for an alerts route, or undefined when the path is not one. */
-  return async function route(req, path, corpus) {
+  async function route(req, path, corpus) {
     if (path !== "/demo/alerts" && !path.startsWith("/demo/alerts/")) return;
     if (!destination)
       return path === "/demo/alerts" && req.method === "GET"
@@ -512,7 +535,7 @@ export function alertRoutes({
     try {
       if (path === "/demo/alerts")
         return req.method === "GET"
-          ? await list(corpus)
+          ? await listed(corpus)
           : req.method === "POST"
             ? await create(req, corpus)
             : undefined;
@@ -533,5 +556,7 @@ export function alertRoutes({
         return error;
       throw error;
     }
-  };
+  }
+  route.matched = matched;
+  return route;
 }

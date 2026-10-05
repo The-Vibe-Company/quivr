@@ -1084,3 +1084,110 @@ test("the Admin tab relays the demo corpus's documents live, fences timelines an
   assert.ok(!received.includes("fixture-server-key"));
   assert.ok(!JSON.stringify(snapshot).includes("fixture-server-key"));
 });
+
+test("the demo's numbers count every article of the corpus, beyond the feed's latest 300", async (t) => {
+  const { fakeCore } = await import("../scripts/fake-core.mjs");
+  const now = Date.now();
+  const HOUR = 3600000;
+  const DAY = 24 * HOUR;
+  // 300 articles of today fill the feed's snapshot; 120 older ones do not.
+  const core = fakeCore({
+    records: [
+      ...Array.from({ length: 300 }, (_, i) => ({
+        id: `new${i}`,
+        namespace: "Dépêches exemple",
+        at: now - (i + 1) * 60000,
+        title: `Marché de Noël : étape ${i}`,
+      })),
+      ...Array.from({ length: 120 }, (_, i) => ({
+        id: `old${i}`,
+        namespace: "Revue technique",
+        at: now - 3 * DAY - (i + 1) * 60000,
+        title: `Archives municipales : lot ${i}`,
+      })),
+    ],
+    alerts: [["sub_arch", "Archives", ["archives"]]],
+  });
+  core.server.listen(0, "127.0.0.1");
+  await once(core.server, "listening");
+  t.after(() => {
+    core.server.closeAllConnections();
+    core.server.close();
+  });
+  const base = await startDemo(t, core.server.address().port, {
+    QUIVR_DEMO_DESTINATION_ID: "demo-alerts-sink",
+  });
+  const iso = (time) => new Date(time).toISOString();
+  // Today and the three days before, newest first.
+  const bounds = [iso(now + HOUR), iso(now - DAY), iso(now - 4 * DAY)];
+  const stats = async (body) => {
+    const response = await fetch(`${base}/demo/feed/stats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: base },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, data: await response.json() };
+  };
+  const get = async (path) => (await fetch(base + path)).json();
+  // Waits until the facade's answer holds, up to a deadline.
+  async function until(read, holds, what) {
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      const value = await read();
+      if (holds(value)) return value;
+      if (Date.now() > deadline) assert.fail(`${what}: ${JSON.stringify(value)}`);
+      await delay(25);
+    }
+  }
+
+  assert.equal((await get("/demo/feed")).items.length, 300);
+  const all = await until(() => stats({ buckets: bounds }).then((r) => r.data), (d) => !d.building, "index built");
+  assert.deepEqual(
+    { total: all.total, buckets: all.buckets, sources: all.sources, alerts: all.alerts, any: all.any_alert },
+    {
+      total: 420,
+      buckets: [300, 120],
+      sources: { "Dépêches exemple": 300, "Revue technique": 120 },
+      alerts: { sub_arch: 120 },
+      any: 120,
+    },
+  );
+  // A picked source narrows the total and the bars, not its own menu.
+  const picked = (await stats({ buckets: bounds, sources: ["Revue technique"] })).data;
+  assert.deepEqual([picked.total, picked.buckets, picked.sources], [120, [0, 120], all.sources]);
+  // Counting again reads memory only: no call reaches the core.
+  const calls = JSON.stringify(core.calls());
+  await stats({ buckets: bounds, alerts: ["sub_arch"] });
+  assert.equal(JSON.stringify(core.calls()), calls);
+
+  // Topics come from every title of the period, the older ones included.
+  const period = new URLSearchParams({ after: bounds[2], before: bounds[0] });
+  const topics = await until(() => get(`/demo/feed/topics?${period}`), (d) => !d.building, "titles read");
+  assert.deepEqual(topics.items.find((x) => x.label === "Archives"), { label: "Archives", count: 120 });
+  period.append("source", "Dépêches exemple");
+  const narrowed = await get(`/demo/feed/topics?${period}`);
+  assert.equal(narrowed.items.some((x) => x.label === "Archives"), false);
+
+  // The Sources page's numbers, and the alerts' catches dated by the index.
+  const sources = await get(`/demo/sources/stats?bounds=${bounds.join(",")}`);
+  assert.deepEqual(sources.sources["Revue technique"].days, [0, 120]);
+  assert.deepEqual(
+    [sources.sources["Revue technique"].all, sources.sources["Revue technique"].caught],
+    [120, 120],
+  );
+  const alerts = await get("/demo/alerts");
+  assert.equal(Object.keys(alerts.dated.records).length, 120);
+  assert.deepEqual(alerts.dated.namespaces, ["Revue technique"]);
+  assert.equal(alerts.items[0].arrived, 420);
+
+  // A correction moves an older article to today; a withdrawal removes one.
+  core.correct("old0", "Archives municipales : lot corrigé");
+  await until(() => stats({ buckets: bounds }).then((r) => r.data.buckets), (b) => b[0] === 301, "corrected");
+  core.withdraw("new0");
+  const after = await until(() => stats({ buckets: bounds }).then((r) => r.data), (d) => d.total === 419, "withdrawn");
+  assert.deepEqual(after.buckets, [300, 119]);
+
+  for (const bad of [{ buckets: [...bounds].reverse() }, { read: "some" }, { sources: "Revue technique" }])
+    assert.equal((await stats(bad)).status, 422, JSON.stringify(bad));
+  assert.equal((await fetch(`${base}/demo/feed/topics`)).status, 422);
+});

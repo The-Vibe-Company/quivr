@@ -1,5 +1,6 @@
 // "Sujets du moment": the words and names that come back most in a set of
-// titles, counted once per title. Computed in the browser, from the feed.
+// titles, counted once per title. Computed by the facade over the titles of
+// the period shown (catalog.mjs), never from the browser's latest articles.
 
 const STOPWORDS = new Set(
   (
@@ -21,20 +22,20 @@ const STOPWORDS = new Set(
     .map((word) => fold(word)),
 );
 
-function fold(word: string) {
+function fold(word) {
   return word.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 }
 
 // Words of a title, without elided articles: "l’Espagne" gives "Espagne".
-function words(title: string) {
+function words(title) {
   return (title.match(/[\p{L}][\p{L}’'-]*/gu) || [])
     .map((w) => w.replace(/^(?:[ldjmntsc]|qu|jusqu|lorsqu|puisqu)['’]/i, "").replace(/['’-]+$/, ""))
     .filter(Boolean);
 }
 
-const capital = (word: string) => /^\p{Lu}/u.test(word);
-const acronym = (word: string) => /^\p{Lu}{2,5}$/u.test(word);
-const kept = (word: string) =>
+const capital = (word) => /^\p{Lu}/u.test(word);
+const acronym = (word) => /^\p{Lu}{2,5}$/u.test(word);
+const kept = (word) =>
   !STOPWORDS.has(fold(word)) && (word.length >= 4 || acronym(word));
 
 /**
@@ -42,9 +43,9 @@ const kept = (word: string) =>
  * capitalised words ("Christa Pike") and single words, each counted once per
  * title. A word met mostly inside a name is not repeated on its own.
  */
-export function topics(titles: string[], limit = 8, least = 2) {
-  const counts = new Map<string, { label: string; count: number }>();
-  const add = (label: string, seen: Set<string>) => {
+export function topics(titles, limit = 8, least = 2) {
+  const counts = new Map();
+  const add = (label, seen) => {
     const key = fold(label);
     if (seen.has(key)) return;
     seen.add(key);
@@ -57,7 +58,7 @@ export function topics(titles: string[], limit = 8, least = 2) {
     }
   };
   for (const title of titles) {
-    const seen = new Set<string>();
+    const seen = new Set();
     const list = words(title);
     for (let i = 0; i < list.length; i++) {
       // A name: capitalised words in a row ("Christa Pike"), not starting

@@ -6,6 +6,7 @@ import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { feedGuard, parseSuggestions } from "./feeds.mjs";
 import { createFeed } from "./feed.mjs";
+import { boundsOf, createCatalog, statsQuery, topicsQuery } from "./catalog.mjs";
 import { alertRoutes } from "./alerts.mjs";
 import { createAdmin } from "./admin.mjs";
 import { activePlugins } from "./admin-plugins.mjs";
@@ -102,8 +103,21 @@ async function saveState() {
 }
 let feed;
 let admin;
+let catalog;
+// Every article of the demo corpus, indexed for the demo's numbers (THE-1038).
+const catalogFor = (corpus) =>
+  (catalog ||= createCatalog({
+    upstream,
+    corpus,
+    caught: () => alerts.matched(corpus),
+  }));
 const feedFor = (corpus) =>
-  (feed ||= createFeed({ core, key, corpus, upstream }));
+  (feed ||= createFeed({ core, key, corpus, upstream, index: catalogFor(corpus) }));
+// The index, with the feed's change stream keeping it current.
+const indexFor = (corpus) => {
+  feedFor(corpus).start();
+  return catalogFor(corpus);
+};
 // The plugins the engine runs, for the Admin tab's Plugins section (THE-797).
 const plugins = activePlugins({ upstream: (...args) => upstream(...args) });
 // The Admin tab (THE-796) follows the Fil's change stream of the demo corpus.
@@ -398,6 +412,9 @@ const server = http.createServer(async (req, res) => {
       path === "/demo/feed/stream" ||
       path === "/demo/feed/page" ||
       path === "/demo/feed/days" ||
+      path === "/demo/feed/stats" ||
+      path === "/demo/feed/topics" ||
+      path === "/demo/sources/stats" ||
       path === "/demo/alerts" ||
       path.startsWith("/demo/alerts/") ||
       path === "/demo/admin" ||
@@ -426,6 +443,19 @@ const server = http.createServer(async (req, res) => {
       }
       if (path === "/demo/feed/days" && req.method === "GET") {
         send(res, 200, await feedFor(id).days(url.searchParams));
+        return;
+      }
+      // The demo's numbers, over every article of the corpus (catalog.mjs).
+      if (path === "/demo/feed/stats" && req.method === "POST") {
+        send(res, 200, await indexFor(id).feed(statsQuery(await jsonBody(req))));
+        return;
+      }
+      if (path === "/demo/feed/topics" && req.method === "GET") {
+        send(res, 200, await indexFor(id).topics(topicsQuery(url.searchParams)));
+        return;
+      }
+      if (path === "/demo/sources/stats" && req.method === "GET") {
+        send(res, 200, await indexFor(id).sources(boundsOf(url.searchParams.get("bounds"))));
         return;
       }
       const logo = path.match(/^\/demo\/sources\/logo\/([\w-]+)$/);
@@ -465,8 +495,13 @@ const server = http.createServer(async (req, res) => {
         response = { status: 200, data: await adminFor(id).history(url) };
       else if (path === "/demo/admin/plugins" && req.method === "GET")
         response = await plugins();
-      else if (path.startsWith("/demo/alerts"))
+      else if (path.startsWith("/demo/alerts")) {
         response = await alerts(req, path, id);
+        // The list dates what each alert caught from the index.
+        if (path === "/demo/alerts" && req.method === "GET" && response?.data?.available) {
+          response = { ...response, data: indexFor(id).alerts(response.data) };
+        }
+      }
       else if (path === "/demo/feeds/suggestions" && req.method === "GET")
         response = { status: 200, data: { items: suggestions } };
       else if (path === "/demo/feeds/discover" && req.method === "POST") {
