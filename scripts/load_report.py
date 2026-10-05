@@ -46,6 +46,9 @@ def markdown(report):
                   f"Work: {run.get('work')}", f"Faults: {run.get('faults', [])}"]
         if run.get('driver_errors'):
             lines.append(f"Driver errors: {run['driver_errors']}")
+        if run.get('probes'):
+            lines += [f"Observer probes (separate from workload): {run['probes']}",
+                      'Probes share the APIs and can influence measured request latency.']
         for operation, row in run.get('lag', {}).items():
             lines.append(f"{operation}: {row}")
         if run.get('fault_windows'):

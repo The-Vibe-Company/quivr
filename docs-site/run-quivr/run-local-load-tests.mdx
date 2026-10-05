@@ -46,6 +46,7 @@ Durations are in seconds; fake delays are in milliseconds. Search mode weights
 set relative request frequency: four weights of `1` give an equal mix.
 `drain_seconds` is the time allowed for accepted work to finish after ingestion stops.
 Unknown fields, invalid values and killing the only replica are refused.
+The local driver also refuses more than one million scheduled ingestion arrivals.
 Validate a file without starting anything:
 
 ```bash
@@ -76,8 +77,13 @@ Lag percentiles cover successful observations; always read missing documents
 and missing alerts alongside them.
 The JSON `work` object names these `missing_searchable` and `missing_alerts`.
 Every generated document matches every configured alert, so `expected_alerts`
-is accepted documents times the scenario's alert count. Probes poll at 100 ms
-between passes; a pass over many documents can take longer.
+is accepted documents times the scenario's alert count. Receipt and search probes
+share a limit of 10 HTTP requests per second and rotate across live APIs.
+Receipt probes identify the stored record version from its acceptance receipt.
+The JSON `probes` object records `total_attempts` and `timed_window` statistics
+separately from workload requests.
+They share API capacity with the workload and can influence its latency.
+A pass over many pending documents can take longer than 100 ms.
 
 A run fails if requests fail, the driver drops arrivals, or accepted documents
 or expected notices remain missing at the drain deadline. A killed API may

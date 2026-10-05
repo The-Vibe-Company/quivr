@@ -7,10 +7,21 @@ from types import SimpleNamespace
 from load_report import distribution, request_summary
 from load_scenarios import validate
 from load import Workload
-from load_stack import local_docker_host
+from load_stack import LoadStack, local_docker_host
 
 
 class LoadContracts(unittest.TestCase):
+    def test_cleanup_removes_containers_when_a_child_exits_before_signal(self):
+        # The process manager and Docker are external boundaries. A vanished
+        # process must never prevent teardown of our own stack.
+        stack = LoadStack.__new__(LoadStack)
+        stack.children = [SimpleNamespace(pid=123, poll=lambda: None, wait=lambda **kwargs: None)]
+        stack.state = {'pids': [123]}
+        with mock.patch.object(stack, 'save'), mock.patch.object(stack, 'compose') as compose:
+            with mock.patch('os.killpg', side_effect=ProcessLookupError):
+                stack.down()
+        compose.assert_called_once_with('down', '--volumes', timeout=60)
+
     def test_docker_endpoint_is_local_even_with_a_selected_context(self):
         # Docker's context metadata is the owning external boundary. A remote
         # selection must fail before a stack or volume can be created.
@@ -71,6 +82,10 @@ class LoadContracts(unittest.TestCase):
                  ({'replicas': {'api': 1, 'worker': 1, 'kill_at_seconds': 5}}, 'kill'),
                  ({'search': {'concurrency': 2, 'users': 10, 'mix': {'lexcial': 1}}}, 'mix'),
                  ({'alerts': True}, 'alerts'), ({'duration_seconds': float('nan')}, 'duration'),
+                 ({'alerts': 10**400}, 'alerts'),
+                 ({'duration_seconds': 86400, 'ingestion': {'per_second': 10000,
+                   'concurrency': 2, 'burst': {'at_seconds': 0, 'duration_seconds': 86400,
+                   'multiplier': 100}}}, 'arrivals'),
                  ({'fake_latency_ms': {'embedding': -1, 'reranking': 3, 'judge': 4}}, 'embedding')]
         for changes, message in cases:
             with self.subTest(changes=changes):

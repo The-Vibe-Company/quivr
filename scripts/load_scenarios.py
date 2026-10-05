@@ -12,7 +12,7 @@ def keys(value, required, optional=()):
 
 
 def number(value, name, minimum, maximum, integer=False):
-    if (type(value) not in (int, float) or not math.isfinite(value)
+    if (type(value) not in (int, float) or (type(value) is float and not math.isfinite(value))
             or not minimum <= value <= maximum or (integer and type(value) is not int)):
         raise ValueError(f'{name} must be {"an integer" if integer else "a number"} in [{minimum}, {maximum}]')
 
@@ -49,6 +49,14 @@ def validate(s):
     number(burst['at_seconds'], 'burst at_seconds', 0, s['duration_seconds'])
     number(burst['duration_seconds'], 'burst duration_seconds', 0, s['duration_seconds'] - burst['at_seconds'])
     number(burst['multiplier'], 'burst multiplier', 1, 100)
+    boundaries = sorted({0, burst['at_seconds'], burst['at_seconds'] +
+                         burst['duration_seconds'], s['duration_seconds']})
+    arrivals = sum(math.ceil((end-start)*s['ingestion']['per_second'] *
+        (burst['multiplier'] if burst['at_seconds'] <= start <
+         burst['at_seconds'] + burst['duration_seconds'] else 1))
+        for start, end in zip(boundaries, boundaries[1:]))
+    if arrivals > 1000000:
+        raise ValueError('scenario exceeds 1000000 scheduled ingestion arrivals')
     replicas = s['replicas']
     keys(replicas, ('api', 'worker'), ('kill_at_seconds',))
     for role in ('api', 'worker'):

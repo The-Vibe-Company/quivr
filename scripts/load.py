@@ -26,6 +26,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / 'tests/load/scenarios'
 TIMEOUT = 5
 POLL = .1
+PROBE_HTTP_PER_SECOND = 10
 
 
 def call(base, token, method, path, body=None):
@@ -117,6 +118,8 @@ class Workload:
         self.faults = []
         self.driver_errors = []
         self.started = None
+        self.probe_next = 0
+        self.probe_requests = []
 
     def guarded(self, function, *args):
         try:
@@ -169,12 +172,12 @@ class Workload:
                 if self.observe_stop.is_set():
                     return
                 if not record.get('version'):
-                    row, receipt = call(self.endpoint(), self.token, 'GET',
+                    row, receipt = self.probe('GET',
                                          '/v0/ingestion-receipts/' + record['receipt'])
                     if row['status'] == 200 and receipt.get('version_id'):
                         record.update(version=receipt['version_id'], record_id=receipt['record_id'])
                 if not record.get('searchable'):
-                    row, found = call(self.endpoint(), self.token, 'POST', '/v0/search', {
+                    row, found = self.probe('POST', '/v0/search', {
                         'query': record['marker'], 'corpus_ids': [self.corpus],
                         'mode': 'hybrid', 'limit': 10})
                     if row['status'] == 200 and any(hit['record_id'] == record.get('record_id') and
@@ -191,6 +194,18 @@ class Workload:
                     if len(notices) == self.s['alerts']:
                         record['alerted'] = max(notices)
             self.observe_stop.wait(POLL)
+
+    def probe(self, method, path, body=None):
+        # One observer shares a global budget across both receipt and search
+        # probes, and rotates over live replicas instead of loading only API0.
+        if self.observe_stop.wait(max(0, self.probe_next-time.monotonic())):
+            return {'status': None}, {}
+        started = time.monotonic()
+        self.probe_next = started + 1/PROBE_HTTP_PER_SECOND
+        at = started-self.started if self.started is not None else None
+        row, result = call(self.endpoint(len(self.probe_requests)), self.token, method, path, body)
+        self.probe_requests.append({'at_seconds': at, **row})
+        return row, result
 
     def caught_up(self):
         with self.lock:
@@ -305,6 +320,7 @@ class Workload:
             for thread in threads:
                 if thread.ident:
                     thread.join()
+        self.close()
         operations = ['ingestion', *self.s['search']['mix']]
         summaries = {op: request_summary([r for r in self.requests if r['operation'] == op], elapsed,
                                          202 if op == 'ingestion' else 200) for op in operations}
@@ -332,6 +348,10 @@ class Workload:
                 self.s['search']['mix'] if self.s['search']['mix'][op]) else 'failed',
                 'elapsed_seconds': round(elapsed, 3), 'users_exercised': len(self.users),
                 'requests': summaries, 'lag': lag, 'faults': self.faults, 'fault_windows': fault_windows,
+                'probes': {'http_per_second_limit': PROBE_HTTP_PER_SECOND,
+                    'total_attempts': len(self.probe_requests), 'timed_window': request_summary([
+                        row for row in self.probe_requests if row['at_seconds'] is not None and
+                        0 <= row['at_seconds'] < elapsed], elapsed, 200)},
                 'driver_errors': self.driver_errors,
                 'work': {'scheduled': self.scheduled, 'driver_dropped': self.dropped,
                          'submitted': len(measured), 'accepted': len(accepted),

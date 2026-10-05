@@ -168,12 +168,18 @@ class LoadStack(Stack):
     def down(self):
         for child in reversed(self.children):
             if child.poll() is None:
-                os.killpg(child.pid, signal.SIGTERM)
+                try:
+                    os.killpg(child.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass  # Exited after poll; still reap it and remove containers.
         for child in reversed(self.children):
             try:
                 child.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGKILL)
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 child.wait(timeout=5)
         self.state['pids'] = []
         self.save()

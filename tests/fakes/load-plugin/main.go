@@ -85,6 +85,9 @@ func (fake) SegmentAndEmbed(ctx context.Context, r *q.IngestRequest) ([]q.Segmen
 		segments = append(segments, q.Segment{PartKey: part.Key, Start: 0, End: len([]rune(part.Text)),
 			Vectors: vectors, LexicalText: strings.Join(words(part.Text), " ")})
 	}
+	if len(segments) == 0 {
+		return nil, q.TerminalIngestError("empty_content", "no nonblank text parts")
+	}
 	return segments, nil
 }
 
