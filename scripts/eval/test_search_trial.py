@@ -305,7 +305,9 @@ class Trial(unittest.TestCase):
                 payload = db.execute('SELECT payload FROM eval_control.leases WHERE campaign=%s AND key=%s', (campaign, busy_key)).fetchone()[0]
             path = pathlib.Path(temp, payload['filename'])
             original = path.read_bytes()
-            data['corpus']['000'] = {'text': 'uncached passage'}
+            # A later corrupt chunk must release earlier validated claims in
+            # the same wave, before any provider admission.
+            data['corpus'].update({'000' + str(i).zfill(3): {'text': 'uncached passage ' + str(i)} for i in range(129)})
             for corrupt in (False, True):
                 with self.subTest(corrupt=corrupt):
                     if corrupt:
@@ -319,8 +321,8 @@ class Trial(unittest.TestCase):
                         self.assertEqual(db.execute("SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND key LIKE 'embedding/%%'", (campaign,)).fetchone()[0], 130)
                     path.write_bytes(original)
             recovered = run(commit)
-            self.assertEqual(network.call_count, before + 1)
-            self.assertEqual(commit.call_count, 1)
+            self.assertEqual(network.call_count, before + 3)
+            self.assertEqual(commit.call_count, 2)
             self.assertEqual(recovered['cost']['cache_hits'], 130)
 
     def test_parallel_fills_and_full_quality_use_a_fixed_fresh_latency_sample(self):
