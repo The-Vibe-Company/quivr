@@ -1,10 +1,15 @@
 ---
-title: "Try a vector model and switch to it"
-description: "Compare a second embedding model on the same documents, fill its coverage, switch search, and keep a way back."
+title: "Try and switch a vector model"
+description: "Compare a second embedding model on your documents, switch search to it, and keep a way back."
 keywords: ["embedding model", "evaluation", "backfill", "promotion", "rollback"]
 ---
 
 Run a second embedding model (a model that turns text into numeric vectors) beside the current one. Fill it for existing documents, compare searches, then switch with a way back and update alerts that match by meaning.
+
+**On this page**
+
+- [Steps](#steps): prepare the second model, run it for evaluation, fill existing documents, compare searches, switch, then move meaning alerts.
+- [Check it worked](#check-it-worked), [roll back](#roll-back), and [clean up](#clean-up) once you no longer need the way back.
 
 ## Prerequisites
 
@@ -29,7 +34,7 @@ Hosted embedding sends document text and search queries to your provider and can
 
 The package generation runs offline. The API sequence is checked with a local fake embedding provider; the provider configuration below is an example, not a live provider run. Replace placeholders with your installation's values.
 
-This procedure changes the plugin that produces segments and vectors (the ingestion owner). If your new model is another space of the same plugin, follow [Fill a new vector space](/run-quivr/backfill-a-vector-space), then use this page's comparison and alert-migration checks. That path promotes a space; this example activates a registration.
+This procedure changes the plugin that produces segments and vectors (the ingestion owner). If your new model is another space of the same plugin, follow [Fill a new vector space](/run-quivr/backfill-a-vector-space), then use this page's comparison checks and [move meaning alerts](/run-quivr/move-meaning-alerts). That path promotes a space; this example activates a registration.
 
 Keep the former model reachable and filling new documents throughout the trial and switch, so rollback remains possible.
 
@@ -205,7 +210,7 @@ curl -fsS "$QUIVR_API_URL/v0/operations/$OPERATION_ID" \
   -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" | jq '{state, counters, backfill}'
 ```
 
-See [Backfill a vector space](/run-quivr/backfill-a-vector-space) for pausing, resuming and failures. The same accepted key and body return the same Operation; a later fill needs a fresh key and its own dry run before starting. One unfinished backfill per Corpus is allowed.
+See [Fill a new vector space](/run-quivr/backfill-a-vector-space) for pausing, resuming and failures. The same accepted key and body return the same Operation; a later fill needs a fresh key and its own dry run before starting. One unfinished backfill per Corpus is allowed.
 
 </Step>
 <Step title="Compare searches and coverage">
@@ -299,40 +304,7 @@ Missing coverage returns `409 plugin_conflict` and leaves the plan unchanged; an
 </Step>
 <Step title="Move vector meaning alerts">
 
-A Saved Query stores an alert definition; each immutable Saved Query Version fixes its query vectors. A Subscription pins one such Version and the evaluator that judges documents. Switching search does not re-encode those vectors or move those pins. Vectors from different spaces cannot be compared.
-
-Migrate immediately after the switch. Until you do, these alerts return `not_ready` because the document and query vectors are in different spaces. Quivr records that result as final: it does not automatically re-check those documents when you migrate. A new Subscription Version takes effect from its commit, so documents accepted between the switch and migration can miss alerts permanently. The same gap opens after rollback; migrate immediately then too.
-
-For every Saved Query using `meaning_check: vectors` in the affected Corpora, create a new Version **after** the served-model switch. Set `SAVED_QUERY_ID` to its id from your application's alert inventory. Preserve its definition:
-
-```bash
-curl -fsS "$QUIVR_API_URL/v0/saved-queries/$SAVED_QUERY_ID" \
-  -H "Authorization: Bearer $QUIVR_ALERT_KEY" \
-  | jq --arg key "model-switch-$SAVED_QUERY_ID-$SPACE_ID" \
-    '{idempotency_key:$key, definition:.current_version.definition}' > query-version.json
-curl -fsS -X POST "$QUIVR_API_URL/v0/saved-queries/$SAVED_QUERY_ID/versions" \
-  -H "Authorization: Bearer $QUIVR_ALERT_KEY" -H "Content-Type: application/json" \
-  -d @query-version.json | jq '{saved_query_id, version_id}'
-```
-
-Save its returned `version_id` as `QUERY_VERSION_ID`. For each Subscription of this Saved Query, set `SUBSCRIPTION_ID` and create a new Version, retaining its evaluator settings and destination:
-
-```bash
-curl -fsS "$QUIVR_API_URL/v0/subscriptions/$SUBSCRIPTION_ID" \
-  -H "Authorization: Bearer $QUIVR_ALERT_KEY" \
-  | jq --arg key "model-switch-$SUBSCRIPTION_ID-$QUERY_VERSION_ID" \
-       --arg query "$QUERY_VERSION_ID" \
-    '{idempotency_key:$key, saved_query_version_id:$query,
-      evaluator:.current_version.evaluator, destination_id:.current_version.destination_id}' \
-    > subscription-version.json
-curl -fsS -X POST "$QUIVR_API_URL/v0/subscriptions/$SUBSCRIPTION_ID/versions" \
-  -H "Authorization: Bearer $QUIVR_ALERT_KEY" -H "Content-Type: application/json" \
-  -d @subscription-version.json | jq '{subscription_id, saved_query_version_id}'
-```
-
-The query Version must still be that Saved Query's current Version. Finish its Subscription migrations before creating another query Version. Replaying the same key and body returns the same Version; a changed body conflicts. Subscription edits preserve enabled state and affect future changes from their commit, without replaying past documents or rewriting existing Matches.
-
-Use your application’s inventory to include disabled Subscriptions before re-enabling them. The [Subscription API](/api-reference/overview) requires an owner filter and lists only enabled, non-deleted items; follow all pages for each owner and list global Subscriptions separately with `owner=none`. Gather Saved Query ids from those lists or your inventory; the API cannot list Saved Queries. Recalibrate the evaluator's similarity threshold against the new model. This is separate from [upgrading an alert-rule plugin](/run-quivr/upgrade-an-alert-rule).
+Switching search does not re-encode the query vectors of alerts that match by meaning, so those alerts return `not_ready` until you re-create them. Do it right away: follow [Move meaning alerts to a new vector model](/run-quivr/move-meaning-alerts), with `SPACE_ID` still set to the candidate's space.
 
 </Step>
 </Steps>
@@ -372,7 +344,7 @@ curl -fsS "$QUIVR_API_URL/v0/admin/plugins/plan" \
 
 API and worker processes poll for plan changes. If loading a plan fails, they keep the old plan and do not retry that plan id until another plan appears; inspect their logs and fix the reported error before applying another plan change.
 
-Inspect every Corpus's coverage. Submit a new document and confirm the new model fills it. Read migrated Subscriptions and check `current_version.saved_query_version_id` matches the new query Version.
+Inspect every Corpus's coverage. Submit a new document and confirm the new model fills it. Check the migrated alerts as [Move meaning alerts](/run-quivr/move-meaning-alerts#check-it-worked) shows.
 
 ## Roll back
 
@@ -391,13 +363,13 @@ EOF
 
 Use `drain` for sound output; [use `stop` for bad output or hangs](/run-quivr/upgrade-a-plugin#roll-back). The same key and body replay this rollback. Keep the explicit target: another untargeted rollback can return to the plan you just left. Unreachable builds return `409 plugin_unreachable`; missing owner coverage returns `409 plugin_conflict`. Its message names the owner, space and number of missing documents, and points to `POST /v0/admin/backfills`. It also reports missing index generations: even an empty Corpus must carry the returning space. Find the returning owner's registration with `GET /v0/admin/plugins` and read each Corpus's coverage to locate gaps. Use the [backfill procedure](/run-quivr/backfill-a-vector-space) for that registration and space in each affected Corpus, wait for complete coverage, then retry. Historical gaps and failed optional calls still need this recovery.
 
-For a same-owner space switch, promote the returned `previous_space_id` back with the space-promotion request. It needs complete coverage too. Immediately after either rollback, create another Saved Query Version using the restored served model and migrate its Subscriptions again with fresh keys; the earlier migrations do not reverse themselves.
+For a same-owner space switch, promote the returned `previous_space_id` back with the space-promotion request. It needs complete coverage too. Immediately after either rollback, [move meaning alerts](/run-quivr/move-meaning-alerts#after-a-rollback) again to the restored space; the earlier migrations do not reverse themselves.
 
-Compatible redeploys preserve activated serving and evaluation routes; see [Redeploy a configured build](/run-quivr/upgrade-a-plugin#redeploy-a-configured-build) for the compatibility conditions. Earlier plans and pinned work still require their original builds. If a redeploy makes the saved plan unreachable, restore that build or follow the linked procedure to activate the returning owner's current evaluation registration, then migrate alerts again.
+Compatible redeploys preserve activated serving and evaluation routes; see [Redeploy a configured build](/run-quivr/upgrade-a-plugin#redeploy-a-configured-build) for the compatibility conditions. Earlier plans and pinned work still require their original builds. If a redeploy makes the saved plan unreachable, restore that build or follow the linked procedure to activate the returning owner's current evaluation registration, then [move meaning alerts](/run-quivr/move-meaning-alerts) again.
 
 ## Clean up
 
-Delete the local `query-version.json` and `subscription-version.json` files after migration. Retaining an evaluation owner is useful for rollback but continues provider calls. Once you no longer need that rollback option:
+Retaining an evaluation owner is useful for rollback but continues provider calls. Once you no longer need that rollback option:
 
 1. Copy the active plan's default, served routes and evaluation owners into `ingestion.default`, `ingestion.routes` and `ingestion.evaluation` in every process's configuration. [Apply this configuration](/run-quivr/pin) first, so it records the routing you chose by activation or rollback.
 2. Remove the retiring owner from each `ingestion.evaluation` list and apply the configuration again. After rollback in this example, remove `hosted.embed`; if you keep the candidate serving, remove the former owner instead. This stops new evaluation calls for those formats.
@@ -407,6 +379,6 @@ Preserve the served routes and remaining owners' pins throughout cleanup. Stored
 
 ## Next
 
-- [Backfill a vector space](/run-quivr/backfill-a-vector-space) for estimates and Operation controls.
+- [Fill a new vector space](/run-quivr/backfill-a-vector-space) for estimates and Operation controls.
 - [Plugin lifecycle](/run-quivr/upgrade-a-plugin#plugin-lifecycle) for draining work and deciding when a plugin can stop.
-- [Meaning alerts](/guides/described-alerts#keep-the-meaning-check-inside-the-installation) for vector matching and calibration.
+- [Move meaning alerts to a new vector model](/run-quivr/move-meaning-alerts) for the alert migration after a switch.

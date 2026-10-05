@@ -1,0 +1,79 @@
+---
+title: "Deploy and configure Quivr"
+sidebarTitle: "Deploy and configure"
+description: "What a Quivr deployment runs, the order to start it in, and how to check that it is ready."
+keywords: ["deploy", "QUIVR_CONFIG", "migrate", "readiness", "probes", "self-host"]
+---
+
+A Quivr deployment runs one `quivr` binary as three commands, next to four services and the plugins you choose. Every process reads the same JSON configuration file; you run `quivr migrate` first, then keep `quivr api` and `quivr worker` running.
+
+<Warning>
+Quivr is at the evaluation stage: its API is `v0` and may change. Do not run it in production yet.
+</Warning>
+
+## What a deployment runs
+
+| Part | What it does |
+| --- | --- |
+| `quivr api` | Serves the public HTTP API that applications call |
+| `quivr worker` | Runs the background work: processes content, pulls connectors, delivers alerts and events |
+| `quivr migrate` | Prepares PostgreSQL, object storage and the search index, then exits |
+| PostgreSQL | Stores Quivr's state: documents and their versions, alerts, operations and the change feed |
+| Temporal | Schedules and retries the worker's background work |
+| Weaviate | The search index |
+| S3-compatible storage | Original files and the artifacts derived from them |
+| Plugins | Separate HTTP services that read files, cut and embed passages, rank results and judge alerts |
+
+`make dev` runs all of these on one machine, with the service versions pinned in [`deploy/compose/compose.yaml`](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/compose/compose.yaml). The [Quickstart](/quickstart) walks through it.
+
+## The configuration file
+
+`QUIVR_CONFIG` holds the path of a JSON file. Give `api`, `worker` and `migrate` the same file, except for addresses such as `probe_listen`. It must set:
+
+- `database_url`, `temporal_address`, `weaviate_url` and `s3`: where the four services are;
+- `cursor_key`: a stable secret of at least 32 bytes that signs change-feed cursors;
+- `keys`: the API keys and what each may do. You create keys here; give `plugins:admin` only to operator keys;
+- `plugins`: at least one ingestion plugin and one retrieval plugin, normally the first-party `core.ingest` and `core.retrieve`. The `api` refuses to start without both, and the `worker` without an ingestion plugin. `core.ingest` also needs a Text Embeddings Inference server for its model; see [First-party plugins](/run-quivr/catalog#core-ingest).
+
+The file holds the database URL, storage credentials and API keys, so keep it readable only by Quivr's processes. The [Configuration reference](/reference/configuration) lists every field, and [Pin a plugin](/run-quivr/pin) shows how to add one.
+
+A change to this file takes effect when the processes restart. Plugin changes made through the API, such as activating a new version, apply while Quivr runs; see [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
+
+## Start order
+
+For example, not run as printed here:
+
+```bash
+export QUIVR_CONFIG=/etc/quivr/config.json
+quivr migrate   # exits when done
+quivr api       # in its own process
+quivr worker    # in its own process
+```
+
+1. `quivr migrate` updates the database schema, creates the storage bucket when it is missing, and prepares the search index. It gives up after 30 seconds when storage or the search index does not answer; run it again once they do.
+2. `quivr api` refuses to start while migrations are pending, with `database/schema unavailable; run migrate`.
+3. `quivr worker` started before the migrations waits for them for up to `migration_wait` (5 minutes by default), then exits.
+
+To deploy a new `quivr` binary, run its `quivr migrate` first, then restart `api` and `worker` on it. A binary older than the database schema refuses to start, with `database schema is newer than this binary`. The [CLI reference](/reference/cli#engine-commands) lists the commands' exit codes.
+
+## Check that it is ready
+
+Each `api` and `worker` serves three probes on its `probe_listen` address, `127.0.0.1:8081` by default. Give each process its own address, and keep it private.
+
+| Probe | Answer |
+| --- | --- |
+| `GET /healthz` | `204` while the process runs |
+| `GET /readyz` | `204` once the process can serve, `503` with the reason otherwise |
+| `GET /metrics` | Counters in Prometheus text format |
+
+The `api` becomes ready once its schema check passes and its ingestion plugin has answered a first query, or after 5 seconds; the first searches are then only slower. The `worker` also checks that Temporal, object storage and the search index answer. A plugin that is down does not stop either process: work that needs it waits and retries.
+
+## Example deployments
+
+- **Local:** `make dev`, in the [Quickstart](/quickstart).
+- **Hosted, single node:** the repository's [Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/README.md) runs the demo app and Quivr as single-replica services, without high availability.
+
+## Next
+
+- [Pin a plugin](/run-quivr/pin) to add plugins to your deployment.
+- [Operate a Quivr deployment](/run-quivr/overview) for the other operator tasks.

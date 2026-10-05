@@ -1,10 +1,10 @@
 ---
-title: "Fill a new vector space for past articles"
-description: "Fill an embedding model or evaluation plugin on past articles before making search use it."
+title: "Fill a new vector space"
+description: "Compute a new embedding model's vectors for the documents you already have, before search uses it."
 keywords: ["backfill", "vector space", "embedding model", "promote", "evaluation space", "reprocess"]
 ---
 
-A new embedding model enters as an evaluation space of your ingestion plugin. Articles ingested from then on get vectors in it, but the ones you already have do not. A backfill fills that space for a Corpus's past articles, at low priority, and a promotion then makes search use it. You can also backfill a second plugin selected in `ingestion.evaluation`; it creates its own segments from each article's canonical Parts. See [Configuration](/reference/configuration#ingestion-routing) for the selection and [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin#promote-an-evaluation-plugin) for promotion.
+A new embedding model enters as an evaluation space of your ingestion plugin. Documents ingested from then on get vectors in it, but the ones you already have do not. A backfill fills that space for a Corpus's past documents, at low priority, and a promotion then makes search use it. You can also backfill a second plugin selected in `ingestion.evaluation`; it creates its own segments from each document's canonical Parts. See [Configuration](/reference/configuration#ingestion-routing) for the selection and [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin#promote-an-evaluation-plugin) for promotion.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ A new embedding model enters as an evaluation space of your ingestion plugin. Ar
 <Steps>
 <Step title="Estimate it">
 
-A dry run is required. It counts the articles to fill and estimates how long it takes and what it costs:
+A dry run is required. It counts the documents to fill and estimates how long it takes and what it costs:
 
 ```bash
 curl -s -X POST "$QUIVR_API_URL/v0/admin/backfills" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
@@ -31,7 +31,7 @@ EOF
  "input_tokens": 9600000, "estimated_seconds": 6000, "duration_basis": "rate", "estimated_cost_usd": 0.2, "confirmation_required": true}
 ```
 
-`registration_id` selects any ingestion registration in the active plan; omit it to use the default ingestion plugin. `spaces` defaults to that plugin's evaluation spaces; name them in `spaces` to choose. For a second plugin, articles of the source formats assigned to it in the pinned plan are in scope, including articles without that plugin's segments. Existing segments of that owner are reused. Name its primary space explicitly when preparing an owner switch. If the owner has no segments yet, the dry run estimates segments and tokens from the current served projection; completion counters use the new owner's actual cuts. To fill only part of the Corpus, add `accepted_after` or `accepted_before`: the time Quivr accepted each article. `estimated_seconds` uses the deployment's `backfill.rate`, or the recent throughput when it is slower (`duration_basis`).
+`registration_id` selects any ingestion registration in the active plan; omit it to use the default ingestion plugin. `spaces` defaults to that plugin's evaluation spaces; name them in `spaces` to choose. For a second plugin, documents of the source formats assigned to it in the pinned plan are in scope, including documents without that plugin's segments. Existing segments of that owner are reused. Name its primary space explicitly when preparing an owner switch. If the owner has no segments yet, the dry run estimates segments and tokens from the current served projection; completion counters use the new owner's actual cuts. To fill only part of the Corpus, add `accepted_after` or `accepted_before`: the time Quivr accepted each document. `estimated_seconds` uses the deployment's `backfill.rate`, or the recent throughput when it is slower (`duration_basis`).
 
 </Step>
 <Step title="Start it">
@@ -63,7 +63,7 @@ curl -s "$QUIVR_API_URL/v0/operations/$OPERATION_ID" -H "Authorization: Bearer $
   | jq '{state, counters, checkpoint: .backfill.checkpoint}'
 ```
 
-`counters` shows `versions_in_scope`, `versions_done`, `versions_skipped` and `segments`. One backfill of a Corpus runs at a time: another one is refused with `409 backfill_in_progress` until it ends. Pause, resume or cancel it with `POST /v0/operations/{id}/pause`, `/resume` or `/cancel`, each with an `idempotency_key` body. A paused or restarted backfill continues after its `checkpoint` and never fills an article twice.
+`counters` shows `versions_in_scope`, `versions_done`, `versions_skipped` and `segments`. One backfill of a Corpus runs at a time: another one is refused with `409 backfill_in_progress` until it ends. Pause, resume or cancel it with `POST /v0/operations/{id}/pause`, `/resume` or `/cancel`, each with an `idempotency_key` body. A paused or restarted backfill continues after its `checkpoint` and never fills a document twice.
 
 </Step>
 <Step title="Promote the space">
@@ -79,7 +79,9 @@ curl -s -X POST "$QUIVR_API_URL/v0/admin/spaces/acme.embedder.large@1/promote" -
 {"served_space_id": "acme.embedder.large@1", "previous_space_id": "acme.embedder.base@1", "generations_switched": 3, "corpora_incomplete": 0, "segments_missing": 0}
 ```
 
-A promotion applies to this space's owner across the deployment. Other plugins keep their served spaces. It is refused with `409 coverage_incomplete` while some Corpus has current articles segmented by this owner without a vector in the space: backfill those Corpora first. `{"force": true}` promotes anyway, and the articles without a vector drop out of semantic results until a backfill fills them.
+A promotion applies to this space's owner across the deployment. Other plugins keep their served spaces. It is refused with `409 coverage_incomplete` while some Corpus has current documents segmented by this owner without a vector in the space: backfill those Corpora first. `{"force": true}` promotes anyway, and the documents without a vector drop out of semantic results until a backfill fills them.
+
+Right after the promotion, [move meaning alerts](/run-quivr/move-meaning-alerts) to the new space: alerts that match by vector meaning return `not_ready` until you do.
 
 </Step>
 </Steps>
@@ -95,19 +97,19 @@ The new space is `served` and covers every segment produced by its owner. Semant
 
 ## Fill and promote another plugin
 
-To change the plugin that produces segments and vectors, follow [Try a vector model and switch to it](/run-quivr/switch-a-vector-model). That guide owns the second-plugin setup, deployment-wide fill, comparison, registration activation, alert migration and rollback. The space promotion above changes models within one owner; it does not select a different plugin for a format.
+To change the plugin that produces segments and vectors, follow [Try and switch a vector model](/run-quivr/switch-a-vector-model). That guide owns the second-plugin setup, deployment-wide fill, comparison, registration activation, alert migration and rollback. The space promotion above changes models within one owner; it does not select a different plugin for a format.
 
 ## Go back to the previous model
 
-Promote the former space the same way. It stayed an evaluation space and kept its vectors, so search uses it again at once. A promotion survives restarts, activations and rollbacks while the ingestion plugin enables both spaces. Once a plugin version stops declaring one of them, its own `spaces` settings decide again.
+Promote the former space the same way. It stayed an evaluation space and kept its vectors, so search uses it again at once. Then [move meaning alerts](/run-quivr/move-meaning-alerts#after-a-rollback) back to it. A promotion survives restarts, activations and rollbacks while the ingestion plugin enables both spaces. Once a plugin version stops declaring one of them, its own `spaces` settings decide again.
 
 ## How a backfill runs
 
 - It runs on its own worker queue, with at most `backfill.concurrency` Versions in flight per step (default four), paced at `backfill.rate` Versions per second (see [Configuration](/reference/configuration#backfill)), so live ingestion keeps its capacity.
 - It is pinned to the Pipeline Plan active when it started, like other work, and fails with `pinned_plugin_unavailable` or `pinned_plan_stopped` rather than moving to another plugin version.
-- On its first step, the Corpus's search index starts carrying the new space, so articles ingested from then on get their vectors from live ingestion. The backfill fills only the articles that already had theirs.
-- It creates no new Version and no content event in the change feed. Articles outside its window are not touched.
-- If this plugin already has stored segments, an article it now cuts differently is skipped and counted as `skipped_segmentation_differs`: rebuild the Corpus to re-cut it (see [Write an ingestion plugin](/plugins/write-an-ingestion-plugin)). A refusal by the plugin is counted as `skipped_ingestion_refused`, and an article the plugin cannot embed within its deadline as `skipped_plugin_deadline`. Rerun the backfill to try skipped articles again.
+- On its first step, the Corpus's search index starts carrying the new space, so documents ingested from then on get their vectors from live ingestion. The backfill fills only the documents that already had theirs.
+- It creates no new Version and no content event in the change feed. Documents outside its window are not touched.
+- If this plugin already has stored segments, a document it now cuts differently is skipped and counted as `skipped_segmentation_differs`: rebuild the Corpus to re-cut it (see [Write an ingestion plugin](/plugins/write-an-ingestion-plugin)). A refusal by the plugin is counted as `skipped_ingestion_refused`, and a document the plugin cannot embed within its deadline as `skipped_plugin_deadline`. Rerun the backfill to try skipped documents again.
 
 ## Troubleshooting
 
