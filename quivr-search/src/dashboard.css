@@ -1111,8 +1111,10 @@ button.moment-pill:hover {
     background: var(--fresh);
   }
 }
+/* The article open in the reader: tinted and outlined, apart from a hover. */
 .row[data-selected] {
-  --row-bg: var(--panel);
+  --row-bg: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .row-node {
   position: relative;
@@ -2808,11 +2810,6 @@ button.moment-pill:hover {
 .alerts-head h2:focus {
   outline: none;
 }
-.alerts-sum {
-  margin: 0;
-  font-size: 14px;
-  color: var(--ink-soft);
-}
 .alerts-head .live-badge {
   margin-left: auto;
 }
@@ -2883,9 +2880,6 @@ button.moment-pill:hover {
 }
 .alerts-table tr[data-selected] td {
   background: var(--selected);
-}
-.alerts-table tr[data-selected] td:first-child {
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 .alerts-table tr[data-highlight] td {
   animation: source-arrive 2.4s cubic-bezier(0.22, 1, 0.36, 1);
@@ -3692,6 +3686,37 @@ button.caught-title:hover {
     min-height: 0;
   }
 }
+/* Wide enough for the sheet and the caught list side by side, the page fits
+   the window: the table, the sheet and the list scroll inside their cards. */
+@media (min-width: 1101px) {
+  .alerts-page {
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+  /* Five alerts in view (a 35 px header, 43 px rows); the rest scroll. */
+  .alerts-table-wrap {
+    max-height: 250px;
+    overflow-y: auto;
+  }
+  .alerts-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .alerts-detail {
+    flex: 1;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .alert-sheet {
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .alert-caught {
+    height: auto;
+    min-height: 0;
+  }
+}
 @media (max-width: 1240px) {
   .alerts-table [data-col="sources"],
   .alerts-table [data-col="created"] {
@@ -3885,14 +3910,6 @@ button.caught-title:hover {
     opacity: 1;
   }
 }
-.sc-where {
-  margin: 2px 0 0;
-  overflow: hidden;
-  color: var(--ink-faint);
-  font-size: 12.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .sc-rename input {
   width: 100%;
   height: 34px;
@@ -4018,21 +4035,46 @@ button.caught-title:hover {
   color: var(--ink-soft);
   font-size: 12.5px;
 }
+/* The card's state in words, after a dot of its colour. */
 .sc-foot .source-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  white-space: normal;
+}
+.sc-foot .source-state::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+.sc-foot .source-state[data-tone="quiet"]::before {
+  background: var(--idle-dot);
+}
+.sc-foot .source-state[data-tone="warn"]::before {
+  background: var(--warning);
+}
+.sc-foot .source-state[data-tone="error"]::before {
+  background: var(--error);
+}
+.sc-foot .source-state:not([data-tone="ok"]) {
   font-weight: 600;
 }
-.sc-meta:empty {
-  display: none;
+.sc-foot .source-state[data-tone="warn"] {
+  color: var(--warning);
 }
-.sc-meta::before {
-  content: "";
-  display: inline-block;
-  width: 3px;
-  height: 3px;
-  margin-right: 10px;
-  border-radius: 50%;
-  background: var(--idle-dot);
-  vertical-align: middle;
+.sc-foot .source-state[data-tone="error"] {
+  color: var(--error);
+}
+.sc-foot .source-state time {
+  color: var(--ink);
+  font-weight: 560;
 }
 .sc-more {
   margin-left: auto;
@@ -4053,15 +4095,114 @@ button.caught-title:hover {
 .sc-foot.row-actions .row-confirm {
   flex-basis: 100%;
 }
+/* The card that adds a source: a "+" until it is opened, then the form. */
 .source-card.source-add {
+  align-self: stretch;
   gap: 0;
-  padding: 18px 20px;
-  border: 1.5px dashed var(--line);
-  background: color-mix(in srgb, var(--panel) 40%, transparent);
+  padding: 0;
+}
+.source-card.source-add:has(.add-cta) {
+  background: transparent;
   box-shadow: none;
 }
-.source-add .form-aside {
-  margin-top: 14px;
+.add-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.add-cta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 236px;
+  padding: 24px;
+  border: 1.5px dashed color-mix(in srgb, var(--ink-faint) 45%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 45%, transparent);
+  color: var(--ink-soft);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+.add-cta:hover,
+.add-cta:focus-visible {
+  border-color: var(--accent);
+  background: var(--panel);
+  color: var(--ink);
+}
+.add-plus {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: var(--tint);
+  color: var(--accent);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.add-cta:hover .add-plus {
+  transform: scale(1.08) rotate(90deg);
+}
+.add-label {
+  font-size: 15px;
+  font-weight: 620;
+}
+.add-hint {
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+/* The dialog that adds a source: its title is the dialog's own. */
+.add-modal {
+  padding: 22px 24px 24px;
+}
+.add-modal .form-intro h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.add-modal .form-aside {
+  margin-top: 18px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .add-plus,
+  .add-cta {
+    transition: none;
+  }
+  .add-cta:hover .add-plus {
+    transform: none;
+  }
+}
+/* The count of sources beside the page title. */
+.head-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--tint);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.sources-page .list-count[data-tone="warn"] {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  font-size: 13px;
+  font-weight: 600;
 }
 @media (forced-colors: active) {
   .sc-spark span,
@@ -4070,3 +4211,227 @@ button.caught-title:hover {
   }
 }
 
+
+/* A source's settings: what it is on the left, what changes on the right. */
+.document-modal:has(.settings) {
+  max-width: 820px;
+}
+.settings {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  min-height: 0;
+}
+.settings-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 22px 24px;
+  border-right: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--hover) 50%, var(--panel));
+}
+.settings-id {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.settings-name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+.settings-name h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+  overflow-wrap: anywhere;
+}
+.settings-stats {
+  grid-template-columns: 1fr 1fr;
+}
+.settings-facts {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 12.5px;
+}
+.settings-facts dt {
+  margin-top: 8px;
+  color: var(--ink-faint);
+}
+.settings-facts dt:first-child {
+  margin-top: 0;
+}
+.settings-facts dd {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.settings-facts dd[data-tone="error"] {
+  color: var(--error);
+}
+.settings-facts code {
+  font-size: 11.5px;
+}
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  padding: 22px 24px 20px;
+}
+.settings-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.settings-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.settings-address {
+  display: block;
+  overflow: hidden;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--hover);
+  color: var(--ink-soft);
+  font-size: 13.5px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-address:hover {
+  color: var(--accent);
+}
+.settings-config {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--hover);
+  font-size: 12.5px;
+}
+.settings-config > div {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 12px;
+}
+.settings-config dt {
+  color: var(--ink-faint);
+}
+.settings-config dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.settings-form > section {
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.settings-form > section h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-form > section > p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.settings-actions .row-confirm {
+  flex-basis: 100%;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.settings-gap {
+  flex: 1;
+}
+.button.ghost-danger {
+  border-color: transparent;
+  background: transparent;
+  color: var(--error);
+}
+.button.ghost-danger:hover {
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+}
+@media (max-width: 700px) {
+  .settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-summary {
+    gap: 12px;
+    padding: 16px 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .settings-summary .sc-spark {
+    display: none;
+  }
+  .settings-form {
+    padding: 18px;
+  }
+  .settings-actions:not([role="group"]) {
+    flex-wrap: nowrap;
+  }
+  .settings-actions .button {
+    padding-inline: 12px;
+  }
+}
+
+/* The tooltip of the small charts (ChartTip): above the bar under the pointer. */
+.chart-tip {
+  position: fixed;
+  z-index: 60;
+  max-width: 260px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--panel);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.35;
+  width: max-content;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 8px));
+  box-shadow: 0 6px 18px #17132d2e;
+}
+.chart-tip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  transform: translateX(-50%) rotate(45deg);
+}
+[data-tips] {
+  cursor: default;
+}
+[data-tips] [data-tip][data-hover] {
+  filter: brightness(0.82) saturate(1.15);
+}
+[data-tips] [data-tip][data-hover][data-zero],
+[data-tips] [data-tip][data-hover][data-empty],
+[data-tips] [data-tip][data-hover][data-level="0"] {
+  opacity: 1;
+  filter: none;
+  background: color-mix(in srgb, var(--accent) 45%, var(--panel));
+}
+.plug-spark .spark-idle {
+  fill: transparent;
+}

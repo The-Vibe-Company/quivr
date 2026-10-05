@@ -81,6 +81,17 @@ export function countsIn(
   return out;
 }
 
+/** The time range of each group `coarse` makes, as its tooltip reads it. */
+export function coarseRanges(bins: Bin[], window: UsageWindow) {
+  const size = window === "24h" ? 3 : 4;
+  const out: string[] = [];
+  for (let i = 0; i < bins.length; i += size) {
+    const group = bins.slice(i, i + size);
+    out.push(binRange({ ...group[0], end: group[group.length - 1].end }, window));
+  }
+  return out;
+}
+
 /**
  * A row's trend in coarse columns, so a rare query still shows a shape:
  * eight quarters of 3 hours over 24 h, seven days over 7 days.

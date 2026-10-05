@@ -103,6 +103,13 @@ function weighted(points: StatsPoint[], field: "p50_ms" | "p95_ms") {
   return { n, value: n ? sum / n : undefined };
 }
 
+/** When a bucket of a plugin's spark starts, as its tooltip reads it. */
+const bucketTime = new Intl.DateTimeFormat("fr-FR", {
+  weekday: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 /** Sums several series bucket by bucket; latencies are count-weighted. */
 export function mergePoints(
   list: Omit<List<unknown>, "items">,
@@ -305,6 +312,8 @@ export interface PluginRow {
   last_error_at?: string;
   /** Error share per bucket of the window, oldest first; null when idle. */
   spark: (number | null)[];
+  /** What each bucket reads on hover: when, how many calls, how many failed. */
+  sparkTips: string[];
   operations: OperationRow[];
 }
 
@@ -399,11 +408,16 @@ export function pluginRows(
     const version = versions.join(", ") || undefined;
     const { state, reason } = pluginState(hour, now);
     const last = latest(operations);
-    const spark = window
-      ? mergePoints(window, series).map((p) =>
-          p.count ? p.errors / p.count : null,
-        )
-      : [];
+    const points = window ? mergePoints(window, series) : [];
+    const spark = points.map((p) => (p.count ? p.errors / p.count : null));
+    const sparkTips = points.map(
+      (p) =>
+        `${bucketTime.format(new Date(p.start))} · ${
+          p.count
+            ? `${p.count} appel${p.count > 1 ? "s" : ""}, ${Math.round((p.errors / p.count) * 100)} % d’erreurs`
+            : "aucun appel"
+        }`,
+    );
     return {
       plugin_id: id,
       version,
@@ -425,6 +439,7 @@ export function pluginRows(
       last_error_code: last?.last_error_code,
       last_error_at: last?.last_error_at,
       spark,
+      sparkTips,
       operations,
     };
   });

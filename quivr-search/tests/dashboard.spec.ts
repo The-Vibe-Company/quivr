@@ -519,7 +519,13 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
   page,
 }) => {
   await page.goto("/?view=sources");
-  const address = page.getByLabel("Adresse du site");
+  // Adding opens a dialog, from the header's button or the "+" card.
+  await expect(page.getByRole("heading", { name: "Vos sources" })).toBeVisible();
+  await expect(page.locator(".head-count")).toHaveText("3 sources");
+  await page.getByRole("button", { name: "Ajouter une source", exact: true }).click();
+  const adding = page.getByRole("dialog", { name: "Ajouter une source" });
+  const address = adding.getByLabel("Adresse du site");
+  await expect(address).toBeFocused();
   // Looked up as soon as typing pauses.
   await address.fill("www.example.org");
   await expect(page.getByText("Fil trouvé")).toBeVisible();
@@ -533,10 +539,13 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
     config: { url: "https://www.example.org/rss.xml" },
     schedule: { interval_seconds: 3600 },
   });
+  // Added: the dialog closes on the new card.
+  await expect(adding).toHaveCount(0);
   const list = page.getByRole("list", { name: "Sources" });
   await expect(list.getByRole("button", { name: "www.example.org — À la une", exact: true })).toBeVisible();
-  await expect(address).toHaveValue("");
 
+  await page.getByRole("button", { name: /^Ajouter une source Un site/ }).click();
+  await expect(address).toBeFocused();
   await address.fill("http://10.0.0.1/feed.xml");
   await address.press("Enter");
   await expect(page.getByRole("alert")).toContainText("réseau privé ou local");
@@ -544,7 +553,11 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
   await expect(page.getByRole("button", { name: "Commencer la collecte" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Ajouter Fil exemple — International" }).click();
+  await expect(adding).toHaveCount(0);
+  await page.getByRole("button", { name: "Ajouter une source", exact: true }).click();
   await expect(page.getByRole("button", { name: "Fil exemple — International (déjà suivie)" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(adding).toHaveCount(0);
 
   // A failing source says so in plain words; pause, resume and remove.
   const weather = list.getByRole("listitem").filter({ hasText: "Météo locale" });
@@ -571,9 +584,32 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
   await expect(wire.getByRole("button", { name: "Le fil des dépêches", exact: true })).toBeVisible();
   await expect(page.locator(".toast")).toContainText("s’appelle maintenant « Le fil des dépêches »");
 
-  await weather.getByRole("button", { name: "Plus d’actions pour Météo locale" }).click();
-  await weather.getByRole("menuitem", { name: "Retirer" }).click();
-  await weather.getByRole("group", { name: "Retirer Météo locale" }).getByRole("button", { name: "Oui, retirer" }).click();
+  // The settings change the name and how often it is read, saved together.
+  await wire.getByRole("button", { name: "Plus d’actions pour Le fil des dépêches" }).click();
+  await wire.getByRole("menuitem", { name: "Réglages" }).click();
+  const settings = page.getByRole("dialog", { name: "Réglages de Le fil des dépêches" });
+  await expect(settings.getByRole("heading", { name: "Le fil des dépêches", level: 1 })).toBeVisible();
+  await expect(settings.getByRole("link", { name: "https://news.example.org/feed.xml" })).toBeVisible();
+  // A chart's bar says what it counts, drawn inside the modal (not under it).
+  await settings.locator(".sc-spark [data-tip]").last().hover();
+  await expect(settings.locator(".chart-tip")).toHaveText(/ · \d+ articles?$/);
+  await settings.getByLabel("Nom").fill("Dépêches");
+  await settings.getByRole("group", { name: "Vérifier les nouveautés toutes les…" }).getByRole("button", { name: "1 h" }).click();
+  const scheduled = page
+    .waitForRequest((r) => r.method() === "PUT" && new URL(r.url()).pathname === "/v0/connectors/con_wire/schedule")
+    .then((r) => r.postDataJSON());
+  await settings.getByRole("button", { name: "Enregistrer" }).click();
+  expect(await scheduled).toEqual({ interval_seconds: 3600 });
+  await expect(settings).toHaveCount(0);
+  await expect(wire.getByRole("button", { name: "Dépêches", exact: true })).toBeVisible();
+  await expect(wire.locator(".source-state")).toHaveAttribute("title", "Vérifiée toutes les 1 h");
+
+  // Removed from its settings: they close and the focus lands on the list.
+  await weather.getByRole("button", { name: "Météo locale", exact: true }).click();
+  const weatherSettings = page.getByRole("dialog", { name: "Réglages de Météo locale" });
+  await weatherSettings.getByRole("button", { name: "Retirer" }).click();
+  await weatherSettings.getByRole("group", { name: "Retirer Météo locale" }).getByRole("button", { name: "Oui, retirer" }).click();
+  await expect(weatherSettings).toHaveCount(0);
   await expect(list.getByRole("button", { name: "Météo locale", exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Vos sources" })).toBeFocused();
 });

@@ -104,6 +104,7 @@ export function SideColumn({
             <div
               className="pulse"
               role="img"
+              data-tips
               aria-label={`${plural(total, "article")} ${today ? "depuis minuit" : "ce jour-là"}`}
             >
               {hours.map((count, hour) => (
@@ -113,7 +114,7 @@ export function SideColumn({
                   data-now={(today && hour === hours.length - 1) || undefined}
                   data-empty={count === 0 || undefined}
                   style={count ? { height: `${Math.max(8, (count / most) * 100)}%` } : undefined}
-                  title={`${hour} h : ${plural(count, "article")}`}
+                  data-tip={`${hour} h – ${hour + 1} h · ${plural(count, "article")}`}
                 />
               ))}
             </div>
@@ -125,13 +126,13 @@ export function SideColumn({
           </>
         ) : (
           <>
-            <div className="pulse" role="group" aria-label="Articles des 7 derniers jours">
+            <div className="pulse" role="group" data-tips aria-label="Articles des 7 derniers jours">
               {week.map(({ day: d, count }) => (
                 <button
                   key={d}
                   type="button"
                   className="pulse-column"
-                  title={`${dayLabel(d, now)} : ${plural(count, "article")}`}
+                  data-tip={`${dayLabel(d, now)} · ${plural(count, "article")}`}
                   aria-label={`${dayLabel(d, now)} : ${plural(count, "article")}`}
                   disabled={count === 0}
                   onClick={() => onDay(d)}

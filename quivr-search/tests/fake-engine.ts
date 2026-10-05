@@ -523,6 +523,12 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       Object.assign(c.health, { state: "active", evaluated_at: now, last_success_at: now });
       return json(route, { connector_id: c.connector_id, run_at: now }, 202);
     }
+    const schedule = path.match(/^\/v0\/connectors\/([\w-]+)\/schedule$/);
+    if (schedule) {
+      const c = ws.connectors.find((x) => x.connector_id === schedule[1])!;
+      c.schedule = { interval_seconds: body.interval_seconds };
+      return json(route, c);
+    }
     const disable = path.match(/^\/v0\/connectors\/([\w-]+)\/disable$/);
     if (disable) {
       const c = ws.connectors.find((x) => x.connector_id === disable[1])!;

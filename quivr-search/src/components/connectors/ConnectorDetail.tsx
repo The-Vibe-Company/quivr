@@ -1,11 +1,10 @@
 import { useRef, useState } from "react";
-import { Key, Power } from "@phosphor-icons/react";
+import { Key } from "@phosphor-icons/react";
 import { Dialog } from "../Dialog";
 import { APIError } from "../../lib/search";
 import {
   changeSchedule,
   connectorMessage,
-  disableConnector,
   formatAbsolute,
   formatInterval,
   formatRelative,
@@ -14,12 +13,15 @@ import {
   type ConnectorKind,
   type KindCatalog,
 } from "../../lib/connectors";
-import { HealthBadge } from "./HealthBadge";
+import { HealthBadge, displayState } from "./HealthBadge";
 import { SchemaFields, clearFields, collect } from "./SchemaForm";
 import { ErrorSummary, labelFor } from "./ErrorSummary";
 import { useSubmit } from "./useSubmit";
-import { ExpiryField, IntervalField, readExpiry } from "./fields";
+import { ExpiryField, readExpiry } from "./fields";
 import { sourceSummary } from "./summary";
+import { intervals } from "./AddSource";
+import { FAILURES, WeekSpark, nameOf, resumable, weekRates, type SourceStats } from "./SourceList";
+import { SourceLogo } from "../feed/SourceLogo";
 
 function When({ value, empty = "Jamais" }: { value?: string; empty?: string }) {
   if (!value) return <>{empty}</>;
@@ -30,187 +32,222 @@ function When({ value, empty = "Jamais" }: { value?: string; empty?: string }) {
   );
 }
 
+/**
+ * A source's settings, in two columns: what it is and how it does on the
+ * left, what can be changed on the right (its name, how often it is read,
+ * its credential), saved together. The configuration itself is read-only:
+ * another one is another source.
+ */
 export function ConnectorDetail({
   connector,
   kind,
   catalog,
+  stats,
+  now,
   onClose,
   onChanged,
+  onRename,
+  onRemove,
 }: {
   connector: Connector;
   kind?: ConnectorKind;
   catalog: KindCatalog;
+  stats?: SourceStats;
+  now: number;
   onClose: () => void;
   onChanged: (connector: Connector) => void;
+  onRename: (c: Connector, name: string) => Promise<void>;
+  onRemove: (c: Connector) => Promise<void>;
 }) {
   const h = connector.health;
-  const title = kind?.title || connector.kind;
+  const name = nameOf(connector);
   const properties = kind?.config_schema.properties || {};
-  const source = sourceSummary(connector, kind);
+  const address = connector.kind === "rss" ? sourceSummary(connector, kind) : "";
+  const { week, perDay, most } = weekRates(connector, stats, now);
+  const current = connector.schedule.interval_seconds;
+  const options = [...new Set([...intervals(catalog), current])].sort((a, b) => a - b);
+  const [draft, setDraft] = useState(name);
+  const [seconds, setSeconds] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const renamed = draft.trim().replace(/\s+/g, " ") !== name;
+  const rescheduled = connector.enabled && seconds !== current;
+
+  const save = async () => {
+    if (busy) return;
+    if (!renamed && !rescheduled) return onClose();
+    setBusy(true);
+    setError("");
+    let scheduled = false;
+    try {
+      if (rescheduled) {
+        onChanged(await changeSchedule(connector.connector_id, seconds));
+        scheduled = true;
+      }
+      if (renamed) await onRename(connector, draft);
+      onClose();
+    } catch (e) {
+      const message = e instanceof Error && !(e instanceof APIError) ? e.message : connectorMessage(e, catalog.min_interval_seconds);
+      setError(scheduled ? `Intervalle enregistré, mais pas le nom : ${message}` : message);
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await onRemove(connector);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "La source n’a pas pu être retirée.");
+      setBusy(false);
+    }
+  };
+
   return (
-    <Dialog
-      title={`Connecteur ${title}`}
-      closeLabel="Fermer le connecteur"
-      onClose={onClose}
-      wide
-    >
-      <div className="document-body connector-detail">
-        <div className="detail-head">
-          <HealthBadge state={h.state} />
-          <span className="muted">
-            {title}
-            {source ? ` · ${connector.source_namespace}` : ""}
-          </span>
-        </div>
-        <h1>{source || connector.source_namespace}</h1>
-        <section aria-labelledby="detail-health">
-          <h2 id="detail-health">Santé</h2>
-          <dl className="facts">
-            <dt>Dernière collecte réussie</dt>
+    <Dialog title="Réglages" label={`Réglages de ${name}`} closeLabel="Fermer les réglages" onClose={onClose} wide>
+      <div className="settings">
+        <aside className="settings-summary" aria-label="Résumé">
+          <div className="settings-id">
+            <SourceLogo
+              namespace={connector.source_namespace}
+              connectorId={connector.kind === "rss" ? connector.connector_id : undefined}
+            />
+            <div className="settings-name">
+              <h1>{name}</h1>
+              <HealthBadge state={displayState(connector)} />
+            </div>
+          </div>
+          <dl className="sc-stats settings-stats">
+            <div>
+              <dt>par jour</dt>
+              <dd>{perDay}</dd>
+            </div>
+            <div>
+              <dt>repérés</dt>
+              <dd>{stats?.caught || 0}</dd>
+            </div>
+          </dl>
+          <WeekSpark week={week} most={most} now={now} />
+          <dl className="settings-facts">
+            <dt>Dernier article</dt>
             <dd>
-              <When value={h.last_success_at} />
+              <When value={h.last_item_at} empty="Aucun pour l’instant" />
             </dd>
-            <dt>Dernier élément nouveau</dt>
-            <dd>
-              <When value={h.last_item_at} empty="Aucun" />
-            </dd>
-            <dt>Dernière erreur</dt>
-            <dd>
-              {h.last_error ? (
-                <>
-                  <code>{h.last_error.code}</code> ·{" "}
-                  <When value={h.last_error.at} />
-                </>
-              ) : (
-                "Aucune"
-              )}
-            </dd>
-            {h.usage && (
+            {h.last_error && (
               <>
-                <dt>Lectures du jour (UTC)</dt>
-                <dd>
-                  {h.usage.items_read} · la veille{" "}
-                  {h.usage.previous_day_items_read}
+                <dt>Dernière erreur</dt>
+                <dd data-tone="error">
+                  {FAILURES[h.last_error.code] || "erreur"} (<code>{h.last_error.code}</code>),{" "}
+                  <When value={h.last_error.at} />
                 </dd>
               </>
             )}
-            <dt>Santé évaluée</dt>
-            <dd>
-              <When value={h.evaluated_at} />
-            </dd>
-            <dt>Créé</dt>
+            <dt>Ajoutée</dt>
             <dd>
               <When value={connector.created_at} />
             </dd>
-            {connector.disabled_at && (
-              <>
-                <dt>Désactivé</dt>
-                <dd>
-                  <When value={connector.disabled_at} />
-                </dd>
-              </>
-            )}
           </dl>
-        </section>
-        <section aria-labelledby="detail-config">
-          <h2 id="detail-config">Configuration</h2>
-          <dl className="facts">
-            {Object.entries(connector.config).map(([name, value]) => (
-              <div key={name} className="fact-row">
-                <dt>{properties[name]?.title || name}</dt>
-                <dd>
-                  <code className="config-value">
-                    {typeof value === "string" ? value : JSON.stringify(value)}
-                  </code>
-                </dd>
+        </aside>
+        <div className="settings-form">
+          <form
+            id="settings-form"
+            className="settings-fields"
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              void save();
+            }}
+          >
+            <label className="form-field">
+              <span className="form-label">Nom</span>
+              <input
+                className="form-input"
+                value={draft}
+                maxLength={80}
+                placeholder={connector.source_namespace}
+                title="Vide, la source reprend son nom d’origine"
+                onChange={(event) => setDraft(event.target.value)}
+              />
+            </label>
+            <div className="form-field">
+              <span className="form-label" id="settings-interval">
+                Vérifier les nouveautés toutes les…
+              </span>
+              {connector.enabled ? (
+                <div className="segmented" role="group" aria-labelledby="settings-interval">
+                  {options.map((s) => (
+                    <button key={s} type="button" aria-pressed={seconds === s} onClick={() => setSeconds(s)}>
+                      {formatInterval(s)}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="settings-note">
+                  {resumable(connector, kind)
+                    ? "En pause : la collecte reprend depuis la carte de la source."
+                    : "En pause pour de bon : une source à identifiant ne reprend pas. Ajoutez-la de nouveau pour relancer la collecte."}
+                </p>
+              )}
+            </div>
+            {address ? (
+              <div className="form-field">
+                <span className="form-label">Adresse du flux</span>
+                <a className="settings-address" href={address} target="_blank" rel="noreferrer" title={address}>
+                  {address}
+                </a>
               </div>
-            ))}
-          </dl>
-          <p className="schema-help">
-            La configuration ne se modifie pas : désactivez ce connecteur puis
-            créez-en un nouveau sur le même espace de noms.
-          </p>
-        </section>
-        <ScheduleSection
-          connector={connector}
-          minInterval={catalog.min_interval_seconds}
-          onChanged={onChanged}
-        />
-        <CredentialSection
-          connector={connector}
-          kind={kind}
-          catalog={catalog}
-          onChanged={onChanged}
-        />
-        {connector.enabled && (
-          <DisableSection connector={connector} onChanged={onChanged} />
-        )}
+            ) : (
+              Object.keys(connector.config).length > 0 && (
+                <div className="form-field">
+                  <span className="form-label">Configuration</span>
+                  <dl className="settings-config" title="Une autre configuration est une autre source.">
+                    {Object.entries(connector.config).map(([key, value]) => (
+                      <div key={key}>
+                        <dt>{properties[key]?.title || key}</dt>
+                        <dd>
+                          <code>{typeof value === "string" ? value : JSON.stringify(value)}</code>
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )
+            )}
+          </form>
+          <CredentialSection connector={connector} kind={kind} catalog={catalog} onChanged={onChanged} />
+          {error && (
+            <p className="error-text" role="alert">
+              {error}
+            </p>
+          )}
+          {confirming ? (
+            <div className="settings-actions" role="group" aria-label={`Retirer ${name}`}>
+              <span className="row-confirm">Retirer cette source ? Les articles déjà reçus restent.</span>
+              <button type="button" className="button danger" disabled={busy} onClick={remove} autoFocus>
+                {busy ? "Retrait…" : "Oui, retirer"}
+              </button>
+              <button type="button" className="button" onClick={() => setConfirming(false)}>
+                Non
+              </button>
+            </div>
+          ) : (
+            <div className="settings-actions">
+              <button type="button" className="button ghost-danger" onClick={() => setConfirming(true)}>
+                Retirer
+              </button>
+              <span className="settings-gap" />
+              <button type="button" className="button" onClick={onClose}>
+                Annuler
+              </button>
+              <button className="button primary" form="settings-form" disabled={busy}>
+                {busy ? "Enregistrement…" : "Enregistrer"}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </Dialog>
-  );
-}
-
-function ScheduleSection({
-  connector,
-  minInterval,
-  onChanged,
-}: {
-  connector: Connector;
-  minInterval: number;
-  onChanged: (c: Connector) => void;
-}) {
-  const { busy, failure, summary, run } = useSubmit(minInterval);
-  const [saved, setSaved] = useState(false);
-  const current = connector.schedule.interval_seconds;
-  return (
-    <section aria-labelledby="detail-schedule">
-      <h2 id="detail-schedule">Collecte</h2>
-      <p>Toutes les {formatInterval(current)}.</p>
-      {connector.enabled && (
-        <form
-          noValidate
-          className="inline-form"
-          onSubmit={(event) =>
-            run(event, (form) => {
-              const seconds = Number(
-                (
-                  form.elements.namedItem(
-                    "interval_seconds",
-                  ) as HTMLInputElement
-                ).value,
-              );
-              return async () => {
-                setSaved(false);
-                onChanged(
-                  await changeSchedule(connector.connector_id, seconds),
-                );
-                setSaved(true);
-              };
-            })
-          }
-        >
-          <ErrorSummary failure={failure} summary={summary} labels={labelFor} />
-          <IntervalField
-            key={current}
-            name="interval_seconds"
-            label="Nouvel intervalle (secondes)"
-            defaultValue={current}
-            min={minInterval}
-            error={failure?.fields.interval_seconds}
-          />
-          <div className="form-row">
-            <button className="button" disabled={busy}>
-              {busy ? "Enregistrement…" : "Changer l’intervalle"}
-            </button>
-            {saved && (
-              <span role="status" className="success-text">
-                Intervalle enregistré.
-              </span>
-            )}
-          </div>
-        </form>
-      )}
-    </section>
   );
 }
 
@@ -232,7 +269,10 @@ function CredentialSection({
     catalog.min_interval_seconds,
   );
   const c = connector.credential;
-  if (!kind?.credential_schema && !c) return null;
+  // A source that may take one but has none (a public feed) skips the
+  // section, unless the site now refuses access: an identifier may fix that.
+  const refused = ["access_error", "credential_expiring"].includes(displayState(connector));
+  if (!c && (!kind?.credential_schema || (kind.credential !== "required" && !refused))) return null;
   const canDeposit =
     connector.enabled &&
     !!kind?.credential_schema &&
@@ -343,74 +383,6 @@ function CredentialSection({
             </button>
           </div>
         </form>
-      )}
-    </section>
-  );
-}
-
-function DisableSection({
-  connector,
-  onChanged,
-}: {
-  connector: Connector;
-  onChanged: (c: Connector) => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const key = useRef(crypto.randomUUID());
-  return (
-    <section aria-labelledby="detail-disable" className="danger-zone">
-      <h2 id="detail-disable">Désactiver</h2>
-      <p className="muted">
-        La collecte s’arrête immédiatement. Les éléments déjà collectés restent
-        consultables. Un connecteur désactivé ne peut pas être réactivé.
-      </p>
-      {error && (
-        <p className="error-text" role="alert">
-          {error}
-        </p>
-      )}
-      {confirming ? (
-        <div className="form-row">
-          <button
-            type="button"
-            className="button danger"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError("");
-              try {
-                onChanged(
-                  await disableConnector(connector.connector_id, key.current),
-                );
-                setConfirming(false);
-              } catch (e) {
-                setError(connectorMessage(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <Power size={16} aria-hidden="true" />
-            {busy ? "Désactivation…" : "Confirmer la désactivation"}
-          </button>
-          <button
-            type="button"
-            className="button"
-            onClick={() => setConfirming(false)}
-          >
-            Annuler
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          className="button"
-          onClick={() => setConfirming(true)}
-        >
-          <Power size={16} aria-hidden="true" /> Désactiver ce connecteur
-        </button>
       )}
     </section>
   );

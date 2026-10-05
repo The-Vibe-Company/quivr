@@ -23,7 +23,8 @@ Search is lexical, or hybrid with **Idées proches**, which marks articles found
 ### Sources
 
 The **Sources** tab (`?view=sources`) collects news sites into the demo corpus (see
-[From the web interface](#sources)):
+[From the web interface](#sources)). **Ajouter une source**, in the header or on the
+last card, opens a dialog:
 
 1. Paste a site address or a feed address. Once you pause typing (or press Entrée), the
    server fetches it, recognises a feed or finds the feeds the page advertises
@@ -34,7 +35,7 @@ The **Sources** tab (`?view=sources`) collects news sites into the demo corpus (
 3. **Commencer la collecte** creates an `rss` Connector Instance whose Source
    Namespace is that name. Its articles become searchable after the first poll.
 
-Suggested feeds, set by the deployment, add in one click from the last card of the page. Each source is a card: its logo, its health in plain words, its last article, its interval, its articles per day, in the feed and caught by an alert, and its last seven days. A switch pauses or resumes it; its **…** menu renames or removes it. A name given to a source is kept by the web server (`POST /demo/sources/rename`, in `DEMO_STATE_FILE`) and shown everywhere in the app; the Source Namespace, which Records and alerts use, does not change, and an empty name gives it back. Pausing disables the instance. Resuming creates a new instance on the same Source Namespace, because the core cannot re-enable one; articles already collected keep their identity. Removing disables every instance of the source and hides them; collected articles stay searchable. **Réessayer** on a failing source checks it now (`POST /v0/connectors/{id}/runs`) and shows the result.
+Suggested feeds, set by the deployment, add in one click from the same dialog, which closes on the new card. Each source is a card: its logo, its health or its last article in plain words (its interval on hover), its articles per day, in the feed and caught by an alert, and its last seven days. A switch pauses or resumes it; its **…** menu renames it, opens its settings or removes it. **Réglages**, also opened by its name, changes its name and how often it is checked, saved together, shows its feed address and its credential, and removes it. A name given to a source is kept by the web server (`POST /demo/sources/rename`, in `DEMO_STATE_FILE`) and shown everywhere in the app; the Source Namespace, which Records and alerts use, does not change, and an empty name gives it back. Pausing disables the instance. Resuming creates a new instance on the same Source Namespace, because the core cannot re-enable one; articles already collected keep their identity. Removing disables every instance of the source and hides them; collected articles stay searchable. **Réessayer** on a failing source checks it now (`POST /v0/connectors/{id}/runs`) and shows the result.
 
 `make demo` also enables the test `fixture` kind, under **Ajouter un connecteur
 d’un autre type**. Its token field accepts any value, except values starting with

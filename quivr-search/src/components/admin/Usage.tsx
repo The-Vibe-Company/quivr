@@ -19,6 +19,7 @@ import {
   hourlySpan,
   spanOf,
   coarse,
+  coarseRanges,
   count,
   countsIn,
   matchValues,
@@ -310,24 +311,29 @@ export function Usage({ onUnauthorized, bare }: SectionProps) {
                 className="usage-queries"
                 aria-label={`Requêtes les plus fréquentes, ${v.name}`}
               >
-                {list.items.map((q, i) => (
-                  <li key={q.query}>
-                    <span className="usage-rank" aria-hidden="true">
-                      {i + 1}
-                    </span>
-                    <span className="usage-query" title={q.query}>
-                      {q.query}
-                    </span>
-                    <Trend
-                      values={coarse(countsIn(v.bins, q.points), v.window)}
-                      label={trendLabel(countsIn(v.bins, q.points))}
-                    />
-                    <span className="usage-query-count">
-                      {count(q.count)}
-                      <span className="visually-hidden"> fois</span>
-                    </span>
-                  </li>
-                ))}
+                {list.items.map((q, i) => {
+                  const columns = coarse(countsIn(v.bins, q.points), v.window);
+                  const ranges = coarseRanges(v.bins, v.window);
+                  return (
+                    <li key={q.query}>
+                      <span className="usage-rank" aria-hidden="true">
+                        {i + 1}
+                      </span>
+                      <span className="usage-query" title={q.query}>
+                        {q.query}
+                      </span>
+                      <Trend
+                        values={columns}
+                        label={trendLabel(countsIn(v.bins, q.points))}
+                        tips={columns.map((n, c) => `${ranges[c]} · ${n} fois`)}
+                      />
+                      <span className="usage-query-count">
+                        {count(q.count)}
+                        <span className="visually-hidden"> fois</span>
+                      </span>
+                    </li>
+                  );
+                })}
               </ol>
             )
           }

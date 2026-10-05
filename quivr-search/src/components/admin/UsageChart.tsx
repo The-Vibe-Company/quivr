@@ -202,14 +202,24 @@ export function Columns({
 }
 
 /** A row's trend: one micro-column per chart column, scaled to the row's peak. */
-export function Trend({ values, label }: { values: number[]; label: string }) {
+export function Trend({
+  values,
+  label,
+  tips,
+}: {
+  values: number[];
+  label: string;
+  /** What each micro-column reads on hover. */
+  tips?: string[];
+}) {
   const max = Math.max(1, ...values);
   return (
-    <span className="usage-trend" role="img" aria-label={label}>
+    <span className="usage-trend" role="img" aria-label={label} data-tips={tips ? "" : undefined}>
       {values.map((v, i) => (
         <span
           key={i}
           data-empty={v === 0 || undefined}
+          data-tip={tips?.[i]}
           style={{
             height: v ? `${Math.max(12, (v / max) * 100)}%` : undefined,
           }}
