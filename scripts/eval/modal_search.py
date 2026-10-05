@@ -14,7 +14,6 @@ import direct_bakeoff
 import embeddings
 import gates
 import public_sets
-import protected_inputs
 import results
 import search_trial
 import private_working
@@ -31,10 +30,12 @@ PRIVATE_FAILURE_MESSAGES = frozenset({
     'provider response exceeds size limit', 'invalid provider response',
     'invalid provider embeddings',
 } | {f'provider HTTP {code}' for code in (400, 401, 403, 404, 408, 413, 422, 429, 500, 502, 503, 504)})
+# Keyed by (module, class name), not class objects: Modal pickles remote_trial's
+# globals by value, and an eval-module class would be unresolvable remotely.
 PRIVATE_FAILURES = {
-    RuntimeError: ('RuntimeError', PRIVATE_FAILURE_MESSAGES),
-    protected_inputs.DecryptionError: ('DecryptionError', frozenset({'protected input identity or ciphertext rejected'})),
-    protected_inputs.DecryptionTimeout: ('DecryptionTimeout', frozenset({'protected input decryption timed out'})),
+    ('builtins', 'RuntimeError'): PRIVATE_FAILURE_MESSAGES,
+    ('protected_inputs', 'DecryptionError'): frozenset({'protected input identity or ciphertext rejected'}),
+    ('protected_inputs', 'DecryptionTimeout'): frozenset({'protected input decryption timed out'}),
 }
 
 
@@ -43,10 +44,11 @@ def failure_summary(error, *, private=False):
     if private:
         # Only our exact fixed diagnostics and a fixed exception type escape.
         # Neither provider suffixes nor arbitrary exception class names are safe.
-        kind, messages = PRIVATE_FAILURES.get(type(error), ('RuntimeError', frozenset()))
+        cls = type(error)
+        messages = PRIVATE_FAILURES.get((cls.__module__, cls.__qualname__), frozenset())
         message = str(error) if messages else ''
         if message in messages:
-            return kind, message
+            return cls.__qualname__, message
         return 'RuntimeError', 'protected measurement failed'
     message = str(error)
     credentials = [value for name, value in os.environ.items() if value and
