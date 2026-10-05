@@ -1,5 +1,9 @@
 """Run the offline push-source sample in local and guide-verification stacks."""
+import plugin_environment
 import os
+import base64
+import json
+import secrets
 import signal
 import subprocess
 import time
@@ -35,7 +39,18 @@ def healthy(stack):
 
 def start(stack):
     stop(stack)
-    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port(stack))}
+    # Keep the local signing secret across plugin/api/worker restarts. The
+    # stack directory is private and gitignored, like its existing keys.
+    key_file = stack.directory / 'push-source-signing.json'
+    if not key_file.exists():
+        ring = {'active': 'local', 'keys': [{'id': 'local',
+                'secret': base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=')}]}
+        with open(key_file, 'x', opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
+            json.dump(ring, output)
+    ring = json.loads(key_file.read_text())
+    env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port(stack)),
+           'QUIVR_PLUGIN_SIGNING_KEYS': json.dumps(ring)}
+    env.pop('QUIVR_ENGINE_PLUGIN_KEYS', None)
     with (stack.directory / 'push-source.log').open('a') as log:
         process = subprocess.Popen([str(normalizer_plugin.python()), '-m', 'push_source'],
                                    cwd=directory(stack), env=env, stdout=log, stderr=log, start_new_session=True)
@@ -46,6 +61,16 @@ def start(stack):
         if process.poll() is not None or time.monotonic() >= deadline:
             raise RuntimeError('push source not healthy; inspect ' + str(stack.directory / 'push-source.log'))
         time.sleep(.05)
+
+
+def engine_environment(stack):
+    """Supply only engine processes with the local plugin's signing ring."""
+    key_file = stack.directory / 'push-source-signing.json'
+    if not key_file.exists():
+        return {}
+    engine_keys = json.loads(os.environ.get('QUIVR_ENGINE_PLUGIN_KEYS', '{}'))
+    engine_keys['push-source'] = json.loads(key_file.read_text())
+    return {'QUIVR_ENGINE_PLUGIN_KEYS': json.dumps(engine_keys)}
 
 
 def stop(stack):

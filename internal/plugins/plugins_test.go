@@ -132,6 +132,45 @@ func TestNormativeFixtures(t *testing.T) {
 	}
 }
 
+func TestAuthenticationFixturesRequireEveryProbeAndCorrectStatus(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(fixtures, "authentication/cases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutation := range []string{"missing probe", "duplicate probe", "reject valid", "accept unsigned"} {
+		t.Run(mutation, func(t *testing.T) {
+			var doc struct {
+				Cases []map[string]any `json:"cases"`
+			}
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				t.Fatal(err)
+			}
+			switch mutation {
+			case "missing probe":
+				doc.Cases = doc.Cases[:len(doc.Cases)-1]
+			case "duplicate probe":
+				doc.Cases[1] = doc.Cases[0]
+			default:
+				for _, probe := range doc.Cases {
+					if mutation == "reject valid" && probe["name"] == "valid" {
+						probe["expected_status"] = 401
+					}
+					if mutation == "accept unsigned" && probe["name"] == "unsigned" {
+						probe["expected_status"] = 200
+					}
+				}
+			}
+			changed, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if issues := plugins.ValidateDocument("authentication-fixture.schema.json", changed); len(issues) == 0 {
+				t.Fatal("incomplete or misleading authentication fixture accepted")
+			}
+		})
+	}
+}
+
 func TestRangesMatchNormativeFixtures(t *testing.T) {
 	var doc struct {
 		Cases []struct {

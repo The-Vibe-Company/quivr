@@ -9,7 +9,7 @@ The HTTP routes a plugin serves, with every field of their JSON bodies, the erro
 
 ## Plugin API versions
 
-Latest Plugin API: `0.13.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`.
+Latest Plugin API: `0.14.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`.
 
 | Feature | Since |
 | --- | --- |
@@ -29,6 +29,71 @@ Latest Plugin API: `0.13.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Instance-scoped bearer tokens for connector API routes | `0.12.0` |
 | Profile candidates, declared retrieval dependencies and shared search budgets | `0.12.0` |
 | Optional search mode override for profile candidates | `0.13.0` |
+| Signed engine requests with per-plugin audience and body digest | `0.14.0` |
+
+## Signed engine requests
+
+Plugin API `0.14.0` requires `Authorization: Bearer <compact JWS>` on discovery
+and every Contribution request. The Go and Python SDK HTTP servers verify the
+token before dispatching to your handler. `GET /v0/health` remains public for
+readiness probes. Handler code needs no change.
+
+The engine reads `QUIVR_ENGINE_PLUGIN_KEYS`, a JSON object mapping plugin ids to
+independent key rings. Each plugin reads only its ring from
+`QUIVR_PLUGIN_SIGNING_KEYS`. Provision these as environment secrets, outside
+manifests, plugin configuration and registry metadata. Never give a plugin the
+engine's full map. Use HTTPS for remote endpoints; tokens do not encrypt bodies.
+
+A key ring has `active` (the signing key id) and `keys` (one to 16 keys). Each key
+has `id`, `secret` (unpadded base64url of at least 32 random bytes), and optional
+`not_before` / `not_after` integer Unix seconds. A key is accepted from
+`not_before` inclusive until `not_after` exclusive; absent bounds are unbounded.
+Ids must be unique. Generate separate secrets for each plugin. Missing or invalid
+keys fail closed; signing-key diagnostics never include their values.
+
+The JWS protected header has exactly `alg: "HS256"`, `typ: "quivr-engine+jwt"`
+and `kid` (the configured key id). All three compact segments are unpadded
+base64url. Header and claims objects reject duplicate members. No other
+algorithm or remote key lookup is accepted.
+
+| Claim | Required value |
+| --- | --- |
+| `aud`, `plugin_id` | Both equal this plugin's manifest id |
+| `contribution` | `discovery`, or the Contribution name in the route |
+| `method` | The exact HTTP method |
+| `target` | The exact request path and query string |
+| `body_sha256` | Lowercase SHA-256 hex of the exact transmitted body bytes; empty bytes for bodyless discovery |
+| `iat`, `exp` | Integer Unix seconds: `iat <= now < exp`, with `0 < exp - iat <= 60` |
+
+The eight claims above are required and no others are accepted. Verification
+uses constant-time MAC comparison. Proxies must preserve method, path, query
+and body bytes. Clocks must agree; no clock-skew allowance is
+added. The token's lifetime is a replay window: the same token and exact request
+can be replayed until expiry. Contribution idempotency rules still apply.
+
+A missing, malformed, forged, expired, wrong-audience, wrong-operation or
+body-tampered token returns HTTP `401` with
+`{"code":"invalid_engine_token","message":"engine request authentication failed","retryable":false}`.
+A request exceeding the SDK body limit returns `413` before authentication.
+
+For rotation, first distribute a ring containing the old and new keys to the
+plugins and engine processes. Set the new key as `active` on engines during a
+rolling restart. Keep both verification windows valid until old engine processes
+are replaced and their last 60-second tokens have expired. Give the old key a
+`not_after` cutoff for the configured overlap, then remove it. New calls continue
+throughout the overlap; retired keys are refused even with an unexpired token.
+
+A manifest restricted to an API below `0.14.0` keeps working unsigned and the
+engine warns at startup. To opt in, admit `0.14.0` and upgrade the SDK, then
+provision both environments. A manifest admitting the signed API cannot silently
+serve an older unsigned discovery version. `quivr plugin dev` and `quivr plugin
+test` provision ephemeral keys when they launch the plugin; `plugin test
+--endpoint` uses `QUIVR_ENGINE_PLUGIN_KEYS` for that plugin.
+
+The Contract Runner executes the normative valid, expired, wrong-audience,
+tampered, unsigned and forged probes in
+`fixtures/authentication/cases.json`, then signs its ordinary Contribution
+fixtures. Their report check id is `authentication`.
 
 ## Discovery and health
 
@@ -509,6 +574,22 @@ Body of every non-2xx plugin response. retryable is authoritative: true asks the
 ## Fixtures
 
 Local test inputs that `quivr plugin dev` and `quivr plugin test` turn into requests. A plugin keeps its own in `fixtures/*.json`.
+
+### Authentication fixture
+
+Normative authentication probes used by the Contract Runner. The plugin audience placeholder resolves to the tested plugin id. Tokens use the configured key, issued_seconds_ago relative to probe time, a 60-second lifetime and GET /v0/discovery. The unsigned and forged names omit or corrupt the token.
+
+Schema: `authentication-fixture.schema.json`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `cases` | array of object | yes | 6 to 6 items. |
+| `cases[].name` | `valid`, `expired`, `wrong-audience`, `tampered`, `unsigned`, `forged` | yes | — |
+| `cases[].audience` | string | yes | — |
+| `cases[].issued_seconds_ago` | integer | yes | 0 to 3600. |
+| `cases[].body` | string | yes | — |
+| `cases[].sent_body` | string | yes | — |
+| `cases[].expected_status` | `200`, `401` | yes | — |
 
 ### Connector fixture
 

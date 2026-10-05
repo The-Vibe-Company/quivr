@@ -215,6 +215,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
   schemas, secrets and limits.
+- **Signed engine calls** (Plugin API 0.14): per-plugin HS256 tokens bind the operation and body, expire within 60 seconds, and support overlapping key rotation. Both SDKs reject invalid calls before dispatch. Older declared APIs remain unsigned with a startup warning. [Protocol reference](https://docs.quivr.thevibecompany.co/reference/plugin-protocol#signed-engine-requests).
 - **Plugin registry and activation without restart**: the plugins pinned at startup are
   recorded in the database, with the active Pipeline Plan saying which plugin serves each role
   (a media type, an alert rule, a connector kind, ingestion, retrieval). An operator key with

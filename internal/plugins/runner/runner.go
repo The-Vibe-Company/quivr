@@ -185,7 +185,8 @@ type run struct {
 	// logs captures the launched plugin's output for the credential check.
 	logs *lockedBuffer
 	// seen collects every connector answer body for the credential check.
-	seen [][]byte
+	seen    [][]byte
+	signing *plugins.SigningKeys
 }
 
 func (r *run) add(c Check, started time.Time) {
@@ -236,6 +237,18 @@ func (r *run) execute(ctx context.Context) {
 	if !r.inspect() {
 		return
 	}
+	if r.api.Speaks(plugins.FeatureSignedCalls) {
+		ring, err := plugins.NewSigningKeys()
+		if r.opts.Endpoint != "" {
+			ring, err = plugins.EngineSigningKeys(r.m.ID)
+		}
+		if err != nil {
+			r.add(Check{ID: "authentication", Title: "engine signing keys are available", Issues: []plugins.Issue{{Code: "invalid_engine_token", Message: plugins.ErrSigningKeys.Error()}}}, time.Now())
+			return
+		}
+		r.signing = &ring
+		ctx = plugins.WithRequestSigning(ctx, r.m.ID, ring)
+	}
 	defer func() {
 		if r.tmp != "" {
 			_ = os.RemoveAll(r.tmp)
@@ -255,6 +268,9 @@ func (r *run) execute(ctx context.Context) {
 	}
 	r.pluginAPI = served
 	r.add(Check{ID: CheckDiscovery, Title: "GET /v0/discovery matches quivr-plugin.yaml", Issues: issues}, started)
+	if r.signing != nil {
+		r.authentication(ctx)
+	}
 
 	own := r.ownFixtures()
 	if r.m.Contributions.Normalizer != nil {
@@ -409,7 +425,12 @@ func (r *run) reach(ctx context.Context) (*devhost.Process, bool) {
 				output = io.MultiWriter(output, r.logs)
 			}
 		}
-		proc, err = devhost.Start(devhost.Options{Dir: dir, Command: r.m.Run.Command, Manifest: r.report.Plugin.ManifestPath, Output: output})
+		var env []string
+		if r.signing != nil {
+			raw, _ := json.Marshal(r.signing)
+			env = []string{plugins.EnvPluginSigningKeys + "=" + string(raw)}
+		}
+		proc, err = devhost.Start(devhost.Options{Dir: dir, Command: r.m.Run.Command, Manifest: r.report.Plugin.ManifestPath, Output: output, Env: env})
 		if err == nil {
 			r.baseURL = proc.BaseURL
 			r.report.Target.BaseURL = proc.BaseURL
