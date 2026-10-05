@@ -34,7 +34,12 @@ policy:
   # Replace this example timestamp with the operator's actual end date.
   end_at: '2099-01-01T00:00:00Z'
   confirmation_limit: 10
+  # Keep the conservative aggregate rate aligned with full-engine confirmation.
+  # Remove this override for size-derived exploration pricing.
   modal_usd_per_second: 0.001
+  modal_cpu: 2
+  modal_memory_mib: 4096
+  quality_concurrency: 8
   max_seconds: 1800
   startup_seconds: 300
   sets:

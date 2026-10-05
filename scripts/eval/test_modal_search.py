@@ -47,6 +47,26 @@ class Refusal(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 modal_search.policy(policy)
 
+    def test_resource_policy_derives_price_and_rejects_underestimated_bounds(self):
+        # Policy owns resource/pricing consistency; no network or Modal calls.
+        base = {'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
+                'price_revision': '2026-10-05'}
+        small = modal_search.policy(base)
+        self.assertEqual((small['quality_concurrency'], small['modal_cpu'], small['modal_memory_mib']), (8, 2, 4096))
+        self.assertAlmostEqual(small['modal_usd_per_second'], .00003508)
+        large = modal_search.policy({**base, 'modal_cpu': 8, 'modal_memory_mib': 16384})
+        self.assertAlmostEqual(large['modal_usd_per_second'], 4 * small['modal_usd_per_second'])
+        custom = modal_search.policy({**base, 'modal_cpu': 3, 'modal_memory_mib': 2048,
+            'modal_cpu_usd_per_second': .001, 'modal_gib_usd_per_second': .002})
+        self.assertAlmostEqual(custom['modal_usd_per_second'], .007)
+        self.assertEqual(modal_search.policy({**base, 'modal_usd_per_second': .001})['modal_usd_per_second'], .001)
+        self.assertEqual(modal_search.policy(small), small)
+        for override in ({'quality_concurrency': 0}, {'quality_concurrency': 33}, {'quality_concurrency': True},
+                         {'modal_cpu': 0}, {'modal_memory_mib': 127}, {'modal_cpu_usd_per_second': 0},
+                         {'modal_usd_per_second': .000001}):
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                modal_search.policy({**base, **override})
+
 
 class RemoteSerialization(unittest.TestCase):
     def test_remote_trial_loads_before_evaluation_modules_are_importable(self):
