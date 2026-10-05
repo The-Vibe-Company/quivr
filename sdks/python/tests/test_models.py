@@ -84,6 +84,10 @@ class NormativeFixtureRoundTrip(unittest.TestCase):
             models.NormalizerResponse.from_dict(json.loads((FIXTURES / "responses/wrong-manifest-kind.json").read_text()))
         with self.assertRaisesRegex(ValueError, "missing required field sha256"):
             models.NormalizerRequest.from_dict(json.loads((FIXTURES / "requests/missing-sha256.json").read_text()))
+        authentication = json.loads((FIXTURES / "authentication/cases.json").read_text())
+        del authentication["cases"][0]["body"]
+        with self.assertRaisesRegex(ValueError, "missing required field body"):
+            models.AuthenticationFixture.from_dict(authentication)
 
     def test_unions_decode_by_kind(self):
         request = models.NormalizerRequest.from_dict(json.loads((FIXTURES / "requests/signed-url.json").read_text()))

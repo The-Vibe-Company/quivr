@@ -452,7 +452,7 @@ class AuthenticationFixtureCasesItem(Model):
     name: Literal["valid", "expired", "wrong-audience", "tampered", "unsigned", "forged", "wrong-plugin-id", "wrong-route", "wrong-method", "future-iat", "overlong-lifetime", "alg-none", "utf16"]
     audience: str
     issued_seconds_ago: int
-    body: Literal["{}"] = "{}"
+    body: str
     sent_body: str
     expected_status: Literal[200, 401]
     claims: AuthenticationFixtureCasesItemClaims | None = None

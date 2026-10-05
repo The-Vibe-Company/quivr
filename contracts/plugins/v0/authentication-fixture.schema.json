@@ -52,7 +52,7 @@
           },
           "body": {
             "type": "string",
-            "const": "{}"
+            "description": "The signed body is {} for every probe."
           },
           "sent_body": {
             "type": "string"
@@ -222,12 +222,18 @@
               "properties": {
                 "sent_body": {
                   "const": "{ }"
+                },
+                "body": {
+                  "const": "{}"
                 }
               }
             },
             "else": {
               "properties": {
                 "sent_body": {
+                  "const": "{}"
+                },
+                "body": {
                   "const": "{}"
                 }
               }

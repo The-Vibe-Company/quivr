@@ -610,7 +610,7 @@ Schema: `authentication-fixture.schema.json`.
 | `cases[].name` | `valid`, `expired`, `wrong-audience`, `tampered`, `unsigned`, `forged`, `wrong-plugin-id`, `wrong-route`, `wrong-method`, `future-iat`, `overlong-lifetime`, `alg-none`, `utf16` | yes | — |
 | `cases[].audience` | string | yes | — |
 | `cases[].issued_seconds_ago` | integer | yes | -3600 to 3600. |
-| `cases[].body` | `"{}"` | yes | — |
+| `cases[].body` | string | yes | The signed body is &#123;&#125; for every probe. |
 | `cases[].sent_body` | string | yes | — |
 | `cases[].expected_status` | `200`, `401` | yes | — |
 | `cases[].claims` | object | no | Signed claim replacements; other-plugin resolves to an id distinct from the tested plugin. |
