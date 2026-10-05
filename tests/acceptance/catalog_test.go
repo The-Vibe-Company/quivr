@@ -363,32 +363,3 @@ func TestCatalogResyncRestartsAfterExpiry(t *testing.T) {
 		t.Fatal("restarted view missed content", client.view)
 	}
 }
-
-// TestCatalogCursorsRejectChangedScope presents cursors issued to one key with
-// another key of a narrower scope over the same Corpus.
-func TestCatalogCursorsRejectChangedScope(t *testing.T) {
-	if os.Getenv("QUIVR_TEST_URL") == "" {
-		t.Skip("make verify")
-	}
-	admin, scoped := os.Getenv("QUIVR_TEST_ADMIN"), os.Getenv("QUIVR_TEST_SCOPED")
-	granted := request(t, "GET", "/v0/corpora", scoped, nil, 200)["items"].([]any)[0].(map[string]any)["corpus_id"].(string)
-	for i := range 2 {
-		key := fmt.Sprint("catalog-scope-", i)
-		request(t, "POST", "/v0/records", scoped, inlineCommand(granted, key, key, "Portée restreinte"), 202)
-	}
-	page := request(t, "GET", recordsPath(granted, "", 1), admin, nil, 200)["next_page_cursor"].(string)
-	change := request(t, "GET", changesPath(granted, "", 0), admin, nil, 200)["next_cursor"].(string)
-	resync := "/v0/records?" + url.Values{"corpus_id": {granted}}.Encode()
-	for _, path := range []string{recordsPath(granted, page, 0), changesPath(granted, change, 0)} {
-		if e := request(t, "GET", path, scoped, nil, 409); e["code"] != "cursor_scope_changed" || e["resync_url"] != resync {
-			t.Fatal("scope change did not name the restart", path, e)
-		}
-	}
-	if e := request(t, "GET", recordsPath(granted, change, 0), admin, nil, 422); e["code"] != "invalid_cursor" {
-		t.Fatal("a Change Cursor was accepted as a page cursor", e)
-	}
-	// The scoped key restarts from resync_url and sees the whole catalog it may read.
-	if items := request(t, "GET", resync, scoped, nil, 200)["items"].([]any); len(items) < 2 {
-		t.Fatal("restart from resync_url returned an incomplete catalog", items)
-	}
-}

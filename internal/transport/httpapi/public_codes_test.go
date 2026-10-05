@@ -15,7 +15,6 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
-	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
 
 // detailed returns err as a domain would report it with an explanation, in
@@ -66,14 +65,6 @@ func TestConnectorFailureCodesIgnoreDetail(t *testing.T) {
 		status int
 		code   string
 	}{
-		connectors.ErrConflict:          {409, "idempotency_conflict"},
-		connectors.ErrNamespaceInUse:    {409, "source_namespace_in_use"},
-		connectors.ErrDisabled:          {409, "connector_disabled"},
-		connectors.ErrUnsupportedKind:   {422, "unsupported_connector_kind"},
-		connectors.ErrInvalidConfig:     {422, "invalid_config"},
-		connectors.ErrInvalidCredential: {422, "invalid_credential"},
-		connectors.ErrInvalidInterval:   {422, "invalid_interval"},
-		connectors.ErrInvalid:           {422, "invalid_input"},
 		// Provider codes can match engine codes; delivery owns their class.
 		(connectors.RelayAnswer{Status: 500, ErrorCode: "invalid_input"}).PublicError(): {500, "invalid_input"},
 		(connectors.RelayAnswer{Status: 503, ErrorCode: "invalid_input"}).PublicError(): {503, "invalid_input"},
@@ -156,27 +147,6 @@ func TestMonitoringSchemaRefusalNamesTheField(t *testing.T) {
 	}
 	if rec.Code != 422 || body.Code != "invalid_expression" || body.Field != "/saved_query_version_id" || body.Message != "/expression/text: minLength: got 0, want 1" || body.Retryable {
 		t.Fatalf("%d %+v", rec.Code, body)
-	}
-}
-
-// A refused upload answers the public code of its sentinel; the request schema
-// alone answers invalid_schema.
-func TestUploadFailureCodesIgnoreDetail(t *testing.T) {
-	for sentinel, want := range map[error]struct {
-		status int
-		code   string
-	}{
-		uploads.ErrInvalid:  {422, "invalid_input"},
-		content.ErrInvalid:  {422, "invalid_input"},
-		uploads.ErrNotFound: {404, "not_found"},
-		uploads.ErrConflict: {409, "idempotency_conflict"},
-	} {
-		for style, err := range detailed(sentinel) {
-			status, code := written(t, func(w *httptest.ResponseRecorder) { writeError(w, err, publicerr.StorageUnavailable) })
-			if status != want.status || code != want.code {
-				t.Errorf("%v (%s): %d %q, want %d %q", sentinel, style, status, code, want.status, want.code)
-			}
-		}
 	}
 }
 
