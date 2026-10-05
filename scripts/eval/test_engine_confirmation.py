@@ -33,6 +33,11 @@ import results
 
 
 class Mapping(unittest.TestCase):
+    def test_trusted_lineage_binds_ci_admission_source_bytes(self):
+        path = 'scripts/eval/ci_guard.py'
+        hashes = confirmation.lineage()['engine_source_hashes']
+        self.assertEqual(hashes[path], hashlib.sha256((confirmation.ROOT / path).read_bytes()).hexdigest())
+
     def test_maps_real_settings_and_refuses_changed_character_windows(self):
         baseline = search_trial.configuration({'model': 'Cohere-Embed-V5-Pro',
             'revision': '2026-10-03', 'dimensions': 1024})

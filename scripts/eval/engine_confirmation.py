@@ -97,7 +97,7 @@ def lineage():
     sources = ['scripts/eval/' + name for name in
         ('engine_confirmation.py', 'engine_confirm_runner.py', 'engine_measurement.py', 'engine_stack.py',
          'modal_engine.py', 'control_store.py', 'results.py', 'run.py', 'scoring.py', 'gates.py', 'embeddings.py', 'trec.py',
-         'search_trial.py', 'direct_bakeoff.py', 'protected_inputs.py')]
+         'search_trial.py', 'direct_bakeoff.py', 'protected_inputs.py', 'ci_guard.py')]
     sources += ['scripts/' + name for name in
                 ('local.py', 'hosted_embed_plugin.py', 'ingestion_plugin.py', 'connector_plugin.py',
                  'core_ingest_plugin.py', 'retrieval_plugin.py', 'ports.py', 'push_plugin.py', 'fixture_plugin.py',
