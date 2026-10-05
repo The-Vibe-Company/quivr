@@ -423,9 +423,11 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
   let overlayAt = 0;
 
   // The engine's counts, by query, each for its own time; the first day of
-  // each time zone; and the counts in flight.
+  // each time zone and when each zone was last asked for; and the counts in
+  // flight.
   const counts = new Map();
   const firstDays = new Map();
+  const zonesSeen = new Map();
   let inFlight = 0;
   const queued = [];
 
@@ -709,22 +711,33 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
     // the engine's count; Records without a current Version count in the
     // total only.
     async history(url) {
-      const tz = url.searchParams.get("tz") || "UTC";
+      let tz;
       try {
-        wall(0, tz);
+        // The zone's own name, so "europe/paris" is "Europe/Paris".
+        tz = new Intl.DateTimeFormat("en-US", {
+          timeZone: url.searchParams.get("tz") || "UTC",
+        }).resolvedOptions().timeZone;
       } catch {
         throw failure(422, "Fuseau horaire inconnu.");
       }
       const now = clock();
       for (const [key, entry] of counts)
         if (now - entry.at >= entry.ttl) counts.delete(key);
+      for (const [key, at] of zonesSeen)
+        if (now - at >= FIRST_DAY_MS) zonesSeen.delete(key);
       for (const [key, entry] of firstDays)
         if (now - entry.at >= FIRST_DAY_MS) firstDays.delete(key);
-      if (!firstDays.has(tz) && firstDays.size >= MAX_ZONES)
+      if (!zonesSeen.has(tz) && zonesSeen.size >= MAX_ZONES)
         throw failure(503, "Trop de fuseaux horaires à la fois. Réessayez.");
+      zonesSeen.set(tz, now);
       const today = wall(now, tz).day;
-      const total = countRecords({}, TODAY_MS);
-      total.catch(() => {});
+      // Every Record, and every Record with a date: the difference has no
+      // current Version, so no day.
+      const totals = Promise.all([
+        countRecords({}, TODAY_MS),
+        countRecords({ accepted_before: midnight(plusDays(today, 1), tz) }, TODAY_MS),
+      ]);
+      totals.catch(() => {});
       const back = await daysBack(tz, today);
       const days = Array.from({ length: back.days + 1 }, (_, i) =>
         plusDays(today, i - back.days),
@@ -740,9 +753,11 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
           ),
         ),
       );
+      const [total, dated] = await totals;
       return {
         time_zone: tz,
-        total: await total,
+        total,
+        undated: Math.max(0, total - dated),
         first_day: days[0],
         today,
         truncated: back.truncated,

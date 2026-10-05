@@ -291,11 +291,16 @@ test("the header prefers the rollups, but not over a document they do not count 
 });
 
 // The engine's count API over synthetic Records: one acceptance time each,
-// or null for a Record without a current Version.
+// or null for a Record without a current Version. Each count answers on a
+// later turn, so reads overlap as they would against the core.
 function counting(times) {
   const calls = [];
+  const flight = { now: 0, max: 0 };
   const upstream = async (path) => {
     calls.push(path);
+    flight.max = Math.max(flight.max, ++flight.now);
+    await new Promise((resolve) => setImmediate(resolve));
+    flight.now--;
     const url = new URL(path, "http://core");
     assert.equal(url.pathname, "/v0/records/count");
     assert.equal(url.searchParams.get("corpus_id"), "demo");
@@ -310,7 +315,7 @@ function counting(times) {
     ).length;
     return { status: 200, data: { count } };
   };
-  return { upstream, calls };
+  return { upstream, calls, flight };
 }
 const history = (admin, tz) =>
   admin.history(new URL(`http://demo/demo/admin/history?tz=${tz}`));
@@ -330,6 +335,7 @@ test("documents are counted per local day since the first one, empty days at zer
   assert.deepEqual(paris, {
     time_zone: "Europe/Paris",
     total: 5,
+    undated: 1,
     first_day: "2026-10-23",
     today: "2026-10-27",
     truncated: false,
@@ -347,7 +353,8 @@ test("documents are counted per local day since the first one, empty days at zer
     ),
     "each bound carries its own offset",
   );
-  const utc = await history(admin, "UTC");
+  const utc = await history(admin, "utc");
+  assert.equal(utc.time_zone, "UTC");
   assert.deepEqual(
     utc.days.map((d) => d.count),
     [1, 1, 1, 0, 1],
@@ -357,17 +364,19 @@ test("documents are counted per local day since the first one, empty days at zer
 
 test("past days are reread less often than today, and history is capped", async () => {
   let now = Date.parse("2026-10-27T12:00:00Z");
-  const { upstream, calls } = counting([
+  const { upstream, calls, flight } = counting([
     "2026-10-20T10:00:00Z",
     "2026-10-27T10:00:00Z",
   ]);
   const admin = createAdmin({ upstream, corpus: "demo", clock: () => now });
   await history(admin, "UTC");
+  assert.equal(flight.max, 4, "at most four counts in flight");
   calls.length = 0;
   now += 60_000;
   await history(admin, "UTC");
   assert.deepEqual(calls, [
     "/v0/records/count?corpus_id=demo",
+    "/v0/records/count?corpus_id=demo&accepted_before=2026-10-28T00%3A00%3A00%2B00%3A00",
     "/v0/records/count?corpus_id=demo&accepted_after=2026-10-27T00%3A00%3A00%2B00%3A00&accepted_before=2026-10-28T00%3A00%3A00%2B00%3A00",
   ]);
   calls.length = 0;

@@ -38,16 +38,20 @@ const documents = (n: number) => plural(n, "document");
 function Stored({ data }: { data: HistoryData }) {
   const { days } = data;
   const today = days.at(-1)?.count ?? 0;
-  const empty = days.filter((d) => d.count === 0).length;
-  const dated = days.reduce((n, d) => n + d.count, 0);
-  const undated = data.total - dated;
+  // Today is not empty yet: only the days before it count as gaps.
+  const past = days.slice(0, -1);
+  const empty = past.filter((d) => d.count === 0).length;
   return (
     <div className="history">
       <div className="history-figures">
         <Figure
           value={count(data.total)}
           unit={data.total > 1 ? "documents" : "document"}
-          detail={`en base depuis le ${dayName(data.first_day)}, retirés compris`}
+          detail={
+            data.truncated
+              ? "en base, retirés compris"
+              : `en base depuis le ${dayName(data.first_day)}, retirés compris`
+          }
         />
         <Figure
           value={count(today)}
@@ -57,7 +61,7 @@ function Stored({ data }: { data: HistoryData }) {
         <Figure
           value={count(empty)}
           unit={empty > 1 ? "jours sans document" : "jour sans document"}
-          detail={`sur ${plural(days.length, "jour")}`}
+          detail={`avant aujourd’hui, sur ${plural(past.length, "jour")}`}
           tone={empty ? "warn" : undefined}
         />
       </div>
@@ -66,8 +70,8 @@ function Stored({ data }: { data: HistoryData }) {
         Un document compte au jour où Quivr a reçu sa version actuelle, dans le
         fuseau {data.time_zone} : une correction le déplace au jour de sa
         nouvelle version. Les documents retirés restent comptés.
-        {undated > 0 &&
-          ` Le total compte aussi ${documents(undated)} sans version actuelle, donc sans jour.`}
+        {data.undated > 0 &&
+          ` Le total compte aussi ${documents(data.undated)} sans version actuelle, donc sans jour.`}
         {data.truncated &&
           ` Les jours avant le ${dayName(data.first_day)} ne sont pas montrés : un an au plus.`}
       </p>
@@ -85,7 +89,10 @@ function Stored({ data }: { data: HistoryData }) {
           </thead>
           <tbody>
             {[...days].reverse().map((d) => (
-              <tr key={d.day} data-empty={d.count === 0 || undefined}>
+              <tr
+                key={d.day}
+                data-empty={(d.count === 0 && d.day !== data.today) || undefined}
+              >
                 <th scope="row">{dayLabel(d.day)}</th>
                 <td>{count(d.count)}</td>
               </tr>
@@ -139,7 +146,11 @@ function DayColumns({ days }: { days: HistoryData["days"] }) {
     .map((_, i) => i)
     .filter((i) => i % step === 0 && (i === 0 || days.length - i >= step / 2));
   const left = point === null ? 0 : ((point + 0.5) / days.length) * 100;
-  const columns = { gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` };
+  // The gaps between columns narrow as days add up, so a year still fits.
+  const columns = {
+    gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
+    gap: days.length > 120 ? 0 : days.length > 60 ? 1 : undefined,
+  };
   return (
     <div className="usage-chart history-chart">
       <div
@@ -147,7 +158,6 @@ function DayColumns({ days }: { days: HistoryData["days"] }) {
         role="img"
         aria-label={summary}
         tabIndex={0}
-        data-dense={days.length > 60 || undefined}
         style={columns}
         onMouseLeave={() => setPoint(null)}
         onBlur={() => {

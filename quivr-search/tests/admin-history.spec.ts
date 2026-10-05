@@ -32,7 +32,7 @@ test("le total, aujourd’hui et chaque jour, un jour vide compté zéro", async
     /^12\saujourd’hui/,
   );
   await expect(panel.locator(".usage-figure").nth(2)).toContainText(
-    /^2\sjours sans document\ssur 21\sjours$/,
+    /^2\sjours sans document\savant aujourd’hui, sur 20\sjours$/,
   );
   expect(admin.reads).toContain("/demo/admin/history?tz=Europe%2FParis");
   await expect(panel).toContainText("fuseau Europe/Paris");

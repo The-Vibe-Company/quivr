@@ -10,6 +10,8 @@ export interface History {
   time_zone: string;
   /** Every Record of the corpus, withdrawn ones and undated ones included. */
   total: number;
+  /** Records without a current Version: in the total, on no day. */
+  undated: number;
   /** YYYY-MM-DD, local to time_zone. */
   first_day: string;
   today: string;

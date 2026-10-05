@@ -557,7 +557,8 @@
 @media (forced-colors: active) {
   .usage-segment,
   .usage-swatch,
-  .usage-trend span {
+  .usage-trend span,
+  .history-zero {
     background: CanvasText;
     forced-color-adjust: none;
   }
@@ -581,15 +582,15 @@
 .history-chart .usage-columns {
   height: 140px;
 }
-.history-chart .usage-columns[data-dense] {
-  gap: 1px;
-}
 .history-zero {
   width: 100%;
   max-width: 22px;
   height: 3px;
   border-radius: 1px;
   background: var(--warning);
+}
+.usage-slot[data-current] .history-zero {
+  background: var(--ink-faint);
 }
 .history-note {
   max-width: 72ch;

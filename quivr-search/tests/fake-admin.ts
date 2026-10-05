@@ -270,7 +270,7 @@ export async function fakeAdmin(page: Page): Promise<AdminFake> {
   });
 
   // The documents stored per day over three weeks, two of them empty, and
-  // undated or withdrawn Records counted in the total only.
+  // Records without a current Version counted in the total only.
   const stored = [3, 5, 4, 0, 6, 8, 7, 5, 9, 0, 4, 6, 7, 8, 5, 6, 9, 11, 10, 8, 12];
   const history = (url: URL) => {
     const today = Date.parse(new Date().toISOString().slice(0, 10));
@@ -283,6 +283,7 @@ export async function fakeAdmin(page: Page): Promise<AdminFake> {
     return {
       time_zone: url.searchParams.get("tz"),
       total: stored.reduce((n, c) => n + c, 0) + 3,
+      undated: 3,
       first_day: days[0].day,
       today: days.at(-1)?.day,
       truncated: false,
