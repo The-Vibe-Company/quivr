@@ -3,6 +3,7 @@ import {
   memo,
   startTransition,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -346,25 +347,29 @@ export function FeedPage({
       : rows;
   }, [query, day, dayFeed.items, hits, searchedSources, feed.items, byId, sort, terms]);
 
+  // The list follows a new filter in a background render: the click that
+  // picks it shows at once in the bar, the rows right after (THE-1056).
+  const listed = useDeferredValue(filter);
+  const stale = listed !== filter;
   // A row passes every facet of the filter but `skip`, so each facet's
   // counts read what picking it would show.
   const pass = (row: Row, skip?: Facet) => {
     const id = row.item.record_id;
     if (skip !== "read") {
-      if (filter.read === "unread" && !reading.isUnread(row.item)) return false;
+      if (listed.read === "unread" && !reading.isUnread(row.item)) return false;
     }
-    if (skip !== "alerts" && filter.alerts.length) {
+    if (skip !== "alerts" && listed.alerts.length) {
       const caught = list?.matched[id] || [];
-      if (!filter.alerts.some((a) => caught.includes(a))) return false;
+      if (!listed.alerts.some((a) => caught.includes(a))) return false;
     }
     // The engine already searched within the chosen sources, so its hits pass
     // even when they are older than the feed and their source is unknown here.
     const engineNarrowed = !!query && searchedSources.length > 0;
     if (
       skip !== "sources" &&
-      filter.sources.length &&
+      listed.sources.length &&
       !engineNarrowed &&
-      !filter.sources.includes(row.item.namespace)
+      !listed.sources.includes(row.item.namespace)
     )
       return false;
     return true;
@@ -373,7 +378,7 @@ export function FeedPage({
   const shown = query
     ? base
     : base.filter(
-        (r) => !muted.has(r.item.namespace) || filter.sources.includes(r.item.namespace),
+        (r) => !muted.has(r.item.namespace) || listed.sources.includes(r.item.namespace),
       );
   const dated = day
     ? shown.filter((r) => when(r.item) && dayOf(when(r.item)) === day)
@@ -463,13 +468,13 @@ export function FeedPage({
     scroller.current?.scrollTo({ top: 0 });
   };
   const timeline = query ? [] : moments(rows, (r) => when(r.item) || undefined, now);
-  // Coming back to the Fil, or from a search to the feed, mounts the first
-  // rows at once and the others right after, without holding the frame that
-  // answers the click.
+  // Coming back to the Fil, or from a search to the feed, mounts the rows
+  // the window shows at once and the others right after, without holding
+  // the frame that answers the click.
   const listing = query ? "search" : "feed";
   const [complete, setComplete] = useState("");
   useEffect(() => startTransition(() => setComplete(listing)), [listing]);
-  let left = complete === listing ? Infinity : FIRST_ROWS;
+  let left = complete === listing ? Infinity : Math.ceil(window.innerHeight / ROW_MIN_HEIGHT);
   const take = (list: Row[]) => {
     const shown = list.slice(0, Math.max(0, left));
     left -= shown.length;
@@ -635,7 +640,7 @@ export function FeedPage({
       selected={doc?.record === item.record_id}
       fresh={feed.fresh.has(item.record_id)}
       caught={caughtBy(item.record_id)}
-      picked={filter.alerts}
+      picked={listed.alerts}
       onAlert={pickAlert}
       onOpen={openItem}
     />
@@ -1000,7 +1005,7 @@ export function FeedPage({
             </div>
           )}
           {rows.length > 0 && (!query || searching === "ready") && (
-            <ol className="feed-rows" aria-label="Derniers éléments">
+            <ol className="feed-rows" aria-label="Derniers éléments" data-pending={stale || undefined}>
               {query
                 ? take(rows).map(row)
                 : timeline.map((moment) => (
@@ -1237,7 +1242,6 @@ function FeedRowView({
                     title={`Voir les articles de l’alerte « ${a.name} »`}
                     onClick={() => onAlert(a.alert_id)}
                   >
-                    <AlertsIcon size={13} />
                     <span className="row-tag-name">{a.name}</span>
                   </button>
                 </li>
@@ -1258,8 +1262,10 @@ function FeedRowView({
   );
 }
 
-// Rows mounted in the first frame of the Fil; the rest follow in a transition.
-const FIRST_ROWS = 40;
+// Rows are at least this tall (66 px on a laptop, more on a phone): the first
+// frame of the Fil mounts the rows that fill the window, the rest follow in
+// a transition.
+const ROW_MIN_HEIGHT = 60;
 
 const DEEP_HINT =
   "Re-classe les résultats selon leur chance de répondre à la recherche. Plus lent, quelques secondes, et peut faire un appel payant.";

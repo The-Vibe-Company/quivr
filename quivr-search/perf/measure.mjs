@@ -109,17 +109,28 @@ async function load(browser, target) {
   return sample;
 }
 
-// One session over the page: an article, the tabs, a search typed and cleared.
+// One session over the page: an article, an alert's tag, the tabs, a search
+// typed and cleared.
 async function interactions(browser) {
   const { ctx, page, cdp } = await context(browser);
   await throttle(cdp);
   await page.goto(base + "/");
   await page.waitForSelector(".feed-rows .row");
   await page.waitForTimeout(1000);
+  // A row's middle may be one of its alert tags: an article opens from its title.
+  const tag = page.locator(".feed-rows .row-tags button").first();
   const steps = [
-    ["open an article", () => page.locator(".feed-rows .row").nth(2).click()],
+    ["open an article", () => page.locator(".feed-rows .row-link").nth(2).click()],
     ["next article (↓)", () => page.keyboard.press("ArrowDown")],
     ["close it (Esc)", () => page.keyboard.press("Escape")],
+    // A feed whose articles no alert caught has no tag to click.
+    ["filter on an alert tag", async () => {
+      if (await tag.count()) await tag.click();
+    }],
+    ["clear the filters", async () => {
+      const clear = page.locator(".filters-clear");
+      if (await clear.count()) await clear.click();
+    }],
     ["Alertes tab", () => page.locator('.rail-tab[data-section="alerts"]').click()],
     ["Sources tab", () => page.locator('.rail-tab[data-section="sources"]').click()],
     ["Admin tab", () => page.locator('.rail-tab[data-section="admin"]').click()],
