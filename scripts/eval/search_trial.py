@@ -121,24 +121,32 @@ class SearchIndex:
         return [self.doc_ids[i] for i in selected[:self.cfg['candidate_count']]]
 
 
-def rerank(query, passages, budget, key, price):
+def rerank(query, passages, budget, key, price, timing=None):
     """One bounded Jev attempt, no hidden retry/background transport."""
     sys.path.insert(0, str(ROOT / 'plugins/jev-rerank'))
     from jev_rerank import client as jev
     raw = json.dumps(jev.payload(query, passages), ensure_ascii=False, separators=(',', ':')).encode()
     if len(raw) > jev.MAX_BYTES:
         raise ValueError('reranker request exceeds its supported bound')
+    timing = {} if timing is None else timing
+    started = time.monotonic()
     call = budget.reserve(jev.MODEL, 'rerank', 'query', jev.MAX_TOKENS, price)
+    timing['blocked'] = time.monotonic() - started
     request = urllib.request.Request(jev.URL, data=raw, headers={'Content-Type': 'application/json',
                                      'Authorization': 'Bearer ' + key}, method='POST')
     try:
+        started = time.monotonic()
         with urllib.request.build_opener(embeddings.NoRedirect()).open(request, timeout=60) as response:
             answer = response.read(jev.MAX_RESPONSE_BYTES + 1)
+        timing['provider'] = time.monotonic() - started
+        timing['blocked'] += timing['provider']
         if len(answer) > jev.MAX_RESPONSE_BYTES:
             raise ValueError()
         body = json.loads(answer)
         tokens = body['usage']['input_tokens']
+        started = time.monotonic()
         budget.settle(call, tokens)
+        timing['blocked'] += time.monotonic() - started
         scores = {name: item['noul'] for name, item in body['answers'].items()}
         if (type(tokens) is not int or not 0 <= tokens <= jev.MAX_TOKENS or body['model'] != jev.MODEL
                 or set(scores) != set(passages) or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in scores.values())):
@@ -150,7 +158,7 @@ def rerank(query, passages, budget, key, price):
         raise RuntimeError('reranker attempt failed; uncertain charge retained') from None
 
 
-def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
+def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             fresh_latency=True, rerank_key='', flush=lambda: None, private_vectors=None):
     if dataset['split'] != 'dev':
         raise PermissionError('tier 1 accepts campaign-dev data only')
@@ -167,12 +175,18 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         cache.mkdir(parents=True, exist_ok=True)
     local = direct.E5()
     def embed(texts, mode, client=hosted):
+        started = time.monotonic()
         if cfg['model'] == direct.E5_MODEL:
-            return direct.normalize(local.embed(texts, mode)).tolist()
+            vectors = direct.normalize(local.embed(texts, mode)).tolist()
+            return vectors, time.monotonic() - started, 0
+        blocked, http = client.blocked_seconds, client.http_seconds
         vectors = client.embed(cfg['model'], texts, mode, dimensions=cfg['dimensions'])
-        return direct.normalize(vectors).tolist()
+        vectors = direct.normalize(vectors).tolist()
+        return (vectors, max(0, time.monotonic() - started - (client.blocked_seconds - blocked)),
+                client.http_seconds - http)
 
     identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
+    identity['timing'] = 'local-compute-v2'
     # The protected caller owns this map for one dataset invocation only.
     # No private text identities, vectors or cache keys cross a durable boundary.
     entries = (private_vectors.setdefault(tuple(identity.values()), {})
@@ -241,17 +255,16 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                 def fill(item):
                     pending, task_budget = item
                     texts = [piece for _, pieces, _, _ in pending for piece in pieces]
-                    started = time.monotonic()
                     if cfg['model'] == direct.E5_MODEL:
-                        vectors = embed(texts, mode)
+                        vectors, compute_seconds, _ = embed(texts, mode)
                     else:
                         # Usage and unknown reservations belong to this task,
                         # never a delta of a concurrently changing global sum.
                         client = copy.copy(hosted)
                         client.budget = task_budget
-                        vectors = embed(texts, mode, client)
+                        vectors, compute_seconds, _ = embed(texts, mode, client)
                     usage = task_budget.summary()
-                    return vectors, usage['confirmed_input_tokens'] + usage['reserved_input_tokens'], time.monotonic() - started
+                    return vectors, usage['confirmed_input_tokens'] + usage['reserved_input_tokens'], compute_seconds
                 started = time.monotonic()
                 try:
                     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
@@ -265,14 +278,14 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                 seconds = time.monotonic() - started
                 if mode == 'document':
                     document_embedding_seconds += seconds
-                # Attribute overlapping provider time as wall time, without
-                # charging parallel durations multiple times. Cached metadata
-                # retains this original attribution for later repricing.
-                total_seconds = sum(item[2] for item in filled)
-                for pending, (vectors, tokens, task_seconds) in zip(wave, filled):
+                # Price local work only. Bound summed task work by wave wall
+                # time so parallel execution is never charged multiple times.
+                total_compute = sum(item[2] for item in filled)
+                scale = min(1, seconds / total_compute) if total_compute else 0
+                for pending, (vectors, tokens, compute_seconds) in zip(wave, filled):
                     texts = [piece for _, pieces, _, _ in pending for piece in pieces]
                     bound = embeddings.estimate_tokens(texts)
-                    attributed_seconds = seconds * task_seconds / total_seconds if total_seconds else 0
+                    attributed_seconds = compute_seconds * scale
                     offset, publication = 0, {}
                     for text, pieces, cache_key, owner in pending:
                         fraction = embeddings.estimate_tokens(pieces) / bound
@@ -307,7 +320,8 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     # Include document preparation/cache processing, excluding quality queries.
     index_seconds += index_overhead_seconds + max(0, time.monotonic() - assembly_started)
     LOG.info('indexing complete documents=%d queries=%d', len(docs), len(query_ids))
-    ranking, latencies, query_prices = {}, [], []
+    ranking, latencies, provider_latencies, local_latencies = {}, [], [], []
+    provider_prices, compute_prices = [], []
     provider_rate = prices.get(cfg['model'], 0) / 1_000_000
 
     def search(qid, fresh, dense=None, batch_seconds=0):
@@ -316,23 +330,34 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         query = data['queries'][qid]
         before = budget.summary()['cost_upper_bound_usd']
         started = time.monotonic()
+        provider_seconds = 0
         if not semantic:
-            vector, query_tokens, embedding_seconds = None, 0, 0
+            vector, query_tokens, embedding_seconds, local_embedding = None, 0, 0, 0
         elif fresh:
-            vector = embed([query], 'query')[0]
+            vectors, local_embedding, provider_seconds = embed([query], 'query')
+            vector = vectors[0]
             query_tokens, embedding_seconds = 0, 0
         else:
             entry = entries[('query', query)]
             vector = entry['vectors'][0]
             query_tokens, embedding_seconds = entry['tokens'], entry['embedding_seconds']
+            local_embedding = 0
+        local_started = time.monotonic()
         selected = index.rank(query, vector, dense)
         if cfg['reranker'] == 'jev':
             if not rerank_key:
                 raise ValueError('reranker secret is absent')
-            selected = rerank(query, {d: docs[doc_ids.index(d)] for d in selected}, budget, rerank_key, prices['jev-1.13.0'])
+            timing = {}
+            selected = rerank(query, {d: docs[doc_ids.index(d)] for d in selected}, budget, rerank_key, prices['jev-1.13.0'], timing)
+            provider_seconds += timing['provider']
+        else:
+            timing = {'blocked': 0}
+        local_seconds = local_embedding + max(0, time.monotonic() - local_started - timing['blocked'])
         elapsed = time.monotonic() - started
         spend = budget.summary()['cost_upper_bound_usd'] - before
-        return selected[:10], elapsed, spend + query_tokens * provider_rate + (elapsed + embedding_seconds + batch_seconds) * compute_rate
+        return (selected[:10], elapsed, spend + query_tokens * provider_rate,
+                (local_seconds + embedding_seconds + batch_seconds) * compute_rate,
+                provider_seconds, local_seconds)
 
     # Bound temporary piece-score memory while batching quality-only work.
     # Fresh serving below always computes its own per-query dense scores.
@@ -347,12 +372,18 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                                           for q in batch_ids]) if semantic else [None] * len(batch_ids)
         batch_seconds = (time.monotonic() - batch_started) / len(batch_ids)
         for position, (qid, dense) in enumerate(zip(batch_ids, dense_batch), start + 1):
-            selected, elapsed, price = search(qid, False, dense, batch_seconds)
+            selected, _, provider_price, compute_price, _, _ = search(qid, False, dense, batch_seconds)
             ranking[qid] = selected
             if not fresh_latency:
-                query_prices.append(price)
+                provider_prices.append(provider_price)
+                compute_prices.append(compute_price)
             if position % 10 == 0 or position == len(query_ids):
                 LOG.info('search progress completed=%d total=%d', position, len(query_ids))
+    LOG.info('scoring started queries=%d', len(query_ids))
+    scores = scoring.score(data['qrels'], ranking)
+    LOG.info('scoring complete queries=%d', len(query_ids))
+    # Preparation barrier: paired callers prepare both indexes before warmup.
+    yield
     sample = None
     if fresh_latency:
         timed_ids = sorted(query_ids, key=lambda q: (hashlib.sha256(q.encode()).hexdigest(), q))[:LATENCY_SAMPLE_SIZE]
@@ -360,27 +391,71 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         # Warmup exercises the same fresh serving path on both configurations.
         # Its charges stay in the ledger, outside per-search metrics.
         search(query_ids[0], True)
+        yield
         for position, qid in enumerate(timed_ids, 1):
-            _, elapsed, price = search(qid, True)
+            _, elapsed, provider_price, compute_price, provider_seconds, local_seconds = search(qid, True)
             latencies.append(1000 * elapsed)
-            query_prices.append(price)
+            provider_latencies.append(1000 * provider_seconds)
+            local_latencies.append(1000 * local_seconds)
+            provider_prices.append(provider_price)
+            compute_prices.append(compute_price)
             if position % 10 == 0 or position == len(timed_ids):
                 LOG.info('latency progress completed=%d total=%d', position, len(timed_ids))
-    LOG.info('scoring started queries=%d', len(query_ids))
-    scores = scoring.score(data['qrels'], ranking)
-    LOG.info('scoring complete queries=%d', len(query_ids))
-    ordered = sorted(latencies)
-    percentile = lambda fraction: ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
+            yield
+    def percentile(values, fraction):
+        return sorted(values)[max(0, math.ceil(len(values) * fraction) - 1)] if values else None
+    provider_price = sum(provider_prices) / len(provider_prices)
+    compute_price = sum(compute_prices) / len(compute_prices)
     return {'dataset': dataset, 'metrics': {**scores['mean'],
-                'latency_p50_ms': percentile(.5) if fresh_latency else None,
-                'latency_p95_ms': percentile(.95) if fresh_latency else None,
-                'cost_per_search_usd': sum(query_prices) / len(query_prices),
+                'latency_p50_ms': percentile(latencies, .5),
+                'latency_p95_ms': percentile(latencies, .95),
+                'cost_per_search_usd': provider_price + compute_price,
                 'cost_per_1000_documents_usd': (index_tokens * provider_rate + index_seconds * compute_rate) * 1000 / len(docs)},
             'per_query': scores['per_query'], 'cost': {'provider': budget.summary(),
+                'search_provider_usd': provider_price, 'search_compute_usd': compute_price,
+                'search_timing_ms': {'samples': len(latencies),
+                    'provider_p50': percentile(provider_latencies, .5), 'provider_p95': percentile(provider_latencies, .95),
+                    'local_p50': percentile(local_latencies, .5), 'local_p95': percentile(local_latencies, .95)},
                 'index_tokens_attributed': index_tokens, 'index_embedding_seconds_attributed': index_seconds,
                 'cache_hits': cache_hits, 'latency_sample': sample, 'latency_method': 'serial fresh query embedding+retrieval+rerank; fixed hash sample up to 50; one fixed first-query warmup' if fresh_latency else 'cached exploration; p95 unavailable',
-                'price_basis': 'frozen rates, original embedding usage upper bound; includes attributable compute'},
+                'price_basis': 'frozen rates, provider usage upper bound plus local compute; excludes HTTP, retry and ledger waits; local-compute-v2'},
             'machine': socket.gethostname()}
+
+
+def measure(*args, **kwargs):
+    """Prepare and measure one standalone configuration."""
+    run = _measure(*args, **kwargs)
+    while True:
+        try:
+            next(run)
+        except StopIteration as done:
+            return done.value
+
+
+def measure_pair(configs, data, dataset, cache, budgets, clients, prices, compute_rate,
+                 fresh_latency=True, rerank_key='', private_vectors=None):
+    """Prepare both sides, then alternate warmups and identical query samples."""
+    runs = {side: _measure(cfg, data, dataset, cache, budgets[side], clients[side], prices,
+                          compute_rate, fresh_latency, rerank_key, private_vectors=private_vectors)
+            for side, cfg in configs.items()}
+    measured = {}
+    try:
+        for run in runs.values():
+            next(run)  # Complete preparation before either timed serving path.
+        while runs:
+            for side, run in list(runs.items()):
+                try:
+                    next(run)
+                except StopIteration as done:
+                    measured[side] = done.value
+                    del runs[side]
+    finally:
+        for run in runs.values():
+            run.close()
+    if fresh_latency:
+        for row in measured.values():
+            row['cost']['latency_method'] = 'paired A/B fresh query embedding+retrieval+rerank; fixed hash sample up to 50; one fixed first-query warmup per side'
+    return measured
 
 
 def record(measured, cfg, experiment, sha, scorer_digest):

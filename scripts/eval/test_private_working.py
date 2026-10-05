@@ -162,6 +162,42 @@ class Runner(unittest.TestCase):
                              or 'secret-doc-' in line or 'secret-query-' in line for line in logs.output))
         self.assertFalse(any((path / 'vectors').exists() for path in self.ephemeral_paths))
 
+    def test_fresh_samples_alternate_sides_and_export_timing_components(self):
+        # Own paired scheduling at the encrypted runner boundary. Spy on real
+        # ranking only to label the configuration served by each fake request.
+        original_rank = search_trial.SearchIndex.rank
+        served = []
+        clock = [0.]
+        def rank(index, query, *args, **kwargs):
+            served.append((index.cfg['dense_weight'], query))
+            clock[0] += .02
+            return original_rank(index, query, *args, **kwargs)
+        def provider(request, timeout):
+            # Serial provider latency drifts across the invocation. Adjacent
+            # A/B requests see nearly the same drift rather than separate eras.
+            clock[0] += .1 + .001 * len(self.calls)
+            return self.provider(request, timeout)
+        with mock.patch.object(search_trial.SearchIndex, 'rank', rank), \
+                mock.patch.object(search_trial.time, 'monotonic', side_effect=lambda: clock[0]):
+            outcome = self.run_trial(provider=provider)
+        self.assertEqual(outcome['status'], 'complete')
+        # The quality passes precede 21 alternating fresh calls per side,
+        # including each side's identical first-query warmup.
+        fresh = served[40:]
+        self.assertEqual([weight for weight, _ in fresh], [1, .5] * 21)
+        self.assertTrue(all(a[1] == b[1] for a, b in zip(fresh[::2], fresh[1::2])))
+        for row in (outcome['record'], outcome['baseline_record']):
+            cost = row['cost']
+            self.assertEqual(cost['search_timing_ms']['samples'], 20)
+            self.assertGreaterEqual(cost['search_timing_ms']['provider_p95'], 0)
+            self.assertGreaterEqual(cost['search_timing_ms']['local_p95'], 0)
+            self.assertAlmostEqual(row['metrics']['cost_per_search_usd'],
+                cost['search_provider_usd'] + cost['search_compute_usd'])
+            self.assertNotIn('secret-query-', json.dumps(cost))
+        self.assertAlmostEqual(outcome['record']['cost']['search_timing_ms']['local_p95'], 20)
+        self.assertLess(outcome['record']['metrics']['latency_p95_ms'] /
+                        outcome['baseline_record']['metrics']['latency_p95_ms'], 1.02)
+
     def test_private_reuse_requires_full_embedding_identity_and_ends_with_invocation(self):
         for field, value in ((None, None), ('revision', 'fixture-v2'), ('dimensions', 3),
                 ('model', 'Cohere-Embed-V5-Pro'), ('window_chars', 1900), ('overlap_chars', 100)):

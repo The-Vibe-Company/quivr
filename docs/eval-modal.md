@@ -119,6 +119,8 @@ Quality covers every query with relevance judgments using batched, cached embedd
 uses up to 50 serial queries, ordered by SHA-256 of the ID (ID breaks ties), after
 warming up the lexicographically first judged ID, which may also be timed.
 Both configurations use the same sample and resource class.
+Private comparisons prepare both indexes, then alternate baseline/candidate
+warmups and each sampled query (A/B/A/B). Public standalone runs remain serial.
 For public sets, `cost.latency_sample` records timed IDs, warmup ID and policy;
 `gates.latency.samples` echoes both and rejects missing or mismatched evidence.
 Private samples stay inside the runner; only
@@ -131,10 +133,17 @@ Price limits are $0.0005/search for `default`, $0.05/search for `deep`, and
 $10/1,000 original documents. Override `min_gain`, `latency_ratio`, `search_usd` or
 `index_usd` in `gates`. Serving includes query embedding, reranking and compute.
 Indexing covers all document windows, excluding quality-query preparation. Cached
-usage is repriced by input bounds and parallel wall time; campaign usage stays exact.
+usage is repriced by input bounds and local compute time; campaign usage stays exact.
+Serving compute excludes provider HTTP, retry and ledger waits. Actual invocation
+spend remains in the Modal ledger. `cost.search_provider_usd` and
+`cost.search_compute_usd` split the average search price; `cost.search_timing_ms`
+reports provider and local p50/p95 alongside the end-to-end latency metric.
+Timing-versioned cache entries prevent reuse of earlier wall-time attributions.
 
 Admission and planning share the UTF-8 byte-plus-eight-token bound at frozen prices.
-Confirmed responses release unused reservations; failed/unknown attempts stay reserved.
+Confirmed responses release unused reservations. This Azure hosted adapter settles
+429 rejections at zero; other failed/unknown attempts stay reserved. Successful
+responses without confirmed token usage are rejected and remain reserved.
 Usage above the bound is charged at its actual amount and stops the campaign.
 A daily cap hit stops that ledger for its UTC day, even after later settlements.
 Other campaigns have independent caps. Exact reported `agent_token_usage` contains
@@ -149,16 +158,17 @@ account charges need separate operator budgets. Bounds depend on correct rates
 and provider token limits; observed overages cannot undo already incurred bills.
 
 Tier 1 accepts public campaign-dev sets and private working descriptors. An upstream
-public `test` partition differs
-from campaign-heldout data, which tier 1 cannot consume. The store's maximum-ten confirmation counter
-is owned by the [trusted full-engine confirmation runner](eval-engine-confirmation.md).
+public `test` partition differs from campaign-heldout data, which tier 1 cannot consume.
+The [trusted full-engine confirmation runner](eval-engine-confirmation.md) owns the maximum-ten confirmation counter.
 
 ## Recover and validate
 
 The Volume `quivr-eval-embeddings-cache` holds immutable vectors and the outbox.
 Hosted document fills overlap at most four 128-entry cache chunks; each provider
-attempt reserves and settles independently. Local e5 and quality-query fills stay
-serial and batched. Claims and validation precede paid work; commits and fenced
+attempt reserves and settles independently. Hosted admission halves after 429s
+and recovers one slot after 16 times the current slot count in clean requests;
+requests already in flight drain at the old limit. Local e5 and quality-query
+fills stay serial and batched. Claims and validation precede paid work; commits and fenced
 publication stay serial. Failed waves drain attempts and retain uncertain charges.
 Chunks commit before publication; lost ownership rolls it back. Logs exclude texts.
 Reruns recover evidence and tracking writes. Keep the Volume and schema until
