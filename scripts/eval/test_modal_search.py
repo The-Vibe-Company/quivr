@@ -1,4 +1,4 @@
-"""Dispatch owner: CI/holdout refusal, shared compute cap and evidence recovery.
+"""Dispatch owner: holdout refusal, shared compute cap and evidence recovery.
 
 Only the Modal remote call is fake. Real SQL and Results persistence protect
 ordering regressions that the budget and provider owner tests cannot observe.

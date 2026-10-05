@@ -155,8 +155,8 @@ class Runner(unittest.TestCase):
                     # Private request efficiency has its own branch; the
                     # public scheduler already owns the concurrency barrier.
                     self.encrypt_fixture({f'secret-doc-{i:03}': {'text': f'private-passage-sentinel {i}'} for i in range(513)},
-                        {f'secret-query-{i}': f'private-question-sentinel {i}' for i in range(20)},
-                        {f'secret-query-{i}': {'secret-doc-000': 1} for i in range(20)})
+                        {f'secret-query-{i}': f'private-question-sentinel {i}' for i in range(61)},
+                        {f'secret-query-{i}': {'secret-doc-000': 1} for i in range(61)})
                     self.policy = modal_search.policy(self.value)
                 self.config = search_trial.configuration({**self.policy['baseline'],
                     'dense_weight': .7, 'candidate_count': 40, **({field: value} if field else {})})
@@ -170,6 +170,7 @@ class Runner(unittest.TestCase):
                         'meta': {'billed_units': {'input_tokens': count}}}).encode())
                 outcome = self.run_trial(provider=provider)
                 self.assertEqual(outcome['status'], 'complete')
+                self.assertEqual(outcome['record']['provenance']['private_pair']['statistics']['queries'], 20 if field else 61)
                 counts = collections.Counter(c['input_type'] for c in self.calls)
                 if field:
                     self.assertEqual(counts['search_document'], 2)
@@ -177,10 +178,11 @@ class Runner(unittest.TestCase):
                     documents = [c for c in self.calls if c['input_type'] == 'search_document']
                     self.assertEqual(sum(len(c['texts']) for c in documents), 513)
                     self.assertLessEqual(len(documents), 9)
-                self.assertEqual(counts['search_query'], 44 if field else 43)
-                # Baseline owns the documents, 20 quality queries and 21 fresh
-                # requests. Identical candidates pay only their fresh requests.
-                baseline_tokens, candidate_tokens = 43 if field else 554, 43 if field else 21
+                self.assertEqual(counts['search_query'], 44 if field else 103)
+                # Statistics count all quality queries, including those beyond
+                # the 50-query fresh sample. Identical candidates pay only
+                # their fresh requests; baseline owns the document/query fill.
+                baseline_tokens, candidate_tokens = 43 if field else 625, 43 if field else 51
                 self.assertEqual(sum(len(c['texts']) for c in self.calls), baseline_tokens + candidate_tokens)
                 for side, tokens in (('baseline_record', baseline_tokens), ('record', candidate_tokens)):
                     usage = outcome[side]['cost']['provider']
