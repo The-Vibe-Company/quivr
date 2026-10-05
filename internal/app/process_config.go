@@ -114,6 +114,20 @@ func (cfg Config) logSecrets() []string {
 			collect(v)
 		}
 	}
+	// Signing key rings live in the engine environment, independently of pins.
+	// Collect their secrets while retaining non-secret plugin and key IDs.
+	if raw := os.Getenv(plugins.EnvSigningKeys); raw != "" {
+		secrets = append(secrets, raw)
+		var rings map[string]plugins.SigningKeys
+		if json.Unmarshal([]byte(raw), &rings) == nil {
+			for _, ring := range rings {
+				for _, key := range ring.Keys {
+					secrets = append(secrets, key.Secret)
+				}
+			}
+		}
+	}
+
 	return secrets
 }
 

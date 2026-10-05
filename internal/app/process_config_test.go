@@ -50,6 +50,8 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	t.Setenv("QUIVR_LOG_LEVEL", "")
 	t.Setenv("QUIVR_SHUTDOWN_GRACE", "")
 	t.Setenv("EXAMPLE_WEBHOOK_SECRET", "sentinel-env-secret")
+	const signingSecret = "c2lnbmluZy1zZWNyZXQtc2VudGluZWwtMzItYnl0ZXM"
+	t.Setenv(plugins.EnvSigningKeys, `{"example-plugin":{"active":"primary","keys":[{"id":"primary","secret":"`+signingSecret+`"}]}}`)
 	cfg := Config{LogDirectory: t.TempDir(), CursorKey: "sentinel-cursor-secret", CredentialKey: "sentinel-credential-secret",
 		DatabaseURL: "postgres://user:sentinel-db-secret@localhost/db", Keys: map[string]corpus.Scope{"sentinel-bearer-secret": {}},
 		Destinations: map[string]monitoring.Destination{"receiver": {SecretEnv: "EXAMPLE_WEBHOOK_SECRET"}},
@@ -61,6 +63,7 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	}
 	slog.Info("process starting", "event", "quivr.start", cfg.processSummary(grace))
 	slog.Info("provider metadata", "detail", "sentinel-plugin-secret")
+	slog.Info("signer metadata", "detail", signingSecret)
 	LogFailure(errors.New("sentinel-db-secret sentinel-env-secret"))
 	LogFailure(&plugins.PinError{Path: "sentinel-storage-secret", Issues: []plugins.Issue{{Code: plugins.CodeInvalidConfiguration, Message: "sentinel-bearer-secret"}}})
 	LogFailure(&plugins.PinError{Path: "sentinel-storage-secret", Issues: []plugins.Issue{{Code: plugins.CodeNamespaceConflict, Message: "sentinel-bearer-secret"}}})
@@ -75,7 +78,7 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	if !bytes.Equal(fileLog, stdoutLog) || len(fileLog) == 0 {
 		t.Fatal("stdout and opt-in file must contain identical JSON events")
 	}
-	for _, secret := range []string{"sentinel-cursor-secret", "sentinel-credential-secret", "sentinel-db-secret", "sentinel-bearer-secret", "sentinel-env-secret", "sentinel-plugin-secret", "sentinel-access-secret", "sentinel-storage-secret"} {
+	for _, secret := range []string{signingSecret, "sentinel-cursor-secret", "sentinel-credential-secret", "sentinel-db-secret", "sentinel-bearer-secret", "sentinel-env-secret", "sentinel-plugin-secret", "sentinel-access-secret", "sentinel-storage-secret"} {
 		if bytes.Contains(fileLog, []byte(secret)) {
 			t.Fatalf("process log leaked %q", secret)
 		}
