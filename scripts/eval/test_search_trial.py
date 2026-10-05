@@ -16,6 +16,7 @@ import pathlib
 import tempfile
 import threading
 import unittest
+import urllib.error
 import uuid
 from unittest import mock
 
@@ -119,6 +120,57 @@ class Reranker(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN') and importlib.util.find_spec('ranx'), 'needs eval dependencies and disposable PostgreSQL')
 class Trial(unittest.TestCase):
+    def test_concurrent_retries_complete_with_uncertain_spend(self):
+        # Own retry acceptance at the measurement/ledger boundary. Each of
+        # four overlapping tasks fails its first HTTP attempt, then succeeds.
+        # Public cache publication and private ephemeral fills use this path.
+        for private in (False, True):
+            with self.subTest(private=private):
+                store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+                campaign = uuid.uuid4().hex
+                store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
+                lease = store.claim(campaign, 'trial')
+                budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+                cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
+                prices = {'Cohere-Embed-V5-Fast': .08}
+                client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+                data = {'corpus': {str(i): {'text': f'passage{i:03}'} for i in range(512)},
+                        'queries': {'q': 'question'}, 'qrels': {'q': {'0': 1}}}
+                barrier, lock = threading.Barrier(4), threading.Lock()
+                attempted = set()
+                def respond(request, timeout):
+                    body = json.loads(request.data)
+                    first = body['texts'][0]
+                    with lock:
+                        # Fail one attempt per task, plus the quality query.
+                        retry = first not in attempted and (len(attempted) < 4 or body['input_type'] == 'search_query')
+                        attempted.add(first)
+                    if retry:
+                        if body['input_type'] == 'search_document':
+                            barrier.wait(timeout=5)
+                        code = 429 if first in ('passage000', 'question') else 503
+                        raise urllib.error.HTTPError(request.full_url, code, 'private error',
+                                                     {'Retry-After': '0'}, io.BytesIO(b'private body'))
+                    count = len(body['texts'])
+                    return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                        'meta': {'billed_units': {'input_tokens': count}}}).encode())
+                with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond), \
+                        mock.patch.object(direct_bakeoff.time, 'sleep'):
+                    commit = mock.Mock()
+                    measured = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
+                                                   budget, client, prices, 0, flush=commit)
+                    self.assertEqual(measured['metrics']['ndcg@10'], 1)
+                    self.assertEqual(measured['cost']['provider']['confirmed_input_tokens'], 515)
+                    self.assertEqual(measured['cost']['provider']['reserved_input_tokens'], 4624)
+                    self.assertAlmostEqual(store.summary(campaign)['provider']['unknown_usd'], .00036992)
+                    store.publish(campaign, 'trial', lease['owner'], {'metrics': measured['metrics'], 'cost': measured['cost']})
+                    self.assertEqual(store.claim(campaign, 'trial')['status'], 'done')
+                    if private:
+                        commit.assert_not_called()
+                        self.assertEqual(list(pathlib.Path(temp).iterdir()), [])
+                    else:
+                        self.assertGreater(commit.call_count, 0)
+
     def test_cache_chunks_commit_before_publication_and_recover_expired_fills(self):
         # Own bounded cache persistence/recovery, beyond the scoring sweep's
         # tiny fixture. Only hosted HTTP is fake; leases and files are real.
@@ -333,8 +385,10 @@ class Trial(unittest.TestCase):
                 search_trial.measure(cfg, data, {'split': 'dev', 'private': False}, temp, budget, client,
                                      prices, .001, flush=commit)
             commit.assert_not_called()
-            self.assertEqual(budget.summary()['admitted_calls'], 8)
-            self.assertEqual(budget.summary()['confirmed_input_tokens'], 448)
+            # The task missing usage stops before its second provider batch;
+            # the other three tasks drain both of their successful batches.
+            self.assertEqual(budget.summary()['admitted_calls'], 7)
+            self.assertEqual(budget.summary()['confirmed_input_tokens'], 384)
             self.assertGreater(budget.summary()['reserved_input_tokens'], 0)
             with psycopg.connect(store.dsn) as db:
                 self.assertEqual(db.execute('SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND payload IS NOT NULL', (campaign,)).fetchone()[0], 0)

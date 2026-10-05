@@ -166,12 +166,10 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     if not dataset['private']:
         cache.mkdir(parents=True, exist_ok=True)
     local = direct.E5()
-    def embed(texts, mode, task_budget=budget, client=hosted):
+    def embed(texts, mode, client=hosted):
         if cfg['model'] == direct.E5_MODEL:
             return direct.normalize(local.embed(texts, mode)).tolist()
         vectors = client.embed(cfg['model'], texts, mode, dimensions=cfg['dimensions'])
-        if task_budget.summary()['reserved_input_tokens']:
-            raise RuntimeError('provider omitted confirmed usage; measurement rejected')
         return direct.normalize(vectors).tolist()
 
     identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
@@ -251,7 +249,7 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                         # never a delta of a concurrently changing global sum.
                         client = copy.copy(hosted)
                         client.budget = task_budget
-                        vectors = embed(texts, mode, task_budget, client)
+                        vectors = embed(texts, mode, client)
                     return vectors, task_budget.summary()['confirmed_input_tokens'], time.monotonic() - started
                 started = time.monotonic()
                 try:
