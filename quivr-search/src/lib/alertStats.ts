@@ -1,8 +1,8 @@
 // What an alert's sheet shows about it: how often it catches something, the
 // trend, where and when. The core dates neither Matches nor Subscriptions, so
 // times come from the facade's index of every article (when Quivr accepted
-// each one it caught) and from the date the facade noted when it created the
-// alert.
+// each one it caught: exact for the articles the feed read, to the hour for
+// older ones) and from the date the facade noted when it created the alert.
 import type { FeedItem } from "./feed";
 import { daily } from "./moments";
 

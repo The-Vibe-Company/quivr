@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { alertStats, busiestPeriod, streakStart } from "../src/lib/alertStats";
+import { alertStats, arrivedAt, busiestPeriod, streakStart } from "../src/lib/alertStats";
 import type { FeedItem } from "../src/lib/feed";
 
 // The owner of an alert's sheet numbers (THE-1017): which window they cover,
@@ -25,7 +25,7 @@ const at = (ago: number, namespace = "Dépêches"): FeedItem => ({
  * alert started (or since the oldest), as the facade counts them.
  */
 const run = (createdAt: string | undefined, caught: FeedItem[], feed: FeedItem[], total = caught.length) => {
-  const times = feed.map((i) => Date.parse(i.received_at!));
+  const times = feed.map((i) => Date.parse(arrivedAt(i))).filter((t) => !Number.isNaN(t));
   const oldest = times.length ? Math.min(...times) : null;
   const since = createdAt ? Date.parse(createdAt) : oldest;
   const arrived = since === null ? 0 : times.filter((t) => t >= since).length;

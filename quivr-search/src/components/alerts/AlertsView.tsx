@@ -283,6 +283,12 @@ export function AlertsView({
     [matched, dated, feedItems],
   );
   const byRecord = useMemo(() => new Map(feedItems.map((i) => [i.record_id, i])), [feedItems]);
+  // While the facade still indexes, what the alerts caught is dated as it goes.
+  useEffect(() => {
+    if (!dated?.building) return;
+    const timer = setTimeout(() => void reload().catch(() => {}), 3000);
+    return () => clearTimeout(timer);
+  }, [dated, reload]);
   const logoOf = useMemo(() => logoIds(connectors), [connectors]);
   const stats = useMemo(
     () =>
@@ -532,7 +538,7 @@ export function AlertsView({
                 ) : (
                   <ul className="caught-list" aria-label="Articles trouvés">
                     {shownDetail.matches.map((article) => {
-                      const item = datedById.get(article.record_id);
+                      const item = datedById.get(article.record_id) || byRecord.get(article.record_id);
                       return (
                         <CaughtItem
                           key={article.match_id}

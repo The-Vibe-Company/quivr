@@ -196,6 +196,12 @@ export function useAlertList(onUnauthorized: () => void) {
       if (e instanceof APIError && e.status === 401) onUnauthorized();
     }
   }, [onUnauthorized]);
+  // While the facade still indexes, what the alerts caught is dated as it goes.
+  useEffect(() => {
+    if (!list?.dated?.building) return;
+    const timer = setTimeout(() => void reload(), 3000);
+    return () => clearTimeout(timer);
+  }, [list, reload]);
   useEffect(() => {
     const controller = new AbortController();
     void reload(controller.signal);

@@ -51,6 +51,28 @@ async function pool(items, limit, fn) {
 
 const utcDay = (t) => t - (t % DAY);
 
+// At most `limit` calls at a time, whichever path makes them.
+function limiter(limit) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= limit || !queue.length) return;
+    active += 1;
+    const { task, resolve, reject } = queue.shift();
+    task()
+      .then(resolve, reject)
+      .finally(() => {
+        active -= 1;
+        next();
+      });
+  };
+  return (task) =>
+    new Promise((resolve, reject) => {
+      queue.push({ task, resolve, reject });
+      next();
+    });
+}
+
 // What a browser may ask for. Times are RFC 3339 instants, as for day counts.
 const invalid = () =>
   Object.assign(new Error("Cette période n’est pas valide."), { status: 422 });
@@ -122,17 +144,23 @@ export function topicsQuery(params) {
   };
 }
 
-export function createCatalog({ upstream, corpus, caught, ready = async () => {} }) {
+export function createCatalog({ upstream: read, corpus, caught, ready = async () => {} }) {
+  // The build and the title reader share the same few calls to the core.
+  const slot = limiter(CONCURRENCY);
+  const upstream = (path) => slot(() => read(path));
   // record id → { record_id, version_id, namespace, at, exact, seen }
   const entries = new Map();
   const titles = new Map();
   const wanted = new Map();
   const unreadable = new Map();
+  // Records the stream withdrew, by when: a listing read before must not bring them back.
+  const dropped = new Map();
   let generation = 0;
   let build = null;
   let builtAt = 0;
   let failedAt = 0;
-  let stale = false;
+  // When the feed last had to resynchronize: a build started before it is stale.
+  let staleAt = 0;
   // The index is whole for every article accepted at or after this time.
   let completeAfter = Infinity;
   let pumping = false;
@@ -165,10 +193,13 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
         limit: "100",
       };
       if (cursor) extra.page_cursor = cursor;
+      const asked = Date.now();
       const response = await upstream(`/v0/records?${query(extra)}`);
       if (response.status !== 200) throw new Error(`list: HTTP ${response.status}`);
       for (const record of response.data.items) {
         if (record.source?.corpus_id !== corpus) continue;
+        // The stream told of a newer state while this page was on its way.
+        if ((dropped.get(record.record_id) ?? 0) >= asked) continue;
         if (record.withdrawn || !record.current_version_id) {
           if (entries.delete(record.record_id)) generation += 1;
           continue;
@@ -179,7 +210,7 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
           continue;
         }
         round.listed += 1;
-        if (known?.version_id === record.current_version_id) {
+        if (known?.version_id === record.current_version_id || known?.noted >= asked) {
           known.seen = at;
           continue;
         }
@@ -226,7 +257,8 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
       top = days.at(-1);
       if (!older || round.listed >= MAX_RECORDS) break;
     }
-    capped = round.skipped > 0 || (round.listed >= MAX_RECORDS && older > 0);
+    // Older Records were left out: past the cap, or older than a year.
+    capped = round.skipped > 0 || older > 0;
     // What the listing no longer holds, and the feed did not note since,
     // was withdrawn or left the corpus.
     for (const [id, entry] of entries)
@@ -236,14 +268,14 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
       }
     completeAfter = -Infinity;
     builtAt = Date.now();
-    stale = false;
+    if (staleAt < round.at) staleAt = 0;
   }
 
   /** Starts the build when none ran, or rebuilds an old or stale index. */
   function ensure() {
     const now = Date.now();
     if (build) return;
-    if (builtAt && !stale && now - builtAt < REBUILD_MS) return;
+    if (builtAt && !staleAt && now - builtAt < REBUILD_MS) return;
     if (failedAt && now - failedAt < RETRY_MS) return;
     build = run()
       .catch((error) => {
@@ -342,8 +374,8 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
     const keep = filterOf({ ...q, read: "all" }, matched);
     let period = [];
     for (const entry of entries.values()) if (keep(entry)) period.push(entry);
-    if (period.length > TOPIC_TITLES)
-      period = period.sort((a, b) => b.at - a.at).slice(0, TOPIC_TITLES);
+    const truncated = period.length > TOPIC_TITLES;
+    if (truncated) period = period.sort((a, b) => b.at - a.at).slice(0, TOPIC_TITLES);
     const known = [];
     let missing = 0;
     for (const entry of period) {
@@ -361,6 +393,7 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
       items: topics(known, TOPICS),
       ...status(),
       building: status().building || missing > 0,
+      partial: capped || truncated,
       as_of: iso(now),
     };
     topicsCache.delete(key);
@@ -390,11 +423,14 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
     },
     /** A Record withdrawn, or gone from the corpus. */
     drop(id) {
+      dropped.delete(id);
+      dropped.set(id, Date.now());
+      if (dropped.size > 10000) dropped.delete(dropped.keys().next().value);
       if (entries.delete(id)) generation += 1;
     },
     /** The feed resynchronized: what the stream missed shows at the next rebuild. */
     invalidate() {
-      stale = true;
+      staleAt = Date.now();
     },
     /** POST /demo/feed/stats: the Fil's counts for a filter. */
     async feed(q) {

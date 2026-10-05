@@ -46,9 +46,11 @@ export function useNumbers<T extends { building: boolean }>(
         })
         .catch((error) => {
           if (controller.signal.aborted) return;
-          if (error instanceof APIError && error.status === 401) unauthorized.current();
-          // Otherwise the last numbers stay until the next refresh.
-          else setFailures((n) => n + 1);
+          if (error instanceof APIError && error.status === 401) return unauthorized.current();
+          // The last numbers of this filter stay until the next refresh;
+          // another filter's are dropped rather than shown for this one.
+          setData((last) => (last && last.key !== key ? null : last));
+          setFailures((n) => n + 1);
         })
         .finally(() => {
           if (controller.signal.aborted) return;
@@ -78,8 +80,15 @@ export function useNumbers<T extends { building: boolean }>(
     return () => clearTimeout(timer);
   }, [key, data, tick, failures]);
 
+  const firstArrivals = useRef(arrivals);
   useEffect(() => {
-    if (arrivals === undefined || !fetched.current) return;
+    if (arrivals === undefined || arrivals === firstArrivals.current) return;
+    firstArrivals.current = undefined;
+    // Before the first answer, the request on its way is asked again once in.
+    if (!fetched.current) {
+      if (busy.current) again.current = true;
+      return;
+    }
     const wait = Math.max(0, fetched.current + every - Date.now());
     const timer = setTimeout(() => {
       // An answer on its way may predate the arrival: ask again once it is in.

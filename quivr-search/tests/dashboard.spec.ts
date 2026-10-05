@@ -468,7 +468,10 @@ test("le formulaire guidé compose tous ces mots, une phrase, l’un de ces mots
   // included: no growth is claimed, the week says how far it goes, and the
   // share counts every article since then (2 of 12), not only the feed's.
   await expect(sheet.locator(".kpi dd")).toHaveText(["2", "2", "0,1", "17 %"]);
-  await expect(sheet.locator(".kpi dt").nth(1)).toHaveText("depuis 5 jours");
+  // Five days and some hours, rounded as the sheet does, so a late run holds.
+  const oldest = Math.min(...[...engine.ws.articles, ...engine.ws.archive].map((a) => Date.parse(a.received_at!)));
+  const reach = Math.round(Math.round((Date.now() - oldest) / 3600000) / 24);
+  await expect(sheet.locator(".kpi dt").nth(1)).toHaveText(`depuis ${reach} jours`);
   await expect(sheet.locator(".insight")).toHaveCount(0);
   await expect(sheet.locator(".rule-created")).toHaveText(/^créée le \d{1,2} \S+$/);
 

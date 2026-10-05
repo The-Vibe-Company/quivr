@@ -121,7 +121,7 @@ export function WeekSpark({
         <span
           key={d.day}
           data-now={i === week.length - 1 || undefined}
-          data-zero={!d.count || undefined}
+          data-zero={(counted && !d.count) || undefined}
           data-tip={counted ? `${dayLabel(d.day, now)} · ${plural(d.count, "article")}` : undefined}
           style={d.count ? { height: `${Math.max(8, (d.count / most) * 100)}%` } : undefined}
         />
@@ -141,6 +141,7 @@ export function SourceList({
   sources,
   kindOf,
   stats,
+  whole,
   highlight,
   now,
   extra,
@@ -155,6 +156,8 @@ export function SourceList({
   kindOf: (kind: string) => ConnectorKind | undefined;
   /** Null until the facade counted them. */
   stats: Map<string, SourceStats> | null;
+  /** The facade indexed every article: a source it did not count has none. */
+  whole: boolean;
   highlight: string | null;
   now: number;
   extra?: ReactNode;
@@ -172,7 +175,7 @@ export function SourceList({
           key={c.source_namespace}
           connector={c}
           kind={kindOf(c.kind)}
-          stats={stats && (stats.get(c.source_namespace) || NO_ARTICLES)}
+          stats={stats && (stats.get(c.source_namespace) || (whole ? NO_ARTICLES : null))}
           highlight={highlight === c.connector_id}
           now={now}
           onOpen={onOpen}

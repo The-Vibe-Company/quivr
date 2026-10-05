@@ -484,6 +484,8 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
         alert_id: `alert_${ws.alerts.length + 1}`,
         name: body.name,
         enabled: true,
+        // The facade notes when it creates an alert.
+        created_at: new Date().toISOString(),
         kind: body.expression.kind,
         expression: body.expression,
         caught: {},

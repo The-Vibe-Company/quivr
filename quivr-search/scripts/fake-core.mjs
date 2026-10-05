@@ -85,8 +85,7 @@ export function fakeCore({ records: given, alerts = [], latency = 0 } = {}) {
   };
   const matchesOf = (words) =>
     ordered()
-      .filter((r) => words.some((w) => r.title.toLowerCase().includes(w)))
-      .slice(0, 1000)
+      .filter((r) => words.some((w) => r.title.toLowerCase().includes(w.toLowerCase())))
       .reverse()
       .map((r, n) => ({
         match_id: `m_${r.record_id}_${n}`,

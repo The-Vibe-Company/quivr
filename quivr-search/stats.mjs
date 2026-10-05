@@ -55,8 +55,9 @@ export function feedStats(rows, query, matched) {
     total: 0,
     all: 0,
     unread: 0,
-    sources: {},
-    alerts: {},
+    // Keyed by names people choose: maps without a prototype.
+    sources: Object.create(null),
+    alerts: Object.create(null),
     any_alert: 0,
     buckets: bounds.slice(1).map(() => 0),
   };
@@ -103,7 +104,7 @@ function bucketOf(bounds, at) {
  * and when its oldest one arrived (`first`, in milliseconds).
  */
 export function sourceStats(rows, bounds, matched) {
-  const out = {};
+  const out = Object.create(null);
   for (const row of rows) {
     const s = (out[row.namespace] ||= {
       all: 0,

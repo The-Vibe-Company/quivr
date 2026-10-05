@@ -510,21 +510,27 @@ export function alertRoutes({
     const pending = list(corpus);
     const mine = ++order;
     asked = { at: Date.now(), pending };
-    pending.then(
-      (result) => {
-        // A slower, older list never replaces a newer one.
-        if (result.status === 200 && mine > knownOrder) {
-          known = result.data.matched;
-          knownOrder = mine;
-        }
-      },
-      () => {},
-    );
+    pending
+      .then(
+        (result) => {
+          // A slower, older list never replaces a newer one.
+          if (result.status === 200 && mine > knownOrder) {
+            known = result.data.matched;
+            knownOrder = mine;
+          }
+        },
+        () => {},
+      )
+      .finally(() => {
+        if (asked?.pending === pending) asked.done = true;
+      });
     return pending;
   }
   async function matched(corpus) {
     if (!destination) return {};
-    if (!asked || Date.now() - asked.at >= 60000) void listed(corpus).catch(() => {});
+    // A list still being read is waited for, never started again.
+    if (!asked || (asked.done && Date.now() - asked.at >= 60000))
+      void listed(corpus).catch(() => {});
     if (known) return known;
     const result = await asked.pending.catch(() => null);
     return result?.status === 200 ? result.data.matched : {};

@@ -26,9 +26,9 @@ test("every article counts, and each facet's counts leave that facet out", () =>
   const all = feedStats(rows, { buckets: days }, matched);
   assert.equal(all.total, 1000);
   assert.deepEqual(all.buckets, new Array(10).fill(100));
-  assert.deepEqual(all.sources, { "source-0": 250, "source-1": 250, "source-2": 250, "source-3": 250 });
+  assert.deepEqual({ ...all.sources }, { "source-0": 250, "source-1": 250, "source-2": 250, "source-3": 250 });
   // 200 caught by a, 143 by b, 29 by both.
-  assert.deepEqual([all.alerts, all.any_alert], [{ a: 200, b: 143 }, 314]);
+  assert.deepEqual([{ ...all.alerts }, all.any_alert], [{ a: 200, b: 143 }, 314]);
 
   // Source 1 over the last three days: odd articles, so only day 1 holds
   // any. The bars keep their own days, for the source on each.

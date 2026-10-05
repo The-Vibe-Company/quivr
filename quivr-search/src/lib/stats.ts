@@ -4,6 +4,8 @@
 import { request } from "./search";
 import { dayOf, localInstant } from "./moments";
 
+const HOUR = 3600000;
+
 interface Progress {
   building: boolean;
 }
@@ -82,23 +84,22 @@ export function weekBounds(now: number) {
 
 /**
  * A local day hour by hour, as bounds newest first, up to the current hour
- * today, and the hour of the day each bucket starts at (a day may skip or
- * repeat one when the clocks change).
+ * today, and the hour of the day each bucket starts at. Bounds step by real
+ * hours from midnight, so a day that skips or repeats an hour when the clocks
+ * change still gets one bucket per hour.
  */
 export function hourBounds(day: string, now: number) {
   const [y, m, d] = day.split("-").map(Number);
+  const midnight = new Date(y, m - 1, d).getTime();
+  const next = new Date(y, m - 1, d + 1).getTime();
   const today = dayOf(now) === day;
-  const last = today ? new Date(now).getHours() : 23;
   const starts: number[] = [];
-  for (let h = 0; h <= last; h++) {
-    const t = new Date(y, m - 1, d, h).getTime();
-    if (t !== starts.at(-1)) starts.push(t);
-  }
-  const end = new Date(y, m - 1, today ? d : d + 1, today ? last + 1 : 0).getTime();
+  for (let t = midnight; t < next && (!today || t <= now); t += HOUR) starts.push(t);
+  const end = Math.min(next, starts[starts.length - 1] + HOUR);
   starts.reverse();
   return {
     bounds: [end, ...starts].map(localInstant),
     hours: starts.map((t) => new Date(t).getHours()),
-    length: last + 1,
+    length: today ? new Date(now).getHours() + 1 : 24,
   };
 }

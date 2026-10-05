@@ -322,7 +322,9 @@ export function ConnectorsView({
     onUnauthorized,
     feedItems,
   );
-  const stats = counted
+  // Only numbers for this week; while the facade still indexes, a source it
+  // has not reached yet stays uncounted rather than zero.
+  const stats = counted?.current
     ? new Map<string, SourceStats>(
         Object.entries(counted.value.sources).map(([namespace, s]) => [
           namespace,
@@ -330,6 +332,7 @@ export function ConnectorsView({
         ]),
       )
     : null;
+  const whole = !!counted?.current && !counted.value.building;
   const toCheck = sources.filter((c) => needsCheck(displayState(c))).length;
 
   return (
@@ -396,6 +399,7 @@ export function ConnectorsView({
               sources={sources}
               kindOf={kindOf}
               stats={stats}
+              whole={whole}
               highlight={highlight}
               now={now}
               onOpen={setSelected}
@@ -503,7 +507,7 @@ export function ConnectorsView({
           connector={current}
           kind={kindOf(current.kind)}
           catalog={catalog}
-          stats={stats && (stats.get(current.source_namespace) || NO_ARTICLES)}
+          stats={stats && (stats.get(current.source_namespace) || (whole ? NO_ARTICLES : null))}
           now={now}
           onClose={() => setSelected(null)}
           onChanged={(c) => {
