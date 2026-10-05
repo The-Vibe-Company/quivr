@@ -116,7 +116,7 @@ class CampaignStore(control_store.Store):
         return owner
 
     @contextlib.contextmanager
-    def mutation(self, name, owner=None, *, cleanup=False, recovering=False):
+    def mutation(self, name, owner=None, *, cleanup=False, recovering=False, lease=None):
         with self.transaction() as db:
             policy, stopped = self.lock(db, name)
             stopped = self.terminal(db, name, policy, stopped)
@@ -135,7 +135,13 @@ class CampaignStore(control_store.Store):
                 # renewal must not race a watchdog that already began cleanup.
                 state['owner_released'] = True
             yield db, state, row[3]
-            db.execute('UPDATE eval_control.campaign_runs SET state=%s::jsonb WHERE campaign=%s', (json.dumps(state, allow_nan=False), name))
+            predicate, parameters = '', (json.dumps(state, allow_nan=False), name)
+            if lease:
+                predicate = ' AND EXISTS (SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL)'
+                parameters += (name, *lease)
+            updated = db.execute('UPDATE eval_control.campaign_runs SET state=%s::jsonb WHERE campaign=%s' + predicate + ' RETURNING campaign', parameters).fetchone()
+            if lease and updated is None:
+                raise control_store.LeaseLost('measurement slot expired before compute intent')
 
     @control_store.retry_contention
     def renew_owner(self, name, owner, ttl=120):
@@ -151,9 +157,9 @@ class CampaignStore(control_store.Store):
             db.execute("UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp(),state=jsonb_set(state,'{owner_released}','true') WHERE campaign=%s AND owner=%s", (name, owner))
 
     @control_store.retry_contention
-    def intent(self, name, owner):
+    def intent(self, name, owner, *, lease=None):
         identity = uuid.uuid4().hex
-        with self.mutation(name, owner) as (db, state, generation):
+        with self.mutation(name, owner, lease=lease) as (db, state, generation):
             policy, _ = self.lock(db, name)
             # Startup deadline is diagnostic only: AppCreate acknowledgement
             # can be lost independently of a container's startup timeout.
@@ -163,6 +169,16 @@ class CampaignStore(control_store.Store):
                         'creation_deadline': deadline.isoformat()}
             state['resources'][identity] = resource
         return resource
+
+    @control_store.retry_contention
+    def abandon_intent(self, name, owner, identity):
+        """Close an intent whose creator knows no AppCreate was attempted."""
+        with self.edit(name) as (db, state):
+            current, generation = db.execute('SELECT owner,generation FROM eval_control.campaign_runs WHERE campaign=%s', (name,)).fetchone()
+            resource = state['resources'][identity]
+            if current != owner or resource['generation'] != generation or resource['app_id']:
+                raise control_store.LeaseLost('cannot abandon a replaced or launched intent')
+            resource['status'] = 'closed'
 
     @control_store.retry_contention
     def bind(self, name, owner, identity, app_id):
