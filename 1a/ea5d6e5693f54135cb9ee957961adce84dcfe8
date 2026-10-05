@@ -1,0 +1,43 @@
+search-ui/src/styles.css
+  s_ba1e855ab2c2b9::t_429f391feff0c4 128-130,132-142,146-147,151-153,157-160,163-167,170,737,951,953-959,962-973,976-977,979-997,1006,1011-1020,1024-1025,1027-1028,1033,1037,1041,1043-1045,1052-1071,1079-1082,1113
+  s_ba1e855ab2c2b9::t_fbb2f98490f5e8 10,27-28,32,46,63-64,119-121,123,131,143-145,161-162,186,278-279,283,293,297-299,449,460-470,498,525,739-741,748,764-766,770-773,781-782,789,791,1029
+search-ui/package.json
+  s_ba1e855ab2c2b9::t_aad54571125683 13
+search-ui/src/components/DocumentPanel.tsx
+  s_ba1e855ab2c2b9::t_a12bcbb45cdf16 1-105
+search-ui/src/components/Logo.tsx
+  s_ba1e855ab2c2b9::t_2c51ca657b6134 1-12,15
+  s_ba1e855ab2c2b9::t_05a76e9ec299e6 13-14,16-18
+search-ui/public/favicon.svg
+  s_ba1e855ab2c2b9::t_2c51ca657b6134 3-6
+  s_ba1e855ab2c2b9::t_cf4705e9cf5518 1-2,7
+search-ui/src/components/Icons.tsx
+  s_ba1e855ab2c2b9::t_2c51ca657b6134 1,4-10,13-14
+search-ui/src/components/ModeSwitch.tsx
+  s_ba1e855ab2c2b9::t_2c51ca657b6134 2,22,24
+search-ui/src/components/AnswerCard.tsx
+  s_ba1e855ab2c2b9::t_2c51ca657b6134 3,81,103
+search-ui/src/components/SearchBar.tsx
+  s_ba1e855ab2c2b9::t_2c51ca657b6134 3,88,122,143
+search-ui/src/App.tsx
+  s_ba1e855ab2c2b9::t_a12bcbb45cdf16 4,11-12,74-75,164-165,209,211-215,232,242,251,288,390-393
+  s_ba1e855ab2c2b9::t_028c8bfe414e0e 3
+search-ui/README.md
+  s_ba1e855ab2c2b9::t_b7d1bcdaf98a51 9-11,36-38,56-57,62,151-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "1aea5d6e5693f54135cb9ee957961adce84dcfe8",
+  "prompts": {},
+  "sessions": {
+    "s_ba1e855ab2c2b9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76d813ff-fa2f-4ded-8b90-d1ec189ba3df",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}

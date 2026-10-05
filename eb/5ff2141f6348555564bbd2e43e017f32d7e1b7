@@ -1,0 +1,22 @@
+scripts/eval/modal_search.py
+  s_54b80c92daa9cb::t_10154288fffed4 33-34,36-38,47-48,51
+scripts/eval/test_modal_search.py
+  s_54b80c92daa9cb::t_10154288fffed4 10-11,51-65
+  s_54b80c92daa9cb::t_ab4999d839055b 66-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eb5ff2141f6348555564bbd2e43e017f32d7e1b7",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}

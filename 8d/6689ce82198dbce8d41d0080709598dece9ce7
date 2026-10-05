@@ -1,0 +1,19 @@
+quivr-search/package.json
+  s_ba1e855ab2c2b9::t_476bdd2462708c 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "8d6689ce82198dbce8d41d0080709598dece9ce7",
+  "prompts": {},
+  "sessions": {
+    "s_ba1e855ab2c2b9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76d813ff-fa2f-4ded-8b90-d1ec189ba3df",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}

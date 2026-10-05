@@ -1,0 +1,39 @@
+search-ui/src/lib/agent.ts
+  s_ba1e855ab2c2b9::t_80e85aa8ff91bf 2,32-37,59-62
+search-ui/src/components/Logo.tsx
+  s_ba1e855ab2c2b9::t_3005fbfd2bfe11 1,11
+search-ui/src/components/SearchBar.tsx
+  s_ba1e855ab2c2b9::t_3005fbfd2bfe11 3,91,125,147
+search-ui/src/lib/corpus.ts
+  s_ba1e855ab2c2b9::t_80e85aa8ff91bf 357
+search-ui/src/components/AnswerCard.tsx
+  s_ba1e855ab2c2b9::t_3005fbfd2bfe11 3,81,103
+search-ui/src/components/ModeSwitch.tsx
+  s_ba1e855ab2c2b9::t_3005fbfd2bfe11 2,22,24
+search-ui/package.json
+  s_ba1e855ab2c2b9::t_3ab7be1566cba6 13
+search-ui/public/favicon.svg
+  s_ba1e855ab2c2b9::t_3005fbfd2bfe11 1-4
+search-ui/src/components/Icons.tsx
+  s_ba1e855ab2c2b9::t_3005fbfd2bfe11 1,4,7-9,14
+search-ui/src/components/DocumentPanel.tsx
+  s_ba1e855ab2c2b9::t_3005fbfd2bfe11 2,44
+search-ui/README.md
+  s_ba1e855ab2c2b9::t_4891d763c4a9f2 37,62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "49e63626ba52e4af2fbc3b8aa1b10cfe0175c2d9",
+  "prompts": {},
+  "sessions": {
+    "s_ba1e855ab2c2b9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "76d813ff-fa2f-4ded-8b90-d1ec189ba3df",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}
