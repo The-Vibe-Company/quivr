@@ -51,7 +51,8 @@
             "maximum": 3600
           },
           "body": {
-            "type": "string"
+            "type": "string",
+            "const": "{}"
           },
           "sent_body": {
             "type": "string"
@@ -126,6 +127,291 @@
               "properties": {
                 "expected_status": {
                   "const": 401
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "enum": [
+                    "wrong-audience"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "audience": {
+                  "not": {
+                    "const": "plugin"
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "audience": {
+                  "const": "plugin"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "enum": [
+                    "expired"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "issued_seconds_ago": {
+                  "minimum": 61
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "issued_seconds_ago": {
+                  "maximum": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "enum": [
+                    "future-iat"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "issued_seconds_ago": {
+                  "maximum": -1
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "issued_seconds_ago": {
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "enum": [
+                    "tampered"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "sent_body": {
+                  "const": "{ }"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "sent_body": {
+                  "const": "{}"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "enum": [
+                    "wrong-plugin-id",
+                    "wrong-route",
+                    "wrong-method"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {},
+              "required": [
+                "claims"
+              ]
+            },
+            "else": {
+              "properties": {
+                "claims": false
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "const": "wrong-plugin-id"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "claims": {
+                  "const": {
+                    "plugin_id": "other-plugin"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "const": "wrong-route"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "claims": {
+                  "const": {
+                    "target": "/v0/discovery?source=other"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "const": "wrong-method"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "claims": {
+                  "const": {
+                    "method": "POST"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "enum": [
+                    "overlong-lifetime"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "lifetime_seconds": {
+                  "minimum": 61
+                }
+              },
+              "required": [
+                "lifetime_seconds"
+              ]
+            },
+            "else": {
+              "properties": {
+                "lifetime_seconds": {
+                  "maximum": 60
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "not": {
+                    "enum": [
+                      "future-iat",
+                      "overlong-lifetime"
+                    ]
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "lifetime_seconds": {
+                  "const": 60
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "enum": [
+                    "alg-none"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "algorithm": {
+                  "const": "none"
+                }
+              },
+              "required": [
+                "algorithm"
+              ]
+            },
+            "else": {
+              "properties": {
+                "algorithm": {
+                  "const": "HS256"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "name": {
+                  "enum": [
+                    "utf16"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "json_encoding": {
+                  "const": "utf-16"
+                }
+              },
+              "required": [
+                "json_encoding"
+              ]
+            },
+            "else": {
+              "properties": {
+                "json_encoding": {
+                  "const": "utf-8"
                 }
               }
             }
@@ -277,7 +563,8 @@
           "minContains": 1,
           "maxContains": 1
         }
-      ]
+      ],
+      "description": "Exactly 13 items; each named case appears exactly once. Every probe changes only its named authentication condition."
     }
   }
 }

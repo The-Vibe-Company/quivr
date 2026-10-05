@@ -606,11 +606,11 @@ Schema: `authentication-fixture.schema.json`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `cases` | array of object | yes | 13 to 13 items. |
+| `cases` | array of object | yes | Exactly 13 items; each named case appears exactly once. Every probe changes only its named authentication condition. 13 to 13 items. |
 | `cases[].name` | `valid`, `expired`, `wrong-audience`, `tampered`, `unsigned`, `forged`, `wrong-plugin-id`, `wrong-route`, `wrong-method`, `future-iat`, `overlong-lifetime`, `alg-none`, `utf16` | yes | — |
 | `cases[].audience` | string | yes | — |
 | `cases[].issued_seconds_ago` | integer | yes | -3600 to 3600. |
-| `cases[].body` | string | yes | — |
+| `cases[].body` | `"{}"` | yes | — |
 | `cases[].sent_body` | string | yes | — |
 | `cases[].expected_status` | `200`, `401` | yes | — |
 | `cases[].claims` | object | no | Signed claim replacements; other-plugin resolves to an id distinct from the tested plugin. |

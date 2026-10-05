@@ -25,7 +25,6 @@ for line in sys.stdin:
     request = json.loads(line)
     text = request[0]['text'] if request else ''
     if text == 'crash': sys.exit(3)
-    if text == 'hang': sys.stdin.readline()
     if text == 'block':
         host, port = sys.argv[1].rsplit(':', 1)
         with socket.create_connection((host, int(port))) as gate:
@@ -50,6 +49,37 @@ func fake(t *testing.T, source string) *Server {
 
 func encodeText(s *Server, ctx context.Context, text string) ([]Encoding, error) {
 	return s.Encode(ctx, []TokenInput{{Text: text}})
+}
+
+func listenForTokenizer(t *testing.T, s *Server) *net.TCPListener {
+	t.Helper()
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	if err := listener.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	s.Config.Model = listener.Addr().String()
+	return listener
+}
+
+func acceptTokenizerGate(t *testing.T, listener *net.TCPListener) net.Conn {
+	t.Helper()
+	gate, err := listener.Accept()
+	if err != nil {
+		t.Fatal("tokenizer did not receive the request:", err)
+	}
+	t.Cleanup(func() { _ = gate.Close() })
+	if err := gate.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	ready := make([]byte, 1)
+	if _, err := io.ReadFull(gate, ready); err != nil || ready[0] != 'R' {
+		t.Fatalf("tokenizer did not block at the gate: %q, %v", ready, err)
+	}
+	return gate
 }
 
 func TestServerRoundTripsBatchesOnOneProcess(t *testing.T) {
@@ -84,15 +114,24 @@ func TestServerRespawnsAfterFailures(t *testing.T) {
 	for _, text := range []string{"crash", "hang", "huge", "short"} {
 		t.Run(text, func(t *testing.T) {
 			s := fake(t, fakeServer)
+			var listener *net.TCPListener
+			if text == "hang" {
+				listener = listenForTokenizer(t, s)
+			}
 			if _, err := encodeText(s, context.Background(), "warm"); err != nil {
 				t.Fatal(err)
 			}
-			if text == "hang" {
-				// An already-expired timeout kills the blocked process without waiting.
-				s.timeout = -1
-			}
 			process := s.proc.cmd.Process
 			t.Cleanup(func() { _ = process.Kill() })
+			if text == "hang" {
+				// Hold the child at a fixture-controlled read before arming the timer.
+				// Encode must time out even when the peer cannot consume its request.
+				if _, err := fmt.Fprintln(s.proc.stdin, `[{"text":"block"}]`); err != nil {
+					t.Fatal(err)
+				}
+				acceptTokenizerGate(t, listener)
+				s.timeout = -1
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_, err := encodeText(s, ctx, text)
@@ -114,18 +153,12 @@ func TestServerRespawnsAfterFailures(t *testing.T) {
 
 func TestServerCallerCancellationDoesNotKillProcess(t *testing.T) {
 	s := fake(t, fakeServer)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	if err := listener.(*net.TCPListener).SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	s.Config.Model = listener.Addr().String()
+	listener := listenForTokenizer(t, s)
 	if _, err := encodeText(s, context.Background(), "warm"); err != nil {
 		t.Fatal(err)
 	}
+	process := s.proc.cmd.Process
+	t.Cleanup(func() { _ = process.Kill() })
 	s.timeout = 30 * time.Second // watchdog; the socket gate controls completion
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -134,18 +167,7 @@ func TestServerCallerCancellationDoesNotKillProcess(t *testing.T) {
 		_, err := encodeText(s, ctx, "block")
 		done <- err
 	}()
-	gate, err := listener.Accept()
-	if err != nil {
-		t.Fatal("tokenizer did not receive the request:", err)
-	}
-	t.Cleanup(func() { _ = gate.Close() })
-	if err := gate.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	ready := make([]byte, 1)
-	if _, err := io.ReadFull(gate, ready); err != nil || ready[0] != 'R' {
-		t.Fatalf("tokenizer did not block at the gate: %q, %v", ready, err)
-	}
+	gate := acceptTokenizerGate(t, listener)
 	cancel()
 	select {
 	case err := <-done:
