@@ -7,6 +7,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import time
 
 import control_store
@@ -276,6 +277,17 @@ def remote_trial(request):
                 **({'error': {'kind': kind, 'message': message}} if private else {})}
 
 
+def shipped_trial():
+    """remote_trial as Modal must ship it: by value, also when a campaign imports this module.
+
+    A by-reference payload names this module, which the container cannot import
+    before remote_trial adds the evaluation directory to sys.path.
+    """
+    from modal._vendor import cloudpickle
+    cloudpickle.register_pickle_by_value(sys.modules[__name__])
+    return remote_trial
+
+
 def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quivr-search-measurement',
            on_app=lambda identity: None, check=lambda: None):
     import modal
@@ -301,7 +313,7 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
         retries=0, max_containers=4, scaledown_window=2, single_use_containers=True,
         include_source=False, serialized=True, secrets=secrets,
         volumes={'/eval-cache': modal.Volume.from_name('quivr-eval-embeddings-cache', create_if_missing=True),
-                 **{mount: modal.Volume.from_name(name) for mount, name in private_volumes.items()}})(remote_trial)
+                 **{mount: modal.Volume.from_name(name) for mount, name in private_volumes.items()}})(shipped_trial())
     store = control_store.Store(os.environ['EVAL_CONTROL_DATABASE_URL'])
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     scorer_digest = 'sha256:' + search_trial.digest({name: (ROOT / 'scripts/eval' / name).read_text()

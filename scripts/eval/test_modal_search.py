@@ -50,13 +50,12 @@ class Refusal(unittest.TestCase):
 
 class RemoteSerialization(unittest.TestCase):
     def test_remote_trial_loads_before_evaluation_modules_are_importable(self):
-        # Modal pickles the launched script's functions and globals by value; the
-        # container adds the evaluation directory to sys.path only inside the call.
+        # The container adds the evaluation directory to sys.path only inside the
+        # call. Campaigns import this module, so launch must force a by-value payload.
         from modal._serialization import serialize
         from modal._vendor import cloudpickle
-        cloudpickle.register_pickle_by_value(modal_search)
         try:
-            payload = serialize(modal_search.remote_trial)
+            payload = serialize(modal_search.shipped_trial())
         finally:
             cloudpickle.unregister_pickle_by_value(modal_search)
         with tempfile.TemporaryDirectory() as temp:
