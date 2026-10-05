@@ -1,0 +1,56 @@
+# Explicitly pinned by make load only. No provider client, URL or secret.
+id: load.fake
+version: 0.1.0
+description: Deterministic local stand-ins for embeddings, reranking and alert judges.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.10.0 <0.11.0"
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    required: [embedding_ms, reranking_ms, judge_ms]
+    properties:
+      embedding_ms: {type: integer, minimum: 0, maximum: 500}
+      reranking_ms: {type: integer, minimum: 0, maximum: 500}
+      judge_ms: {type: integer, minimum: 0, maximum: 500}
+contributions:
+  ingestion:
+    spaces:
+      load.fake.words:
+        version: "1"
+        model: deterministic-hashed-words-64
+        dimensions: 64
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+    timeout_ms: 10000
+    query_timeout_ms: 1000
+  retrieval:
+    profiles:
+      default:
+        description: Return real index candidates in score order.
+        max_latency_ms: 5000
+        max_cost_cents: 0
+      deep:
+        description: Re-score real hybrid candidates with deterministic word overlap.
+        max_latency_ms: 5000
+        max_cost_cents: 0
+    limits:
+      max_rounds: 2
+      max_requests: 1
+      max_candidates: 40
+  subscription:
+    expression_schema:
+      type: object
+      additionalProperties: false
+      required: [term, alert]
+      properties:
+        term: {type: string, minLength: 1}
+        alert: {type: integer, minimum: 0}
+    configuration_schema: {type: object, additionalProperties: false}
+    max_batch_size: 100
+    timeout_ms: 5000
+    limits: {max_response_bytes: 1048576}
+run:
+  command: [go, run, .]

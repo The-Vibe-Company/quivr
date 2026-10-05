@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -263,7 +262,7 @@ func (p *Plugin) Handler() (http.Handler, error) {
 		mux.HandleFunc("POST /v0/contributions/retrieval/search", p.serveSearch)
 	}
 	if p.m.Connector == nil {
-		return mux, nil
+		return p.protocolHandler(mux), nil
 	}
 	mux.HandleFunc("POST /v0/contributions/connector/fetch", p.serveFetch)
 	mux.HandleFunc("POST /v0/contributions/connector/check_credential", p.serveCheckCredential)
@@ -274,7 +273,14 @@ func (p *Plugin) Handler() (http.Handler, error) {
 		mux.HandleFunc("POST /v0/contributions/connector/describe_attachment", p.serveDescribeAttachment)
 		mux.HandleFunc("POST /v0/contributions/connector/upload_attachment", p.serveUploadAttachment)
 	}
-	return mux, nil
+	return p.protocolHandler(mux), nil
+}
+
+func (p *Plugin) protocolHandler(mux http.Handler) http.Handler {
+	if resolveAPIFeatures(p.m.pluginAPI).speaks("signed_calls") {
+		return p.authenticate(mux)
+	}
+	return mux
 }
 
 // contributions lists the declared Contributions for discovery.
@@ -363,7 +369,7 @@ type common struct {
 // decode reads, schema-checks and semantically checks a request. It answers
 // the refusal itself and returns nil when the request is invalid.
 func (p *Plugin) decode(w http.ResponseWriter, r *http.Request, schema string, into any) (*kind, Credential) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
+	body, err := requestBody(r)
 	if err != nil || len(body) > maxRequestBytes {
 		refuse(w, 400, "invalid_request", "the request body is unreadable or larger than 16 MiB", Credential{})
 		return nil, Credential{}

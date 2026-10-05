@@ -33,6 +33,7 @@ FILES = {
     "error.schema.json": "ErrorEnvelope",
     "plugin-manifest.schema.json": "PluginManifest",
     "plugin-fixture.schema.json": "InvocationFixture",
+    "authentication-fixture.schema.json": "AuthenticationFixture",
     "subscription-request.schema.json": "SubscriptionRequest",
     "subscription-response.schema.json": "SubscriptionResponse",
     "subscription-fixture.schema.json": "SubscriptionFixture",
