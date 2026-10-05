@@ -1,6 +1,6 @@
 ---
 title: "Search profiles"
-description: "What default and deep mean, how a deployment picks the plugin behind each name, and how one profile re-ranks another's results within a budget."
+description: "What default and deep mean, how to choose the plugin behind each, and how one profile re-ranks another within a budget."
 keywords: ["search profile", "default", "deep", "retrieval.profiles", "re-rank"]
 ---
 
@@ -43,7 +43,7 @@ The map is `retrieval.profiles` in the startup configuration. This one makes `de
 - **Several retrieval plugins**: the map is required and must contain `default`. Each target must be a profile of an installed retrieval plugin.
 - **Full names always work**, including for profiles that no short name maps to.
 
-Quivr refuses to start when a required map is missing or a target does not resolve, and the error names the problem. Activating a new version of a plugin keeps the map, and Quivr refuses an activation that would leave the map unresolved. [Search profiles in the configuration reference](/reference/configuration#search-profiles) lists the rules, and [Re-rank with Jev](/guides/rerank-with-jev) pins both plugins.
+Quivr refuses to start when a required map is missing or a target does not resolve, and the error names the problem. Activating a new version of a plugin keeps the map, and Quivr refuses an activation that would leave the map unresolved. [Search profiles in the configuration reference](/reference/configuration#search-profiles) lists the rules, and [Re-rank deep searches with Jev](/run-quivr/rerank-with-jev) pins both plugins.
 
 ## Core retrieval settings
 
@@ -154,7 +154,7 @@ Without a key, there is no paid call and no reported cost. With a key, a failed 
 ## Next
 
 <CardGroup cols={2}>
-<Card title="Re-rank with Jev" icon="ranking-star" href="/guides/rerank-with-jev">
+<Card title="Re-rank deep searches with Jev" icon="ranking-star" href="/run-quivr/rerank-with-jev">
 Run the Jev plugin beside core.retrieve and map deep to it.
 </Card>
 <Card title="Write a retrieval plugin" icon="code" href="/plugins/write-a-retrieval-plugin#start-from-another-plugins-ranking">
