@@ -74,6 +74,8 @@
     --ink-soft: #a5a7ae;
     --ink-faint: #8c8e96;
     --hover: #212225;
+    /* A feed row under the pointer: the panel is too close to the feed here. */
+    --row-hover: var(--hover);
     --pressed: #28292d;
     --selected: #15291f;
     --fresh: #173a2d;
@@ -112,6 +114,7 @@
   --ink-soft: #a5a7ae;
   --ink-faint: #8c8e96;
   --hover: #212225;
+  --row-hover: var(--hover);
   --pressed: #28292d;
   --selected: #15291f;
   --fresh: #173a2d;
@@ -1133,7 +1136,7 @@ button.moment-pill:hover {
   transition: background 120ms;
 }
 .row:hover {
-  --row-bg: var(--panel);
+  --row-bg: var(--row-hover, var(--panel));
 }
 /* A new arrival lights up, then fades back. */
 .row[data-fresh] {
