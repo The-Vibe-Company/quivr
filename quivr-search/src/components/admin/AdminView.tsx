@@ -1,8 +1,8 @@
 // The Admin tab (THE-796): one line on whether all is well, the pipeline
 // (where documents spend their time, step by step, and the plugins running
 // each), then what goes through it: the live flow of the latest documents
-// (one document's timeline opens beside it), with the plugins and the usage
-// a click away, and the day at a glance beside. The page holds on one
+// (one document's timeline opens beside it), with the plugins, the usage and
+// the documents stored per day a click away, and the day at a glance beside. The page holds on one
 // screen; the flow scrolls inside. Read-only.
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -34,13 +34,16 @@ import type { Connector } from "../../lib/connectors";
 import { Bottlenecks } from "./Bottlenecks";
 import { Plugins } from "./Plugins";
 import { Usage } from "./Usage";
+import { History } from "./History";
 
-// The tabs of the panel under the pipeline. Plugins and usage are sections
+// The tabs of the panel under the pipeline. Plugins, usage and the documents
+// stored are sections
 // of their own (admin/, built on AdminSection), shown without their frame.
 const TABS = [
   { key: "flow", label: "Flux", title: "Ce qui passe dans le tuyau" },
   { key: "plugins", label: "Plugins", title: "Plugins" },
   { key: "usage", label: "Utilisation", title: "Utilisation" },
+  { key: "history", label: "En base", title: "Documents en base" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
@@ -199,6 +202,7 @@ export function AdminView({
             >
               {tab === "plugins" && <Plugins onUnauthorized={onUnauthorized} stats={admin.stats} bare />}
               {tab === "usage" && <Usage onUnauthorized={onUnauthorized} stats={admin.stats} bare />}
+              {tab === "history" && <History onUnauthorized={onUnauthorized} bare />}
               {tab === "flow" && (
                 <div className="admin-main" data-open={selected ? "" : undefined}>
                   <section className="admin-flow" aria-labelledby="flow-title">

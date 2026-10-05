@@ -6,7 +6,8 @@
 
 /* The usage tab and the day at a glance beside the Admin flow. */
 .usage-grid,
-.glance {
+.glance,
+.history {
   --series-1: #5b3fd6;
   --series-2: #1baf7a;
   --series-3: #eb6834;
@@ -23,7 +24,7 @@
 /* Dark theme: follows the system unless a theme was chosen in the rail
    (data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) :is(.usage-grid, .glance) {
+  :root:not([data-theme="light"]) :is(.usage-grid, .glance, .history) {
     --series-1: #9085e9;
     --series-2: #199e70;
     --series-3: #d95926;
@@ -32,7 +33,7 @@
     --series-other: #4a4b5a;
   }
 }
-:root[data-theme="dark"] :is(.usage-grid, .glance) {
+:root[data-theme="dark"] :is(.usage-grid, .glance, .history) {
   --series-1: #9085e9;
   --series-2: #199e70;
   --series-3: #d95926;
@@ -559,5 +560,89 @@
   .usage-trend span {
     background: CanvasText;
     forced-color-adjust: none;
+  }
+}
+
+/* The documents stored per day (THE-1034): three figures, one column per
+   day, an empty day as a flat mark on the baseline, then the table by day. */
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.history-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 24px;
+}
+.usage-figure[data-tone="warn"] .usage-figure-value {
+  color: var(--warning);
+}
+.history-chart .usage-columns {
+  height: 140px;
+}
+.history-zero {
+  width: 100%;
+  max-width: 22px;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--warning);
+}
+.usage-slot[data-current] .history-zero {
+  background: var(--ink-faint);
+}
+.history-note {
+  max-width: 72ch;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+.history-days summary {
+  width: fit-content;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.history-table {
+  width: 100%;
+  max-width: 360px;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.history-table th,
+.history-table td {
+  padding: 6px 0;
+  font-weight: 400;
+  text-align: right;
+  white-space: nowrap;
+}
+.history-table th:first-child {
+  text-align: left;
+}
+.history-table thead th {
+  padding-top: 0;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.history-table tbody tr + tr > * {
+  border-top: 1px solid var(--line-soft);
+}
+.history-days tr[data-empty] > * {
+  color: var(--warning);
+}
+@media (forced-colors: active) {
+  .history-zero,
+  .usage-slot[data-current] .history-zero {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
+}
+@media (max-width: 700px) {
+  .history-figures {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

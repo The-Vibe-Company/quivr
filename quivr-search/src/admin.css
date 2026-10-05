@@ -925,7 +925,7 @@ li[data-fresh] > .flow-row {
 .admin-tabpanel .admin-section[data-bare] > .panel-head {
   position: absolute;
   top: 9px;
-  right: 270px;
+  right: 300px;
   padding: 0;
   border: 0;
 }

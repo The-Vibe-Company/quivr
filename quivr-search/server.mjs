@@ -442,7 +442,8 @@ const server = http.createServer(async (req, res) => {
         res.end(image.bytes);
         return;
       }
-      // The Admin tab, read-only: a snapshot, a live stream and one timeline.
+      // The Admin tab, read-only: a snapshot, a live stream, one timeline, the
+      // engine's rollups and the documents stored per day.
       if (path === "/demo/admin" && req.method === "GET") {
         send(res, 200, await adminFor(id).snapshot());
         return;
@@ -460,6 +461,8 @@ const server = http.createServer(async (req, res) => {
         response = await adminFor(id).timeline(timeline[1]);
       else if (stats && req.method === "GET")
         response = await adminFor(id).stats(stats[1], url);
+      else if (path === "/demo/admin/history" && req.method === "GET")
+        response = { status: 200, data: await adminFor(id).history(url) };
       else if (path === "/demo/admin/plugins" && req.method === "GET")
         response = await plugins();
       else if (path.startsWith("/demo/alerts"))
