@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary
+.PHONY: dev env check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -16,7 +16,7 @@ verify-demo:
 demo-perf:
 	GO=$(GO) python3 scripts/demo.py perf
 # Everything that needs no Docker stack; run it before pushing (about two minutes on a laptop).
-check: docs denylist migrations contracts image-context plugin-boundary test
+check: docs denylist migrations contracts image-context plugin-boundary conformance-validate test
 # make check, then every part of the stack verification one after another, then the demo.
 # make verify part=<name>[,<name>] runs only those parts, without make check; parts are listed
 # in scripts/local.py (parts) and CI runs them in parallel.
@@ -29,6 +29,7 @@ test:
 	$(GO) vet ./...
 	$(GO) test ./...
 	cd tests/fakes && $(GO) vet ./... && $(GO) test ./...
+	$(CONFORMANCE_PYTHON) -m unittest conformance.test_runner
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 	python3 -m unittest discover -s scripts/eval -p 'test_*.py'
 	GO=$(GO) bash scripts/plugin_sdk.sh
@@ -90,3 +91,11 @@ migration:
 # Move a migration after main's latest: make migration-restamp file=<name>.sql
 migration-restamp:
 	python3 scripts/migrations.py restamp $(file)
+
+# Local requirement measurements, never run by CI. Example: make conformance suite=example version=v2.0.0-alpha.1
+CONFORMANCE_PYTHON ?= python3
+conformance:
+	GO=$(GO) $(CONFORMANCE_PYTHON) conformance/runner.py --suite "$(or $(suite),example)" $(if $(version),--version "$(version)") $(args)
+# make check needs conformance/requirements.txt (the same pins installed by the CI contract lane).
+conformance-validate:
+	$(CONFORMANCE_PYTHON) conformance/runner.py --validate

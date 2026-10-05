@@ -1,0 +1,9 @@
+id: EXNF-API-002
+check: error_shape
+parameters:
+  path: /v0/corpora
+threshold:
+  status: 401
+  fields:
+    code: string
+    message: string

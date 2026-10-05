@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quivr.dev/conformance/case.schema.json",
+  "description": "One declarative requirement. Unknown checks require a maintainer ticket and are skipped.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "check": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "parameters": {
+      "type": "object"
+    },
+    "threshold": {
+      "type": "object"
+    },
+    "maintainer_ticket": {
+      "type": "string",
+      "pattern": "^https://[^\\s]+$",
+      "maxLength": 2048
+    }
+  },
+  "required": [
+    "id",
+    "check",
+    "parameters",
+    "threshold"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "check": {
+            "const": "http_probe"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^/(?!/)[^\\s\\\\#]*$",
+                "maxLength": 1024
+              },
+              "target": {
+                "enum": [
+                  "api",
+                  "probe"
+                ]
+              },
+              "authenticated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          },
+          "threshold": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              },
+              "max_latency_ms": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 60000
+              }
+            },
+            "required": [
+              "status",
+              "max_latency_ms"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "check": {
+            "const": "openapi_valid"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "threshold": {
+            "type": "object",
+            "properties": {
+              "valid": {
+                "const": true
+              }
+            },
+            "required": [
+              "valid"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "check": {
+            "const": "metric_exposed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z_:][a-zA-Z0-9_:]*$",
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "threshold": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "counter",
+                  "gauge",
+                  "histogram",
+                  "summary",
+                  "untyped"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "check": {
+            "const": "log_format"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "stream": {
+                "enum": [
+                  "stdout",
+                  "stderr"
+                ]
+              }
+            },
+            "required": [
+              "stream"
+            ],
+            "additionalProperties": false
+          },
+          "threshold": {
+            "type": "object",
+            "properties": {
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "minItems": 1,
+                "maxItems": 32,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "fields"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "check": {
+            "const": "image_property"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "threshold": {
+            "type": "object",
+            "properties": {
+              "non_root": {
+                "const": true
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "minItems": 1,
+                "maxItems": 32,
+                "uniqueItems": true
+              },
+              "sbom": {
+                "const": true
+              }
+            },
+            "required": [],
+            "additionalProperties": false,
+            "minProperties": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "check": {
+            "const": "error_shape"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^/(?!/)[^\\s\\\\#]*$",
+                "maxLength": 1024
+              },
+              "target": {
+                "enum": [
+                  "api",
+                  "probe"
+                ]
+              },
+              "authenticated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          },
+          "threshold": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "integer",
+                "minimum": 400,
+                "maximum": 599
+              },
+              "fields": {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 32,
+                "additionalProperties": {
+                  "enum": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "object",
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "status",
+              "fields"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "check": {
+            "const": "config_refuses_invalid"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "fixture": {
+                "enum": [
+                  "unknown_field",
+                  "invalid_json",
+                  "missing_required"
+                ]
+              }
+            },
+            "required": [
+              "fixture"
+            ],
+            "additionalProperties": false
+          },
+          "threshold": {
+            "type": "object",
+            "properties": {
+              "exit_code": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 125
+              },
+              "diagnostic": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "exit_code",
+              "diagnostic"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "check": {
+            "not": {
+              "enum": [
+                "http_probe",
+                "openapi_valid",
+                "metric_exposed",
+                "log_format",
+                "image_property",
+                "error_shape",
+                "config_refuses_invalid"
+              ]
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "maintainer_ticket"
+        ]
+      }
+    }
+  ]
+}
