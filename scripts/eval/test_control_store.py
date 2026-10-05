@@ -292,8 +292,10 @@ class Control(unittest.TestCase):
         with psycopg.connect(self.dsn) as db:
             self.assertEqual(db.execute('SELECT expires_at,payload FROM eval_control.leases WHERE campaign=%s AND key=%s', (self.name, keys[0])).fetchone(), (before, None))
         replacement = self.store.claim_many(self.name, [keys[1]])[keys[1]]
+        self.store.release_many(self.name, {keys[1]: owners[keys[1]]})
         owners[keys[1]] = replacement['owner']
         self.store.publish_many(self.name, {k: (o, {'canonical': True}) for k, o in owners.items()})
+        self.store.release_many(self.name, owners)
         with self.assertRaises(control_store.LeaseLost):
             self.store.renew_many(self.name, owners)
         self.assertTrue(all(c == {'status': 'done', 'payload': {'canonical': True}} for c in self.store.claim_many(self.name, keys).values()))
@@ -309,6 +311,26 @@ class Control(unittest.TestCase):
         self.assertEqual(sorted(reads), list(range(1, 11)))
         with self.assertRaises(control_store.Unavailable):
             control_store.Store('postgresql://localhost:1/absent?connect_timeout=1').campaign('x', self.policy)
+
+    def test_validation_error_survives_unavailable_claim_release(self):
+        dsn = self.store.dsn
+        try:
+            with self.assertLogs('control_store', level='WARNING') as messages:
+                with self.assertRaisesRegex(ValueError, '^cache validation failed$'):
+                    with self.store.claim_batch(self.name, ['release-outage'], ttl=86400) as claims:
+                        self.store.dsn = 'postgresql://localhost:1/absent?connect_timeout=1'
+                        raise ValueError('cache validation failed')
+            self.assertEqual(messages.output, ['WARNING:control_store:unpublished claim release deferred; store unavailable or contended'])
+        finally:
+            self.store.dsn = dsn
+        import psycopg
+        with psycopg.connect(dsn) as db:
+            remaining = db.execute("SELECT extract(epoch FROM expires_at-clock_timestamp()) FROM eval_control.leases WHERE campaign=%s AND key='release-outage'", (self.name,)).fetchone()[0]
+        self.assertLessEqual(remaining, 600)
+        # A failed compensation retains its fence, then can be released later.
+        self.assertEqual(self.store.claim(self.name, 'release-outage')['status'], 'leased')
+        self.store.release_many(self.name, {'release-outage': claims['release-outage']['owner']})
+        self.assertEqual(self.store.claim(self.name, 'release-outage')['status'], 'claimed')
 
 
 if __name__ == '__main__':

@@ -22,6 +22,7 @@ are not stored.
 """
 import ast
 import contextlib
+import control_store
 import copy
 import hashlib
 import json
@@ -453,11 +454,7 @@ def confirm(store, name, trial, owner, *, adapter=None, repository=ROOT, compute
                                engine_scorer_digest=getattr(adapter, 'engine_scorer_digest', None),
                                heldout_family=getattr(adapter, 'heldout_family', None), engine_checkout=engine_checkout,
                                confirmation_policy_digest=getattr(adapter, 'confirmation_policy_digest', None))
-        with store.mutation(name, owner) as (_, current, __):
-            protocol = {k: request[k] for k in ('confirmation_policy_digest',
-                'engine_runner_git_sha', 'engine_runner_scorer_digest', 'heldout_family_digest')}
-            if current.setdefault('confirmation_protocol', protocol) != protocol:
-                raise Refused('confirmation runner policy and held-out family are frozen for this campaign')
+        _freeze_confirmation(store, name, owner, request)
         store.renew_owner(name, owner)
         handle = ConfirmationResource(store, name, owner)
         try:
@@ -509,6 +506,22 @@ def confirm(store, name, trial, owner, *, adapter=None, repository=ROOT, compute
                 report = None
                 outcome = {'status': 'pending_confirmation', 'reason': 'Confirmation compute cleanup pending; retry watchdog or stop.'}
     # A stopped/replaced owner cannot publish a receipt after external work.
+    _finish_confirmation(store, name, owner, trial, outcome, receipt, report)
+    return outcome
+
+
+
+@control_store.retry_contention
+def _freeze_confirmation(store, name, owner, request):
+    with store.mutation(name, owner) as (_, current, __):
+        protocol = {k: request[k] for k in ('confirmation_policy_digest',
+            'engine_runner_git_sha', 'engine_runner_scorer_digest', 'heldout_family_digest')}
+        if current.setdefault('confirmation_protocol', protocol) != protocol:
+            raise Refused('confirmation runner policy and held-out family are frozen for this campaign')
+
+
+@control_store.retry_contention
+def _finish_confirmation(store, name, owner, trial, outcome, receipt, report):
     with store.mutation(name, owner) as (_, current, __):
         record = {**outcome}
         if receipt:
@@ -516,7 +529,12 @@ def confirm(store, name, trial, owner, *, adapter=None, repository=ROOT, compute
         if report:
             record['report'] = report
         current.setdefault('confirmations', {})[str(trial)] = record
-    return outcome
+
+
+@control_store.retry_contention
+def _remember_confirmation(store, name, number, result):
+    with store.edit(name) as (_, current):
+        current.setdefault('confirmations', {}).setdefault(number, result)
 
 
 def _main_revision(repository):
@@ -589,6 +607,7 @@ class GitHub:
         return self.find(branch)
 
 
+@control_store.retry_contention
 def _promotion_claim(store, name, key, branch, evidence):
     with store.edit(name) as (db, state):
         now = db.execute('SELECT clock_timestamp()').fetchone()[0]
@@ -610,6 +629,7 @@ def _promotion_claim(store, name, key, branch, evidence):
         return owner, None
 
 
+@control_store.retry_contention
 def _promotion_finish(store, name, key, owner, outcome):
     with store.edit(name) as (db, state):
         record = state['promotions'][key]
@@ -756,8 +776,7 @@ def advance(store, name, owner, *, repository=ROOT, adapter=None, compute=None, 
             continue
         result = confirm(store, name, int(number), owner, adapter=adapter, repository=repository, compute=compute)
         if adapter is None:
-            with store.edit(name) as (_, current):
-                current.setdefault('confirmations', {}).setdefault(number, result)
+            _remember_confirmation(store, name, number, result)
         elif result['status'] == 'confirmed':
             result = promote(store, name, int(number), repository=repository, github=github, builder=builder)
         outcomes.append({'trial': int(number), **result})
