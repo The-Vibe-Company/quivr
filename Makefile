@@ -72,7 +72,7 @@ denylist:
 # Fails when code under plugins/ or sdks/go/ imports the engine's internal/ packages.
 plugin-boundary:
 	python3 scripts/plugin_boundary.py
-# Fails when the core image build stage misses a Go package the binary imports.
+# Fails when either core image build stage misses a Go package the binary imports.
 image-context:
 	GO=$(GO) python3 scripts/image_context.py
 # Fails when a migration added here sorts before main's latest; see scripts/migrations.py.

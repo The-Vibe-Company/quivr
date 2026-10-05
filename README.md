@@ -86,6 +86,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What works today
 
+- **Release images and build identity.** Release-please manages alpha release PRs, versions and changelogs. Publishing a release builds signed engine and first-party plugin images on GHCR. `quivr --version`, `GET /v0/version`, startup logs and process metrics report the build. See [Deploy and configure Quivr](https://docs.quivr.thevibecompany.co/run-quivr/deploy).
+
 - **Corpora** with scoped API keys per Organization, action and Corpus.
 - **Durable, idempotent ingestion**: inline text, bounded batches with per-entry
   outcomes, verified uploads (presigned PUT + checksum confirm), structured Manifests,

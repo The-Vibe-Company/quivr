@@ -108,6 +108,21 @@ func (e BlobContentKind) Valid() bool {
 	}
 }
 
+// Defines values for BuildVersionApiVersion.
+const (
+	V0 BuildVersionApiVersion = "v0"
+)
+
+// Valid indicates whether the value is a known member of the BuildVersionApiVersion enum.
+func (e BuildVersionApiVersion) Valid() bool {
+	switch e {
+	case V0:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConnectorHealthState.
 const (
 	ConnectorHealthStateAccessError        ConnectorHealthState = "access_error"
@@ -1349,6 +1364,23 @@ type BlobContent struct {
 
 // BlobContentKind defines model for BlobContent.Kind.
 type BlobContentKind string
+
+// BuildVersion defines model for BuildVersion.
+type BuildVersion struct {
+	ApiVersion BuildVersionApiVersion `json:"api_version"`
+
+	// PluginEngineVersion Engine compatibility version checked against plugin manifests, independent of the distribution release.
+	PluginEngineVersion string `json:"plugin_engine_version"`
+
+	// Revision Full source commit, or unknown for an unversioned build.
+	Revision string `json:"revision"`
+
+	// Version Distribution release version, or dev for an unversioned build.
+	Version string `json:"version"`
+}
+
+// BuildVersionApiVersion defines model for BuildVersion.ApiVersion.
+type BuildVersionApiVersion string
 
 // ChangeEvent Every change to a Record catalog entry emits an event with resource.kind=record and resource.id=the affected Record ID. Additional resource-specific events do not replace this invalidation. Consumers reread current state; payload detail belongs to THE-547. Monitoring notice types mirror WebhookEvent and include monitoring references; event_id identifies that same committed notice. Delivery status changes emit delivery.updated events only to the feed, never recursive webhooks.
 type ChangeEvent struct {
@@ -4476,6 +4508,13 @@ type ClientInterface interface {
 	//
 	// Start or observe checksum/size verification; SDK polls until verified before referencing the Blob in ingestion. Confirmation is repeatable for this session.
 	ConfirmUpload(ctx context.Context, uploadId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetBuildVersion Read the running Quivr build
+	//
+	// Reports the distribution release, source revision and API and plugin engine compatibility versions. Any valid API key can read it; no database access is needed.
+	//
+	// Corresponds with GET /v0/version (the `GetBuildVersion` operationId).
+	GetBuildVersion(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // ListActivePlugins performs a GET /v0/admin/active-plugins (the `ListActivePlugins` operationId) request.
@@ -6433,6 +6472,23 @@ func (c *Client) GetUpload(ctx context.Context, uploadId string, reqEditors ...R
 // Start or observe checksum/size verification; SDK polls until verified before referencing the Blob in ingestion. Confirmation is repeatable for this session.
 func (c *Client) ConfirmUpload(ctx context.Context, uploadId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewConfirmUploadRequest(c.Server, uploadId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetBuildVersion Read the running Quivr build
+//
+// Reports the distribution release, source revision and API and plugin engine compatibility versions. Any valid API key can read it; no database access is needed.
+//
+// Corresponds with GET /v0/version (the `GetBuildVersion` operationId).
+func (c *Client) GetBuildVersion(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetBuildVersionRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -10666,6 +10722,33 @@ func NewConfirmUploadRequest(server string, uploadId string) (*http.Request, err
 	return req, nil
 }
 
+// NewGetBuildVersionRequest constructs an http.Request for the GetBuildVersion method
+func NewGetBuildVersionRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/version")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -11600,6 +11683,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ConfirmUploadWithResponse(ctx context.Context, uploadId string, reqEditors ...RequestEditorFn) (*ConfirmUploadResponse, error)
+
+	// GetBuildVersionWithResponse Read the running Quivr build
+	//
+	// Reports the distribution release, source revision and API and plugin engine compatibility versions. Any valid API key can read it; no database access is needed.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v0/version (the `GetBuildVersion` operationId).
+	GetBuildVersionWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetBuildVersionResponse, error)
 }
 
 type ListActivePluginsResponse struct {
@@ -15930,6 +16022,54 @@ func (r ConfirmUploadResponse) ContentType() string {
 	return ""
 }
 
+type GetBuildVersionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BuildVersion
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetBuildVersionResponse) GetJSON200() *BuildVersion {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetBuildVersionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetBuildVersionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetBuildVersionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetBuildVersionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetBuildVersionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // ListActivePluginsWithResponse performs a GET /v0/admin/active-plugins (the `ListActivePlugins` operationId) request.
 //
 // The plugin versions the active Pipeline Plan runs and the roles each serves, for operator views that read the plugin call rollups beside them. It names no address, configuration, manifest or digest, so it needs observability:read on a key that grants every Corpus, not plugins:admin. Empty when no plan is active.
@@ -17569,6 +17709,21 @@ func (c *ClientWithResponses) ConfirmUploadWithResponse(ctx context.Context, upl
 		return nil, err
 	}
 	return ParseConfirmUploadResponse(rsp)
+}
+
+// GetBuildVersionWithResponse Read the running Quivr build
+//
+// Reports the distribution release, source revision and API and plugin engine compatibility versions. Any valid API key can read it; no database access is needed.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v0/version (the `GetBuildVersion` operationId).
+func (c *ClientWithResponses) GetBuildVersionWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetBuildVersionResponse, error) {
+	rsp, err := c.GetBuildVersion(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetBuildVersionResponse(rsp)
 }
 
 // ParseListActivePluginsResponse parses an HTTP response from a ListActivePluginsWithResponse call
@@ -20608,6 +20763,39 @@ func ParseConfirmUploadResponse(rsp *http.Response) (*ConfirmUploadResponse, err
 			return nil, err
 		}
 		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetBuildVersionResponse parses an HTTP response from a GetBuildVersionWithResponse call
+func ParseGetBuildVersionResponse(rsp *http.Response) (*GetBuildVersionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetBuildVersionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BuildVersion
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

@@ -1221,6 +1221,28 @@ x-public-errors:
 x-quivr-route-aliases:
   /v0/admin/plugins/: /v0/admin/plugins
 paths:
+  /v0/version:
+    get:
+      operationId: getBuildVersion
+      summary: Read the running Quivr build
+      description: Reports the distribution release, source revision and API and plugin engine compatibility versions. Any
+        valid API key can read it; no database access is needed.
+      responses:
+        '200':
+          description: The running build identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildVersion'
+        default:
+          description: Structured error. 401 unauthenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      x-required-permissions: []
+      tags:
+      - Version
   /v0/records:
     post:
       operationId: ingestRecord
@@ -4713,6 +4735,28 @@ components:
       description: API key, not necessarily a JWT. Server derives Organization, permitted actions and Corpus scope; every
         resource access is authorized.
   schemas:
+    BuildVersion:
+      type: object
+      additionalProperties: false
+      required:
+      - version
+      - revision
+      - api_version
+      - plugin_engine_version
+      properties:
+        version:
+          type: string
+          description: Distribution release version, or dev for an unversioned build.
+        revision:
+          type: string
+          description: Full source commit, or unknown for an unversioned build.
+        api_version:
+          type: string
+          enum:
+          - v0
+        plugin_engine_version:
+          type: string
+          description: Engine compatibility version checked against plugin manifests, independent of the distribution release.
     ConnectorToken:
       type: object
       additionalProperties: false

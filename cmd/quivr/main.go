@@ -1,16 +1,23 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/online"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/cli"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == buildinfo.VersionFlag {
+		fmt.Printf("quivr %s (revision %s; API v0; plugin engine %s)\n", buildinfo.Version, buildinfo.Revision, plugins.EngineVersion)
+		return
+	}
 	// Plugin tooling runs without QUIVR_CONFIG or a running stack.
 	if len(os.Args) >= 2 && os.Args[1] == "plugin" {
 		os.Exit(cli.Run(os.Args[2:], os.Stdout, os.Stderr))
@@ -34,7 +41,7 @@ func main() {
 
 // usage names every command, from the engine and online command tables.
 func usage() string {
-	names := []string{}
+	names := []string{buildinfo.VersionFlag}
 	for _, c := range app.Commands {
 		names = append(names, c.Name)
 	}

@@ -6,6 +6,8 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 
 `quivr api`, `quivr worker` and `quivr migrate` read one JSON file, whose path is in the `QUIVR_CONFIG` environment variable. Give every process the same file, except for addresses such as `probe_listen`. `make dev` writes one for the local stack; this page lists every field. `make docs` fails when a field of the engine's configuration is missing here.
 
+In the [release image](/run-quivr/deploy#run-the-image), mount the file read-only and make it readable by UID/GID `10001`. Set `listen` and `probe_listen` to `0.0.0.0` addresses to use published container ports. `QUIVR_CONFIG` selects a file; arbitrary environment variables do not override its fields. The image declares `/tmp` for temporary files; a configured `log_directory` also needs a writable mount.
+
 ## Top-level fields
 
 | Field | Required | Meaning |

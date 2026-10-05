@@ -25,6 +25,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/changes"
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -220,6 +221,7 @@ func Run(command string) error {
 	if cfg.DatabaseURL == "" || len(cfg.CursorKey) < 32 || len(cfg.Keys) == 0 {
 		return errors.New("database_url, cursor_key (32+ bytes) and keys required")
 	}
+	slog.Info("process starting", "component", command, "version", buildinfo.Version, "revision", buildinfo.Revision, "api_version", "v0", "plugin_engine_version", plugins.EngineVersion)
 	logger := slog.Default()
 	if command == "migrate" {
 		// Only api and worker handle credentials; migrate stays silent about them.
@@ -645,12 +647,12 @@ func Run(command string) error {
 			evaluationMetrics.Write(w)
 			recorder.WriteMetrics(w)
 		}
-		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
+		probes.Handle("GET /metrics", buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)))
 		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators.Load().Served))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
-		probes.Handle("GET /metrics", apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics))
+		probes.Handle("GET /metrics", buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)))
 	}
 	servers := []*http.Server{{Addr: cfg.ProbeListen, Handler: probes, ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {

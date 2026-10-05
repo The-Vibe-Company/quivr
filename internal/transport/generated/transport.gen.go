@@ -108,6 +108,21 @@ func (e BlobContentKind) Valid() bool {
 	}
 }
 
+// Defines values for BuildVersionApiVersion.
+const (
+	V0 BuildVersionApiVersion = "v0"
+)
+
+// Valid indicates whether the value is a known member of the BuildVersionApiVersion enum.
+func (e BuildVersionApiVersion) Valid() bool {
+	switch e {
+	case V0:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConnectorHealthState.
 const (
 	ConnectorHealthStateAccessError        ConnectorHealthState = "access_error"
@@ -1349,6 +1364,23 @@ type BlobContent struct {
 
 // BlobContentKind defines model for BlobContent.Kind.
 type BlobContentKind string
+
+// BuildVersion defines model for BuildVersion.
+type BuildVersion struct {
+	ApiVersion BuildVersionApiVersion `json:"api_version"`
+
+	// PluginEngineVersion Engine compatibility version checked against plugin manifests, independent of the distribution release.
+	PluginEngineVersion string `json:"plugin_engine_version"`
+
+	// Revision Full source commit, or unknown for an unversioned build.
+	Revision string `json:"revision"`
+
+	// Version Distribution release version, or dev for an unversioned build.
+	Version string `json:"version"`
+}
+
+// BuildVersionApiVersion defines model for BuildVersion.ApiVersion.
+type BuildVersionApiVersion string
 
 // ChangeEvent Every change to a Record catalog entry emits an event with resource.kind=record and resource.id=the affected Record ID. Additional resource-specific events do not replace this invalidation. Consumers reread current state; payload detail belongs to THE-547. Monitoring notice types mirror WebhookEvent and include monitoring references; event_id identifies that same committed notice. Delivery status changes emit delivery.updated events only to the feed, never recursive webhooks.
 type ChangeEvent struct {
@@ -3957,6 +3989,9 @@ type ServerInterface interface {
 
 	// (POST /v0/uploads/{upload_id}/confirm)
 	ConfirmUpload(w http.ResponseWriter, r *http.Request, uploadId string)
+	// GetBuildVersion Read the running Quivr build
+	// (GET /v0/version)
+	GetBuildVersion(w http.ResponseWriter, r *http.Request)
 }
 
 // ServerInterfaceWrapper passes transport inputs without eagerly parsing them.
@@ -5003,6 +5038,17 @@ func (siw *ServerInterfaceWrapper) ConfirmUpload(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+func (siw *ServerInterfaceWrapper) GetBuildVersion(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBuildVersion(w, r)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
 // Handler creates http.Handler with routing matching OpenAPI spec.
 func Handler(si ServerInterface) http.Handler {
 	return HandlerWithOptions(si, StdHTTPServerOptions{})
@@ -5054,6 +5100,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/version", wrapper.GetBuildVersion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/records", wrapper.ListRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records", wrapper.IngestRecord)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/records/count", wrapper.CountRecords)
@@ -9734,6 +9781,54 @@ func (response ConfirmUploaddefaultJSONResponse) VisitConfirmUploadResponse(w ht
 	return err
 }
 
+type GetBuildVersionRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+}
+
+type GetBuildVersionResponseObject interface {
+	VisitGetBuildVersionResponse(w http.ResponseWriter) error
+}
+
+// GetBuildVersionResponseFunc writes a deferred response, including streams and plugin answers.
+type GetBuildVersionResponseFunc func(http.ResponseWriter)
+
+func (response GetBuildVersionResponseFunc) VisitGetBuildVersionResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type GetBuildVersion200JSONResponse BuildVersion
+
+func (response GetBuildVersion200JSONResponse) VisitGetBuildVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBuildVersiondefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetBuildVersiondefaultJSONResponse) VisitGetBuildVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
@@ -10003,6 +10098,9 @@ type StrictServerInterface interface {
 
 	// (POST /v0/uploads/{upload_id}/confirm)
 	ConfirmUpload(ctx context.Context, request ConfirmUploadRequestObject) (ConfirmUploadResponseObject, error)
+	// GetBuildVersion Read the running Quivr build
+	// (GET /v0/version)
+	GetBuildVersion(ctx context.Context, request GetBuildVersionRequestObject) (GetBuildVersionResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -12519,6 +12617,33 @@ func (sh *strictHandler) ConfirmUpload(w http.ResponseWriter, r *http.Request, u
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ConfirmUploadResponseObject); ok {
 		if err := validResponse.VisitConfirmUploadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetBuildVersion operation middleware
+func (sh *strictHandler) GetBuildVersion(w http.ResponseWriter, r *http.Request) {
+	var request GetBuildVersionRequestObject
+
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetBuildVersion(ctx, request.(GetBuildVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetBuildVersion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetBuildVersionResponseObject); ok {
+		if err := validResponse.VisitGetBuildVersionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
