@@ -163,18 +163,18 @@ class Trial(unittest.TestCase):
                             mock.patch.object(direct_bakeoff.E5, 'embed', local_embed):
                         measured = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
                             budget, client, prices, .001, rerank_key='fixture-key', private_vectors=vectors)
-                        self.assertAlmostEqual(measured['metrics']['cost_per_search_usd'], price)
+                        self.assertAlmostEqual(measured['metrics']['cost_per_search_usd'], price, delta=1e-12)
                         self.assertAlmostEqual(measured['metrics']['latency_p95_ms'], latency)
-                        self.assertAlmostEqual(measured['cost']['search_provider_usd'], provider_usd)
-                        self.assertAlmostEqual(measured['cost']['search_compute_usd'], price - provider_usd)
+                        self.assertAlmostEqual(measured['cost']['search_provider_usd'], provider_usd, delta=1e-12)
+                        self.assertAlmostEqual(measured['cost']['search_compute_usd'], price - provider_usd, delta=1e-12)
                         self.assertAlmostEqual(measured['cost']['search_timing_ms']['provider_p95'], provider_ms)
                         self.assertAlmostEqual(measured['cost']['search_timing_ms']['local_p95'], local_ms)
                         before = network.call_count
                         replay = search_trial.measure(cfg, data, {'split': 'dev', 'private': private}, temp,
                             budget, client, prices, .002, fresh_latency=False, rerank_key='fixture-key', private_vectors=vectors)
                         self.assertEqual(network.call_count, before + (reranker == 'jev'))
-                        self.assertAlmostEqual(replay['metrics']['cost_per_search_usd'], replay_price)
-                        self.assertAlmostEqual(replay['metrics']['cost_per_1000_documents_usd'], index_price)
+                        self.assertAlmostEqual(replay['metrics']['cost_per_search_usd'], replay_price, delta=1e-12)
+                        self.assertAlmostEqual(replay['metrics']['cost_per_1000_documents_usd'], index_price, delta=1e-12)
 
 
     def test_concurrent_retries_complete_with_uncertain_spend(self):
