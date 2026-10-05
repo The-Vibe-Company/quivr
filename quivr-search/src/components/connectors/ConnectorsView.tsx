@@ -128,6 +128,8 @@ export function ConnectorsView({
   const reload = useCallback(
     async (signal?: AbortSignal) => {
       const list = await fetchConnectors(signal);
+      // An attempt that failed meanwhile keeps its error and its list.
+      if (signal?.aborted) return;
       track(list);
       setConnectors(list);
       setError("");
@@ -170,7 +172,11 @@ export function ConnectorsView({
         setStatus("ready");
       })
       .catch((e) => {
-        if (!controller.signal.aborted) failed(e);
+        if (controller.signal.aborted) return;
+        failed(e);
+        // The other reads of this attempt stop: a late answer must not undo
+        // the failure (the list's read clears the error).
+        controller.abort();
       });
     return () => controller.abort();
   }, [reload, failed, attempt]);
