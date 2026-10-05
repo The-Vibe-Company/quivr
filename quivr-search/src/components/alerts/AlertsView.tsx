@@ -51,7 +51,7 @@ import {
 import { MoreMenu } from "../MoreMenu";
 import { AlertForm } from "./AlertForm";
 import { CaughtItem } from "./CaughtItem";
-import { EmptyState, LiveBadge, LoadingState, Notice, liveFeed } from "../ui";
+import { EmptyState, InBar, LiveBadge, LoadingState, Notice, liveFeed, type Bar } from "../ui";
 
 type Status = "loading" | "ready" | "unavailable" | "error";
 
@@ -121,6 +121,7 @@ let visited: {
  */
 export function AlertsView({
   corpus,
+  bar,
   selected,
   onSelect,
   doc,
@@ -136,6 +137,8 @@ export function AlertsView({
   onUnauthorized,
 }: {
   corpus: string;
+  /** The top bar’s places this page fills. */
+  bar: Bar;
   selected: string | null;
   onSelect: (id: string | null) => void;
   /** The article open in the reader over the page. */
@@ -413,22 +416,25 @@ export function AlertsView({
     <main className="board board-single alerts-board">
       <h1 className="visually-hidden">Alertes</h1>
       <section className="alerts-page" aria-labelledby="alerts-list-title">
-        <div className="alerts-head">
-          <h2 id="alerts-list-title" ref={listHeading} tabIndex={-1}>
-            Vos alertes
-          </h2>
+        {/* The count, the live state and "Nouvelle alerte" sit in the top bar. */}
+        <h2 id="alerts-list-title" className="visually-hidden" ref={listHeading} tabIndex={-1}>
+          Vos alertes
+        </h2>
+        <InBar to={bar.meta}>
           {alerts.length > 0 && (
             <span className="head-count">
               {alerts.length}
               <span className="visually-hidden"> alerte{alerts.length > 1 ? "s" : ""}</span>
             </span>
           )}
+        </InBar>
+        <InBar to={bar.actions}>
           <LiveBadge live={live} />
           <button type="button" className="button alerts-new" onClick={() => compose(null)}>
             <PlusIcon size={16} />
-            Nouvelle alerte
+            <span className="bar-action-label">Nouvelle alerte</span>
           </button>
-        </div>
+        </InBar>
         {alerts.length === 0 || !current || !stats ? (
           <div className="alerts-empty">
             <span className="kind-tile" aria-hidden="true">

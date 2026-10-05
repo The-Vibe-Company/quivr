@@ -43,6 +43,22 @@ const posted = (page: Page, path: string) =>
     .then((r) => r.postDataJSON());
 const noOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+// The top bar's title side and action side each fit their place: neither
+// spills over the search between them.
+const barFits = (page: Page) =>
+  page.evaluate(() =>
+    [".bar-view", ".bar-actions"].every((selector) => {
+      const part = document.querySelector(selector);
+      if (!part) return true;
+      const left = part.getBoundingClientRect().left;
+      // Spilling right shows in its scroll width; spilling left (the actions
+      // end at the right) shows in where its children start.
+      return (
+        part.scrollWidth <= part.clientWidth + 1 &&
+        [...part.children].every((child) => child.getBoundingClientRect().left >= left - 1)
+      );
+    }),
+  );
 
 test("le fil marque les non-lus, filtre par alerte et par source, et retient les arrivées en pause", async ({
   page,
@@ -520,8 +536,10 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
 }) => {
   await page.goto("/?view=sources");
   // Adding opens a dialog, from the header's button or the "+" card.
-  await expect(page.getByRole("heading", { name: "Vos sources" })).toBeVisible();
-  await expect(page.locator(".head-count")).toHaveText("3 sources");
+  // The page's count and its main action sit in the top bar.
+  const banner = page.getByRole("banner");
+  await expect(banner.locator(".head-count")).toHaveText("3 sources");
+  await expect(banner.getByRole("button", { name: "Ajouter une source", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Ajouter une source", exact: true }).click();
   const adding = page.getByRole("dialog", { name: "Ajouter une source" });
   const address = adding.getByLabel("Adresse du site");
@@ -624,10 +642,12 @@ test("revenir sur Alertes ou Sources les montre aussitôt, le temps de les relir
   page,
 }) => {
   const nav = page.getByRole("navigation", { name: "Sections" });
+  const alertsShown = page.getByRole("table");
+  const sourcesShown = page.getByRole("list", { name: "Sources" });
   await page.goto("/?view=alerts");
-  await expect(page.getByRole("heading", { name: "Vos alertes" })).toBeVisible();
+  await expect(alertsShown).toBeVisible();
   await nav.getByRole("link", { name: /^Sources/ }).click();
-  await expect(page.getByRole("heading", { name: "Vos sources" })).toBeVisible();
+  await expect(sourcesShown).toBeVisible();
   // From now on, both lists and the change feed answer only once released:
   // coming back, each page is already there, live as last seen, not a
   // loading state between two pages.
@@ -642,10 +662,10 @@ test("revenir sur Alertes ou Sources les montre aussitôt, le temps de les relir
   );
   try {
     await nav.getByRole("link", { name: /^Alertes/ }).click();
-    await expect(page.getByRole("heading", { name: "Vos alertes" })).toBeVisible();
+    await expect(alertsShown).toBeVisible();
     await expect(page.locator(".live-badge")).toHaveText("En direct");
     await nav.getByRole("link", { name: /^Sources/ }).click();
-    await expect(page.getByRole("heading", { name: "Vos sources" })).toBeVisible();
+    await expect(sourcesShown).toBeVisible();
   } finally {
     release();
   }
@@ -656,6 +676,8 @@ test("le tableau de bord tient sur un téléphone, en clair et en sombre", async
 }, info) => {
   for (const [name, size] of [
     ["desktop", { width: 1440, height: 900 }],
+    // Just above the phone layout: the tightest top bar.
+    ["tablet", { width: 770, height: 900 }],
     ["mobile", { width: 390, height: 844 }],
   ] as const) {
     await page.setViewportSize(size);
@@ -669,12 +691,13 @@ test("le tableau de bord tient sur un téléphone, en clair et en sombre", async
     await page.getByRole("searchbox", { name: "Rechercher dans le fil" }).fill("orage");
     await expect(page.getByRole("heading", { name: /articles sur « orage »/ })).toBeVisible();
     await page.screenshot({ path: info.outputPath(`${name}-search.png`) });
-    for (const [tab, heading] of [["Alertes", "Vos alertes"], ["Sources", "Vos sources"]]) {
+    for (const [tab, action] of [["Alertes", "Nouvelle alerte"], ["Sources", "Ajouter une source"]]) {
       await page.getByRole("navigation", { name: "Sections" }).getByRole("link", { name: new RegExp(`^${tab}`) }).click();
-      await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+      await expect(page.getByRole("banner").getByRole("button", { name: action, exact: true })).toBeVisible();
       for (const scheme of ["light", "dark"] as const) {
         await page.emulateMedia({ colorScheme: scheme });
         expect(await noOverflow(page), `${name} ${tab} ${scheme}`).toBe(true);
+        expect(await barFits(page), `${name} ${tab} ${scheme}: top bar`).toBe(true);
       }
       await page.emulateMedia({ colorScheme: "light" });
       await page.screenshot({

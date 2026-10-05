@@ -336,7 +336,11 @@ mark {
   position: sticky;
   top: 0;
   z-index: 20;
-  display: flex;
+  /* The title at the left, the search in the middle, the page's live state
+     and main action at the right: both sides share the rest, so the search
+     stays centred and gives way first when the bar is short. */
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 460px) minmax(max-content, 1fr);
   align-items: center;
   gap: 11px;
   /* The hairline lines up with the rail's separator under the logo, and the
@@ -372,11 +376,57 @@ mark {
 .shell[data-view="admin"] .bar-view {
   display: none;
 }
+.bar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0;
+}
+.bar-meta:empty {
+  display: none;
+}
+.bar-meta .list-count[data-tone="warn"] {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.bar-actions {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.bar-actions:empty {
+  display: none;
+}
+/* As tall as the search beside it. */
+.bar-actions .button {
+  min-height: 0;
+  height: 36px;
+}
+.bar-meta .list-count {
+  white-space: nowrap;
+}
+/* Short of room, the live state keeps its dot; its words stay for screen readers. */
+@media (max-width: 1100px) {
+  .bar-actions .live-badge {
+    gap: 0;
+  }
+  .bar-actions .live-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
 .bar-search {
-  flex: 1;
+  grid-column: 2;
   min-width: 0;
-  max-width: 460px;
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2395,17 +2445,42 @@ button.moment-pill:hover {
     width: 42px;
     height: 46px;
   }
+  /* The title and the page's action on one line, the search under them. */
   .bar {
-    flex-wrap: wrap;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
     height: auto;
     margin: 0 12px;
     padding: 12px 0;
   }
+  .bar-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  /* The live state and the action keep their words for screen readers; on
+     screen, the action is its "+" alone. */
+  .bar-actions .live-badge {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .bar-actions .alerts-new {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+  .bar-action-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   .bar-search {
-    flex-basis: 100%;
-    max-width: none;
-    margin-left: 0;
+    grid-column: 1 / -1;
   }
   .bar-kbd {
     display: none;
@@ -2793,25 +2868,6 @@ button.moment-pill:hover {
   --bar-soft: color-mix(in srgb, var(--accent) 42%, var(--panel));
   --chip-bg: color-mix(in srgb, var(--ink) 6%, var(--panel));
   --well: color-mix(in srgb, var(--panel) 55%, var(--page));
-}
-.alerts-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-  padding: 6px 0 0;
-}
-.alerts-head h2 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.5px;
-}
-.alerts-head h2:focus {
-  outline: none;
-}
-.alerts-head .live-badge {
-  margin-left: auto;
 }
 .alerts-new {
   display: inline-flex;
@@ -3811,12 +3867,6 @@ button.caught-title:hover {
   gap: 14px;
   padding: 2px 0 24px;
 }
-.sources-page .alerts-head h2:focus {
-  outline: none;
-}
-.sources-page .list-count {
-  font-size: inherit;
-}
 .source-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -4183,7 +4233,7 @@ button.caught-title:hover {
     transform: none;
   }
 }
-/* The count of sources beside the page title. */
+/* A page’s count, beside its title in the top bar. */
 .head-count {
   display: inline-grid;
   place-items: center;
@@ -4196,13 +4246,6 @@ button.caught-title:hover {
   font-size: 13px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
-}
-.sources-page .list-count[data-tone="warn"] {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--warning) 12%, transparent);
-  font-size: 13px;
-  font-weight: 600;
 }
 @media (forced-colors: active) {
   .sc-spark span,

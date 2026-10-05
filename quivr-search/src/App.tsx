@@ -200,6 +200,10 @@ function Dashboard({
 }) {
   const [initial] = useState(urlState);
   const [view, setView] = useState<View>(initial.view);
+  // The top bar's places a page fills (see InBar), held once mounted.
+  const [barMeta, setBarMeta] = useState<HTMLElement | null>(null);
+  const [barActions, setBarActions] = useState<HTMLElement | null>(null);
+  const bar = useMemo(() => ({ meta: barMeta, actions: barActions }), [barMeta, barActions]);
   const [input, setInput] = useState(initial.query);
   const [near, setNear] = useState(initial.near);
   // "Recherche approfondie": offered when the engine serves it, off at every
@@ -440,6 +444,8 @@ function Dashboard({
             })()}
           </span>
           {TITLES[view]}
+          {/* A page's own figures beside its title: its count, what needs a look. */}
+          <span className="bar-meta" ref={setBarMeta} />
         </span>
         <form
           role="search"
@@ -493,6 +499,8 @@ function Dashboard({
             </kbd>
           )}
         </form>
+        {/* A page's live state and main action, at the top right. */}
+        <div className="bar-actions" ref={setBarActions} />
       </header>
       {view === "feed" ? (
         <FeedPage
@@ -530,6 +538,7 @@ function Dashboard({
       ) : view === "alerts" ? (
         <AlertsView
           corpus={corpus}
+          bar={bar}
           selected={alert}
           onSelect={setAlert}
           doc={doc}
@@ -571,6 +580,7 @@ function Dashboard({
       ) : (
         <ConnectorsView
           corpus={corpus}
+          bar={bar}
           feedItems={feed.items}
           matched={alerts.list?.matched || {}}
           initialSelected={openSource}
