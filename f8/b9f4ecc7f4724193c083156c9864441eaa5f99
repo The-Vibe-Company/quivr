@@ -8,6 +8,7 @@ quivr-search/src/components/alerts/AlertsView.tsx
   s_c21c70c5aa40f0::t_94e8fe199bb77e 57,267-270
   s_c21c70c5aa40f0::t_7121e56ac8c78c 159-160,162-164,173
   s_c21c70c5aa40f0::t_2c107ce2655bdc 105
+  s_c21c70c5aa40f0::t_3e172abb639c5b 113,174,181
 quivr-search/src/components/connectors/ConnectorsView.tsx
   s_c21c70c5aa40f0::t_94e8fe199bb77e 27,220,235
   s_c21c70c5aa40f0::t_6b86bbb4b29138 45,70-71,73-74,77,81,89
