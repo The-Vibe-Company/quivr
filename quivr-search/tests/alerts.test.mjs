@@ -36,6 +36,8 @@ function fakeCore() {
   const records = new Map();
   let refuse = null;
   let forbidden = false;
+  // The demo corpus's change feed: its head moves on each change.
+  const feed = { head: 1 };
   // What POST /v0/subscription-previews answers.
   const preview = { evaluated: 0, matched: 0, not_ready: 0, complete: true, matches: [] };
   let n = 0;
@@ -169,6 +171,8 @@ function fakeCore() {
       }
       return send(200, sub);
     }
+    if (p === "/v0/changes" && req.method === "GET" && url.searchParams.get("corpus_id") === "demo")
+      return send(200, { items: [], has_more: false, next_cursor: `head-${feed.head}` });
     if (p === "/v0/subscription-previews" && req.method === "POST")
       return send(200, preview);
     if (p === "/v0/matches")
@@ -198,6 +202,7 @@ function fakeCore() {
     query,
     subscription,
     preview,
+    feed,
     refuse: (error) => (refuse = error),
     forbid: () => (forbidden = true),
   };
@@ -639,4 +644,33 @@ test("a preview asks the core about the newest articles with the alert's own rul
     core.seen.every((r) => r.method === "GET" || r.url === "/v0/subscription-previews"),
     "a preview creates nothing",
   );
+});
+
+test("the list is read once while the demo corpus has not changed, and again once it has", async (t) => {
+  const { core, call } = await start(t);
+  const created = await call("/demo/alerts", {
+    idempotency_key: idem(),
+    name: "Orages",
+    expression: { kind: "keywords", match: { term: "orage" } },
+  });
+  const id = created.data.alert_id;
+  const reads = () =>
+    core.seen.filter((r) => r.url.startsWith("/v0/matches")).length;
+  const before = reads();
+  const lists = await Promise.all([call("/demo/alerts"), call("/demo/alerts"), call("/demo/alerts")]);
+  assert.deepEqual(lists.map((l) => l.data.items[0].match_count), [0, 0, 0]);
+  await call("/demo/alerts");
+  assert.equal(reads() - before, 1, "one read of the Matches for four lists");
+  // A Match arrives: the change feed moves, and the next list shows it.
+  core.matches.push({
+    match_id: "m1",
+    subscription_id: id,
+    record_id: "r1",
+    record_version_id: "v1",
+    evidence: {},
+  });
+  core.feed.head++;
+  const after = await call("/demo/alerts");
+  assert.equal(after.data.items[0].match_count, 1);
+  assert.deepEqual(after.data.matched, { r1: [id] });
 });
