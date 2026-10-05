@@ -3,6 +3,7 @@ package temporal
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"time"
 
@@ -147,7 +148,7 @@ type Runtime struct {
 // queue. pins pins the processing of each receipt, each Operation and each
 // connector run to the plan it started on; nil leaves them on the active
 // plan.
-func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, backfiller *backfill.Backfiller, reprocessor *quarantine.Reprocessor, pins Pinner, evaluationConcurrency int) (*Runtime, error) {
+func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, backfiller *backfill.Backfiller, reprocessor *quarantine.Reprocessor, pins Pinner, evaluationConcurrency int, tlsConfig *tls.Config) (*Runtime, error) {
 	if evaluationConcurrency == 0 {
 		evaluationConcurrency = 4
 	}
@@ -160,7 +161,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	// The application retries startup after transient connection failures.
 	connect, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	c, err := client.DialContext(connect, client.Options{HostPort: address})
+	c, err := Dial(connect, address, tlsConfig)
 	if err != nil {
 		return nil, err
 	}
