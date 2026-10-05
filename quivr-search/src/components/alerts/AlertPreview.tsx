@@ -64,7 +64,15 @@ export function AlertPreview({
       .catch((error) => {
         if (controller.signal.aborted) return;
         if (error instanceof APIError && error.status === 401) onUnauthorized();
-        setStatus({ state: "error", message: alertMessage(error, target.kind) });
+        let message: string;
+        if (error instanceof APIError && (error.code === "preview_deadline_exceeded" || error.status === 504)) {
+          message = "Le test de l’alerte a pris trop de temps. Réessayez dans un instant.";
+        } else if (error instanceof APIError && error.code === "storage_unavailable") {
+          message = "Les articles sont temporairement indisponibles. Réessayez dans un instant.";
+        } else {
+          message = alertMessage(error, target.kind);
+        }
+        setStatus({ state: "error", message });
       });
   };
 
@@ -132,7 +140,9 @@ function Result({
   if (!evaluated)
     return (
       <p className="alert-preview-title" data-empty="true">
-        Aucun article récent pour tester l’alerte.
+        {complete
+          ? "Aucun article récent pour tester l’alerte."
+          : "Le moteur n’a pas pu terminer le test à temps. Réessayez dans un instant."}
       </p>
     );
   return (

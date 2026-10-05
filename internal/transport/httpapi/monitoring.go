@@ -281,14 +281,14 @@ func (a *API) decodeMonitoring(w http.ResponseWriter, r *http.Request, schema *j
 		if schema == a.schemas["SubscriptionCreate"] && connectors.SchemaPointer(err) == "/owner" {
 			writeError(w, publicerr.InvalidOwner, nil)
 		} else {
-			writeError(w, publicerr.InvalidSchema, nil)
+			writeDecodeError(w, r, publicerr.InvalidSchema)
 		}
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
 	if err := decoder.Decode(v); err != nil {
-		writeError(w, publicerr.InvalidSchema, nil)
+		writeDecodeError(w, r, publicerr.InvalidSchema)
 		return false
 	}
 	return true
@@ -439,8 +439,11 @@ func (a *API) previewSubscription(w http.ResponseWriter, r *http.Request, scope 
 		return
 	}
 	var in monitoring.PreviewInput
-	result, err := a.Monitoring.Preview(r.Context(), scope, monitoring.PreviewInput{}, func() (monitoring.PreviewInput, error) {
-		if !a.decodeMonitoring(w, r, a.schemas["SubscriptionPreviewRequest"], &in) {
+	result, err := a.Monitoring.Preview(r.Context(), scope, monitoring.PreviewInput{}, func(ctx context.Context) (monitoring.PreviewInput, error) {
+		deadline, _ := ctx.Deadline()
+		controller := http.NewResponseController(w)
+		_ = controller.SetReadDeadline(deadline)
+		if !a.decodeMonitoring(w, r.WithContext(ctx), a.schemas["SubscriptionPreviewRequest"], &in) {
 			return monitoring.PreviewInput{}, errResponseWritten
 		}
 

@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 	"io"
 	"net/http"
@@ -224,6 +225,17 @@ func (previewRecords) Article(_ context.Context, _, _, recordID, _ string) (moni
 	return monitoring.Article{Parts: []monitoring.Part{{Key: "body", Role: "body", Text: recordID}}}, nil
 }
 
+type failedRecent struct{ err error }
+
+func (f failedRecent) Recent(context.Context, string, []string, time.Time, int) ([]monitoring.RecentVersion, error) {
+	return nil, f.err
+}
+
+type deadlineBody struct{}
+
+func (deadlineBody) Read([]byte) (int, error) { return 0, context.DeadlineExceeded }
+func (deadlineBody) Close() error             { return nil }
+
 func TestSubscriptionPreviewRoute(t *testing.T) {
 	body := `{"definition":{"corpus_ids":["corpus_a"],"expression":{},"retrieval_profile":"default","temporal_policy":"from_activation"},"evaluator":{"plugin_id":"quivr.fixture","version":"1.0.0","configuration":{"decisions":{"hit":"match","wait":"not_ready"}}},"limit":3,"accepted_after":"2026-09-30T08:00:00Z"}`
 	for name, row := range map[string]struct {
@@ -259,6 +271,27 @@ func TestSubscriptionPreviewRoute(t *testing.T) {
 		service.Recent, service.Versions = records, records
 	})
 	got, _ := call(t, server, "POST", "/v0/subscription-previews", monitor, body, 200)
+	req := httptest.NewRequest("POST", "/v0/subscription-previews", nil)
+	req.Header.Set("Authorization", "Bearer "+monitor)
+	req.Header.Set("Content-Type", "application/json")
+	ctx, cancel := context.WithDeadline(req.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	req = req.WithContext(ctx)
+	for name, body := range map[string]io.ReadCloser{
+		"body read":       deadlineBody{},
+		"JSON decoding":   io.NopCloser(strings.NewReader(`{`)),
+		"schema decoding": io.NopCloser(strings.NewReader(`{}`)),
+	} {
+		t.Run("deadline during "+name, func(t *testing.T) {
+			req := req.Clone(ctx)
+			req.Body = body
+			response := httptest.NewRecorder()
+			server.Config.Handler.ServeHTTP(response, req)
+			if response.Code != http.StatusGatewayTimeout || !strings.Contains(response.Body.String(), `"code":"preview_deadline_exceeded"`) {
+				t.Fatalf("a decoding deadline must return a preview timeout, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
 	want := map[string]any{
 		"evaluated": float64(3), "matched": float64(1), "not_ready": float64(1), "complete": true,
 		"oldest_accepted_at": "2026-09-30T10:00:00Z",
@@ -274,6 +307,24 @@ func TestSubscriptionPreviewRoute(t *testing.T) {
 		t.Fatalf("preview rendering: got %v, want %v", got, want)
 	}
 	conforms(t, "SubscriptionPreview", got)
+	for name, row := range map[string]struct {
+		err    error
+		status int
+		code   string
+	}{
+		"deadline":        {context.DeadlineExceeded, 504, "preview_deadline_exceeded"},
+		"storage failure": {errors.New("database connection lost"), 503, "storage_unavailable"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := monitoringServer(t, func(service *monitoring.Service) {
+				service.Recent, service.Versions = failedRecent{row.err}, records
+			})
+			got, _ := call(t, server, "POST", "/v0/subscription-previews", monitor, body, row.status)
+			if got["code"] != row.code || got["retryable"] != true {
+				t.Fatalf("want retryable %s, got %v", row.code, got)
+			}
+		})
+	}
 }
 
 func subscriptionBody(key, evaluator, destination string) string {
