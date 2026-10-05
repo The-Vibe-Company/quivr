@@ -1,9 +1,11 @@
-// The Admin tab's rules (admin.mjs): how each step of a document is judged
-// and what the KPIs and the per-hour chart count. The facade routes are
+// The Admin tab's rules (admin.mjs): how each step of a document is judged,
+// what the KPIs and the per-hour chart count, and the documents stored per
+// day. The facade routes are
 // covered in server.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  createAdmin,
   flow,
   fromRollups,
   limits,
@@ -286,4 +288,100 @@ test("the header prefers the rollups, but not over a document they do not count 
   assert.equal(merged.per_minute_window, "10min");
   assert.equal(merged.searchable_p95_ms, 2200);
   assert.equal(withRollups(own, null).hours_of, "received");
+});
+
+// The engine's count API over synthetic Records: one acceptance time each,
+// or null for a Record without a current Version.
+function counting(times) {
+  const calls = [];
+  const upstream = async (path) => {
+    calls.push(path);
+    const url = new URL(path, "http://core");
+    assert.equal(url.pathname, "/v0/records/count");
+    assert.equal(url.searchParams.get("corpus_id"), "demo");
+    const after = url.searchParams.get("accepted_after");
+    const before = url.searchParams.get("accepted_before");
+    const count = times.filter((t) =>
+      after || before
+        ? t !== null &&
+          (!after || Date.parse(t) >= Date.parse(after)) &&
+          (!before || Date.parse(t) < Date.parse(before))
+        : true,
+    ).length;
+    return { status: 200, data: { count } };
+  };
+  return { upstream, calls };
+}
+const history = (admin, tz) =>
+  admin.history(new URL(`http://demo/demo/admin/history?tz=${tz}`));
+
+test("documents are counted per local day since the first one, empty days at zero", async () => {
+  const { upstream, calls } = counting([
+    "2026-10-23T23:30:00+02:00",
+    // Both on the day the clocks go back, a 25-hour day in Paris.
+    "2026-10-25T00:30:00+02:00",
+    "2026-10-25T23:30:00+01:00",
+    "2026-10-27T10:00:00+01:00",
+    null,
+  ]);
+  const clock = () => Date.parse("2026-10-27T12:00:00Z");
+  const admin = createAdmin({ upstream, corpus: "demo", clock });
+  const paris = await history(admin, "Europe/Paris");
+  assert.deepEqual(paris, {
+    time_zone: "Europe/Paris",
+    total: 5,
+    first_day: "2026-10-23",
+    today: "2026-10-27",
+    truncated: false,
+    days: [
+      { day: "2026-10-23", count: 1 },
+      { day: "2026-10-24", count: 0 },
+      { day: "2026-10-25", count: 2 },
+      { day: "2026-10-26", count: 0 },
+      { day: "2026-10-27", count: 1 },
+    ],
+  });
+  assert.ok(
+    calls.includes(
+      "/v0/records/count?corpus_id=demo&accepted_after=2026-10-25T00%3A00%3A00%2B02%3A00&accepted_before=2026-10-26T00%3A00%3A00%2B01%3A00",
+    ),
+    "each bound carries its own offset",
+  );
+  const utc = await history(admin, "UTC");
+  assert.deepEqual(
+    utc.days.map((d) => d.count),
+    [1, 1, 1, 0, 1],
+  );
+  await assert.rejects(history(admin, "Mars/Olympus"), { status: 422 });
+});
+
+test("past days are reread less often than today, and history is capped", async () => {
+  let now = Date.parse("2026-10-27T12:00:00Z");
+  const { upstream, calls } = counting([
+    "2026-10-20T10:00:00Z",
+    "2026-10-27T10:00:00Z",
+  ]);
+  const admin = createAdmin({ upstream, corpus: "demo", clock: () => now });
+  await history(admin, "UTC");
+  calls.length = 0;
+  now += 60_000;
+  await history(admin, "UTC");
+  assert.deepEqual(calls, [
+    "/v0/records/count?corpus_id=demo",
+    "/v0/records/count?corpus_id=demo&accepted_after=2026-10-27T00%3A00%3A00%2B00%3A00&accepted_before=2026-10-28T00%3A00%3A00%2B00%3A00",
+  ]);
+  calls.length = 0;
+  now += 15 * 60_000;
+  await history(admin, "UTC");
+  assert.ok(calls.length > 8, "every day is reread once the cache expires");
+
+  const old = counting(["2025-01-01T10:00:00Z", "2026-10-27T10:00:00Z"]);
+  const capped = await history(
+    createAdmin({ upstream: old.upstream, corpus: "demo", clock: () => now }),
+    "UTC",
+  );
+  assert.equal(capped.truncated, true);
+  assert.equal(capped.days.length, 366);
+  assert.equal(capped.days.at(-1).day, "2026-10-27");
+  assert.ok(old.calls.length < 400, `${old.calls.length} calls`);
 });

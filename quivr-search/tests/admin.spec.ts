@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 // The Admin tab against the real core (make verify-demo): a text added by
-// hand shows up in the live flow, advances until it is searchable, and opens
-// its timeline. Synthetic content only.
+// hand shows up in the live flow, advances until it is searchable, opens its
+// timeline, and counts among today's documents stored. Synthetic content only.
 const run = Date.now().toString(36);
 const title = `Relevé de suivi ${run}`;
 
@@ -73,4 +73,11 @@ test("un texte ajouté passe dans le flux en direct jusqu’à trouvable, puis o
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
   await expect(row).toBeFocused();
+
+  // The engine's count puts it among today's documents stored.
+  await page.getByRole("tab", { name: "En base" }).click();
+  const stored = page.getByRole("region", { name: "Documents en base" });
+  await expect(stored.locator(".usage-figure").nth(1)).toContainText(
+    /^[1-9][\d\s]*aujourd’hui/,
+  );
 });
