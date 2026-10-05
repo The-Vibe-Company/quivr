@@ -717,6 +717,7 @@ function AlertRow({
         <div
           className="spark"
           role="img"
+          tabIndex={0}
           data-tips
           aria-label={`Repérés sur 7 jours : ${week.map((d) => d.count).join(", ")}`}
         >
@@ -837,6 +838,7 @@ function Trend({ s }: { s: AlertStats }) {
       <div
         className="trend-plot"
         role="img"
+        tabIndex={0}
         data-tips
         aria-label={`Repérés par ${s.mode === "hours" ? "heure" : "jour"} : ${s.bars.map((b) => b.count).join(", ")}`}
       >
@@ -1077,6 +1079,7 @@ function AlertSheet({
             <div
               className="hours"
               role="img"
+              tabIndex={0}
               data-tips
               aria-label={`Repérés par heure de la journée : ${s.hours
                 .map((c, h) => (c ? `${h} h : ${c}` : ""))

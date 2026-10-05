@@ -325,7 +325,7 @@ export function Usage({ onUnauthorized, bare }: SectionProps) {
                       <Trend
                         values={columns}
                         label={trendLabel(countsIn(v.bins, q.points))}
-                        tips={columns.map((n, c) => `${ranges[c]} · ${n} fois`)}
+                        tips={columns.map((n, c) => `${ranges[c]} · ${count(n)} fois`)}
                       />
                       <span className="usage-query-count">
                         {count(q.count)}

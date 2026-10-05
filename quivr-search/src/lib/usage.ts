@@ -87,7 +87,8 @@ export function coarseRanges(bins: Bin[], window: UsageWindow) {
   const out: string[] = [];
   for (let i = 0; i < bins.length; i += size) {
     const group = bins.slice(i, i + size);
-    out.push(binRange({ ...group[0], end: group[group.length - 1].end }, window));
+    const span = { ...group[0], end: group[group.length - 1].end };
+    out.push(window === "24h" ? binRange(span, window) : `${dayTime.format(span.start)} – ${dayTime.format(span.end)}`);
   }
   return out;
 }

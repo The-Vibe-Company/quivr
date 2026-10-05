@@ -104,6 +104,7 @@ export function WeekSpark({
     <div
       className="sc-spark"
       role="img"
+      tabIndex={0}
       data-tips
       aria-label={`Articles reçus sur 7 jours : ${week.map((d) => d.count).join(", ")}`}
     >
@@ -302,8 +303,12 @@ function SourceCard({
   const retryable = c.enabled && (state === "failing" || state === "access_error" || state === "silent");
   const troubled = c.enabled && (problem || h.last_error) && state !== "active";
 
+  // A new card is scrolled to and takes the focus: the dialog that added it
+  // gave the focus back to its opener first (its cleanup runs before this).
   useEffect(() => {
-    if (highlight) card.current?.scrollIntoView({ block: "nearest" });
+    if (!highlight) return;
+    card.current?.scrollIntoView({ block: "nearest" });
+    card.current?.querySelector<HTMLElement>(".connector-link")?.focus({ preventScroll: true });
   }, [highlight]);
   // Keyboard focus follows the controls it came from: into the removal
   // confirmation and back to the card's menu, and stays on the switch.

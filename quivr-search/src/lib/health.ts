@@ -414,7 +414,7 @@ export function pluginRows(
       (p) =>
         `${bucketTime.format(new Date(p.start))} · ${
           p.count
-            ? `${p.count} appel${p.count > 1 ? "s" : ""}, ${Math.round((p.errors / p.count) * 100)} % d’erreurs`
+            ? `${calls(p.count)}, ${p.errors ? `${p.errors.toLocaleString("fr-FR")} en erreur` : "aucune erreur"}`
             : "aucun appel"
         }`,
     );

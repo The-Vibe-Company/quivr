@@ -524,7 +524,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       return json(route, { connector_id: c.connector_id, run_at: now }, 202);
     }
     const schedule = path.match(/^\/v0\/connectors\/([\w-]+)\/schedule$/);
-    if (schedule) {
+    if (schedule && method === "PUT") {
       const c = ws.connectors.find((x) => x.connector_id === schedule[1])!;
       c.schedule = { interval_seconds: body.interval_seconds };
       return json(route, c);

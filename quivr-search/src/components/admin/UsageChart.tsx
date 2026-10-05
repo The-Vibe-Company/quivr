@@ -214,7 +214,13 @@ export function Trend({
 }) {
   const max = Math.max(1, ...values);
   return (
-    <span className="usage-trend" role="img" aria-label={label} data-tips={tips ? "" : undefined}>
+    <span
+      className="usage-trend"
+      role="img"
+      aria-label={label}
+      tabIndex={tips ? 0 : undefined}
+      data-tips={tips ? "" : undefined}
+    >
       {values.map((v, i) => (
         <span
           key={i}

@@ -539,10 +539,10 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
     config: { url: "https://www.example.org/rss.xml" },
     schedule: { interval_seconds: 3600 },
   });
-  // Added: the dialog closes on the new card.
+  // Added: the dialog closes on the new card, which takes the focus.
   await expect(adding).toHaveCount(0);
   const list = page.getByRole("list", { name: "Sources" });
-  await expect(list.getByRole("button", { name: "www.example.org — À la une", exact: true })).toBeVisible();
+  await expect(list.getByRole("button", { name: "www.example.org — À la une", exact: true })).toBeFocused();
 
   await page.getByRole("button", { name: /^Ajouter une source Un site/ }).click();
   await expect(address).toBeFocused();
@@ -593,6 +593,12 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
   // A chart's bar says what it counts, drawn inside the modal (not under it).
   await settings.locator(".sc-spark [data-tip]").last().hover();
   await expect(settings.locator(".chart-tip")).toHaveText(/ · \d+ articles?$/);
+  // From the keyboard, the chart reads today first, then the day before on ←.
+  await settings.getByLabel("Nom").focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(settings.locator(".chart-tip")).toHaveText(/^Aujourd’hui · /);
+  await page.keyboard.press("ArrowLeft");
+  await expect(settings.locator(".chart-tip")).toHaveText(/^Hier · /);
   await settings.getByLabel("Nom").fill("Dépêches");
   await settings.getByRole("group", { name: "Vérifier les nouveautés toutes les…" }).getByRole("button", { name: "1 h" }).click();
   const scheduled = page

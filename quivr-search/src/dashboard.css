@@ -4419,6 +4419,14 @@ button.caught-title:hover {
   background: inherit;
   transform: translateX(-50%) rotate(45deg);
 }
+/* Near the window's top, below its bar, pointing up. */
+.chart-tip[data-below] {
+  transform: translate(-50%, 8px);
+}
+.chart-tip[data-below]::after {
+  top: -4px;
+  bottom: auto;
+}
 [data-tips] {
   cursor: default;
 }

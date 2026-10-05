@@ -406,7 +406,13 @@ export function ConnectorsView({
                       <PlusIcon size={22} />
                     </span>
                     <span className="add-label">Ajouter une source</span>
-                    <span className="add-hint">Un site, un journal ou un flux RSS</span>
+                    <span className="add-hint">
+                      {catalog.items.some((k) => k.kind === "rss")
+                        ? "Un site, un journal ou un flux RSS"
+                        : catalog.items.length
+                          ? "Un texte ou un connecteur d’un autre type"
+                          : "Un texte ajouté à la main"}
+                    </span>
                   </button>
                 </div>
               }

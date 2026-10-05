@@ -104,6 +104,7 @@ export function SideColumn({
             <div
               className="pulse"
               role="img"
+              tabIndex={0}
               data-tips
               aria-label={`${plural(total, "article")} ${today ? "depuis minuit" : "ce jour-là"}`}
             >
@@ -114,7 +115,7 @@ export function SideColumn({
                   data-now={(today && hour === hours.length - 1) || undefined}
                   data-empty={count === 0 || undefined}
                   style={count ? { height: `${Math.max(8, (count / most) * 100)}%` } : undefined}
-                  data-tip={`${hour} h – ${hour + 1} h · ${plural(count, "article")}`}
+                  data-tip={`${hour} h – ${today && hour === hours.length - 1 ? "maintenant" : `${hour + 1} h`} · ${plural(count, "article")}`}
                 />
               ))}
             </div>
