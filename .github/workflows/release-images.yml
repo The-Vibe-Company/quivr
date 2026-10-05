@@ -63,10 +63,8 @@ jobs:
           file: ${{ matrix.file }}
           target: ${{ matrix.target }}
           platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ matrix.image }}:${{ needs.prepare.outputs.version }}
-            ${{ matrix.image }}:sha-${{ needs.prepare.outputs.revision }}
+          # A failed smoke/signing run must not advertise unsigned release tags.
+          outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             VERSION=${{ needs.prepare.outputs.version }}
             REVISION=${{ needs.prepare.outputs.revision }}
@@ -125,17 +123,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          REVISION: ${{ needs.prepare.outputs.revision }}
         run: |
           cat signed-images/* | sort > images.txt
           # Rerunning an older release must not move the rolling alias backwards.
           published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
             --jq '.[] | select(any(.assets[]; .name == "images.txt")) | .tag_name' \
             | sort -V | tail -n 1)
+          gh release upload "$RELEASE_TAG" images.txt --repo "$GITHUB_REPOSITORY" --clobber
+          gh api "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$RELEASE_TAG" --jq .content | base64 --decode > CHANGELOG.md
+          gh release upload "$RELEASE_TAG" CHANGELOG.md --repo "$GITHUB_REPOSITORY" --clobber
+          while IFS= read -r image; do
+            docker buildx imagetools create --prefer-index=false \
+              --tag "${image%@*}:$VERSION" --tag "${image%@*}:sha-$REVISION" "$image"
+          done < images.txt
           if [ "$(printf '%s\n' "$published" "$RELEASE_TAG" | sort -V | tail -n 1)" = "$RELEASE_TAG" ]; then
             while IFS= read -r image; do
               docker buildx imagetools create --prefer-index=false --tag "${image%@*}:latest-alpha" "$image"
             done < images.txt
           fi
-          gh release upload "$RELEASE_TAG" images.txt --repo "$GITHUB_REPOSITORY" --clobber
-          gh api "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$RELEASE_TAG" --jq .content | base64 --decode > CHANGELOG.md
-          gh release upload "$RELEASE_TAG" CHANGELOG.md --repo "$GITHUB_REPOSITORY" --clobber

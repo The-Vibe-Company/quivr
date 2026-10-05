@@ -39,7 +39,7 @@ func cliSource() (commands.Source, error) {
 		Intro: "`quivr --version` prints the distribution release, revision, API version and plugin engine compatibility version. `quivr plugin` commands help write and certify a plugin. They need no configuration file and no running server. Run `quivr plugin` alone to list them.",
 		ExitCodes: []commands.ExitCode{
 			{Code: plugincli.ExitOK, Meaning: "success; for `test`, the plugin is certified"},
-			{Code: plugincli.ExitInvalid, Meaning: "the command failed: an invalid plugin or manifest, a target directory `init` cannot write, a plugin `dev` cannot start; for `test`, the plugin is not certified"},
+			{Code: plugincli.ExitInvalid, Meaning: "for plugin commands only: an invalid plugin or manifest, a target directory `init` cannot write, a plugin `dev` cannot start; for `test`, the plugin is not certified"},
 			{Code: plugincli.ExitUsage, Meaning: "invalid flags or arguments"},
 		},
 	}

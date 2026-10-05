@@ -10,7 +10,8 @@ merge release pull requests or create release tags.
 
 Set the repository Actions secret `RELEASE_PLEASE_TOKEN` to a fine-grained PAT
 or GitHub App token with Contents, Issues and Pull requests write access to this
-repository. For example, not run:
+repository. Run this locally as the repository administrator. This example was
+not run in this workspace and is not part of release automation:
 
 ```sh
 gh secret set RELEASE_PLEASE_TOKEN --repo The-Vibe-Company/quivr
@@ -38,13 +39,17 @@ The workflow refuses a tag outside `v2.0.0-alpha.N` or a version that differs
 from the checked-out manifest and `version.txt`. It:
 
 1. Discovers first-party plugin manifests and their Go or Python runtimes.
-2. Builds `linux/amd64` images tagged with the version and full `sha-<commit>`.
+2. Builds `linux/amd64` images and pushes only their immutable digests.
 3. Checks the real images as UID/GID 10001 with a read-only root and `/tmp` tmpfs.
 4. Signs and verifies each digest with cosign and GitHub OIDC.
-5. Advances `latest-alpha` after every image succeeds, without changing the
-   digest; a rerun of an older release does not move the alias backwards.
-6. Attaches `images.txt` (signed digests) and release-please's `CHANGELOG.md` to
+5. Attaches `images.txt` (signed digests) and release-please's `CHANGELOG.md` to
    the existing release. Its release notes already contain the changelog.
+6. Creates version/full `sha-<commit>` tags and advances `latest-alpha` without
+   changing the signed digests. Older reruns do not move that alias backwards.
+
+Rolling aliases update separately for each package; registries cannot promote
+multiple packages atomically. Deploy a shared release by its version or the
+signed digests in `images.txt`, rather than combining `latest-alpha` tags.
 
 GHCR package names use manifest ids: `quivr` for the engine and
 `quivr-plugin-<id>` for each plugin. For example, `quivr-plugin-core.ingest`

@@ -5,7 +5,8 @@ COPY sdks/go ./sdks/go
 COPY plugins ./plugins
 ARG PLUGIN
 RUN cd "plugins/${PLUGIN}" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/plugin . \
- && cp quivr-plugin.yaml /out/quivr-plugin.yaml
+ && cp quivr-plugin.yaml /out/quivr-plugin.yaml \
+ && mkdir -p /out/runtime/tmp && chmod 1777 /out/runtime/tmp
 
 FROM scratch AS go-plugin
 ARG VERSION=dev
@@ -17,6 +18,7 @@ LABEL org.opencontainers.image.source="https://github.com/The-Vibe-Company/quivr
 COPY --from=go-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=go-build /out/plugin /usr/local/bin/plugin
 COPY --from=go-build /out/quivr-plugin.yaml /app/quivr-plugin.yaml
+COPY --from=go-build /out/runtime/ /
 WORKDIR /app
 ENV QUIVR_PLUGIN_HOST=0.0.0.0 QUIVR_PLUGIN_PORT=8080 QUIVR_PLUGIN_MANIFEST=/app/quivr-plugin.yaml TMPDIR=/tmp
 VOLUME ["/tmp"]

@@ -41,6 +41,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -221,7 +222,7 @@ func Run(command string) error {
 	if cfg.DatabaseURL == "" || len(cfg.CursorKey) < 32 || len(cfg.Keys) == 0 {
 		return errors.New("database_url, cursor_key (32+ bytes) and keys required")
 	}
-	slog.Info("process starting", "component", command, "version", buildinfo.Version, "revision", buildinfo.Revision, "api_version", "v0", "plugin_engine_version", plugins.EngineVersion)
+	slog.Info("process starting", "component", command, "version", buildinfo.Version, "revision", buildinfo.Revision, "api_version", transport.V0, "plugin_engine_version", plugins.EngineVersion)
 	logger := slog.Default()
 	if command == "migrate" {
 		// Only api and worker handle credentials; migrate stays silent about them.

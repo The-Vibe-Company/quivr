@@ -11,6 +11,7 @@ COPY plugins ./plugins
 ARG VERSION=dev
 ARG REVISION=unknown
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/The-Vibe-Company/quivr/internal/buildinfo.Version=${VERSION} -X github.com/The-Vibe-Company/quivr/internal/buildinfo.Revision=${REVISION}" -o /out/quivr ./cmd/quivr \
+ && mkdir -p /out/runtime/tmp && chmod 1777 /out/runtime/tmp \
  && for manifest in plugins/*/quivr-plugin.yaml; do \
       id=$(basename "$(dirname "$manifest")"); \
       mkdir -p "/out/plugins/$id" && cp "$manifest" "/out/plugins/$id/"; \
@@ -26,6 +27,7 @@ LABEL org.opencontainers.image.source="https://github.com/The-Vibe-Company/quivr
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /out/quivr /usr/local/bin/quivr
 COPY --from=build /out/plugins /usr/share/quivr/plugins
+COPY --from=build /out/runtime/ /
 ENV TMPDIR=/tmp
 VOLUME ["/tmp"]
 USER 10001:10001

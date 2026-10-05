@@ -23,6 +23,10 @@ def docker(*args):
     return subprocess.check_output(['docker', *args], text=True).strip()
 
 
+def container_logs(container):
+    return subprocess.check_output(["docker", "logs", container], stderr=subprocess.STDOUT, text=True).strip()
+
+
 def check(args):
     docker('pull', args.image) if '@sha256:' in args.image else None
     config = json.loads(docker('image', 'inspect', args.image))[0]['Config']
@@ -64,16 +68,21 @@ def check(args):
                 with urllib.request.urlopen(f'http://{port}/v0/discovery', timeout=1) as response:
                     discovery = json.load(response)
                 break
+            except ValueError as error:
+                raise RuntimeError(f'invalid discovery JSON: {container_logs(container)}') from error
             except (OSError, urllib.error.URLError):
                 if time.monotonic() >= deadline or docker('inspect', '--format', '{{.State.Running}}', container) != 'true':
-                    raise RuntimeError(f'plugin did not serve discovery: {docker("logs", container)}')
+                    raise RuntimeError(f'plugin did not serve discovery: {container_logs(container)}')
         manifest = ROOT / 'plugins' / args.plugin / 'quivr-plugin.yaml'
         digest = 'sha256:' + hashlib.sha256(manifest.read_bytes()).hexdigest()
         if discovery['manifest_digest'] != digest:
             raise RuntimeError(f'image serves a different manifest: {discovery}')
-        with urllib.request.urlopen(f'http://{port}/v0/health', timeout=2) as response:
-            if response.status != 200:
-                raise RuntimeError('plugin health failed')
+        try:
+            with urllib.request.urlopen(f'http://{port}/v0/health', timeout=2) as response:
+                if response.status != 200 or json.load(response) != {"status": "ok"}:
+                    raise RuntimeError('plugin health failed')
+        except (OSError, ValueError, RuntimeError) as error:
+            raise RuntimeError(f'plugin health failed: {container_logs(container)}') from error
         print(f'{args.plugin}: read-only discovery and health passed ({digest})')
     finally:
         docker('rm', '--force', container)
