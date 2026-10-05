@@ -6,10 +6,12 @@ strings and dependency errors may contain credentials. Provisioning is explicit.
 import contextlib
 import decimal
 import datetime
+import functools
 import json
 import os
 import re
 import tempfile
+import time
 import uuid
 
 import embeddings
@@ -28,6 +30,24 @@ def lease_batch(keys, ttl=3600):
 
 class Unavailable(RuntimeError):
     pass
+
+
+class Contention(RuntimeError):
+    """A known-aborted SQL transaction can be retried without paid side effects."""
+
+
+def retry_contention(operation):
+    """Retry SQL-only operations after rollback; never replay connection errors."""
+    @functools.wraps(operation)
+    def run(*args, **kwargs):
+        delay = 1
+        while True:
+            try:
+                return operation(*args, **kwargs)
+            except Contention:
+                time.sleep(delay)
+                delay = min(delay * 2, 10)
+    return run
 
 
 class LeaseLost(RuntimeError):
@@ -93,6 +113,9 @@ class Store:
                     dsn = make_conninfo(dsn, sslrootcert=ca.name)
                 with psycopg.connect(dsn, connect_timeout=5, options='-c statement_timeout=10000') as db:
                     yield db
+        except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled,
+                psycopg.errors.DeadlockDetected, psycopg.errors.SerializationFailure):
+            raise Contention('evaluation control transaction timed out or conflicted; retrying') from None
         except psycopg.Error:
             raise Unavailable('evaluation control store unavailable; paid admission refused') from None
 
@@ -102,6 +125,7 @@ class Store:
             raise ValueError('campaign has not been registered')
         return row
 
+    @retry_contention
     def campaign(self, name, policy):
         for kind in ('provider', 'modal'):
             if money(policy[kind + '_daily_usd']) <= 0:
@@ -130,19 +154,14 @@ class Store:
         return self.claim_many(name, [key], ttl)[key]
 
     def claim_many(self, name, keys, ttl=3600, *, require_available=False):
-        with self.claim_batch(name, keys, ttl, require_available=require_available) as claims:
-            return claims
-
-    @contextlib.contextmanager
-    def claim_batch(self, name, keys, ttl=3600, *, require_available=False):
-        """Validate a bounded chunk inside its claim transaction.
-
-        Caller errors roll back new owners. Start paid work only after exit.
-        """
+        """Commit a bounded claim transaction before returning to the caller."""
         keys = lease_batch(keys, ttl)
+        return self._claim_many(name, keys, ttl, require_available=require_available)
+
+    @retry_contention
+    def _claim_many(self, name, keys, ttl, *, require_available):
         if not keys:
-            yield {}
-            return
+            return {}
         with self.transaction() as db:
             self.lock(db, name)
             rows = db.execute('SELECT key, owner, expires_at>clock_timestamp(), payload FROM eval_control.leases WHERE campaign=%s AND key=ANY(%s)', (name, keys)).fetchall()
@@ -161,11 +180,37 @@ class Store:
                     claims[key] = {'status': 'claimed', 'owner': owners[key]}
             if owners:
                 db.execute("INSERT INTO eval_control.leases(campaign,key,owner,expires_at) SELECT %s, key, owner, clock_timestamp()+%s*interval '1 second' FROM unnest(%s::text[],%s::text[]) AS batch(key,owner) ON CONFLICT (campaign,key) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at", (name, ttl, list(owners), list(owners.values())))
+        return claims
+
+    @contextlib.contextmanager
+    def claim_batch(self, name, keys, ttl=3600, *, require_available=False):
+        """Validate committed claims without holding a database transaction.
+
+        Release new unpublished owners on caller failure. Start paid work only
+        after the entire validation scope exits successfully.
+        """
+        claims = self.claim_many(name, keys, ttl, require_available=require_available)
+        try:
             yield claims
+        except BaseException:
+            self.release_many(name, {key: claim['owner'] for key, claim in claims.items()
+                                     if claim['status'] == 'claimed'})
+            raise
+
+    @retry_contention
+    def release_many(self, name, owners):
+        """Release only matching unpublished claims; leave replacements intact."""
+        keys = lease_batch(owners)
+        if not keys:
+            return
+        with self.transaction() as db:
+            self.lock(db, name)
+            db.execute('DELETE FROM eval_control.leases AS lease USING unnest(%s::text[],%s::text[]) AS batch(key,owner) WHERE lease.campaign=%s AND lease.key=batch.key AND lease.owner=batch.owner AND lease.payload IS NULL', (keys, [owners[k] for k in keys], name))
 
     def renew(self, name, key, owner, ttl=3600):
         self.renew_many(name, {key: owner}, ttl)
 
+    @retry_contention
     def renew_many(self, name, owners, ttl=3600):
         """Renew the entire chunk or roll back if any entry loses its fence."""
         keys = lease_batch(owners, ttl)
@@ -181,6 +226,7 @@ class Store:
         self.publish_many(name, {key: (owner, payload)})
         return payload
 
+    @retry_contention
     def publish_many(self, name, entries):
         """Publish a durable chunk or roll back on any owner/expiry mismatch."""
         keys = lease_batch(entries)
@@ -194,6 +240,7 @@ class Store:
             if len(rows) != len(keys):
                 raise LeaseLost('lease expired, completed or held by another worker')
 
+    @retry_contention
     def abandon(self, name, key, owner, status):
         """Persist unsuccessful attempt state and immediately allow a later retry."""
         if status not in ('capped', 'failed'):
@@ -213,6 +260,7 @@ class Store:
                 db.execute('UPDATE eval_control.campaigns SET stopped=%s WHERE name=%s', (stopped, name))
         return stopped
 
+    @retry_contention
     def stop(self, name, reason='operator stop'):
         # Leaves leases and uncertain spend intact until compute is terminated.
         if reason not in ('operator stop', 'campaign end reached', 'trial limit reached', 'supervisor failed'):
@@ -221,6 +269,7 @@ class Store:
             self.lock(db, name)
             db.execute('UPDATE eval_control.campaigns SET stopped=COALESCE(stopped,%s) WHERE name=%s', (reason, name))
 
+    @retry_contention
     def availability(self, name):
         """Read shared lifetime/day state for supervisors and independent watchdogs."""
         with self.transaction() as db:
@@ -243,6 +292,7 @@ class Store:
         return {'stopped': stopped, 'paused': bool(paused), 'day': str(day),
                 'confirmation_reads_left': policy.get('confirmation_limit', 10) - reads}
 
+    @retry_contention
     def reserve(self, name, kind, usd, metadata=None, lease=None):
         amount, refused = money(usd), False
         if kind not in ('provider', 'modal'):
@@ -283,6 +333,7 @@ class Store:
             raise embeddings.BudgetExceeded(kind + ' daily cap reached or campaign stopped')
         return rid
 
+    @retry_contention
     def settle(self, rid, usd, metadata=None):
         amount, exceeded = money(usd), False
         with self.transaction() as db:
@@ -302,6 +353,7 @@ class Store:
         if exceeded:
             raise embeddings.BudgetExceeded('confirmed usage exceeded reservation; campaign stopped')
 
+    @retry_contention
     def policy(self, name):
         """Read frozen admission policy; does not create or replace a campaign."""
         with self.transaction() as db:
@@ -311,11 +363,16 @@ class Store:
     def evidence(self, name, keys):
         """Read canonical evidence without claiming missing measurement keys."""
         keys = lease_batch(keys)
+        return self._evidence(name, keys)
+
+    @retry_contention
+    def _evidence(self, name, keys):
         with self.transaction() as db:
             self.lock(db, name)
             rows = db.execute('SELECT key,payload FROM eval_control.leases WHERE campaign=%s AND key=ANY(%s) AND payload IS NOT NULL', (name, keys)).fetchall()
         return dict(rows)
 
+    @retry_contention
     def register_confirmation(self, name, binding):
         encoded = json.dumps(binding, sort_keys=True, allow_nan=False)
         with self.transaction() as db:
@@ -331,6 +388,7 @@ class Store:
                 raise PermissionError('campaign stopped or ended')
             db.execute('INSERT INTO eval_control.confirmation_policies(campaign,policy) VALUES (%s,%s::jsonb)', (name, encoded))
 
+    @retry_contention
     def confirmation_policy(self, name):
         with self.transaction() as db:
             self.lock(db, name)
@@ -339,6 +397,7 @@ class Store:
             raise ValueError('confirmation policy has not been registered')
         return row[0]
 
+    @retry_contention
     def confirmation_intent(self, name, intent, owner):
         """Standalone dispatch intent, persisted before Modal app creation."""
         with self.transaction() as db:
@@ -348,6 +407,7 @@ class Store:
             self.fence(db, name, 'confirmation-resource/' + intent, owner)
             db.execute('INSERT INTO eval_control.confirmation_apps(campaign,intent,owner) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING', (name, intent, owner))
 
+    @retry_contention
     def bind_confirmation_app(self, name, intent, owner, app_id):
         """Bind the fenced, already persisted intent before runner dispatch."""
         if not isinstance(app_id, str) or not re.fullmatch(r'ap-[A-Za-z0-9_-]+', app_id):
@@ -361,6 +421,7 @@ class Store:
             if row is None:
                 raise LeaseLost('confirmation intent missing or already bound')
 
+    @retry_contention
     def confirmation_proof(self, name, key, owner):
         with self.transaction() as db:
             self.lock(db, name)
@@ -369,6 +430,7 @@ class Store:
             raise PermissionError('protected input was not admitted')
         return {'read_ordinal': row[0]}
 
+    @retry_contention
     def publish_confirmation(self, name, key, owner, payload):
         """Stop/end and the read/owner fence remain atomic at publication."""
         with self.transaction() as db:
@@ -382,6 +444,7 @@ class Store:
             if row is None:
                 raise LeaseLost('confirmation ownership or deadline lost before publication')
 
+    @retry_contention
     def confirmation(self, name, lease=None):
         """Atomic guard for trusted confirmation runners; tier 1 never calls it."""
         with self.transaction() as db:
@@ -406,6 +469,7 @@ class Store:
                 db.execute('INSERT INTO eval_control.confirmation_reads(campaign,key,owner,read_ordinal) VALUES (%s,%s,%s,%s)', (name, *lease, row[0]))
             return row[0]
 
+    @retry_contention
     def summary(self, name):
         with self.transaction() as db:
             self.lock(db, name)

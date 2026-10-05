@@ -5,6 +5,7 @@ admission ledger. Only explicit dev data is accepted by this tier.
 """
 import collections
 import concurrent.futures
+import contextlib
 import copy
 import hashlib
 import json
@@ -207,26 +208,28 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         wave_size = concurrency * control_store.LEASE_BATCH_SIZE
         for wave_start in range(0, len(unique), wave_size):
             wave = []
-            for start in range(wave_start, min(wave_start + wave_size, len(unique)), control_store.LEASE_BATCH_SIZE):
-                chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
-                if dataset['private']:
-                    pending = []
-                    for text in chunk:
-                        if (mode, text) in entries:
-                            cache_hits += 1
-                            continue
-                        pieces = (direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0]
-                                  if mode == 'document' else [text])
-                        pending.append((text, pieces, None, None))
-                else:
-                    keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
-                             'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
-                    started = time.monotonic()
-                    pending = []
-                    try:
-                        # A cache validation failure also rolls back new claims in
-                        # this chunk. No paid work starts before the wave validates.
-                        with budget.store.claim_batch(budget.campaign, keyed, ttl=86400, require_available=True) as claims:
+            with contextlib.ExitStack() as validation:
+                for start in range(wave_start, min(wave_start + wave_size, len(unique)), control_store.LEASE_BATCH_SIZE):
+                    chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
+                    if dataset['private']:
+                        pending = []
+                        for text in chunk:
+                            if (mode, text) in entries:
+                                cache_hits += 1
+                                continue
+                            pieces = (direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0]
+                                      if mode == 'document' else [text])
+                            pending.append((text, pieces, None, None))
+                    else:
+                        keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
+                                 'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
+                        started = time.monotonic()
+                        pending = []
+                        try:
+                            # Claims commit before volume I/O; validation failure
+                            # releases claims across the unstarted wave.
+                            claims = validation.enter_context(budget.store.claim_batch(
+                                budget.campaign, keyed, ttl=86400, require_available=True))
                             for cache_key, text in keyed.items():
                                 claim = claims[cache_key]
                                 if claim['status'] == 'done':
@@ -242,14 +245,14 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                                 else:
                                     pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
                                     pending.append((text, pieces, cache_key, claim['owner']))
-                    except control_store.LeaseBusy:
-                        raise RuntimeError('embedding cache fill already leased; retry after completion') from None
-                    LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
-                if pending:
-                    if not dataset['private']:
-                        budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=86400)
-                    budget.store.renew(budget.campaign, *budget.lease)
-                    wave.append(pending)
+                        except control_store.LeaseBusy:
+                            raise RuntimeError('embedding cache fill already leased; retry after completion') from None
+                        LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
+                    if pending:
+                        if not dataset['private']:
+                            budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=86400)
+                        budget.store.renew(budget.campaign, *budget.lease)
+                        wave.append(pending)
             if wave:
                 task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease) for _ in wave]
                 def fill(item):

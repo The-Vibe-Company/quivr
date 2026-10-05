@@ -6,7 +6,9 @@ import json
 import os
 import pathlib
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import control_store
@@ -88,6 +90,109 @@ class Lifecycle(unittest.TestCase):
             db.execute((pathlib.Path(__file__).parents[2] / 'deploy/mlflow/eval-control.sql').read_text())
         self.store = campaign_store.CampaignStore(self.dsn)
         self.store.register(self.value, 'a' * 40, 'sha256:fixture')
+
+    def test_three_cache_validators_leave_watchdog_responsive_and_claims_unique(self):
+        # SQL races alone miss locks held by the caller while reading a volume.
+        # Hold all three actual trial readers; the watchdog must finish before
+        # releasing them. Only provider I/O and unrelated scoring are fake.
+        import hashlib
+        import direct_bakeoff
+        import search_campaign
+        import search_trial
+        name = self.value['name']
+        self.store.acquire(name)
+        cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture', 'dimensions': 2})
+        identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
+        identity['timing'] = 'local-compute-v2'
+        prices = {'Cohere-Embed-V5-Fast': .08}
+        ready = [threading.Event() for _ in range(3)]
+        release = threading.Event()
+        readers = threading.local()
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp, 'cached.json')
+            entry = {'vectors': [[1, 0]], 'tokens': 1, 'embedding_seconds': 0}
+            path.write_text(json.dumps(entry))
+            key = 'embedding/' + search_trial.digest({'config': identity, 'mode': 'document',
+                'text_hash': hashlib.sha256(b'cached passage').hexdigest()})
+            claim = self.store.claim(name, key)
+            self.store.publish(name, key, claim['owner'], {'filename': path.name, 'digest': search_trial.digest(entry)})
+            read_text = pathlib.Path.read_text
+            def slow_read(cache_path, *args, **kwargs):
+                if cache_path == path:
+                    ready[readers.number].set()
+                    if not release.wait(5):
+                        raise AssertionError('watchdog did not release cache readers')
+                return read_text(cache_path, *args, **kwargs)
+            def respond(request, timeout):
+                count = len(json.loads(request.data)['texts'])
+                return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
+                    'meta': {'billed_units': {'input_tokens': count}}}).encode())
+            def trial(number):
+                readers.number = number
+                claim = self.store.claim(name, 'trial/' + str(number))
+                budget = control_store.Budget(self.store, name, ('trial/' + str(number), claim['owner']))
+                client = direct_bakeoff.Hosted('https://example.com', 'fixture', budget, 'tiny', prices)
+                client.opener.open = respond
+                data = {'corpus': {'a': {'text': 'fresh passage ' + str(number)}, 'b': {'text': 'cached passage'}},
+                        'queries': {'q': 'question ' + str(number)}, 'qrels': {'q': {'b': 1}}}
+                dataset = {'name': 'tiny', 'version': '1', 'split': 'dev', 'private': False}
+                return search_trial.measure(cfg, data, dataset, temp, budget, client, prices, .001, fresh_latency=False)
+            scores = {'mean': {'ndcg@10': 1}, 'per_query': {}}
+            with mock.patch.object(pathlib.Path, 'read_text', slow_read), mock.patch('scoring.score', return_value=scores):
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    futures = [pool.submit(trial, i) for i in range(3)]
+                    try:
+                        self.assertTrue(all(event.wait(2) for event in ready), 'three validators must enter cache reads')
+                        watchdog = pool.submit(search_campaign.watchdog_once, self.store, name, mock.Mock())
+                        self.assertFalse(watchdog.result(timeout=2)['stopped'])
+                        # A second claimer cannot steal any reader's fresh entry.
+                        with self.store.transaction() as db:
+                            keys = [row[0] for row in db.execute("SELECT key FROM eval_control.leases WHERE campaign=%s AND key LIKE 'embedding/%%' AND payload IS NULL", (name,)).fetchall()]
+                        self.assertEqual(len(keys), 3)
+                        self.assertTrue(all(c['status'] == 'leased' for c in self.store.claim_many(name, keys).values()))
+                    finally:
+                        release.set()
+                    self.assertEqual([f.result(timeout=5)['cost']['cache_hits'] for f in futures], [1, 1, 1])
+            self.assertTrue(all(c['status'] == 'done' for c in self.store.claim_many(name, keys).values()))
+
+    def test_watchdog_and_supervisor_retry_sql_contention_without_losing_ownership(self):
+        # Real lock/statement timeouts must not become an unavailable-store
+        # crash. Release the blocker at the retry wait, never by sleeping.
+        import psycopg
+        import search_campaign
+        name = self.value['name']
+        owner = self.store.acquire(name)
+        done = self.store.claim(name, 'evidence')
+        self.store.publish(name, 'evidence', done['owner'], {'canonical': True})
+        connect = psycopg.connect
+        for operation, timeout in (('watchdog', 'lock_timeout'), ('renew', 'statement_timeout'),
+                                   ('claims', 'lock_timeout'), ('evidence', 'statement_timeout')):
+            with self.subTest(operation=operation), connect(self.dsn) as blocker:
+                blocker.execute('SELECT name FROM eval_control.campaigns WHERE name=%s FOR UPDATE', (name,))
+                def bounded(*args, **kwargs):
+                    kwargs['options'] = '-c ' + timeout + '=25'
+                    return connect(*args, **kwargs)
+                waits = []
+                def backoff(delay):
+                    waits.append(delay)
+                    if len(waits) == 2:
+                        blocker.rollback()
+                with mock.patch('psycopg.connect', side_effect=bounded), mock.patch('time.sleep', side_effect=backoff):
+                    if operation == 'watchdog':
+                        status = search_campaign.watchdog_once(self.store, name, mock.Mock())
+                        self.assertFalse(status['paused'])
+                    elif operation == 'renew':
+                        self.store.renew_owner(name, owner)
+                    elif operation == 'claims':
+                        claims = self.store.claim_many(name, iter(['first', 'second']))
+                        self.assertEqual(set(claims), {'first', 'second'})
+                        self.assertTrue(all(c['status'] == 'claimed' for c in claims.values()))
+                    else:
+                        self.assertEqual(self.store.evidence(name, iter(['evidence'])), {'evidence': {'canonical': True}})
+                self.assertEqual(waits, [1, 2])
+                state = self.store.snapshot(name)
+                self.assertEqual(state['owner'], owner)
+                self.assertTrue(state['live'])
 
     def test_signal_stops_compute_before_blocked_measurement_futures_drain(self):
         import signal

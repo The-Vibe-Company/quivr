@@ -292,8 +292,10 @@ class Control(unittest.TestCase):
         with psycopg.connect(self.dsn) as db:
             self.assertEqual(db.execute('SELECT expires_at,payload FROM eval_control.leases WHERE campaign=%s AND key=%s', (self.name, keys[0])).fetchone(), (before, None))
         replacement = self.store.claim_many(self.name, [keys[1]])[keys[1]]
+        self.store.release_many(self.name, {keys[1]: owners[keys[1]]})
         owners[keys[1]] = replacement['owner']
         self.store.publish_many(self.name, {k: (o, {'canonical': True}) for k, o in owners.items()})
+        self.store.release_many(self.name, owners)
         with self.assertRaises(control_store.LeaseLost):
             self.store.renew_many(self.name, owners)
         self.assertTrue(all(c == {'status': 'done', 'payload': {'canonical': True}} for c in self.store.claim_many(self.name, keys).values()))
