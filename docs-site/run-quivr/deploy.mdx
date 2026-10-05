@@ -74,6 +74,12 @@ Engine logs are JSON lines on stdout. Set `log_level` or `QUIVR_LOG_LEVEL` to `d
 
 Stop a process with SIGTERM or SIGINT. Its `/readyz` becomes `503` first, then it drains admitted requests and background work. `shutdown_grace` defaults to `60s`; set your platform's termination timeout long enough to allow that budget. The stable lifecycle events are `quivr.start`, `quivr.ready`, `quivr.draining` and `quivr.stop`. A readiness event means the process passed its readiness criteria, including the API’s query warm-up timeout described above; a start event alone does not.
 
+## Follow a request across services
+
+Set `telemetry.endpoint` to your OpenTelemetry collector in the API and worker configuration, then restart both. The [OpenTelemetry reference](/reference/configuration#opentelemetry) lists HTTP/gRPC, authentication headers and sampling settings. Search your collector by the response’s `X-Trace-ID`, or the `trace_id` in a JSON error or log line. The trace continues through durable background work and outgoing plugin and webhook requests.
+
+Keep `/metrics` scraping as it is: metric names and buckets remain unchanged. Each plugin process needs its own exporter configuration to send its internal spans to the collector.
+
 ## Example deployments
 
 - **Local:** `make dev`, in the [Quickstart](/quickstart).

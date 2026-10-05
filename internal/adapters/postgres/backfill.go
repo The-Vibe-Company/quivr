@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
@@ -300,7 +301,7 @@ func insertBackfill(ctx context.Context, tx pgx.Tx, org, id, corpusID, key strin
 	if _, err = tx.Exec(ctx, `INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id,ingestion_registration_id) VALUES('operation',$1,$2,$3,$4)`, org, id, plan, spec.RegistrationID); err != nil {
 		return operations.Operation{}, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id) VALUES($1,$2)`, org, id); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id,trace_context) VALUES($1,$2,$3)`, org, id, telemetry.Encode(ctx)); err != nil {
 		return operations.Operation{}, err
 	}
 	if err = operationEvent(ctx, tx, org, corpusID, id, operations.StateQueued); err != nil {

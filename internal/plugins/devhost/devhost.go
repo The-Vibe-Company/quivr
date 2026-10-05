@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 // Issue codes added by the local host, beside the codes of package plugins.
@@ -176,6 +177,7 @@ func get(ctx context.Context, url string, timeout time.Duration) (int, []byte, e
 	if err != nil {
 		return 0, nil, err
 	}
+	telemetry.Inject(ctx, req.Header)
 	if err := plugins.SignHTTPRequest(req, nil); err != nil {
 		return 0, nil, err
 	}
@@ -488,6 +490,7 @@ func invoke(ctx context.Context, baseURL, route string, request []byte, maxRespo
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	telemetry.Inject(ctx, req.Header)
 	if err := plugins.SignHTTPRequest(req, request); err != nil {
 		return nil, err
 	}

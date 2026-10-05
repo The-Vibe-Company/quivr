@@ -1802,10 +1802,19 @@ type Error struct {
 	Code string `json:"code"`
 
 	// Field JSON Pointer (RFC 6901) to the request member that caused a 422, when known (for example /config/url or /credential/secret/token on connector commands).
-	Field     *string `json:"field,omitempty"`
-	Message   string  `json:"message"`
+	Field   *string `json:"field,omitempty"`
+	Message string  `json:"message"`
+
+	// RequestId Bounded caller X-Request-ID, or an engine-generated correlation ID.
+	RequestId *string `json:"request_id,omitempty"`
 	ResyncUrl *string `json:"resync_url,omitempty"`
 	Retryable bool    `json:"retryable"`
+
+	// SpanId W3C span ID of the API handler when a trace context is present.
+	SpanId *string `json:"span_id,omitempty"`
+
+	// TraceId W3C trace ID when a trace context is present.
+	TraceId *string `json:"trace_id,omitempty"`
 }
 
 // EvaluationBacklogPage defines model for EvaluationBacklogPage.

@@ -64,6 +64,7 @@ func (a *API) batchEntry(ctx context.Context, submit content.Submitter, index in
 	}
 	if err != nil {
 		_, e := errorResponse(err, publicerr.ContentUnavailable)
+		correlateError(ctx, &e)
 		item.Error = &e
 		return item
 	}
