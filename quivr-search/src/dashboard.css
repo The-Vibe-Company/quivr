@@ -74,8 +74,6 @@
     --ink-soft: #a5a7ae;
     --ink-faint: #8c8e96;
     --hover: #212225;
-    /* A feed row under the pointer: the panel is too close to the feed here. */
-    --row-hover: var(--hover);
     --pressed: #28292d;
     --selected: #15291f;
     --fresh: #173a2d;
@@ -114,7 +112,6 @@
   --ink-soft: #a5a7ae;
   --ink-faint: #8c8e96;
   --hover: #212225;
-  --row-hover: var(--hover);
   --pressed: #28292d;
   --selected: #15291f;
   --fresh: #173a2d;
@@ -1133,10 +1130,18 @@ button.moment-pill:hover {
   padding: 10px 24px 13px 44px;
   background: var(--row-bg);
   cursor: pointer;
-  transition: background 120ms;
+  transition:
+    background 120ms,
+    box-shadow 120ms;
 }
-.row:hover {
-  --row-bg: var(--row-hover, var(--panel));
+/* The row under the pointer stands out from the feed in either theme: a
+   shade of the ink over the feed, and a hairline around it. A touch screen
+   has no pointer resting on a row: the last row tapped stays as it was. */
+@media (hover: hover) {
+  .row:hover {
+    --row-bg: color-mix(in srgb, var(--ink) 7%, var(--feed-bg));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
 }
 /* A new arrival lights up, then fades back. */
 .row[data-fresh] {
