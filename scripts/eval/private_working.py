@@ -85,26 +85,29 @@ def trial(request, store):
         started = time.monotonic()
         measurements = search_trial.measure_pair(configs, data, dataset, root / 'vectors', budgets, clients,
             policy['prices'], float(policy['modal_usd_per_second']), request['fresh_latency'],
-            os.environ.get('TYPESAFE_API_KEY', ''), private_vectors=private_vectors)
+            os.environ.get('TYPESAFE_API_KEY', ''), private_vectors=private_vectors, quality_concurrency=policy['quality_concurrency'])
         for side, cfg in configs.items():
             measured = measurements[side]
             measured['duration_seconds'] = time.monotonic() - started
-            measured['cost']['resource_class'] = 'cpu8-memory16384'
+            measured['cost']['resource_class'] = search_trial.resource_class(policy)
             full_cfg = {**cfg, 'paired_side': side, 'profile': policy['profile'], 'campaign': request['campaign'],
                         'campaign_policy_hash': search_trial.digest(policy), 'fresh_latency': request['fresh_latency'],
                         'paired_candidate_hash': search_trial.digest(request['config']),
                         'prices_usd_per_million': policy['prices'],
                         'modal_usd_per_second': policy['modal_usd_per_second'],
-                        'resource_class': 'cpu8-memory16384', 'price_revision': policy['price_revision']}
+                        'quality_concurrency': policy['quality_concurrency'],
+                        'resource_class': search_trial.resource_class(policy), 'price_revision': policy['price_revision']}
             pairs[side] = search_trial.record(measured, full_cfg, policy['experiment'],
                                              request['git_sha'], request['scorer_digest'])
             # Explicit output fields only: latency IDs, per-query scores and
             # arbitrary dependency metadata never become durable evidence.
             rows[side] = {**pairs[side], 'per_query': {}, 'cost': {
-                'provider': budgets[side].summary(), 'resource_class': 'cpu8-memory16384',
+                'provider': budgets[side].summary(), 'resource_class': search_trial.resource_class(policy),
                 'latency_method': measured['cost']['latency_method'],
                 'price_basis': measured['cost']['price_basis'],
                 'search_timing_ms': measured['cost']['search_timing_ms'],
+                'phase_usage': measured['cost']['phase_usage'],
+                'quality_concurrency': measured['cost']['quality_concurrency'],
                 'search_provider_usd': measured['cost']['search_provider_usd'],
                 'search_compute_usd': measured['cost']['search_compute_usd']}}
         verdict = gates.evaluate({name: pairs}, {**policy, 'sets': {name: policy['sets'][name]}})

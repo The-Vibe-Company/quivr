@@ -58,10 +58,9 @@ deployment `revision`, dimensions and provider price. Fusion uses weighted
 reciprocal ranks of exact best-piece cosine and BM25; `dense_weight=1` is dense
 only, `0` is BM25 only. `candidate_count` bounds optional Jev reranking.
 
-The sample uses a **conservative assumed compute rate**, not a Modal quote.
-Review it for eight CPU cores and 16 GiB memory before paid dispatch. Provider
-defaults are dated 2026-10-03 list-price estimates. Supply a complete `prices`
-map and new `price_revision` when your deployment prices differ.
+In the policy, `modal_cpu` / `modal_memory_mib` bound containers (defaults: 2 cores / 4096 MiB). `modal_usd_per_second` = CPU × `modal_cpu_usd_per_second` + MiB / 1024 × `modal_gib_usd_per_second`.
+Defaults estimate [Modal function pricing](https://modal.com/pricing) on 2026-10-05; review before dispatch. An explicit aggregate rate overrides the estimate; remove it for size-derived pricing. Underpricing is refused.
+Provider defaults estimate 2026-10-03 prices. Change `prices` and `price_revision` as needed.
 
 This dry run was exercised locally:
 
@@ -72,7 +71,7 @@ python scripts/eval/modal_search.py \
 ```
 
 It prints the policy, candidate and maximum reservation per invocation, without
-loading datasets or keys. The sample reserves $2.10 for each dispatched worker.
+loading datasets or keys. The sample reserves about $0.074 for each dispatched worker.
 The default daily caps are $1,000 each for provider APIs and runner compute;
 the sample deliberately uses smaller caps.
 
@@ -168,8 +167,9 @@ Hosted document fills overlap at most four 128-entry cache chunks; each provider
 attempt reserves and settles independently. Hosted admission halves after 429s
 and recovers one slot after 16 times the current slot count in clean requests;
 requests already in flight drain at the old limit. Local e5 and quality-query
-fills stay serial and batched. Claims and validation precede paid work; commits and fenced
-publication stay serial. Failed waves drain attempts and retain uncertain charges.
+embedding fills stay serial and batched. The policy field `quality_concurrency` bounds re-ranking waves (1–32, default 8), preserving rankings, scores and per-search prices. Fresh warmup and latency stay serial.
+Attempts reserve independently; failed waves drain and retain uncertain charges. `cost.phase_usage` reports process CPU and elapsed seconds for indexing, quality, scoring and fresh latency, including warmup, excluding paired idle time. CPU/elapsed estimates average cores used, separately from serving cost.
+Claims precede paid work; commits and fenced publication stay serial.
 Chunks commit before publication; lost ownership rolls it back. Logs exclude texts.
 Reruns recover evidence and tracking writes. Keep the Volume and schema until
 results sync and campaign archival; never delete unknown reservations.

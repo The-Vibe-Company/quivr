@@ -32,6 +32,10 @@ LATENCY_SAMPLE_SIZE = 50
 LATENCY_SAMPLE_POLICY = 'sha256-query-id-v1; max=50'
 
 
+def resource_class(policy):
+    return f"cpu{policy['modal_cpu']}-memory{policy['modal_memory_mib']}"
+
+
 def digest(value):
     return hashlib.sha256(results.encode(value).encode()).hexdigest()
 
@@ -160,10 +164,21 @@ def rerank(query, passages, budget, key, price, timing=None):
 
 
 def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
-            fresh_latency=True, rerank_key='', flush=lambda: None, private_vectors=None):
+            fresh_latency=True, rerank_key='', flush=lambda: None, private_vectors=None, quality_concurrency=8):
     if dataset['split'] != 'dev':
         raise PermissionError('tier 1 accepts campaign-dev data only')
     cfg = configuration(cfg)
+    if type(quality_concurrency) is not int or not 1 <= quality_concurrency <= 32:
+        raise ValueError('quality concurrency must be 1..32')
+    phase_usage = {}
+    def phase_start():
+        return time.monotonic(), time.process_time()
+    def phase_end(name, started):
+        elapsed, cpu = time.monotonic() - started[0], time.process_time() - started[1]
+        usage = phase_usage.setdefault(name, {'elapsed_seconds': 0., 'cpu_seconds': 0.})
+        usage['elapsed_seconds'] += max(0, elapsed)
+        usage['cpu_seconds'] += max(0, cpu)
+    indexing_phase = phase_start()
     LOG.info('indexing started')
     indexing_started = time.monotonic()
     doc_ids, query_ids = sorted(data['corpus']), sorted(data['qrels'])
@@ -325,16 +340,17 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     index = SearchIndex(docs, doc_ids, piece_vectors, owners, cfg)
     # Include document preparation/cache processing, excluding quality queries.
     index_seconds += index_overhead_seconds + max(0, time.monotonic() - assembly_started)
+    phase_end('indexing', indexing_phase)
     LOG.info('indexing complete documents=%d queries=%d', len(docs), len(query_ids))
     ranking, latencies, provider_latencies, local_latencies = {}, [], [], []
     provider_prices, compute_prices = [], []
     provider_rate = prices.get(cfg['model'], 0) / 1_000_000
 
-    def search(qid, fresh, dense=None, batch_seconds=0):
+    def search(qid, fresh, dense=None, batch_seconds=0, search_budget=budget):
         if fresh:
             budget.store.renew(budget.campaign, *budget.lease)
         query = data['queries'][qid]
-        before = budget.summary()['cost_upper_bound_usd']
+        before = search_budget.summary()['cost_upper_bound_usd']
         started = time.monotonic()
         provider_seconds = 0
         if not semantic:
@@ -354,19 +370,20 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             if not rerank_key:
                 raise ValueError('reranker secret is absent')
             timing = {}
-            selected = rerank(query, {d: docs[doc_ids.index(d)] for d in selected}, budget, rerank_key, prices['jev-1.13.0'], timing)
+            selected = rerank(query, {d: docs[doc_ids.index(d)] for d in selected}, search_budget, rerank_key, prices['jev-1.13.0'], timing)
             provider_seconds += timing['provider']
         else:
             timing = {'blocked': 0}
         local_seconds = local_embedding + max(0, time.monotonic() - local_started - timing['blocked'])
         elapsed = time.monotonic() - started
-        spend = budget.summary()['cost_upper_bound_usd'] - before
+        spend = search_budget.summary()['cost_upper_bound_usd'] - before
         return (selected[:10], elapsed, spend + query_tokens * provider_rate,
                 (local_seconds + embedding_seconds + batch_seconds) * compute_rate,
                 provider_seconds, local_seconds)
 
     # Bound temporary piece-score memory while batching quality-only work.
     # Fresh serving below always computes its own per-query dense scores.
+    quality_phase = phase_start()
     for start in range(0, len(query_ids), 32):
         # Quality work uses prepared vectors/indexes: renew once per bounded
         # batch, not one remote SQL round trip for every cached query. Paid
@@ -377,16 +394,39 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         dense_batch = index.dense_scores([entries[('query', data['queries'][q])]['vectors'][0]
                                           for q in batch_ids]) if semantic else [None] * len(batch_ids)
         batch_seconds = (time.monotonic() - batch_started) / len(batch_ids)
-        for position, (qid, dense) in enumerate(zip(batch_ids, dense_batch), start + 1):
-            selected, _, provider_price, compute_price, _, _ = search(qid, False, dense, batch_seconds)
-            ranking[qid] = selected
-            if not fresh_latency:
-                provider_prices.append(provider_price)
-                compute_prices.append(compute_price)
-            if position % 10 == 0 or position == len(query_ids):
-                LOG.info('search progress completed=%d total=%d', position, len(query_ids))
+        concurrency = quality_concurrency if cfg['reranker'] == 'jev' else 1
+        for offset in range(0, len(batch_ids), concurrency):
+            wave_ids = batch_ids[offset:offset + concurrency]
+            wave_dense = dense_batch[offset:offset + concurrency]
+            # Independent views prevent overlapping paid attempts from inflating
+            # a search's price. SQL still owns campaign-wide admission.
+            task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease) for _ in wave_ids]
+            try:
+                if concurrency == 1:
+                    searched = [search(wave_ids[0], False, wave_dense[0], batch_seconds, task_budgets[0])]
+                else:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+                        futures = [pool.submit(search, qid, False, dense, batch_seconds, task_budget)
+                                   for qid, dense, task_budget in zip(wave_ids, wave_dense, task_budgets)]
+                        searched = [future.result() for future in futures]
+            finally:
+                # Drain admitted calls before propagating failure; retain both
+                # confirmed and uncertain usage even if another task is refused.
+                for task_budget in task_budgets:
+                    budget.calls.extend(task_budget.calls)
+            for position, (qid, found) in enumerate(zip(wave_ids, searched), start + offset + 1):
+                selected, _, provider_price, compute_price, _, _ = found
+                ranking[qid] = selected
+                if not fresh_latency:
+                    provider_prices.append(provider_price)
+                    compute_prices.append(compute_price)
+                if position % 10 == 0 or position == len(query_ids):
+                    LOG.info('search progress completed=%d total=%d', position, len(query_ids))
+    phase_end('quality', quality_phase)
+    scoring_phase = phase_start()
     LOG.info('scoring started queries=%d', len(query_ids))
     scores = scoring.score(data['qrels'], ranking)
+    phase_end('scoring', scoring_phase)
     LOG.info('scoring complete queries=%d', len(query_ids))
     # Preparation barrier: paired callers prepare both indexes before warmup.
     yield
@@ -396,10 +436,14 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         sample = {'policy': LATENCY_SAMPLE_POLICY, 'query_ids': timed_ids, 'warmup_query_ids': [query_ids[0]]}
         # Warmup exercises the same fresh serving path on both configurations.
         # Its charges stay in the ledger, outside per-search metrics.
+        latency_phase = phase_start()
         search(query_ids[0], True)
+        phase_end('latency', latency_phase)
         yield
         for position, qid in enumerate(timed_ids, 1):
+            latency_phase = phase_start()
             _, elapsed, provider_price, compute_price, provider_seconds, local_seconds = search(qid, True)
+            phase_end('latency', latency_phase)
             latencies.append(1000 * elapsed)
             provider_latencies.append(1000 * provider_seconds)
             local_latencies.append(1000 * local_seconds)
@@ -423,7 +467,7 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                     'provider_p50': percentile(provider_latencies, .5), 'provider_p95': percentile(provider_latencies, .95),
                     'local_p50': percentile(local_latencies, .5), 'local_p95': percentile(local_latencies, .95)},
                 'index_tokens_attributed': index_tokens, 'index_embedding_seconds_attributed': index_seconds,
-                'cache_hits': cache_hits, 'latency_sample': sample, 'latency_method': 'serial fresh query embedding+retrieval+rerank; fixed hash sample up to 50; one fixed first-query warmup' if fresh_latency else 'cached exploration; p95 unavailable',
+                'cache_hits': cache_hits, 'phase_usage': phase_usage, 'quality_concurrency': quality_concurrency, 'latency_sample': sample, 'latency_method': 'serial fresh query embedding+retrieval+rerank; fixed hash sample up to 50; one fixed first-query warmup' if fresh_latency else 'cached exploration; p95 unavailable',
                 'price_basis': 'frozen rates, provider usage upper bound plus local compute; excludes HTTP, retry and ledger waits; local-compute-v2'},
             'machine': socket.gethostname()}
 
@@ -439,10 +483,10 @@ def measure(*args, **kwargs):
 
 
 def measure_pair(configs, data, dataset, cache, budgets, clients, prices, compute_rate,
-                 fresh_latency=True, rerank_key='', private_vectors=None):
+                 fresh_latency=True, rerank_key='', private_vectors=None, quality_concurrency=8):
     """Prepare both sides, then alternate warmups and identical query samples."""
     runs = {side: _measure(cfg, data, dataset, cache, budgets[side], clients[side], prices,
-                          compute_rate, fresh_latency, rerank_key, private_vectors=private_vectors)
+                          compute_rate, fresh_latency, rerank_key, private_vectors=private_vectors, quality_concurrency=quality_concurrency)
             for side, cfg in configs.items()}
     measured = {}
     try:

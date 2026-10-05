@@ -120,6 +120,124 @@ class Reranker(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN') and importlib.util.find_spec('ranx'), 'needs eval dependencies and disposable PostgreSQL')
 class Trial(unittest.TestCase):
+    def test_quality_overlap_preserves_rankings_prices_and_serial_latency(self):
+        # Own concurrent quality ordering and per-search prices at measure():
+        # real SQL admission/scoring, only HTTP is fake. Existing embedding
+        # concurrency tests cannot detect cross-query rerank cost attribution.
+        data = {'corpus': {'a': {'text': 'apple'}, 'b': {'text': 'pear'}},
+                'queries': {f'q{i:02}': f'question {i}' for i in range(10)},
+                'qrels': {f'q{i:02}': {'a': 1} for i in range(10)}}
+        cfg = search_trial.configuration({'dense_weight': 0, 'reranker': 'jev'})
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        for limit in (1, 3, 8):
+            for fresh in (False, True):
+                with self.subTest(limit=limit, fresh=fresh), tempfile.TemporaryDirectory() as temp:
+                    campaign = uuid.uuid4().hex
+                    store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
+                    lease = store.claim(campaign, 'trial')
+                    budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+                    finished = [threading.Event() for _ in range(10)]
+                    arrivals = {start: threading.Barrier(min(limit, 10 - start)) for start in range(0, 10, limit)}
+                    lock, completed, visits = threading.Lock(), [], collections.Counter()
+                    active, peak = 0, 0
+                    latency_calls = []
+                    def provider(request, timeout):
+                        nonlocal active, peak
+                        payload = json.loads(request.data)
+                        query = int(payload['state']['query'].split()[-1])
+                        with lock:
+                            active += 1
+                            peak = max(peak, active)
+                            quality = visits[query] == 0
+                            visits[query] += 1
+                            if not quality:
+                                self.assertTrue(all(event.is_set() for event in finished))
+                                latency_calls.append(query)
+                                self.assertEqual(active, 1)
+                        if quality:
+                            arrivals[query // limit * limit].wait(5)
+                        if quality and query < min((query // limit + 1) * limit, 10) - 1:
+                            self.assertTrue(finished[query + 1].wait(5), 'quality calls did not overlap')
+                        with lock:
+                            if quality:
+                                completed.append(query)
+                                finished[query].set()
+                            active -= 1
+                        scores = {'a': .9 if query % 2 == 0 else .1, 'b': .1 if query % 2 == 0 else .9}
+                        return io.BytesIO(json.dumps({'model': 'jev-1.13.0',
+                            'usage': {'input_tokens': (query + 1) * 5},
+                            'answers': {doc: {'noul': value} for doc, value in scores.items()}}).encode())
+                    original_score = search_trial.scoring.score
+                    rankings = {}
+                    def score(qrels, ranking):
+                        rankings.update(ranking)
+                        return original_score(qrels, ranking)
+                    with mock.patch('urllib.request.OpenerDirector.open', side_effect=provider), \
+                            mock.patch.object(search_trial.scoring, 'score', side_effect=score):
+                        measured = search_trial.measure(cfg, data, {'split': 'dev', 'private': False}, temp,
+                            budget, None, {'jev-1.13.0': .042}, 0, fresh_latency=fresh,
+                            rerank_key='fixture-key', quality_concurrency=limit)
+                    expected_order = [i for start in range(0, 10, limit)
+                                      for i in reversed(range(start, min(start + limit, 10)))]
+                    self.assertEqual(completed, expected_order)
+                    self.assertEqual(peak, limit)
+                    self.assertEqual(list(rankings), sorted(data['queries']))
+                    for i in range(10):
+                        self.assertEqual(rankings[f'q{i:02}'], ['a', 'b'] if i % 2 == 0 else ['b', 'a'])
+                        self.assertAlmostEqual(measured['per_query']['ndcg@10'][f'q{i:02}'],
+                                               1 if i % 2 == 0 else 1 / math.log2(3))
+                    self.assertAlmostEqual(measured['cost']['search_provider_usd'], 27.5 * .042 / 1_000_000)
+                    self.assertEqual(measured['cost']['provider']['confirmed_input_tokens'], 555 if fresh else 275)
+                    self.assertEqual(measured['cost']['provider']['reserved_input_tokens'], 0)
+                    expected_sample = sorted(range(10), key=lambda i: (hashlib.sha256(f'q{i:02}'.encode()).hexdigest(), i))
+                    self.assertEqual(latency_calls, [0] + expected_sample if fresh else [])
+                    self.assertEqual(measured['metrics']['latency_p95_ms'] is not None, fresh)
+                    for phase, usage in measured['cost']['phase_usage'].items():
+                        self.assertGreaterEqual(usage['cpu_seconds'], 0, phase)
+                        self.assertGreaterEqual(usage['elapsed_seconds'], 0, phase)
+
+    def test_rerank_wave_drains_admitted_calls_after_cap_or_transport_failure(self):
+        # Own failure drain and retained charges with simultaneous reranks.
+        # A shared PostgreSQL cap refuses before HTTP, including concurrent work.
+        for capped in (False, True):
+            with self.subTest(capped=capped), tempfile.TemporaryDirectory() as temp:
+                store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+                campaign = uuid.uuid4().hex
+                store.campaign(campaign, {'provider_daily_usd': .006 if capped else 1, 'modal_daily_usd': 1})
+                lease = store.claim(campaign, 'trial')
+                budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+                refused, barrier = threading.Event(), threading.Barrier(3)
+                reserve = store.reserve
+                def admit(*args, **kwargs):
+                    try:
+                        return reserve(*args, **kwargs)
+                    except embeddings.BudgetExceeded:
+                        refused.set()
+                        raise
+                def provider(request, timeout):
+                    if capped:
+                        self.assertTrue(refused.wait(5), 'cap did not refuse overlapping reservation')
+                    else:
+                        barrier.wait(5)
+                        if json.loads(request.data)['state']['query'] == 'question 0':
+                            raise OSError('transport failed')
+                    return io.BytesIO(b'{"model":"jev-1.13.0","usage":{"input_tokens":20},"answers":{"a":{"noul":1}}}')
+                cfg = search_trial.configuration({'dense_weight': 0, 'reranker': 'jev'})
+                data = {'corpus': {'a': {'text': 'apple'}},
+                        'queries': {str(i): f'question {i}' for i in range(3)},
+                        'qrels': {str(i): {'a': 1} for i in range(3)}}
+                with mock.patch.object(store, 'reserve', side_effect=admit), \
+                        mock.patch('urllib.request.OpenerDirector.open', side_effect=provider) as network:
+                    with self.assertRaises(embeddings.BudgetExceeded if capped else RuntimeError):
+                        search_trial.measure(cfg, data, {'split': 'dev', 'private': False}, temp,
+                            budget, None, {'jev-1.13.0': .042}, 0, fresh_latency=False,
+                            rerank_key='fixture-key', quality_concurrency=3)
+                self.assertEqual(network.call_count, 2 if capped else 3)
+                self.assertEqual(budget.summary()['confirmed_input_tokens'], 40)
+                self.assertEqual(budget.summary()['reserved_input_tokens'], 0 if capped else 65536)
+                self.assertAlmostEqual(store.summary(campaign)['provider']['charged_usd'],
+                                       (40 + (0 if capped else 65536)) * .042 / 1_000_000)
+
     def test_serving_compute_excludes_hosted_wait_and_cached_usage_reprices(self):
         # Own unit price decomposition: fake time advances only at provider I/O
         # and ranking. SQL admission, cache and scorer remain real.

@@ -68,7 +68,9 @@ def policy(value):
     defaults = {'profile': 'default', 'provider_daily_usd': 1000, 'modal_daily_usd': 1000,
                 'max_seconds': 3600, 'startup_seconds': 300, 'baseline': {},
                 'prices': {**direct_bakeoff.PRICES, 'jev-1.13.0': .042}, 'gates': {},
-                'agent_token_usage': None}
+                'agent_token_usage': None, 'quality_concurrency': 8,
+                'modal_cpu': 2, 'modal_memory_mib': 4096,
+                'modal_cpu_usd_per_second': .0000131, 'modal_gib_usd_per_second': .00000222}
     allowed = set(defaults) | {'experiment', 'sets', 'modal_usd_per_second', 'price_revision',
                                'provider_total_usd', 'modal_total_usd', 'end_at', 'confirmation_limit'}
     if not isinstance(value, dict) or set(value) - allowed:
@@ -79,6 +81,19 @@ def policy(value):
     if cfg['profile'] not in ('default', 'deep') or not re.fullmatch(r'[A-Za-z0-9_.-]+', cfg['price_revision']):
         raise ValueError('invalid profile or pricing revision')
     cfg['baseline'] = search_trial.configuration(cfg['baseline'])
+    for field, maximum in (('quality_concurrency', 32), ('modal_cpu', 64), ('modal_memory_mib', 262144)):
+        minimum = 128 if field == 'modal_memory_mib' else 1
+        if type(cfg[field]) is not int or not minimum <= cfg[field] <= maximum:
+            raise ValueError('invalid quality concurrency or Modal resource bound')
+    rates = [control_store.money(cfg[field]) for field in ('modal_cpu_usd_per_second', 'modal_gib_usd_per_second')]
+    if any(rate <= 0 for rate in rates):
+        raise ValueError('Modal unit prices must be positive')
+    derived = cfg['modal_cpu'] * rates[0] + decimal.Decimal(cfg['modal_memory_mib']) / 1024 * rates[1]
+    # Existing policies may keep a conservative aggregate override. Never
+    # silently lower their budget estimate, or accept an underpriced size.
+    if 'modal_usd_per_second' in value and control_store.money(value['modal_usd_per_second']) < derived:
+        raise ValueError('Modal compute rate is below the configured resource price')
+    cfg['modal_usd_per_second'] = float(control_store.money(value.get('modal_usd_per_second', derived)))
     for field in ('provider_daily_usd', 'modal_daily_usd', 'modal_usd_per_second'):
         if control_store.money(cfg[field]) <= 0:
             raise ValueError('daily caps and conservative compute rate must be positive')
@@ -247,15 +262,15 @@ def remote_trial(request):
                                           budget, name, policy['prices'])
         measured = search_trial.measure(cfg, data, dataset, '/eval-cache/embeddings', budget, hosted,
                         policy['prices'], float(policy['modal_usd_per_second']), request['fresh_latency'],
-                        os.environ.get('TYPESAFE_API_KEY', ''), volume.commit)
+                        os.environ.get('TYPESAFE_API_KEY', ''), volume.commit, quality_concurrency=policy['quality_concurrency'])
         measured['duration_seconds'] = time.monotonic() - started
-        measured['cost'].update(modal_seconds=measured['duration_seconds'], resource_class='cpu8-memory16384',
+        measured['cost'].update(modal_seconds=measured['duration_seconds'], resource_class=search_trial.resource_class(policy),
                                 agent_token_usage=policy['agent_token_usage'], compute_cap_notice=COMPUTE_NOTICE)
         row = search_trial.record(measured, {**cfg, 'profile': policy['profile'],
                     'campaign': request['campaign'], 'campaign_policy_hash': search_trial.digest(policy),
                     'prices_usd_per_million': policy['prices'],
                     'modal_usd_per_second': policy['modal_usd_per_second'],
-                    'resource_class': 'cpu8-memory16384',
+                    'resource_class': search_trial.resource_class(policy), 'quality_concurrency': policy['quality_concurrency'],
                     'price_revision': policy['price_revision'], 'fresh_latency': request['fresh_latency']},
                     policy['experiment'], request['git_sha'], request['scorer_digest'])
         log.info('measurement complete elapsed_seconds=%.3f', measured['duration_seconds'])
@@ -308,7 +323,8 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
         secrets.append(modal.Secret.from_name('quivr-eval-rerank'))
     private_volumes, private_secrets = private_working.mounts(policy)
     secrets.extend(modal.Secret.from_name(name) for name in private_secrets)
-    remote = app.function(image=image, cpu=(8, 8), memory=(16384, 16384),
+    remote = app.function(image=image, cpu=(policy['modal_cpu'], policy['modal_cpu']),
+        memory=(policy['modal_memory_mib'], policy['modal_memory_mib']),
         timeout=policy['max_seconds'], startup_timeout=policy['startup_seconds'],
         retries=0, max_containers=4, scaledown_window=2, single_use_containers=True,
         include_source=False, serialized=True, secrets=secrets,

@@ -55,7 +55,7 @@ jobs:
       - run: pip install -r scripts/eval/requirements-news.txt
       - run: pip install -r scripts/eval/requirements-campaign.txt
       # Build the OSS runner's SDK and exercise prepared scoring on offline vectors.
-      - run: pip install modal==1.6.1 numpy==2.0.2
+      - run: pip install modal==1.6.1 numpy==2.0.2 ranx==0.3.21
       # The builder reuses this pinned stdlib client, without the plugin runtime dependencies.
       - run: pip install --no-deps -e plugins/jev-rerank
       # Private news-set owner tests exercise real encryption with disposable keys and synthetic text.
