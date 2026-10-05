@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 
 	"encoding/json"
 	"errors"
@@ -142,6 +143,9 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	ctx = telemetry.Restore(ctx, in.TraceContext)
+	ctx, span := telemetry.Start(ctx, "monitoring.evaluate")
+	defer span.End()
 	if in.Kind == IntentWithdrawal {
 		outcome, err := e.Store.CommitWithdrawal(ctx, in)
 		if err != nil {
@@ -380,7 +384,7 @@ func (e Engine) apply(ctx context.Context, p pending, parts []Part, result Outco
 	}
 	switch result.Decision {
 	case DecisionNoMatch:
-		outcome, err := e.Store.CommitNoMatch(ctx, in)
+		outcome, err := e.Store.CommitNoMatch(telemetry.Restore(ctx, in.TraceContext), in)
 		if err != nil {
 			return e.retry(ctx, in, "storage_unavailable")
 		}
@@ -397,7 +401,7 @@ func (e Engine) apply(ctx context.Context, p pending, parts []Part, result Outco
 	if !validEvidence(evidence, parts) {
 		return e.retry(ctx, in, "evaluation_invalid")
 	}
-	outcome, err := e.Store.CommitMatch(ctx, in, evidence)
+	outcome, err := e.Store.CommitMatch(telemetry.Restore(ctx, in.TraceContext), in, evidence)
 	if err != nil {
 		return e.retry(ctx, in, "storage_unavailable")
 	}

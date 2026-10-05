@@ -2065,6 +2065,9 @@ required:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| `request_id` | string |  | Bounded caller X-Request-ID, or an engine-generated correlation ID. |
+| `trace_id` | string |  | W3C trace ID when a trace context is present. |
+| `span_id` | string |  | W3C span ID of the API handler when a trace context is present. |
 | `code` | string | yes | Minimum length `1`. |
 | `message` | string | yes | Minimum length `1`. |
 | `retryable` | boolean | yes |  |
@@ -2078,6 +2081,15 @@ required:
 type: object
 additionalProperties: false
 properties:
+  request_id:
+    type: string
+    description: Bounded caller X-Request-ID, or an engine-generated correlation ID.
+  trace_id:
+    type: string
+    description: W3C trace ID when a trace context is present.
+  span_id:
+    type: string
+    description: W3C span ID of the API handler when a trace context is present.
   code:
     type: string
     minLength: 1

@@ -19,6 +19,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 // InitialCollection is shared by every logical Projection Generation; objects carry
@@ -127,7 +128,7 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 }
 
 func New(endpoint string) *Store {
-	return &Store{Endpoint: strings.TrimRight(endpoint, "/"), Client: &http.Client{Timeout: 4 * time.Second}, vectors: &sync.Map{}}
+	return &Store{Endpoint: strings.TrimRight(endpoint, "/"), Client: &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(nil, "weaviate.request")}, vectors: &sync.Map{}}
 }
 func (s *Store) call(ctx context.Context, method, path string, in, out any) (int, error) {
 	var body []byte

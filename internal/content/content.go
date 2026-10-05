@@ -922,7 +922,7 @@ func (s Service) Republication(ctx context.Context, org, receiptID string) (Work
 }
 
 // Dispatch names one accepted command that still needs a durable workflow start.
-type Dispatch struct{ Organization, ReceiptID string }
+type Dispatch struct{ Organization, ReceiptID, TraceContext string }
 
 var ErrNoDispatch = errors.New("no_pending_dispatch")
 

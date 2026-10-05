@@ -3,7 +3,7 @@
 `quivr-plugin-sdk` (import `quivr_plugin`) implements the Plugin Protocol v0
 ([contract](../../contracts/plugins/v0/README.md)) for
 all five Contributions: normalizers, alert rules, connectors, ingestion and retrieval. It has no Temporal, Weaviate or database clients, and its
-only runtime dependencies are PyYAML and jsonschema (both MIT). Python 3.12 or
+runtime dependencies are PyYAML, jsonschema (MIT) and the OpenTelemetry API (Apache 2.0). Python 3.12 or
 later.
 
 The SDK is installed from this repository; it is not published to PyPI in v0.
@@ -21,6 +21,8 @@ Older declared API ranges remain unsigned; `plugin dev` and `plugin test` supply
 pip install -e sdks/python                       # from a checkout
 pip install "quivr-plugin-sdk @ git+https://github.com/The-Vibe-Company/quivr#subdirectory=sdks/python"
 ```
+
+The HTTP adapter continues W3C trace context in the current OpenTelemetry context. Configure an OpenTelemetry SDK provider and exporter in your plugin process to export internal spans. Call `quivr_plugin.tracing.inject_headers(headers)` before provider requests; SDK Blob reads already do this. See the [protocol’s propagation and privacy rules](../../contracts/plugins/v0/README.md#trace-context).
 
 Start a new plugin with `quivr plugin init <name>`. It writes a working
 `text/markdown` normalizer, a fixture and tests that use only this SDK.

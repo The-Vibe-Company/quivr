@@ -14,6 +14,7 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `cursor_key` | yes | A secret of at least 32 bytes that signs change-feed cursors. Keep it stable. |
 | `keys` | yes | The API keys, by bearer token. See [API keys](#api-keys). |
 | `temporal_address` | yes | Temporal's frontend address, such as `temporal:7233` |
+| `telemetry` | no | Opt-in OTLP traces and metrics export. See [OpenTelemetry](#opentelemetry). |
 | `tls` | no | Outgoing connection encryption and trust. See [Outbound TLS](#outbound-tls). |
 | `weaviate_url` | yes | The Weaviate search index, such as `http://weaviate:8080` |
 | `s3` | yes | Object storage for original bytes and derived artifacts. See [Object storage](#object-storage). |
@@ -51,13 +52,37 @@ Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup.
 
 ## Logs and shutdown
 
-Engine processes write one JSON event per line to stdout. Every event includes `ts`, `level`, `msg`, `service`, `version`, `instance` and `environment`; events within an HTTP request also include `request_id`. `service` distinguishes `quivr.api`, `quivr.worker` and `quivr.migrate`. `version` reports the engine build version. Debug events are hidden at the default `info` level. Nonempty environment overrides take precedence over the JSON file; unknown levels and nonpositive grace periods refuse startup.
+Engine processes write one JSON event per line to stdout. Every event includes `ts`, `level`, `msg`, `service`, `version`, `instance`, `environment`, `trace_id` and `span_id` (empty outside a trace); events within an HTTP request also include `request_id`. `service` distinguishes `quivr.api`, `quivr.worker` and `quivr.migrate`. `version` reports the engine build version. Debug events are hidden at the default `info` level. Nonempty environment overrides take precedence over the JSON file; unknown levels and nonpositive grace periods refuse startup.
 
 Each completed public or probe HTTP request writes an access event with `route`, `method`, `status`, `duration_ms`, `response_size` (bytes written), `client_ip`, `api_key_id`, `error_code` and `request_id`. Routes are registered templates, with `unmatched` for unknown paths. For public requests, client IP follows the trusted proxy policy in `connector_push.trusted_proxy_cidrs`; otherwise it is the socket peer. Probe requests use the socket peer. The key ID is a 128-bit SHA-256 fingerprint of a bearer token present in the configured `keys`; it is empty for instance tokens and requests without a configured API key. No bearer token, request body, query string or arbitrary request path is logged.
 
 Lifecycle events use `event`: `quivr.start`, `quivr.ready`, `quivr.draining` and `quivr.stop`. Startup includes an allowlisted summary of effective process settings, with counts and enabled flags for sensitive configuration. Credentials, plugin settings and connection URLs are excluded. Raw error details are redacted at the logging boundary; use stable event and error codes for routing.
 
 On SIGTERM or SIGINT, readiness becomes `503` before drain begins. New public requests are refused, public listeners close, and admitted work can finish within one `shutdown_grace` budget. Probes remain available during the drain. Work still running at the deadline is canceled, open HTTP connections are closed, and unfinished durable work can resume on another worker. Streaming connections count as in-flight requests and may use the whole grace period. The final counter flush shares this deadline.
+
+## OpenTelemetry
+
+Set `telemetry.endpoint` in every engine process to export traces and metrics to your collector. An omitted or empty endpoint disables export; tracing uses a no-op provider and installs no dependency tracing or exporter goroutines. `/metrics` remains available with the same Prometheus metric names, labels and buckets. SDK meters own aggregation; no collector is needed for scraping. The OTLP reader samples backlog gauges even when nobody scrapes `/metrics`.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `endpoint` | Empty (export off) | Collector base URL, such as `https://collector.example.com:4318`. HTTP appends `/v1/traces` and `/v1/metrics`; gRPC permits no path. URLs with credentials, queries or fragments are refused. |
+| `protocol` | `http/protobuf` | `http/protobuf` or `grpc`. Use an `https` endpoint for verified TLS, or `http` for plaintext to a trusted local collector. |
+| `headers` | `{}` | Collector authentication headers, used for both signals. Values are excluded from logs. |
+| `sampling_ratio` | `1` | Root trace sampling probability, from `0` to `1`. Children honor their parent's sampled flag, including incoming W3C context. |
+| `resource_attributes` | Engine service and version | Deployment identity as string key/value pairs. `service.name` and `service.version` use process settings. Configured `instance` and `environment` also become resource attributes unless you override them. |
+
+For example, not run:
+
+```json
+{"telemetry":{"endpoint":"https://collector.example.com:4318","protocol":"http/protobuf","sampling_ratio":0.1,"resource_attributes":{"deployment.environment.name":"staging"}}}
+```
+
+The API honors W3C `traceparent` and `tracestate`. Send `X-Request-ID` as 1–128 ASCII letters, digits, dots, underscores or hyphens; missing, duplicate or invalid IDs are replaced. Responses echo `X-Request-ID`; JSON errors include `request_id` and, when a valid trace context is present (including an incoming `traceparent` while export is disabled), `trace_id` and `span_id`. Logs carry the same trace fields. Request IDs are correlation values, so use opaque IDs rather than names or secrets.
+
+One trace crosses durable ingestion and operation queues, Temporal workflows and activities, plugin calls, monitoring evaluation and webhook retries. Spans cover HTTP route templates, PostgreSQL, Weaviate and S3. They exclude SQL statements, query text, URLs, object keys, record identifiers, bodies and baggage. Resource attributes are operator-controlled: keep customer data out of them. `observability.record_query_text` only governs the stored search statistics below, not span attributes.
+
+Export runs asynchronously. A collector outage does not stop requests; the SDK's bounded queue can drop telemetry. Look for `quivr.telemetry.export_failed`, with no collector credentials or raw error details. Shutdown flushes exporters within the shared grace deadline. Plugin SDKs continue W3C context automatically; configure an exporter separately in each plugin process to observe its internal spans. See [Plugin protocol](/reference/plugin-protocol#trace-context).
 
 ## Outbound TLS
 
