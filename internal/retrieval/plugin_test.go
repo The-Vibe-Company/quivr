@@ -217,10 +217,10 @@ func TestPluginAnswersTheEngineRefuses(t *testing.T) {
 func TestASearchMayRunPastItsObjective(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := &fakeProjection{candidates: []content.Candidate{{SegmentID: "a", GenerationID: "gen"}}}
-		var left time.Duration
+		left := make(map[string]time.Duration)
 		answer := func(ctx context.Context, request plugins.SearchRequest) ([]byte, error) {
-			if deadline, ok := ctx.Deadline(); ok && left == 0 {
-				left = time.Until(deadline)
+			if deadline, ok := ctx.Deadline(); ok && left[request.Profile] == 0 {
+				left[request.Profile] = time.Until(deadline)
 			}
 			if request.Profile == "deep" {
 				// deep's objective is 50 ms, the shortest a manifest declares:
@@ -240,8 +240,8 @@ func TestASearchMayRunPastItsObjective(t *testing.T) {
 				t.Fatalf("profile %s: usage %+v; want over its objective %v", profile, result.Usage, over)
 			}
 		}
-		if left < time.Second {
-			t.Fatalf("the first round had %s left under a 50 ms objective; want the hard bound, at least 2 s", left)
+		if left["deep"] != 2*time.Second {
+			t.Fatalf("deep’s first round had %s left under a 50 ms objective; want its 2 s hard bound", left["deep"])
 		}
 	})
 }

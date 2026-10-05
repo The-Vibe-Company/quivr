@@ -512,7 +512,7 @@ func TestRetryBudget(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := setup(t, tc.answer)
 			if tc.answer == nil {
-				f.pin.Manifest.Contributions.Normalizer.TimeoutMS = 50
+				f.pin.Manifest.Contributions.Normalizer.TimeoutMS = 500
 			}
 			// The fixture declares retry.max_attempts: 2.
 			if err := f.service.Normalize(context.Background(), "org_a", "receipt_1"); err == nil {
