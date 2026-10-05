@@ -929,6 +929,9 @@ type Dispatch struct{ Organization, ReceiptID string }
 type DispatchBatch struct {
 	ID       string
 	Receipts []Dispatch
+	// Legacy preserves an old receipt's workflow identity after a lost start
+	// acknowledgement, including receipts accepted by an older API process.
+	Legacy bool
 }
 
 var ErrNoDispatch = errors.New("no_pending_dispatch")

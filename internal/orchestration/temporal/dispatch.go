@@ -149,9 +149,18 @@ func (r *Runtime) ingestionIntents() IntentSource {
 		}
 		intents := make([]Intent, 0, len(batch))
 		for _, b := range batch {
+			queue, name := ingestionBatchQueue, ingestionBatchWorkflow
+			var input any = b
+			if b.Legacy {
+				// A pre-upgrade start may already exist, even when its outbox
+				// acknowledgement was lost. Keep its name, queue and input.
+				queue, name = taskQueue, "process-e5-v3"
+				d := b.Receipts[0]
+				input = Input{Organization: d.Organization, ReceiptID: d.ReceiptID}
+			}
 			intents = append(intents, dispatchIntent{
-				options: client.StartWorkflowOptions{ID: b.ID, TaskQueue: ingestionBatchQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
-				name:    ingestionBatchWorkflow, input: b,
+				options: client.StartWorkflowOptions{ID: b.ID, TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
+				name:    name, input: input,
 				complete: func(ctx context.Context) error { return r.Store.IngestionBatchDispatched(ctx, b.ID) },
 				retry: func(ctx context.Context) error {
 					for _, d := range b.Receipts {

@@ -60,16 +60,15 @@ LEFT JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
 ORDER BY x.ordinal`
 
 // CommitMatches commits one bounded Record Version group. New positives take
-// a fixed number of round trips regardless of the number of subscriptions;
-// corrections and repeated subscriptions keep the established decision path
-// inside this same transaction, so their predecessor and ordering rules hold.
+// a fixed number of round trips regardless of the number of subscriptions.
+// Repeated positives share their first eligible Match; corrections keep the
+// established decision path so their predecessor and ordering rules hold.
 func (s EvaluationStore) CommitMatches(ctx context.Context, matches []monitoring.MatchCommit) ([]string, error) {
 	if len(matches) == 0 {
 		return []string{}, nil
 	}
 	first := matches[0].Intent
 	ids, versions, sequences, matchIDs := make([]string, len(matches)), make([]string, len(matches)), make([]int64, len(matches)), make([]string, len(matches))
-	seen := make(map[string]bool, len(matches))
 	fallback := false
 	for i, match := range matches {
 		in := match.Intent
@@ -78,8 +77,6 @@ func (s EvaluationStore) CommitMatches(ctx context.Context, matches []monitoring
 		}
 		ids[i], versions[i], sequences[i] = in.SubscriptionID, in.SubscriptionVersionID, in.Sequence
 		matchIDs[i] = content.StableID("match", in.Organization, in.SubscriptionVersionID, in.VersionID)
-		fallback = fallback || seen[in.SubscriptionID]
-		seen[in.SubscriptionID] = true
 	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -106,6 +103,7 @@ func (s EvaluationStore) CommitMatches(ctx context.Context, matches []monitoring
 	}
 	outcomes := make([]string, len(matches))
 	newMatches := 0
+	created := make(map[string]bool, len(matches))
 	for i, c := range candidates {
 		if c.ordinal != i+1 {
 			return nil, errors.New("match group eligibility order differs from inputs")
@@ -114,10 +112,13 @@ func (s EvaluationStore) CommitMatches(ctx context.Context, matches []monitoring
 		switch {
 		case c.refused != "":
 			outcomes[i] = c.refused
-		case c.duplicate:
+		case c.duplicate || created[matches[i].Intent.SubscriptionID]:
 			outcomes[i] = monitoring.OutcomeDuplicate
 		default:
 			outcomes[i] = monitoring.OutcomeMatched
+			// Only an eligible new positive suppresses later inputs for this
+			// Subscription. Refusals and retirement retain their own outcomes.
+			created[matches[i].Intent.SubscriptionID] = true
 			newMatches++
 		}
 	}

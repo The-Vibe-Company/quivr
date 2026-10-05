@@ -428,14 +428,36 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		t.Fatalf("failed group recorded evaluation: %+v %v", activity.Steps, err)
 	}
 
-	// A refused item keeps its place among two new positives. Both positives
-	// share the transaction time and receive consecutive journal positions in
-	// input order; the immutable bodies keep the existing field encoding.
+	// Retrieval and enrichment can put two intents for one Subscription in
+	// the same positive group. Only its first eligible positive creates a
+	// Match; both intents must complete before the evaluated step is recorded.
+	trigger("record.enrichment_available", a.ID, groupRecord, groupVersion)
+	drain()
+	var enrichmentSequence int64
+	if err = pool.QueryRow(ctx, `SELECT max(sequence) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2`, org, groupVersion).Scan(&enrichmentSequence); err != nil || enrichmentSequence <= group[0].Intent.Sequence {
+		t.Fatalf("distinct enrichment intent sequence %d after retrieval %d: %v", enrichmentSequence, group[0].Intent.Sequence, err)
+	}
+	if got := count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND sequence=$3`, org, groupVersion, enrichmentSequence); got != 2 {
+		t.Fatalf("enrichment dispatched %d intents, want 2", got)
+	}
+	enrichedSecond, enrichedFirst := group[0], group[1]
+	enrichedSecond.Intent.Sequence, enrichedFirst.Intent.Sequence = enrichmentSequence, enrichmentSequence
+	// Earlier refused and retired inputs for that same Subscription cannot
+	// suppress its eligible enrichment decision. The other Subscription's
+	// retrieval creates its Match and its enrichment becomes a duplicate.
+	refusedEarlier := group[0]
+	refusedEarlier.Intent.Sequence = 0 // precedes the Subscription's enabled boundary
+	if err = evaluation.Complete(ctx, group[0].Intent, monitoring.OutcomeEvaluatorRetired); err != nil {
+		t.Fatal(err)
+	}
+	beforeHead, beforeFacts = head(), facts()
 	disabled := group[0].Intent
 	disabled.SubscriptionID, disabled.SubscriptionVersionID = subs[1].ID, subs[1].Current.VersionID
-	group = []monitoring.MatchCommit{group[0], {Intent: disabled, Evidence: evidence}, group[1]}
+	group = []monitoring.MatchCommit{refusedEarlier, group[0], enrichedSecond, {Intent: disabled, Evidence: evidence}, group[1], enrichedFirst}
+	// Both new Matches share transaction time and consecutive journal positions
+	// in input order; immutable bodies retain the existing field encoding.
 	outcomes, err := evaluation.CommitMatches(ctx, group)
-	if err != nil || fmt.Sprint(outcomes) != fmt.Sprint([]string{monitoring.OutcomeMatched, monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeMatched}) {
+	if err != nil || fmt.Sprint(outcomes) != fmt.Sprint([]string{monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeEvaluatorRetired, monitoring.OutcomeMatched, monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeMatched, monitoring.OutcomeDuplicate}) {
 		t.Fatalf("group outcomes: %v %v", outcomes, err)
 	}
 	if got := head(); got != beforeHead+2 {
@@ -449,6 +471,15 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	if got := count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='done' AND outcome='matched'`, org, groupVersion); got != 2 {
 		t.Fatalf("committed group completed %d intents, want 2", got)
 	}
+	if got := count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='done' AND outcome='duplicate'`, org, groupVersion); got != 1 {
+		t.Fatalf("second positive intent completed %d duplicates, want 1", got)
+	}
+	if got := count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='done' AND outcome='evaluator_retired'`, org, groupVersion); got != 1 {
+		t.Fatalf("late positive changed retirement: got %d retired intents, want 1", got)
+	}
+	if got := count(`SELECT count(*) FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='pending'`, org, groupVersion); got != 0 {
+		t.Fatalf("group left %d retrieval/enrichment intents pending, want none", got)
+	}
 	activity, err = store.VersionActivity(ctx, org, groupVersion)
 	if err != nil || activity.Steps.Evaluated == nil {
 		t.Fatalf("committed group omitted evaluation: %+v %v", activity.Steps, err)
@@ -457,7 +488,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	if err != nil || len(window.Events) != 2 {
 		t.Fatalf("group feed: %+v %v", window, err)
 	}
-	for i, match := range []monitoring.MatchCommit{group[0], group[2]} {
+	for i, match := range []monitoring.MatchCommit{group[2], group[4]} {
 		in := match.Intent
 		id := content.StableID("match", org, in.SubscriptionVersionID, groupVersion)
 		deliveryID := content.StableID("delivery", org, id, "dest", monitoring.NoticeCreated)
@@ -479,7 +510,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 			t.Fatalf("group notice bytes: got %s, want %s (%v)", delivery.Event, wantBody, err)
 		}
 	}
-	if outcomes, err = evaluation.CommitMatches(ctx, group); err != nil || fmt.Sprint(outcomes) != fmt.Sprint([]string{monitoring.OutcomeDuplicate, monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeDuplicate}) || head() != beforeHead+2 {
+	if outcomes, err = evaluation.CommitMatches(ctx, group); err != nil || fmt.Sprint(outcomes) != fmt.Sprint([]string{monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeEvaluatorRetired, monitoring.OutcomeDuplicate, monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeDuplicate, monitoring.OutcomeDuplicate}) || head() != beforeHead+2 {
 		t.Fatalf("group replay: %v %v, head %d", outcomes, err, head())
 	}
 }

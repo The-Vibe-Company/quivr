@@ -173,15 +173,18 @@ func (s DeliveryStore) admitDeliveryGroup(ctx context.Context, works []monitorin
 		}
 	}
 	attempts := make([]monitoring.AdmittedAttempt, len(works))
+	attemptIDs, eventIDs, corpusIDs := make([]string, len(works)), make([]string, len(works)), make([]string, len(works))
 	writes := &pgx.Batch{}
 	for i, g := range guards {
 		a := monitoring.AdmittedAttempt{Organization: org, DeliveryID: works[i].DeliveryID, Number: 1, EventID: g.eventID, DestinationID: g.destination, Body: g.body}
 		a.AttemptID = attemptID(org, a.DeliveryID, a.Number)
 		attempts[i] = a
-		writes.Queue(`INSERT INTO delivery_attempts(organization,id,delivery_id,number) VALUES($1,$2,$3,$4)`, org, a.AttemptID, a.DeliveryID, a.Number)
-		writes.Queue(`UPDATE deliveries SET state='delivering',attempt_count=$3 WHERE organization=$1 AND id=$2`, org, a.DeliveryID, a.Number)
-		queueEvent(writes, deliveryStateEvent(org, g.corpusID, a.DeliveryID, a.Number, "delivering"))
+		attemptIDs[i], eventIDs[i], corpusIDs[i] = a.AttemptID, eventID(deliveryStateEvent(org, g.corpusID, a.DeliveryID, a.Number, "delivering")), g.corpusID
 	}
+	writes.Queue(`INSERT INTO delivery_attempts(organization,id,delivery_id,number)
+SELECT $1,x.attempt_id,x.delivery_id,1 FROM unnest($2::text[],$3::text[]) AS x(attempt_id,delivery_id)`, org, attemptIDs, ids)
+	writes.Queue(`UPDATE deliveries SET state='delivering',attempt_count=1 WHERE organization=$1 AND id=ANY($2::text[])`, org, ids)
+	writes.Queue(deliveryEventsBatchSQL, org, eventIDs, corpusIDs, ids)
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return true, nil, err
 	}
@@ -194,6 +197,19 @@ func (s DeliveryStore) admitDeliveryGroup(ctx context.Context, works []monitorin
 func deliveryStateEvent(org, corpusID, deliveryID string, number int, state string) eventInput {
 	return eventInput{Organization: org, CorpusID: corpusID, Kind: "delivery.updated", Resource: "delivery", ResourceID: deliveryID, MutationID: fmt.Sprint(deliveryID, ":", number, ":", state)}
 }
+
+// deliveryEventsBatchSQL allocates one contiguous range under the already held
+// journal lock. Ordinality assigns each event its original input position;
+// the committed head is visible only with the whole range and its other facts.
+const deliveryEventsBatchSQL = `WITH inputs AS (
+  SELECT * FROM unnest($2::text[],$3::text[],$4::text[])
+    WITH ORDINALITY AS x(event_id,corpus_id,delivery_id,ordinal)),
+position AS (
+  UPDATE organization_journals SET last_sequence=last_sequence+cardinality($2::text[])
+  WHERE organization=$1 RETURNING last_sequence-cardinality($2::text[]) AS base)
+INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id)
+SELECT $1,position.base+inputs.ordinal,inputs.event_id,inputs.corpus_id,'delivery.updated','delivery',inputs.delivery_id,NULL
+FROM inputs CROSS JOIN position ORDER BY inputs.ordinal`
 
 type deliveryRecordGuard struct {
 	ordinal    int
@@ -279,17 +295,19 @@ func (s DeliveryStore) recordDeliveryGroup(ctx context.Context, attempts []monit
 		}
 	}
 	writes := &pgx.Batch{}
+	statuses := make([]int, len(attempts))
+	codes, messages, eventIDs, corpusIDs := make([]string, len(attempts)), make([]string, len(attempts)), make([]string, len(attempts)), make([]string, len(attempts))
 	for i, g := range guards {
 		a, o := attempts[i], outcomes[i]
-		var status any
-		if o.HTTPStatus != 0 {
-			status = o.HTTPStatus
-		}
-		writes.Queue(`INSERT INTO delivery_attempt_outcomes(organization,attempt_id,outcome,http_status,error_code,error_message) VALUES($1,$2,$3,$4,$5,left($6,200))`, org, a.AttemptID, o.Outcome, status, o.ErrorCode, o.ErrorMessage)
-		writes.Queue(`UPDATE deliveries SET state='delivered',exhausted_reason='',last_outcome='acknowledged' WHERE organization=$1 AND id=$2`, org, a.DeliveryID)
-		queueEvent(writes, deliveryStateEvent(org, g.corpusID, a.DeliveryID, a.Number, "delivered"))
-		writes.Queue(`DELETE FROM delivery_outbox WHERE organization=$1 AND delivery_id=$2`, org, a.DeliveryID)
+		statuses[i], codes[i], messages[i] = o.HTTPStatus, o.ErrorCode, o.ErrorMessage
+		eventIDs[i], corpusIDs[i] = eventID(deliveryStateEvent(org, g.corpusID, a.DeliveryID, a.Number, "delivered")), g.corpusID
 	}
+	writes.Queue(`INSERT INTO delivery_attempt_outcomes(organization,attempt_id,outcome,http_status,error_code,error_message)
+SELECT $1,x.attempt_id,'acknowledged',NULLIF(x.http_status,0),x.error_code,left(x.error_message,200)
+FROM unnest($2::text[],$3::integer[],$4::text[],$5::text[]) AS x(attempt_id,http_status,error_code,error_message)`, org, attemptIDs, statuses, codes, messages)
+	writes.Queue(`UPDATE deliveries SET state='delivered',exhausted_reason='',last_outcome='acknowledged' WHERE organization=$1 AND id=ANY($2::text[])`, org, ids)
+	writes.Queue(deliveryEventsBatchSQL, org, eventIDs, corpusIDs, ids)
+	writes.Queue(`DELETE FROM delivery_outbox WHERE organization=$1 AND delivery_id=ANY($2::text[])`, org, ids)
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return true, err
 	}

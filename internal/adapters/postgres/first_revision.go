@@ -28,7 +28,8 @@ func acceptFirstRevision(ctx context.Context, tx pgx.Tx, org string, c content.C
  INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest)
  SELECT $1,$3,$14,$11::bytea,convert_from($11::bytea,'UTF8')::jsonb,$4,record_id,1,$9,$10 FROM revision RETURNING id
 ), outbox AS (
- INSERT INTO ingestion_outbox(organization,receipt_id) SELECT $1,id FROM receipt RETURNING receipt_id
+ INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until)
+ SELECT $1,id,false,'infinity'::timestamptz FROM receipt RETURNING receipt_id
 ), positions AS (
  UPDATE organization_journals SET last_sequence=last_sequence+2
  WHERE organization=$1 AND EXISTS(SELECT 1 FROM outbox) RETURNING last_sequence
