@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"testing"
 )
@@ -25,8 +27,15 @@ func TestBootstrapHonorsEnvironmentIdentityWithInvalidLevel(t *testing.T) {
 	if _, err := output.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
+	data, err := io.ReadAll(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("invalid-credential-sentinel")) {
+		t.Fatal("bootstrap exposed invalid level")
+	}
 	var record map[string]any
-	if err := json.NewDecoder(output).Decode(&record); err != nil {
+	if err := json.Unmarshal(data, &record); err != nil {
 		t.Fatal(err)
 	}
 	if record["instance"] != "replica-7" || record["environment"] != "staging" {

@@ -101,7 +101,7 @@ func registerConnectors(w worker.Registry, c *Connectors, pins Pinner) {
 			}
 			err = c.Acquirer.Run(pinned, in.Organization, in.ConnectorID, in.Run)
 			if legacy && (err == nil || activity.GetInfo(ctx).Attempt >= acquireAttempts) {
-				release, cancel := lifecycle.CleanupContext(ctx, time.Second)
+				release, cancel := lifecycle.CleanupContext(ctx, time.Minute)
 				defer cancel()
 				if releaseErr := pins.Release(release, workConnectorRun, in.Organization, id); releaseErr != nil && err == nil {
 					err = releaseErr

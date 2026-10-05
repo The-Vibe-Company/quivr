@@ -181,7 +181,11 @@ func (d Deliverer) Run(ctx context.Context) {
 			defer wg.Done()
 			wait := poll
 			for ctx.Err() == nil {
-				step, cancel := context.WithTimeout(lifecycle.WorkContext(ctx), d.lease())
+				work, admitted := lifecycle.Admit(ctx)
+				if !admitted {
+					return
+				}
+				step, cancel := context.WithTimeout(work, d.lease())
 				progressed, err := d.Step(step)
 				cancel()
 				if err != nil && ctx.Err() == nil {

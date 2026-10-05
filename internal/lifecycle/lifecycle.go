@@ -11,22 +11,28 @@ import (
 type workKey struct{}
 
 // Group owns background loops and their shared shutdown deadline. Go calls
-// finish before BeginDrain; no new loops may be registered while waiting.
+// are rejected after BeginDrain; Wait follows BeginDrain to join them.
 type Group struct {
 	ctx, work        context.Context
 	stop, cancelWork context.CancelFunc
 	wg               sync.WaitGroup
 	draining         atomic.Bool
+	mu               sync.Mutex
 }
 
 func New() *Group {
 	work, cancel := context.WithCancel(context.Background())
 	managed := &managedWork{Context: work}
 	ctx, stop := context.WithCancel(WithWorkContext(context.Background(), managed))
-	return &Group{ctx: ctx, work: managed, stop: stop, cancelWork: cancel}
+	g := &Group{ctx: ctx, work: managed, stop: stop, cancelWork: cancel}
+	managed.group = g
+	return g
 }
 
-type managedWork struct{ context.Context }
+type managedWork struct {
+	context.Context
+	group *Group
+}
 
 func (c *managedWork) Value(key any) any {
 	if _, ok := key.(workKey); ok {
@@ -56,6 +62,11 @@ func WithWorkContext(ctx, work context.Context) context.Context {
 func (g *Group) Context() context.Context { return g.ctx }
 func (g *Group) Draining() bool           { return g.draining.Load() }
 func (g *Group) Go(run func(context.Context)) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.draining.Load() {
+		return
+	}
 	g.wg.Add(1)
 	go func() { defer g.wg.Done(); run(g.ctx) }()
 }
@@ -67,6 +78,23 @@ func WorkContext(ctx context.Context) context.Context {
 		return workValues{Context: work, values: ctx}
 	}
 	return ctx
+}
+
+// Admit claims one background operation before draining starts. Its work may
+// finish during grace even when the loop's admission context is canceled.
+func Admit(ctx context.Context) (context.Context, bool) {
+	if work, ok := ctx.Value(workKey{}).(context.Context); ok {
+		if managed, ok := work.Value(workKey{}).(*managedWork); ok && managed.group != nil {
+			g := managed.group
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			if g.draining.Load() || ctx.Err() != nil {
+				return nil, false
+			}
+			return WorkContext(ctx), true
+		}
+	}
+	return ctx, ctx.Err() == nil
 }
 
 // CleanupContext lets durable outcome recording survive attempt cancellation,
@@ -81,17 +109,27 @@ func CleanupContext(ctx context.Context, limit time.Duration) (context.Context, 
 }
 
 func (g *Group) BeginDrain() {
+	g.mu.Lock()
 	g.draining.Store(true)
+	g.mu.Unlock()
 	g.stop()
 }
 
 // Wait cancels outstanding work when the shared deadline expires. It never
 // adds a per-component timeout that could extend the process grace period.
 func (g *Group) Wait(deadline context.Context) error {
+	if err := deadline.Err(); err != nil {
+		g.cancelWork()
+		return err
+	}
 	done := make(chan struct{})
 	go func() { g.wg.Wait(); close(done) }()
 	select {
 	case <-done:
+		if err := deadline.Err(); err != nil {
+			g.cancelWork()
+			return err
+		}
 		return nil
 	case <-deadline.Done():
 		g.cancelWork()

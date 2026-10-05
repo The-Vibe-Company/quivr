@@ -128,7 +128,11 @@ func (s Service) RunChecks(ctx context.Context, interval, lease time.Duration) {
 		check = RunCheck
 	}
 	for ctx.Err() == nil {
-		r, ok, err := s.Store.ClaimCheck(lifecycle.WorkContext(ctx), lease)
+		work, admitted := lifecycle.Admit(ctx)
+		if !admitted {
+			return
+		}
+		r, ok, err := s.Store.ClaimCheck(work, lease)
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("plugin check claim failed", "error", err)
 		}

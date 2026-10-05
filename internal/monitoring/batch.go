@@ -83,7 +83,11 @@ func (e Engine) Run(ctx context.Context) {
 func (e Engine) loop(ctx context.Context, poll time.Duration, step func(context.Context) (bool, error), warning string) {
 	for ctx.Err() == nil {
 		// A step never outlives the lease of the work it claimed.
-		attempt, cancel := context.WithTimeout(lifecycle.WorkContext(ctx), e.lease())
+		work, admitted := lifecycle.Admit(ctx)
+		if !admitted {
+			return
+		}
+		attempt, cancel := context.WithTimeout(work, e.lease())
 		progressed, err := step(attempt)
 		cancel()
 		if err != nil && ctx.Err() == nil {

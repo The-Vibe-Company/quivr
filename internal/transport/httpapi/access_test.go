@@ -153,9 +153,12 @@ func TestStreamingAccessEventCountsBytesAndCorrelatesDiagnostics(t *testing.T) {
 }
 
 type failingPushAudit struct {
-	connectors.PushProtection
 	stopProcess func()
 	canceled    *bool
+}
+
+func (a failingPushAudit) ProtectPush(_ context.Context, _ connectors.PushAttempt, invoke func() (connectors.RelayAnswer, error)) (connectors.RelayAnswer, error) {
+	return invoke()
 }
 
 func (a failingPushAudit) RecordPush(ctx context.Context, _ string, _ bool) error {
@@ -164,6 +167,15 @@ func (a failingPushAudit) RecordPush(ctx context.Context, _ string, _ bool) erro
 		*a.canceled = ctx.Err() != nil
 	}
 	return errors.New("sentinel-audit-secret")
+}
+
+type auditedPush struct{ echoPush }
+
+func (p auditedPush) Descriptor() connectors.Descriptor {
+	d := p.echoPush.Descriptor()
+	d.APIRoutes = []connectors.APIRoute{{Name: "events", Method: "POST", Path: "events", Auth: "quivr_key", RequestSchema: json.RawMessage(`{"type":"object"}`)}}
+	d.Receiver = p
+	return d
 }
 
 // Push auditing may replace the plugin's successful response after it runs.
@@ -183,7 +195,7 @@ func TestAccessEventsIncludeEarlyAndFinalPushAuditRefusals(t *testing.T) {
 		budgetCanceled := false
 		logs.Reset()
 		var seen []connectors.ReceiveRequest
-		registry, err := connectors.NewRegistry(echoPush{seen: &seen})
+		registry, err := connectors.NewRegistry(auditedPush{echoPush{seen: &seen}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -191,7 +203,7 @@ func TestAccessEventsIncludeEarlyAndFinalPushAuditRefusals(t *testing.T) {
 		if early {
 			store.fail = errors.New("sentinel-lookup-secret")
 		}
-		handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{}, nil, catalogCursorKey,
+		handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{}, map[string]corpus.Scope{"push-key": {Organization: "org_a", Actions: []string{"connector:push"}, Corpora: []string{"corpus_news"}}}, catalogCursorKey,
 			httpapi.WithLifecycle(group),
 			httpapi.WithRelay(connectors.Relay{Store: store, Registry: registry, Protection: failingPushAudit{stopProcess: group.Close, canceled: &budgetCanceled}}))
 		if err != nil {
@@ -202,9 +214,15 @@ func TestAccessEventsIncludeEarlyAndFinalPushAuditRefusals(t *testing.T) {
 		if !early {
 			path = "/v0/connectors/connector_push/api/events"
 		}
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader("body")))
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer push-key")
+		handler.ServeHTTP(rec, request)
 		if rec.Code != 503 {
 			t.Fatalf("early=%t: final status %d", early, rec.Code)
+		}
+		if !early && len(seen) != 1 {
+			t.Fatalf("push plugin was not invoked: %d deliveries", len(seen))
 		}
 		if !early && !budgetCanceled {
 			t.Fatal("push audit escaped the process shutdown budget")

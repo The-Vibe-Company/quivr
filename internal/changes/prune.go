@@ -38,7 +38,11 @@ func (p Pruner) Run(ctx context.Context) {
 	ticker := time.NewTicker(p.Interval)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
-		n, err := p.Store.PruneChanges(lifecycle.WorkContext(ctx), p.Retention, p.Organizations, PruneBatch, PruneBatches)
+		work, admitted := lifecycle.Admit(ctx)
+		if !admitted {
+			return
+		}
+		n, err := p.Store.PruneChanges(work, p.Retention, p.Organizations, PruneBatch, PruneBatches)
 		p.Metrics.Pruned(n)
 		if err != nil && ctx.Err() == nil {
 			p.Metrics.Failed()

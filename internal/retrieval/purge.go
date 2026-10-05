@@ -108,7 +108,11 @@ func (p Purger) Run(ctx context.Context) {
 		interval = time.Minute
 	}
 	for ctx.Err() == nil {
-		if _, err := p.Sweep(lifecycle.WorkContext(ctx)); err != nil && ctx.Err() == nil {
+		work, admitted := lifecycle.Admit(ctx)
+		if !admitted {
+			return
+		}
+		if _, err := p.Sweep(work); err != nil && ctx.Err() == nil {
 			slog.Warn("projection purge sweep failed; retrying next interval", "error", err)
 		}
 		select {

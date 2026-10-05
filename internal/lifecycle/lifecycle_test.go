@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,7 +17,10 @@ func TestDrainFinishesAdmittedWorkAndCancelsItAtTheDeadline(t *testing.T) {
 			group := lifecycle.New()
 			started, finish, stopped := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 			group.Go(func(ctx context.Context) {
-				work := lifecycle.WorkContext(ctx)
+				work, admitted := lifecycle.Admit(ctx)
+				if !admitted {
+					t.Error("running task not admitted")
+				}
 				close(started)
 				select {
 				case <-finish:
@@ -27,6 +31,11 @@ func TestDrainFinishesAdmittedWorkAndCancelsItAtTheDeadline(t *testing.T) {
 			})
 			<-started
 			group.BeginDrain()
+			if _, admitted := lifecycle.Admit(lifecycle.WorkContext(group.Context())); admitted {
+				t.Fatal("new operation admitted during drain")
+			}
+			var late atomic.Bool
+			group.Go(func(context.Context) { late.Store(true) })
 			if !group.Draining() || group.Context().Err() == nil {
 				t.Fatal("drain must mark unready and stop admissions first")
 			}
@@ -44,6 +53,9 @@ func TestDrainFinishesAdmittedWorkAndCancelsItAtTheDeadline(t *testing.T) {
 			err := group.Wait(deadline)
 			if expired && err != context.DeadlineExceeded {
 				t.Fatalf("expired drain: %v", err)
+			}
+			if !expired && late.Load() {
+				t.Fatal("new background loop started during drain")
 			}
 			if !expired && err != nil {
 				t.Fatal(err)

@@ -72,7 +72,7 @@ The `api` becomes ready once its schema check passes and its ingestion plugin ha
 
 Engine logs are JSON lines on stdout. Set `log_level` or `QUIVR_LOG_LEVEL` to `debug`, `info`, `warn` or `error`; the default is `info`. Set `instance` and `environment`, or their `QUIVR_INSTANCE` and `QUIVR_ENVIRONMENT` overrides, to identify the process in your log tooling. [Logs and shutdown](/reference/configuration#logs-and-shutdown) lists the event fields and redaction behavior. `log_directory` optionally keeps rotating local copies.
 
-Stop a process with SIGTERM or SIGINT. Its `/readyz` becomes `503` first, then it drains admitted requests and background work. `shutdown_grace` defaults to `60s`; set your platform's termination timeout long enough to allow that budget. The stable lifecycle events are `quivr.start`, `quivr.ready`, `quivr.draining` and `quivr.stop`. A readiness event means the dependency checks passed; a start event alone does not.
+Stop a process with SIGTERM or SIGINT. Its `/readyz` becomes `503` first, then it drains admitted requests and background work. `shutdown_grace` defaults to `60s`; set your platform's termination timeout long enough to allow that budget. The stable lifecycle events are `quivr.start`, `quivr.ready`, `quivr.draining` and `quivr.stop`. A readiness event means the process passed its readiness criteria, including the API’s query warm-up timeout described above; a start event alone does not.
 
 ## Example deployments
 

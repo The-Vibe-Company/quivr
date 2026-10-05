@@ -305,8 +305,8 @@ func normalizeSecrets(secrets []string) []string {
 
 var (
 	urlPattern              = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+`)
-	authorizationPattern    = regexp.MustCompile(`(?i)(\bauthorization\b\s*[:=]\s*)[^\r\n]*`)
-	secretAssignmentPattern = regexp.MustCompile(`(?i)(\b(authorization|password|token|secret|credential|api[-_]?key|client[-_]?secret)\b\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)`)
+	authorizationPattern    = regexp.MustCompile(`(?i)((?:"(?:authorization|cookie|set[-_]?cookie)"|\b(?:authorization|cookie|set[-_]?cookie)\b)\s*[:=]\s*)[^\r\n]*`)
+	secretAssignmentPattern = regexp.MustCompile(`(?i)((?:"[^"\r\n]*(?:authorization|password|token|secret|credential|api[-_]?key|private[-_]?key|cookie)[^"\r\n]*"|'[^'\r\n]*(?:authorization|password|token|secret|credential|api[-_]?key|private[-_]?key|cookie)[^'\r\n]*'|\b[\w.-]*(?:authorization|password|token|secret|credential|api[-_]?key|private[-_]?key|cookie)[\w.-]*\b)\s*[:=]\s*)(\[REDACTED\]|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)`)
 )
 
 func (s sanitizer) sanitizeString(value string) string {
@@ -314,8 +314,8 @@ func (s sanitizer) sanitizeString(value string) string {
 		value = strings.ReplaceAll(value, secret, redactedValue)
 	}
 	value = urlPattern.ReplaceAllStringFunc(value, sanitizeURL)
-	value = authorizationPattern.ReplaceAllString(value, `${1}`+redactedValue)
-	return secretAssignmentPattern.ReplaceAllString(value, `${1}`+redactedValue)
+	value = secretAssignmentPattern.ReplaceAllString(value, `${1}`+redactedValue)
+	return authorizationPattern.ReplaceAllString(value, `${1}`+redactedValue)
 }
 
 func sanitizeURL(raw string) string {
@@ -340,7 +340,8 @@ func sensitiveKey(key string) bool {
 	case "api_key_id", "credential_deposits":
 		return false
 	}
-	for _, term := range []string{"authorization", "password", "token", "secret", "credential", "configuration", "api_key", "private_key", "cookie"} {
+	lower = strings.ReplaceAll(lower, "_", "")
+	for _, term := range []string{"authorization", "password", "token", "secret", "credential", "configuration", "apikey", "privatekey", "cookie"} {
 		if strings.Contains(lower, term) {
 			return true
 		}

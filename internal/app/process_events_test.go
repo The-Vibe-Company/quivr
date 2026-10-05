@@ -43,7 +43,14 @@ func TestLifecycleEventsPreserveOrderWithoutBlockingDrain(t *testing.T) {
 				t.Fatal(err)
 			}
 			events := newProcessEvents(logger, slog.Group("effective_config"))
-			<-output.entered
+			startup, cancelStartup := context.WithTimeout(context.Background(), time.Second)
+			defer cancelStartup()
+			select {
+			case <-output.entered:
+			case <-startup.Done():
+				close(output.release)
+				t.Fatal("startup event not written")
+			}
 			loops := lifecycle.New()
 			defer loops.Close()
 			if readyFirst {
@@ -74,7 +81,11 @@ func TestLifecycleEventsPreserveOrderWithoutBlockingDrain(t *testing.T) {
 				t.Fatal("blocked stdout delayed stop beyond budget")
 			}
 			close(output.release)
-			<-events.done
+			select {
+			case <-events.done:
+			case <-guard.Done():
+				t.Fatal("event logging did not finish after sink release")
+			}
 			want := []string{"quivr.start", "quivr.draining", "quivr.stop"}
 			if readyFirst {
 				want = []string{"quivr.start", "quivr.ready", "quivr.draining", "quivr.stop"}

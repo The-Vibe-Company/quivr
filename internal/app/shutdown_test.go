@@ -33,7 +33,11 @@ func TestDrainMakesReadinessFailWhileAnAdmittedRequestCompletes(t *testing.T) {
 			return
 		}
 		defer r.Body.Close()
-		b, _ := io.ReadAll(r.Body)
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			response <- err.Error()
+			return
+		}
 		response <- string(b)
 	}()
 	<-started
