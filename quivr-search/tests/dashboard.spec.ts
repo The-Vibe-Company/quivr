@@ -648,13 +648,12 @@ test("revenir sur Alertes ou Sources les montre aussitôt, le temps de les relir
   await expect(alertsShown).toBeVisible();
   await nav.getByRole("link", { name: /^Sources/ }).click();
   await expect(sourcesShown).toBeVisible();
-  // From now on, both lists and the change feed answer only once released:
-  // coming back, each page is already there, live as last seen, not a
-  // loading state between two pages.
+  // From now on, both lists answer only once released: coming back, each
+  // page is already there, not a loading state between two pages.
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   await page.route(
-    (url) => ["/demo/alerts", "/v0/connectors", "/v0/changes"].includes(url.pathname),
+    (url) => ["/demo/alerts", "/v0/connectors"].includes(url.pathname),
     async (route) => {
       await held;
       await route.fallback();
@@ -663,7 +662,6 @@ test("revenir sur Alertes ou Sources les montre aussitôt, le temps de les relir
   try {
     await nav.getByRole("link", { name: /^Alertes/ }).click();
     await expect(alertsShown).toBeVisible();
-    await expect(page.locator(".live-badge")).toHaveText("En direct");
     await nav.getByRole("link", { name: /^Sources/ }).click();
     await expect(sourcesShown).toBeVisible();
   } finally {

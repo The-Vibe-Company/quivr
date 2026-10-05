@@ -1,10 +1,10 @@
 // Shared building blocks of the demo's pages, so every tab has the same
-// header, live indicator and loading, empty and error states.
+// header, top-bar places and loading, empty and error states.
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowClockwise, Info, WarningCircle } from "@phosphor-icons/react";
 
-/** A page's title, one-line purpose and an optional aside (a live badge). */
+/** A page's title, one-line purpose and an optional aside. */
 export function PageHeader({
   title,
   description,
@@ -34,30 +34,6 @@ export interface Bar {
 /** What a page shows in the top bar (its figures, its main action). */
 export function InBar({ to, children }: { to: Element | null; children: ReactNode }) {
   return to ? createPortal(children, to) : null;
-}
-
-/**
- * Whether the change feed answered when a page last followed it. It is the
- * deployment's, so a page that opens starts its badge from it rather than
- * from "off" for the moment its first read takes; before any answer it
- * assumes the feed, and a deployment without one says so once.
- */
-export const liveFeed = { seen: true };
-
-/** Whether a page follows its data live; colour is never the only cue. */
-export function LiveBadge({
-  live,
-  offLabel = "Actualisé régulièrement",
-}: {
-  live: boolean;
-  offLabel?: string;
-}) {
-  return (
-    <span className="live-badge" data-live={live} title={live ? "En direct" : offLabel}>
-      <span className="live-dot" aria-hidden="true" />
-      <span className="live-label">{live ? "En direct" : offLabel}</span>
-    </span>
-  );
 }
 
 /** A skeleton list; the label is announced once, the shapes are not. */

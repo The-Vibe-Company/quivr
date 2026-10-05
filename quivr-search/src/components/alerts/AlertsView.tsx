@@ -51,7 +51,7 @@ import {
 import { MoreMenu } from "../MoreMenu";
 import { AlertForm } from "./AlertForm";
 import { CaughtItem } from "./CaughtItem";
-import { EmptyState, InBar, LiveBadge, LoadingState, Notice, liveFeed, type Bar } from "../ui";
+import { EmptyState, InBar, LoadingState, Notice, type Bar } from "../ui";
 
 type Status = "loading" | "ready" | "unavailable" | "error";
 
@@ -162,7 +162,6 @@ export function AlertsView({
   const [described, setDescribed] = useState(last?.described ?? false);
   const [detail, setDetail] = useState<Detail | null>(last?.detail ?? null);
   const [detailError, setDetailError] = useState("");
-  const [live, setLive] = useState(liveFeed.seen);
   const [attempt, setAttempt] = useState(0);
   const [grown, setGrown] = useState<Set<string>>(new Set());
   const [fresh, setFresh] = useState<Set<string>>(new Set());
@@ -260,10 +259,6 @@ export function AlertsView({
       onChange: async (signal) => {
         await reload(signal);
         if (currentID) await reloadDetail(currentID, signal);
-      },
-      onLive: (on) => {
-        liveFeed.seen = on;
-        setLive(on);
       },
       onUnauthorized,
     });
@@ -416,7 +411,7 @@ export function AlertsView({
     <main className="board board-single alerts-board">
       <h1 className="visually-hidden">Alertes</h1>
       <section className="alerts-page" aria-labelledby="alerts-list-title">
-        {/* The count, the live state and "Nouvelle alerte" sit in the top bar. */}
+        {/* The count and "Nouvelle alerte" sit in the top bar. */}
         <h2 id="alerts-list-title" className="visually-hidden" ref={listHeading} tabIndex={-1}>
           Vos alertes
         </h2>
@@ -429,7 +424,6 @@ export function AlertsView({
           )}
         </InBar>
         <InBar to={bar.actions}>
-          <LiveBadge live={live} />
           <button type="button" className="button alerts-new" onClick={() => compose(null)}>
             <PlusIcon size={16} />
             <span className="bar-action-label">Nouvelle alerte</span>
