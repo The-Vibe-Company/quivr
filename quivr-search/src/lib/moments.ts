@@ -10,7 +10,13 @@ export interface Moment<T> {
 const weekday = new Intl.DateTimeFormat("fr-FR", {
   weekday: "long",
   day: "numeric",
-  month: "long",
+  month: "short",
+});
+const weekdayYear = new Intl.DateTimeFormat("fr-FR", {
+  weekday: "long",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
 });
 
 const dayStart = (time: number) => new Date(time).setHours(0, 0, 0, 0);
@@ -22,14 +28,49 @@ export function dayOf(value: string | number) {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
-/** "Aujourd’hui", "Hier", then "Jeudi 1 octobre". */
-export function dayLabel(day: string, now: number) {
+/** The local midnight a day starts at. */
+const startOf = (day: string) => {
   const [y, m, d] = day.split("-").map(Number);
-  const start = new Date(y, m - 1, d).getTime();
+  return new Date(y, m - 1, d).getTime();
+};
+
+/** The day `count` days after (or before, when negative) a day. */
+export function shiftDay(day: string, count: number) {
+  const [y, m, d] = day.split("-").map(Number);
+  return dayOf(new Date(y, m - 1, d + count).getTime());
+}
+
+/** A time as RFC 3339 in the local time zone: "2026-10-02T00:00:00+02:00". */
+export function localInstant(time: number) {
+  const at = new Date(time);
+  const pad = (n: number) => String(Math.abs(n)).padStart(2, "0");
+  const offset = -at.getTimezoneOffset();
+  return (
+    `${dayOf(time)}T${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}` +
+    `${offset < 0 ? "-" : "+"}${pad(Math.trunc(offset / 60))}:${pad(offset % 60)}`
+  );
+}
+
+/**
+ * A local day as the bounds Quivr filters on: from its midnight, inclusive,
+ * to the next one, exclusive, each with its own offset (a day may change
+ * from summer to winter time).
+ */
+export function dayBounds(day: string) {
+  return {
+    after: localInstant(startOf(day)),
+    before: localInstant(startOf(shiftDay(day, 1))),
+  };
+}
+
+/** "Aujourd’hui", "Hier", then "Jeudi 1 oct.", with the year when not this one. */
+export function dayLabel(day: string, now: number) {
+  const start = startOf(day);
   const days = Math.round((dayStart(now) - start) / 86400000);
   if (days === 0) return "Aujourd’hui";
   if (days === 1) return "Hier";
-  const label = weekday.format(start);
+  const format = new Date(start).getFullYear() === new Date(now).getFullYear() ? weekday : weekdayYear;
+  const label = format.format(start);
   return label[0].toUpperCase() + label.slice(1);
 }
 

@@ -139,6 +139,43 @@ test("un texte ajouté à la main puis un article RSS arrivent en direct, filtra
   }
 });
 
+// The Date filter reads Quivr itself: its counts and a day's articles come
+// from the core's date listing, not from the articles the feed loaded.
+test("le filtre Date compte et liste aujourd’hui depuis Quivr", async ({ page }, info) => {
+  test.setTimeout(90000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFeed(page);
+  const title = `Note du jour ${run}`;
+  await page.getByRole("button", { name: "Ajouter du texte", exact: true }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Ajouter du texte" });
+  await dialog.getByLabel("Votre texte").fill(`${title}\nUn texte daté par Quivr.`);
+  await dialog.getByRole("button", { name: "Ajouter à la démo" }).click();
+  await expect(dialog.getByText("Texte enregistré")).toBeVisible({ timeout: 30000 });
+  await page.keyboard.press("Escape");
+  const list = page.getByRole("list", { name: "Derniers éléments" });
+  await expect(list.getByText(title)).toBeVisible({ timeout: 30000 });
+
+  const filters = page.getByRole("group", { name: "Filtrer le fil" });
+  const counted = page.waitForResponse((r) => new URL(r.url()).pathname === "/demo/feed/days");
+  await filters.getByRole("button", { name: /^Date/ }).click();
+  expect((await counted).status()).toBe(200);
+  // Quivr may have counted before the text arrived (the server keeps counts a
+  // minute): the page adds what arrived since, so today shows it either way.
+  const dates = page.getByRole("dialog", { name: "Date" });
+  const today = dates.getByRole("button", { name: /^Aujourd’hui/ });
+  await expect
+    .poll(async () => Number(await today.locator(".menu-count").textContent()))
+    .toBeGreaterThanOrEqual(1);
+  const listed = page.waitForResponse((r) => new URL(r.url()).pathname === "/demo/feed/page");
+  await today.click();
+  const day = await listed;
+  expect(day.status()).toBe(200);
+  expect((await day.json()).items.map((i: { title: string }) => i.title)).toContain(title);
+  await page.keyboard.press("Escape");
+  await expect(list.getByText(title)).toBeVisible();
+  await page.screenshot({ path: info.outputPath("veille-today.png") });
+});
+
 // The verify Corpus is shared by every spec, so an empty feed is simulated.
 test("un fil vide explique comment ajouter une source ou un texte", async ({
   page,

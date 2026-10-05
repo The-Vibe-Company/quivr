@@ -8,6 +8,13 @@ import type { AddressInfo } from "node:net";
 import type { Page, Route } from "@playwright/test";
 
 const minutes = (n: number) => new Date(Date.now() - n * 60000).toISOString();
+/** A local time `n` days ago, at that hour. */
+export const daysAgo = (n: number, hour: number) => {
+  const at = new Date();
+  at.setDate(at.getDate() - n);
+  at.setHours(hour, 0, 0, 0);
+  return at.toISOString();
+};
 
 export interface Article {
   record_id: string;
@@ -134,7 +141,14 @@ export function workspace() {
     connector("con_tech", "Revue technique", "https://tech.example.com/rss", { state: "active", last_success_at: minutes(3), last_item_at: minutes(14) }),
     connector("con_weather", "Météo locale", "https://weather.example.net/feed", { state: "active", last_success_at: minutes(40), last_item_at: minutes(5), last_error: { code: "timeout", at: minutes(10) } }),
   ];
-  return { articles, incoming, alerts, connectors };
+  // Older than the feed's snapshot: reached by picking their day.
+  const archive: Article[] = [
+    article("port", "Dépêches exemple", 0, "Le port rouvre après trois jours de fermeture", "Le trafic reprend au port après trois jours de fermeture.", ["transports"], { received_at: daysAgo(3, 18) }),
+    article("bridge", "Revue technique", 0, "Un pont suspendu inspecté par drone", "Des drones ont inspecté le pont suspendu pendant la nuit.", ["industrie"], { received_at: daysAgo(3, 12) }),
+    article("market", "Dépêches exemple", 0, "Le marché couvert rouvre ses portes", "Après travaux, le marché couvert rouvre ce matin.", ["commerce"], { received_at: daysAgo(3, 8) }),
+    article("archive", "Dépêches exemple", 0, "Les archives municipales numérisées", "Les archives municipales sont désormais consultables en ligne.", ["culture"], { received_at: daysAgo(5, 10) }),
+  ];
+  return { articles, incoming, alerts, connectors, archive };
 }
 
 export type Workspace = ReturnType<typeof workspace>;
@@ -239,7 +253,9 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     capped: false,
     created_at: "created_at" in a ? a.created_at : undefined,
   });
-  const find = (id: string) => ws.articles.find((a) => a.record_id === id);
+  const stored = () => [...ws.articles, ...ws.archive];
+  const find = (id: string) => stored().find((a) => a.record_id === id);
+  const arrived = (a: Article) => Date.parse(a.received_at!);
 
   await page.route("**/demo/feed/stream", (route) =>
     route.continue({ url: streamURL }),
@@ -256,6 +272,36 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       return json(route, { corpus_id: "demo", name: "Espace démo" });
     if (path === "/demo/feed")
       return json(route, { items: ws.articles.map(feedItem), live: true });
+    // Like the facade: Quivr's counts per period, and a day newest first,
+    // two articles a page so that paging shows.
+    if (path === "/demo/feed/days") {
+      const bounds = (url.searchParams.get("bounds") || "").split(",").map(Date.parse);
+      if (bounds.some((b, i) => Number.isNaN(b) || (i > 0 && b >= bounds[i - 1])))
+        return json(route, { message: "Cette période n’est pas valide." }, 422);
+      const all = stored();
+      return json(route, {
+        total: all.length,
+        days: bounds.slice(1).map(
+          (after, i) => all.filter((a) => arrived(a) >= after && arrived(a) < bounds[i]).length,
+        ),
+        older: all.filter((a) => arrived(a) < bounds.at(-1)!).length,
+        as_of: new Date().toISOString(),
+      });
+    }
+    if (path === "/demo/feed/page") {
+      const after = Date.parse(url.searchParams.get("after") || "");
+      const before = Date.parse(url.searchParams.get("before") || "");
+      if (Number.isNaN(after) || Number.isNaN(before) || after >= before)
+        return json(route, { message: "Cette période n’est pas valide." }, 422);
+      const start = Number(url.searchParams.get("cursor") || 0);
+      const day = stored()
+        .filter((a) => arrived(a) >= after && arrived(a) < before)
+        .sort((a, b) => arrived(b) - arrived(a));
+      return json(route, {
+        items: day.slice(start, start + 2).map(feedItem),
+        next_cursor: start + 2 < day.length ? String(start + 2) : undefined,
+      });
+    }
     if (path === "/v0/changes")
       return json(route, { items: [], next_cursor: "c0", has_more: false });
     if (path === "/v0/search/profiles" && options.profiles)

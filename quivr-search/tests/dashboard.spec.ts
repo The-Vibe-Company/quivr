@@ -146,6 +146,97 @@ test("le fil marque les non-lus, filtre par alerte et par source, et retient les
   await expect(chips(page).getByRole("button", { name: "Tout marquer comme lu" })).toHaveCount(0);
 });
 
+test("le filtre Date liste chaque jour jusqu’au premier article, compté par Quivr, et charge un jour ancien", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(8);
+  // Tout counts what Quivr holds, not the articles the feed loaded.
+  const total = engine.ws.articles.length + engine.ws.archive.length;
+  const all = chips(page).getByRole("button", { name: /^Tout\b/ }).first();
+  await expect(all.locator(".chip-count")).toHaveText(String(total));
+  await expect(page.getByText(/Les articles plus anciens restent dans Quivr/)).toBeVisible();
+  // An article arriving live after Quivr counted adds one, once.
+  engine.arrive();
+  await expect(rows(page)).toHaveCount(9);
+  await expect(all.locator(".chip-count")).toHaveText(String(total + 1));
+
+  // Every day back to the first article, five days ago, newest first.
+  const label = (iso: string) => {
+    const day = new Date(iso);
+    const text = new Intl.DateTimeFormat("fr-FR", {
+      weekday: "long",
+      day: "numeric",
+      month: "short",
+      ...(day.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }),
+    }).format(day);
+    return text[0].toUpperCase() + text.slice(1);
+  };
+  // Labels come from the fixture's own times, so a run across midnight holds.
+  const [port, , , first] = engine.ws.archive;
+  const portDay = new Date(port.received_at!);
+  const dayBefore = new Date(portDay);
+  dayBefore.setDate(dayBefore.getDate() - 1);
+  const firstDay = new Date(first.received_at!).toDateString();
+  const earlier: string[] = [];
+  for (let n = 2; earlier.length < 30; n++) {
+    const at = new Date();
+    at.setHours(12, 0, 0, 0);
+    at.setDate(at.getDate() - n);
+    earlier.push(label(at.toISOString()));
+    if (at.toDateString() === firstDay) break;
+  }
+  const dates = await menu(page, "Date");
+  const options = dates.locator(".menu-option");
+  await expect(options.locator(".menu-label")).toHaveText([
+    "Tous les jours",
+    "Aujourd’hui",
+    "Hier",
+    ...earlier,
+  ]);
+  await expect(options.first().locator(".menu-count")).toHaveText(String(total + 1));
+  const old = options.filter({ hasText: label(port.received_at!) });
+  await expect(old.locator(".menu-count")).toHaveText("3");
+  await expect(options.filter({ hasText: label(dayBefore.toISOString()) }).locator(".menu-count")).toHaveText("0");
+  await page.screenshot({ path: info.outputPath("date-menu-light.png") });
+
+  // A day older than the feed loads from Quivr, newest first, page by page.
+  await old.click();
+  await page.keyboard.press("Escape");
+  await expect(rows(page).locator(".row-title")).toHaveText([
+    "Le port rouvre après trois jours de fermeture",
+    "Un pont suspendu inspecté par drone",
+    "Le marché couvert rouvre ses portes",
+  ]);
+  await expect(all.locator(".chip-count")).toHaveText("3");
+  await expect(page.getByText(/Les articles plus anciens restent dans Quivr/)).toHaveCount(0);
+  await expect(chips(page).getByRole("button", { name: /^Date/ })).toHaveAttribute(
+    "aria-label",
+    `Date : ${label(port.received_at!)}`,
+  );
+  // The source filter still applies to a day read from Quivr.
+  await pick(page, "Sources", /^Revue technique/);
+  await expect(rows(page)).toHaveCount(1);
+  await expect(row(page, "Un pont suspendu")).toBeVisible();
+  for (const scheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.screenshot({ path: info.outputPath(`date-day-${scheme}.png`), animations: "disabled" });
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+  await chips(page).getByRole("button", { name: "Tout effacer" }).click();
+  await expect(rows(page)).toHaveCount(9);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await pick(page, "Date", new RegExp(`^${label(first.received_at!)}`));
+  await expect(rows(page)).toHaveCount(1);
+  await expect(row(page, "Les archives municipales")).toBeVisible();
+  expect(await noOverflow(page)).toBe(true);
+  await (await menu(page, "Date")).waitFor();
+  await page.screenshot({ path: info.outputPath("date-menu-mobile.png"), animations: "disabled" });
+});
+
 test("la recherche passe des mots exacts aux idées proches et devient une alerte", async ({
   page,
 }) => {

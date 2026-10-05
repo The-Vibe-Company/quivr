@@ -17,6 +17,7 @@ export function SideColumn({
   titles,
   query,
   span,
+  counts,
   day,
   onDay,
   onSearch,
@@ -27,6 +28,8 @@ export function SideColumn({
   query: string;
   /** The articles of every day, for the day-by-day chart. */
   span: FeedItem[];
+  /** Articles per day as Quivr counts them, when no filter narrows the feed. */
+  counts?: Map<string, number>;
   /** The day chosen, as "2026-10-03", or "" for every day. */
   day: string;
   onDay: (day: string) => void;
@@ -38,7 +41,9 @@ export function SideColumn({
   const fold = (text: string) =>
     text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
   const times = span.map((i) => i.received_at || i.published_at);
-  const week = daily(times, now);
+  const week = daily(times, now).map((d) =>
+    counts ? { ...d, count: counts.get(d.day) ?? d.count } : d,
+  );
   const { counts: hours, today } = hourly(times, day || week[week.length - 1].day, now);
   const bars = day ? hours : week.map((d) => d.count);
   const total = bars.reduce((sum, n) => sum + n, 0);
