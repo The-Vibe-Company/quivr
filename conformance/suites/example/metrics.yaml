@@ -1,0 +1,6 @@
+id: EXNF-OBSV-001
+check: metric_exposed
+parameters:
+  name: quivr_observability_dropped_events_total
+threshold:
+  type: counter
