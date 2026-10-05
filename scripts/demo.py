@@ -118,14 +118,13 @@ def main():
             stack.capture()
         finally:
             stack.down(isolated)
-        if args.command == 'perf':
-            print('Demo artifacts:', stack.directory)
-            return
-        (stack.directory / 'demo-report.json').write_text(json.dumps({
-            'status': status, 'duration_seconds': round(time.monotonic() - started, 3),
-            'scope': 'Real core + production demo facade + Chromium browser and HTTP tests',
-            'tests': verify_report.browser_results(browser_report)[0], 'failures': failures,
-        }, indent=2))
+        # perf writes its own report (perf.json); no return here, which would swallow its failure.
+        if args.command != 'perf':
+            (stack.directory / 'demo-report.json').write_text(json.dumps({
+                'status': status, 'duration_seconds': round(time.monotonic() - started, 3),
+                'scope': 'Real core + production demo facade + Chromium browser and HTTP tests',
+                'tests': verify_report.browser_results(browser_report)[0], 'failures': failures,
+            }, indent=2))
         for failure in failures:
             print(f"\n--- FAIL: {failure['test']} (log {failure['log']})\n" + '\n'.join('    ' + line for line in failure['excerpt'].splitlines()), flush=True)
         print('Demo artifacts:', stack.directory)

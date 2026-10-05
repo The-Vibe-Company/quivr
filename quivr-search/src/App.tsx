@@ -1,5 +1,7 @@
 import {
+  Component,
   type ComponentType,
+  type ReactNode,
   lazy,
   Suspense,
   useCallback,
@@ -101,6 +103,24 @@ function urlState() {
         ? { record: p.get("record")!, version: p.get("doc")! }
         : null,
   };
+}
+
+// A tab whose code cannot load (offline, or a page left open across a deploy)
+// says so and offers a reload, instead of emptying the whole app.
+class TabBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? (
+      <Notice title="Cette page n’a pas pu se charger." onRetry={() => location.reload()}>
+        Rechargez la page pour récupérer la dernière version de la démo.
+      </Notice>
+    ) : (
+      this.props.children
+    );
+  }
 }
 
 // The tab the address opens on loads with the page, not after the session.
@@ -521,94 +541,96 @@ function Dashboard({
           )}
         </form>
       </header>
-      <Suspense fallback={<LoadingState label="Chargement…" rows={4} />}>
-        {view === "feed" ? (
-          <FeedPage
-            corpus={corpus}
-            query={query}
-            near={near}
-            onNear={setNear}
-            deepOffered={deepOffered}
-            deep={deep}
-            onDeep={setDeep}
-            filter={filter}
-            onFilter={setFilter}
-            doc={doc}
-            onOpen={open}
-            onClose={() => setDoc(null)}
-            onQuery={setInput}
-            feed={feed}
-            alerts={alerts}
-            connectors={sources.connectors}
-            reading={reading}
-            scroller={scroller}
-            onAdd={() => setAdding(true)}
-            onAlerts={() => {
-              setDoc(null);
-              setView("alerts");
-            }}
-            onSources={(id) => {
-              setDoc(null);
-              setOpenSource(id || null);
-              setView("sources");
-            }}
-            notify={notify}
-            onUnauthorized={onUnauthorized}
-          />
-        ) : view === "alerts" ? (
-          <AlertsView
-            corpus={corpus}
-            selected={alert}
-            onSelect={setAlert}
-            doc={doc}
-            // Articles open in the reader over the page; the open one closes it.
-            onOpen={(record, version) => setDoc(doc?.record === record ? null : { record, version })}
-            onCloseDoc={() => setDoc(null)}
-            onSimilar={(text) => {
-              setInput(text);
-              setNear(true);
-              setFilter(ALL);
-              setDoc(null);
-              setView("feed");
-            }}
-            connectors={sources.connectors}
-            feedItems={feed.items}
-            isUnread={reading.isUnread}
-            onMarkAllRead={reading.markAllRead}
-            onChanged={() => void alerts.reload()}
-            notify={notify}
-            onUnauthorized={onUnauthorized}
-          />
-        ) : view === "admin" ? (
-          <AdminView
-            titles={titles}
-            connectors={sources.connectors}
-            selected={version}
-            onSelect={setVersion}
-            onOpen={(record, target) => {
-              setVersion(null);
-              open(record, target);
-            }}
-            onAdd={() => setAdding(true)}
-            onSources={() => {
-              setOpenSource(null);
-              setView("sources");
-            }}
-            onUnauthorized={onUnauthorized}
-          />
-        ) : (
-          <ConnectorsView
-            corpus={corpus}
-            feedItems={feed.items}
-            matched={alerts.list?.matched || {}}
-            initialSelected={openSource}
-            onChanged={() => void sources.reload()}
-            onAdd={() => setAdding(true)}
-            notify={notify}
-            onUnauthorized={onUnauthorized}
-          />
-        )}
-      </Suspense>
+      <TabBoundary key={view}>
+        <Suspense fallback={<LoadingState label="Chargement…" rows={4} />}>
+          {view === "feed" ? (
+            <FeedPage
+              corpus={corpus}
+              query={query}
+              near={near}
+              onNear={setNear}
+              deepOffered={deepOffered}
+              deep={deep}
+              onDeep={setDeep}
+              filter={filter}
+              onFilter={setFilter}
+              doc={doc}
+              onOpen={open}
+              onClose={() => setDoc(null)}
+              onQuery={setInput}
+              feed={feed}
+              alerts={alerts}
+              connectors={sources.connectors}
+              reading={reading}
+              scroller={scroller}
+              onAdd={() => setAdding(true)}
+              onAlerts={() => {
+                setDoc(null);
+                setView("alerts");
+              }}
+              onSources={(id) => {
+                setDoc(null);
+                setOpenSource(id || null);
+                setView("sources");
+              }}
+              notify={notify}
+              onUnauthorized={onUnauthorized}
+            />
+          ) : view === "alerts" ? (
+            <AlertsView
+              corpus={corpus}
+              selected={alert}
+              onSelect={setAlert}
+              doc={doc}
+              // Articles open in the reader over the page; the open one closes it.
+              onOpen={(record, version) => setDoc(doc?.record === record ? null : { record, version })}
+              onCloseDoc={() => setDoc(null)}
+              onSimilar={(text) => {
+                setInput(text);
+                setNear(true);
+                setFilter(ALL);
+                setDoc(null);
+                setView("feed");
+              }}
+              connectors={sources.connectors}
+              feedItems={feed.items}
+              isUnread={reading.isUnread}
+              onMarkAllRead={reading.markAllRead}
+              onChanged={() => void alerts.reload()}
+              notify={notify}
+              onUnauthorized={onUnauthorized}
+            />
+          ) : view === "admin" ? (
+            <AdminView
+              titles={titles}
+              connectors={sources.connectors}
+              selected={version}
+              onSelect={setVersion}
+              onOpen={(record, target) => {
+                setVersion(null);
+                open(record, target);
+              }}
+              onAdd={() => setAdding(true)}
+              onSources={() => {
+                setOpenSource(null);
+                setView("sources");
+              }}
+              onUnauthorized={onUnauthorized}
+            />
+          ) : (
+            <ConnectorsView
+              corpus={corpus}
+              feedItems={feed.items}
+              matched={alerts.list?.matched || {}}
+              initialSelected={openSource}
+              onChanged={() => void sources.reload()}
+              onAdd={() => setAdding(true)}
+              notify={notify}
+              onUnauthorized={onUnauthorized}
+            />
+          )}
+        </Suspense>
+      </TabBoundary>
       <ChartTip />
       <div className="toast-region" role="status" aria-live="polite">
         {toast && (
@@ -618,17 +640,19 @@ function Dashboard({
         )}
       </div>
       {adding && (
-        <Suspense fallback={null}>
-          <AddText
-            corpus={corpus}
-            onClose={() => setAdding(false)}
-            onAdded={() => undefined}
-            onOpen={(record, version) => {
-              setAdding(false);
-              open(record, version);
-            }}
-          />
-        </Suspense>
+        <TabBoundary>
+          <Suspense fallback={null}>
+            <AddText
+              corpus={corpus}
+              onClose={() => setAdding(false)}
+              onAdded={() => undefined}
+              onOpen={(record, version) => {
+                setAdding(false);
+                open(record, version);
+              }}
+            />
+          </Suspense>
+        </TabBoundary>
       )}
     </div>
   );

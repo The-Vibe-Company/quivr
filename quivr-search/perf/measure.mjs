@@ -275,6 +275,9 @@ for (const [name, page] of Object.entries(report.pages)) {
     breaches.push(`${name}: JavaScript ${page.js_kb} KB > ${budgets.pages.js_kb}`);
 }
 if (report.inp_ms > budgets.inp_ms) breaches.push(`INP ${report.inp_ms} ms > ${budgets.inp_ms}`);
+// A fast refusal is not a pass, wherever the demo runs.
+for (const [name, row] of Object.entries(report.endpoints))
+  if (row.status < 200 || row.status > 299) breaches.push(`${name}: HTTP ${row.status}`);
 if (local)
   for (const [name, row] of Object.entries(report.endpoints)) {
     const budget = budgets.endpoints[name];

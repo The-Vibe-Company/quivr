@@ -281,8 +281,10 @@ async function send(res, status, data, headers = {}) {
   }
   await reply(res, status, head, body);
 }
+// `encoded`: the body's compressed forms, or null for one sent as is.
 async function reply(res, status, head, body, encoded) {
-  const coding = body.length >= COMPRESS_MIN ? encoding(res.req) : "";
+  const coding =
+    body.length >= COMPRESS_MIN && encoded !== null ? encoding(res.req) : "";
   head.Vary = "Accept-Encoding";
   if (coding) {
     body = encoded?.[coding] || (await compress(body, coding));
@@ -298,18 +300,21 @@ const files = new Map();
 async function builtFile(file) {
   if (files.has(file)) return files.get(file);
   const loading = readFile(file).then(async (raw) => {
-    const big = raw.length >= COMPRESS_MIN && !/\.(png|woff2)$/.test(file);
+    // Images and fonts are compressed already: they go as they are.
+    const packed = /\.(png|woff2)$/.test(file);
     return {
       raw,
       etag: tag(raw),
-      encoded: big
-        ? {
-            br: await brotli(raw, {
-              params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 },
-            }),
-            gzip: await gzip(raw, { level: 9 }),
-          }
-        : {},
+      encoded: packed
+        ? null
+        : raw.length < COMPRESS_MIN
+          ? {}
+          : {
+              br: await brotli(raw, {
+                params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 },
+              }),
+              gzip: await gzip(raw, { level: 9 }),
+            },
     };
   });
   files.set(file, loading);
