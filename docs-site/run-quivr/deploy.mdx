@@ -41,7 +41,7 @@ A change to this file takes effect when the processes restart. Plugin changes ma
 
 ## Start order
 
-For example, not run as printed here:
+For example, not run:
 
 ```bash
 export QUIVR_CONFIG=/etc/quivr/config.json
@@ -66,7 +66,7 @@ Each `api` and `worker` serves three probes on its `probe_listen` address, `127.
 | `GET /readyz` | `204` once the process can serve, `503` otherwise |
 | `GET /metrics` | Counters in Prometheus text format |
 
-The `api` becomes ready once its schema check passes and its ingestion plugin has answered a first query, or after 5 seconds; the first searches are then only slower. The `worker` also checks that Temporal, object storage and the search index answer. A plugin that is down does not stop either process: work that needs it waits and retries.
+The `api` becomes ready once its schema check passes and its ingestion plugin has answered a first query, or after 5 seconds; the first searches are then only slower. The `worker` also checks that Temporal, object storage and the search index answer. A plugin that is down does not stop either process. Background work that needs it waits and retries; a search that needs it fails with `503 search_unavailable`.
 
 ## Example deployments
 

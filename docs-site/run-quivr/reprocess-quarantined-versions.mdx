@@ -84,7 +84,7 @@ curl -s "$QUIVR_API_URL/v0/operations/$OPERATION_ID" -H "Authorization: Bearer $
 {"state": "succeeded", "counters": {"versions_in_scope": 11, "versions_recovered": 11, "versions_quarantined": 0, "versions_skipped": 0}}
 ```
 
-`versions_recovered` are searchable now. `versions_quarantined` failed again and stay quarantined with their new reason. `versions_skipped` counts the documents it left as they were, each under `skipped_<reason>`:
+`versions_recovered` are searchable now. `versions_quarantined` failed again and stay quarantined with their new reason. `versions_skipped` counts the Versions it left as they were, each under `skipped_<reason>`:
 
 | Reason | Meaning |
 | --- | --- |
@@ -113,7 +113,7 @@ curl -s "$QUIVR_API_URL/v0/admin/quarantine?corpus_id=$CORPUS_ID" -H "Authorizat
 - **Normalization stage.** The normalizer of the active plan runs again. When it answers, the document is published with the normalized content, as it would have been the first time, and processed. The change feed announces it with `record.materialized`.
 - **Ingestion stage.** The ingestion plugin of the active plan segments and embeds the document again.
 - **As a first success.** A recovered document becomes its Record's current Version if the Record still wants it, is searchable, is evaluated by the alerts of its Corpus, and appears in the change feed with `record.retrieval_ready` and `record.enrichment_available`.
-- **Pace.** It runs on the backfill queue, at most `backfill.rate` documents per second (see [Configuration](/reference/configuration#backfill)), so live ingestion keeps its capacity. One reprocess of a Corpus runs at a time.
+- **Pace.** It runs on the backfill queue, at most `backfill.rate` Versions per second (see [Configuration](/reference/configuration#backfill)), so live ingestion keeps its capacity. One reprocess of a Corpus runs at a time.
 - **Plan.** It is pinned to the plan active when it was accepted, like other work. A plugin of that plan that becomes unreachable quarantines the document again with `pinned_plugin_unavailable`.
 - **Interruptions.** A restart resumes the document it was processing. Canceling it puts a document it had started back in quarantine with its previous reason.
 

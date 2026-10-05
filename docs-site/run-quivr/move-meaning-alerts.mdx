@@ -13,7 +13,7 @@ A Saved Query stores an alert definition; each immutable Saved Query Version fix
 
 - Search has just switched vector space: you [activated another ingestion plugin](/run-quivr/switch-a-vector-model), [promoted another space](/run-quivr/backfill-a-vector-space) of the same plugin, or rolled either back.
 - `curl` and `jq` (`curl --version`, `jq --version`), your API address in `QUIVR_API_URL`, and a key with `monitoring:read` and `monitoring:write` in `QUIVR_ALERT_KEY`.
-- The id of the vector space search uses now in `SPACE_ID`: the `served_space_id` a promotion returned, or the candidate's space when you activated another plugin. The requests use it only to build idempotency keys.
+- A label unique to this migration in `MIGRATION_ID`, such as the new space id followed by today's date. The requests use it only to build idempotency keys, so a later switch back to a space you used before still gets fresh keys.
 - Your application's inventory of alerts that use `meaning_check: vectors`. The API cannot list Saved Queries.
 
 <Warning>
@@ -30,7 +30,7 @@ For every Saved Query using `meaning_check: vectors` in the affected Corpora, cr
 ```bash
 curl -fsS "$QUIVR_API_URL/v0/saved-queries/$SAVED_QUERY_ID" \
   -H "Authorization: Bearer $QUIVR_ALERT_KEY" \
-  | jq --arg key "model-switch-$SAVED_QUERY_ID-$SPACE_ID" \
+  | jq --arg key "model-switch-$SAVED_QUERY_ID-$MIGRATION_ID" \
     '{idempotency_key:$key, definition:.current_version.definition}' > query-version.json
 curl -fsS -X POST "$QUIVR_API_URL/v0/saved-queries/$SAVED_QUERY_ID/versions" \
   -H "Authorization: Bearer $QUIVR_ALERT_KEY" -H "Content-Type: application/json" \
@@ -64,7 +64,7 @@ Use your application’s inventory to include disabled Subscriptions before re-e
 </Step>
 <Step title="Recalibrate the threshold">
 
-Recalibrate the evaluator's similarity threshold against the new model: similarity scores from different models are not comparable. [Meaning alerts](/guides/described-alerts#keep-the-meaning-check-inside-the-installation) explains vector matching and its threshold.
+Similarity scores from different models are not comparable, so the copied threshold may now catch too much or too little. Tune it on your own examples; [Meaning alerts](/guides/described-alerts#keep-the-meaning-check-inside-the-installation) explains vector matching and its threshold. To apply a new value, repeat the previous step with a new idempotency key in `subscription-version.json` and the value in its `evaluator.configuration.threshold`, between 0.2 and 0.95.
 
 </Step>
 </Steps>
@@ -80,7 +80,7 @@ curl -fsS "$QUIVR_API_URL/v0/subscriptions/$SUBSCRIPTION_ID" \
 
 ## After a rollback
 
-The migrations do not reverse themselves. Immediately after a rollback, set `SPACE_ID` to the restored space, and repeat these steps: the new `SPACE_ID` gives fresh idempotency keys.
+The migrations do not reverse themselves. Immediately after a rollback, set a new `MIGRATION_ID` and repeat these steps.
 
 ## Clean up
 
