@@ -24,7 +24,7 @@ import { Dialog } from "../Dialog";
 import { AddSource } from "./AddSource";
 import { NO_ARTICLES, SourceList, groupSources, nameOf, type SourceStats } from "./SourceList";
 import { PlusIcon } from "../RailIcons";
-import { LiveBadge, LoadingState, Notice, liveFeed } from "../ui";
+import { InBar, LiveBadge, LoadingState, Notice, liveFeed, type Bar } from "../ui";
 import type { FeedItem } from "../../lib/feed";
 import { needsCheck } from "../../lib/format";
 import { displayState } from "./HealthBadge";
@@ -50,6 +50,7 @@ let visited: {
 
 export function ConnectorsView({
   corpus,
+  bar,
   feedItems,
   initialSelected,
   onChanged,
@@ -58,6 +59,8 @@ export function ConnectorsView({
   onUnauthorized,
 }: {
   corpus: string;
+  /** The top bar’s places this page fills. */
+  bar: Bar;
   /** The feed's latest articles: their arrival counts again. */
   feedItems: FeedItem[];
   /** A source to open on arrival (from the feed's "Renouveler"). */
@@ -387,10 +390,11 @@ export function ConnectorsView({
       )}
       {status === "ready" && catalog && (
         <section className="sources-page" aria-labelledby="sources-title">
-          <div className="alerts-head">
-            <h2 id="sources-title" ref={listHeading} tabIndex={-1}>
-              Vos sources
-            </h2>
+          {/* The counts, the live state and "Ajouter une source" sit in the top bar. */}
+          <h2 id="sources-title" className="visually-hidden" ref={listHeading} tabIndex={-1}>
+            Vos sources
+          </h2>
+          <InBar to={bar.meta}>
             {sources.length > 0 && (
               <span className="head-count">
                 {sources.length}
@@ -402,14 +406,16 @@ export function ConnectorsView({
                 {toCheck} à vérifier
               </span>
             )}
+          </InBar>
+          <InBar to={bar.actions}>
             <LiveBadge live={live} />
             {catalog.items.length > 0 && (
               <button type="button" className="button alerts-new" onClick={openAdd}>
                 <PlusIcon size={16} />
-                Ajouter une source
+                <span className="bar-action-label">Ajouter une source</span>
               </button>
             )}
-          </div>
+          </InBar>
           {sources.length === 0 && !catalog.items.length ? (
             <p className="list-empty">Aucun type de source n’est disponible sur ce déploiement.</p>
           ) : (
