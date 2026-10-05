@@ -2,7 +2,6 @@
 import contextlib
 import os
 import time
-import functools
 import threading
 
 
@@ -47,9 +46,17 @@ class AdmissionGate:
                 raise Outage('campaign network recovery failed; paid admission refused')
 
 
-@functools.lru_cache(maxsize=128)
+_admissions = {}
+_admission_lock = threading.Lock()
+
+
 def admission(campaign):
-    return AdmissionGate()
+    # A gate is process-lifetime state: concurrent creation or eviction could
+    # split the campaign's pause/failure fence across different identities.
+    with _admission_lock:
+        if campaign not in _admissions:
+            _admissions[campaign] = AdmissionGate()
+        return _admissions[campaign]
 
 
 def window():

@@ -52,10 +52,12 @@ class TLSConfiguration(unittest.TestCase):
                             pass
                     self.assertEqual(connect.call_count, 1)
                     self.assertFalse(waits)
-            with mock.patch('psycopg.connect', return_value=mock.MagicMock()) as connect:
+            connection = mock.MagicMock()
+            connection.__exit__.side_effect = psycopg.OperationalError('connection lost during commit')
+            with mock.patch('psycopg.connect', return_value=connection) as connect:
                 with self.assertRaises(control_store.Unavailable):
                     with store.transaction():
-                        raise psycopg.OperationalError('connection lost during commit')
+                        pass
                 self.assertEqual(connect.call_count, 1, 'an uncertain transaction must never replay')
 
     def test_secret_ca_is_private_and_removed_after_success_or_connection_failure(self):
@@ -131,6 +133,12 @@ class Control(unittest.TestCase):
                 try:
                     self.assertTrue(paused.wait(5), 'reservation did not reach SQL')
                     self.assertTrue(rolled_back.wait(5), 'paused admission committed instead of rolling back')
+                    # Other campaign lookups must not evict this active gate.
+                    for index in range(129):
+                        network_recovery.admission('registry-' + campaign + str(index))
+                    with mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='0'):
+                        with self.assertRaises(network_recovery.Outage):
+                            control_store.Store(store.dsn).reserve(campaign, 'provider', 1)
                     self.assertNotIn('provider', control_store.Store(store.dsn).summary(campaign))
                 finally:
                     # Stop the lock hook before the retry, and release the waiter.
