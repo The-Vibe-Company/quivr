@@ -151,10 +151,11 @@ def rerank(query, passages, budget, key, price):
 
 
 def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
-            fresh_latency=True, rerank_key='', flush=lambda: None):
+            fresh_latency=True, rerank_key='', flush=lambda: None, private_vectors=None):
     if dataset['split'] != 'dev':
         raise PermissionError('tier 1 accepts campaign-dev data only')
     cfg = configuration(cfg)
+    LOG.info('indexing started')
     indexing_started = time.monotonic()
     doc_ids, query_ids = sorted(data['corpus']), sorted(data['qrels'])
     docs = [(data['corpus'][d].get('title', '') + '\n' if data['corpus'][d].get('title') else '')
@@ -174,39 +175,19 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         return direct.normalize(vectors).tolist()
 
     identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
-    entries, cache_hits, cache_fills = {}, 0, 0
+    # The protected caller owns this map for one dataset invocation only.
+    # No private text identities, vectors or cache keys cross a durable boundary.
+    entries = (private_vectors.setdefault(tuple(identity.values()), {})
+               if dataset['private'] and private_vectors is not None else {})
+    cache_hits, cache_fills = 0, 0
     semantic = cfg['dense_weight'] > 0
     document_embedding_seconds = 0
     index_overhead_seconds = time.monotonic() - indexing_started
     for mode, texts in (('document', docs if semantic else []),
                         ('query', [data['queries'][q] for q in query_ids] if semantic else [])):
-        if dataset['private']:
-            # Private vectors and text identities stay in memory, outside SQL
-            # cache claims and the shared Volume.
-            started = time.monotonic()
-            unique = list(dict.fromkeys(texts))
-            for start in range(0, len(unique), control_store.LEASE_BATCH_SIZE):
-                chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
-                windows = [direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0]
-                           if mode == 'document' else [text] for text in chunk]
-                pieces = [piece for group in windows for piece in group]
-                before = budget.summary()['confirmed_input_tokens']
-                begin = time.monotonic()
-                vectors = embed(pieces, mode)
-                seconds = time.monotonic() - begin
-                tokens = budget.summary()['confirmed_input_tokens'] - before
-                bound, offset = embeddings.estimate_tokens(pieces), 0
-                for text, group in zip(chunk, windows):
-                    fraction = embeddings.estimate_tokens(group) / bound
-                    entries[(mode, text)] = {'vectors': vectors[offset:offset + len(group)],
-                        'tokens': tokens * fraction, 'embedding_seconds': seconds * fraction}
-                    offset += len(group)
-            if mode == 'document':
-                index_overhead_seconds += max(0, time.monotonic() - started - sum(
-                    e['embedding_seconds'] for (kind, _), e in entries.items() if kind == 'document'))
-            continue
         mode_started = time.monotonic()
         unique = list(dict.fromkeys(texts))
+        LOG.info('embedding started mode=%s total=%d', mode, len(unique))
         # Local inference stays serial; hosted requests overlap across a bounded
         # wave. Claims, file persistence, Volume commits and publication stay on
         # this thread. Never enqueue the entire dataset.
@@ -216,34 +197,45 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             wave = []
             for start in range(wave_start, min(wave_start + wave_size, len(unique)), control_store.LEASE_BATCH_SIZE):
                 chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
-                keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
-                         'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
-                started = time.monotonic()
-                pending = []
-                try:
-                    # A cache validation failure also rolls back new claims in
-                    # this chunk. No paid work starts before the wave validates.
-                    with budget.store.claim_batch(budget.campaign, keyed, ttl=86400, require_available=True) as claims:
-                        for cache_key, text in keyed.items():
-                            claim = claims[cache_key]
-                            if claim['status'] == 'done':
-                                meta = claim['payload']
-                                path = cache / meta['filename']
-                                if not path.exists():
-                                    raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
-                                entry = json.loads(path.read_text())
-                                if digest(entry) != meta['digest']:
-                                    raise RuntimeError('embedding cache digest mismatch')
-                                entries[(mode, text)] = entry
-                                cache_hits += 1
-                            else:
-                                pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
-                                pending.append((text, pieces, cache_key, claim['owner']))
-                except control_store.LeaseBusy:
-                    raise RuntimeError('embedding cache fill already leased; retry after completion') from None
-                LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
+                if dataset['private']:
+                    pending = []
+                    for text in chunk:
+                        if (mode, text) in entries:
+                            cache_hits += 1
+                            continue
+                        pieces = (direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0]
+                                  if mode == 'document' else [text])
+                        pending.append((text, pieces, None, None))
+                else:
+                    keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
+                             'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
+                    started = time.monotonic()
+                    pending = []
+                    try:
+                        # A cache validation failure also rolls back new claims in
+                        # this chunk. No paid work starts before the wave validates.
+                        with budget.store.claim_batch(budget.campaign, keyed, ttl=86400, require_available=True) as claims:
+                            for cache_key, text in keyed.items():
+                                claim = claims[cache_key]
+                                if claim['status'] == 'done':
+                                    meta = claim['payload']
+                                    path = cache / meta['filename']
+                                    if not path.exists():
+                                        raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
+                                    entry = json.loads(path.read_text())
+                                    if digest(entry) != meta['digest']:
+                                        raise RuntimeError('embedding cache digest mismatch')
+                                    entries[(mode, text)] = entry
+                                    cache_hits += 1
+                                else:
+                                    pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
+                                    pending.append((text, pieces, cache_key, claim['owner']))
+                    except control_store.LeaseBusy:
+                        raise RuntimeError('embedding cache fill already leased; retry after completion') from None
+                    LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
                 if pending:
-                    budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=86400)
+                    if not dataset['private']:
+                        budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=86400)
                     budget.store.renew(budget.campaign, *budget.lease)
                     wave.append(pending)
             if wave:
@@ -287,16 +279,18 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                         fraction = embeddings.estimate_tokens(pieces) / bound
                         entry = {'vectors': vectors[offset:offset + len(pieces)], 'tokens': tokens * fraction,
                                  'embedding_seconds': attributed_seconds * fraction}
-                        filename = digest([cache_key, owner]) + '.json'
-                        results.save(cache / filename, entry)
-                        publication[cache_key] = (owner, {'filename': filename, 'digest': digest(entry)})
+                        if not dataset['private']:
+                            filename = digest([cache_key, owner]) + '.json'
+                            results.save(cache / filename, entry)
+                            publication[cache_key] = (owner, {'filename': filename, 'digest': digest(entry)})
                         entries[(mode, text)] = entry
                         offset += len(pieces)
                     # SQL references files only after this chunk is durable.
-                    flush()
-                    budget.store.publish_many(budget.campaign, publication)
+                    if not dataset['private']:
+                        flush()
+                        budget.store.publish_many(budget.campaign, publication)
                     cache_fills += len(pending)
-            LOG.info('cache progress processed=%d total=%d hits=%d filled=%d',
+            LOG.info('embedding progress processed=%d total=%d hits=%d filled=%d',
                      min(wave_start + wave_size, len(unique)), len(unique), cache_hits, cache_fills)
         if mode == 'document':
             index_overhead_seconds += max(0, time.monotonic() - mode_started - document_embedding_seconds)
@@ -313,11 +307,13 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     index = SearchIndex(docs, doc_ids, piece_vectors, owners, cfg)
     # Include document preparation/cache processing, excluding quality queries.
     index_seconds += index_overhead_seconds + max(0, time.monotonic() - assembly_started)
+    LOG.info('indexing complete documents=%d queries=%d', len(docs), len(query_ids))
     ranking, latencies, query_prices = {}, [], []
     provider_rate = prices.get(cfg['model'], 0) / 1_000_000
 
     def search(qid, fresh, dense=None, batch_seconds=0):
-        budget.store.renew(budget.campaign, *budget.lease)
+        if fresh:
+            budget.store.renew(budget.campaign, *budget.lease)
         query = data['queries'][qid]
         before = budget.summary()['confirmed_cost_usd']
         started = time.monotonic()
@@ -342,6 +338,10 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     # Bound temporary piece-score memory while batching quality-only work.
     # Fresh serving below always computes its own per-query dense scores.
     for start in range(0, len(query_ids), 32):
+        # Quality work uses prepared vectors/indexes: renew once per bounded
+        # batch, not one remote SQL round trip for every cached query. Paid
+        # reranking attempts still renew and reserve independently.
+        budget.store.renew(budget.campaign, *budget.lease)
         batch_ids = query_ids[start:start + 32]
         batch_started = time.monotonic()
         dense_batch = index.dense_scores([entries[('query', data['queries'][q])]['vectors'][0]
@@ -353,8 +353,7 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             if not fresh_latency:
                 query_prices.append(price)
             if position % 10 == 0 or position == len(query_ids):
-                LOG.info('search progress completed=%d total=%d elapsed_seconds=%.3f',
-                         position, len(query_ids), time.monotonic() - indexing_started)
+                LOG.info('search progress completed=%d total=%d', position, len(query_ids))
     sample = None
     if fresh_latency:
         timed_ids = sorted(query_ids, key=lambda q: (hashlib.sha256(q.encode()).hexdigest(), q))[:LATENCY_SAMPLE_SIZE]
@@ -367,9 +366,10 @@ def measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             latencies.append(1000 * elapsed)
             query_prices.append(price)
             if position % 10 == 0 or position == len(timed_ids):
-                LOG.info('latency progress completed=%d total=%d elapsed_seconds=%.3f',
-                         position, len(timed_ids), time.monotonic() - indexing_started)
+                LOG.info('latency progress completed=%d total=%d', position, len(timed_ids))
+    LOG.info('scoring started queries=%d', len(query_ids))
     scores = scoring.score(data['qrels'], ranking)
+    LOG.info('scoring complete queries=%d', len(query_ids))
     ordered = sorted(latencies)
     percentile = lambda fraction: ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
     return {'dataset': dataset, 'metrics': {**scores['mean'],

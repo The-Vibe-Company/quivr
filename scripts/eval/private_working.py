@@ -1,5 +1,6 @@
 """Private working comparisons: runtime references in, aggregate evidence out."""
 import json
+import logging
 import os
 import pathlib
 import re
@@ -18,6 +19,7 @@ import trec
 IDENTIFIER = re.compile(r'[A-Za-z0-9_.-]{1,120}')
 HASH = re.compile(r'[a-f0-9]{64}')
 MOUNT_ROOT = pathlib.Path('/eval-working')
+LOG = logging.getLogger(__name__)
 
 
 def descriptor(name, entry):
@@ -65,12 +67,14 @@ def trial(request, store):
         identity = root / 'identity.txt'
         identity.write_text(os.environ[reference['identity_env']])
         identity.chmod(0o600)
+        LOG.info('decrypting started')
         directory = protected_inputs.decrypt(entry,
             MOUNT_ROOT / name / reference['artifact'], identity, root)
         data = trec.load(directory)
+        LOG.info('decrypting complete documents=%d queries=%d', len(data['corpus']), len(data['qrels']))
         dataset = {'name': name, 'version': entry['version'], 'split': 'dev',
                    'fingerprint': entry['fingerprint'], 'private': True}
-        pairs, rows = {}, {}
+        pairs, rows, private_vectors = {}, {}, {}
         for side, cfg in (('baseline', policy['baseline']), ('candidate', request['config'])):
             store.renew(request['campaign'], *lease, ttl=policy['max_seconds'])
             budget = control_store.Budget(store, request['campaign'], lease)
@@ -79,7 +83,7 @@ def trial(request, store):
             started = time.monotonic()
             measured = search_trial.measure(cfg, data, dataset, root / 'vectors', budget, hosted,
                 policy['prices'], float(policy['modal_usd_per_second']), request['fresh_latency'],
-                os.environ.get('TYPESAFE_API_KEY', ''))
+                os.environ.get('TYPESAFE_API_KEY', ''), private_vectors=private_vectors)
             measured['duration_seconds'] = time.monotonic() - started
             measured['cost']['resource_class'] = 'cpu8-memory16384'
             full_cfg = {**cfg, 'paired_side': side, 'profile': policy['profile'], 'campaign': request['campaign'],
