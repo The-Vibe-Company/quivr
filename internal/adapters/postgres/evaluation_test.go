@@ -352,12 +352,13 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		}
 	}
 	var retry monitoring.Intent
-	if err = pool.QueryRow(ctx, `SELECT subscription_version_id,sequence FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='pending'`, org, laterVersion).Scan(&retry.SubscriptionVersionID, &retry.Sequence); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT subscription_id,subscription_version_id,sequence FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='pending'`, org, laterVersion).Scan(&retry.SubscriptionID, &retry.SubscriptionVersionID, &retry.Sequence); err != nil {
 		t.Fatal(err)
 	}
-	retry.Organization = org
-	if err = evaluation.Complete(ctx, retry, monitoring.OutcomeNoMatch); err != nil {
-		t.Fatal(err)
+	retry.Kind, retry.Organization, retry.CorpusID, retry.RecordID, retry.VersionID = monitoring.IntentEvaluation, org, a.ID, laterRecord, laterVersion
+	resolved, err := evaluation.CommitMatches(ctx, []monitoring.MatchCommit{{Intent: retry, Evidence: evidence}})
+	if err != nil || len(resolved) != 1 || resolved[0] != monitoring.OutcomeMatched {
+		t.Fatalf("positive decision after not_ready: outcomes=%v err=%v", resolved, err)
 	}
 	if evaluated() == nil {
 		t.Fatal("evaluated step missing once every Subscription decided")

@@ -157,6 +157,11 @@ func writeNewMatches(ctx context.Context, tx pgx.Tx, matches []monitoring.MatchC
 		}
 	}
 	writes := &pgx.Batch{}
+	var ids, subscriptionIDs, subscriptionVersions, queryIDs, queryVersions, corpusIDs, deliveryIDs, destinations, eventIDs, evidenceJSON []string
+	var bodies [][]byte
+	var positions []int64
+	var completeVersions, completeOutcomes []string
+	var completeSequences []int64
 	for i, match := range matches {
 		if outcomes[i] == monitoring.OutcomeEvaluatorRetired {
 			// An explicit retirement never completes or materializes a late answer.
@@ -176,18 +181,70 @@ func writeNewMatches(ctx context.Context, tx pgx.Tx, matches []monitoring.MatchC
 				return err
 			}
 			position++
-			writes.Queue(`INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id) VALUES($1,$2,$3,$4,$5,$6,$7,NULL)`, org, position, eventID(event), c.corpusID, event.Kind, event.Resource, r.MatchID)
-			writes.Queue(`INSERT INTO matches(organization,id,subscription_id,subscription_version_id,saved_query_id,saved_query_version_id,corpus_id,record_id,record_version_id,previous_match_id,evidence,position) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10,$11)`, org, r.MatchID, in.SubscriptionID, in.SubscriptionVersionID, c.pinned.queryID, c.pinned.queryVersionID, c.corpusID, in.RecordID, in.VersionID, evidence, position)
-			writes.Queue(`INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id,window_start) VALUES($1,$2,$3,$4,$5,$6,NULL)`, org, r.DeliveryID, r.MatchID, c.pinned.destination, event.Kind, eventID(event))
-			writes.Queue(`INSERT INTO monitoring_notices(organization,event_id,kind,match_id,record_id,record_version_id,subscription_id,subscription_version_id,delivery_id,previous_match_id,body,position) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10,$11)`, org, eventID(event), event.Kind, r.MatchID, in.RecordID, in.VersionID, in.SubscriptionID, in.SubscriptionVersionID, r.DeliveryID, body, position)
-			writes.Queue(`INSERT INTO delivery_outbox(organization,delivery_id) VALUES($1,$2)`, org, r.DeliveryID)
+			ids, subscriptionIDs, subscriptionVersions = append(ids, r.MatchID), append(subscriptionIDs, in.SubscriptionID), append(subscriptionVersions, in.SubscriptionVersionID)
+			queryIDs, queryVersions, corpusIDs = append(queryIDs, c.pinned.queryID), append(queryVersions, c.pinned.queryVersionID), append(corpusIDs, c.corpusID)
+			deliveryIDs, destinations, eventIDs = append(deliveryIDs, r.DeliveryID), append(destinations, c.pinned.destination), append(eventIDs, eventID(event))
+			evidenceJSON, bodies, positions = append(evidenceJSON, string(evidence)), append(bodies, body), append(positions, position)
 		}
-		// Keep individual completions ordered: the last one observes the earlier
-		// completed intents and retains completeIntentSQL's evaluated_at rules.
-		writes.Queue(completeIntentSQL, org, in.SubscriptionVersionID, in.Sequence, outcomes[i])
+		completeVersions, completeSequences, completeOutcomes = append(completeVersions, in.SubscriptionVersionID), append(completeSequences, in.Sequence), append(completeOutcomes, outcomes[i])
+	}
+	if len(ids) > 0 {
+		writes.Queue(`INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id)
+SELECT $1,x.position,x.event_id,x.corpus_id,'match.created','match',x.match_id,NULL
+FROM unnest($2::bigint[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(position,event_id,corpus_id,match_id,ordinal) ORDER BY x.ordinal`, org, positions, eventIDs, corpusIDs, ids)
+		writes.Queue(`INSERT INTO matches(organization,id,subscription_id,subscription_version_id,saved_query_id,saved_query_version_id,corpus_id,record_id,record_version_id,previous_match_id,evidence,position)
+SELECT $1,x.match_id,x.subscription_id,x.subscription_version_id,x.query_id,x.query_version_id,x.corpus_id,$2,$3,NULL,x.evidence,x.position
+FROM unnest($4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::text[],$10::jsonb[],$11::bigint[])
+  WITH ORDINALITY AS x(match_id,subscription_id,subscription_version_id,query_id,query_version_id,corpus_id,evidence,position,ordinal) ORDER BY x.ordinal`, org, matches[0].Intent.RecordID, matches[0].Intent.VersionID, ids, subscriptionIDs, subscriptionVersions, queryIDs, queryVersions, corpusIDs, evidenceJSON, positions)
+		writes.Queue(`INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id,window_start)
+SELECT $1,x.delivery_id,x.match_id,x.destination_id,'match.created',x.event_id,NULL
+FROM unnest($2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(delivery_id,match_id,destination_id,event_id,ordinal) ORDER BY x.ordinal`, org, deliveryIDs, ids, destinations, eventIDs)
+		writes.Queue(`INSERT INTO monitoring_notices(organization,event_id,kind,match_id,record_id,record_version_id,subscription_id,subscription_version_id,delivery_id,previous_match_id,body,position)
+SELECT $1,x.event_id,'match.created',x.match_id,$2,$3,x.subscription_id,x.subscription_version_id,x.delivery_id,NULL,x.body,x.position
+FROM unnest($4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::bytea[],$10::bigint[])
+  WITH ORDINALITY AS x(event_id,match_id,subscription_id,subscription_version_id,delivery_id,body,position,ordinal) ORDER BY x.ordinal`, org, matches[0].Intent.RecordID, matches[0].Intent.VersionID, eventIDs, ids, subscriptionIDs, subscriptionVersions, deliveryIDs, bodies, positions)
+		writes.Queue(`INSERT INTO delivery_outbox(organization,delivery_id)
+SELECT $1,x.delivery_id FROM unnest($2::text[]) WITH ORDINALITY AS x(delivery_id,ordinal) ORDER BY x.ordinal`, org, deliveryIDs)
+	}
+	if len(completeVersions) > 0 {
+		writes.Queue(completeMatchGroupSQL, org, completeVersions, completeSequences, completeOutcomes)
 	}
 	if writes.Len() == 0 {
 		return nil
 	}
 	return tx.SendBatch(ctx, writes).Close()
 }
+
+// completeMatchGroupSQL models the state after ordered single completions.
+// The first occurrence of a requested key owns its outcome; later occurrences
+// would already be done. Only actual pending rows returned by done can record
+// an evaluated step or resolve an earlier not_ready answer. Table subqueries
+// see the pre-update snapshot, so they explicitly exclude every actual done key
+// and include its newly completed non-not_ready evaluation decision.
+const completeMatchGroupSQL = `WITH requested AS (
+  SELECT DISTINCT ON (subscription_version_id,sequence) subscription_version_id,sequence,outcome
+  FROM unnest($2::text[],$3::bigint[],$4::text[])
+    WITH ORDINALITY AS x(subscription_version_id,sequence,outcome,ordinal)
+  ORDER BY subscription_version_id,sequence,ordinal),
+done AS (
+  UPDATE evaluation_intents i SET state='done',outcome=x.outcome,error_code='',lease_until='-infinity'
+  FROM requested x WHERE i.organization=$1 AND i.subscription_version_id=x.subscription_version_id
+    AND i.sequence=x.sequence AND i.state='pending'
+  RETURNING i.organization,i.record_version_id,i.kind,i.subscription_version_id,i.sequence,i.outcome),
+evaluated AS (
+  SELECT DISTINCT organization,record_version_id FROM done WHERE kind='evaluation' AND outcome<>'not_ready')
+UPDATE record_versions v SET evaluated_at=clock_timestamp() FROM evaluated
+WHERE v.organization=evaluated.organization AND v.id=evaluated.record_version_id
+  AND v.evaluated_at IS NULL AND v.materialized_at IS NOT NULL
+  AND NOT EXISTS(SELECT 1 FROM evaluation_intents p WHERE p.organization=v.organization AND p.record_version_id=v.id
+    AND p.kind='evaluation' AND p.state='pending'
+    AND NOT EXISTS(SELECT 1 FROM done d WHERE d.organization=p.organization
+      AND d.subscription_version_id=p.subscription_version_id AND d.sequence=p.sequence))
+  AND NOT EXISTS(SELECT 1 FROM evaluation_intents n WHERE n.organization=v.organization AND n.record_version_id=v.id
+    AND n.outcome='not_ready'
+    AND NOT EXISTS(SELECT 1 FROM subscription_versions e JOIN evaluation_intents d ON d.organization=e.organization AND d.subscription_version_id=e.id
+      WHERE e.organization=n.organization AND e.subscription_id=n.subscription_id
+      AND d.record_version_id=n.record_version_id AND d.kind='evaluation' AND d.state='done' AND d.outcome<>'not_ready')
+    AND NOT EXISTS(SELECT 1 FROM subscription_versions e JOIN done d ON d.organization=e.organization AND d.subscription_version_id=e.id
+      WHERE e.organization=n.organization AND e.subscription_id=n.subscription_id
+      AND d.record_version_id=n.record_version_id AND d.kind='evaluation' AND d.outcome<>'not_ready'))`
