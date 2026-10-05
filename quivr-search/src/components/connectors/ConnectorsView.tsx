@@ -46,6 +46,8 @@ let visited: {
   catalog: KindCatalog;
   connectors: Connector[];
   suggestions: FeedChoice[];
+  /** Each source's numbers, for the week they were counted over. */
+  numbers?: { key: string; value: Awaited<ReturnType<typeof fetchSourceStats>> };
 } | null = null;
 
 export function ConnectorsView({
@@ -87,9 +89,6 @@ export function ConnectorsView({
   const openAdd = () => setAdding(true);
   const states = useRef(new Map<string, string>());
   const listHeading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    if (status === "ready" && catalog) visited = { corpus, catalog, connectors, suggestions };
-  });
   // The row is gone: keyboard focus lands on the list heading, once the
   // settings it was removed from have closed and handed the focus back.
   const [removals, setRemovals] = useState(0);
@@ -337,7 +336,15 @@ export function ConnectorsView({
     (signal) => fetchSourceStats(week, signal),
     onUnauthorized,
     feedItems,
+    undefined,
+    seen?.numbers,
   );
+  // Remembered for the next visit, with the numbers of this week.
+  useEffect(() => {
+    if (status !== "ready" || !catalog) return;
+    const numbers = counted?.current ? { key: week.join(","), value: counted.value } : seen?.numbers;
+    visited = { corpus, catalog, connectors, suggestions, numbers };
+  });
   // Only numbers for this week; while the facade still indexes, a source it
   // has not reached yet stays uncounted rather than zero.
   const stats = counted?.current

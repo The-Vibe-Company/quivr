@@ -760,16 +760,20 @@ test("revenir sur Alertes ou Sources les montre aussitôt, le temps de les relir
   const nav = page.getByRole("navigation", { name: "Sections" });
   const alertsShown = page.getByRole("table");
   const sourcesShown = page.getByRole("list", { name: "Sources" });
+  // A card's first number: "—" until the facade has counted its source.
+  const perDay = sourcesShown.locator(".sc-stats dd").first();
   await page.goto("/?view=alerts");
   await expect(alertsShown).toBeVisible();
   await nav.getByRole("link", { name: /^Sources/ }).click();
   await expect(sourcesShown).toBeVisible();
-  // From now on, both lists answer only once released: coming back, each
-  // page is already there, not a loading state between two pages.
+  await expect(perDay).not.toHaveText("—");
+  // From now on, both lists and the sources' numbers answer only once
+  // released: coming back, each page is already there with its numbers, not
+  // a loading state between two pages.
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   await page.route(
-    (url) => ["/demo/alerts", "/v0/connectors"].includes(url.pathname),
+    (url) => ["/demo/alerts", "/v0/connectors", "/demo/sources/stats"].includes(url.pathname),
     async (route) => {
       await held;
       await route.fallback();
@@ -780,6 +784,7 @@ test("revenir sur Alertes ou Sources les montre aussitôt, le temps de les relir
     await expect(alertsShown).toBeVisible();
     await nav.getByRole("link", { name: /^Sources/ }).click();
     await expect(sourcesShown).toBeVisible();
+    await expect(perDay).not.toHaveText("—");
   } finally {
     release();
   }
