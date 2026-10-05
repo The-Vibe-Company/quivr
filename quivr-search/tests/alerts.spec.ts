@@ -22,7 +22,7 @@ test.beforeEach(async ({ page }) => {
 const sameOrigin = (page: Page) => ({ Origin: new URL(page.url()).origin });
 
 /** Adds a text through the facade, as the "Ajouter du texte" dialog does, and waits until it is searchable. */
-async function addText(page: Page, text: string) {
+async function addText(page: Page, text: string, enriched = false) {
   const { corpus_id } = await (await page.request.get("/demo/session")).json();
   const key = `alert-${run}-${Math.random().toString(36).slice(2)}`;
   const receipt = await (
@@ -37,14 +37,17 @@ async function addText(page: Page, text: string) {
   ).json();
   await expect
     .poll(
-      async () =>
-        (
-          await (
-            await page.request.get(
-              `/v0/ingestion-receipts/${receipt.receipt_id}`,
-            )
-          ).json()
-        ).availability?.searchable === true,
+      async () => {
+        const status = await (
+          await page.request.get(`/v0/ingestion-receipts/${receipt.receipt_id}`)
+        ).json();
+        if (status.availability?.searchable !== true) return false;
+        if (!enriched) return true;
+        const version = await (
+          await page.request.get(`/v0/records/${receipt.record_id}/versions/${status.version_id}`)
+        ).json();
+        return Boolean(version.steps?.enriched_at);
+      },
       { timeout: 60000 },
     )
     .toBe(true);
@@ -61,6 +64,7 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
 }, info) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/?view=alerts");
+  await addText(page, `Orage de grêle sur la côte ${run}, avant la création de l’alerte.`);
   // The form opens in a panel from the page's button.
   await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   await expect(
@@ -76,6 +80,8 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
     "data-state",
     "invalid",
   );
+  await query.fill(`${run} AND introuvable`);
+  await expect(page.locator(".alert-preview-title")).toHaveText(/^Aucun sur les \d+ derniers$/);
   await query.fill(`${run} AND (orage OR grêle) NOT football`);
   const preview = page.locator("#alert-query-preview");
   await expect(preview).toHaveAttribute("data-state", "valid");
@@ -85,6 +91,8 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
     "grêle",
     "football",
   ]);
+  await expect(page.locator(".alert-preview-title")).toHaveText(/^1 article sur les \d+ derniers$/);
+  await expect(page.getByRole("list", { name: "Articles qui auraient été attrapés" })).toContainText(`Orage de grêle sur la côte ${run}`);
   const name = `Orages ${run}`;
   await page.getByLabel("Nom de l’alerte").fill(name);
   await page.screenshot({
@@ -236,6 +244,7 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
 }, info) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/?view=alerts");
+  await addText(page, `Les dockers cessent le travail au port ${run}, avant la création de l’alerte : un débrayage bloque les navires.`, true);
   await page.getByRole("button", { name: "Nouvelle alerte" }).click();
   await page
     .getByRole("group", { name: "Type d’alerte" })
@@ -247,6 +256,10 @@ test("une alerte décrite en langage courant trouve un article formulé autremen
   await page
     .getByLabel("Décrivez le sujet en une phrase")
     .fill("Des grèves dans les ports");
+  await page.getByRole("button", { name: "Tester sur les derniers articles" }).click();
+  await expect(page.getByRole("list", { name: "Articles qui auraient été attrapés" })).toContainText(
+    `Les dockers cessent le travail au port ${run}, avant la création`,
+  );
   const name = `Ports ${run}`;
   await page.getByLabel("Nom de l’alerte").fill(name);
   await page.screenshot({
