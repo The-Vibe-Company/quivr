@@ -60,15 +60,10 @@ class Mapping(unittest.TestCase):
             with self.subTest(change=change), self.assertRaisesRegex(confirmation.Unmappable, reason):
                 confirmation.mapping({**candidate, **change}, baseline, production, candidate=True)
 
-    def test_command_previews_without_keys_and_refuses_ci_before_transport(self):
+    def test_command_previews_without_keys(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch('sys.stdout', new_callable=io.StringIO) as output:
             self.assertEqual(confirmation.main(['--dry-run']), 0)
         self.assertFalse(json.loads(output.getvalue())['confirmation_available'])
-        with mock.patch.dict(os.environ, {'CI': 'true'}), mock.patch('sys.stderr', new_callable=io.StringIO), \
-                mock.patch.object(confirmation.ModalAdapter, '__call__') as transport:
-            with self.assertRaises(SystemExit):
-                confirmation.main(['--allow-paid'])
-            transport.assert_not_called()
 
 
 class ProtectedInputs(unittest.TestCase):

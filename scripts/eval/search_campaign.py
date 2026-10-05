@@ -22,6 +22,8 @@ import modal_search
 import results
 import search_trial
 
+import ci_guard
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 IDENTIFIER = re.compile(r'[A-Za-z0-9_.-]{1,120}')
 
@@ -624,11 +626,11 @@ def main(argv=None):
         sub.add_argument('--once', action='store_true', help='perform one scheduling/watchdog pass')
         sub.add_argument('--outbox', type=pathlib.Path, default=ROOT / '.scratch/eval/results')
     args = parser.parse_args(argv)
-    if args.command == 'promote' and (not args.open_pr or any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS'))):
+    if args.command == 'promote' and (not args.open_pr or ci_guard.in_ci()):
         parser.error('promotion requires --open-pr outside CI')
-    if args.command == 'digest' and args.send and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
+    if args.command == 'digest' and args.send and ci_guard.in_ci():
         parser.error('notification delivery is refused in CI')
-    if args.command == 'confirm' and args.allow_paid and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
+    if args.command == 'confirm' and args.allow_paid and ci_guard.in_ci():
         parser.error('live confirmation is refused in CI')
     if args.command == 'confirm' and args.confirmation_configuration and not args.allow_paid:
         parser.error('confirmation configuration requires --allow-paid outside CI')
@@ -640,7 +642,7 @@ def main(argv=None):
             # YAML parser exceptions can include entire input lines.
             print(results.encode({'status': 'invalid', 'reason': 'campaign YAML or configuration is invalid'}))
             return 2
-    if args.command in ('start', 'resume', 'stop', 'watchdog') and (not args.allow_paid or any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS'))):
+    if args.command in ('start', 'resume', 'stop', 'watchdog') and (not args.allow_paid or ci_guard.in_ci()):
         parser.error('live lifecycle requires --allow-paid outside CI')
     import campaign_store
     import campaign_compute
