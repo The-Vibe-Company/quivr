@@ -540,6 +540,7 @@ def parts():
     from hosted_embed_plugin import verify as verify_hosted_embed, verify_redeploy as verify_hosted_redeploy
     from embedding_outage import verify as verify_embedding_outage
     from first_search import verify as verify_first_search
+    from tracing import verify as verify_tracing
     from rebuild_recovery import verify as verify_rebuild_recovery
     from operation_control import verify as verify_operation_control
     from connector_restart import verify as verify_connector_restart
@@ -571,6 +572,7 @@ def parts():
             acceptance('cli','^TestCLI'),
             # Plugin calls, searches and steps counted and read back through the admin stats (THE-795).
             acceptance('observability','^TestObservabilityStats$'),
+            step('end_to_end_tracing',verify_tracing),
             step('validate_captures',validate_captures)],
         # Monitoring, webhook delivery across a worker restart, and the assembled public journey (THE-662).
         'monitoring':setup+[

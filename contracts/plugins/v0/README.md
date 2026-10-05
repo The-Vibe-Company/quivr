@@ -67,6 +67,31 @@ or if a plugin schema declares a `$defs` entry with a shared name; the bundler
 used by `make contracts` also rejects a malformed alias. Reviewers still keep
 equivalent copies under other names out of both contracts.
 
+## Trace context
+
+<!-- trace-context: published in the generated protocol reference -->
+The engine sends optional W3C `traceparent` and `tracestate` headers on plugin
+requests, plus `X-Request-ID` for correlation. These headers are supported with
+all Plugin API versions and do not change request JSON or signing claims.
+Only W3C TraceContext travels; arbitrary baggage is excluded.
+
+Both SDK HTTP adapters extract the headers and make the current span available
+to handlers through the OpenTelemetry API. They start a `plugin.request` span
+when the plugin has configured a tracer provider; otherwise they continue the
+incoming context without an exporter. SDK input-Blob HTTP reads also inject it.
+Configure your plugin's OpenTelemetry SDK and OTLP exporter in its own process
+to export internal/provider spans. Do not put content, query text, credentials,
+source addresses or organization identifiers in span attributes.
+
+Go handlers receive the context as their `context.Context` argument; call
+`quivrplugin.InjectTrace(ctx, request.Header)` before an outgoing provider
+request. Python handlers use the current OpenTelemetry context; call
+`quivr_plugin.tracing.inject_headers(headers)` before making an outgoing
+request. Provider instrumentation must preserve that context and apply the
+same privacy policy. Engine webhook deliveries use the same headers; receivers
+can continue the trace after checking the webhook signature.
+<!-- /trace-context -->
+
 ## Signed engine requests
 
 <!-- engine-auth: published in the generated protocol reference -->

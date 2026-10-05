@@ -48,7 +48,7 @@ type storage struct {
 func (s *storage) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	sum := sha256.Sum256(body)
-	if r.Method != http.MethodPut || r.Header.Get("X-Checksum") != hex.EncodeToString(sum[:]) || r.ContentLength != int64(len(body)) {
+	if r.Header.Get("traceparent") != "" || r.Header.Get("tracestate") != "" || r.Header.Get("X-Request-ID") != "" || r.Method != http.MethodPut || r.Header.Get("X-Checksum") != hex.EncodeToString(sum[:]) || r.ContentLength != int64(len(body)) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -111,7 +111,12 @@ func TestDescribedBytesAreUploadedToTheGrantWithoutReadingTheSourceAgain(t *test
 	if err := validate("plugins/v0/connector-describe-attachment-response.schema.json", []byte(raw)); err != nil {
 		t.Fatal(err)
 	}
-	status, _, raw = call(h, uploadRoute, attachmentBody("att:1", "2026-09-29T09:01:00Z", grantFor(server.URL+"/object-1", "%PDF-1.7 small")))
+	uploadRequest := httptest.NewRequest("POST", uploadRoute, bytes.NewReader(attachmentBody("att:1", "2026-09-29T09:01:00Z", grantFor(server.URL+"/object-1", "%PDF-1.7 small"))))
+	uploadRequest.Header.Set("traceparent", "00-11111111111111111111111111111111-2222222222222222-01")
+	uploadRequest.Header.Set("X-Request-ID", "attachment-request")
+	uploadResponse := httptest.NewRecorder()
+	h.ServeHTTP(uploadResponse, uploadRequest)
+	status, raw = uploadResponse.Code, uploadResponse.Body.String()
 	if status != 200 || strings.TrimSpace(raw) != `{"status":"uploaded"}` {
 		t.Fatalf("upload %d %s", status, raw)
 	}

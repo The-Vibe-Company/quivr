@@ -24,6 +24,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from .tracing import request_context
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -501,6 +502,10 @@ class Plugin:
                     log.debug("plugin caller disconnected")
 
             def _serve(self, method: str) -> None:
+                with request_context(self.headers):
+                    self._serve_traced(method)
+
+            def _serve_traced(self, method: str) -> None:
                 raw_length = self.headers.get("Content-Length") or "0"
                 try:
                     length = int(raw_length)
