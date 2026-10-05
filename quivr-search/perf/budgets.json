@@ -26,9 +26,11 @@
     "GET /demo/feed/page": 200,
     "GET /demo/alerts": 300,
     "GET /demo/alerts/:id": 300,
-    "GET /demo/admin": 150,
+    "GET /demo/admin": 250,
     "GET /v0/connectors": 100,
     "POST /v0/search lexical": 300,
-    "POST /v0/search hybrid": 300
+    "POST /v0/search hybrid": 300,
+    "GET /v0/records/:id/versions/:v": 100,
+    "POST /demo/alerts/preview": 8000
   }
 }

@@ -237,8 +237,15 @@ const brotli = promisify(zlib.brotliCompress);
 const gzip = promisify(zlib.gzip);
 const COMPRESS_MIN = 1024;
 function encoding(req) {
-  const accepted = req.headers["accept-encoding"] || "";
-  return /\bbr\b/.test(accepted) ? "br" : /\bgzip\b/.test(accepted) ? "gzip" : "";
+  // Codings the client accepts, "br;q=0" (refused) left out.
+  const accepted = new Set(
+    (req.headers["accept-encoding"] || "")
+      .split(",")
+      .map((part) => part.trim().split(/\s*;\s*/))
+      .filter(([, q]) => !/^q=0(\.0*)?$/.test(q || ""))
+      .map(([name]) => name.toLowerCase()),
+  );
+  return accepted.has("br") ? "br" : accepted.has("gzip") ? "gzip" : "";
 }
 async function compress(body, coding) {
   if (coding === "br")
@@ -322,8 +329,9 @@ async function builtFile(file) {
   loading.catch(() => files.delete(file));
   return loading;
 }
-// Compressed at startup, off the request path, so the first visitor after a
-// deploy does not wait for it.
+// Compressed as the server starts, off the request path: a request in the
+// first second waits for the same work, never redoes it. Listening does not
+// wait, so a restart answers its health check at once.
 readdir(resolve(root, "assets"))
   .then((names) => [
     resolve(root, "index.html"),

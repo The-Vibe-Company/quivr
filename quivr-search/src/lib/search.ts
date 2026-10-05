@@ -34,8 +34,10 @@ export async function request<T>(
 ): Promise<T> {
   const started = method === "GET" ? early.get(path) : undefined;
   early.delete(path);
-  // An early read that failed (signed out, say) is asked again.
+  // An early read that failed (signed out, say) is asked again; a caller that
+  // gave up meanwhile gets its abort, not the answer.
   const ready = await started;
+  signal?.throwIfAborted();
   const response = ready?.ok
     ? ready
     : await fetch(path, {

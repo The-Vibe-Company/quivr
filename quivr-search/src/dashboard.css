@@ -1113,6 +1113,12 @@ button.moment-pill:hover {
 .row:focus-within {
   content-visibility: visible;
 }
+/* Touch layouts wrap titles on two lines more often. */
+@media (pointer: coarse) {
+  .row {
+    contain-intrinsic-block-size: auto 86px;
+  }
+}
 /* A new arrival lights up, then fades back. */
 .row[data-fresh] {
   animation: row-fresh 2.8s var(--ease-out);

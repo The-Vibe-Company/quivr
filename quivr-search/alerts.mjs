@@ -359,8 +359,10 @@ export function alertRoutes({
     const drop = () => {
       if (listed === entry) listed = null;
     };
+    // Only a full list is reused: not a refusal, nor "alerts not enabled",
+    // which a key given monitoring rights must stop saying at once.
     entry.answer.then((response) => {
-      if (response.status !== 200) drop();
+      if (response.status !== 200 || !response.data?.available) drop();
     }, drop);
     return entry.answer;
   }

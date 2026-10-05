@@ -1145,6 +1145,9 @@ test("answers are compressed, revalidated with an ETag and say what they waited 
     assert.equal(again.status, 304);
     assert.equal(again.body.length, 0);
   }
+  // A coding the client refuses (q=0) is never chosen.
+  const refused = await raw(`${base}/v0/connectors`, { "Accept-Encoding": "br;q=0, gzip" });
+  assert.equal(refused.headers["content-encoding"], "gzip");
   // Without Accept-Encoding the answer is plain; errors are never stored.
   const plain = await raw(`${base}/v0/connectors`);
   assert.equal(plain.headers["content-encoding"], undefined);

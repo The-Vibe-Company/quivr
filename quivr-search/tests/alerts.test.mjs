@@ -157,7 +157,7 @@ function fakeCore() {
       }
       return send(200, sub);
     }
-    if (p === "/v0/changes" && url.searchParams.get("corpus_id") === "demo")
+    if (p === "/v0/changes" && req.method === "GET" && url.searchParams.get("corpus_id") === "demo")
       return send(200, { items: [], has_more: false, next_cursor: `head-${feed.head}` });
     if (p === "/v0/subscription-previews" && req.method === "POST")
       return send(200, preview);

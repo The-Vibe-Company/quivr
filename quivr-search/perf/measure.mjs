@@ -70,16 +70,20 @@ async function context(browser) {
   return { ctx, page, cdp };
 }
 
-async function load(browser, target) {
-  const { ctx, page, cdp } = await context(browser);
+async function throttle(cdp) {
   await cdp.send("Network.enable");
-  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
   await cdp.send("Network.emulateNetworkConditions", {
     offline: false,
     latency: profile.latency_ms,
     downloadThroughput: (profile.download_kbps * 1024) / 8,
     uploadThroughput: (profile.upload_kbps * 1024) / 8,
   });
+}
+
+async function load(browser, target) {
+  const { ctx, page, cdp } = await context(browser);
+  await throttle(cdp);
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
   await page.goto(base + target.path, { waitUntil: "load" });
   await page.waitForSelector(target.ready, { timeout: 60000 });
   // LCP and layout shifts settle once the data has painted.
@@ -106,7 +110,8 @@ async function load(browser, target) {
 
 // One session over the page: an article, the tabs, a search typed and cleared.
 async function interactions(browser) {
-  const { ctx, page } = await context(browser);
+  const { ctx, page, cdp } = await context(browser);
+  await throttle(cdp);
   await page.goto(base + "/");
   await page.waitForSelector(".feed-rows .row");
   await page.waitForTimeout(1000);
@@ -191,7 +196,8 @@ async function endpoints() {
       // Sent compressed when the facade compresses, else as read.
       wire = Number(response.headers.get("content-length")) || bytes;
       times.push(performance.now() - started);
-      status = response.status;
+      // The worst answer is kept: a refusal among successes still shows.
+      if (status < 300) status = response.status;
       const timing = /core;dur=([\d.]+);desc="(\d+)/.exec(response.headers.get("server-timing") || "");
       if (timing) core.push([Number(timing[1]), Number(timing[2])]);
     }
@@ -211,12 +217,14 @@ async function endpoints() {
 // How long an alert takes to catch a text added now, with an alert kept for it.
 async function alertLag() {
   const term = "sondedelai";
-  let alert = ((await (await api("/demo/alerts")).json()).items || []).find((a) => a.name === "Sonde de délai");
+  let alert = ((await (await api("/demo/alerts")).json()).items || []).find(
+    (a) => a.name === "Sonde de délai" && a.expression?.match?.term === term,
+  );
   if (!alert)
     alert = await (await api("/demo/alerts", {
       method: "POST",
       body: JSON.stringify({
-        idempotency_key: "perf-alert-lag-probe",
+        idempotency_key: `perf-alert-lag-probe-${Date.now()}`,
         name: "Sonde de délai",
         expression: { kind: "keywords", match: { term } },
       }),

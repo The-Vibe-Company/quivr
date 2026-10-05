@@ -641,7 +641,13 @@ function Dashboard({
       </div>
       {adding && (
         <TabBoundary>
-          <Suspense fallback={null}>
+          <Suspense
+            fallback={
+              <div className="toast-region" role="status">
+                <p className="toast">Chargement…</p>
+              </div>
+            }
+          >
             <AddText
               corpus={corpus}
               onClose={() => setAdding(false)}

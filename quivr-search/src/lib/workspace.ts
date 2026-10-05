@@ -67,17 +67,32 @@ export function useFeedStream(
     // refs, the render, the highlight and the announcement wait for the batch.
     let batch: ReturnType<typeof setTimeout> | undefined;
     let arrived: string[] = [];
-    let said = "";
+    // An article joined those waiting during the batch.
+    let held = false;
     const stage = (nextItems: FeedItem[], nextPending: FeedItem[]) => {
       itemsRef.current = nextItems;
       pendingRef.current = nextPending;
       batch ??= setTimeout(() => {
         batch = undefined;
         commit(itemsRef.current, pendingRef.current);
-        flash(arrived);
-        if (said) setAnnouncement(said);
+        // Articles removed before the batch was shown are neither lit nor told.
+        const shown = arrived.filter((id) =>
+          itemsRef.current.some((i) => i.record_id === id),
+        );
+        flash(shown);
+        const waiting = pendingRef.current.length;
+        if (waiting && held)
+          setAnnouncement(
+            `${waiting} nouvel${waiting > 1 ? "s" : ""} article${waiting > 1 ? "s" : ""} en attente.`,
+          );
+        else if (shown.length > 1)
+          setAnnouncement(`${shown.length} nouveaux articles.`);
+        else if (shown.length === 1)
+          setAnnouncement(
+            `Nouveau : ${itemsRef.current.find((i) => i.record_id === shown[0])?.title}`,
+          );
         arrived = [];
-        said = "";
+        held = false;
       }, ARRIVALS_MS);
     };
     // Live changes seen while a snapshot is in flight, replayed over it so an
@@ -99,13 +114,11 @@ export function useFeedStream(
       }
       if (waiting.length || holdRef.current()) {
         stage(shown, [item, ...without(waiting, item.record_id)]);
-        const n = pendingRef.current.length;
-        said = `${n} nouvel${n > 1 ? "s" : ""} article${n > 1 ? "s" : ""} en attente.`;
+        held = true;
         return;
       }
       stage([item, ...shown].sort(newestFirst), waiting);
       arrived.push(item.record_id);
-      said = `Nouveau : ${item.title}`;
     };
     const drop = (id: string) =>
       stage(without(itemsRef.current, id), without(pendingRef.current, id));

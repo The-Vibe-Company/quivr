@@ -104,7 +104,7 @@ def main():
             process.wait()
         status = 'passed'
     except KeyboardInterrupt:
-        if verify:
+        if isolated:
             raise
     finally:
         if process is not None and process.poll() is None:
