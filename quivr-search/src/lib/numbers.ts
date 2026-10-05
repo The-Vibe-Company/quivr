@@ -26,6 +26,7 @@ export function useNumbers<T extends { building: boolean }>(
   const [failures, setFailures] = useState(0);
   // A refresh waits for the answer on its way rather than cancel it.
   const busy = useRef(false);
+  const again = useRef(false);
   const loader = useRef(load);
   loader.current = load;
   const unauthorized = useRef(onUnauthorized);
@@ -51,13 +52,19 @@ export function useNumbers<T extends { building: boolean }>(
           else setFailures((n) => n + 1);
         })
         .finally(() => {
-          if (!controller.signal.aborted) busy.current = false;
+          if (controller.signal.aborted) return;
+          busy.current = false;
+          if (again.current) {
+            again.current = false;
+            setTick((n) => n + 1);
+          }
         });
     }, fetched.current ? DEBOUNCE_MS : 0);
     return () => {
       clearTimeout(timer);
       controller.abort();
       busy.current = false;
+      again.current = false;
     };
   }, [key, tick]);
 
@@ -76,7 +83,9 @@ export function useNumbers<T extends { building: boolean }>(
     if (arrivals === undefined || !fetched.current) return;
     const wait = Math.max(0, fetched.current + every - Date.now());
     const timer = setTimeout(() => {
-      if (!busy.current) setTick((n) => n + 1);
+      // An answer on its way may predate the arrival: ask again once it is in.
+      if (busy.current) again.current = true;
+      else setTick((n) => n + 1);
     }, wait);
     return () => clearTimeout(timer);
   }, [arrivals, every]);

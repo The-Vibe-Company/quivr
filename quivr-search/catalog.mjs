@@ -283,10 +283,13 @@ export function createCatalog({ upstream, corpus, caught, ready = async () => {}
           const response = await upstream(
             `/v0/records/${encodeURIComponent(entry.record_id)}/versions/${encodeURIComponent(entry.version_id)}`,
           ).catch(() => ({ status: 503 }));
-          const title =
-            response.status === 200
-              ? describe({ record_id: entry.record_id }, response.data).title
-              : undefined;
+          let title;
+          try {
+            if (response.status === 200)
+              title = describe({ record_id: entry.record_id }, response.data).title;
+          } catch {
+            // A Version that cannot be described counts as unreadable too.
+          }
           if (title === undefined) {
             unreadable.delete(entry.version_id);
             unreadable.set(entry.version_id, Date.now());
