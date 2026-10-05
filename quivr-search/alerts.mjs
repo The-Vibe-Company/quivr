@@ -345,19 +345,19 @@ export function alertRoutes({
   // reads every Match of every alert. A list is read again only once the
   // demo corpus's change feed has moved: its head cursor, an opaque token,
   // is the same while nothing changed. Concurrent callers share one read.
-  let listed = null;
+  let shared = null;
   async function sharedList(corpus) {
     const head = await upstream(
       `/v0/changes?${new URLSearchParams({ corpus_id: corpus, limit: "1" })}`,
     );
     const position = head.status === 200 ? head.data?.next_cursor : undefined;
-    if (typeof position !== "string" || !position) return list(corpus);
-    if (listed?.corpus === corpus && listed.position === position)
-      return listed.answer;
-    const entry = { corpus, position, answer: list(corpus) };
-    listed = entry;
+    if (typeof position !== "string" || !position) return listed(corpus);
+    if (shared?.corpus === corpus && shared.position === position)
+      return shared.answer;
+    const entry = { corpus, position, answer: listed(corpus) };
+    shared = entry;
     const drop = () => {
-      if (listed === entry) listed = null;
+      if (shared === entry) shared = null;
     };
     // Only a full list is reused: not a refusal, nor "alerts not enabled",
     // which a key given monitoring rights must stop saying at once.
@@ -368,11 +368,11 @@ export function alertRoutes({
   }
   // A change made here shows in the next list, even one already on its way.
   async function changing(action) {
-    listed = null;
+    shared = null;
     try {
       return await action();
     } finally {
-      listed = null;
+      shared = null;
     }
   }
 
@@ -534,8 +534,45 @@ export function alertRoutes({
     };
   }
 
+  // What the alerts caught, for the demo's numbers (catalog.mjs): the last
+  // list read answers at once, and one older than a minute is read again
+  // behind it, so counting never waits for Matches to be paged.
+  let asked = null;
+  let known = null;
+  let order = 0;
+  let knownOrder = 0;
+  function listed(corpus) {
+    const pending = list(corpus);
+    const mine = ++order;
+    asked = { at: Date.now(), pending };
+    pending
+      .then(
+        (result) => {
+          // A slower, older list never replaces a newer one.
+          if (result.status === 200 && mine > knownOrder) {
+            known = result.data.matched;
+            knownOrder = mine;
+          }
+        },
+        () => {},
+      )
+      .finally(() => {
+        if (asked?.pending === pending) asked.done = true;
+      });
+    return pending;
+  }
+  async function matched(corpus) {
+    if (!destination) return {};
+    // A list still being read is waited for, never started again.
+    if (!asked || (asked.done && Date.now() - asked.at >= 60000))
+      void listed(corpus).catch(() => {});
+    if (known) return known;
+    const result = await asked.pending.catch(() => null);
+    return result?.status === 200 ? result.data.matched : {};
+  }
+
   /** The response for an alerts route, or undefined when the path is not one. */
-  return async function route(req, path, corpus) {
+  async function route(req, path, corpus) {
     if (path !== "/demo/alerts" && !path.startsWith("/demo/alerts/")) return;
     if (!destination)
       return path === "/demo/alerts" && req.method === "GET"
@@ -568,5 +605,7 @@ export function alertRoutes({
         return error;
       throw error;
     }
-  };
+  }
+  route.matched = matched;
+  return route;
 }
