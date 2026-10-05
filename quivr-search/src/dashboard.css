@@ -2484,9 +2484,10 @@ button.moment-pill:hover {
   .bar-live[data-state="live"] .bar-live-dot::after {
     animation: none;
   }
+  /* No fade, but still no flash: the dim keeps its delay. */
   .feed-rows,
   .mark-read:disabled {
-    transition: none;
+    transition-duration: 0s;
   }
   .peek,
   .toast {
