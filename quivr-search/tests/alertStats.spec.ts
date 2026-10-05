@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { alertStats, busiestPeriod, streakStart } from "../src/lib/alertStats";
+import { alertStats, arrivedAt, busiestPeriod, streakStart } from "../src/lib/alertStats";
 import type { FeedItem } from "../src/lib/feed";
 
 // The owner of an alert's sheet numbers (THE-1017): which window they cover,
@@ -19,8 +19,18 @@ const at = (ago: number, namespace = "Dépêches"): FeedItem => ({
   excerpt: "",
   received_at: new Date(NOW - ago).toISOString(),
 });
-const run = (createdAt: string | undefined, caught: FeedItem[], feed: FeedItem[], total = caught.length) =>
-  alertStats({ createdAt, caught, feed, now: NOW, total });
+/**
+ * The sheet's numbers for an alert, `feed` standing for every article the
+ * facade indexed: it gives the oldest one, and how many arrived since the
+ * alert started (or since the oldest), as the facade counts them.
+ */
+const run = (createdAt: string | undefined, caught: FeedItem[], feed: FeedItem[], total = caught.length) => {
+  const times = feed.map((i) => Date.parse(arrivedAt(i))).filter((t) => !Number.isNaN(t));
+  const oldest = times.length ? Math.min(...times) : null;
+  const since = createdAt ? Date.parse(createdAt) : oldest;
+  const arrived = since === null ? 0 : times.filter((t) => t >= since).length;
+  return alertStats({ createdAt, caught, oldest, arrived, now: NOW, total });
+};
 
 test("une alerte récente se lit heure par heure, depuis sa création", () => {
   const caught = [at(1 * HOUR), at(2 * HOUR), at(2.5 * HOUR)];
@@ -35,24 +45,24 @@ test("une alerte récente se lit heure par heure, depuis sa création", () => {
   expect(s.share).toBeCloseTo(3 / 5);
 });
 
-test("une alerte sans date se mesure sur la fenêtre du fil, pas depuis sa première prise", () => {
+test("une alerte sans date se mesure depuis le plus ancien article indexé, pas depuis sa première prise", () => {
   const caught = [at(1 * HOUR)];
   const feed = [...caught, at(30 * HOUR), at(20 * HOUR)];
   const s = run(undefined, caught, feed, 9);
   expect(s.dated).toBe(false);
   expect(s.young).toBe(false);
   expect(s.since).toBe(NOW - 30 * HOUR);
-  // Only what the feed shows counts, not the facade's total of 9.
+  // Only what the index dates counts, not the facade's total of 9.
   expect(s.perDay).toBeCloseTo(1 / (30 / 24));
   expect(s.share).toBeCloseTo(1 / 3);
 });
 
-test("la croissance ne compare deux semaines que si le fil les couvre", () => {
+test("la croissance ne compare deux semaines que si l’index les couvre", () => {
   const created = new Date(NOW - 20 * DAY).toISOString();
   const caught = [at(1 * DAY), at(2 * DAY), at(9 * DAY)];
-  // A feed of a few hours: nothing before is known, so no growth.
+  // An index of a few hours: nothing before is known, so no growth.
   expect(run(created, caught.slice(0, 1), [at(1 * HOUR), at(3 * HOUR)]).growth).toBeNull();
-  // A feed of three weeks: 2 this week against 1 the week before.
+  // An index of three weeks: 2 this week against 1 the week before.
   const s = run(created, caught, [...caught, at(21 * DAY)]);
   expect(s.feedSince).toBe(NOW - 21 * DAY);
   expect(s.growth).toEqual({ week: 2, before: 1, change: 100 });
