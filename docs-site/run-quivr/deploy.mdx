@@ -58,12 +58,12 @@ To deploy a new `quivr` binary, run its `quivr migrate` first, then restart `api
 
 ## Check that it is ready
 
-Each `api` and `worker` serves three probes on its `probe_listen` address, `127.0.0.1:8081` by default. Give each process its own address, and keep it private.
+Each `api` and `worker` serves three probes on its `probe_listen` address, `127.0.0.1:8081` by default. Give each process its own address, and keep it private. The probes open only once startup is done: a `worker` still waiting for migrations answers none of them, so give a liveness check at least `migration_wait` before it restarts the process.
 
 | Probe | Answer |
 | --- | --- |
-| `GET /healthz` | `204` while the process runs |
-| `GET /readyz` | `204` once the process can serve, `503` with the reason otherwise |
+| `GET /healthz` | `204` once the process has started |
+| `GET /readyz` | `204` once the process can serve, `503` otherwise |
 | `GET /metrics` | Counters in Prometheus text format |
 
 The `api` becomes ready once its schema check passes and its ingestion plugin has answered a first query, or after 5 seconds; the first searches are then only slower. The `worker` also checks that Temporal, object storage and the search index answer. A plugin that is down does not stop either process: work that needs it waits and retries.
