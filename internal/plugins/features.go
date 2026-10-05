@@ -22,6 +22,7 @@ const (
 	FeatureInstanceToken        Feature = "instance_token"
 	FeatureProfileCandidates    Feature = "profile_candidates"
 	FeatureProfileCandidateMode Feature = "profile_candidate_mode"
+	FeatureSignedCalls          Feature = "signed_calls"
 )
 
 // FeatureDefinition records the public history and manifest admission rules.
@@ -50,6 +51,7 @@ var featureTable = []FeatureDefinition{
 	{FeatureInstanceToken, "0.12.0", "Instance-scoped bearer tokens for connector API routes", "", ""},
 	{FeatureProfileCandidates, "0.12.0", "Profile candidates, declared retrieval dependencies and shared search budgets", "", "/requires"},
 	{FeatureProfileCandidateMode, "0.13.0", "Optional search mode override for profile candidates", "", ""},
+	{FeatureSignedCalls, "0.14.0", "Signed engine requests with per-plugin audience and body digest", "", ""},
 }
 
 // FeatureTable returns the introduction history, oldest first.

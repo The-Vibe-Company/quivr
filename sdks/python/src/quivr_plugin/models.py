@@ -439,6 +439,23 @@ class InvocationFixture(Model):
 
 
 @dataclass(kw_only=True)
+class AuthenticationFixtureCasesItem(Model):
+    name: Literal["valid", "expired", "wrong-audience", "tampered", "unsigned", "forged"]
+    audience: str
+    issued_seconds_ago: int
+    body: str
+    sent_body: str
+    expected_status: Literal[200, 401]
+
+
+@dataclass(kw_only=True)
+class AuthenticationFixture(Model):
+    "Normative authentication probes used by the Contract Runner. The plugin audience placeholder resolves to the tested plugin id. Tokens use the configured key, issued_seconds_ago relative to probe time, a 60-second lifetime and GET /v0/discovery. The unsigned and forged names omit or corrupt the token."
+
+    cases: list[AuthenticationFixtureCasesItem]
+
+
+@dataclass(kw_only=True)
 class RecordPartVectorsItem(Model):
     segment_id: str
     vector: list[float]
@@ -1227,6 +1244,8 @@ Extensions = dict[str, ExtensionEntry]
 
 __all__ = [
     "AttachmentItem",
+    "AuthenticationFixture",
+    "AuthenticationFixtureCasesItem",
     "BlobContent",
     "Candidate",
     "CandidateRequest",

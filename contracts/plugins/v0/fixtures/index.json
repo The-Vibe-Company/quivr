@@ -2303,6 +2303,14 @@
       "schema_valid": true,
       "errors": [],
       "description": "A composing plugin speaking profile candidate mode."
+    },
+    {
+      "file": "authentication/cases.json",
+      "schema": "authentication-fixture.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Valid and rejected engine authentication probes for API 0.14."
     }
   ]
 }

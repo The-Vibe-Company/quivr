@@ -1,4 +1,5 @@
 """Harness-only scripted connector and alert rule, pinned like any plugin."""
+import plugin_environment
 import os, signal, subprocess, time, urllib.request
 
 import normalizer_plugin
@@ -29,7 +30,7 @@ def prepare(stack):
 
 def start(stack):
     stop(stack)
-    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state['fixture_plugin_port']),
+    env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state['fixture_plugin_port']),
            'QUIVR_PLUGIN_MANIFEST': str(MANIFEST), 'QUIVR_FAKE_PLUGIN_MODE': 'fixture'}
     with (stack.directory / 'fixture-plugin.log').open('a') as log:
         process = subprocess.Popen([str(stack.directory / 'fixture-plugin')], cwd=ROOT, env=env, stdout=log, stderr=log, start_new_session=True)
