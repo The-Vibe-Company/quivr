@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade eval docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate
+.PHONY: dev env check verify down reset migrate adapter-postgres test contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -48,6 +48,9 @@ measure-upgrade:
 # Needs scripts/eval/requirements.txt. make eval [args='--sets scifact --baseline <report.json>']
 eval:
 	GO=$(GO) python3 scripts/eval/run.py $(args)
+# Synthetic provider load measurements, local only; never part of check or verify.
+load:
+	GO=$(GO) python3 scripts/load.py $(args)
 generate:
 	GO=$(GO) bash scripts/contracts.sh generate
 contracts:
