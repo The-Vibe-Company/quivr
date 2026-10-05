@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost/fakeplugin"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -163,21 +164,50 @@ func TestPreviewRefusesWhatASubscriptionWould(t *testing.T) {
 // An evaluator error fails the whole preview, never a partial "no match";
 // Records still undecided when the time budget runs out are left out.
 func TestPreviewFailuresAndBudget(t *testing.T) {
-	ctx := context.Background()
-	s, _, _ := previewService("strike", "slow", "boom")
-	s.PreviewBudget = 100 * time.Millisecond
-	if _, err := s.Preview(ctx, writer, monitoring.PreviewInput{Definition: inline("corpus_a"), Evaluator: decisions(map[string]any{"boom": "error"})}); !errors.Is(err, monitoring.ErrPreviewFailed) {
-		t.Fatalf("an evaluation the plugin cannot decide fails the preview with evaluator_error, got %v", err)
-	}
-	unavailable := monitoring.Evaluator{PluginID: "acme.alerts", Version: "0.1.0", Configuration: map[string]any{}}
-	withText := inline("corpus_a")
-	withText.Expression = map[string]any{"text": "x"}
-	if _, err := s.Preview(ctx, writer, monitoring.PreviewInput{Definition: withText, Evaluator: unavailable}); !errors.Is(err, monitoring.ErrPreviewUnavailable) {
-		t.Fatalf("an unreachable evaluator fails the preview with evaluator_unavailable, got %v", err)
-	}
-	slow := monitoring.Evaluator{PluginID: "test.blocking", Version: "1", Configuration: map[string]any{"decisions": map[string]any{"strike": "match"}}}
-	got, err := s.Preview(ctx, writer, monitoring.PreviewInput{Definition: inline("corpus_a"), Evaluator: slow})
-	if err != nil || got.Complete || got.Evaluated != 2 || len(got.Matches) != 1 || got.Matches[0].RecordID != "strike" {
-		t.Fatalf("want the two Records decided in time, strike matched, and complete false; got %+v, %v", got, err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		s, _, _ := previewService("strike", "slow", "boom")
+		s.PreviewBudget = 100 * time.Millisecond
+		if _, err := s.Preview(ctx, writer, monitoring.PreviewInput{Definition: inline("corpus_a"), Evaluator: decisions(map[string]any{"boom": "error"})}); !errors.Is(err, monitoring.ErrPreviewFailed) {
+			t.Fatalf("an evaluation the plugin cannot decide fails the preview with evaluator_error, got %v", err)
+		}
+		unavailable := monitoring.Evaluator{PluginID: "acme.alerts", Version: "0.1.0", Configuration: map[string]any{}}
+		withText := inline("corpus_a")
+		withText.Expression = map[string]any{"text": "x"}
+		if _, err := s.Preview(ctx, writer, monitoring.PreviewInput{Definition: withText, Evaluator: unavailable}); !errors.Is(err, monitoring.ErrPreviewUnavailable) {
+			t.Fatalf("an unreachable evaluator fails the preview with evaluator_unavailable, got %v", err)
+		}
+		slow := monitoring.Evaluator{PluginID: "test.blocking", Version: "1", Configuration: map[string]any{"decisions": map[string]any{"strike": "match"}}}
+		// The default service budget must leave time to answer within the HTTP
+		// request's five-second deadline. Fake time exercises that ordering.
+		s.PreviewBudget = 0
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		got, err := s.Preview(ctx, writer, monitoring.PreviewInput{Definition: inline("corpus_a"), Evaluator: slow})
+		if err != nil || ctx.Err() != nil || got.Complete || got.Evaluated != 2 || len(got.Matches) != 1 || got.Matches[0].RecordID != "strike" {
+			t.Fatalf("want the two Records decided in time, strike matched, and complete false; got %+v, %v", got, err)
+		}
+	})
+}
+
+type blockedRecent struct{}
+
+func (blockedRecent) Recent(ctx context.Context, _ string, _ []string, _ time.Time, _ int) ([]monitoring.RecentVersion, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// Preparation uses the same service budget as evaluation, rather than
+// spending the entire caller deadline before the evaluator budget starts.
+func TestPreviewPreparationSharesBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, _, _ := previewService()
+		s.Recent = blockedRecent{}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := s.Preview(ctx, writer, monitoring.PreviewInput{Definition: inline("corpus_a"), Evaluator: fixture()})
+		if !errors.Is(err, monitoring.ErrPreviewTimeout) || ctx.Err() != nil {
+			t.Fatalf("preparation must report its timeout before the caller deadline, got %v, caller %v", err, ctx.Err())
+		}
+	})
 }

@@ -18,8 +18,9 @@ const (
 	MaxPreviewRecords = 50
 	// DefaultPreviewRecords applies when the request names no limit.
 	DefaultPreviewRecords = 20
-	// defaultPreviewBudget keeps a preview well under the API's 10 s write timeout, and under the usual client timeouts.
-	defaultPreviewBudget = 6 * time.Second
+	// defaultPreviewBudget leaves response headroom inside the HTTP request's
+	// five-second deadline. It includes preparation and storage reads.
+	defaultPreviewBudget = 4 * time.Second
 	// previewCalls bounds the evaluator calls one preview runs at once.
 	previewCalls = 8
 	// PreviewID names the synthetic Subscription, Version and evaluation a
@@ -34,6 +35,9 @@ var (
 	// ErrPreviewFailed fails a preview whose evaluator refused or broke an
 	// evaluation. A partial preview would claim that articles do not match.
 	ErrPreviewFailed = publicerr.EvaluatorError
+	// ErrPreviewTimeout reports a deadline before evaluation could produce a
+	// partial result, or a caller deadline that expired first.
+	ErrPreviewTimeout = publicerr.PreviewDeadlineExceeded
 )
 
 // PreviewInput asks how a proposed Subscription would have judged the most
@@ -96,7 +100,7 @@ type PreviewResult struct {
 // written: a preview has no Subscription, so it creates no Match, Delivery or
 // event. Evaluator calls run under a time budget; Records still undecided when
 // it runs out are left out, and an evaluator error fails the whole preview.
-func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInput, prepare ...func() (PreviewInput, error)) (PreviewResult, error) {
+func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInput, prepare ...func() (PreviewInput, error)) (result PreviewResult, err error) {
 	if err := scope.Require(corpus.ActionMonitoringPreview); err != nil {
 		return PreviewResult{}, err
 	}
@@ -110,6 +114,18 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 	if s.Recent == nil || s.Versions == nil {
 		return PreviewResult{}, ErrNotFound
 	}
+	parent := ctx
+	budget := s.PreviewBudget
+	if budget <= 0 {
+		budget = defaultPreviewBudget
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	defer func() {
+		if err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded)) {
+			err = ErrPreviewTimeout
+		}
+	}()
 	query, err := s.previewQuery(ctx, scope, in)
 	if err != nil {
 		return PreviewResult{}, err
@@ -142,12 +158,6 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 	if err != nil {
 		return PreviewResult{}, err
 	}
-	budget := s.PreviewBudget
-	if budget <= 0 {
-		budget = defaultPreviewBudget
-	}
-	judge, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
 	item := BatchItem{ID: PreviewID, Expression: query.Definition.Expression, Configuration: in.Evaluator.Configuration, QueryVectors: query.QueryVectors,
 		Subscriptions: []SubscriptionRef{{SubscriptionID: PreviewID, SubscriptionVersionID: PreviewID, SavedQueryID: query.SavedQueryID, SavedQueryVersionID: query.VersionID}}}
 	if item.Expression == nil {
@@ -167,11 +177,11 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 			defer wg.Done()
 			select {
 			case slots <- struct{}{}:
-			case <-judge.Done():
+			case <-ctx.Done():
 				return
 			}
 			defer func() { <-slots }()
-			decided[i], errs[i] = s.previewOne(judge, evaluator, scope.Organization, r, item)
+			decided[i], errs[i] = s.previewOne(ctx, evaluator, scope.Organization, r, item)
 		}()
 	}
 	wg.Wait()
@@ -179,7 +189,7 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 	for i, r := range recent {
 		if errs[i] != nil {
 			// Out of time is not an evaluator failure: the Record is left out.
-			if errors.Is(errs[i], context.DeadlineExceeded) && ctx.Err() == nil {
+			if errors.Is(errs[i], context.DeadlineExceeded) && parent.Err() == nil {
 				out.Complete = false
 				continue
 			}
@@ -200,6 +210,9 @@ func (s Service) Preview(ctx context.Context, scope corpus.Scope, in PreviewInpu
 			out.Matches = append(out.Matches, PreviewMatch{RecentVersion: r, Evidence: MatchEvidence{
 				Evaluator: in.Evaluator, Explanation: decided[i].Explanation, PartKeys: decided[i].PartKeys, Details: decided[i].Details}})
 		}
+	}
+	if parent.Err() != nil {
+		return PreviewResult{}, parent.Err()
 	}
 	return out, nil
 }

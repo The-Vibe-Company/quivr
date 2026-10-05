@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from functools import cache
+from functools import cache, lru_cache
 from importlib import resources
 from typing import Any
 
@@ -45,7 +45,16 @@ def protocol_errors(schema_file: str, value: Any) -> list[str]:
     return _format(_validator(schema_file).iter_errors(value))
 
 
+@lru_cache(maxsize=128)
+def _declared_validator(document: str) -> Draft202012Validator:
+    # Copy the schema from its content key: callers may mutate their input,
+    # while concurrent invocations reuse these checked, immutable rules.
+    schema = json.loads(document)
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
 def schema_errors(schema: Any, value: Any) -> list[str]:
     """Validate value against a plugin-declared JSON Schema 2020-12 document."""
-    Draft202012Validator.check_schema(schema)
-    return _format(Draft202012Validator(schema).iter_errors(value))
+    document = json.dumps(schema, sort_keys=True, separators=(",", ":"))
+    return _format(_declared_validator(document).iter_errors(value))
