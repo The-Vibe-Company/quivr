@@ -43,6 +43,7 @@ type API struct {
 	processWork    context.Context
 	router         *routing.Mux
 	routes         http.Handler
+	searches       chan struct{}
 	pushProxyCIDRs []string
 	Content        content.Service
 	Retrieval      retrieval.Service
@@ -91,7 +92,7 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
+	a := &API{searches: make(chan struct{}, maxConcurrentSearches), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
 	a.Content.Corpora = store
 	for _, option := range options {
 		option(a)
