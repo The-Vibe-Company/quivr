@@ -87,20 +87,3 @@ func (s *Store) PresignGet(ctx context.Context, objectKey string, ttl time.Durat
 	}
 	return request.URL, expires, nil
 }
-
-// ReadRange reads an inclusive byte range of a stored object.
-func (s *Store) ReadRange(ctx context.Context, objectKey string, start, end int64) ([]byte, error) {
-	if start < 0 || end < start {
-		return nil, errors.New("invalid range")
-	}
-	object, err := s.client.GetObject(ctx, &awss3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(objectKey), Range: aws.String(fmt.Sprintf("bytes=%d-%d", start, end))})
-	if err != nil {
-		return nil, errors.New("canonical S3 range unavailable")
-	}
-	defer object.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(object.Body, end-start+2))
-	if err != nil {
-		return nil, errors.New("canonical S3 range read failed")
-	}
-	return data, nil
-}

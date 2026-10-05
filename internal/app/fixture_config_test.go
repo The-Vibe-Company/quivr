@@ -44,11 +44,23 @@ func TestOperatorAllowancesWarnAtStartup(t *testing.T) {
 				cfg := Config{DatabaseURL: "postgres://127.0.0.1:1/unused", CursorKey: strings.Repeat("c", 32), CredentialKey: strings.Repeat("s", 32),
 					Keys: map[string]corpus.Scope{strings.Repeat("k", 32): {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}}}, ProjectionPurgeGrace: "invalid"}
 				cfg.LogDirectory = t.TempDir()
-				cfg.Delivery.AllowPrivateDestinations = enabled
 				cfg.ChangePrune.AllowShortRetention = enabled
 				cfg.ChangePrune.Organizations = []string{"org_a"}
 				path := filepath.Join(t.TempDir(), "config.json")
 				raw, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Literal operator input also protects the public key and omitted default.
+				var input map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &input); err != nil {
+					t.Fatal(err)
+				}
+				input["delivery"] = json.RawMessage(`{}`)
+				if enabled {
+					input["delivery"] = json.RawMessage(`{"allow_private_destinations":true}`)
+				}
+				raw, err = json.Marshal(input)
 				if err != nil {
 					t.Fatal(err)
 				}
