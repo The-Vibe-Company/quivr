@@ -13,6 +13,7 @@ import signal
 import subprocess
 import time
 
+import ci_guard
 import direct_bakeoff
 import results
 import search_trial
@@ -510,7 +511,7 @@ class ModalAdapter:
         self.store, self.outbox = store, pathlib.Path(outbox)
 
     def __call__(self, request, resource):
-        if os.environ.get('CI'):
+        if ci_guard.in_ci():
             raise PermissionError('paid confirmation is forbidden in CI')
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
         if (request['engine_runner_git_sha'] != sha
@@ -576,7 +577,7 @@ def main(argv=None):
             'engine_runner_scorer_digest': lineage()['engine_runner_scorer_digest'],
             'heldout_read_limit': 10, 'compute_cap_notice': modal_engine.COMPUTE_NOTICE}))
         return 0
-    if os.environ.get('CI') or not args.allow_paid:
+    if ci_guard.in_ci() or not args.allow_paid:
         parser.error('live confirmation requires --allow-paid and is forbidden in CI')
     if any(value is None for value in (args.campaign, args.trial, args.candidate, args.configuration)):
         parser.error('live confirmation needs campaign, trial, candidate and trusted configuration')
