@@ -3523,6 +3523,8 @@ paths:
         does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks
         the engine for candidates in up to three rounds and returns its ranking, which may hold only
         candidates the engine served in this search, each already authorized and hydrated.
+        Each API process admits at most 64 active searches across callers. At capacity it immediately
+        returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
       requestBody:
         required: true
         content:
@@ -3543,7 +3545,14 @@ paths:
             it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its
             contract, for example ranked a segment the engine never served it), 503 dependency unavailable,
             504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms;
-            a dependency that does not answer in time is 503).
+            a dependency that does not answer in time is 503). At search capacity, 503 search_unavailable
+            includes Retry-After; retry only after that delay.
+          headers:
+            Retry-After:
+              description: Present when search capacity is full; minimum delay in seconds before retrying.
+              schema:
+                type: integer
+                minimum: 1
           content:
             application/json:
               schema:

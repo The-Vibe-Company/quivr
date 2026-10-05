@@ -32,7 +32,13 @@ type Store struct {
 
 func New(cfg Config) *Store { return newWithTransport(cfg, outbound.Transport(nil)) }
 
+// Canonical hydration fans out across blobs. Retain connections between batches;
+// the default two idle connections churn ephemeral ports under concurrent searches.
+const canonicalIdleConnections = 128
+
 func newWithTransport(cfg Config, transport *http.Transport) *Store {
+	transport.MaxIdleConnsPerHost = canonicalIdleConnections
+	transport.MaxIdleConns = canonicalIdleConnections
 	client := awss3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")), HTTPClient: &http.Client{Timeout: 5 * time.Second, Transport: transport, CheckRedirect: outbound.CheckRedirect}}, func(o *awss3.Options) { o.BaseEndpoint = aws.String(cfg.Endpoint); o.UsePathStyle = true })
 	return &Store{client: client, bucket: cfg.Bucket}
 }
