@@ -3,14 +3,11 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"mime"
 	"net/http"
 	"net/netip"
@@ -42,7 +39,11 @@ import (
 )
 
 type API struct {
+	draining       func() bool
+	processWork    context.Context
+	router         *routing.Mux
 	routes         http.Handler
+	searches       chan struct{}
 	pushProxyCIDRs []string
 	Content        content.Service
 	Retrieval      retrieval.Service
@@ -91,7 +92,7 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
+	a := &API{searches: make(chan struct{}, maxConcurrentSearches), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
 	a.Content.Corpora = store
 	for _, option := range options {
 		option(a)
@@ -109,7 +110,8 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 			return nil, err
 		}
 	}
-	return http.HandlerFunc(a.servePushAudited), nil
+	a.router = mux
+	return http.HandlerFunc(a.serveAccess), nil
 }
 
 const (
@@ -145,16 +147,6 @@ func pageLimit(w http.ResponseWriter, q url.Values, def, max int) (int, bool) {
 }
 
 func (a *API) serve(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	var requestID [16]byte
-	_, _ = rand.Read(requestID[:])
-	id := hex.EncodeToString(requestID[:])
-	w.Header().Set("X-Request-ID", id)
-	observed := &responseWriter{ResponseWriter: w}
-	w = observed
-	defer func() {
-		slog.Info("http request", "method", r.Method, "request_id", id, "status", observed.status, "duration_ms", time.Since(start).Milliseconds())
-	}()
 	if isWebhookRoute(r.URL.Path) || isConnectorAPIPath(r.URL.Path) {
 		a.routes.ServeHTTP(w, r)
 		return
@@ -321,19 +313,6 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 		page["next_page_cursor"] = a.encodePage(corpusPageDomain, cursor{items[limit-1].ID, scope})
 	}
 	send(w, 200, page)
-}
-
-type responseWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-// Unwrap exposes the underlying writer to http.ResponseController.
-func (w *responseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-
-func (w *responseWriter) WriteHeader(status int) {
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
 }
 
 // writeDecodeError preserves the preview deadline when decoding finishes late.

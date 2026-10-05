@@ -152,6 +152,10 @@ EOF
 
 These outputs come from the `make dev` stack, where `deep` maps to `core.retrieve/deep`. An unknown profile is refused with `422 unsupported_profile`.
 
+## Retry a busy search
+
+Each API process admits at most 64 active searches across callers. When capacity is full, it returns `503 search_unavailable` with `retryable: true` and a `Retry-After` header. Wait at least that many seconds before retrying, and limit concurrent searches in your client. A dependency outage can return the same code without the header; use bounded backoff for those failures. The [API overview](/api-reference/overview) describes the error envelope.
+
 ## Search from the command line
 
 `quivr search` sends the same request from a terminal, with the same `QUIVR_API_URL` and `QUIVR_API_KEY`:
@@ -176,4 +180,4 @@ Add `--json` to print the API response unchanged, and `--source` to filter by So
 | `403 forbidden` | The key may not search one of the requested Corpora. |
 | `422 query_too_long`, `422 unsupported_profile` | The query or the profile is refused. The message says why. |
 | `422 source_filter_unavailable` | The Corpus was indexed before source filtering existed; rebuild it once. |
-| `503` | A dependency, such as the search index or the embedding service, is unavailable. Retry later: Quivr never answers an empty list instead. |
+| `503 search_unavailable` | Search capacity is full or a dependency is unavailable. Wait for `Retry-After` when present; otherwise use bounded backoff. Quivr never answers an empty list instead. |

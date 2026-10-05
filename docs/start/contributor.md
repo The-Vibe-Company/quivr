@@ -13,6 +13,7 @@ How this repository is organised, tested and changed, for people and coding agen
 ## Guides
 
 - [Repository instructions](../../AGENTS.md): rules every contributor and coding agent follows in this repository
+- [Prove requirements with conformance cases](../../conformance/README.md): contribute declarative requirements and run local conformance reports
 - [Documentation conventions](../agents/documentation.md): living and dated documents, the inventory, budgets and when docs may change
 - [Domain documentation](../agents/domain.md): how the domain documentation is laid out
 - [Measure search quality](../agents/evaluation.md): measure how well search ranks results on public and private evaluation sets

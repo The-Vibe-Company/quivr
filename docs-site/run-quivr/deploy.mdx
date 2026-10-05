@@ -51,10 +51,10 @@ quivr worker    # in its own process
 ```
 
 1. `quivr migrate` updates the database schema, creates the storage bucket when it is missing, and prepares the search index. It gives up after 30 seconds when storage or the search index does not answer; run it again once they do.
-2. `quivr api` refuses to start while migrations are pending, with `database/schema unavailable; run migrate`.
+2. `quivr api` refuses to start while migrations are pending; run `quivr migrate` first.
 3. `quivr worker` started before the migrations waits for them for up to `migration_wait` (5 minutes by default), then exits.
 
-To deploy a new `quivr` binary, run its `quivr migrate` first, then restart `api` and `worker` on it. A binary older than the database schema refuses to start, with `database schema is newer than this binary`. The [CLI reference](/reference/cli#engine-commands) lists the commands' exit codes.
+To deploy a new `quivr` binary, run its `quivr migrate` first, then restart `api` and `worker` on it. A binary older than the database schema refuses to start. The [CLI reference](/reference/cli#engine-commands) lists the commands' exit codes.
 
 ## Check that it is ready
 
@@ -67,6 +67,12 @@ Each `api` and `worker` serves three probes on its `probe_listen` address, `127.
 | `GET /metrics` | Counters in Prometheus text format |
 
 The `api` becomes ready once its schema check passes and its ingestion plugin has answered a first query, or after 5 seconds; the first searches are then only slower. The `worker` also checks that Temporal, object storage and the search index answer. A plugin that is down does not stop either process. Background work that needs it waits and retries; a search that needs it fails with `503 search_unavailable`.
+
+## Route logs and stop a process
+
+Engine logs are JSON lines on stdout. Set `log_level` or `QUIVR_LOG_LEVEL` to `debug`, `info`, `warn` or `error`; the default is `info`. Set `instance` and `environment`, or their `QUIVR_INSTANCE` and `QUIVR_ENVIRONMENT` overrides, to identify the process in your log tooling. [Logs and shutdown](/reference/configuration#logs-and-shutdown) lists the event fields and redaction behavior. `log_directory` optionally keeps rotating local copies.
+
+Stop a process with SIGTERM or SIGINT. Its `/readyz` becomes `503` first, then it drains admitted requests and background work. `shutdown_grace` defaults to `60s`; set your platform's termination timeout long enough to allow that budget. The stable lifecycle events are `quivr.start`, `quivr.ready`, `quivr.draining` and `quivr.stop`. A readiness event means the process passed its readiness criteria, including the API’s query warm-up timeout described above; a start event alone does not.
 
 ## Example deployments
 

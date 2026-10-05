@@ -109,17 +109,27 @@ async function load(browser, target) {
   return sample;
 }
 
-// One session over the page: an article, the tabs, a search typed and cleared.
+// One session over the page: an article, an alert's tag, the tabs, a search
+// typed and cleared.
 async function interactions(browser) {
   const { ctx, page, cdp } = await context(browser);
   await throttle(cdp);
   await page.goto(base + "/");
   await page.waitForSelector(".feed-rows .row");
   await page.waitForTimeout(1000);
+  // A row's middle may be one of its alert tags: an article opens from its title.
+  const tag = page.locator(".feed-rows .row-tags button").first();
   const steps = [
-    ["open an article", () => page.locator(".feed-rows .row").nth(2).click()],
+    ["open an article", () => page.locator(".feed-rows .row-link").nth(2).click()],
     ["next article (↓)", () => page.keyboard.press("ArrowDown")],
     ["close it (Esc)", () => page.keyboard.press("Escape")],
+    // When no article of the feed was caught by an alert, there is no tag
+    // to click: the two steps are reported as skipped, not measured.
+    ["filter on an alert tag", async () => (await tag.count()) > 0 && tag.click().then(() => true)],
+    ["clear the filters", async () => {
+      const clear = page.locator(".filters-clear");
+      return (await clear.count()) > 0 && clear.click().then(() => true);
+    }],
     ["Alertes tab", () => page.locator('.rail-tab[data-section="alerts"]').click()],
     ["Sources tab", () => page.locator('.rail-tab[data-section="sources"]').click()],
     ["Admin tab", () => page.locator('.rail-tab[data-section="admin"]').click()],
@@ -130,16 +140,17 @@ async function interactions(browser) {
     }],
     ["clear the search", () => page.locator(".bar-clear").click()],
   ];
+  const skipped = [];
   for (const [label, act] of steps) {
     await page.evaluate((value) => (window.__perf.label = value), label);
-    await act();
+    if ((await act()) === false) skipped.push(label);
     await page.waitForTimeout(1200);
   }
   const events = await page.evaluate(() => window.__perf.events);
   await ctx.close();
   const worst = {};
   for (const { label, ms } of events) worst[label] = Math.max(worst[label] || 0, ms);
-  return worst;
+  return { worst, skipped };
 }
 
 async function api(path, init = {}) {
@@ -271,8 +282,10 @@ for (const target of PAGES) {
 const sessions = [];
 for (let i = 0; i < runs; i++) sessions.push(await interactions(browser));
 await browser.close();
-for (const label of Object.keys(sessions[0]))
-  report.interactions[label] = Math.round(median(sessions.map((s) => s[label] || 0)));
+report.skipped = [...new Set(sessions.flatMap((s) => s.skipped))];
+for (const label of Object.keys(sessions[0].worst))
+  if (!report.skipped.includes(label))
+    report.interactions[label] = Math.round(median(sessions.map((s) => s.worst[label] || 0)));
 report.inp_ms = Math.max(0, ...Object.values(report.interactions));
 report.endpoints = await endpoints();
 if (process.env.PERF_ALERT_LAG === "1") report.alert_lag = await alertLag();
@@ -284,6 +297,7 @@ console.log(`\n${base} — ${profile.about}\n`);
 console.table(report.pages);
 console.table(report.interactions);
 console.log(`INP (slowest interaction, median of ${runs} sessions): ${report.inp_ms} ms`);
+if (report.skipped.length) console.log(`Not measured, nothing to click on this demo: ${report.skipped.join(", ")}`);
 console.table(report.endpoints);
 if (report.alert_lag) console.log("Alert catch delay:", report.alert_lag);
 if (process.env.PERF_REPORT) writeFileSync(process.env.PERF_REPORT, JSON.stringify(report, null, 2));

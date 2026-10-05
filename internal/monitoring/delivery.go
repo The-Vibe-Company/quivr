@@ -3,8 +3,10 @@ package monitoring
 import (
 	"bytes"
 	"context"
+
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"io"
 	"log/slog"
 	"net"
@@ -191,7 +193,11 @@ func (d Deliverer) Run(ctx context.Context) {
 			defer wg.Done()
 			wait := poll
 			for ctx.Err() == nil {
-				step, cancel := context.WithTimeout(ctx, d.lease())
+				work, admitted := lifecycle.Admit(ctx)
+				if !admitted {
+					return
+				}
+				step, cancel := context.WithTimeout(work, d.lease())
 				progressed, err := d.Step(step)
 				cancel()
 				if err != nil && ctx.Err() == nil {
@@ -245,7 +251,7 @@ func (d Deliverer) Step(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 	// The outcome is recorded even when the step context is ending.
-	record, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	record, cancel := lifecycle.CleanupContext(ctx, 10*time.Second)
 	defer cancel()
 	retry := Retry{Window: policy.Window}
 	if outcome.Outcome == AttemptRetryableError {
@@ -324,7 +330,7 @@ func (d Deliverer) stepBatch(ctx context.Context, store DeliveryBatchStore) (boo
 		retries, durations = append(retries, retry), append(durations, elapsed[i])
 	}
 	if len(recordAttempts) > 0 {
-		record, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		record, cancel := lifecycle.CleanupContext(ctx, 10*time.Second)
 		recorded := store.RecordDeliveries(record, recordAttempts, recordOutcomes, retries)
 		cancel()
 		if len(recorded) != len(recordAttempts) {

@@ -9026,8 +9026,13 @@ func (response SearchRecords200JSONResponse) VisitSearchRecordsResponse(w http.R
 	return err
 }
 
+type SearchRecordsdefaultResponseHeaders struct {
+	RetryAfter *int
+}
+
 type SearchRecordsdefaultJSONResponse struct {
 	Body       Error
+	Headers    SearchRecordsdefaultResponseHeaders
 	StatusCode int
 }
 
@@ -9038,6 +9043,9 @@ func (response SearchRecordsdefaultJSONResponse) VisitSearchRecordsResponse(w ht
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.WriteHeader(response.StatusCode)
 	_, err := buf.WriteTo(w)
 	return err

@@ -19,6 +19,7 @@ stays in the single ``plugin`` pin:
 Each runs as its own process with the repository's Python Plugin SDK. Every
 oracle is a public HTTP read or a webhook.
 """
+import plugin_environment
 import json, os, pathlib, shutil, signal, subprocess, time, urllib.request
 
 import normalizer_plugin
@@ -151,7 +152,7 @@ def start_fake(stack):
     stack.state.setdefault('fake_system_one_port', normalizer_plugin.stack_port())
     with (stack.directory / 'fake-system-one.log').open('a') as log:
         p = subprocess.Popen([str(normalizer_plugin.python()), '-m', 'alerts.fake_system_one', '--port', str(stack.state['fake_system_one_port']), '--key', FAKE_KEY],
-                             cwd=ALERTS, stdout=log, stderr=log, start_new_session=True)
+                             cwd=ALERTS, env=plugin_environment.inherited(), stdout=log, stderr=log, start_new_session=True)
     stack.state['fake_system_one_pid'] = p.pid
     stack.save()
     deadline = time.monotonic() + 30
@@ -177,7 +178,7 @@ def start(stack):
     if stack.state.get('alerts_plugin', True) and stack.state.get('described') == 'fake':
         start_fake(stack)
     for name, path, module, port in running(stack):
-        env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state[port]), 'QUIVR_PLUGIN_MANIFEST': str(path / 'quivr-plugin.yaml')}
+        env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state[port]), 'QUIVR_PLUGIN_MANIFEST': str(path / 'quivr-plugin.yaml')}
         if name == 'alerts':
             env.update(classifier_environment(stack))
         logfile = stack.directory / ('subscription-plugin.log' if name == NAME else 'alerts-plugin.log')
@@ -271,7 +272,7 @@ def upgrade(stack):
     stack.state.setdefault('subscription_plugin_next_port', normalizer_plugin.stack_port())
     stack.save()
     port = stack.state['subscription_plugin_next_port']
-    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest_next)}
+    env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest_next)}
     with (stack.directory / 'subscription-plugin-next.log').open('a') as log:
         p = subprocess.Popen([str(normalizer_plugin.python()), '-m', MODULE], cwd=copy, env=env, stdout=log, stderr=log, start_new_session=True)
     try:

@@ -1,0 +1,7 @@
+id: EXNF-IMAGE-001
+check: image_property
+parameters: {}
+threshold:
+  non_root: true
+  labels: [org.opencontainers.image.version]
+  sbom: true

@@ -18,6 +18,7 @@ startup refusal of invalid pins and that an unreachable plugin leaves the API
 and worker healthy, then switches the pin to pdf-text. Every oracle is a
 process exit status or a public HTTP read.
 """
+import plugin_environment
 import json, os, pathlib, signal, subprocess, sys, time, urllib.error, urllib.request
 import ports
 
@@ -155,7 +156,7 @@ def start(stack):
     stop(stack)
     if selected(stack) not in PLUGINS:
         return
-    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state['plugin_port']), 'QUIVR_PLUGIN_MANIFEST': str(manifest(stack))}
+    env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state['plugin_port']), 'QUIVR_PLUGIN_MANIFEST': str(manifest(stack))}
     with (stack.directory / 'normalizer-plugin.log').open('a') as log:
         p = subprocess.Popen([str(python()), '-m', PLUGINS[selected(stack)][0]], cwd=directory(stack), env=env, stdout=log, stderr=log, start_new_session=True)
     stack.state['plugin_pid'] = p.pid
@@ -200,8 +201,8 @@ def refused(stack, name, plugin, code):
     path.chmod(0o600)
     for command in ['api', 'worker']:
         result = subprocess.run([str(stack.directory / 'quivr'), command], cwd=ROOT, env={**os.environ, 'QUIVR_CONFIG': str(path)}, capture_output=True, text=True, timeout=30)
-        (stack.directory / f'bad-pin-{name}-{command}.log').write_text(result.stderr)
-        assert result.returncode != 0 and code in result.stderr, (name, command, result.returncode, result.stderr)
+        (stack.directory / f'bad-pin-{name}-{command}.log').write_text(result.stdout + result.stderr)
+        assert result.returncode != 0 and code in result.stdout, (name, command, result.returncode, result.stdout + result.stderr)
 
 
 def switch(stack, name):
@@ -291,7 +292,7 @@ def failures(stack):
     manifest_path = directory / 'quivr-plugin.yaml'
     manifest_path.write_text(FAULTY_MANIFEST)
     port = stack_port()
-    env = {**os.environ, 'QUIVR_FAKE_PLUGIN': '1', 'QUIVR_FAKE_PLUGIN_MODE': 'by-record-key',
+    env = {**plugin_environment.inherited(), 'QUIVR_FAKE_PLUGIN': '1', 'QUIVR_FAKE_PLUGIN_MODE': 'by-record-key',
            'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest_path)}
     with (stack.directory / 'faulty-plugin.log').open('a') as log:
         plugin = subprocess.Popen([str(binary), '-test.run=^$'], cwd=directory, env=env, stdout=log, stderr=log, start_new_session=True)

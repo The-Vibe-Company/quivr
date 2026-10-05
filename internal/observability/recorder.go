@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 )
 
 // Store persists rollup rows.
@@ -297,7 +299,7 @@ func (r *Recorder) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			final, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			final, cancel := lifecycle.CleanupContext(ctx, 2*time.Second)
 			if err := r.Flush(final); err != nil {
 				slog.Warn("observability flush failed at shutdown", "component", "observability", "error", err.Error())
 			}

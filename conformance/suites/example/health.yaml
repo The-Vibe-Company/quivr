@@ -1,0 +1,8 @@
+id: EXNF-HTTP-001
+check: http_probe
+parameters:
+  target: probe
+  path: /healthz
+threshold:
+  status: 204
+  max_latency_ms: 1000

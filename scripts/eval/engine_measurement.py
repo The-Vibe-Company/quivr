@@ -148,6 +148,7 @@ def stack(mapping, budget, runtime, stacks):
     import run
     import hosted_embed_plugin
     import ingestion_plugin
+    import plugin_environment
     import ports
     client = run.start_stack({}, stacks)
     owned, process, gate = client.stack, None, None
@@ -170,7 +171,7 @@ def stack(mapping, budget, runtime, stacks):
             space = next(iter(declaration['contributions']['ingestion']['spaces']))
             port = ports.allocate()
             with (directory / 'plugin.log').open('w') as out:
-                process = subprocess.Popen([str(binary)], env={**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1',
+                process = subprocess.Popen([str(binary)], env={**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1',
                     'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest)},
                     stdout=out, stderr=out, start_new_session=True)
             ingestion_plugin.await_healthy(process, port, directory / 'plugin.log')

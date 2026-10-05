@@ -11,6 +11,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/observability"
 	"github.com/jackc/pgx/v5"
 )
@@ -53,7 +54,7 @@ func (s ConnectorStore) ProtectPush(ctx context.Context, in connectors.PushAttem
 			}
 		}
 		defer func() {
-			release, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			release, cancel := lifecycle.CleanupContext(ctx, 2*time.Second)
 			defer cancel()
 			// Completed answers clear owner_token; only an unfinished claim is released.
 			_, _ = s.Pool.Exec(release, `DELETE FROM connector_push_answers WHERE organization=$1 AND connector_id=$2 AND key_hash=$3 AND owner_token=$4`, in.Organization, in.InstanceID, in.KeyHash, owner)

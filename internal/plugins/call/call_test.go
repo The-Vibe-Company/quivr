@@ -39,7 +39,7 @@ func TestInvocationRefusesDiscoveryMismatch(t *testing.T) {
 				} else {
 					version = "2.0.0"
 				}
-				_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": plugins.PluginAPIVersion, "plugin": map[string]string{"id": pin.Manifest.ID, "version": version}, "manifest_digest": digest, "contributions": pin.Manifest.Contributions.Names()})
+				_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": pin.PluginAPI(), "plugin": map[string]string{"id": pin.Manifest.ID, "version": version}, "manifest_digest": digest, "contributions": pin.Manifest.Contributions.Names()})
 			}))
 			defer server.Close()
 			pin.Endpoint = server.URL
@@ -133,7 +133,7 @@ func TestInvocationOwnsDeadlineInsideOuterEnvelope(t *testing.T) {
 						parent, cancel = context.WithTimeout(context.Background(), time.Second)
 					}
 					defer cancel()
-					discovery, err := json.Marshal(map[string]any{"plugin_api": plugins.PluginAPIVersion, "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
+					discovery, err := json.Marshal(map[string]any{"plugin_api": pin.PluginAPI(), "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -182,7 +182,7 @@ func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f
 var operations = []string{call.Normalize, call.SegmentAndEmbed, call.EmbedQuery, call.SearchRound, call.EvaluateSubscription, call.ConnectorFetch, call.CheckCredential, call.ConnectorReceive, call.DescribeAttachment, call.UploadAttachment}
 
 func policyPin() *plugins.Pin {
-	return &plugins.Pin{Endpoint: "http://127.0.0.1:1", ManifestDigest: "sha256:" + strings.Repeat("a", 64), Configuration: json.RawMessage(`{}`), Manifest: plugins.Manifest{ID: "test.calls", Version: "1.0.0", Compatibility: plugins.Compatibility{PluginAPI: ">=0.6.0 <1.0.0"}, Contributions: plugins.Contributions{
+	return &plugins.Pin{Endpoint: "http://127.0.0.1:1", ManifestDigest: "sha256:" + strings.Repeat("a", 64), Configuration: json.RawMessage(`{}`), Manifest: plugins.Manifest{ID: "test.calls", Version: "1.0.0", Compatibility: plugins.Compatibility{PluginAPI: ">=0.6.0 <0.14.0"}, Contributions: plugins.Contributions{
 		Normalizer: &plugins.Normalizer{TimeoutMS: 2000}, Ingestion: &plugins.Ingestion{TimeoutMS: 2000, QueryTimeoutMS: 2000}, Subscription: &plugins.Subscription{TimeoutMS: 2000}, Connector: &plugins.Connector{TimeoutMS: 2000, Attachments: &plugins.ConnectorAttachments{TimeoutMS: 2000}}, Retrieval: &plugins.Retrieval{},
 	}}}
 }
@@ -191,7 +191,7 @@ func peer(t *testing.T, pin *plugins.Pin, post http.HandlerFunc) *httptest.Serve
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/v0/discovery" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": plugins.PluginAPIVersion, "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
+			_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": pin.PluginAPI(), "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
 			return
 		}
 		post(w, r)
