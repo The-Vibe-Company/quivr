@@ -1,5 +1,9 @@
 import {
+  Component,
   type ComponentType,
+  type ReactNode,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -18,12 +22,8 @@ import {
   SunIcon,
 } from "./components/RailIcons";
 import { Brand } from "./components/Logo";
-import { AddText } from "./components/AddText";
-import { ConnectorsView } from "./components/connectors/ConnectorsView";
 import { ALL, FeedPage, type Filter } from "./components/feed/FeedPage";
-import { AlertsView } from "./components/alerts/AlertsView";
-import { AdminView } from "./components/admin/AdminView";
-import { Notice } from "./components/ui";
+import { LoadingState, Notice } from "./components/ui";
 import { APIError, login, searchProfiles, session } from "./lib/search";
 import { offersDeep } from "./lib/deep";
 import { useAlertList, useConnectorList, useFeedStream } from "./lib/workspace";
@@ -35,6 +35,30 @@ import { displayState } from "./components/connectors/HealthBadge";
 import { needsCheck } from "./lib/format";
 import { currentTheme, onSystemTheme, saveTheme, type Theme } from "./lib/theme";
 import { ChartTip } from "./components/ChartTip";
+
+// The Fil ships with the page; the other tabs and the text form load on first
+// use, and are fetched while the browser is idle so a click does not wait.
+const loaders = {
+  alerts: () => import("./components/alerts/AlertsView"),
+  sources: () => import("./components/connectors/ConnectorsView"),
+  admin: () => import("./components/admin/AdminView"),
+  addText: () => import("./components/AddText"),
+};
+const AlertsView = lazy(() => loaders.alerts().then((m) => ({ default: m.AlertsView })));
+const ConnectorsView = lazy(() =>
+  loaders.sources().then((m) => ({ default: m.ConnectorsView })),
+);
+const AdminView = lazy(() => loaders.admin().then((m) => ({ default: m.AdminView })));
+const AddText = lazy(() => loaders.addText().then((m) => ({ default: m.AddText })));
+function prefetchTabs() {
+  const load = () => Object.values(loaders).forEach((load) => void load().catch(() => {}));
+  if ("requestIdleCallback" in window) {
+    const id = requestIdleCallback(load, { timeout: 4000 });
+    return () => cancelIdleCallback(id);
+  }
+  const id = setTimeout(load, 1500);
+  return () => clearTimeout(id);
+}
 
 type Auth = "loading" | "login" | "ready" | "error";
 type View = "feed" | "alerts" | "sources" | "admin";
@@ -81,6 +105,28 @@ function urlState() {
         : null,
   };
 }
+
+// A tab whose code cannot load (offline, or a page left open across a deploy)
+// says so and offers a reload, instead of emptying the whole app.
+class TabBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? (
+      <Notice title="Cette page n’a pas pu se charger." onRetry={() => location.reload()}>
+        Rechargez la page pour récupérer la dernière version de la démo.
+      </Notice>
+    ) : (
+      this.props.children
+    );
+  }
+}
+
+// The tab the address opens on loads with the page, not after the session.
+const opening = urlState().view;
+if (opening !== "feed") void loaders[opening]().catch(() => {});
 
 export default function App() {
   const [auth, setAuth] = useState<Auth>("loading");
@@ -235,6 +281,7 @@ function Dashboard({
     [feed.items],
   );
 
+  useEffect(prefetchTabs, []);
   useEffect(() => {
     const controller = new AbortController();
     searchProfiles(controller.signal)
@@ -496,91 +543,95 @@ function Dashboard({
           )}
         </form>
       </header>
-      {view === "feed" ? (
-        <FeedPage
-          corpus={corpus}
-          query={query}
-          near={near}
-          onNear={setNear}
-          deepOffered={deepOffered}
-          deep={deep}
-          onDeep={setDeep}
-          filter={filter}
-          onFilter={setFilter}
-          doc={doc}
-          onOpen={open}
-          onClose={() => setDoc(null)}
-          onQuery={setInput}
-          feed={feed}
-          alerts={alerts}
-          connectors={sources.connectors}
-          reading={reading}
-          scroller={scroller}
-          onAdd={() => setAdding(true)}
-          onAlerts={() => {
-            setDoc(null);
-            setView("alerts");
-          }}
-          onSources={(id) => {
-            setDoc(null);
-            setOpenSource(id || null);
-            setView("sources");
-          }}
-          notify={notify}
-          onUnauthorized={onUnauthorized}
-        />
-      ) : view === "alerts" ? (
-        <AlertsView
-          corpus={corpus}
-          selected={alert}
-          onSelect={setAlert}
-          doc={doc}
-          // Articles open in the reader over the page; the open one closes it.
-          onOpen={(record, version) => setDoc(doc?.record === record ? null : { record, version })}
-          onCloseDoc={() => setDoc(null)}
-          onSimilar={(text) => {
-            setInput(text);
-            setNear(true);
-            setFilter(ALL);
-            setDoc(null);
-            setView("feed");
-          }}
-          connectors={sources.connectors}
-          feedItems={feed.items}
-          isUnread={reading.isUnread}
-          onMarkAllRead={reading.markAllRead}
-          onChanged={() => void alerts.reload()}
-          notify={notify}
-          onUnauthorized={onUnauthorized}
-        />
-      ) : view === "admin" ? (
-        <AdminView
-          titles={titles}
-          connectors={sources.connectors}
-          selected={version}
-          onSelect={setVersion}
-          onOpen={(record, target) => {
-            setVersion(null);
-            open(record, target);
-          }}
-          onAdd={() => setAdding(true)}
-          onSources={() => {
-            setOpenSource(null);
-            setView("sources");
-          }}
-          onUnauthorized={onUnauthorized}
-        />
-      ) : (
-        <ConnectorsView
-          corpus={corpus}
-          feedItems={feed.items}
-          initialSelected={openSource}
-          onChanged={() => void sources.reload()}
-          onAdd={() => setAdding(true)}
-          notify={notify}
-          onUnauthorized={onUnauthorized}
-        />
-      )}
+      <TabBoundary key={view}>
+        <Suspense fallback={<LoadingState label="Chargement…" rows={4} />}>
+          {view === "feed" ? (
+            <FeedPage
+              corpus={corpus}
+              query={query}
+              near={near}
+              onNear={setNear}
+              deepOffered={deepOffered}
+              deep={deep}
+              onDeep={setDeep}
+              filter={filter}
+              onFilter={setFilter}
+              doc={doc}
+              onOpen={open}
+              onClose={() => setDoc(null)}
+              onQuery={setInput}
+              feed={feed}
+              alerts={alerts}
+              connectors={sources.connectors}
+              reading={reading}
+              scroller={scroller}
+              onAdd={() => setAdding(true)}
+              onAlerts={() => {
+                setDoc(null);
+                setView("alerts");
+              }}
+              onSources={(id) => {
+                setDoc(null);
+                setOpenSource(id || null);
+                setView("sources");
+              }}
+              notify={notify}
+              onUnauthorized={onUnauthorized}
+            />
+          ) : view === "alerts" ? (
+            <AlertsView
+              corpus={corpus}
+              selected={alert}
+              onSelect={setAlert}
+              doc={doc}
+              // Articles open in the reader over the page; the open one closes it.
+              onOpen={(record, version) => setDoc(doc?.record === record ? null : { record, version })}
+              onCloseDoc={() => setDoc(null)}
+              onSimilar={(text) => {
+                setInput(text);
+                setNear(true);
+                setFilter(ALL);
+                setDoc(null);
+                setView("feed");
+              }}
+              connectors={sources.connectors}
+              feedItems={feed.items}
+              isUnread={reading.isUnread}
+              onMarkAllRead={reading.markAllRead}
+              onChanged={() => void alerts.reload()}
+              notify={notify}
+              onUnauthorized={onUnauthorized}
+            />
+          ) : view === "admin" ? (
+            <AdminView
+              titles={titles}
+              connectors={sources.connectors}
+              selected={version}
+              onSelect={setVersion}
+              onOpen={(record, target) => {
+                setVersion(null);
+                open(record, target);
+              }}
+              onAdd={() => setAdding(true)}
+              onSources={() => {
+                setOpenSource(null);
+                setView("sources");
+              }}
+              onUnauthorized={onUnauthorized}
+            />
+          ) : (
+            <ConnectorsView
+              corpus={corpus}
+              feedItems={feed.items}
+              initialSelected={openSource}
+              onChanged={() => void sources.reload()}
+              onAdd={() => setAdding(true)}
+              notify={notify}
+              onUnauthorized={onUnauthorized}
+            />
+          )}
+        </Suspense>
+      </TabBoundary>
       <ChartTip />
       <div className="toast-region" role="status" aria-live="polite">
         {toast && (
@@ -590,15 +641,25 @@ function Dashboard({
         )}
       </div>
       {adding && (
-        <AddText
-          corpus={corpus}
-          onClose={() => setAdding(false)}
-          onAdded={() => undefined}
-          onOpen={(record, version) => {
-            setAdding(false);
-            open(record, version);
-          }}
-        />
+        <TabBoundary>
+          <Suspense
+            fallback={
+              <div className="toast-region" role="status">
+                <p className="toast">Chargement…</p>
+              </div>
+            }
+          >
+            <AddText
+              corpus={corpus}
+              onClose={() => setAdding(false)}
+              onAdded={() => undefined}
+              onOpen={(record, version) => {
+                setAdding(false);
+                open(record, version);
+              }}
+            />
+          </Suspense>
+        </TabBoundary>
       )}
     </div>
   );
