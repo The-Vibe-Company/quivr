@@ -4,6 +4,9 @@ import copy
 import io
 import json
 import logging
+import socket
+import struct
+import sys
 import tempfile
 import threading
 import unittest
@@ -162,6 +165,73 @@ class LoggingCorrelation(Base):
 
 
 class HTTPTransport(Base):
+    def test_disconnected_caller_does_not_raise_a_server_error(self):
+        entered, release, finished = (threading.Event() for _ in range(3))
+
+        @self.plugin.health_check
+        def held_health_check():
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError("test did not release the health check")
+
+        server = self.plugin.make_server("127.0.0.1", 0)
+        errors = []
+        finish = server.process_request_thread
+
+        def observed_finish(*args):
+            try:
+                finish(*args)
+            finally:
+                finished.set()
+
+        server.process_request_thread = observed_finish
+        server.handle_error = lambda *_: errors.append(sys.exc_info()[1])
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.addCleanup(release.set)
+        connection = socket.create_connection(("127.0.0.1", server.server_port), timeout=5)
+        self.addCleanup(connection.close)
+        connection.sendall(b"GET /v0/health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertTrue(entered.wait(5), "request did not reach the health handler")
+        # Reset the TCP connection before allowing the response to be written.
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        connection.close()
+        release.set()
+        self.assertTrue(finished.wait(5), "disconnected request did not finish")
+        self.assertEqual(errors, [], "a caller hang-up must not escape as a server error")
+        with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/v0/health", timeout=5) as response:
+            self.assertEqual(json.load(response), {"status": "ok"})
+
+    def test_persistent_responses_disable_nagle(self):
+        # Small protocol replies must not wait for a delayed ACK between
+        # their headers and body. Observe the actual accepted TCP socket;
+        # latency thresholds belong in the separate burst measurement.
+        server = self.plugin.make_server("127.0.0.1", 0)
+        accepted = []
+        accept = server.get_request
+
+        def capture_socket():
+            connection, address = accept()
+            accepted.append(connection)
+            return connection, address
+
+        server.get_request = capture_socket
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        import http.client
+
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        self.addCleanup(connection.close)
+        for _ in range(2):
+            connection.request("GET", "/v0/health")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read()), {"status": "ok"})
+        self.assertEqual(len(accepted), 1, "both responses should reuse the connection")
+        self.assertEqual(accepted[0].getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY), 1)
+
     def test_routes_over_http(self):
         server = self.plugin.make_server("127.0.0.1", 0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
