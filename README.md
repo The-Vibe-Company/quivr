@@ -188,6 +188,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
   JSON logs link request, Receipt, Record and Version IDs
   ([harness](docs/quivr-v2-local-harness.md)).
+- **Local load measurement** (`make load`) with deterministic free providers,
+  versioned scenarios, ingestion bursts and replica failure. Reports include
+  latency, errors, throughput and delays until documents are searchable and alerted;
+  see [Run local load tests](docs-site/run-quivr/run-local-load-tests.mdx).
 - **Retrieval measurement** with a frozen workload (`make measure`), and **search
   quality** on public French and English evaluation sets or a private set, nightly
   (`make eval`, [guide](docs/agents/evaluation.md)).
