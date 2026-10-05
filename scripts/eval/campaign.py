@@ -23,6 +23,8 @@ import embeddings
 import report as render
 import run
 
+import ci_guard
+
 PRICES = {
     'Cohere-Embed-V5-Pro': {'usd_per_million_tokens': .12, 'date': '2026-10-03',
                           'source': 'https://cohere.com/blog/embed-5'},
@@ -225,8 +227,7 @@ def main():
     if options.dry_run:
         print(json.dumps(campaign, indent=2))
         return
-    if not options.allow_paid or any(os.environ.get(key, '').lower() not in ('', '0', 'false')
-                                     for key in ('CI', 'GITHUB_ACTIONS')):
+    if not options.allow_paid or ci_guard.in_ci():
         parser.error('paid campaign requires --allow-paid locally; CI execution is refused')
     endpoint = os.environ.pop('AZURE_FOUNDRY_ENDPOINT', '')
     key = os.environ.pop('AZURE_FOUNDRY_KEY', '')

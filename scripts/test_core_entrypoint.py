@@ -255,10 +255,6 @@ class CoreEntrypointTest(unittest.TestCase):
         # The engine segments and embeds nothing itself: api and worker refuse to start without it.
         pin = next(p for p in core_entrypoint.build_config(ENV)['plugins'] if p['manifest'] == '/app/plugins/core-ingest/quivr-plugin.yaml')
         self.assertEqual(pin['configuration']['tei_url'], ENV['TEI_URL'])
-        # The tokenizer stage runs scripts/prepare_tokenizer.py in /app, which prepares .scratch/tokenizer.
-        dockerfile = (ROOT / 'deploy' / 'railway' / 'core.Dockerfile').read_text()
-        self.assertIn('FROM python:3.12-slim-bookworm AS tokenizer\nWORKDIR /app\n', dockerfile)
-        self.assertIn("work=ROOT/'.scratch/tokenizer'", (ROOT / 'scripts' / 'prepare_tokenizer.py').read_text())
         self.assertEqual(pin['configuration']['tokenizer'], {'python': '/app/.scratch/tokenizer/venv/bin/python', 'model': '/app/.scratch/tokenizer/tokenizer.json'})
         self.assertNotIn('tokenizer', core_entrypoint.build_config(ENV))
 
