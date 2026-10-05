@@ -4,7 +4,6 @@
 import { useEffect, useRef, useState } from "react";
 import { APIError } from "./search";
 
-const DEBOUNCE_MS = 50;
 const REFRESH_MS = 60000;
 const BUILDING_MS = 1000;
 
@@ -36,7 +35,7 @@ export function useNumbers<T extends { building: boolean }>(
   useEffect(() => {
     if (key === null) return;
     const controller = new AbortController();
-    // The first answer is asked at once; later ones wait for the filter to settle.
+    // Asked once the render settles; a newer filter aborts an older answer.
     const timer = setTimeout(() => {
       busy.current = true;
       loader
@@ -59,7 +58,7 @@ export function useNumbers<T extends { building: boolean }>(
             setTick((n) => n + 1);
           }
         });
-    }, fetched.current ? DEBOUNCE_MS : 0);
+    }, 0);
     return () => {
       clearTimeout(timer);
       controller.abort();
