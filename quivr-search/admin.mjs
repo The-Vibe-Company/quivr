@@ -428,6 +428,7 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
   const counts = new Map();
   const firstDays = new Map();
   const zonesSeen = new Map();
+  const zoneTotals = new Map();
   let inFlight = 0;
   const queued = [];
 
@@ -725,6 +726,8 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
         if (now - entry.at >= entry.ttl) counts.delete(key);
       for (const [key, at] of zonesSeen)
         if (now - at >= FIRST_DAY_MS) zonesSeen.delete(key);
+      for (const [key, entry] of zoneTotals)
+        if (now - entry.at >= TODAY_MS) zoneTotals.delete(key);
       for (const [key, entry] of firstDays)
         if (now - entry.at >= FIRST_DAY_MS) firstDays.delete(key);
       if (!zonesSeen.has(tz) && zonesSeen.size >= MAX_ZONES)
@@ -732,12 +735,18 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
       zonesSeen.set(tz, now);
       const today = wall(now, tz).day;
       // Every Record, and every Record with a date: the difference has no
-      // current Version, so no day.
-      const totals = Promise.all([
-        countRecords({}, TODAY_MS),
-        countRecords({ accepted_before: midnight(plusDays(today, 1), tz) }, TODAY_MS),
-      ]);
-      totals.catch(() => {});
+      // current Version, so no day. Both are read and kept together, per
+      // zone, so the difference compares two reads of the same moment.
+      let totals = zoneTotals.get(tz);
+      if (!totals || now - totals.at >= TODAY_MS) {
+        const pair = Promise.all([
+          countRecords({}, 0),
+          countRecords({ accepted_before: midnight(plusDays(today, 1), tz) }, 0),
+        ]);
+        totals = { at: now, pair };
+        zoneTotals.set(tz, totals);
+        pair.catch(() => zoneTotals.delete(tz));
+      }
       const back = await daysBack(tz, today);
       const days = Array.from({ length: back.days + 1 }, (_, i) =>
         plusDays(today, i - back.days),
@@ -753,7 +762,7 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
           ),
         ),
       );
-      const [total, dated] = await totals;
+      const [total, dated] = await totals.pair;
       return {
         time_zone: tz,
         total,
