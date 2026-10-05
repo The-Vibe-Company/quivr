@@ -29,3 +29,27 @@ test("une alerte réécrite en texte pour la modifier redonne la même alerte", 
     expect(parse(text!).match, `${query} → ${text}`).toEqual(match);
   }
 });
+
+test("une erreur dit où elle est dans la requête", () => {
+  // [query, the characters the message points to]
+  const cases: [string, string][] = [
+    ["orage AND", "AND"],
+    ["orage AND (grêle OR vent", "("],
+    ['orage "coup de vent', '"coup de vent'],
+    ["orage ) vent", ")"],
+    ["orage -football", "-football"],
+    ["auteur: orage", "auteur:"],
+    ["orage OR OR vent", "OR"],
+  ];
+  for (const [query, marked] of cases) {
+    let error: unknown;
+    try {
+      parse(query);
+    } catch (e) {
+      error = e;
+    }
+    expect(error, query).toBeInstanceOf(NotationError);
+    const { at, end } = error as NotationError;
+    expect(query.slice(at, end), query).toBe(marked);
+  }
+});

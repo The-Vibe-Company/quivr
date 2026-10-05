@@ -203,9 +203,13 @@ test("une alerte par mots-clés montre ce qu’elle a trouvé, puis se met en pa
   await active.click();
   await expect(row.locator(".alert-state")).toHaveText("Active");
 
+  // The alert fits the guided form, so it opens there.
   await actions.getByRole("button", { name: "Modifier" }).click();
   const edit = page.getByRole("form", { name: "Modifier l’alerte" });
-  await edit.getByLabel("Requête avancée").fill(`${run} AND tempête`);
+  await expect(edit.getByLabel("Au moins un de ces mots")).toHaveValue("orage grêle");
+  await edit.getByLabel("Tous ces mots").fill(`${run} tempête`);
+  await edit.getByLabel("Au moins un de ces mots").fill("");
+  await edit.getByLabel("Aucun de ces mots").fill("");
   await edit.getByRole("button", { name: "Enregistrer" }).click();
   await expect(page.locator(".alert-sheet .sheet-rule .kw")).toHaveText([
     run,
@@ -315,7 +319,7 @@ test("sans classifieur, la page ne propose que les mots-clés et dit pourquoi", 
   });
   await page.goto("/?view=alerts");
   await page.getByRole("button", { name: "Nouvelle alerte" }).click();
-  await expect(page.getByLabel("Mots à surveiller")).toBeVisible();
+  await expect(page.getByLabel("Tous ces mots")).toBeVisible();
   await expect(page.getByRole("group", { name: "Type d’alerte" })).toHaveCount(
     0,
   );
@@ -332,12 +336,10 @@ test("la page des alertes tient sur mobile, en mode clair et sombre", async ({
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/?view=alerts");
   await page.getByRole("button", { name: "Nouvelle alerte" }).click();
-  const words = page.getByLabel("Mots à surveiller");
-  await words.fill("marché aux fleurs");
-  await words.press("Enter");
-  await expect(
-    page.getByRole("list", { name: "Mots surveillés" }).getByRole("listitem"),
-  ).toHaveText(["marché aux fleurs×"]);
+  await page.getByLabel("Cette phrase exacte").fill("marché aux fleurs");
+  await expect(page.locator(".query-built-code")).toHaveText(
+    '"marché aux fleurs"',
+  );
   for (const scheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     expect(
