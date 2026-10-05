@@ -7,6 +7,8 @@ import io
 import json
 import os
 import pathlib
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -44,6 +46,23 @@ class Refusal(unittest.TestCase):
             policy['sets']['scifact']['split'] = 'test'
             with self.assertRaises(PermissionError):
                 modal_search.policy(policy)
+
+
+class RemoteSerialization(unittest.TestCase):
+    def test_remote_trial_loads_before_evaluation_modules_are_importable(self):
+        # Modal pickles the launched script's functions and globals by value; the
+        # container adds the evaluation directory to sys.path only inside the call.
+        from modal._serialization import serialize
+        from modal._vendor import cloudpickle
+        cloudpickle.register_pickle_by_value(modal_search)
+        try:
+            payload = serialize(modal_search.remote_trial)
+        finally:
+            cloudpickle.unregister_pickle_by_value(modal_search)
+        with tempfile.TemporaryDirectory() as temp:
+            child = subprocess.run([sys.executable, '-I', '-c', 'import pickle, sys; pickle.loads(sys.stdin.buffer.read())'],
+                                   input=payload, cwd=temp, capture_output=True, timeout=30)
+        self.assertEqual(child.returncode, 0, child.stderr.decode()[-500:])
 
 
 class FailureLogging(unittest.TestCase):
