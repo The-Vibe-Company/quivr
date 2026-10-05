@@ -10,10 +10,11 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `database_url` | yes | PostgreSQL connection URL, such as `postgres://quivr:…@db:5432/quivr?sslmode=require` |
+| `database_url` | yes | PostgreSQL connection URL, such as `postgres://quivr:…@db:5432/quivr?sslmode=verify-full` |
 | `cursor_key` | yes | A secret of at least 32 bytes that signs change-feed cursors. Keep it stable. |
 | `keys` | yes | The API keys, by bearer token. See [API keys](#api-keys). |
 | `temporal_address` | yes | Temporal's frontend address, such as `temporal:7233` |
+| `tls` | no | Outgoing connection encryption and trust. See [Outbound TLS](#outbound-tls). |
 | `weaviate_url` | yes | The Weaviate search index, such as `http://weaviate:8080` |
 | `s3` | yes | Object storage for original bytes and derived artifacts. See [Object storage](#object-storage). |
 | `listen` | no | Address of the public HTTP API. Default `127.0.0.1:8080`. |
@@ -43,6 +44,28 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `m365` | no | Refused. The Microsoft 365 settings moved to the `m365-mail` plugin's pin configuration. |
 
 Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup with `invalid configuration JSON: json: unknown field "<field>"`. Remove the former `connector_fixtures` and `monitoring_fixture_evaluator` settings; the acceptance harness now pins its fixture plugin through `plugins`.
+
+## Outbound TLS
+
+`tls` configures `temporal`, `weaviate`, `postgres`, `s3` and `plugins` independently. All enabled TLS verifies the server certificate and name, using system roots by default, and requires TLS 1.2 or newer. There is no insecure verification mode or fallback to plaintext. [Run Quivr behind TLS](/run-quivr/tls) covers platform termination of incoming HTTPS; the engine's API and probe listeners serve plain HTTP.
+
+Each dependency accepts these optional fields:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | See below | Explicit TLS on/off switch. For HTTP dependencies, it must agree with the endpoint scheme. |
+| `ca_file` | System roots | Readable PEM CA bundle path, added to system roots. |
+| `cert_file` | None | PEM client certificate path, configured with `key_file`. Refused for plugins. |
+| `key_file` | None | Matching PEM private key path. Refused for plugins. |
+| `server_name` | Endpoint host | Certificate name to verify and send as TLS server name. |
+
+Temporal defaults to plaintext; enable it with `tls.temporal.enabled: true`. Its address stays `host:port`. Weaviate and S3 select TLS from their `https://` endpoint when `enabled` is omitted. An explicit switch never rewrites a URL: `true` requires HTTPS and `false` requires HTTP. TLS settings on a disabled connection refuse startup.
+
+PostgreSQL uses `database_url` when `tls.postgres` is omitted: `sslmode=verify-full` verifies the certificate and hostname, with system roots unless the URL supplies `sslrootcert`. `sslmode=disable` selects plaintext. Opportunistic or unverified modes (`prefer`, the driver's default, `allow`, `require`, `verify-ca`) are refused. Explicit `tls.postgres` settings override the URL's TLS policy for every configured host and remove plaintext fallbacks; omitted `enabled` with certificate settings enables TLS. Prefer configuring trust in one place. URL certificate file options are still parsed, so remove obsolete file paths when switching to `tls.postgres`.
+
+Plugin settings apply to discovery and every contribution call, including newly registered plugins and earlier pipeline plans. With omitted `enabled`, each endpoint selects HTTP or verified HTTPS; a CA bundle applies to HTTPS endpoints. Explicit `true` requires every plugin endpoint to use HTTPS. Explicit `false` requires HTTP and still preserves the connector rule: non-loopback connectors must use HTTPS. Plugin redirects are always refused. Plugin mTLS is not supported.
+
+Unreadable or malformed certificate files, incomplete or mismatched client identity, disabled TLS with certificate settings, and URL/switch conflicts refuse startup with the dependency's name. Certificates load at startup; restart the API and worker after rotating them. Remote handshake failures make the dependency unavailable; they never trigger an insecure retry.
 
 ## API keys
 
