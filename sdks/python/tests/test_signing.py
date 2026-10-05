@@ -140,6 +140,10 @@ class SignedCalls(unittest.TestCase):
             status, document, _ = self._request(server, "GET", DISCOVERY_TARGET)
         self.assertEqual(status, 401)
         self.assertEqual(document["code"], "invalid_engine_token")
+        with _running_server(plugin) as server, _environment(None):
+            for target in ["/v0/health", "/v0/health?probe=1"]:
+                status, document, _ = self._request(server, "GET", target)
+                self.assertEqual(status, 200, document)
 
     def test_signed_discovery_and_post_reach_http_dispatch(self):
         plugin = self._plugin()

@@ -1,4 +1,5 @@
 """Run the offline push-source sample in local and guide-verification stacks."""
+import plugin_environment
 import os
 import base64
 import json
@@ -47,7 +48,7 @@ def start(stack):
         with key_file.open('x', opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
             json.dump(ring, output)
     ring = json.loads(key_file.read_text())
-    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port(stack)),
+    env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port(stack)),
            'QUIVR_PLUGIN_SIGNING_KEYS': json.dumps(ring)}
     env.pop('QUIVR_ENGINE_PLUGIN_KEYS', None)
     with (stack.directory / 'push-source.log').open('a') as log:

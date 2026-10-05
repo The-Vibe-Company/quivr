@@ -6,6 +6,7 @@ configuration and processes are restored afterwards, even on failure.
 """
 import json, os, pathlib, subprocess, time
 
+import plugin_environment
 import ports
 from ingestion_plugin import healthy, stop_plugin
 
@@ -39,7 +40,7 @@ def verify(stack):
     fake_binary = directory / 'quivr-fake-plugin'
     subprocess.run([GO, 'test', '-c', '-o', str(fake_binary), './tests/plugin-contract'], cwd=ROOT, check=True)
     port = ports.allocate()
-    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(SAMPLE / 'quivr-plugin.yaml')}
+    env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(SAMPLE / 'quivr-plugin.yaml')}
     with (directory / 'plugin.log').open('a') as log:
         plugin = subprocess.Popen([str(binary)], cwd=SAMPLE, env=env, stdout=log, stderr=log, start_new_session=True)
     running = [(plugin, port, directory / 'plugin.log')]
