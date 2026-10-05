@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
 	"github.com/The-Vibe-Company/quivr/internal/changes"
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
@@ -39,6 +40,7 @@ import (
 )
 
 type API struct {
+	Audit          audit.Store
 	draining       func() bool
 	processWork    context.Context
 	router         *routing.Mux

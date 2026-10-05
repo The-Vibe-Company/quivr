@@ -3519,6 +3519,70 @@ paths:
       tags:
       - Connector kinds
       summary: List connector kinds
+  /v0/admin/audit:
+    get:
+      operationId: listAuditEvents
+      description: List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read
+        and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors
+        bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches
+        are not audited.
+      x-required-permissions:
+      - audit:read
+      parameters:
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: until
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: actor
+        in: query
+        schema:
+          type: string
+      - name: action
+        in: query
+        schema:
+          type: string
+      - name: target_type
+        in: query
+        schema:
+          type: string
+      - name: target_id
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: page_cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: An organization-scoped page of audit entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventPage'
+        default:
+          description: Structured error; 401 invalid API key, 403 without audit:read or with restricted Corpus scope, 422
+            invalid_cursor, 422 invalid_schema or invalid_limit, 503 storage_unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Admin
+      summary: List audit events
   /v0/admin/plugins:
     get:
       operationId: listPluginRegistrations
@@ -4728,6 +4792,76 @@ components:
       description: API key, not necessarily a JWT. Server derives Organization, permitted actions and Corpus scope; every
         resource access is authorized.
   schemas:
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - time
+      - actor
+      - action
+      - target_type
+      - target_id
+      - organization
+      - outcome
+      - request_id
+      - detail
+      properties:
+        id:
+          type: string
+          pattern: ^[1-9][0-9]*$
+          description: Decimal audit identifier, represented as text to preserve bigint precision.
+        time:
+          type: string
+          format: date-time
+        actor:
+          type: string
+          description: SHA-256-derived API key identifier; empty for unauthenticated attempts.
+        action:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+          description: Target identifier; empty if refusal occurred before the target could be resolved.
+        organization:
+          type: string
+        outcome:
+          type: string
+          enum:
+          - accepted
+          - refused
+        request_id:
+          type: string
+        detail:
+          type: object
+          additionalProperties: false
+          required:
+          - status
+          properties:
+            status:
+              type: integer
+              minimum: 100
+              maximum: 599
+            error_code:
+              type: string
+            plan_id:
+              type: string
+            credential_version:
+              type: integer
+              minimum: 1
+    AuditEventPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        next_page_cursor:
+          type: string
     ConnectorToken:
       type: object
       additionalProperties: false

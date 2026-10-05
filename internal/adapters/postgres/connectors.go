@@ -153,7 +153,7 @@ func reevaluate(ctx context.Context, tx pgx.Tx, org, id string) (connectors.Inst
 // CreateConnector inserts an instance with its optional first credential, or
 // replays an existing one created under the same key and request.
 func (s ConnectorStore) CreateConnector(ctx context.Context, n connectors.NewInstance) (connectors.Instance, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.Instance{}, err
 	}
@@ -232,12 +232,12 @@ func insertCredential(ctx context.Context, tx pgx.Tx, org, id string, version in
 
 // ReadConnector reads one instance of an Organization.
 func (s ConnectorStore) ReadConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
-	return readConnector(ctx, s.Pool, org, id, false)
+	return readConnector(ctx, database(ctx, s.Pool), org, id, false)
 }
 
 // ListConnectors pages authorized instances in identifier order.
 func (s ConnectorStore) ListConnectors(ctx context.Context, scope corpus.Scope, corpusID, after string, limit int) ([]connectors.Instance, error) {
-	rows, err := s.Pool.Query(ctx, "SELECT "+connectorColumns+connectorFrom+` WHERE c.organization=$1 AND c.id>$2 AND ($3 OR c.corpus_id=ANY($4)) AND ($5='' OR c.corpus_id=$5) ORDER BY c.id LIMIT $6`, scope.Organization, after, scope.AllCorpora(), scope.Corpora, corpusID, limit)
+	rows, err := database(ctx, s.Pool).Query(ctx, "SELECT "+connectorColumns+connectorFrom+` WHERE c.organization=$1 AND c.id>$2 AND ($3 OR c.corpus_id=ANY($4)) AND ($5='' OR c.corpus_id=$5) ORDER BY c.id LIMIT $6`, scope.Organization, after, scope.AllCorpora(), scope.Corpora, corpusID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +255,7 @@ func (s ConnectorStore) ListConnectors(ctx context.Context, scope corpus.Scope, 
 
 // DisableConnector disables an instance once; repeats return it unchanged.
 func (s ConnectorStore) DisableConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.Instance{}, err
 	}
@@ -283,7 +283,7 @@ func (s ConnectorStore) DisableConnector(ctx context.Context, org, id string) (c
 // unchanged value commits nothing. A shorter interval pulls the next run in; a
 // longer one applies after the run already scheduled.
 func (s ConnectorStore) ChangeSchedule(ctx context.Context, org, id string, interval time.Duration) (connectors.Instance, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.Instance{}, err
 	}
@@ -322,7 +322,7 @@ func (s ConnectorStore) ChangeSchedule(ctx context.Context, org, id string, inte
 func (s ConnectorStore) RequestRun(ctx context.Context, org, id string, floor time.Duration) (time.Time, error) {
 	var enabled bool
 	var at time.Time
-	err := s.Pool.QueryRow(ctx, `UPDATE connector_instances SET next_run_at=CASE WHEN enabled THEN LEAST(next_run_at,GREATEST(now(),
+	err := database(ctx, s.Pool).QueryRow(ctx, `UPDATE connector_instances SET next_run_at=CASE WHEN enabled THEN LEAST(next_run_at,GREATEST(now(),
   COALESCE(last_run_at+make_interval(secs => $3::double precision),now()),COALESCE(retry_until,now()))) ELSE next_run_at END
 WHERE organization=$1 AND id=$2 RETURNING enabled,GREATEST(next_run_at,now())`, org, id, floor.Seconds()).Scan(&enabled, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -337,7 +337,7 @@ WHERE organization=$1 AND id=$2 RETURNING enabled,GREATEST(next_run_at,now())`, 
 // ReplaceCredential deposits the next credential version, or replays one
 // deposited under the same key and request.
 func (s ConnectorStore) ReplaceCredential(ctx context.Context, org, id string, d connectors.CredentialDeposit) (connectors.Instance, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.Instance{}, err
 	}
@@ -383,7 +383,7 @@ func (s ConnectorStore) ReplaceCredential(ctx context.Context, org, id string, d
 // hides an instance from other dispatchers until it expires or the run ends;
 // the run sequence stays stable so a re-dispatch targets the same run.
 func (s ConnectorStore) ClaimConnectorRuns(ctx context.Context, lease time.Duration, limit int) ([]connectors.ConnectorRun, error) {
-	rows, err := s.Pool.Query(ctx, `UPDATE connector_instances c SET lease_until=now()+make_interval(secs => $1::double precision)
+	rows, err := database(ctx, s.Pool).Query(ctx, `UPDATE connector_instances c SET lease_until=now()+make_interval(secs => $1::double precision)
 FROM (SELECT organization,id FROM connector_instances WHERE enabled AND next_run_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at LIMIT $2 FOR UPDATE SKIP LOCKED) d
 WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,c.run_sequence`, lease.Seconds(), limit)
 	if err != nil {
@@ -403,13 +403,13 @@ WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,
 
 // ReleaseConnectorRun drops a lease whose run could not be dispatched.
 func (s ConnectorStore) ReleaseConnectorRun(ctx context.Context, r connectors.ConnectorRun) error {
-	_, err := s.Pool.Exec(ctx, "UPDATE connector_instances SET lease_until=NULL WHERE organization=$1 AND id=$2 AND run_sequence=$3", r.Organization, r.ConnectorID, r.Run)
+	_, err := database(ctx, s.Pool).Exec(ctx, "UPDATE connector_instances SET lease_until=NULL WHERE organization=$1 AND id=$2 AND run_sequence=$3", r.Organization, r.ConnectorID, r.Run)
 	return err
 }
 
 // LoadRun reads an instance, its checkpoint and its current sealed credential.
 func (s ConnectorStore) LoadRun(ctx context.Context, org, id string) (connectors.Target, error) {
-	in, err := readConnector(ctx, s.Pool, org, id, false)
+	in, err := readConnector(ctx, database(ctx, s.Pool), org, id, false)
 	if err != nil {
 		return connectors.Target{}, err
 	}
@@ -420,7 +420,7 @@ func (s ConnectorStore) LoadRun(ctx context.Context, org, id string) (connectors
 // instance ids are random, so an id names at most one instance, and an
 // ambiguous id is treated as unknown.
 func (s ConnectorStore) LoadDelivery(ctx context.Context, id string) (connectors.Target, error) {
-	rows, err := s.Pool.Query(ctx, "SELECT "+connectorColumns+connectorFrom+" WHERE c.id=$1 LIMIT 2", id)
+	rows, err := database(ctx, s.Pool).Query(ctx, "SELECT "+connectorColumns+connectorFrom+" WHERE c.id=$1 LIMIT 2", id)
 	if err != nil {
 		return connectors.Target{}, err
 	}
@@ -450,12 +450,12 @@ func (s ConnectorStore) target(ctx context.Context, in connectors.Instance) (con
 	if in.Health.Usage != nil {
 		t.ReadsToday = in.Health.Usage.ItemsRead
 	}
-	if err = s.Pool.QueryRow(ctx, "SELECT run_sequence,checkpoint FROM connector_instances WHERE organization=$1 AND id=$2", org, id).Scan(&t.RunSequence, &t.Checkpoint); err != nil {
+	if err = database(ctx, s.Pool).QueryRow(ctx, "SELECT run_sequence,checkpoint FROM connector_instances WHERE organization=$1 AND id=$2", org, id).Scan(&t.RunSequence, &t.Checkpoint); err != nil {
 		return t, err
 	}
 	if in.Credential != nil {
 		sealed := connectors.Sealed{ExpiresAt: in.Credential.ExpiresAt}
-		if err = s.Pool.QueryRow(ctx, "SELECT key_id,nonce,ciphertext FROM connector_credentials WHERE organization=$1 AND connector_id=$2 AND version=$3", org, id, in.Credential.Version).Scan(&sealed.KeyID, &sealed.Nonce, &sealed.Ciphertext); err != nil {
+		if err = database(ctx, s.Pool).QueryRow(ctx, "SELECT key_id,nonce,ciphertext FROM connector_credentials WHERE organization=$1 AND connector_id=$2 AND version=$3", org, id, in.Credential.Version).Scan(&sealed.KeyID, &sealed.Nonce, &sealed.Ciphertext); err != nil {
 			return t, err
 		}
 		t.Sealed = &sealed
@@ -486,7 +486,7 @@ func (s ConnectorStore) CommitCheckpoint(ctx context.Context, org, id string, ru
 			pushInterval = int64(p.Push.PollInterval / time.Second)
 		}
 	}
-	tag, err := s.Pool.Exec(ctx, `UPDATE connector_instances SET checkpoint=$4, last_item_at=CASE WHEN $5 THEN now() ELSE last_item_at END,
+	tag, err := database(ctx, s.Pool).Exec(ctx, `UPDATE connector_instances SET checkpoint=$4, last_item_at=CASE WHEN $5 THEN now() ELSE last_item_at END,
  usage_previous_items=CASE WHEN usage_day=`+utcToday+` THEN usage_previous_items WHEN usage_day=`+utcToday+`-1 THEN usage_items ELSE 0 END,
  usage_items=CASE WHEN usage_day=`+utcToday+` THEN usage_items+$6 ELSE $6 END,
  usage_day=CASE WHEN usage_day IS NULL AND $6=0 THEN NULL ELSE `+utcToday+` END,
@@ -509,7 +509,7 @@ WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled`, org, id, run, 
 // pull run relaxed by healthy push back to the instance's interval. Connector
 // Health is re-evaluated in the same transaction.
 func (s ConnectorStore) RecordDelivery(ctx context.Context, org, id string, o connectors.DeliveryOutcome) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -549,7 +549,7 @@ WHERE organization=$1 AND id=$2`, org, id, o.Accepted, o.Carried, class, code, o
 // one interval later (or after the failure's RetryAfter when longer),
 // releases the lease and commits re-evaluated health.
 func (s ConnectorStore) FinishRun(ctx context.Context, org, id string, run int64, failure *connectors.RunError) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}

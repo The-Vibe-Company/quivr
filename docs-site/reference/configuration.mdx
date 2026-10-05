@@ -35,6 +35,7 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `public_url` | no | The address where sources reach this API, such as `https://quivr.example.com`. Connector kinds that receive webhooks need it. |
 | `connector_min_interval` | no | Shortest polling interval an instance may ask for, a Go duration. Default `30s`. |
 | `connector_push` | no | Declared source API protection: `rate_per_second` (default `10`, range `0.001`–`100000`), `burst` (default `100`, maximum `100000`), `idempotency_ttl` (Go duration, default `24h`, range `1ms`–`168h`) and `trusted_proxy_cidrs` (default empty). Instance `push_policy` can override rate/burst and set `allowed_cidrs`. |
+| `audit_retention_months` | no | Calendar months to retain sensitive-action audit entries. Default `12`, range `1`–`1200`; `0` selects the default. The worker prunes them on the change-pruning schedule. See [Audit trail](#audit-trail). |
 | `change_retention` | no | How long the change feed keeps events and a cursor stays valid. Default `168h` (7 days). |
 | `change_stream_poll` | no | How often an open change stream (`/v0/changes/stream`) checks for new events. Shorter delivers sooner and reads the database more often. Api only. Default `250ms`. |
 | `change_prune` | no | When the worker prunes the change feed. See [Change feed pruning](#change-feed-pruning). |
@@ -48,6 +49,18 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 | `m365` | no | Refused. The Microsoft 365 settings moved to the `m365-mail` plugin's pin configuration. |
 
 Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup. Remove the former `connector_fixtures` and `monitoring_fixture_evaluator` settings; the acceptance harness now pins its fixture plugin through `plugins`.
+
+## Audit trail
+
+Quivr records sensitive HTTP commands in PostgreSQL and emits a `quivr.audit` JSON log event after each audit entry commits. The API key identifier matches `api_key_id` in the access log; bearer tokens, credential values and request bodies are excluded. Each entry records the time, organization, action, target, accepted or refused outcome, request ID and bounded status details. Plugin activation and rollback also record the resulting plan ID. Connector creation includes any credential deposit in the same transaction; credential deposits and replacements record the credential version.
+
+Audited commands cover Corpus creation and retrieval configuration, plugin registration, activation and rollback, connector creation, disable, schedule changes, runs, credential replacement and token creation, rotation and revocation, Record withdrawals, Saved Query and Subscription deletion, and rebuild, backfill, reprocess, cancel, rerun, pause, resume and vector-space promotion commands. Reads, searches and backfill or reprocess dry-run estimates create no audit entry. API keys and their permissions are file configuration; there is no HTTP mutation route to audit. Connector deletion is represented by its disable command.
+
+Read entries with `GET /v0/admin/audit` using a key with `audit:read` and `corpora: ["*"]`. Other admin permissions do not grant access. Results belong only to that key's organization. Filter by `since` (inclusive), `until` (exclusive), `actor`, `action`, `target_type` and `target_id`; use `limit` (default `50`, range `1`–`200`) and `page_cursor` for paging. Pass a response's `next_page_cursor` as the next request's `page_cursor`, carrying the same filters and limit. The last page omits `next_page_cursor`. Time filters use RFC3339 timestamps; other filters match exact identifiers or action names. Audit IDs are decimal strings. Unauthenticated refusals have empty actor and organization fields and are visible in structured logs rather than an organization's audit read.
+
+Successful command changes and their entry commit together. If the audit write fails, the command rolls back and returns `503`. Refused commands roll back any command writes before recording their refusal. Process configuration changes made outside the HTTP API are outside this request audit trail.
+
+`audit_retention_months` defaults to twelve calendar months. Restart the worker after changing this configuration. The existing worker pruning loop removes expired entries in bounded batches; no worker means no retention pruning. Ordinary `UPDATE`, `DELETE` and `TRUNCATE` of `audit_events` are rejected. The retention function is the supported removal path. For privilege separation, run migrations as a schema owner and use a separate runtime role with `SELECT` and `INSERT` on `audit_events`, sequence access and `EXECUTE` on `prune_audit_events`, without table ownership or `UPDATE`, `DELETE`, `TRUNCATE` grants. A database owner or superuser can change schema guards and must remain outside the runtime role.
 
 ## Logs and shutdown
 
@@ -113,6 +126,7 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 | `operations:read`, `operations:write` | reading, cancelling and rerunning Operations |
 | `projections:rebuild` | starting a Corpus rebuild |
 | `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`), backfilling a Corpus (`/v0/admin/backfills`) and promoting a vector space (`/v0/admin/spaces/{id}/promote`); give it only to an operator key |
+| `audit:read` | Reading sensitive-action audit entries in the key's organization (`/v0/admin/audit`); requires `corpora: ["*"]`. |
 | `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches, steps, documents received and Matches (`/v0/admin/stats/*`) |
 
 ## Object storage

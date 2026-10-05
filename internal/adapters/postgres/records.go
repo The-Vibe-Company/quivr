@@ -22,7 +22,7 @@ var _ content.RelationResolver = RecordStore{}
 
 func (s RecordStore) Record(ctx context.Context, org, id string) (content.Record, error) {
 	r := content.Record{}
-	err := s.Pool.QueryRow(ctx, "SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,'') FROM records WHERE organization=$1 AND id=$2", org, id).Scan(&r.ID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Withdrawn, &r.CurrentVersionID)
+	err := database(ctx, s.Pool).QueryRow(ctx, "SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,'') FROM records WHERE organization=$1 AND id=$2", org, id).Scan(&r.ID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Withdrawn, &r.CurrentVersionID)
 	return r, notFound(err)
 }
 
@@ -77,7 +77,7 @@ func (s RecordStore) Records(ctx context.Context, org, corpusID string, q conten
 		where += fmt.Sprintf(` AND id > $%d COLLATE "C"`, len(args))
 	}
 	args = append(args, q.Limit)
-	rows, err := s.Pool.Query(ctx, `SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,''),current_accepted_at FROM records WHERE `+where+` ORDER BY `+order+fmt.Sprintf(" LIMIT $%d", len(args)), args...)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT id,corpus_id,namespace,record_key,withdrawn,coalesce(current_version_id,''),current_accepted_at FROM records WHERE `+where+` ORDER BY `+order+fmt.Sprintf(" LIMIT $%d", len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (s RecordStore) Records(ctx context.Context, org, corpusID string, q conten
 func (s RecordStore) CountRecords(ctx context.Context, org, corpusID string, q content.RecordQuery) (int64, error) {
 	args := []any{org, corpusID}
 	var count int64
-	err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM records WHERE "+catalogRange(q, &args), args...).Scan(&count)
+	err := database(ctx, s.Pool).QueryRow(ctx, "SELECT count(*) FROM records WHERE "+catalogRange(q, &args), args...).Scan(&count)
 	return count, err
 }
 
@@ -112,7 +112,7 @@ func (s RecordStore) Resolve(ctx context.Context, scope corpus.Scope, relations 
 			continue
 		}
 		var recordID, versionID string
-		err := s.Pool.QueryRow(ctx, `SELECT r.id,r.current_version_id FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) WHERE r.organization=$1 AND r.corpus_id=$2 AND r.namespace=$3 AND r.record_key=$4 AND `+eligibleVersionSQL, scope.Organization, relation.Target.CorpusID, relation.Target.Namespace, relation.Target.RecordKey).Scan(&recordID, &versionID)
+		err := database(ctx, s.Pool).QueryRow(ctx, `SELECT r.id,r.current_version_id FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) WHERE r.organization=$1 AND r.corpus_id=$2 AND r.namespace=$3 AND r.record_key=$4 AND `+eligibleVersionSQL, scope.Organization, relation.Target.CorpusID, relation.Target.Namespace, relation.Target.RecordKey).Scan(&recordID, &versionID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}

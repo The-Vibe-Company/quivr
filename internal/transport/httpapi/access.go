@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
 	"net"
@@ -22,8 +21,7 @@ func (a *API) serveAccess(w http.ResponseWriter, r *http.Request) {
 	keyID := ""
 	if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 		if _, valid := a.Keys[token]; valid {
-			digest := sha256.Sum256([]byte(token))
-			keyID = hex.EncodeToString(digest[:16])
+			keyID = apiKeyID(token)
 		}
 	}
 	r.Pattern = a.router.Pattern(r)
@@ -32,7 +30,7 @@ func (a *API) serveAccess(w http.ResponseWriter, r *http.Request) {
 			writeError(w, publicerr.ContentUnavailable, nil)
 			return
 		}
-		a.servePushAudited(w, r)
+		a.serveSensitive(w, r)
 	}))
 }
 

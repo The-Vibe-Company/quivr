@@ -47,7 +47,7 @@ func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c conte
 	if err != nil {
 		return content.Receipt{}, err
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return content.Receipt{}, err
 	}
@@ -147,7 +147,7 @@ func (s SubmissionStore) Withdraw(ctx context.Context, scope corpus.Scope, w con
 	if err != nil {
 		return content.Receipt{}, err
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return content.Receipt{}, err
 	}
