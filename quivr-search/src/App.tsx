@@ -5,6 +5,7 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -299,12 +300,15 @@ function Dashboard({
     return () => clearTimeout(timer);
   }, [toast]);
 
+  // Opening an article marks it read in this browser: in the same render
+  // when opened from a page, which answers the click once (THE-1056), and
+  // after it for an article the address or an alert opens.
+  const { markRead } = reading;
   const open = useCallback((record: string, version: string) => {
     setView("feed");
     setDoc({ record, version });
-  }, []);
-  // Opening an article marks it read in this browser.
-  const { markRead } = reading;
+    markRead({ record_id: record, version_id: version });
+  }, [markRead]);
   useEffect(() => {
     if (doc) markRead({ record_id: doc.record, version_id: doc.version });
   }, [doc, markRead]);
@@ -373,6 +377,11 @@ function Dashboard({
     sources: `${toCheck} source${toCheck > 1 ? "s" : ""} à vérifier`,
   };
   const liveLabel = paused ? "En pause" : feed.live ? "En direct" : "Reconnexion…";
+  // The tab shown follows `view` in a background render: a click on the rail
+  // marks the tab at once, then the page it leaves unmounts and the new one
+  // mounts without holding that frame (THE-1056). The address, the title and
+  // the other state follow `view` at once.
+  const page = useDeferredValue(view);
   const [theme, setTheme] = useState<Theme>(currentTheme);
   useEffect(() => onSystemTheme(setTheme), []);
 
@@ -543,9 +552,9 @@ function Dashboard({
           )}
         </form>
       </header>
-      <TabBoundary key={view}>
+      <TabBoundary key={page}>
         <Suspense fallback={<LoadingState label="Chargement…" rows={4} />}>
-          {view === "feed" ? (
+          {page === "feed" ? (
             <FeedPage
               corpus={corpus}
               query={query}
@@ -578,7 +587,7 @@ function Dashboard({
               notify={notify}
               onUnauthorized={onUnauthorized}
             />
-          ) : view === "alerts" ? (
+          ) : page === "alerts" ? (
             <AlertsView
               corpus={corpus}
               selected={alert}
@@ -602,7 +611,7 @@ function Dashboard({
               notify={notify}
               onUnauthorized={onUnauthorized}
             />
-          ) : view === "admin" ? (
+          ) : page === "admin" ? (
             <AdminView
               titles={titles}
               connectors={sources.connectors}
