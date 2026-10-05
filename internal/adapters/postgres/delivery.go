@@ -29,7 +29,7 @@ FROM (SELECT organization,delivery_id FROM delivery_outbox
   WHERE available_at<=now() AND lease_until<now() AND ($2='' OR organization=$2)
   ORDER BY available_at LIMIT 1 FOR UPDATE SKIP LOCKED) due
 WHERE (o.organization,o.delivery_id)=(due.organization,due.delivery_id)
-RETURNING o.organization,o.delivery_id,o.lease_until`, lease.Seconds(), s.Organization).Scan(&w.Organization, &w.DeliveryID, &w.Lease)
+RETURNING o.organization,o.delivery_id,o.lease_until,o.trace_context`, lease.Seconds(), s.Organization).Scan(&w.Organization, &w.DeliveryID, &w.Lease, &w.TraceContext)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return w, monitoring.ErrNoWork
 	}

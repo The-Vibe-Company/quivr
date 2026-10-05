@@ -3,6 +3,9 @@ package postgres_test
 import (
 	"context"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -190,5 +193,30 @@ func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
 	got, err := store.Claim(ctx, 32)
 	if err != nil || len(got) != 1 || got[0] != expected[1] {
 		t.Fatalf("upgrade claim: got %+v (%v), want %+v", got, err, expected[1])
+	}
+}
+
+// Owns the durable API-to-dispatch handoff: a new pool must recover the original
+// W3C parent and caller ID. Temporal tests cannot detect missing persisted data.
+func TestAcceptancePersistsTraceAcrossDispatcherRestart(t *testing.T) {
+	ctx := telemetry.Extract(context.Background(), http.Header{"Traceparent": []string{"00-11111111111111111111111111111111-2222222222222222-01"}})
+	ctx = logging.WithRequestID(ctx, "caller-request-123")
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	expected := acceptDispatchBacklog(t, ctx, contentStores(pool), 1)
+	next, err := pgxpool.NewWithConfig(ctx, pool.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer next.Close()
+	claimed, err := contentStores(next).Claim(context.Background(), 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim: %v (%v)", claimed, err)
+	}
+	restored := telemetry.Capture(telemetry.Restore(context.Background(), claimed[0].TraceContext))
+	if restored.Traceparent != "00-11111111111111111111111111111111-2222222222222222-01" || restored.RequestID != "caller-request-123" || claimed[0].ReceiptID != expected[0].ReceiptID {
+		t.Fatalf("durable trace lost: %+v", restored)
 	}
 }

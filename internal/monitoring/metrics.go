@@ -2,11 +2,9 @@ package monitoring
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
@@ -29,7 +27,7 @@ var attemptOutcomes = []string{AttemptAcknowledged, AttemptRetryableError, Attem
 // DeliveryMetrics counts the outcomes of webhook requests this process sent.
 // Its zero value is ready; a nil receiver ignores observations.
 type DeliveryMetrics struct {
-	counts [3]atomic.Int64
+	counts *telemetry.Counter
 	// Extra renders further process metrics on the same endpoint (processing, THE-662).
 	Extra    func(io.Writer)
 	once     sync.Once
@@ -38,6 +36,7 @@ type DeliveryMetrics struct {
 
 func (m *DeliveryMetrics) histogram() *telemetry.Histogram {
 	m.once.Do(func() {
+		m.counts = telemetry.NewCounter("quivr_delivery_attempts_total", "Outcomes of webhook delivery requests sent by this process.", []string{"outcome"}, []string{AttemptAcknowledged}, []string{AttemptRetryableError}, []string{AttemptPermanentError})
 		m.duration = telemetry.NewHistogram("quivr_delivery_request_duration_seconds", "Duration of webhook delivery requests with a known outcome.", 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30)
 	})
 	return m.duration
@@ -55,23 +54,23 @@ func (m *DeliveryMetrics) Observe(outcome string) {
 	if m == nil {
 		return
 	}
-	for i, o := range attemptOutcomes {
-		if o == outcome {
-			m.counts[i].Add(1)
-		}
-	}
+	m.histogram()
+	m.counts.Inc(outcome)
 }
 
 // Handler serves the counters and backlog gauges in the Prometheus text
 // format. A backlog read failure omits the gauges rather than reporting zero.
 func (m *DeliveryMetrics) Handler(backlog func(context.Context) (DeliveryBacklog, error)) http.Handler {
+	gauges := []telemetry.GaugeDefinition{{Name: "quivr_delivery_pending", Help: "Admissible Deliveries awaiting an attempt or a retry."}, {Name: "quivr_delivery_oldest_pending_age_seconds", Help: "Age of the oldest admissible pending Delivery."}}
+	telemetry.RegisterGauges(gauges, func(ctx context.Context) ([]float64, error) {
+		b, err := backlog(ctx)
+		return []float64{float64(b.Pending), b.OldestAge.Seconds()}, err
+	})
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		fmt.Fprintln(w, "# HELP quivr_delivery_attempts_total Outcomes of webhook delivery requests sent by this process.")
-		fmt.Fprintln(w, "# TYPE quivr_delivery_attempts_total counter")
-		for i, o := range attemptOutcomes {
-			fmt.Fprintf(w, "quivr_delivery_attempts_total{outcome=%q} %d\n", o, m.counts[i].Load())
-		}
+		m.histogram()
+		m.counts.Write(w)
 		m.histogram().Write(w)
 		if m.Extra != nil {
 			m.Extra(w)
@@ -82,12 +81,8 @@ func (m *DeliveryMetrics) Handler(backlog func(context.Context) (DeliveryBacklog
 		if err != nil {
 			return
 		}
-		fmt.Fprintln(w, "# HELP quivr_delivery_pending Admissible Deliveries awaiting an attempt or a retry.")
-		fmt.Fprintln(w, "# TYPE quivr_delivery_pending gauge")
-		fmt.Fprintf(w, "quivr_delivery_pending %d\n", b.Pending)
-		fmt.Fprintln(w, "# HELP quivr_delivery_oldest_pending_age_seconds Age of the oldest admissible pending Delivery.")
-		fmt.Fprintln(w, "# TYPE quivr_delivery_oldest_pending_age_seconds gauge")
-		fmt.Fprintf(w, "quivr_delivery_oldest_pending_age_seconds %g\n", b.OldestAge.Seconds())
+		telemetry.Gauge(w, gauges[0].Name, gauges[0].Help, float64(b.Pending))
+		telemetry.Gauge(w, gauges[1].Name, gauges[1].Help, b.OldestAge.Seconds())
 	})
 }
 

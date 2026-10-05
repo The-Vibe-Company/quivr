@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -50,7 +51,7 @@ func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, err
 	if err := tx.QueryRow(ctx, "UPDATE organization_journals SET last_sequence=last_sequence+1 WHERE organization=$1 RETURNING last_sequence", event.Organization).Scan(&sequence); err != nil {
 		return 0, err
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''))`, event.Organization, sequence, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID)
+	_, err := tx.Exec(ctx, `INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id,trace_context) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9)`, event.Organization, sequence, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID, telemetry.Encode(ctx))
 	return sequence, err
 }
 
@@ -200,8 +201,8 @@ func (s MaterializationStore) Claim(ctx context.Context, limit int) ([]content.D
  ), claimed AS (
  UPDATE ingestion_outbox o SET lease_until=now()+interval '5 seconds'
  FROM pending p WHERE (o.organization,o.receipt_id)=(p.organization,p.receipt_id)
- RETURNING o.organization,o.receipt_id,o.enqueued_at
- ) SELECT organization,receipt_id FROM claimed ORDER BY enqueued_at,organization,receipt_id`, limit)
+ RETURNING o.organization,o.receipt_id,o.enqueued_at,o.trace_context
+ ) SELECT organization,receipt_id,trace_context FROM claimed ORDER BY enqueued_at,organization,receipt_id`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +210,7 @@ func (s MaterializationStore) Claim(ctx context.Context, limit int) ([]content.D
 	var batch []content.Dispatch
 	for rows.Next() {
 		var d content.Dispatch
-		if err := rows.Scan(&d.Organization, &d.ReceiptID); err != nil {
+		if err := rows.Scan(&d.Organization, &d.ReceiptID, &d.TraceContext); err != nil {
 			return nil, err
 		}
 		batch = append(batch, d)
