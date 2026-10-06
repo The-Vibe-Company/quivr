@@ -23,7 +23,22 @@ export interface Corpus {
   demo: boolean;
   common: Field[];
   own: Field[];
+  /** How many documents it holds, when the engine could count them. */
+  documents?: number;
 }
+
+/** The common fields of every corpus (quivr.metadata), by type, as the facade declares them. */
+export const COMMON_TYPES: [string, FieldType][] = [
+  ["metadata.language", "string"],
+  ["metadata.published_at", "datetime"],
+  ["metadata.source_type", "string"],
+  ["metadata.source", "string"],
+  ["metadata.author", "string_array"],
+  ["metadata.subjects", "string_array"],
+  ["metadata.tags", "string_array"],
+  ["metadata.country", "string_array"],
+  ["metadata.place", "string_array"],
+];
 
 export const fetchCorpora = (signal?: AbortSignal) =>
   request<{ items: Corpus[] }>("/demo/corpora", undefined, signal);

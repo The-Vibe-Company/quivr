@@ -1326,8 +1326,17 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
     if (url.pathname === "/v0/search") {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
-      searches.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      return json(200, { items: [], retrieval_profile: { name: "default", version: "v" } });
+      const asked = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      searches.push(asked);
+      // Two passages of one document, then another; a desk filter keeps the
+      // wire alone, as the demo corpus has no desk.
+      const hit = (record_id, version_id, rank) => ({ record_id, version_id, rank });
+      const desk = asked.filter?.metadata?.some((p) => p.field === "desk");
+      return json(200, {
+        items: [...(desk ? [] : [hit("rec_note", "v_note", 3)]), hit("rec_wire", "v_wire2", 1), hit("rec_wire", "v_wire2", 2)],
+        ...(desk ? { excluded_corpora: [{ corpus_id: "demo", fields: ["desk"] }] } : {}),
+        retrieval_profile: { name: "default", version: "v" },
+      });
     }
     if (url.pathname === "/v0/facets") {
       // One desk value; the demo corpus lacks desk, when it is filtered on.
@@ -1399,6 +1408,8 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
   assert.deepEqual(listed.map((c) => [c.corpus_id, c.name, c.demo]), [["demo", "Espace démo", true], ["wires", "Dépêches", false]]);
   assert.ok(listed[1].common.some((f) => f.name === "metadata.language"));
   assert.deepEqual(listed[1].own.map((f) => f.name), ["desk"]);
+  // Each with how many documents it holds, for the Explorer's corpus switcher.
+  assert.deepEqual(listed.map((c) => c.documents), [1, 1]);
 
   // Search spans the corpora read; one more corpus is refused before the core.
   const search = (corpus_ids) =>
@@ -1426,6 +1437,17 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
     ["rec_wire", "wires", { "metadata.language": ["en"], desk: ["economy"] }],
   ]);
   assert.deepEqual(page.data.excluded_corpora, [{ corpus_id: "demo", fields: ["desk"] }]);
+  // A text searches the same corpora under the same predicates, relaying
+  // the exclusions; its documents come one row each, in rank order.
+  const found = await get(`/demo/explore?corpora=demo,wires&q=port&metadata=${encodeURIComponent(JSON.stringify(predicates))}`);
+  assert.deepEqual(searches.at(-1), { query: "port", corpus_ids: ["demo", "wires"], limit: 50, filter: { metadata: predicates } });
+  assert.deepEqual(found.data.items.map((i) => i.record_id), ["rec_wire"]);
+  assert.deepEqual(found.data.excluded_corpora, [{ corpus_id: "demo", fields: ["desk"] }]);
+  const ranked = await get("/demo/explore?corpora=demo,wires&q=port");
+  assert.deepEqual(ranked.data.items.map((i) => [i.record_id, i.corpus_id, i.version]), [
+    ["rec_wire", "wires", 1],
+    ["rec_note", "demo", 1],
+  ]);
   // The engine counts the facets under the same corpora and predicates, and
   // its exclusions are relayed. A corpus's own fields are counted only when it
   // is picked alone, and a field's own filter is left out of its count.
