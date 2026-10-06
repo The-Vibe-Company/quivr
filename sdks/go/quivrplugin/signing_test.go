@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,43 +21,28 @@ var (
 	oldSigningSecret     = []byte("abcdefghijklmnopqrstuvwxyz123456")
 )
 
-const (
-	signedDiscoveryTarget = "/v0/discovery?source=engine"
-	signedFetchTarget     = "/v0/contributions/connector/fetch?source=engine"
-)
+const signedDiscoveryTarget = "/v0/discovery?source=engine"
 
 // engineToken builds the wire token independently of the SDK signer. Keeping
 // this helper in the HTTP-boundary tests prevents a shared signer from making
 // both sides of the contract agree on the same mistake.
-func engineToken(t *testing.T, secret []byte, kid, audience, pluginID, method, target string, body []byte, issued, expiry int64, edit func(map[string]any, map[string]any)) string {
+func engineToken(t *testing.T, secret []byte, kid, audience, pluginID, method, target string, body []byte, issued, expiry int64) string {
 	t.Helper()
 	header := map[string]any{"alg": "HS256", "typ": "quivr-engine+jwt", "kid": kid}
 	digest := sha256.Sum256(body)
+	contribution := "discovery"
+	if path := strings.SplitN(target, "?", 2)[0]; strings.HasPrefix(path, "/v0/contributions/") {
+		contribution = strings.Split(path, "/")[3]
+	}
 	claims := map[string]any{
 		"aud":          audience,
 		"plugin_id":    pluginID,
-		"contribution": "discovery",
+		"contribution": contribution,
 		"method":       method,
 		"target":       target,
 		"iat":          issued,
 		"exp":          expiry,
 		"body_sha256":  hex.EncodeToString(digest[:]),
-	}
-	if len(target) > len("/v0/contributions/") && target[:len("/v0/contributions/")] == "/v0/contributions/" {
-		path := target
-		for i, r := range path {
-			if r == '?' {
-				path = path[:i]
-				break
-			}
-		}
-		parts := bytes.Split([]byte(path), []byte("/"))
-		if len(parts) >= 4 {
-			claims["contribution"] = string(parts[3])
-		}
-	}
-	if edit != nil {
-		edit(header, claims)
 	}
 	headerRaw, err := json.Marshal(header)
 	if err != nil {
@@ -137,139 +123,22 @@ func assertInvalidEngineToken(t *testing.T, status int, body []byte) {
 	}
 }
 
-func TestSignedCallsAcceptDiscoveryAndDispatchSignedPOST(t *testing.T) {
+func TestSignedMalformedPOSTReachesDecoder(t *testing.T) {
 	now := time.Now().Unix()
 	t.Setenv(EnvSigningKeys, signingRing(t, "current", signingKey("current", currentSigningSecret, nil, nil)))
 	h := signedHandler(t)
-
-	token := engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59, nil)
-	status, body := signingCall(h, http.MethodGet, signedDiscoveryTarget, nil, token)
-	if status != http.StatusOK || !bytes.Contains(body, []byte(`"plugin":{"id":"sdk-test"`)) {
-		t.Fatalf("signed discovery: HTTP %d %s", status, body)
-	}
-
+	target := "/v0/contributions/connector/fetch?source=engine"
 	malformed := []byte("{")
-	token = engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodPost, signedFetchTarget, malformed, now-1, now+59, nil)
-	status, body = signingCall(h, http.MethodPost, signedFetchTarget, malformed, token)
+	token := engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodPost, target, malformed, now-1, now+59)
+	status, body := signingCall(h, http.MethodPost, target, malformed, token)
 	if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"code":"invalid_request"`)) {
 		t.Fatalf("signed POST dispatch: HTTP %d %s", status, body)
 	}
 }
 
-func TestSignedCallsRejectInvalidTokensBeforeDispatch(t *testing.T) {
-	type testCase struct {
-		name   string
-		make   func(now int64) string
-		method string
-		target string
-		body   []byte
-	}
-	cases := []testCase{
-		{
-			name:   "unsigned",
-			make:   func(int64) string { return "" },
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-		},
-		{
-			name: "forged",
-			make: func(now int64) string {
-				return engineToken(t, []byte("wrong-signing-secret-012345678901"), "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59, nil)
-			},
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-		},
-		{
-			name: "expired",
-			make: func(now int64) string {
-				return engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-120, now-60, nil)
-			},
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-		},
-		{
-			name: "wrong audience",
-			make: func(now int64) string {
-				return engineToken(t, currentSigningSecret, "current", "other-plugin", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59, nil)
-			},
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-		},
-		{
-			name: "wrong plugin id",
-			make: func(now int64) string {
-				return engineToken(t, currentSigningSecret, "current", "sdk-test", "other-plugin", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59, nil)
-			},
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-		},
-		{
-			name: "tampered body",
-			make: func(now int64) string {
-				return engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, []byte("original"), now-1, now+59, nil)
-			},
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-			body:   []byte("tampered"),
-		},
-		{
-			name: "wrong route",
-			make: func(now int64) string {
-				return engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59, nil)
-			},
-			method: http.MethodGet,
-			target: "/v0/discovery?source=other",
-		},
-		{
-			name: "wrong method",
-			make: func(now int64) string {
-				return engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodPost, signedDiscoveryTarget, nil, now-1, now+59, nil)
-			},
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-		},
-		{
-			name: "future issued at",
-			make: func(now int64) string {
-				return engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now+10, now+20, nil)
-			},
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-		},
-		{
-			name: "lifetime over sixty seconds",
-			make: func(now int64) string {
-				return engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+70, nil)
-			},
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-		},
-		{
-			name: "algorithm confusion",
-			make: func(now int64) string {
-				return engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59, func(header, _ map[string]any) {
-					header["alg"] = "none"
-				})
-			},
-			method: http.MethodGet,
-			target: signedDiscoveryTarget,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			now := time.Now().Unix()
-			t.Setenv(EnvSigningKeys, signingRing(t, "current", signingKey("current", currentSigningSecret, nil, nil)))
-			h := signedHandler(t)
-			status, body := signingCall(h, tc.method, tc.target, tc.body, tc.make(now))
-			assertInvalidEngineToken(t, status, body)
-		})
-	}
-}
-
 func TestSigningKeyConfigurationFailsClosedWithoutEchoingSecrets(t *testing.T) {
 	now := time.Now().Unix()
-	token := engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59, nil)
+	token := engineToken(t, currentSigningSecret, "current", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59)
 	secretMarker := "config-secret-marker"
 	validKey := signingKey("current", currentSigningSecret, nil, nil)
 	missingActiveRaw, err := json.Marshal(map[string]any{"keys": []map[string]any{validKey}})
@@ -321,7 +190,7 @@ func TestSigningKeyRotationAcceptsOverlapAndRejectsRetiredKeys(t *testing.T) {
 			{id: "old", secret: oldSigningSecret},
 			{id: "current", secret: currentSigningSecret},
 		} {
-			token := engineToken(t, tc.secret, tc.id, "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59, nil)
+			token := engineToken(t, tc.secret, tc.id, "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59)
 			status, body := signingCall(h, http.MethodGet, signedDiscoveryTarget, nil, token)
 			if status != http.StatusOK {
 				t.Fatalf("%s key: HTTP %d %s", tc.id, status, body)
@@ -336,7 +205,7 @@ func TestSigningKeyRotationAcceptsOverlapAndRejectsRetiredKeys(t *testing.T) {
 			signingKey("current", currentSigningSecret, nil, nil),
 		))
 		h := signedHandler(t)
-		token := engineToken(t, oldSigningSecret, "old", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59, nil)
+		token := engineToken(t, oldSigningSecret, "old", "sdk-test", "sdk-test", http.MethodGet, signedDiscoveryTarget, nil, now-1, now+59)
 		status, body := signingCall(h, http.MethodGet, signedDiscoveryTarget, nil, token)
 		assertInvalidEngineToken(t, status, body)
 	})

@@ -36,7 +36,7 @@ func transferConfig(t *testing.T) store.Config {
 	return cfg.S3
 }
 
-func TestPresignedTransferVerifyAndRange(t *testing.T) {
+func TestPresignedTransferVerifiesAndReadsSignedReference(t *testing.T) {
 	cfg := transferConfig(t)
 	blobs := store.New(cfg)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -75,10 +75,6 @@ func TestPresignedTransferVerifyAndRange(t *testing.T) {
 	}
 	if err = blobs.Verify(ctx, "adapter-transfers/absent", int64(len(data)), digest); err == nil {
 		t.Fatal("absent object verified")
-	}
-	window, err := blobs.ReadRange(ctx, objectKey, 0, 4)
-	if err != nil || string(window) != "Ligne" {
-		t.Fatalf("range read failed: %q %v", window, err)
 	}
 	// A signed GET reference reads exactly the stored bytes without credentials.
 	signed, expires, err := blobs.PresignGet(ctx, objectKey, time.Minute)

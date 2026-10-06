@@ -6,8 +6,7 @@ import unittest
 
 import yaml
 
-from quivr_plugin import Plugin
-from quivr_plugin.schema import protocol_errors
+from quivr_plugin import Plugin, SegmentAndEmbedRequest, EmbedQueryRequest
 
 REPO = Path(__file__).resolve().parents[3]
 SEGMENT = "/v0/contributions/ingestion/segment_and_embed"
@@ -51,24 +50,6 @@ class Ingestion(unittest.TestCase):
     def invoke(self, path, request):
         return self.plugin.handle("POST", path, json.dumps(request).encode())
 
-    def test_registered_handlers_dispatch_and_validate_models(self):
-        @self.plugin.segment_and_embed
-        def segment(request):
-            self.assertEqual(request.parts[0].text, "hello world")
-            return {"segments": [{"part_key": "body", "start": 0, "end": 5, "vectors": {"example.words.small": [1, 0, 0, 0]}}]}
-
-        @self.plugin.embed_query
-        def query(request):
-            self.assertEqual(request.space, "example.words.small")
-            return {"vector": [1, 0, 0, 0]}
-
-        segment_reply = self.invoke(SEGMENT, self.segment_request)
-        query_reply = self.invoke(QUERY, self.query_request)
-        self.assertEqual(segment_reply.status, 200, segment_reply.body)
-        self.assertEqual(query_reply.status, 200, query_reply.body)
-        self.assertEqual(protocol_errors("ingestion-segment-and-embed-response.schema.json", segment_reply.body), [])
-        self.assertEqual(protocol_errors("ingestion-embed-query-response.schema.json", query_reply.body), [])
-
     def test_normative_response_cases_match_the_contract_oracle(self):
         index = json.loads((REPO / "contracts/plugins/v0/fixtures/index.json").read_text())
         cases = [
@@ -85,14 +66,32 @@ class Ingestion(unittest.TestCase):
                 request = json.loads((REPO / "contracts/plugins/v0/fixtures" / case["request"]).read_text())
                 response = json.loads((REPO / "contracts/plugins/v0/fixtures" / case["file"]).read_text())
                 schema = case["schema"]
+                seen = []
                 if schema == "ingestion-segment-and-embed-response.schema.json":
-                    plugin.segment_and_embed(lambda _request, response=response: response)
+                    def segment(typed_request):
+                        seen.append(typed_request)
+                        return response
+                    plugin.segment_and_embed(segment)
                     path = SEGMENT
                 else:
-                    plugin.embed_query(lambda _request, response=response: response)
+                    def query(typed_request):
+                        seen.append(typed_request)
+                        return response
+                    plugin.embed_query(query)
                     path = QUERY
                 reply = plugin.handle("POST", path, json.dumps(request).encode())
+                self.assertEqual(len(seen), 1)
+                typed_request = seen[0]
+                if path == SEGMENT:
+                    self.assertIsInstance(typed_request, SegmentAndEmbedRequest)
+                    self.assertEqual(typed_request.parts[0].text, request["parts"][0]["text"])
+                else:
+                    self.assertIsInstance(typed_request, EmbedQueryRequest)
+                    self.assertEqual(typed_request.space, request["space"])
+                self.assertEqual(typed_request.to_dict(), request)
                 self.assertEqual(reply.status == 200, case["valid"], reply.body)
+                if not case["valid"]:
+                    self.assertEqual(reply.body["code"], "invalid_response", reply.body)
 
     def test_unknown_space_is_rejected_before_the_handler_runs(self):
         @self.plugin.embed_query
