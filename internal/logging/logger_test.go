@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewEmitsJSONWithIdentityAndConfiguredLevel(t *testing.T) {
@@ -26,10 +27,16 @@ func TestNewEmitsJSONWithIdentityAndConfiguredLevel(t *testing.T) {
 	}
 
 	logger.Debug("debug event")
+	// An offset record models a host in a non-UTC timezone without changing
+	// process globals or waiting on the clock.
+	record := slog.NewRecord(time.Date(2026, 10, 6, 12, 0, 0, 123000000, time.FixedZone("offset", 2*60*60)), slog.LevelInfo, "offset event", 0)
+	if err := logger.Handler().Handle(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
 	logger.With("version", "plugin-version").Info("info event", "service", "plugin", "level", "overridden")
 	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("got %d JSON records, want 2: %q", len(lines), output.String())
+	if len(lines) != 3 {
+		t.Fatalf("got %d JSON records, want 3: %q", len(lines), output.String())
 	}
 	for i, line := range lines {
 		var record map[string]any
@@ -40,6 +47,9 @@ func TestNewEmitsJSONWithIdentityAndConfiguredLevel(t *testing.T) {
 			if _, ok := record[key]; !ok {
 				t.Fatalf("record %d missing %q: %s", i, key, line)
 			}
+		}
+		if i == 1 && record["ts"] != "2026-10-06T10:00:00.123Z" {
+			t.Fatalf("timestamp = %v, want RFC 3339 UTC", record["ts"])
 		}
 		if _, ok := record["time"]; ok {
 			t.Fatalf("record %d uses time instead of ts: %s", i, line)
@@ -57,7 +67,7 @@ func TestNewEmitsJSONWithIdentityAndConfiguredLevel(t *testing.T) {
 			t.Fatalf("record %d environment = %v, want %v", i, got, want)
 		}
 		wantLevel := "DEBUG"
-		if i == 1 {
+		if i != 0 {
 			wantLevel = "INFO"
 		}
 		if got := record["level"]; got != wantLevel {

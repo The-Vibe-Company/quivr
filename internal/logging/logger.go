@@ -33,6 +33,12 @@ type Options struct {
 	Secrets     []string
 }
 
+// Diagnostic marks engine-owned codes, field names and safe explanations.
+// Use only text derived from engine definitions, never configuration values,
+// request data or raw errors. Unlike values, diagnostic metadata must survive
+// a coincidental match with the process's secret inventory.
+type Diagnostic string
+
 type requestIDKey struct{}
 
 // WithRequestID returns a context carrying id for the logging handler to add
@@ -88,6 +94,7 @@ func New(writer io.Writer, options Options) (*slog.Logger, error) {
 		ReplaceAttr: func(_ []string, attr slog.Attr) slog.Attr {
 			if attr.Key == "time" {
 				attr.Key = "ts"
+				attr.Value = slog.TimeValue(attr.Value.Time().UTC())
 			}
 			return attr
 		},
@@ -263,6 +270,9 @@ func (s sanitizer) sanitizeValue(value slog.Value) slog.Value {
 		// to serialize configuration fields before this boundary sees them.
 		return slog.StringValue(redactedValue)
 	case slog.KindAny:
+		if diagnostic, ok := value.Any().(Diagnostic); ok {
+			return slog.StringValue(string(diagnostic))
+		}
 		if value.Any() == nil {
 			return slog.AnyValue(nil)
 		}

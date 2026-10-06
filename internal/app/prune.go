@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"time"
 )
 
@@ -26,25 +25,26 @@ type changePrune struct {
 func (c ChangePruneConfig) parse(changeRetention time.Duration) (changePrune, error) {
 	p := changePrune{Interval: time.Minute, Retention: changeRetention, Organizations: c.Organizations}
 	for _, v := range []struct {
-		raw string
-		to  *time.Duration
-	}{{c.Interval, &p.Interval}, {c.Retention, &p.Retention}} {
+		field string
+		raw   string
+		to    *time.Duration
+	}{{"change_prune.interval", c.Interval, &p.Interval}, {"change_prune.retention", c.Retention, &p.Retention}} {
 		if v.raw == "" {
 			continue
 		}
 		d, err := time.ParseDuration(v.raw)
 		if err != nil || d <= 0 {
-			return changePrune{}, errors.New("change_prune durations must be positive Go durations")
+			return changePrune{}, badConfig(configInvalid, v.field, "change_prune durations must be positive Go durations")
 		}
 		*v.to = d
 	}
 	for _, org := range c.Organizations {
 		if org == "" {
-			return changePrune{}, errors.New("change_prune.organizations must not contain an empty Organization")
+			return changePrune{}, badConfig(configInvalid, "change_prune.organizations", "change_prune.organizations must not contain an empty Organization")
 		}
 	}
 	if p.Retention < changeRetention && (!c.AllowShortRetention || len(c.Organizations) == 0) {
-		return changePrune{}, errors.New("change_prune.retention is shorter than change_retention; set allow_short_retention with named organizations only when early event loss is acceptable")
+		return changePrune{}, badConfig(configConflict, "change_prune.retention", "change_prune.retention is shorter than change_retention; set allow_short_retention with named organizations only when early event loss is acceptable")
 	}
 	return p, nil
 }
