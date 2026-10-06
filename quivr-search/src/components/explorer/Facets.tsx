@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { WarningCircle } from "@phosphor-icons/react";
 import { exclusionNotice, fieldLabel, type Corpus, type Exclusion } from "../../lib/corpora";
 import {
@@ -126,7 +126,14 @@ function FacetBox({
   const label = fieldLabel(facet.field);
   return (
     <section className="facet" aria-label={label}>
-      <h3>{label}</h3>
+      <h3>
+        {label}
+        {picked.length > 0 && (
+          <button type="button" className="facet-clear" onClick={() => picked.forEach(onToggle)}>
+            Effacer<span className="visually-hidden"> {label}</span>
+          </button>
+        )}
+      </h3>
       <ul>
         {shown.map(({ value, count }) => (
           <li key={String(value)}>
@@ -137,10 +144,16 @@ function FacetBox({
               onClick={() => onToggle(String(value))}
             >
               <span className="menu-check" aria-hidden="true" />
-              <span className="facet-label">{valueLabel(value, facet.type, facet.field)}</span>
+              <span className="facet-label" dir="auto">
+                {valueLabel(value, facet.type, facet.field)}
+              </span>
               {count !== undefined && <span className="menu-count">{countLabel(count)}</span>}
               {count !== undefined && (
-                <span className="facet-share" aria-hidden="true" style={{ width: `${(count / most) * 100}%` }} />
+                <span
+                  className="facet-share"
+                  aria-hidden="true"
+                  style={{ "--share": `${Math.max(2, (count / most) * 100)}%` } as CSSProperties}
+                />
               )}
             </button>
           </li>

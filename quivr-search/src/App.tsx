@@ -269,7 +269,11 @@ function Dashboard({
   // The top bar's places a page fills (see InBar), held once mounted.
   const [barMeta, setBarMeta] = useState<HTMLElement | null>(null);
   const [barActions, setBarActions] = useState<HTMLElement | null>(null);
-  const bar = useMemo(() => ({ meta: barMeta, actions: barActions }), [barMeta, barActions]);
+  const [barSearch, setBarSearch] = useState<HTMLElement | null>(null);
+  const bar = useMemo(
+    () => ({ meta: barMeta, actions: barActions, search: barSearch }),
+    [barMeta, barActions, barSearch],
+  );
   const [input, setInput] = useState(initial.query);
   const [near, setNear] = useState(initial.near);
   // "Recherche approfondie": offered when the engine serves it, off at every
@@ -580,8 +584,10 @@ function Dashboard({
           {/* A page's own figures beside its title: its count, what needs a look. */}
           <span className="bar-meta" ref={setBarMeta} data-stale={view !== page || undefined} />
         </span>
-        {/* The Explorer's list has its own search field; its document page keeps the bar's. */}
-        {(view !== "explorer" || record) && (
+        {/* The Explorer's list puts its own search field here; its document page keeps the bar's. */}
+        {view === "explorer" && !record ? (
+          <div className="bar-slot" ref={setBarSearch} data-stale={view !== page || undefined} />
+        ) : (
         <form
           role="search"
           className="bar-search"
@@ -706,6 +712,7 @@ function Dashboard({
             />
           ) : page === "explorer" ? (
             <ExplorerView
+              bar={bar}
               corpora={allCorpora}
               corporaRead={corporaRead}
               picked={explored}
