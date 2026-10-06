@@ -119,9 +119,9 @@ up to 50 queries in SHA-256 ID order, after warming up the first judged ID (also
 Public/private pairs prepare both indexes in one container with the same resources,
 then alternate baseline/candidate warmups and samples (A/B/A/B).
 Each candidate gets its own paired baseline; completed pairs replay without provider calls.
-A campaign-wide slot serializes trials including indexing and quality, preventing
-preparation from competing with latency. Busy trials return `leased` before paid dispatch;
-ambiguous detached calls retain the slot through their bounded startup/invocation lifetime.
+Up to the spec’s `parallelism` trials index and score concurrently. Only paired fresh warmups/samples
+wait for an exclusive campaign window; other trials continue quality. Window waits stay outside timing. Busy trial slots return `leased` before paid dispatch; detached calls retain their bounded trial slots.
+Failed sample loops release the window; control outages retain its bounded fence until expiry.
 Public `cost.latency_sample` records sample/warmup IDs and policy; `gates.latency.samples`
 rejects missing/mismatched evidence. Private samples remain internal; comparability is published.
 P95 includes local embedding/retrieval/reranking and successful provider round trips;
@@ -164,12 +164,12 @@ The [trusted full-engine confirmation runner](eval-engine-confirmation.md) owns 
 
 The Volume `quivr-eval-embeddings-cache` holds immutable vectors and the outbox.
 Hosted document fills overlap at most four 128-entry cache chunks; each provider
-attempt reserves and settles independently. Hosted admission halves after 429s
-and recovers one slot after 16 times the current slot count in clean requests;
+attempt reserves and settles independently. Campaign Azure/Cohere requests share SQL admission: at most four requests across containers,
+halved after 429s with a bounded Retry-After cooldown. It recovers one slot after 16 times the current slot count in clean requests;
 requests already in flight drain at the old limit. Local e5 and quality-query
 embedding fills stay serial and batched. The policy field `quality_concurrency` bounds re-ranking waves (1–32, default 8), preserving rankings, scores and per-search prices. Fresh warmup and latency stay serial.
 Attempts reserve independently; failed waves drain and retain uncertain charges. `cost.phase_usage` reports process CPU and elapsed seconds for indexing, quality, scoring and fresh latency, including warmup, excluding paired idle time. CPU/elapsed estimates average cores used, separately from serving cost.
-Claims precede paid work; commits and fenced publication stay serial.
+Trials wait for shared in-flight cache fills and reload committed Volume files before reuse; claims precede paid work and commits/publication stay serial.
 Chunks commit before publication; lost ownership rolls it back. Logs exclude texts.
 Reruns recover evidence and tracking writes. Keep the Volume and schema until
 results sync and campaign archival; never delete unknown reservations.
