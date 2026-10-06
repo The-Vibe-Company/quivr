@@ -41,7 +41,8 @@ export function WireList({
   items: ExploreItem[];
   selected: string | null;
   corpusOf: (item: ExploreItem) => string;
-  onSelect: (id: string) => void;
+  /** A row picked, by a click or by the keys. */
+  onSelect: (id: string, by: "click" | "key") => void;
   onOpen: (id: string) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
@@ -80,7 +81,7 @@ export function WireList({
     const next = items[Math.max(0, Math.min(items.length - 1, to))];
     if (!next) return;
     follow.current = true;
-    onSelect(next.record_id);
+    onSelect(next.record_id, "key");
   };
 
   return (
@@ -104,7 +105,7 @@ export function WireList({
                 data-record={item.record_id}
                 aria-selected={on}
                 tabIndex={on ? 0 : -1}
-                onClick={() => onSelect(item.record_id)}
+                onClick={() => onSelect(item.record_id, "click")}
                 onDoubleClick={() => onOpen(item.record_id)}
               >
                 <time className="wire-time" dateTime={at}>

@@ -70,7 +70,7 @@ test("l’Explorer passe d’un corpus à l’autre, filtre par facettes compté
   await expect(headlines(page)).toHaveText(["Port reopens after three-day closure", "Cup final moved to Sunday"]);
   await expect(counts(page, "Desk")).toHaveText(["economy1", "sport1"]);
   await expect(counts(page, "Langue")).toHaveText(["anglais2", "français2"]);
-  await expect(pills(page).getByRole("status")).toHaveText("2 documents");
+  await expect(pills(page).getByRole("status")).toHaveText("2 documents datés");
 
   // The corpus's own field, then every corpus: the field stays picked, the
   // demo corpus is left out and the filters column says so.

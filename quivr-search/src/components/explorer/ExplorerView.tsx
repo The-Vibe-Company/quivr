@@ -202,7 +202,9 @@ export function ExplorerView({
     });
   const setRange = (range: Range | undefined) => filter(() => ({ range }));
   const clearAll = () => filter(() => ({ selection: {}, range: undefined, window: undefined }));
-  const select = (id: string) => (narrow ? onRecord(id) : setState((s) => ({ ...s, selected: id })));
+  // On a narrow screen there is no preview: a click opens the document.
+  const select = (id: string, by: "click" | "key") =>
+    narrow && by === "click" ? onRecord(id) : setState((s) => ({ ...s, selected: id }));
 
   const nameOf = (id?: string) => corpora.find((c) => c.corpus_id === id)?.name || id || "";
   const single = picked.length === 1 ? corpora.find((c) => c.corpus_id === picked[0]) : undefined;
@@ -228,9 +230,12 @@ export function ExplorerView({
     ? status === "ready" && page
       ? `${countLabel(page.items.length)} résultat${page.items.length > 1 ? "s" : ""}`
       : ""
-    : fresh?.total !== undefined
-      ? `${countLabel(fresh.total)} document${fresh.total > 1 ? "s" : ""}`
-      : "";
+    : !predicates.length && documents !== undefined
+      ? `${countLabel(documents)} document${documents > 1 ? "s" : ""}`
+      : fresh?.total !== undefined
+        ? // Counts go by publication date: without a range, undated documents are not counted.
+          `${countLabel(fresh.total)} document${fresh.total > 1 ? "s" : ""}${state.range ? "" : fresh.total > 1 ? " datés" : " daté"}`
+        : "";
 
   if (record)
     return (

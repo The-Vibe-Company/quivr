@@ -57,20 +57,21 @@ export function Preview({
     return () => controller.abort();
   }, [id, attempt, onUnauthorized]);
 
-  const versions = (detail?.versions || []).slice(0, MAX_VERSIONS);
-  const wanted = versions.map((v) => v.version_id).filter((v) => !read.has(v)).join(",");
+  // The earlier Versions, each read once per document shown.
   useEffect(() => {
-    if (!wanted) return;
+    if (!detail) return;
     const controller = new AbortController();
-    for (const version of wanted.split(","))
-      fetchVersion(id, version, controller.signal)
-        .then((v) => setRead((known) => new Map(known).set(v.version_id, v)))
-        .catch((e) => {
-          if (controller.signal.aborted) return;
-          if (e instanceof APIError && e.status === 401) onUnauthorized();
-        });
+    for (const { version_id } of detail.versions.slice(0, MAX_VERSIONS))
+      if (version_id !== detail.version?.version_id)
+        fetchVersion(id, version_id, controller.signal)
+          .then((v) => setRead((known) => new Map(known).set(v.version_id, v)))
+          .catch((e) => {
+            if (controller.signal.aborted) return;
+            if (e instanceof APIError && e.status === 401) onUnauthorized();
+          });
     return () => controller.abort();
-  }, [id, wanted, onUnauthorized]);
+  }, [id, detail, onUnauthorized]);
+  const versions = (detail?.versions || []).slice(0, MAX_VERSIONS);
 
   if (error)
     return (
