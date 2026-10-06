@@ -36,7 +36,7 @@ test-python:
 	$(CONFORMANCE_PYTHON) scripts/check.py --unittest conformance --module conformance.test_runner
 	python3 scripts/check.py --unittest scripts
 test-eval:
-	python3 scripts/check.py --unittest scripts/eval --preload ranx
+	python3 scripts/check.py --unittest scripts/eval --preload ranx $(if $(eval-shard),--shard $(eval-shard))
 test-sdk-python:
 	GO=$(GO) bash scripts/plugin_sdk.sh
 test-sdk-go:

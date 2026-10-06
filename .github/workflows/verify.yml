@@ -21,11 +21,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [guards, contracts, go, python, eval, sdk-python, sdk-go]
+        group: [guards, contracts, go, python, eval-1, eval-2, eval-3, sdk-python, sdk-go]
     services:
       evaluation-postgres:
         # Only eval needs SQL; an empty image disables the service in the other groups.
-        image: ${{ matrix.group == 'eval' && 'postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73' || '' }}
+        image: ${{ startsWith(matrix.group, 'eval-') && 'postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73' || '' }}
         env:
           POSTGRES_DB: evaluation_tests
           POSTGRES_USER: evaluation
@@ -37,7 +37,7 @@ jobs:
           --health-cmd "pg_isready -U evaluation -d evaluation_tests"
           --health-interval 2s --health-timeout 2s --health-retries 20
     env:
-      EVAL_CONTROL_TEST_DSN: ${{ matrix.group == 'eval' && 'postgresql://evaluation@localhost:55433/evaluation_tests' || '' }}
+      EVAL_CONTROL_TEST_DSN: ${{ startsWith(matrix.group, 'eval-') && 'postgresql://evaluation@localhost:55433/evaluation_tests' || '' }}
       NUMBA_CACHE_DIR: ${{ github.workspace }}/.scratch/numba
       NUMBA_CPU_NAME: generic
       NUMBA_NUM_THREADS: 2
@@ -59,12 +59,12 @@ jobs:
           # Cold benchmark: do not restore pip downloads.
           cache-dependency-path: |
             contracts/http/v0/checks/requirements.txt
-            scripts/eval/requirements-news.txt
-            scripts/eval/requirements-campaign.txt
-            scripts/check-requirements.txt
-            plugins/jev-rerank/pyproject.toml
+            ${{ startsWith(matrix.group, 'eval-') && 'scripts/eval/requirements-news.txt' || '' }}
+            ${{ startsWith(matrix.group, 'eval-') && 'scripts/eval/requirements-campaign.txt' || '' }}
+            ${{ startsWith(matrix.group, 'eval-') && 'scripts/check-requirements.txt' || '' }}
+            ${{ startsWith(matrix.group, 'eval-') && 'plugins/jev-rerank/pyproject.toml' || '' }}
       - run: pip install -r contracts/http/v0/checks/requirements.txt
-      - if: matrix.group == 'eval'
+      - if: startsWith(matrix.group, 'eval-')
         run: |
           pip install -r scripts/eval/requirements-news.txt -r scripts/eval/requirements-campaign.txt -r scripts/check-requirements.txt
           pip install --no-deps -e plugins/jev-rerank
@@ -73,14 +73,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .scratch/numba
-          key: quick-numba-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('scripts/check-requirements.txt', 'scripts/eval/requirements-campaign.txt') }}
+          key: quick-numba-${{ matrix.group }}-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('scripts/check-requirements.txt', 'scripts/eval/requirements-campaign.txt') }}
       # Real encryption owner tests need both age and age-keygen; avoid apt's index update.
-      - if: matrix.group == 'eval'
+      - if: startsWith(matrix.group, 'eval-')
         run: |
           curl --fail --silent --show-error --location --retry 3 https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz -o "$RUNNER_TEMP/age.tar.gz"
           echo 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377  '"$RUNNER_TEMP/age.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/age.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/age" >> "$GITHUB_PATH"
+      # Each partition starts from its own empty disposable schema, independent of test order.
+      - if: startsWith(matrix.group, 'eval-')
+        run: docker exec -i "${{ job.services['evaluation-postgres'].id }}" psql -U evaluation -d evaluation_tests < deploy/mlflow/eval-control.sql
       - run: make check check-group=${{ matrix.group }}
       - if: always()
         run: python3 scripts/check.py --summary
@@ -207,70 +210,6 @@ jobs:
     timeout-minutes: 2
     steps:
       - run: test '${{ needs.check-group.result }}' = 'success'
-  # Temporary evidence only: removed after three exact baseline cold measurements.
-  baseline-cold:
-    name: baseline cold ${{ matrix.run }}
-    if: github.run_attempt == 1
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        run: [1, 2, 3]
-    services:
-      evaluation-postgres:
-        image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
-        env:
-          POSTGRES_DB: evaluation_tests
-          POSTGRES_USER: evaluation
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 55433:5432
-        options: >-
-          --health-cmd "pg_isready -U evaluation -d evaluation_tests"
-          --health-interval 2s --health-timeout 2s --health-retries 20
-    env:
-      EVAL_CONTROL_TEST_DSN: postgresql://evaluation@localhost:55433/evaluation_tests
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Original main checkout with the stdlib timing wrapper
-        run: |
-          mkdir -p .scratch
-          cp scripts/check.py .scratch/baseline_check.py
-          git checkout c28e7b6a904827b526dc1f7efa2ead5e4b89f7ae
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install -r contracts/http/v0/checks/requirements.txt
-      - run: pip install -r scripts/eval/requirements-news.txt
-      - run: pip install -r scripts/eval/requirements-campaign.txt
-      - run: pip install modal==1.6.1 numpy==2.0.2 ranx==0.3.21
-      - run: pip install --no-deps -e plugins/jev-rerank
-      - run: sudo apt-get update -qq && sudo apt-get install -y age
-      - name: Original serial make check targets, timed without changing their commands
-        run: |
-          PYTHONPATH=scripts python3 - <<'PYTHON'
-          import sys
-          sys.path.insert(0, '.scratch')
-          import baseline_check as check
-          check.GROUPS = {'baseline': ['docs', 'denylist', 'migrations', 'contracts', 'image-context', 'plugin-boundary', 'conformance-validate', 'test']}
-          raise SystemExit(check.run_targets('baseline'))
-          PYTHON
-      - if: always()
-        run: PYTHONPATH=scripts python3 .scratch/baseline_check.py --summary
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: baseline-cold-${{ matrix.run }}
-          path: .scratch/check/
-          include-hidden-files: true
-          if-no-files-found: error
   # Fast signal on the PostgreSQL adapters (THE-699): a bare migrated database, no other
   # dependency. It proves the suite needs no state left by acceptance scenarios.
   adapter-postgres:

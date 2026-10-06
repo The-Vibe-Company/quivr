@@ -196,6 +196,25 @@ class BrokenFixture(unittest.TestCase):
             report = json.loads(reports[0].read_text())
             self.assertEqual((report['count'], report['skipped'], report['successful']), (3, 1, False))
             self.assertEqual(len(report['failures']), 2)
+            self.assertEqual(len(report['selected_tests']), 4)
+            partitions = []
+            for index in range(1, 4):
+                sharded = subprocess.run([*command, '--unittest', 'tests', '--preload', 'scaffold_helper',
+                                          '--shard', f'{index}/3'], cwd=root,
+                                         env={**os.environ, 'QUICK_CHECK_FIXTURE': '2'},
+                                         capture_output=True, text=True)
+                [path] = output.glob(f'unittest-*-shard{index}of3.json')
+                part = json.loads(path.read_text())
+                self.assertEqual(sharded.returncode, 0 if part['successful'] else 1)
+                partitions.append(part)
+            selected = [name for part in partitions for name in part['selected_tests']]
+            self.assertEqual(len(selected), len(set(selected)), 'a test ran in more than one partition')
+            self.assertEqual(set(selected), set(report['selected_tests']))
+            self.assertEqual(sum(part['count'] for part in partitions), 3)
+            self.assertEqual(sum(part['skipped'] for part in partitions), 1)
+            self.assertEqual(sum(len(part['failures']) for part in partitions), 2)
+            for path in output.glob('unittest-*-shard*.json'):
+                path.unlink()
             summary = subprocess.run([*command, '--summary'], check=True, capture_output=True, text=True).stdout
             self.assertIn('Contract.test_difference', summary)
             self.assertIn('expected two records', summary)
@@ -222,7 +241,7 @@ class Parts(unittest.TestCase):
         matrix = re.search(r'^\s+part: \[(.*)\]$', workflow, re.M).group(1)
         self.assertEqual([p.strip() for p in matrix.split(',')], list(local.parts()) + [local.DEMO])
         quick = re.search(r'^\s+group: \[(.*)\]$', workflow, re.M).group(1)
-        self.assertEqual([g.strip() for g in quick.split(',')], list(quickcheck.GROUPS))
+        self.assertEqual([g.strip() for g in quick.split(',')], quickcheck.CI_GROUPS)
 
 
 if __name__ == '__main__':

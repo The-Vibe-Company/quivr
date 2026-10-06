@@ -1,5 +1,6 @@
 """Time the complete local check and its isolated CI groups, using only the stdlib."""
 import argparse
+import hashlib
 import json
 import importlib
 import importlib.util
@@ -23,6 +24,17 @@ GROUPS = {
     'sdk-python': ['test-sdk-python'],
     'sdk-go': ['test-sdk-go'],
 }
+LOCAL_GROUPS = tuple(GROUPS)
+EVAL_SHARDS = 3
+CI_GROUPS = []
+for group in LOCAL_GROUPS:
+    if group == 'eval':
+        for index in range(1, EVAL_SHARDS + 1):
+            name = f'eval-{index}'
+            GROUPS[name] = GROUPS[group]
+            CI_GROUPS.append(name)
+    else:
+        CI_GROUPS.append(group)
 
 
 def save(name, report):
@@ -37,7 +49,10 @@ def run_targets(group):
     for target in GROUPS[group]:
         started = time.monotonic()
         print(f'::group::{target}' if os.environ.get('GITHUB_ACTIONS') else f'check: {target}', flush=True)
-        code = subprocess.call(['make', '--no-print-directory', target], cwd=ROOT)
+        command = ['make', '--no-print-directory', target]
+        if group.startswith('eval-'):
+            command.append(f'eval-shard={group.removeprefix("eval-")}/{EVAL_SHARDS}')
+        code = subprocess.call(command, cwd=ROOT)
         steps.append({'target': target, 'seconds': round(time.monotonic() - started, 3), 'exit_code': code})
         save(group, {'steps': steps})
         if os.environ.get('GITHUB_ACTIONS'):
@@ -61,7 +76,25 @@ class TimedResult(unittest.TextTestResult):
         super().stopTest(test)
 
 
-def run_unittest(directory, module=None, preload=()):
+def test_cases(suite):
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            yield from test_cases(test)
+        else:
+            yield test
+
+
+def shard_argument(value):
+    try:
+        index, total = map(int, value.split('/'))
+        if 1 <= index <= total:
+            return index, total
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError('use INDEX/TOTAL with 1 <= INDEX <= TOTAL')
+
+
+def run_unittest(directory, module=None, preload=(), shard=None):
     # Match unittest's discover/module import paths; keep one process for the suite's fixtures.
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(Path.cwd()))
@@ -71,13 +104,21 @@ def run_unittest(directory, module=None, preload=()):
             importlib.import_module(name)
     suite = (unittest.defaultTestLoader.loadTestsFromName(module) if module else
              unittest.defaultTestLoader.discover(directory, pattern='test_*.py'))
+    if shard:
+        index, total = shard
+        # Stable IDs partition every test exactly once; keep discovery order for class fixtures.
+        suite = unittest.TestSuite(test for test in test_cases(suite)
+                                   if int.from_bytes(hashlib.sha256(test.id().encode()).digest()[:8], 'big')
+                                   % total == index - 1)
+    selected = [test.id() for test in test_cases(suite)]
     result = unittest.TextTestRunner(verbosity=2, resultclass=TimedResult).run(suite)
     failures = [{'test': test.id(), 'excerpt': text[-4000:]} for test, text in result.failures + result.errors]
     failures += [{'test': test.id(), 'excerpt': 'Unexpected success for an expected failure'}
                  for test in result.unexpectedSuccesses]
-    save('unittest-' + (module or str(Path(directory).resolve())).replace('/', '-'),
+    suffix = f'-shard{shard[0]}of{shard[1]}' if shard else ''
+    save('unittest-' + (module or str(Path(directory).resolve())).replace('/', '-') + suffix,
          {'tests': result.timings, 'failures': failures, 'count': result.testsRun,
-          'skipped': len(result.skipped), 'successful': result.wasSuccessful()})
+          'selected_tests': selected, 'skipped': len(result.skipped), 'successful': result.wasSuccessful()})
     return 0 if result.wasSuccessful() else 1
 
 
@@ -132,6 +173,7 @@ def main():
     action.add_argument('--go', metavar='DIRECTORY')
     action.add_argument('--summary', action='store_true')
     parser.add_argument('--module')
+    parser.add_argument('--shard', type=shard_argument, help='Run one stable INDEX/TOTAL partition of unittest IDs')
     parser.add_argument('--preload', action='append', default=[],
                         help='Initialize an installed optional module before test discovery')
     parser.add_argument('--output', type=Path, default=REPORTS, help='Directory for timing reports and logs')
@@ -139,7 +181,7 @@ def main():
     REPORTS = args.output
     os.environ['QUIVR_CHECK_REPORTS'] = str(REPORTS.resolve())
     if args.unittest:
-        return run_unittest(args.unittest, args.module, args.preload)
+        return run_unittest(args.unittest, args.module, args.preload, args.shard)
     if args.go:
         return run_go(args.go)
     if args.summary:
@@ -149,7 +191,7 @@ def main():
         for path in REPORTS.glob('*'):
             if path.is_file() and path.suffix in ('.json', '.jsonl', '.log'):
                 path.unlink()
-    groups = [args.group] if args.group else GROUPS
+    groups = [args.group] if args.group else LOCAL_GROUPS
     for group in groups:
         code = run_targets(group)
         if code:
