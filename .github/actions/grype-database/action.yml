@@ -1,0 +1,39 @@
+name: Prepare the vulnerability database
+description: Update once per workflow and distribute the same database to every image job
+runs:
+  using: composite
+  steps:
+    - name: Install checksum-verified scanner
+      shell: bash
+      run: |
+        timeout --kill-after=5s 45s bash scripts/security_tools.sh grype "$RUNNER_TEMP/security-tools"
+        echo "$RUNNER_TEMP/security-tools" >> "$GITHUB_PATH"
+    - id: day
+      shell: bash
+      run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.0.0
+      with:
+        path: ${{ runner.temp }}/grype-database
+        key: grype-${{ runner.os }}-${{ hashFiles('scripts/security_tools.sh') }}-${{ steps.day.outputs.day }}
+        restore-keys: grype-${{ runner.os }}-${{ hashFiles('scripts/security_tools.sh') }}-
+    - name: Check upstream for a fresh database
+      shell: bash
+      env:
+        GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
+        GRYPE_CHECK_FOR_APP_UPDATE: false
+      run: |
+        if [ -f "$RUNNER_TEMP/grype-database/grype-db.tar.zst" ]; then
+          mkdir -p "$GRYPE_DB_CACHE_DIR"
+          tar --zstd -xf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$GRYPE_DB_CACHE_DIR"
+        fi
+        timeout --kill-after=5s 120s grype db update
+        grype db status
+        mkdir -p "$RUNNER_TEMP/grype-database"
+        tar --zstd -cf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$GRYPE_DB_CACHE_DIR" .
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: grype-database
+        path: ${{ runner.temp }}/grype-database/grype-db.tar.zst
+        compression-level: 0
+        if-no-files-found: error
+        retention-days: 1

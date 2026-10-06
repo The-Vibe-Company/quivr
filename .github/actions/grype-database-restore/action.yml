@@ -1,0 +1,15 @@
+name: Restore the vulnerability database
+description: Restore into GRYPE_DB_CACHE_DIR or runner temp and export the directory
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: grype-database
+        path: ${{ runner.temp }}/grype-database
+    - shell: bash
+      run: |
+        database_dir="${GRYPE_DB_CACHE_DIR:-$RUNNER_TEMP/grype-db}"
+        mkdir -p "$database_dir"
+        tar --zstd -xf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$database_dir"
+        echo "GRYPE_DB_CACHE_DIR=$database_dir" >> "$GITHUB_ENV"
