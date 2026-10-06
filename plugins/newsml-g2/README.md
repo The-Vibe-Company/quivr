@@ -64,7 +64,8 @@ Corrections remain source versions; withdrawal submission is the acquirer's job.
 | Configured header paths | `newsml-g2.headers.paths`, arrays of matching element trees |
 | Original XML | `source` Blob Part, referencing the input without rewriting it |
 
-Part language and direction describe the text element as a whole; inline span
+Only XHTML, NITF and unqualified paragraphs become body text; foreign elements
+remain in the XML tree. Part language and direction describe the whole element; span
 overrides remain in the XML tree. All extensions use schema version `1`.
 Subject QCodes, including mediatopics,
 remain as supplied; catalogs and scheme declarations remain in the XML tree.
@@ -76,7 +77,8 @@ No remote vocabulary resolution takes place. Missing optional values are omitted
 `source_type` (`newswire`), `source`, and string arrays `author`, `subjects`, `tags`,
 `country`, `place`. Publication uses `firstCreated`, then `versionCreated`, converted
 to UTC only when a timezone is present. Provider/creator/subject identifiers prefer
-URI, then QCode, then name. Place uses names; country uses `iso3166-1a2` hints.
+URI, then QCode, then name or value. Place uses names, falling back to that
+identifier order; country uses `iso3166-1a2` hints.
 Unknown fields are omitted. The original dates and codes remain in source metadata.
 The reserved `quivr.metadata` integration follows when the engine accepts it;
 current deployments can map these plugin fields through corpus retrieval mappings.
@@ -97,11 +99,13 @@ The full XML tree is retained regardless of this list.
 All input refusals are terminal: forbidden DTDs/entities use `unsafe_xml`, malformed
 XML uses `invalid_xml`, and excessive depth or element count uses `xml_too_complex`.
 XML is limited to 10000 elements and
-64 levels. Adjacent body paragraphs with equal language and direction are grouped
+64 levels. Adjacent body Parts (sluglines and paragraphs) with equal language and
+direction are grouped
 when needed to fit 64 text Parts, with a `paragraphs_grouped` warning. Omitted
 direction means `ltr` for grouping, as IPTC specifies. More than 64
 incompatible text groups are refused with `too_many_text_parts`. The source Part
-is additional.
+is additional. Items with no text Parts keep the source Blob and metadata, with a
+`no_text_parts` warning so operators can detect the lack of searchable text.
 
 Text beyond its budget and serialized responses of 2 MiB or more are refused
 with terminal diagnostics (`text_too_large`, `manifest_too_large`); metadata is

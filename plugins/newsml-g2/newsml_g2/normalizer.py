@@ -19,7 +19,6 @@ NAR = 'http://iptc.org/std/nar/2006-10-01/'
 XML_LANG = '{http://www.w3.org/XML/1998/namespace}lang'
 MAX_NODES = 10000
 MAX_DEPTH = 64
-MAX_RESPONSE_BYTES = 2097151
 MAX_TEXT_PARTS = 64
 plugin = Plugin(Path(__file__).resolve().parent.parent / 'quivr-plugin.yaml')
 
@@ -196,7 +195,8 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
     number = 0
     for inline in item.findall('contentSet/inlineXML', {'': NAR}):
         for node in inline.iter():
-            if node.tag.rsplit('}', 1)[-1] == 'p' and (text := _text(node)):
+            if node.tag in {'p', '{http://www.w3.org/1999/xhtml}p',
+                            '{http://iptc.org/std/NITF/2006-10-18/}p'} and (text := _text(node)):
                 number += 1
                 candidates.append((f'paragraph-{number}', 'body', text, contexts[node]))
     language = contexts[item].get('language')
@@ -244,9 +244,14 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
                   'newsml-g2.xml': _extension({'root': _tree(root)})}
     if paths := invocation.configuration.get('header_paths'):
         extensions['newsml-g2.headers'] = _extension(_selected_headers(root, paths))
+    warnings = []
+    if merged:
+        warnings.append(ResponseWarning(code='paragraphs_grouped', message='Adjacent body Parts were grouped within 64 text Parts'))
+    if not candidates:
+        warnings.append(ResponseWarning(code='no_text_parts', message='No headline, slugline or supported paragraph text was found; only the source Blob is retained'))
     response = NormalizerResponse(manifest=ManifestContent(parts=parts), extensions=extensions,
                                   language=language or None,
-                                  warnings=[ResponseWarning(code='paragraphs_grouped', message='Adjacent body paragraphs were grouped within 64 text Parts')] if merged else None)
-    if len(json.dumps(response.to_dict(), ensure_ascii=False, separators=(',', ':')).encode()) > MAX_RESPONSE_BYTES:
-        raise TerminalError('manifest_too_large', 'Normalized output exceeds 2 MiB; source metadata was not truncated')
+                                  warnings=warnings or None)
+    if len(json.dumps(response.to_dict(), ensure_ascii=False, separators=(',', ':')).encode()) > invocation.manifest.max_response_bytes:
+        raise TerminalError('manifest_too_large', 'Normalized output exceeds the declared response byte limit; source metadata was not truncated')
     return response
