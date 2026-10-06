@@ -284,6 +284,8 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       if (response.status !== 200 || !(await readable()).includes(record.source?.corpus_id))
         throw failure(404, "Document introuvable.");
       const current = record.current_version_id ? await version(id, record.current_version_id) : null;
+      // The current Version heads the history, even one read long ago.
+      if (current) history.note(id, current.version_id, current.accepted_at);
       const blobs = [];
       for (const blob of (current?.provenance?.source_blob_ids || []).slice(0, MAX_BLOBS)) {
         const read = await upstream(`/v0/blobs/${encodeURIComponent(blob)}`).catch(() => null);

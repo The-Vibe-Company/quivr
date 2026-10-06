@@ -71,7 +71,8 @@ export function createViews({ feedFor, indexFor, upstream }) {
     /** One SSE stream over the corpora: their items, removals and resets, live when all are. */
     async subscribe(req, res, corpora) {
       const feeds = corpora.map((id) => feedFor(id));
-      await Promise.all(feeds.map((feed) => feed.ready()));
+      // A feed that cannot start refuses the stream, so the browser retries.
+      await Promise.all(feeds.map((feed) => feed.opened()));
       // The browser may have left during the first catalog scan.
       if (req.socket.destroyed || res.destroyed) return;
       if (clients.size >= MAX_CLIENTS)

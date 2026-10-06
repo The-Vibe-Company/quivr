@@ -929,6 +929,10 @@ test("the Veille feed and the Admin tab explain a key without access", async (t)
   const response = await fetch(base + "/demo/feed");
   assert.equal(response.status, 403);
   assert.match((await response.json()).message, /changements/);
+  // The stream is refused too, so the browser retries instead of waiting.
+  const stream = await fetch(base + "/demo/feed/stream", { signal: AbortSignal.timeout(3000) });
+  assert.equal(stream.status, 403);
+  await stream.body?.cancel();
   // The Admin tab says which right its key lacks.
   const admin = await fetch(base + "/demo/admin");
   assert.equal(admin.status, 403);
