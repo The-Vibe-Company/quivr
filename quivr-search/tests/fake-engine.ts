@@ -9,6 +9,8 @@ import type { Page, Route } from "@playwright/test";
 // The facade's own counting, over this workspace's articles.
 import { feedStats, filterOf, sourceStats } from "../stats.mjs";
 import { topics } from "../topics.mjs";
+// The facade's reading of fields and facet values (THE-1171).
+import { COMMON_FIELDS, fieldValues, sampleValues } from "../explore.mjs";
 
 const minutes = (n: number) => new Date(Date.now() - n * 60000).toISOString();
 /** A local time `n` days ago, at that hour. */
@@ -33,6 +35,11 @@ export interface Article {
   updated_at?: string;
   /** The Version a correction replaced. */
   previous?: { version_id: string; title: string; body: string };
+  /** Its corpus, when not the demo corpus. */
+  corpus_id?: string;
+  /** Its common metadata (quivr.metadata) and its corpus's own extension. */
+  metadata?: Record<string, unknown>;
+  own?: Record<string, unknown>;
 }
 
 const article = (
@@ -151,7 +158,30 @@ export function workspace() {
     article("market", "Dépêches exemple", 0, "Le marché couvert rouvre ses portes", "Après travaux, le marché couvert rouvre ce matin.", ["commerce"], { received_at: daysAgo(3, 8) }),
     article("archive", "Dépêches exemple", 0, "Les archives municipales numérisées", "Les archives municipales sont désormais consultables en ligne.", ["culture"], { received_at: daysAgo(5, 10) }),
   ];
-  return { articles, incoming, alerts, connectors, archive };
+  // A second corpus the demo reads, with a field of its own (desk), for the
+  // Explorer and the feed's corpus picker.
+  const wire = (id: string, age: number, title: string, body: string, metadata: Record<string, unknown>, desk: string, extra: Partial<Article> = {}) =>
+    article(id, "Agence exemple", age, title, body, [], { corpus_id: "wires", metadata, own: { desk }, link: undefined, ...extra });
+  const wires: Article[] = [
+    wire("wport", 30, "Port reopens after three-day closure", "Traffic resumed at the port on Monday after a three-day closure.", { language: "en", subjects: ["transport"], published_at: daysAgo(0, 6) }, "economy", { previous: { version_id: "ver_wport_0", title: "Port remains closed for a third day", body: "Traffic is still halted at the port for a third day." } }),
+    wire("wgrain", 90, "Récolte de blé : les prix reculent", "Les prix du blé reculent après une récolte abondante.", { language: "fr", subjects: ["agriculture"], published_at: daysAgo(1, 9) }, "economy"),
+    wire("wcup", 150, "Cup final moved to Sunday", "The cup final has been moved to Sunday because of the storms.", { language: "en", subjects: ["sport"], published_at: daysAgo(1, 7) }, "sport"),
+    wire("wvote", 260, "Le conseil vote le budget", "Le conseil a voté le budget de l’année prochaine.", { language: "fr", subjects: ["politique"], published_at: daysAgo(2, 11) }, "politics"),
+  ];
+  const wireIncoming: Article[] = [
+    wire("wflash", 0, "Flash : le tunnel rouvre à la circulation", "Le tunnel rouvre à la circulation ce soir.", { language: "fr", subjects: ["transport"] }, "economy"),
+  ];
+  const corpora = [
+    { corpus_id: "demo", name: "Espace démo", demo: true, common: COMMON_FIELDS, own: [] },
+    {
+      corpus_id: "wires",
+      name: "Dépêches d’agence",
+      demo: false,
+      common: COMMON_FIELDS,
+      own: [{ name: "desk", type: "string", source_pointer: "/extensions/wire.item/data/desk" }],
+    },
+  ];
+  return { articles, incoming, alerts, connectors, archive, wires, wireIncoming, corpora };
 }
 
 export type Workspace = ReturnType<typeof workspace>;
@@ -160,6 +190,7 @@ const feedItem = (a: Article) => {
   const item: Record<string, unknown> = {
     record_id: a.record_id,
     version_id: a.version_id,
+    corpus_id: a.corpus_id || "demo",
     namespace: a.namespace,
     title: a.title,
     excerpt: a.body.slice(0, 200),
@@ -222,6 +253,8 @@ export interface Engine {
   };
   /** Sends the next incoming article on the live stream. */
   arrive: () => Article;
+  /** Sends the next incoming article of the second corpus on the live stream. */
+  arriveWire: () => Article;
   close: () => Promise<void>;
 }
 
@@ -256,12 +289,69 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     capped: false,
     created_at: "created_at" in a ? a.created_at : undefined,
   });
-  const stored = () => [...ws.articles, ...ws.archive];
-  const find = (id: string) => stored().find((a) => a.record_id === id);
+  // Every stored article of the corpora asked (the demo corpus by default).
+  const stored = (corpora = ["demo"]) => [
+    ...(corpora.includes("demo") ? [...ws.articles, ...ws.archive] : []),
+    ...(corpora.includes("wires") ? ws.wires : []),
+  ];
+  const find = (id: string) => stored(["demo", "wires"]).find((a) => a.record_id === id);
+  // A Version as the engine returns it: its text, metadata and own fields.
+  const versionOf = (a: Article, version_id = a.version_id) => {
+    const shown = a.previous?.version_id === version_id ? a.previous : a;
+    const parts =
+      a.namespace === "web-demo"
+        ? [{ key: "text", role: "body", content: { kind: "text", text: shown.body } }]
+        : [
+            { key: "title", role: "title", content: { kind: "text", text: shown.title } },
+            { key: "body", role: "body", content: { kind: "text", text: shown.body } },
+          ];
+    const extensions: Record<string, unknown> = {
+      "quivr.metadata": { schema_version: "1", data: { language: "fr", ...a.metadata } },
+    };
+    if (a.own) extensions["wire.item"] = { schema_version: "1", data: a.own };
+    return {
+      record_id: a.record_id,
+      version_id: shown.version_id,
+      accepted_at: shown === a ? a.received_at : minutes(24 * 60),
+      manifest: { parts },
+      extensions,
+      provenance: { source_blob_ids: a.corpus_id ? [`blob_${a.record_id}`] : [], producer: a.corpus_id ? "wire-normalizer" : "rss" },
+      availability: { state: "retrieval_ready", searchable: true, is_current: shown === a },
+    };
+  };
+  // The corpora a facade request picks (?corpora=), the demo corpus by default.
+  const pickedOf = (url: URL) => (url.searchParams.get("corpora") || "demo").split(",");
+  const inCorpora = (corpora: string[]) => [
+    ...(corpora.includes("demo") ? ws.articles : []),
+    ...(corpora.includes("wires") ? ws.wires : []),
+  ];
+  // Like the engine: a predicate on a field a corpus lacks excludes it.
+  const explore = (url: URL) => {
+    const corpora = pickedOf(url);
+    const predicates: { field: string; any_of?: unknown[]; gte?: string; lte?: string }[] = JSON.parse(
+      url.searchParams.get("metadata") || "[]",
+    );
+    const fieldsOf = (id: string) => {
+      const c = ws.corpora.find((x) => x.corpus_id === id)!;
+      return [...c.common, ...c.own];
+    };
+    const excluded = corpora
+      .map((id) => ({ corpus_id: id, fields: predicates.map((p) => p.field).filter((f) => !fieldsOf(id).some((x) => x.name === f)) }))
+      .filter((e) => e.fields.length);
+    const kept = inCorpora(corpora.filter((id) => !excluded.some((e) => e.corpus_id === id))).filter((a) =>
+      predicates.every((p) => {
+        const field = fieldsOf(a.corpus_id || "demo").find((f) => f.name === p.field)!;
+        const values = fieldValues(versionOf(a), field);
+        if (p.any_of) return values.some((v: unknown) => p.any_of!.includes(v));
+        return values.some((v: unknown) => (!p.gte || String(v) >= p.gte) && (!p.lte || String(v) <= p.lte));
+      }),
+    );
+    return { corpora, kept: kept.sort((a, b) => arrived(b) - arrived(a)), excluded };
+  };
   const arrived = (a: Article) => Date.parse(a.received_at!);
   // What the facade's index holds: every article, dated, and what alerts caught.
-  const rows = () =>
-    stored().map((a) => ({ record_id: a.record_id, version_id: a.version_id, namespace: a.namespace, at: arrived(a) }));
+  const rows = (corpora?: string[]) =>
+    stored(corpora).map((a) => ({ record_id: a.record_id, version_id: a.version_id, namespace: a.namespace, at: arrived(a) }));
   const catchesOf = () => {
     const out = new Map<string, string[]>();
     for (const a of ws.alerts)
@@ -284,14 +374,65 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     if (path === "/demo/session")
       return json(route, { corpus_id: "demo", name: "Espace démo" });
     if (path === "/demo/feed")
-      return json(route, { items: ws.articles.map(feedItem), live: true });
+      return json(route, { items: inCorpora(pickedOf(url)).map(feedItem), live: true });
+    if (path === "/demo/corpora") return json(route, { items: ws.corpora });
+    if (path === "/demo/explore") {
+      const { kept, excluded } = explore(url);
+      const start = Number(url.searchParams.get("cursor") || 0);
+      return json(route, {
+        items: kept.slice(start, start + 3).map((a) => {
+          const v = versionOf(a);
+          const c = ws.corpora.find((x) => x.corpus_id === (a.corpus_id || "demo"))!;
+          const metadata: Record<string, unknown[]> = {};
+          for (const f of [...c.common, ...c.own]) {
+            const values = fieldValues(v, f);
+            if (values.length) metadata[f.name] = values;
+          }
+          return { ...feedItem(a), metadata };
+        }),
+        next_cursor: start + 3 < kept.length ? String(start + 3) : undefined,
+        ...(excluded.length ? { excluded_corpora: excluded } : {}),
+      });
+    }
+    if (path === "/demo/explore/facets") {
+      const { corpora, kept } = explore(url);
+      const own = corpora.length === 1 ? ws.corpora.find((c) => c.corpus_id === corpora[0])!.own : [];
+      return json(route, {
+        fields: sampleValues(kept.map((a) => versionOf(a)), [...COMMON_FIELDS, ...own]),
+        counted: false,
+        sample: kept.length,
+      });
+    }
+    const explored = path.match(/^\/demo\/explore\/records\/([\w-]+)$/);
+    if (explored) {
+      const a = find(explored[1]);
+      if (!a) return json(route, { message: "Document introuvable." }, 404);
+      const corpus = ws.corpora.find((c) => c.corpus_id === (a.corpus_id || "demo"));
+      return json(route, {
+        record: {
+          record_id: a.record_id,
+          source: { corpus_id: corpus!.corpus_id, namespace: a.namespace, record_key: `key-${a.record_id}` },
+          withdrawn: false,
+          current_version_id: a.version_id,
+        },
+        version: versionOf(a),
+        versions: [
+          { version_id: a.version_id, accepted_at: a.received_at },
+          ...(a.previous ? [{ version_id: a.previous.version_id, accepted_at: minutes(24 * 60) }] : []),
+        ],
+        corpus,
+        blobs: a.corpus_id
+          ? [{ blob_id: `blob_${a.record_id}`, size_bytes: 3172, sha256: "c0ffee".repeat(10) + "abcd", media_type: "application/vnd.iptc.g2.newsitem+xml" }]
+          : [],
+      });
+    }
     // Like the facade: Quivr's counts per period, and a day newest first,
     // two articles a page so that paging shows.
     if (path === "/demo/feed/days") {
       const bounds = (url.searchParams.get("bounds") || "").split(",").map(Date.parse);
       if (bounds.some((b, i) => Number.isNaN(b) || (i > 0 && b >= bounds[i - 1])))
         return json(route, { message: "Cette période n’est pas valide." }, 422);
-      const all = stored();
+      const all = stored(pickedOf(url));
       return json(route, {
         total: all.length,
         days: bounds.slice(1).map(
@@ -307,7 +448,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       if (Number.isNaN(after) || Number.isNaN(before) || after >= before)
         return json(route, { message: "Cette période n’est pas valide." }, 422);
       const start = Number(url.searchParams.get("cursor") || 0);
-      const day = stored()
+      const day = stored(pickedOf(url))
         .filter((a) => arrived(a) >= after && arrived(a) < before)
         .sort((a, b) => arrived(b) - arrived(a));
       return json(route, {
@@ -318,7 +459,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     if (path === "/demo/feed/stats" && method === "POST")
       return json(route, {
         ...feedStats(
-          rows(),
+          rows(pickedOf(url)),
           {
             after: instant(body.after),
             before: instant(body.before),
@@ -346,8 +487,8 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
         },
         catchesOf(),
       );
-      const all = rows();
-      const titles = stored()
+      const all = rows(pickedOf(url));
+      const titles = stored(pickedOf(url))
         .filter((_, i) => keep(all[i]))
         .map((a) => a.title);
       return json(route, { items: topics(titles, 10), building: false });
@@ -371,7 +512,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       const typed = words(body.query);
       const meaning = new Set(typed.flatMap((w) => MEANINGS[w] || []));
       const hits = [];
-      for (const a of ws.articles) {
+      for (const a of inCorpora(body.corpus_ids)) {
         if (sources && !sources.includes(a.namespace)) continue;
         const text = words(`${a.title} ${a.body}`);
         const literal = typed.some((w) => text.some((t) => t.startsWith(w)));
@@ -393,8 +534,8 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       }
       if (body.mode === "semantic") {
         // The reader's neighbours: articles sharing a topic with the seed's article.
-        const seed = ws.articles.find((a) => body.query.startsWith(a.title));
-        const related = ws.articles.filter(
+        const seed = inCorpora(body.corpus_ids).find((a) => body.query.startsWith(a.title));
+        const related = inCorpora(body.corpus_ids).filter(
           (a) => seed && a !== seed && a.topics.some((t) => seed.topics.includes(t)),
         );
         return json(route, {
@@ -441,20 +582,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     if (version) {
       const a = find(version[1]);
       if (!a) return json(route, { message: "Document introuvable." }, 404);
-      const shown = a.previous?.version_id === version[2] ? a.previous : a;
-      const parts =
-        a.namespace === "web-demo"
-          ? [{ key: "text", role: "body", content: { kind: "text", text: shown.body } }]
-          : [
-              { key: "title", role: "title", content: { kind: "text", text: shown.title } },
-              { key: "body", role: "body", content: { kind: "text", text: shown.body } },
-            ];
-      return json(route, {
-        record_id: a.record_id,
-        version_id: shown.version_id,
-        manifest: { parts },
-        availability: { state: "retrieval_ready", searchable: true, is_current: true },
-      });
+      return json(route, versionOf(a, version[2]));
     }
     if (path === "/demo/alerts" && method === "GET") {
       const matched: Record<string, string[]> = {};
@@ -646,6 +774,14 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       const next = ws.incoming.shift()!;
       next.received_at = new Date().toISOString();
       ws.articles.unshift(next);
+      const frame = `event: item\ndata: ${JSON.stringify(feedItem(next))}\n\n`;
+      for (const res of streams) res.write(frame);
+      return next;
+    },
+    arriveWire() {
+      const next = ws.wireIncoming.shift()!;
+      next.received_at = new Date().toISOString();
+      ws.wires.unshift(next);
       const frame = `event: item\ndata: ${JSON.stringify(feedItem(next))}\n\n`;
       for (const res of streams) res.write(frame);
       return next;

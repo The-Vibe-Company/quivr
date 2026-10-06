@@ -336,7 +336,11 @@ mark {
   position: sticky;
   top: 0;
   z-index: 20;
-  display: flex;
+  /* The title at the left, the search in the middle, the page's main
+     action at the right: both sides share the rest, so the search stays
+     centred and gives way first when the bar is short. */
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 460px) minmax(max-content, 1fr);
   align-items: center;
   gap: 11px;
   /* The hairline lines up with the rail's separator under the logo, and the
@@ -372,11 +376,47 @@ mark {
 .shell[data-view="admin"] .bar-view {
   display: none;
 }
+.bar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0;
+}
+.bar-meta:empty {
+  display: none;
+}
+.bar-meta .list-count[data-tone="warn"] {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.bar-actions {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.bar-actions:empty {
+  display: none;
+}
+.bar-meta[data-stale],
+.bar-actions[data-stale] {
+  visibility: hidden;
+}
+/* As tall as the search beside it. */
+.bar-actions .button {
+  min-height: 0;
+  height: 36px;
+}
+.bar-meta .list-count {
+  white-space: nowrap;
+}
 .bar-search {
-  flex: 1;
+  grid-column: 2;
   min-width: 0;
-  max-width: 460px;
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -531,9 +571,6 @@ mark {
 }
 .list-count[data-tone="ok"] {
   color: var(--success);
-}
-.list-head .live-badge {
-  margin-left: auto;
 }
 .list-empty {
   padding: 60px 24px;
@@ -1111,10 +1148,18 @@ button.moment-pill:hover {
   padding: 10px 24px 13px 44px;
   background: var(--row-bg);
   cursor: pointer;
-  transition: background 120ms;
+  transition:
+    background 120ms,
+    box-shadow 120ms;
 }
-.row:hover {
-  --row-bg: var(--panel);
+/* The row under the pointer stands out from the feed in either theme: a
+   shade of the ink over the feed, and a hairline around it. A touch screen
+   has no pointer resting on a row: the last row tapped stays as it was. */
+@media (hover: hover) {
+  .row:hover {
+    --row-bg: color-mix(in srgb, var(--ink) 7%, var(--feed-bg));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
 }
 /* Rows off screen skip style, layout and paint, which a long feed otherwise
    redoes on each click. The row under the pointer or the focus is not
@@ -2374,17 +2419,34 @@ button.moment-pill:hover {
     width: 42px;
     height: 46px;
   }
+  /* The title and the page's action on one line, the search under them. */
   .bar {
-    flex-wrap: wrap;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
     height: auto;
     margin: 0 12px;
     padding: 12px 0;
   }
+  .bar-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  /* The action keeps its name for screen readers, and only its "+" on screen. */
+  .bar-actions .alerts-new {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+  .bar-action-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   .bar-search {
-    flex-basis: 100%;
-    max-width: none;
-    margin-left: 0;
+    grid-column: 1 / -1;
   }
   .bar-kbd {
     display: none;
@@ -2755,25 +2817,6 @@ button.moment-pill:hover {
   --chip-bg: color-mix(in srgb, var(--ink) 6%, var(--panel));
   --well: color-mix(in srgb, var(--panel) 55%, var(--page));
 }
-.alerts-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-  padding: 6px 0 0;
-}
-.alerts-head h2 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.5px;
-}
-.alerts-head h2:focus {
-  outline: none;
-}
-.alerts-head .live-badge {
-  margin-left: auto;
-}
 .alerts-new {
   display: inline-flex;
   align-items: center;
@@ -2793,6 +2836,12 @@ button.moment-pill:hover {
 }
 .alerts-new svg {
   color: var(--rail-accent);
+}
+/* The lists a removal hands the focus to: the ring inside, where their
+   frames do not clip it. */
+.alerts-table:focus-visible,
+.source-cards:focus-visible {
+  outline-offset: -3px;
 }
 .alerts-table-wrap,
 .alert-sheet,
@@ -3772,12 +3821,6 @@ button.caught-title:hover {
   gap: 14px;
   padding: 2px 0 24px;
 }
-.sources-page .alerts-head h2:focus {
-  outline: none;
-}
-.sources-page .list-count {
-  font-size: inherit;
-}
 .source-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -4144,7 +4187,7 @@ button.caught-title:hover {
     transform: none;
   }
 }
-/* The count of sources beside the page title. */
+/* A page’s count, beside its title in the top bar. */
 .head-count {
   display: inline-grid;
   place-items: center;
@@ -4157,13 +4200,6 @@ button.caught-title:hover {
   font-size: 13px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
-}
-.sources-page .list-count[data-tone="warn"] {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--warning) 12%, transparent);
-  font-size: 13px;
-  font-weight: 600;
 }
 @media (forced-colors: active) {
   .sc-spark span,
@@ -4403,4 +4439,30 @@ button.caught-title:hover {
 }
 .plug-spark .spark-idle {
   fill: transparent;
+}
+
+/* Several corpora in the feed (THE-1171): each row names its corpus, and a
+   filter that left corpora out says which. */
+.row-corpus {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--tint);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.exclusion-note {
+  margin: 12px 22px 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--warn-bg);
+  box-shadow: inset 3px 0 0 var(--warn-line);
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.5;
 }

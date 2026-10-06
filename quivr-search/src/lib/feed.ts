@@ -6,6 +6,8 @@ import { request } from "./search";
 export interface FeedItem {
   record_id: string;
   version_id: string;
+  /** The corpus it belongs to. */
+  corpus_id?: string;
   /** Source namespace: a Connector Instance's, or HAND_NAMESPACE. */
   namespace: string;
   title: string;
@@ -25,14 +27,21 @@ export interface FeedItem {
 /** Texts added from this web app use this namespace. */
 export const HAND_NAMESPACE = "web-demo";
 
-export const fetchFeed = (signal?: AbortSignal) =>
+/**
+ * A facade path for the corpora the feed follows: `scope` is their ids
+ * joined by commas, or "" for the demo corpus alone.
+ */
+export const scoped = (path: string, scope: string) =>
+  scope ? `${path}${path.includes("?") ? "&" : "?"}corpora=${encodeURIComponent(scope)}` : path;
+
+export const fetchFeed = (scope: string, signal?: AbortSignal) =>
   request<{ items: FeedItem[]; live: boolean }>(
-    "/demo/feed",
+    scoped("/demo/feed", scope),
     undefined,
     signal,
   );
 
-export const FEED_STREAM = "/demo/feed/stream";
+export const feedStream = (scope: string) => scoped("/demo/feed/stream", scope);
 
 type Dates = Pick<FeedItem, "record_id" | "received_at" | "published_at">;
 const sortKey = (item: Dates) => item.received_at || item.published_at || "";
@@ -46,10 +55,11 @@ export const newestFirst = (a: Dates, b: Dates) =>
 export const fetchFeedPage = (
   bounds: { after: string; before: string },
   cursor: string | undefined,
+  scope: string,
   signal?: AbortSignal,
 ) =>
   request<{ items: FeedItem[]; next_cursor?: string }>(
-    `/demo/feed/page?${new URLSearchParams({ ...bounds, ...(cursor ? { cursor } : {}) })}`,
+    scoped(`/demo/feed/page?${new URLSearchParams({ ...bounds, ...(cursor ? { cursor } : {}) })}`, scope),
     undefined,
     signal,
   );
@@ -59,9 +69,9 @@ export const fetchFeedPage = (
  * count between each two bounds, how many are older than the last, and
  * when they were counted (the facade keeps them a minute).
  */
-export const fetchFeedDays = (bounds: string[], signal?: AbortSignal) =>
+export const fetchFeedDays = (bounds: string[], scope: string, signal?: AbortSignal) =>
   request<{ total: number; days: number[]; older: number; as_of: string }>(
-    `/demo/feed/days?${new URLSearchParams({ bounds: bounds.join(",") })}`,
+    scoped(`/demo/feed/days?${new URLSearchParams({ bounds: bounds.join(",") })}`, scope),
     undefined,
     signal,
   );

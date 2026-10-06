@@ -104,7 +104,8 @@ export function Reader({
 }: {
   doc: Doc;
   item?: FeedItem;
-  corpus: string;
+  /** The corpora articles on the same subject are searched in. */
+  corpus: string | string[];
   terms: string[];
   caught: Alert[];
   feedById: Map<string, FeedItem>;

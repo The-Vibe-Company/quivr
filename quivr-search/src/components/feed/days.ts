@@ -30,7 +30,7 @@ export interface DayCounts {
  * Articles per day, from today back to the first article. Read once, then
  * every minute and whenever `refresh` is called (the date menu opens).
  */
-export function useDayCounts(today: string, onUnauthorized: () => void) {
+export function useDayCounts(today: string, scope: string, onUnauthorized: () => void) {
   const [counts, setCounts] = useState<DayCounts | null>(null);
   const [ask, setAsk] = useState(0);
   const fetched = useRef(0);
@@ -49,7 +49,7 @@ export function useDayCounts(today: string, onUnauthorized: () => void) {
           dayBounds(first).before,
           ...list.map((day) => dayBounds(day).after),
         ];
-        const answer = await fetchFeedDays(bounds, controller.signal);
+        const answer = await fetchFeedDays(bounds, scope, controller.signal);
         if (!chunk) {
           total = answer.total;
           asOf = answer.as_of;
@@ -68,7 +68,7 @@ export function useDayCounts(today: string, onUnauthorized: () => void) {
       // Otherwise the menu keeps the last counts, or the loaded articles'.
     });
     return () => controller.abort();
-  }, [today, ask]);
+  }, [today, ask, scope]);
   useEffect(() => {
     const timer = setInterval(() => setAsk((n) => n + 1), REFRESH_MS);
     return () => clearInterval(timer);
@@ -98,7 +98,7 @@ export function useLiveSince(items: FeedItem[]) {
 }
 
 /** The articles of one day ("" for none), newest first, a page at a time. */
-export function useDayItems(day: string, onUnauthorized: () => void) {
+export function useDayItems(day: string, scope: string, onUnauthorized: () => void) {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [next, setNext] = useState<string | undefined>();
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -114,7 +114,7 @@ export function useDayItems(day: string, onUnauthorized: () => void) {
     if (!run || loading.current) return;
     loading.current = true;
     setStatus("loading");
-    fetchFeedPage(dayBounds(run.day), cursor, run.controller.signal)
+    fetchFeedPage(dayBounds(run.day), cursor, scope, run.controller.signal)
       .then((page) => {
         if (current.current !== run) return;
         setItems((shown) => {
@@ -137,7 +137,7 @@ export function useDayItems(day: string, onUnauthorized: () => void) {
       .finally(() => {
         if (current.current === run) loading.current = false;
       });
-  }, []);
+  }, [scope]);
 
   useEffect(() => {
     setItems([]);

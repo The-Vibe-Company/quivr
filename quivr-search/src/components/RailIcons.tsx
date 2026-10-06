@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
  * news, radar-2, antenna, chart-dots-3, search, plus, sun, moon, calendar,
  * chevron-down, chevron-up, chevrons-right, external-link, check, eye,
  * eye-off, blockquote, brain, pencil, dots, trending-up, trending-down,
- * activity et checks.
+ * activity, checks, stack-2 et list-search.
  * Dessinées au trait, elles prennent la couleur du texte.
  */
 function Icon({ size = 22, children }: { size?: number; children: ReactNode }) {
@@ -215,5 +215,23 @@ export const ChecksIcon = ({ size = 16 }: { size?: number }) => (
   <Icon size={size}>
     <path d="M7 12l5 5l10 -10" />
     <path d="M2 12l5 5m5 -5l5 -5" />
+  </Icon>
+);
+
+export const CorpusIcon = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M12 4l-8 4l8 4l8 -4l-8 -4" />
+    <path d="M4 12l8 4l8 -4" />
+    <path d="M4 16l8 4l8 -4" />
+  </Icon>
+);
+
+export const ExplorerIcon = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M11 15a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" />
+    <path d="M18.5 18.5l2.5 2.5" />
+    <path d="M4 6h16" />
+    <path d="M4 12h4" />
+    <path d="M4 18h4" />
   </Icon>
 );

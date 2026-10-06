@@ -43,6 +43,13 @@ export interface SearchResponse {
   items: SearchResult[];
   retrieval_profile: { name: string; version: string };
   usage?: SearchUsage;
+  /** Corpora a filter on a field they lack left out of the search. */
+  excluded_corpora?: Exclusion[];
+}
+/** A corpus a filter left out, and the fields it lacks, as the engine says. */
+export interface Exclusion {
+  corpus_id: string;
+  fields: string[];
 }
 export interface SearchProfile {
   name: string;
