@@ -55,7 +55,11 @@ func TestRebuildMeasurement(t *testing.T) {
 			if len(store.covered) != 2000 || d.derived != 2000 || !store.activated {
 				t.Fatalf("coverage=%d calls=%d activated=%v", len(store.covered), d.derived, store.activated)
 			}
-			t.Logf("versions=2000 concurrency=%d elapsed_seconds=%.3f versions_per_second=%.3f calls=%d", concurrency, elapsed.Seconds(), 2000/elapsed.Seconds(), d.derived)
+			effective := concurrency
+			if effective == 0 {
+				effective = retrieval.DefaultRebuildConcurrency
+			}
+			t.Logf("versions=2000 configured_concurrency=%d effective_concurrency=%d elapsed_seconds=%.3f versions_per_second=%.3f calls=%d", concurrency, effective, elapsed.Seconds(), 2000/elapsed.Seconds(), d.derived)
 		})
 	}
 }

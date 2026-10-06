@@ -138,7 +138,9 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 	}
 	group, work := errgroup.WithContext(ctx)
 	group.SetLimit(concurrency)
-	for _, c := range candidates {
+	// Each goroutine owns its outcome slot; read only after the join.
+	outcomes := make([]error, len(candidates))
+	for i, c := range candidates {
 		if work.Err() != nil {
 			break
 		}
@@ -147,24 +149,32 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 			if err := work.Err(); err != nil {
 				return err
 			}
-			return r.cover(work, org, target, c)
+			outcomes[i] = r.cover(work, org, target, c)
+			return outcomes[i]
 		})
 	}
 	// Join every effect before settling, comparing progress, or retrying. The
 	// store fences canonical effects and idempotently counts committed coverage.
 	err = group.Wait()
-	var failure terminal
-	if errors.As(err, &failure) {
-		// Use the parent context: the group's context is canceled after Wait.
-		// A failure never overrides an earlier cancellation request.
-		if err = r.Store.FailRebuild(ctx, org, operationID, failure.failure); err != nil {
-			return false, err
+	// The first transient error cancels work, but cannot hide a cancellation
+	// or deterministic failure another candidate already observed.
+	for _, outcome := range outcomes {
+		if errors.Is(outcome, operations.ErrNotRunning) {
+			return r.stop(ctx, org, operationID)
 		}
-		return r.stop(ctx, org, operationID)
 	}
-	if errors.Is(err, operations.ErrNotRunning) {
-		return r.stop(ctx, org, operationID)
+	for _, outcome := range outcomes {
+		var failure terminal
+		if errors.As(outcome, &failure) {
+			// Use the parent context: the group context is canceled after Wait.
+			// The store preserves an earlier cancellation request over this failure.
+			if err = r.Store.FailRebuild(ctx, org, operationID, failure.failure); err != nil {
+				return false, err
+			}
+			return r.stop(ctx, org, operationID)
+		}
 	}
+
 	if err != nil {
 		return false, err
 	}

@@ -521,11 +521,12 @@ func TestRebuildCoversVersionsConcurrentlyWithinTheLimit(t *testing.T) {
 // recording failure or retrying. A parent cancellation has the same join rule.
 type interruptedRebuildDeriver struct {
 	fakeDeriver
-	entered  chan string
-	fail     <-chan struct{}
-	cleanup  <-chan struct{}
-	canceled chan string
-	cause    error
+	entered     chan string
+	fail        <-chan struct{}
+	cleanup     <-chan struct{}
+	canceled    chan string
+	cause       error
+	afterCancel error
 }
 
 func (d *interruptedRebuildDeriver) Derive(ctx context.Context, _, _ string, v content.Version, _ content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
@@ -537,18 +538,25 @@ func (d *interruptedRebuildDeriver) Derive(ctx context.Context, _, _ string, v c
 	<-ctx.Done()
 	d.canceled <- v.ID
 	<-d.cleanup
+	if v.ID == "1" && d.afterCancel != nil {
+		return content.Segmentation{}, nil, d.afterCancel
+	}
 	return content.Segmentation{}, nil, ctx.Err()
 }
 func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 	outage := errors.New("provider unavailable")
 	for _, tc := range []struct {
-		name  string
-		cause error
-		code  string
+		name        string
+		cause       error
+		code        string
+		afterCancel error
+		canceled    bool
 	}{
-		{"outage", outage, ""},
-		{"terminal", content.ErrIngestionRefused, "ingestion_refused"},
-		{"context", nil, ""},
+		{name: "outage", cause: outage},
+		{name: "terminal", cause: content.ErrIngestionRefused, code: "ingestion_refused"},
+		{name: "context"},
+		{name: "terminal precedence", cause: outage, afterCancel: content.ErrIngestionRefused, code: "ingestion_refused"},
+		{name: "cancellation precedence", cause: outage, afterCancel: operations.ErrNotRunning, canceled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -560,7 +568,7 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 				store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: fmt.Sprint(i), VectorsRequired: true})
 			}
 			fail, cleanup := make(chan struct{}), make(chan struct{})
-			d := &interruptedRebuildDeriver{entered: make(chan string, 9), fail: fail, cleanup: cleanup, canceled: make(chan string, 3), cause: tc.cause}
+			d := &interruptedRebuildDeriver{entered: make(chan string, 9), fail: fail, cleanup: cleanup, canceled: make(chan string, 3), cause: tc.cause, afterCancel: tc.afterCancel}
 			r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
 			r.Concurrency, r.Plugin = 3, d
 			finished := make(chan error, 1)
@@ -577,6 +585,11 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 				siblings = 3
 				cancel()
 			} else {
+				if tc.canceled {
+					store.mu.Lock()
+					store.state = operations.StateCancelRequested
+					store.mu.Unlock()
+				}
 				close(fail)
 			}
 			for range siblings {
@@ -604,7 +617,11 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 			case <-watchdog.Done():
 				t.Fatal("Step did not return after candidates joined")
 			}
-			if tc.code != "" {
+			if tc.canceled {
+				if err != nil || store.state != operations.StateCanceled || store.confirms != 1 || len(store.failed) != 0 {
+					t.Fatalf("cancellation err=%v state=%s confirms=%d failures=%v", err, store.state, store.confirms, store.failed)
+				}
+			} else if tc.code != "" {
 				if err != nil || len(store.failed) != 1 || store.failed[0].Code != tc.code {
 					t.Fatalf("terminal err=%v failures=%v", err, store.failed)
 				}

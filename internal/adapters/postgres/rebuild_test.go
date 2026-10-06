@@ -149,8 +149,9 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	if got := candidates(x1.VersionID); !got[0].VectorsRequired {
 		t.Fatalf("vector coverage not required: %+v", got)
 	}
-	// Concurrent workers and retries can submit the same coverage. Real SQL
-	// must count each Version and embedding once even when those commits race.
+	// Concurrent workers and retries can submit the same coverage. Journal
+	// and Operation locks serialize commits; duplicate submissions must count
+	// each Version and embedding once.
 	var covers errgroup.Group
 	covers.SetLimit(8)
 	for range 8 {
