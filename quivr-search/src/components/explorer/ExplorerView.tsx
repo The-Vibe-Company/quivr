@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { MagnifyingGlass, X } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
-import { fieldLabel, type Corpus, type Exclusion, type Field } from "../../lib/corpora";
+import { COMMON_TYPES, fieldLabel, type Corpus, type Exclusion, type Field } from "../../lib/corpora";
 import {
   countLabel,
   fetchExplore,
@@ -101,11 +101,18 @@ export function ExplorerView({
   // Every field of the corpora read, for its type: the picked corpora's
   // first, so a name two corpora share takes the type of the one browsed.
   const types = useMemo(() => {
-    const out = new Map<string, Field["type"]>();
+    // The common fields' types are known before the corpora are read.
+    const out = new Map<string, Field["type"]>(COMMON_TYPES);
     const order = [...corpora].sort(
       (a, b) => Number(!picked.includes(a.corpus_id)) - Number(!picked.includes(b.corpus_id)),
     );
-    for (const c of order) for (const f of [...c.common, ...c.own]) if (!out.has(f.name)) out.set(f.name, f.type);
+    const own = new Set<string>();
+    for (const c of order)
+      for (const f of [...c.common, ...c.own])
+        if (!own.has(f.name)) {
+          own.add(f.name);
+          out.set(f.name, f.type);
+        }
     return out;
   }, [corpora, picked]);
   const predicates = useMemo(
@@ -219,7 +226,7 @@ export function ExplorerView({
   // How many documents the corpora picked hold, once each is counted.
   const counted = corpora.filter((c) => picked.includes(c.corpus_id));
   const documents =
-    counted.length === picked.length && counted.every((c) => c.documents !== undefined)
+    counted.length === new Set(picked).size && counted.every((c) => c.documents !== undefined)
       ? counted.reduce((n, c) => n + c.documents!, 0)
       : undefined;
   const fresh = facets?.key === facetsKey ? facets : null;

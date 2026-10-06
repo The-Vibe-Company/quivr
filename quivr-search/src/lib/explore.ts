@@ -148,9 +148,14 @@ const typed = (value: Scalar, type?: Field["type"]): Scalar =>
  */
 export function predicatesOf(selection: Selection, types: Map<string, Field["type"]>, range?: Range) {
   const out = Object.entries(selection)
-    // A date value that is not a period cannot bound one: it is left out.
-    .filter(([field, values]) =>
-      values.length && field !== TIMELINE_FIELD && (types.get(field) !== "datetime" || PERIOD.test(String(values[0]))),
+    // A field of unknown type cannot be filtered on yet, and a date value
+    // that is not a period cannot bound one: both are left out.
+    .filter(
+      ([field, values]) =>
+        values.length &&
+        field !== TIMELINE_FIELD &&
+        types.has(field) &&
+        (types.get(field) !== "datetime" || PERIOD.test(String(values[0]))),
     )
     .map(([field, values]): MetadataFilter =>
       types.get(field) === "datetime"

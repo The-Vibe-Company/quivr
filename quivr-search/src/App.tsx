@@ -331,6 +331,7 @@ function Dashboard({
     const controller = new AbortController();
     fetchCorpora(controller.signal)
       .then((list) => {
+        if (controller.signal.aborted) return;
         setAllCorpora(list.items);
         // A corpus the address names that the demo no longer reads is dropped.
         const known = new Set(list.items.map((c) => c.corpus_id));

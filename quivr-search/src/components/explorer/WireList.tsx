@@ -61,9 +61,10 @@ export function WireList({
     if (groups.at(-1)?.key !== key) groups.push({ key, label: dayLabel(at), items: [] });
     groups.at(-1)!.items.push(item);
   }
-  // The row previewed, when loaded; a document restored from the address
-  // and not loaded yet marks none, and the keys start from the first row.
-  const current = selected && items.some((i) => i.record_id === selected) ? selected : undefined;
+  // The row previewed: the one selected when loaded, else the first; a
+  // document restored from the address and not loaded yet marks none, and
+  // the keys start from the first row.
+  const current = !selected ? items[0]?.record_id : items.some((i) => i.record_id === selected) ? selected : undefined;
   const stop = current || items[0]?.record_id;
 
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {

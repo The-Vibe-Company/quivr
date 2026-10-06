@@ -539,15 +539,14 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
         items: (
           await Promise.all(
             (await readable()).map(async (id) => {
-              const [described, count] = await Promise.all([
-                corpus(id).catch((error) => {
-                  if (error.status !== 404) return fallback(id);
-                  console.warn(`Explorer: corpus ${id} is not readable with the demo's key.`);
-                  return null;
-                }),
-                documents(id),
-              ]);
-              return described && (count === undefined ? described : { ...described, documents: count });
+              const described = await corpus(id).catch((error) => {
+                if (error.status !== 404) return fallback(id);
+                console.warn(`Explorer: corpus ${id} is not readable with the demo's key.`);
+                return null;
+              });
+              if (!described) return null;
+              const count = await documents(id);
+              return count === undefined ? described : { ...described, documents: count };
             }),
           )
         ).filter(Boolean),
