@@ -1,5 +1,6 @@
 """Scoring pins one nDCG convention and pairs systems per query (needs ranx; the lane installs it)."""
 import importlib.util
+import random
 import unittest
 
 import scoring
@@ -21,6 +22,20 @@ class Score(unittest.TestCase):
         self.assertAlmostEqual(s['mean']['ndcg@10'], 0.8597 / 3, places=4)
         self.assertAlmostEqual(s['mean']['recall@10'], 1 / 3)
         self.assertAlmostEqual(s['mean']['mrr@10'], 1 / 3)
+        # Independent oracle guards the fixed scorer's gain, cutoff, empty
+        # results, unjudged hits and duplicate-document semantics.
+        from ranx import Qrels, Run, evaluate
+        rng = random.Random(0)
+        qrels.update({f'q{i:03}': {f'd{j}': rng.randrange(4) for j in range(25)} for i in range(200)})
+        ranking.update({q: rng.choices([f'd{j}' for j in range(35)], k=rng.randrange(30))
+                        for q in qrels if q not in ('q1', 'q2', 'q3')})
+        qrels['q-zero'], ranking['q-zero'] = {'d0': 0}, ['d0']
+        run = Run({q: {d: 1 / (i + 1) for i, d in enumerate(ranking.get(q, []))} for q in qrels})
+        evaluate(Qrels(qrels), run, ['ndcg@10', 'recall@10', 'mrr@10'], threads=1)
+        actual = scoring.score(qrels, ranking)
+        for metric in ('ndcg@10', 'recall@10', 'mrr@10'):
+            for query in qrels:
+                self.assertAlmostEqual(actual['per_query'][metric][query], run.scores[metric][query], places=12)
 
     def test_paired_t_test_over_common_queries(self):
         c = scoring.paired({'a': 0.5, 'b': 0.6, 'c': 0.9, 'only-here': 1.0}, {'a': 0.4, 'b': 0.4, 'c': 0.4})

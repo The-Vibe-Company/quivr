@@ -112,7 +112,7 @@ class Lifecycle(unittest.TestCase):
         self.store.register(self.value, 'a' * 40, 'sha256:fixture')
 
     def test_cleanup_failure_preserves_report_and_watchdog_drains_before_next_trial(self):
-        for failure in ('stop', 'slot-outage'):
+        for failure in ('stop', 'slot-outage', 'overrun'):
             with self.subTest(failure=failure):
                 self.assert_cleanup_recovery(failure)
 
@@ -138,7 +138,7 @@ class Lifecycle(unittest.TestCase):
         study.enqueue_trial({'dense_weight': .2})
         study.enqueue_trial({'dense_weight': .8})
         apps, measurements, waits = {}, [], []
-        fail_cleanup = True
+        fail_cleanup = failure != 'overrun'
         release_slot = control_store.Store.release_slot
         lost_release = []
         def release(store, campaign, slot):
@@ -182,7 +182,9 @@ class Lifecycle(unittest.TestCase):
                         'metrics': {**row['metrics'], 'ndcg@10': .65}, 'per_query': {'ndcg@10': {'q1': .65}}}
             row['provenance'] = {'public_pair': {
                 'baseline_lease_key': request['lease_key'] + '/' + request['owner'] + '/baseline'}}
-            return search_trial.publish_pair(self.store, request, {'baseline': baseline, 'candidate': row})
+            row = search_trial.publish_pair(self.store, request, {'baseline': baseline, 'candidate': row})
+            return {'row': row, 'compute': {'reservation': request.get('modal_reservation', 'unavailable'),
+                'execution_seconds': request['policy']['max_seconds'] + 1 if failure == 'overrun' else 1}}
         def retry(delay):
             nonlocal fail_cleanup
             waits.append(delay)
@@ -207,6 +209,17 @@ class Lifecycle(unittest.TestCase):
              mock.patch('subprocess.check_output', side_effect=lambda args, **kw: b'' if 'ls-files' in args else 'a' * 40), \
              mock.patch('control_store.Store.release_slot', autospec=True, side_effect=release), \
              mock.patch('campaign_reporting.Notifications.send'), mock.patch('time.sleep', side_effect=retry):
+            if failure == 'overrun':
+                status = search_campaign.supervise(self.store, name, study, temp)
+                self.assertEqual(status['stopped'], 'usage exceeded reservation')
+                self.assertEqual(len(measurements), 1, 'no second dataset or trial after an overrun')
+                self.assertEqual(len(apps), 1)
+                report = status['trials'][0]['report']
+                self.assertEqual(report['status'], 'capped')
+                self.assertEqual(len(report['evidence']), 2)
+                self.assertEqual(report['aggregate_sets'][measurements[0]['dataset']]['candidate']['ndcg_at_10'], .7)
+                self.assertFalse(status['cleanup_pending'])
+                return
             if failure == 'slot-outage':
                 with self.assertRaises(network_recovery.Outage):
                     search_campaign.supervise(self.store, name, study, temp)

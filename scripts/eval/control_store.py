@@ -479,6 +479,33 @@ class Store:
         return rid
 
     @retry_contention
+    def start_modal_attempt(self, rid, lease):
+        """Infrastructure restarts reserve again before doing measurement work.
+
+        An interrupted attempt keeps its full unknown charge. Modal can retry
+        preempted inputs even when application retries are disabled.
+        """
+        with self.transaction() as db:
+            row = db.execute('SELECT campaign FROM eval_control.reservations WHERE id=%s AND kind=\'modal\'', (rid,)).fetchone()
+            if not row:
+                raise ValueError('unknown Modal reservation')
+            name = row[0]
+            policy, stopped = self.lock(db, name)
+            if self.terminal(db, name, policy, stopped):
+                raise embeddings.BudgetExceeded('campaign stopped or ended')
+            self.fence(db, name, *lease)
+            amount, metadata, settled = db.execute('SELECT reserved_usd,metadata,settled FROM eval_control.reservations WHERE id=%s', (rid,)).fetchone()
+            for fence in metadata.get('extra_leases', []):
+                self.fence(db, name, *fence)
+            if settled:
+                raise ValueError('Modal reservation already settled')
+            if not metadata.get('execution_started'):
+                db.execute('UPDATE eval_control.reservations SET metadata=metadata||\'{"execution_started":true}\'::jsonb WHERE id=%s', (rid,))
+                return rid
+        return self.reserve(name, 'modal', amount, {**metadata, 'restarted_from': rid}, lease,
+                            extra_leases=metadata.get('extra_leases', []))
+
+    @retry_contention
     def settle(self, rid, usd, metadata=None):
         amount, exceeded = money(usd), False
         with self.transaction() as db:
@@ -509,6 +536,29 @@ class Store:
         """Read canonical evidence without claiming missing measurement keys."""
         keys = lease_batch(keys)
         return self._evidence(name, keys)
+
+    @retry_contention
+    def reusable_evidence(self, name, source, key):
+        """Read a completed measurement from an explicitly selected campaign.
+
+        Admission limits may change; every measurement-affecting policy field
+        and its code/scorer identity must still match. Stopped sources are valid.
+        """
+        scheduling = ['provider_daily_usd', 'modal_daily_usd', 'provider_total_usd', 'modal_total_usd',
+                      'max_seconds', 'startup_seconds', 'end_at', 'confirmation_limit',
+                      'agent_token_usage', 'reuse_campaign']
+        with self.transaction() as db:
+            current, _ = self.lock(db, name)
+            row = db.execute('SELECT l.payload FROM eval_control.leases l JOIN eval_control.campaigns c ON c.name=l.campaign WHERE l.campaign=%s AND l.key=%s AND l.payload IS NOT NULL AND c.policy-%s::text[]=%s::jsonb-%s::text[]',
+                             (source, key, scheduling, json.dumps(current), scheduling)).fetchone()
+            if row is None:
+                return None
+            payload = row[0]
+            pair = payload.get('provenance', {}).get('private_pair') or payload.get('provenance', {}).get('public_pair')
+            if pair and not db.execute('SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND payload IS NOT NULL',
+                                       (source, pair['baseline_lease_key'])).fetchone():
+                return None
+        return payload
 
     @retry_contention
     def _evidence(self, name, keys):

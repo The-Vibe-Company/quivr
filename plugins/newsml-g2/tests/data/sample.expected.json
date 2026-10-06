@@ -20,23 +20,6 @@
         }
       },
       {
-        "key": "headline-2",
-        "role": "title",
-        "content": {
-          "kind": "text",
-          "text": "Ouverture du port"
-        },
-        "extensions": {
-          "newsml-g2.text": {
-            "schema_version": "1",
-            "data": {
-              "language": "fr",
-              "dir": "ltr"
-            }
-          }
-        }
-      },
-      {
         "key": "slugline-1",
         "role": "body",
         "content": {
@@ -49,6 +32,23 @@
             "data": {
               "language": "ar",
               "dir": "rtl"
+            }
+          }
+        }
+      },
+      {
+        "key": "headline-2",
+        "role": "body",
+        "content": {
+          "kind": "text",
+          "text": "Ouverture du port"
+        },
+        "extensions": {
+          "newsml-g2.text": {
+            "schema_version": "1",
+            "data": {
+              "language": "fr",
+              "dir": "ltr"
             }
           }
         }
