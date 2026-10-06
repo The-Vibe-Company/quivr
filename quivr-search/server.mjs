@@ -23,6 +23,8 @@ const password = process.env.DEMO_PASSWORD;
 const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || 5183);
 const secure = process.env.DEMO_SECURE_COOKIE === "true";
+// Tests only: how long the Admin tab reuses a read of the engine's rollups.
+const statsMs = Number(process.env.DEMO_STATS_MS);
 if (!core || !key || (!password && host !== "127.0.0.1"))
   throw new Error(
     "Configure QUIVR_API_URL, QUIVR_API_KEY and DEMO_PASSWORD for public serving",
@@ -173,6 +175,7 @@ const adminFor = (corpus) =>
     upstream,
     corpus,
     follow: (watcher) => feedFor(corpus).watch(watcher),
+    statsMs: statsMs > 0 ? statsMs : undefined,
   }));
 const alerts = alertRoutes({
   upstream: (...args) => upstream(...args),

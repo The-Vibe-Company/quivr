@@ -3,8 +3,10 @@ import { test, expect } from "@playwright/test";
 // The Goulots and Plugins sections against the real core (make verify-demo,
 // THE-797): a text added through the facade is timed at each step by the
 // worker's rollups, and the ingestion plugin that cut it shows as healthy
-// with its calls. It opens the Admin tab only once the text is searchable, so
-// the section's first read already holds its timings. Synthetic content only.
+// with its calls. It opens the Admin tab only once the timings can be read:
+// a searchable text is not timed yet, since each process writes its timings
+// at its flush interval and the section reads them once on opening.
+// Synthetic content only.
 const run = Date.now().toString(36);
 
 test.beforeEach(async ({ page }) => {
@@ -50,6 +52,20 @@ test("un texte ajouté est chronométré à chaque étape, et le plugin d’inge
         ).availability?.searchable,
     )
     .toBe(true);
+  await expect
+    .poll(async () => {
+      const { items = [] } = await (
+        await page.request.get("/demo/admin/stats/steps?window=1h")
+      ).json();
+      return ["materialized", "segmented", "retrieval_ready"].filter(
+        (step) =>
+          !items.some(
+            (s: { step: string; summary: { count: number } }) =>
+              s.step === step && s.summary.count > 0,
+          ),
+      );
+    }, { message: "steps not timed yet" })
+    .toEqual([]);
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/?view=admin");
