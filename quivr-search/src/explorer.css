@@ -108,7 +108,8 @@
   display: flex;
   align-items: stretch;
   cursor: crosshair;
-  touch-action: none;
+  /* A horizontal drag picks a range; a vertical swipe still scrolls the page. */
+  touch-action: pan-y;
   user-select: none;
 }
 .timeline-empty {

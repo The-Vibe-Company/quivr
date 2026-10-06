@@ -95,6 +95,9 @@ const TITLES: Record<View, string> = {
   admin: "Admin",
 };
 
+// The keys the Explorer keeps in the address (lib/explore.ts writeState).
+const EXPLORER_KEYS = ["q", "f", "range", "window", "sort", "selected"];
+
 function urlState() {
   const p = new URLSearchParams(location.search);
   const view = p.get("view") || "";
@@ -294,9 +297,13 @@ function Dashboard({
   const [record, setRecord] = useState<string | null>(initial.explored);
   // The Explorer's own part of the address: its search, filters, range and
   // the document it previews (THE-1204).
-  const [explorerParams, setExplorerParams] = useState(() =>
-    initial.view === "explorer" ? location.search : "",
-  );
+  const [explorerParams, setExplorerParams] = useState(() => {
+    const own = new URLSearchParams();
+    if (initial.view === "explorer")
+      for (const [key, value] of new URLSearchParams(location.search))
+        if (EXPLORER_KEYS.includes(key)) own.append(key, value);
+    return own.toString();
+  });
   const scope = scopeOf(feedCorpora, corpus);
   const searchRef = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -405,11 +412,12 @@ function Dashboard({
         (event.key === "/" && !typing) ||
         ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k")
       ) {
-        event.preventDefault();
         // The Explorer has its own search field, in place of the bar's.
         const field = document.querySelector<HTMLInputElement>("#explorer-search") || searchRef.current;
-        field?.focus();
-        field?.select();
+        if (!field) return;
+        event.preventDefault();
+        field.focus();
+        field.select();
       }
     };
     window.addEventListener("keydown", listener);
@@ -565,7 +573,8 @@ function Dashboard({
           {/* A page's own figures beside its title: its count, what needs a look. */}
           <span className="bar-meta" ref={setBarMeta} data-stale={view !== page || undefined} />
         </span>
-        {view !== "explorer" && (
+        {/* The Explorer's list has its own search field; its document page keeps the bar's. */}
+        {(view !== "explorer" || record) && (
         <form
           role="search"
           className="bar-search"

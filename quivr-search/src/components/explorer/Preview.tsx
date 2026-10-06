@@ -57,20 +57,28 @@ export function Preview({
     return () => controller.abort();
   }, [id, attempt, onUnauthorized]);
 
-  // The earlier Versions, each read once per document shown.
+  // The earlier Versions, each read once per document shown; one that
+  // cannot be read says so and can be asked again.
+  const [failed, setFailed] = useState<Set<string>>(new Set());
+  const [again, setAgain] = useState(0);
   useEffect(() => {
-    if (!detail) return;
+    // The document left behind while the new one loads is not read again.
+    if (!detail || detail.record.record_id !== id) return;
     const controller = new AbortController();
+    setFailed(new Set());
     for (const { version_id } of detail.versions.slice(0, MAX_VERSIONS))
       if (version_id !== detail.version?.version_id)
         fetchVersion(id, version_id, controller.signal)
-          .then((v) => setRead((known) => new Map(known).set(v.version_id, v)))
+          .then((v) => {
+            if (!controller.signal.aborted) setRead((known) => new Map(known).set(v.version_id, v));
+          })
           .catch((e) => {
             if (controller.signal.aborted) return;
-            if (e instanceof APIError && e.status === 401) onUnauthorized();
+            if (e instanceof APIError && e.status === 401) return onUnauthorized();
+            setFailed((known) => new Set(known).add(version_id));
           });
     return () => controller.abort();
-  }, [id, detail, onUnauthorized]);
+  }, [id, detail, again, onUnauthorized]);
   const versions = (detail?.versions || []).slice(0, MAX_VERSIONS);
 
   if (error)
@@ -146,13 +154,22 @@ export function Preview({
                 <span className="preview-version-n">v{n}</span>
                 {v.accepted_at && <time dateTime={v.accepted_at}>{dayLabel(v.accepted_at)} · {timeLabel(v.accepted_at)}</time>}
                 <span className="preview-version-change">
-                  {!before && n === 1
-                    ? "première version"
-                    : !before
-                      ? "versions plus anciennes non lues"
-                      : mine && theirs
-                        ? changeSummary(theirs, mine)
-                        : "…"}
+                  {!before && n === 1 ? (
+                    "première version"
+                  ) : !before ? (
+                    "versions plus anciennes non lues"
+                  ) : mine && theirs ? (
+                    changeSummary(theirs, mine)
+                  ) : failed.has(v.version_id) || failed.has(before.version_id) ? (
+                    <>
+                      changements illisibles pour l’instant{" "}
+                      <button type="button" className="link-button" onClick={() => setAgain((n) => n + 1)}>
+                        Réessayer
+                      </button>
+                    </>
+                  ) : (
+                    "…"
+                  )}
                 </span>
               </li>
             );

@@ -49,15 +49,21 @@ export function Timeline({
     : [];
   const most = Math.max(1, ...counts.values());
   const bars = useRef<HTMLDivElement>(null);
-  // A drag in progress: the bar it started on and the one under the pointer.
-  const [drag, setDrag] = useState<{ anchor: number; at: number } | null>(null);
+  // A drag in progress: the period it started on and the one under the
+  // pointer, by name, so new counts arriving meanwhile cannot shift it.
+  const [drag, setDrag] = useState<{ anchor: string; at: string } | null>(null);
   const [focused, setFocused] = useState<string>();
 
   const between = (i: number, j: number): Range => ({
     from: periods[Math.min(i, j)],
     to: periods[Math.max(i, j)],
   });
-  const picked = drag ? between(drag.anchor, drag.at) : range;
+  // A drag over periods no longer drawn is dropped.
+  const dragged =
+    drag && periods.includes(drag.anchor) && periods.includes(drag.at)
+      ? between(periods.indexOf(drag.anchor), periods.indexOf(drag.at))
+      : undefined;
+  const picked = dragged || range;
   const indexAt = (x: number) => {
     const box = bars.current?.getBoundingClientRect();
     if (!box || !periods.length) return -1;
@@ -74,17 +80,18 @@ export function Timeline({
     const i = indexAt(event.clientX);
     if (i < 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    setDrag({ anchor: i, at: i });
+    setDrag({ anchor: periods[i], at: periods[i] });
   };
   const move = (event: PointerEvent<HTMLDivElement>) => {
     if (!drag) return;
     const i = indexAt(event.clientX);
-    if (i >= 0 && i !== drag.at) setDrag({ ...drag, at: i });
+    if (i >= 0 && periods[i] !== drag.at) setDrag({ ...drag, at: periods[i] });
   };
   const up = (event: PointerEvent<HTMLDivElement>) => {
     if (!drag) return;
     setDrag(null);
-    onRange(event.shiftKey && drag.anchor === drag.at ? extend(drag.at) : between(drag.anchor, drag.at));
+    if (!dragged) return;
+    onRange(event.shiftKey && drag.anchor === drag.at ? extend(periods.indexOf(drag.at)) : dragged);
   };
   // One stop in the tab order: ← → Début Fin move along the bars.
   const current = focused && periods.includes(focused) ? focused : periods.find((p) => range && overlaps(p, range)) || periods.at(-1);
@@ -102,7 +109,9 @@ export function Timeline({
     buttons[Math.max(0, Math.min(buttons.length - 1, to))]?.focus();
   };
 
-  const wider = range && periods.filter((p) => overlaps(p, range)).length > 1;
+  // A range can be zoomed into unless it is one day already drawn alone.
+  const zoomable =
+    !!range && (periods.filter((p) => overlaps(p, range)).length > 1 || interval !== "day");
   return (
     <section className="timeline" aria-label="Chronologie" data-stale={stale || undefined}>
       <div className="timeline-head">
@@ -118,7 +127,7 @@ export function Timeline({
           )}
         </p>
         <div className="timeline-actions">
-          {range && wider && (!shown || rangeLabel(shown) !== rangeLabel(range)) && (
+          {range && zoomable && (!shown || rangeLabel(shown) !== rangeLabel(range)) && (
             <button type="button" className="link-button" onClick={() => onWindow(range)}>
               Zoomer sur la période
             </button>
@@ -138,7 +147,7 @@ export function Timeline({
             role="group"
             aria-label={`Documents ${STEP[interval]}`}
             data-tips
-            data-dragging={drag ? true : undefined}
+            data-dragging={dragged ? true : undefined}
             onPointerDown={down}
             onPointerMove={move}
             onPointerUp={up}

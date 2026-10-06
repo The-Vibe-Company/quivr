@@ -173,9 +173,20 @@ export interface ExplorerState {
   selected: string | null;
 }
 
+// A period that names a real day: "2026-02-31" does not.
+const real = (period: string) => periodBounds(period).gte.slice(0, period.length) === period;
+
 const rangeOf = (raw: string | null): Range | undefined => {
   const [from, to, ...rest] = (raw || "").split("..");
-  return !rest.length && from && to && PERIOD.test(from) && PERIOD.test(to) && from.length === to.length && from <= to
+  return !rest.length &&
+    from &&
+    to &&
+    PERIOD.test(from) &&
+    PERIOD.test(to) &&
+    from.length === to.length &&
+    real(from) &&
+    real(to) &&
+    from <= to
     ? { from, to }
     : undefined;
 };
@@ -280,6 +291,8 @@ export function shortPeriod(period: string, withYear = true) {
 /** "3 – 5 oct. 2026", "sept. – oct. 2026", or one period alone. */
 export function rangeLabel({ from, to }: Range) {
   if (from === to) return shortPeriod(from);
+  // Two days of one month name it once: "3 – 5 oct. 2026".
+  if (from.length === 10 && from.slice(0, 7) === to.slice(0, 7)) return `${Number(from.slice(8))} – ${shortPeriod(to)}`;
   return `${shortPeriod(from, from.slice(0, 4) !== to.slice(0, 4))} – ${shortPeriod(to)}`;
 }
 

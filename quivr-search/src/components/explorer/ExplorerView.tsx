@@ -28,6 +28,8 @@ import "../../explorer.css";
 // Below this width the page is one column and a row opens its document.
 const NARROW = "(max-width: 1099px)";
 const SEARCH_DELAY_MS = 300;
+// A search shows its best documents, this many at most (explore.mjs).
+const SEARCH_LIMIT = 50;
 
 const narrowQuery = () => window.matchMedia(NARROW);
 const subscribeNarrow = (change: () => void) => {
@@ -117,8 +119,11 @@ export function ExplorerView({
   // The corpora the facets were read for: others picked, their fields go at once.
   const facetsFor = useRef("");
 
+  // Filters restored from the address wait for the fields' types.
+  const typed = corpora.length > 0 || !Object.keys(state.selection).length;
+
   useEffect(() => {
-    if (record) return;
+    if (record || !typed) return;
     const controller = new AbortController();
     reads.current = controller;
     setStatus("loading");
@@ -136,10 +141,10 @@ export function ExplorerView({
       });
     return () => controller.abort();
     // The key holds the corpora, the predicates and the text.
-  }, [listKey, attempt, record, onUnauthorized]);
+  }, [listKey, attempt, record, typed, onUnauthorized]);
 
   useEffect(() => {
-    if (record) return;
+    if (record || !typed) return;
     const controller = new AbortController();
     const corporaKey = picked.join(",");
     if (facetsFor.current !== corporaKey) {
@@ -157,7 +162,7 @@ export function ExplorerView({
       });
     return () => controller.abort();
     // The key holds the corpora, the predicates and the span shown.
-  }, [facetsKey, attempt, record, onUnauthorized]);
+  }, [facetsKey, attempt, record, typed, onUnauthorized]);
 
   const loadMore = () => {
     const controller = reads.current;
@@ -209,9 +214,12 @@ export function ExplorerView({
   const nameOf = (id?: string) => corpora.find((c) => c.corpus_id === id)?.name || id || "";
   const single = picked.length === 1 ? corpora.find((c) => c.corpus_id === picked[0]) : undefined;
   const all = corpora.length > 0 && corpora.every((c) => picked.includes(c.corpus_id));
-  const documents = corpora
-    .filter((c) => picked.includes(c.corpus_id))
-    .reduce<number | undefined>((n, c) => (n === undefined || c.documents === undefined ? undefined : n + c.documents), 0);
+  // How many documents the corpora picked hold, once each is counted.
+  const counted = corpora.filter((c) => picked.includes(c.corpus_id));
+  const documents =
+    counted.length === picked.length && counted.every((c) => c.documents !== undefined)
+      ? counted.reduce((n, c) => n + c.documents!, 0)
+      : undefined;
   const fresh = facets?.key === facetsKey ? facets : null;
   const picks = Object.entries(state.selection).flatMap(([field, values]) => values.map((value) => ({ field, value })));
   const active = picks.length + (state.range ? 1 : 0);
@@ -220,15 +228,18 @@ export function ExplorerView({
   const timeline = facets?.fields.find((f) => f.field === TIMELINE_FIELD);
   const items = useMemo(() => {
     const list = page?.items || [];
-    // Newest first by the date each row shows; a search's own order on request.
-    return state.q && state.sort === "relevance"
-      ? list
-      : [...list].sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
+    // The list comes newest first, page after page; a search comes by
+    // relevance, its hits sorted by date on request.
+    if (!state.q || state.sort === "relevance") return list;
+    const at = (item: (typeof list)[number]) => Date.parse(dateOf(item)) || 0;
+    return [...list].sort((a, b) => at(b) - at(a));
   }, [page, state.q, state.sort]);
   const previewed = state.selected || items[0]?.record_id || null;
   const count = state.q
     ? status === "ready" && page
-      ? `${countLabel(page.items.length)} résultat${page.items.length > 1 ? "s" : ""}`
+      ? page.items.length >= SEARCH_LIMIT
+        ? `${countLabel(page.items.length)} premiers résultats`
+        : `${countLabel(page.items.length)} résultat${page.items.length > 1 ? "s" : ""}`
       : ""
     : !predicates.length && documents !== undefined
       ? `${countLabel(documents)} document${documents > 1 ? "s" : ""}`

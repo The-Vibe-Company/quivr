@@ -365,17 +365,25 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
     if (response.status === 403 || response.status === 404) throw failure(404, "Corpus introuvable.");
     if (response.status !== 200) throw failure(503, "Le moteur est momentanément indisponible. Réessayez.");
     const data = response.data;
-    // How many documents it holds, for the corpus switcher; a count the
-    // engine cannot give now is left out.
-    const counted = await upstream(`/v0/records/count?corpus_id=${encodeURIComponent(id)}`).catch(() => null);
     const value = {
       corpus_id: id,
       name: data.name || (id === demo() ? "Espace démo" : id),
       demo: id === demo(),
-      ...(counted?.status === 200 && Number.isInteger(counted.data?.count) ? { documents: counted.data.count } : {}),
       ...fieldsOf(data),
     };
     corpora.set(id, { at: Date.now(), value });
+    return value;
+  }
+
+  // How many documents a corpus holds, for the corpus switcher only, read
+  // again after a minute; a count the engine cannot give now is left out.
+  const counts = new Map();
+  async function documents(id) {
+    const known = counts.get(id);
+    if (known && Date.now() - known.at < CORPUS_TTL_MS) return known.value;
+    const response = await upstream(`/v0/records/count?corpus_id=${encodeURIComponent(id)}`).catch(() => null);
+    const value = response?.status === 200 && Number.isInteger(response.data?.count) ? response.data.count : undefined;
+    if (value !== undefined) counts.set(id, { at: Date.now(), value });
     return value;
   }
 
@@ -525,13 +533,17 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       return {
         items: (
           await Promise.all(
-            (await readable()).map((id) =>
-              corpus(id).catch((error) => {
-                if (error.status !== 404) return fallback(id);
-                console.warn(`Explorer: corpus ${id} is not readable with the demo's key.`);
-                return null;
-              }),
-            ),
+            (await readable()).map(async (id) => {
+              const [described, count] = await Promise.all([
+                corpus(id).catch((error) => {
+                  if (error.status !== 404) return fallback(id);
+                  console.warn(`Explorer: corpus ${id} is not readable with the demo's key.`);
+                  return null;
+                }),
+                documents(id),
+              ]);
+              return described && (count === undefined ? described : { ...described, documents: count });
+            }),
           )
         ).filter(Boolean),
       };

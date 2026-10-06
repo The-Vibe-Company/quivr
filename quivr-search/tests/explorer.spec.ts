@@ -136,6 +136,11 @@ test("la chronologie choisit une période en glissant, et l’adresse garde la v
   await expect(bar.nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect(rows(page).nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(preview(page).getByRole("heading", { level: 2 })).toHaveText("Le conseil vote le budget");
+
+  // The period's pill removes the range.
+  await pills(page).getByRole("button", { name: /^Période :/ }).click();
+  await expect(bar.nth(1)).toHaveAttribute("aria-pressed", "false");
+  await expect(page).not.toHaveURL(/range=/);
 });
 
 test("le clavier parcourt la liste, l’aperçu montre les versions, Entrée ouvre le document", async ({ page }) => {
