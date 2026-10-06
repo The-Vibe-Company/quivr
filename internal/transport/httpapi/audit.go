@@ -83,6 +83,11 @@ func (a *API) serveSensitive(w http.ResponseWriter, r *http.Request) {
 	}
 	buffered := &auditResponse{header: make(http.Header)}
 	buffered.header.Set("X-Request-ID", event.RequestID)
+	for _, name := range []string{"X-Trace-ID", "X-Span-ID"} {
+		if id := w.Header().Get(name); id != "" {
+			buffered.header.Set(name, id)
+		}
+	}
 	err := a.Audit.Record(ctx, &event, func(work context.Context) error {
 		work = audit.WithTargetRecorder(work, func(targetType, targetID string) {
 			event.TargetType = boundedAuditID(targetType)
