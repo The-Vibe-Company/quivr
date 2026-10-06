@@ -650,6 +650,7 @@ test("the Veille feed scans the catalog, relays live Records newest first and ne
   assert.deepEqual(snapshot.items[0], {
     record_id: "rec_rss",
     version_id: "v_rss",
+    corpus_id: "demo",
     namespace: "wire",
     title: "Feed headline",
     excerpt: "Body of the article",
@@ -928,6 +929,10 @@ test("the Veille feed and the Admin tab explain a key without access", async (t)
   const response = await fetch(base + "/demo/feed");
   assert.equal(response.status, 403);
   assert.match((await response.json()).message, /changements/);
+  // The stream is refused too, so the browser retries instead of waiting.
+  const stream = await fetch(base + "/demo/feed/stream", { signal: AbortSignal.timeout(3000) });
+  assert.equal(stream.status, 403);
+  await stream.body?.cancel();
   // The Admin tab says which right its key lacks.
   const admin = await fetch(base + "/demo/admin");
   assert.equal(admin.status, 403);
@@ -1266,4 +1271,221 @@ test("the demo's numbers count every article of the corpus, beyond the feed's la
   // Topics cover a week or a day: a longer period would read too many titles.
   const long = new URLSearchParams({ after: iso(now - 9 * DAY), before: iso(now) });
   assert.equal((await fetch(`${base}/demo/feed/topics?${long}`)).status, 422);
+});
+
+test("the corpora the demo reads: search, feed and Explorer span them, any other is refused", async (t) => {
+  // Two corpora read (demo, wires), one not (private). wires maps its own
+  // filterable field, desk; the demo corpus maps none.
+  const corpora = {
+    demo: { corpus_id: "demo", name: "Espace démo", effective_retrieval: { fields: [] } },
+    wires: {
+      corpus_id: "wires",
+      name: "Dépêches",
+      effective_retrieval: {
+        fields: [
+          { name: "desk", type: "string", source_pointer: "/extensions/wire.item/data/desk", roles: ["filter"] },
+          { name: "slug", type: "string", source_pointer: "/extensions/wire.item/data/slug", roles: ["search"] },
+        ],
+      },
+    },
+  };
+  const records = {
+    rec_note: { corpus: "demo", version: "v_note", at: "2026-10-05T08:00:00Z", text: "Port : note du matin", language: "fr" },
+    rec_wire: { corpus: "wires", version: "v_wire2", at: "2026-10-05T09:00:00Z", text: "Port reopens", language: "en", desk: "economy", blobs: ["blob_1"] },
+    rec_secret: { corpus: "private", version: "v_secret", at: "2026-10-05T10:00:00Z", text: "Hidden" },
+  };
+  const version = (id, r, text = r.text) => ({
+    record_id: id,
+    version_id: r.version,
+    accepted_at: r.at,
+    manifest: { parts: [{ key: "title", role: "title", content: { kind: "text", text } }] },
+    extensions: {
+      "quivr.metadata": { schema_version: "1", data: { language: r.language } },
+      ...(r.desk ? { "wire.item": { schema_version: "1", data: { desk: r.desk } } } : {}),
+    },
+    provenance: { source_blob_ids: r.blobs || [] },
+  });
+  const listings = [];
+  const searches = [];
+  const upstream = http.createServer(async (req, res) => {
+    const url = new URL(req.url, "http://x");
+    const json = (status, data) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+    };
+    if (url.pathname === "/v0/changes/stream") {
+      // The second corpus's change stream is down: its feed is not live.
+      if (url.searchParams.get("corpus_id") === "wires") return json(503, { code: "unavailable" });
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(": live\n\n");
+      return;
+    }
+    if (url.pathname === "/v0/changes") return json(200, { items: [], next_cursor: "c0", has_more: false });
+    if (url.pathname === "/v0/search") {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      searches.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      return json(200, { items: [], retrieval_profile: { name: "default", version: "v" } });
+    }
+    const corpus = url.pathname.match(/^\/v0\/corpora\/(\w+)$/);
+    if (corpus) return corpora[corpus[1]] ? json(200, corpora[corpus[1]]) : json(404, { code: "not_found" });
+    if (url.pathname === "/v0/blobs/blob_1")
+      return json(200, { blob_id: "blob_1", size_bytes: 2048, sha256: "ab".repeat(32), media_type: "application/xml" });
+    // Records accepted within the asked bounds, if any.
+    const after = Date.parse(url.searchParams.get("accepted_after") || "") || -Infinity;
+    const before = Date.parse(url.searchParams.get("accepted_before") || "") || Infinity;
+    const within = (r) => Date.parse(r.at) >= after && Date.parse(r.at) < before;
+    if (url.pathname === "/v0/records/count") {
+      const corpus = url.searchParams.get("corpus_id");
+      return json(200, { count: Object.values(records).filter((r) => r.corpus === corpus && within(r)).length });
+    }
+    if (url.pathname === "/v0/records") {
+      listings.push(Object.fromEntries(url.searchParams));
+      const asked = (url.searchParams.get("corpus_ids") || url.searchParams.get("corpus_id")).split(",");
+      const filtered = url.searchParams.has("metadata");
+      return json(200, {
+        items: Object.entries(records)
+          .filter(([, r]) => asked.includes(r.corpus) && within(r) && (!filtered || r.corpus !== "demo"))
+          .sort(([, a], [, b]) => b.at.localeCompare(a.at))
+          .map(([record_id, r]) => ({
+            record_id,
+            source: { corpus_id: r.corpus, namespace: "wire", record_key: record_id },
+            withdrawn: false,
+            current_version_id: r.version,
+          })),
+        ...(filtered && asked.includes("demo") ? { excluded_corpora: [{ corpus_id: "demo", fields: ["desk"] }] } : {}),
+      });
+    }
+    const match = url.pathname.match(/^\/v0\/records\/(\w+)(?:\/versions\/(\w+))?$/);
+    const record = match && records[match[1]];
+    if (!record) return json(404, { code: "not_found" });
+    if (match[2] === "v_wire1") return json(200, version(match[1], { ...record, version: "v_wire1", at: "2026-10-05T07:00:00Z" }, "Port closed"));
+    if (match[2]) return json(200, version(match[1], record));
+    json(200, {
+      record_id: match[1],
+      source: { corpus_id: record.corpus, namespace: "wire", record_key: match[1] },
+      withdrawn: false,
+      current_version_id: record.version,
+    });
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  const base = await startDemo(t, upstream.address().port, { QUIVR_DEMO_CORPORA: "wires" });
+  const get = async (path) => {
+    const response = await fetch(base + path);
+    return { status: response.status, data: await response.json() };
+  };
+
+  // The corpora read, with the common fields and each one's filterable own fields.
+  const listed = (await get("/demo/corpora")).data.items;
+  assert.deepEqual(listed.map((c) => [c.corpus_id, c.name, c.demo]), [["demo", "Espace démo", true], ["wires", "Dépêches", false]]);
+  assert.ok(listed[1].common.some((f) => f.name === "metadata.language"));
+  assert.deepEqual(listed[1].own.map((f) => f.name), ["desk"]);
+
+  // Search spans the corpora read; one more corpus is refused before the core.
+  const search = (corpus_ids) =>
+    fetch(base + "/v0/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: base },
+      body: JSON.stringify({ query: "port", mode: "lexical", limit: 10, corpus_ids }),
+    });
+  assert.equal((await search(["demo", "wires"])).status, 200);
+  assert.equal((await search(["wires", "private"])).status, 403);
+  assert.deepEqual(searches.map((s) => s.corpus_ids), [["demo", "wires"]]);
+
+  // The Explorer lists newest first with the predicates as sent, each row with
+  // its fields' values, and relays the corpora a field excluded.
+  const predicates = [{ field: "desk", any_of: ["economy"] }];
+  const page = await get(`/demo/explore?corpora=demo,wires&metadata=${encodeURIComponent(JSON.stringify(predicates))}`);
+  assert.equal(page.status, 200);
+  assert.deepEqual(listings.at(-1), {
+    corpus_ids: "demo,wires",
+    order: "accepted_at_desc",
+    limit: "25",
+    metadata: JSON.stringify(predicates),
+  });
+  assert.deepEqual(page.data.items.map((i) => [i.record_id, i.corpus_id, i.metadata]), [
+    ["rec_wire", "wires", { "metadata.language": ["en"], desk: ["economy"] }],
+  ]);
+  assert.deepEqual(page.data.excluded_corpora, [{ corpus_id: "demo", fields: ["desk"] }]);
+  // A corpus's own fields are offered only when it is picked alone.
+  const fieldsOf = async (corpora) =>
+    (await get(`/demo/explore/facets?corpora=${corpora}`)).data.fields.map((f) => f.field);
+  assert.ok((await fieldsOf("wires")).includes("desk"));
+  assert.ok(!(await fieldsOf("demo,wires")).includes("desk"));
+  for (const path of [
+    "/demo/explore?corpora=private",
+    "/demo/explore/facets?corpora=wires,private",
+    "/demo/feed?corpora=demo,private",
+  ])
+    assert.equal((await get(path)).status, 403, path);
+  assert.equal((await get(`/demo/explore?metadata=${encodeURIComponent('[{"field":"Bad"}]')}`)).status, 422);
+
+  // One document: its current Version, the Versions the demo read, its
+  // corpus's fields and its source files described. Others are not found.
+  assert.equal((await get("/v0/records/rec_wire/versions/v_wire1")).status, 200);
+  const doc = await get("/demo/explore/records/rec_wire");
+  assert.equal(doc.data.version.version_id, "v_wire2");
+  assert.deepEqual(doc.data.versions.map((v) => v.version_id), ["v_wire2", "v_wire1"]);
+  assert.equal(doc.data.corpus.corpus_id, "wires");
+  assert.deepEqual(doc.data.blobs.map((b) => b.media_type), ["application/xml"]);
+  assert.equal((await get("/demo/explore/records/rec_secret")).status, 404);
+  assert.equal((await get("/v0/records/rec_secret")).status, 404);
+
+  // The feed merges the corpora picked, newest first.
+  const feed = await get("/demo/feed?corpora=demo,wires");
+  assert.deepEqual(feed.data.items.map((i) => [i.record_id, i.corpus_id]), [["rec_wire", "wires"], ["rec_note", "demo"]]);
+  assert.deepEqual((await get("/demo/feed")).data.items.map((i) => i.record_id), ["rec_note"]);
+  // Its numbers too: each corpus's day counts and index summed, one listing
+  // for a day's page, and topics over both corpora's titles.
+  const day = { after: "2026-10-05T00:00:00Z", before: "2026-10-06T00:00:00Z" };
+  const days = await get(`/demo/feed/days?corpora=demo,wires&bounds=${day.before},${day.after}`);
+  assert.deepEqual([days.data.total, days.data.days, days.data.older], [2, [2], 0]);
+  const dayPage = await get(`/demo/feed/page?corpora=demo,wires&after=${day.after}&before=${day.before}`);
+  assert.deepEqual(dayPage.data.items.map((i) => i.record_id), ["rec_wire", "rec_note"]);
+  assert.equal(listings.at(-1).corpus_ids, "demo,wires");
+  const stats = await fetch(base + "/demo/feed/stats?corpora=demo,wires", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: base },
+    body: JSON.stringify({ ...day, buckets: [day.before, day.after], read: "all" }),
+  }).then((r) => r.json());
+  assert.deepEqual([stats.total, stats.buckets, stats.sources.wire], [2, [2], 2]);
+  const topics = await get(`/demo/feed/topics?corpora=demo,wires&after=${day.after}&before=${day.before}`);
+  assert.ok(
+    topics.data.items.some((topic) => topic.label.toLowerCase() === "port" && topic.count === 2),
+    JSON.stringify(topics.data.items),
+  );
+
+  // The merged stream is live only when every corpus's feed is: the demo
+  // corpus's alone goes live, both together stay off while one is down.
+  const statusOf = async (path, wanted) => {
+    const response = await fetch(base + path, { signal: AbortSignal.timeout(5000) });
+    const reader = response.body.getReader();
+    let text = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return undefined;
+        text += new TextDecoder().decode(value);
+        const statuses = [...text.matchAll(/event: status\ndata: (.*)\n/g)].map((m) => JSON.parse(m[1]).live);
+        if (statuses.length && (wanted === undefined || statuses.includes(wanted))) return statuses.at(-1);
+      }
+    } finally {
+      await reader.cancel();
+    }
+  };
+  assert.equal(await statusOf("/demo/feed/stream", true), true);
+  assert.equal(await statusOf("/demo/feed/stream?corpora=demo,wires"), false);
+
+  // Another corpus is read, never written to.
+  const write = await fetch(base + "/v0/records", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: base },
+    body: JSON.stringify({ source: { corpus_id: "wires", namespace: "web-demo", record_key: "k" }, content: { kind: "text", text: "x" } }),
+  });
+  assert.equal(write.status, 403);
 });
