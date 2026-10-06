@@ -6,23 +6,25 @@ import "slices"
 type Feature string
 
 const (
-	FeatureNormalizer           Feature = "normalizer"
-	FeatureSubscription         Feature = "subscription"
-	FeatureConnector            Feature = "connector"
-	FeatureInstanceScope        Feature = "instance_scope"
-	FeatureAttachments          Feature = "attachments"
-	FeaturePush                 Feature = "push"
-	FeatureIngestion            Feature = "ingestion"
-	FeatureRetrieval            Feature = "retrieval"
-	FeatureSegmentsOnly         Feature = "segments_only"
-	FeatureInputPrice           Feature = "input_price"
-	FeatureSubscriptionVectors  Feature = "subscription_vectors"
-	FeatureConnectorAPI         Feature = "connector_api"
-	FeatureConnectorSignature   Feature = "connector_signature"
-	FeatureInstanceToken        Feature = "instance_token"
-	FeatureProfileCandidates    Feature = "profile_candidates"
-	FeatureProfileCandidateMode Feature = "profile_candidate_mode"
-	FeatureSignedCalls          Feature = "signed_calls"
+	FeatureNormalizer                     Feature = "normalizer"
+	FeatureSubscription                   Feature = "subscription"
+	FeatureConnector                      Feature = "connector"
+	FeatureInstanceScope                  Feature = "instance_scope"
+	FeatureAttachments                    Feature = "attachments"
+	FeaturePush                           Feature = "push"
+	FeatureIngestion                      Feature = "ingestion"
+	FeatureRetrieval                      Feature = "retrieval"
+	FeatureSegmentsOnly                   Feature = "segments_only"
+	FeatureInputPrice                     Feature = "input_price"
+	FeatureSubscriptionVectors            Feature = "subscription_vectors"
+	FeatureConnectorAPI                   Feature = "connector_api"
+	FeatureConnectorSignature             Feature = "connector_signature"
+	FeatureInstanceToken                  Feature = "instance_token"
+	FeatureProfileCandidates              Feature = "profile_candidates"
+	FeatureProfileCandidateMode           Feature = "profile_candidate_mode"
+	FeatureSignedCalls                    Feature = "signed_calls"
+	FeatureConnectorSubmissionConcurrency Feature = "connector_submission_concurrency"
+	FeatureConnectorAttachmentOnly        Feature = "connector_attachment_only"
 )
 
 // FeatureDefinition records the public history and manifest admission rules.
@@ -52,6 +54,8 @@ var featureTable = []FeatureDefinition{
 	{FeatureProfileCandidates, "0.12.0", "Profile candidates, declared retrieval dependencies and shared search budgets", "", "/requires"},
 	{FeatureProfileCandidateMode, "0.13.0", "Optional search mode override for profile candidates", "", ""},
 	{FeatureSignedCalls, "0.14.0", "Signed engine requests with per-plugin audience and body digest", "", ""},
+	{FeatureConnectorSubmissionConcurrency, "0.15.0", "Bounded concurrent connector item submissions", "", ""},
+	{FeatureConnectorAttachmentOnly, "0.15.0", "Raw connector Blob input through a source attachment", "", ""},
 }
 
 // FeatureTable returns the introduction history, oldest first.

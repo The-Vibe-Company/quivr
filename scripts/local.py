@@ -10,6 +10,7 @@ import ports
 import subscription_plugin
 import push_plugin
 import connector_plugin
+import archive_source
 import fixture_plugin
 import core_ingest_plugin
 import ingestion_plugin
@@ -201,7 +202,7 @@ class Stack:
             run([str(self.directory/'quivr'),'migrate'],env={**os.environ,'QUIVR_CONFIG':str(self.directory/'config.json')},stdout=log,stderr=log)
     def spawn(self,command,config):
         with (self.directory/(command+'-startup.log')).open('a') as log:
-            p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env={**os.environ,**push_plugin.engine_environment(self),'QUIVR_CONFIG':str(self.directory/config)},stdout=log,stderr=log,start_new_session=True)
+            p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env={**os.environ,**connector_plugin.engine_environment(self,push_plugin.engine_environment(self)),'QUIVR_CONFIG':str(self.directory/config)},stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid)
         if command in ('api','worker'):self.state[command+'_pid']=p.pid
         self.save()
@@ -280,7 +281,7 @@ class Stack:
         cfg=json.loads((self.directory/'config.json').read_text());s=self.state
         short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':SHORT_CHANGE_RETENTION}));short.chmod(0o600)
         with (self.directory/'short-api-startup.log').open('w') as log:
-            p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,**push_plugin.engine_environment(self),'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
+            p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,**connector_plugin.engine_environment(self,push_plugin.engine_environment(self)),'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid);self.save()
         self.await_ready('short_probe_port')
     def stop_processes(self):
@@ -636,6 +637,7 @@ def parts():
             step('connectors',connectors),
             # Connector kinds from a pinned plugin: collect and resume, then a plugin outage and its recovery.
             step('collector_plugin',connector_plugin.verify),
+            step('archive_source',archive_source.verify),
             step('connector_restart',verify_connector_restart),
             step('m365_restart',verify_m365_restart),
             step('x_restart',lambda stack:verify_connector_x_restart(stack,f"http://127.0.0.1:{stack.state['fake_x_port']}")),

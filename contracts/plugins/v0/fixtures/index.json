@@ -2311,6 +2311,189 @@
       "schema_valid": true,
       "errors": [],
       "description": "Valid and rejected engine authentication probes for API 0.14."
+    },
+    {
+      "file": "responses/connector/submission-concurrency-serial.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "The submission concurrency hint is bounded to 1..32."
+    },
+    {
+      "file": "responses/connector/submission-concurrency-maximum.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "The submission concurrency hint is bounded to 1..32."
+    },
+    {
+      "file": "responses/connector/submission-concurrency-zero.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "The submission concurrency hint is bounded to 1..32."
+    },
+    {
+      "file": "responses/connector/submission-concurrency-too-large.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "The submission concurrency hint is bounded to 1..32."
+    },
+    {
+      "file": "responses/connector/submission-concurrency-serial.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "submission_concurrency_unsupported"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector.yaml",
+      "description": "A submission concurrency hint requires Plugin API 0.15 even when its value is one."
+    },
+    {
+      "file": "responses/connector/attachment-only-omitted.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "An attachment alone supplies the Manifest Parts on Plugin API 0.15."
+    },
+    {
+      "file": "responses/connector/attachment-only-empty.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "An attachment alone supplies the Manifest Parts on Plugin API 0.15."
+    },
+    {
+      "file": "responses/connector/attachment-only-omitted.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "attachment_only_unsupported"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-attachments.yaml",
+      "description": "Attachment-only Manifests need Plugin API 0.15."
+    },
+    {
+      "file": "responses/connector/empty-manifest.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "A combined Manifest still needs at least one Part or attachment."
+    },
+    {
+      "file": "responses/connector/receive-empty-manifest.json",
+      "schema": "connector-receive-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_manifest"
+      ],
+      "manifest": "manifests/valid/connector-push.yaml",
+      "description": "A delivery Manifest still needs at least one Part; attachments are unsupported."
+    },
+    {
+      "file": "responses/connector/attachment-only-invalid-multiple.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "Raw input needs exactly one source attachment, without relations, a parent or Part extensions."
+    },
+    {
+      "file": "responses/connector/attachment-only-invalid-relations.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "Raw input needs exactly one source attachment, without relations, a parent or Part extensions."
+    },
+    {
+      "file": "responses/connector/attachment-only-invalid-parent.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "Raw input needs exactly one source attachment, without relations, a parent or Part extensions."
+    },
+    {
+      "file": "responses/connector/attachment-only-invalid-extensions.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "Raw input needs exactly one source attachment, without relations, a parent or Part extensions."
+    },
+    {
+      "file": "responses/connector/attachment-only-invalid-key.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "Raw input needs exactly one source attachment, without relations, a parent or Part extensions."
+    },
+    {
+      "file": "responses/connector/attachment-only-invalid-role.json",
+      "schema": "connector-fetch-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_item"
+      ],
+      "request": "requests/connector/fetch.json",
+      "manifest": "manifests/valid/connector-concurrency.yaml",
+      "description": "Raw input needs exactly one source attachment, without relations, a parent or Part extensions."
     }
   ]
 }

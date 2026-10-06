@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "record_key": "archive/member.xml",
+      "revision": "sha256:member-1",
+      "content": {
+        "kind": "manifest"
+      },
+      "attachments": [
+        {
+          "key": "source",
+          "role": "source",
+          "media_type": "application/xml",
+          "ref": "member:1",
+          "extensions": {
+            "example-feeds": {
+              "schema_version": "1",
+              "data": {
+                "author": "source"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "checkpoint": {
+    "member": 1
+  },
+  "more": false
+}
