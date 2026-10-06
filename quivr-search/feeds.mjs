@@ -14,7 +14,11 @@ const DEADLINE = 10000; // whole discovery, under the facade's 15 s request time
 const MAX_FEEDS = 10;
 const MAX_SUGGESTIONS = 12;
 const MAX_LOGO_BYTES = 512 << 10;
-const MAX_LOGO_TRIES = 6;
+const MAX_LOGO_TRIES = 8;
+const MAX_MANIFEST_BYTES = 64 << 10;
+// A smaller raster icon blurs once enlarged to a logo tile: the next
+// candidate is tried, and without one the page shows the source's initial.
+const MIN_LOGO_PIXELS = 32;
 const FEED_ACCEPT =
   "application/rss+xml, application/atom+xml, application/feed+json, text/html;q=0.9, application/xml;q=0.8, */*;q=0.5";
 const IMAGE_ACCEPT = "image/png, image/webp, image/jpeg, image/gif, image/x-icon;q=0.9, */*;q=0.5";
@@ -264,10 +268,14 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
   }
 
   /**
-   * The logo of the site behind a feed: the icons its home page declares
-   * (apple-touch-icon first), then the feed's own image, then the usual
-   * /apple-touch-icon.png and /favicon.ico. Only raster images are kept,
-   * recognised by their first bytes; null when none answers.
+   * The logo of the site behind a feed: the icons of the web app manifest its
+   * home page declares (app icons, the largest), then the icons the page
+   * itself declares (apple-touch-icon first), then the feed's own image, then
+   * the usual /apple-touch-icon.png and /favicon.ico. A home page that refuses
+   * (a bot or consent wall) is replaced by the feed's first article, which
+   * declares the same icons. Raster images are recognised by their first
+   * bytes, and one under 32 px is passed over; an SVG only when served as one
+   * and free of scripts. Null when none answers.
    */
   async function logo(raw) {
     const started = Date.now();
@@ -278,8 +286,13 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
     const home = links.site || new URL("/", feed.url);
     if (!page)
       page = await follow(home.href, started).catch(() => null);
+    if ((!page || page.status >= 400) && links.article)
+      page = await follow(links.article.href, started).catch(() => null);
+    const read = page && page.status < 400 ? page : null;
+    const manifest = read && pageManifest(read.body, read.url);
     const candidates = [
-      ...(page && page.status < 400 ? pageIcons(page.body, page.url) : []),
+      ...(manifest ? await manifestIcons(manifest, started) : []),
+      ...(read ? pageIcons(read.body, read.url) : []),
       ...(links.image ? [links.image] : []),
     ];
     for (const origin of new Set([home.origin, feed.url.origin]))
@@ -291,13 +304,53 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
       tried.add(url.href);
       try {
         const image = await follow(url.href, started, IMAGE_ACCEPT, MAX_LOGO_BYTES);
-        const type = image.status < 300 && imageType(image.bytes);
-        if (type) return { type, bytes: image.bytes };
+        const type = image.status < 300 && imageType(image.bytes, image.type);
+        const size = type && rasterSize(image.bytes, type);
+        if (type && !(size && Math.min(size.width, size.height) < MIN_LOGO_PIXELS))
+          return { type, bytes: image.bytes };
       } catch {
         // Too large, refused or unreachable: try the next one.
       }
     }
     return null;
+  }
+
+  /**
+   * The icons a web app manifest lists, best first: vector or "any" size,
+   * then the largest. A manifest's icons resolve against its own address,
+   * whose query a site may require too (a deployment id): an icon without a
+   * query is also tried with the manifest's.
+   */
+  async function manifestIcons(url, started) {
+    try {
+      const response = await follow(url.href, started, "application/manifest+json, application/json;q=0.9", MAX_MANIFEST_BYTES);
+      if (response.status >= 400) return [];
+      const icons = JSON.parse(response.body).icons;
+      if (!Array.isArray(icons)) return [];
+      const ranked = [];
+      for (const icon of icons.slice(0, MAX_FEEDS * 2)) {
+        const src = typeof icon?.src === "string" && webURL(icon.src, response.url);
+        // A monochrome icon is a stencil the system colours, not a logo.
+        const purpose = String(icon?.purpose || "any").toLowerCase().split(/\s+/);
+        if (!src || !purpose.some((p) => p === "any" || p === "maskable")) continue;
+        const sizes = String(icon.sizes || "").toLowerCase().split(/\s+/);
+        const vector = String(icon.type || "").includes("svg") || /\.svg$/i.test(src.pathname) || sizes.includes("any");
+        const size = Math.max(0, ...sizes.map((s) => parseInt(s, 10) || 0));
+        ranked.push({ url: src, rank: vector ? 10000 : Math.min(size, 4096) });
+      }
+      // The two best: the page's icons and the site's favicon keep tries.
+      return ranked
+        .sort((a, b) => b.rank - a.rank)
+        .slice(0, 2)
+        .flatMap(({ url: icon }) => {
+          if (icon.search || !response.url.search) return [icon];
+          const withQuery = new URL(icon);
+          withQuery.search = response.url.search;
+          return [icon, withQuery];
+        });
+    } catch {
+      return [];
+    }
   }
 
   return { check, discover, logo, exempt: (url) => exempt.has(new URL(url).origin) };
@@ -440,6 +493,7 @@ export function feedLinks(body = "", type = "", base) {
       keep("site", data.home_page_url);
       keep("image", data.icon);
       keep("image", data.favicon);
+      keep("article", Array.isArray(data.items) ? data.items[0]?.url : undefined);
     } catch {
       /* not JSON */
     }
@@ -461,12 +515,23 @@ export function feedLinks(body = "", type = "", base) {
     keep("image", /<url>([^<]{1,2048})<\/url>/i.exec(channel.slice(image, image + 4096))?.[1]);
   keep("image", /<(?:atom:)?logo>([^<]{1,2048})<\//i.exec(channel)?.[1]);
   keep("image", /<(?:atom:)?icon>([^<]{1,2048})<\//i.exec(channel)?.[1]);
+  // The first article: RSS <link>address</link>, Atom <link href>.
+  if (first >= 0) {
+    const item = head.slice(first, first + 8192);
+    keep("article", /<link>([^<]{1,2048})<\/link>/i.exec(item)?.[1]);
+    for (const [tag] of item.matchAll(/<link\b[^<>]{0,4096}>/gi)) {
+      const attrs = attributes(tag.slice(5, -1).replace(/\/$/, ""));
+      if ((attrs.rel || "alternate").toLowerCase() === "alternate") keep("article", attrs.href);
+    }
+  }
   return out;
 }
 
 /**
- * The icons an HTML page declares, best first: apple-touch-icon, then the
- * largest declared icon. SVG is left out: only raster images are served.
+ * The icons an HTML page declares, best first: apple-touch-icon (a full
+ * colour app icon), an SVG icon (sharp at any size, though often a plain
+ * glyph), then the largest declared icon. A mask-icon is a monochrome
+ * stencil, not a logo.
  */
 export function pageIcons(page, base) {
   const html = page.slice(0, SCAN);
@@ -477,26 +542,139 @@ export function pageIcons(page, base) {
     const touch = rel.some((r) => r.startsWith("apple-touch-icon"));
     if (!touch && !rel.includes("icon")) continue;
     const url = attrs.href && webURL(attrs.href, base);
-    if (!url || (attrs.type || "").includes("svg") || /\.svg$/i.test(url.pathname)) continue;
+    if (!url) continue;
+    const vector = (attrs.type || "").includes("svg") || /\.svg$/i.test(url.pathname);
     const size = Math.max(
       0,
       ...(attrs.sizes || "").split(/\s+/).map((s) => parseInt(s, 10) || 0),
     );
-    found.push({ url, rank: (touch ? 1000 : 0) + Math.min(size || (touch ? 180 : 16), 512) });
+    found.push({
+      url,
+      rank: touch ? 1000 + Math.min(size || 180, 512) : vector ? 600 : Math.min(size || 16, 512),
+    });
     if (found.length >= MAX_FEEDS * 2) break;
   }
   return found.sort((a, b) => b.rank - a.rank).map((icon) => icon.url);
 }
 
-/** The type of a raster image, read from its first bytes, or null. */
-export function imageType(bytes) {
+/** The web app manifest an HTML page declares, or null. */
+export function pageManifest(page, base) {
+  for (const [tag] of page.slice(0, SCAN).matchAll(/<link\b[^<>]{0,4096}>/gi)) {
+    const attrs = attributes(tag.slice(5, -1));
+    if ((attrs.rel || "").toLowerCase().split(/\s+/).includes("manifest"))
+      return (attrs.href && webURL(attrs.href, base)) || null;
+  }
+  return null;
+}
+
+/**
+ * The type of an image, or null. A raster image is read from its first
+ * bytes. An SVG counts only when served as one (`declared`, its
+ * Content-Type), without scripts, event handlers, javascript: links or
+ * entities that expand into others. That filter is a best effort: what keeps
+ * an SVG inert is that it is drawn in an <img>, where nothing runs, and
+ * served under a sandbox policy.
+ */
+export function imageType(bytes, declared = "") {
   if (!bytes || bytes.length < 12) return null;
+  if (declared.includes("image/svg+xml")) {
+    const text = bytes.toString("utf8");
+    // Character references and blanks could hide a tag or a scheme: read past them.
+    const plain = text.replace(/&#(?:x([0-9a-f]+)|(\d+));?/gi, (_, hex, decimal) => {
+      const code = parseInt(hex || decimal, hex ? 16 : 10);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    });
+    const active =
+      /<script|<foreignObject|\bon[a-z]+\s*=/i.test(plain) ||
+      /javascript:/i.test(plain.replace(/[\x00-\x20]+/g, "")) ||
+      // An entity built from entities is how an expansion bomb starts; the
+      // doctype that could declare one opens the document.
+      /<!ENTITY\b[^>"']*(?:"[^"]*&|'[^']*&)/i.test(text.slice(0, 4096));
+    return svgRoot(text.slice(0, 4096)) && !active ? "image/svg+xml" : null;
+  }
   const at = (offset, ...values) => values.every((v, i) => bytes[offset + i] === v);
   if (at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
   if (at(0, 0xff, 0xd8, 0xff)) return "image/jpeg";
   if (at(0, 0x47, 0x49, 0x46, 0x38)) return "image/gif";
   if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return "image/webp";
   if (at(0, 0x00, 0x00, 0x01, 0x00) && bytes[4] + bytes[5] > 0) return "image/x-icon";
+  return null;
+}
+
+/**
+ * Whether a document's root element is <svg>, past what may precede it:
+ * processing instructions (the XML declaration, a stylesheet), comments and
+ * a doctype, an internal subset included. A scan rather than a pattern: a
+ * regular expression over repeated comments can backtrack for hours on a
+ * crafted file, and this runs on the server's single thread. Each step
+ * moves forward, so it reads the text once.
+ */
+function svgRoot(text) {
+  let at = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  const after = (close, from) => {
+    const end = text.indexOf(close, from);
+    return end < 0 ? -1 : end + close.length;
+  };
+  for (;;) {
+    while (at < text.length && /\s/.test(text[at])) at++;
+    let next;
+    if (text.startsWith("<?", at)) next = after("?>", at + 2);
+    else if (text.startsWith("<!--", at)) next = after("-->", at + 4);
+    else if (text.slice(at, at + 9).toUpperCase() === "<!DOCTYPE") {
+      const close = text.indexOf(">", at);
+      const subset = text.indexOf("[", at);
+      if (subset < 0 || (close >= 0 && close < subset)) next = after(">", at);
+      else {
+        const end = after("]", subset);
+        next = end < 0 ? -1 : after(">", end);
+      }
+    } else return /^<svg[\s/>]/i.test(text.slice(at, at + 5));
+    if (next <= at) return false;
+    at = next;
+  }
+}
+
+/**
+ * The pixel size of a raster image, from its header (an icon file: its
+ * largest image), or null when it cannot be read (an SVG has none).
+ */
+export function rasterSize(bytes, type) {
+  try {
+    if (type === "image/png") return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+    if (type === "image/gif") return { width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) };
+    if (type === "image/x-icon") {
+      let width = 0;
+      let height = 0;
+      for (let i = 0, count = bytes.readUInt16LE(4); i < count && 6 + 16 * i + 1 < bytes.length; i++) {
+        width = Math.max(width, bytes[6 + 16 * i] || 256);
+        height = Math.max(height, bytes[6 + 16 * i + 1] || 256);
+      }
+      return width && height ? { width, height } : null;
+    }
+    if (type === "image/webp") {
+      const chunk = bytes.toString("latin1", 12, 16);
+      if (chunk === "VP8 ") return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+      if (chunk === "VP8L") {
+        const bits = bytes.readUInt32LE(21);
+        return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+      }
+      if (chunk === "VP8X") return { width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 };
+      return null;
+    }
+    if (type === "image/jpeg") {
+      // The frame header (SOFn, not DHT, JPG or DAC) carries the size; each
+      // other segment is skipped by its length, so the scan moves forward.
+      for (let at = 2; at + 9 < bytes.length; ) {
+        if (bytes[at] !== 0xff) return null;
+        const marker = bytes[at + 1];
+        if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker))
+          return { width: bytes.readUInt16BE(at + 7), height: bytes.readUInt16BE(at + 5) };
+        at += 2 + bytes.readUInt16BE(at + 2);
+      }
+    }
+  } catch {
+    // A truncated header: size unknown.
+  }
   return null;
 }
 

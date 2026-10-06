@@ -667,6 +667,10 @@ async function handle(req, res) {
           "Content-Type": image.type,
           "Content-Length": image.bytes.length,
           "Cache-Control": "private, max-age=86400",
+          // An SVG logo opened on its own runs nothing, loads nothing and
+          // cannot be framed: this replaces the pages' own policy.
+          "Content-Security-Policy":
+            "default-src 'none'; style-src 'unsafe-inline'; sandbox; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
         });
         res.end(image.bytes);
         return;
