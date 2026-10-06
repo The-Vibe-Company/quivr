@@ -11,7 +11,9 @@ const recordGoneSQL = `(r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t
 // It requires the aliases v (record_versions) and r (records) to be in scope.
 // It does not include the Record's current-Version equality: callers that need
 // currentness add "r.current_version_id = v.id" explicitly.
-const eligibleVersionSQL = `v.baseline_ready AND NOT v.quarantined AND NOT ` + recordGoneSQL
+// Separate the two absorbing fences so PostgreSQL can use an anti join for
+// Tombstones and parallelize large reads. This is the negation of recordGoneSQL.
+const eligibleVersionSQL = `v.baseline_ready AND NOT v.quarantined AND NOT r.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)`
 
 // routedGenerationSQL is the canonical routing predicate: the logical Projection
 // Generation serving a Corpus is its installed route, else the default active

@@ -32,8 +32,10 @@ curl -s -X POST "$QUIVR_API_URL/v0/records/batch" -H "Authorization: Bearer $QUI
   -H "Content-Type: application/json" -d @- <<EOF | jq '[.items[].receipt.state]'
 {"items": [
   {"idempotency_key": "guide-search-storm", "source": {"corpus_id": "$CORPUS_ID", "namespace": "wire", "record_key": "storm"},
+   "extensions": {"quivr.metadata": {"schema_version": "1", "data": {"language": "en"}}},
    "content": {"kind": "text", "text": "A storm closed the harbour and cancelled every ferry."}},
   {"idempotency_key": "guide-search-festival", "source": {"corpus_id": "$CORPUS_ID", "namespace": "blog", "record_key": "festival"},
+   "extensions": {"quivr.metadata": {"schema_version": "1", "data": {"language": "en"}}},
    "content": {"kind": "text", "text": "The harbour festival returns with boat races and music."}}
 ]}
 EOF
@@ -148,6 +150,43 @@ Changing the order, a filter, scope or routed generation returns
 `409 cursor_scope_changed`; restart the listing. Search and listing filters on
 older indexes return `422 metadata_filter_unavailable`; rebuild those Corpora
 with [rebuildCorpusProjection](https://docs.quivr.thevibecompany.co/api-reference/corpora/rebuild-corpus-projection) first.
+
+## Count values for facets
+
+`POST /v0/facets` counts documents with each metadata value in the selected
+Corpora. It needs `content:read` on every requested Corpus. Reuse the
+`filter.metadata` and `filter.source_namespaces` predicates from search; the
+acceptance-time bounds from listing work here too. The example articles above
+both declare English:
+
+{/* runnable retry */}
+```bash
+curl -s -X POST "$QUIVR_API_URL/v0/facets" \
+  -H "Authorization: Bearer $QUIVR_API_KEY" -H "Content-Type: application/json" \
+  -d @- <<EOF | jq '.items'
+{"corpus_ids": ["$CORPUS_ID"], "fields": [{"field": "metadata.language", "limit": 10}]}
+EOF
+```
+
+{/* output */}
+```json
+[{"field": "metadata.language", "buckets": [{"value": "en", "count": 2}]}]
+```
+
+Counts include only current, ready documents. Withdrawn or quarantined documents
+are excluded. Each distinct tag counts a document once; a document without a
+value contributes no bucket. Counts and search results are independent reads,
+so an update can change them between requests.
+
+Use `interval: "day"`, `"month"` or `"year"` for a date field such as
+`metadata.published_at`. Buckets start at midnight UTC and omit empty periods.
+The most frequent buckets are selected first, then dates are returned earliest
+first. Custom fields need the Corpus's `filter` mapping role; a Corpus missing
+any requested field appears in `excluded_corpora`, just as with metadata
+filters. If all selected Corpora are excluded, each requested field has empty
+`buckets`. Older indexes need a rebuild. The
+[countFacets reference](https://docs.quivr.thevibecompany.co/api-reference/facets/count-facets) lists the bounds
+and errors.
 
 ## Cite a result
 

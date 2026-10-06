@@ -304,6 +304,7 @@ type Service struct {
 	Versions        VersionReader
 	Materialization MaterializationStore
 	Catalog         RecordCatalog
+	Facets          FacetReader
 	Blobs           Blobs
 	Baseline        BaselineRepository
 	Embeddings      EmbeddingRepository

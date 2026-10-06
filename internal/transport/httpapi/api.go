@@ -46,6 +46,7 @@ type API struct {
 	router         *routing.Mux
 	routes         http.Handler
 	searches       chan struct{}
+	facets         chan struct{}
 	pushProxyCIDRs []string
 	Content        content.Service
 	Retrieval      retrieval.Service
@@ -94,7 +95,7 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 	if err != nil {
 		return nil, err
 	}
-	a := &API{searches: make(chan struct{}, maxConcurrentSearches), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
+	a := &API{facets: make(chan struct{}, maxConcurrentFacets), searches: make(chan struct{}, maxConcurrentSearches), schemas: contract.schemas, Retrieval: search, Content: contents, Uploads: uploadService, Service: corpus.Service{Store: store, Namespaces: contents.ExtensionDeclared}, Keys: keys, CursorKey: cursorKey}
 	a.Content.Corpora = store
 	for _, option := range options {
 		option(a)
@@ -171,6 +172,9 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	timeout := requestTimeout
+	if r.Method == "POST" && r.URL.Path == "/v0/facets" {
+		timeout = facetTimeout
+	}
 	isBatch := r.Method == "POST" && r.URL.Path == "/v0/records/batch"
 	if isBatch {
 		timeout = batchTimeout

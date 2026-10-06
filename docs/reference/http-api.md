@@ -29,6 +29,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/records/withdrawals`](#post-v0recordswithdrawals) | `withdrawRecord` | `content:write` |
 | [`GET /v0/records/{record_id}`](#get-v0recordsrecord_id) | `getRecord` | `content:read` |
 | [`GET /v0/records/{record_id}/versions/{version_id}`](#get-v0recordsrecord_idversionsversion_id) | `getVersion` | `content:read` |
+| [`POST /v0/facets`](#post-v0facets) | `countFacets` | `content:read` |
 | [`GET /v0/ingestion-receipts/{receipt_id}`](#get-v0ingestion-receiptsreceipt_id) | `getReceipt` | `content:read` |
 | [`POST /v0/uploads`](#post-v0uploads) | `createUpload` | `blobs:write` |
 | [`POST /v0/uploads/{upload_id}/confirm`](#post-v0uploadsupload_idconfirm) | `confirmUpload` | `blobs:write` |
@@ -262,6 +263,23 @@ Authorized immutable source Manifest plus separate live availability and relatio
 | --- | --- | --- |
 | `200` | `application/json` [`Version`](#version) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error. 400 malformed; 401 unauthenticated; 403 forbidden action; 404 absent or inaccessible; 409 conflict; 413 oversized; 422 invalid input; 429 throttled; 503 temporary failure. |
+
+### Facets
+
+#### `POST /v0/facets`
+
+Operation `countFacets`. Requires `content:read`.
+
+Exact document counts for projected metadata fields across authorized Corpora. Uses content:read and validates every requested Corpus before resolving mappings, including Corpora excluded for missing facet or predicate fields. Exclusions use the same excluded_corpora shape and rules as search and metadata-filtered listing. All fields are aggregated in one read snapshot from current baseline-ready, non-quarantined Versions; withdrawn Records and Tombstones are excluded immediately. Each distinct array value counts a document once. Missing field values contribute no bucket. Common metadata.* fields and custom fields declared with the filter role are supported. Incompatible types across Corpora return 422 invalid_query. Existing projections without metadata require rebuilding (422 metadata_filter_unavailable). Each field returns at most its limit, selected by descending count then JSON value text in byte order for ties. UTC date buckets are then returned chronologically; empty date buckets are omitted. Histograms require day, month or year on datetime fields; interval on another type is invalid_query. Counts are independent of search and listing reads and can change with ingestion. No text query or ranking is applied. Each API process admits at most 8 active facet requests; excess work returns retryable 503 content_unavailable with Retry-After: 1. Requests have a 25-second execution deadline.
+
+**Request body** (required): `application/json` [`FacetRequest`](#facetrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`FacetResponse`](#facetresponse) | Bounded document counts and excluded Corpus explanations. |
+| `default` | `application/json` [`Error`](#error) | Structured error; malformed_json, invalid_schema, request_too_large, unsupported_media_type, invalid_query, forbidden, not_found, metadata_filter_unavailable or content_unavailable. |
 
 ### Ingestion receipts
 
@@ -9616,6 +9634,267 @@ properties:
     minLength: 1
 required:
   - items
+```
+
+</details>
+
+### `FacetRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `corpus_ids` | array of string | yes | At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
+| `fields` | array of [`FacetField`](#facetfield) | yes | Distinct logical metadata field names, in response order. At least `1` items. At most `16` items. |
+| `filter` | [`SearchFilter`](#searchfilter) |  |  |
+| `accepted_after` | string (date-time) |  | Inclusive current-Version acceptance-time lower bound, as in listing. |
+| `accepted_before` | string (date-time) |  | Exclusive current-Version acceptance-time upper bound, as in listing. |
+
+Example `metadata_facets_request`:
+
+```json
+{
+  "corpus_ids": [
+    "corpus_a",
+    "corpus_b"
+  ],
+  "fields": [
+    {
+      "field": "metadata.language",
+      "limit": 10
+    },
+    {
+      "field": "metadata.published_at",
+      "interval": "month",
+      "limit": 20
+    }
+  ],
+  "filter": {
+    "metadata": [
+      {
+        "field": "metadata.tags",
+        "any_of": [
+          "harbour"
+        ]
+      }
+    ],
+    "source_namespaces": [
+      "source"
+    ]
+  }
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [corpus_ids, fields]
+properties:
+  corpus_ids:
+    type: array
+    minItems: 1
+    maxItems: 16
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1
+  fields:
+    type: array
+    minItems: 1
+    maxItems: 16
+    items:
+      $ref: '#/components/schemas/FacetField'
+    description: Distinct logical metadata field names, in response order.
+  filter:
+    $ref: '#/components/schemas/SearchFilter'
+  accepted_after:
+    type: string
+    format: date-time
+    description: Inclusive current-Version acceptance-time lower bound, as in listing.
+  accepted_before:
+    type: string
+    format: date-time
+    description: Exclusive current-Version acceptance-time upper bound, as in listing.
+```
+
+</details>
+
+### `FacetField`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `field` | string | yes | Pattern `^(metadata\.)?[a-z][a-z0-9_]{0,63}$`. |
+| `limit` | integer |  | Default `20`. Minimum `1`. Maximum `100`. |
+| `interval` | string |  | Required only for datetime fields; bucket start in UTC. One of `day`, `month`, `year`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [field]
+properties:
+  field:
+    type: string
+    pattern: '^(metadata\.)?[a-z][a-z0-9_]{0,63}$'
+  limit:
+    type: integer
+    minimum: 1
+    maximum: 100
+    default: 20
+  interval:
+    type: string
+    enum: [day, month, year]
+    description: Required only for datetime fields; bucket start in UTC.
+```
+
+</details>
+
+### `FacetResponse`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of [`Facet`](#facet) | yes | At most `16` items. |
+| `excluded_corpora` | array of [`CorpusExclusion`](#corpusexclusion) |  | At most `16` items. |
+
+Example `typed_metadata_facets`:
+
+```json
+{
+  "items": [
+    {
+      "field": "metadata.language",
+      "buckets": [
+        {
+          "value": "en",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "field": "rating",
+      "buckets": [
+        {
+          "value": 16777217,
+          "count": 1
+        },
+        {
+          "value": 2.5,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "field": "flag",
+      "buckets": [
+        {
+          "value": false,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "field": "metadata.published_at",
+      "buckets": [
+        {
+          "value": "2026-10-01T00:00:00Z",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "field": "metadata.tags",
+      "buckets": []
+    }
+  ],
+  "excluded_corpora": [
+    {
+      "corpus_id": "corpus_b",
+      "fields": [
+        "rating"
+      ]
+    }
+  ]
+}
+```
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [items]
+properties:
+  items:
+    type: array
+    maxItems: 16
+    items:
+      $ref: '#/components/schemas/Facet'
+  excluded_corpora:
+    type: array
+    maxItems: 16
+    items:
+      $ref: '#/components/schemas/CorpusExclusion'
+```
+
+</details>
+
+### `Facet`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `field` | string | yes |  |
+| `buckets` | array of [`FacetBucket`](#facetbucket) | yes | At most `100` items. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [field, buckets]
+properties:
+  field:
+    type: string
+  buckets:
+    type: array
+    maxItems: 100
+    items:
+      $ref: '#/components/schemas/FacetBucket'
+```
+
+</details>
+
+### `FacetBucket`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `value` | one of string, number (double), boolean | yes | Typed scalar value, array member, or RFC 3339 UTC date bucket start. |
+| `count` | integer (int64) | yes | Minimum `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [value, count]
+properties:
+  value:
+    oneOf:
+      - type: string
+      - type: number
+        format: double
+        x-go-type: float64
+      - type: boolean
+    description: Typed scalar value, array member, or RFC 3339 UTC date bucket start.
+  count:
+    type: integer
+    format: int64
+    minimum: 1
 ```
 
 </details>
