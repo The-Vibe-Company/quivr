@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.0-alpha.2](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.1...v2.0.0-alpha.2) (2026-10-06)
+
+
+### Features
+
+* **migrations:** preserve rollback during schema upgrades ([#3766](https://github.com/The-Vibe-Company/quivr/issues/3766)) ([9f09a43](https://github.com/The-Vibe-Company/quivr/commit/9f09a433ae52cc041652324ff55c81d45f6eeecf))
+* **security:** attest release SBOMs and scan vulnerabilities ([#3767](https://github.com/The-Vibe-Company/quivr/issues/3767)) ([b6e0dd0](https://github.com/The-Vibe-Company/quivr/commit/b6e0dd0f418ea450315a7ece29d212d170e8f7c7))
+
+
+### Bug Fixes
+
+* **eval:** preserve campaign results through compute cleanup ([#3775](https://github.com/The-Vibe-Company/quivr/issues/3775)) ([3da2945](https://github.com/The-Vibe-Company/quivr/commit/3da29458f5d75f6c76d46bf17972bb81c29788a2))
+
+
+### Performance Improvements
+
+* **ci:** return quick checks in parallel ([#3773](https://github.com/The-Vibe-Company/quivr/issues/3773)) ([d67da0e](https://github.com/The-Vibe-Company/quivr/commit/d67da0e935badc81d1f36ccb8f141559dd1c9887))
+
 ## [2.0.0-alpha.1](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.0...v2.0.0-alpha.1) (2026-10-06)
 
 
