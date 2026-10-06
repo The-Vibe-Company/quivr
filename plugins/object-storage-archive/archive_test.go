@@ -46,11 +46,14 @@ func syntheticTar(t *testing.T, paths ...string) []byte {
 
 // The fake owns only S3 HTTP responses. The connector owns parsing, page
 // boundaries, checkpoints and recovery; no existing connector reads archives.
-func objectServer(t *testing.T, data []byte) *httptest.Server {
+func objectServer(t *testing.T, data []byte, keys ...string) *httptest.Server {
 	t.Helper()
 	objectKey := "inbox/2026.tar.gz"
 	if bytes.HasPrefix(data, []byte("PK")) {
 		objectKey = "inbox/2026.zip"
+	}
+	if len(keys) > 0 {
+		objectKey = keys[0]
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("list-type") == "2" {
@@ -104,14 +107,30 @@ func fetchRequest(t *testing.T, endpoint string, cp any, extra string) *quivrplu
 	return &req
 }
 func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
-	for _, format := range []string{"tar.gz", "zip"} {
+	for _, format := range []string{"tar.gz", "zip", "tar.gz_ref_budget"} {
 		t.Run(format, func(t *testing.T) {
 			makeArchive := syntheticTar
 			if format == "zip" {
 				makeArchive = syntheticZip
 			}
 			data := makeArchive(t, "fólder/001.xml", "fólder/skip.txt", "fólder/002.xml", "fólder/003\n.xml")
-			srv := objectServer(t, data)
+			var keys []string
+			if format == "tar.gz_ref_budget" {
+				// Escape-heavy key below the source's 512-byte key bound.
+				key := "inbox/" + strings.Repeat("\"", 480) + ".tar.gz"
+				for {
+					ref, _ := json.Marshal(memberRef{Archive: key, ETag: `"immutable"`, Offset: 0})
+					if len(ref) <= 1024 {
+						break
+					}
+					key = strings.Replace(key, "\"", "", 1)
+				}
+				keys = []string{key}
+			}
+			if format == "zip" {
+				data = append(data, []byte("trailing padding")...)
+			}
+			srv := objectServer(t, data, keys...)
 			var objectReads atomic.Int64
 			handler := srv.Config.Handler
 			srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +145,13 @@ func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
 			page, err := source.Fetch(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if format == "tar.gz_ref_budget" {
+				var ref memberRef
+				_ = json.Unmarshal([]byte(page.Items[0].Attachments[0].Ref), &ref)
+				if ref.BatchEnd != nil || len(page.Items[0].Attachments[0].Ref) > 1024 {
+					t.Fatal("page metadata exceeded compact reference budget")
+				}
 			}
 			if len(page.Items) != 2 || page.Items[0].RecordKey != "001.xml" || page.Items[1].SourcePosition != "2" || !page.More {
 				t.Fatalf("first page: %+v", page)
@@ -156,20 +182,23 @@ func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
 			if string(got) != "<item>fólder/002.xml</item>" {
 				t.Fatalf("lost-cache bytes: %q", got)
 			}
-			// A cold last-member upload must recover earlier page uploads
-			// without another ranged GET or gzip prefix download.
-			before := objectReads.Load()
-			earlier, err := fresh.OpenAttachment(context.Background(), &quivrplugin.AttachmentRequest{OrganizationID: req.OrganizationID, Connector: req.Connector, Credential: req.Credential, Attachment: page.Items[0].Attachments[0]})
-			if err != nil {
-				t.Fatal(err)
-			}
-			firstBytes, err := io.ReadAll(earlier)
-			earlier.Close()
-			if err != nil || string(firstBytes) != "<item>fólder/001.xml</item>" {
-				t.Fatal("earlier page recovery", err)
-			}
-			if objectReads.Load() != before {
-				t.Fatal("earlier page upload re-downloaded the archive")
+			if format != "tar.gz_ref_budget" {
+				// A cold last-member upload must recover earlier page uploads
+				// without another ranged GET or gzip prefix download.
+				before := objectReads.Load()
+				earlier, err := fresh.OpenAttachment(context.Background(), &quivrplugin.AttachmentRequest{OrganizationID: req.OrganizationID, Connector: req.Connector, Credential: req.Credential, Attachment: page.Items[0].Attachments[0]})
+				if err != nil {
+					t.Fatal(err)
+				}
+				firstBytes, err := io.ReadAll(earlier)
+				earlier.Close()
+				if err != nil || string(firstBytes) != "<item>fólder/001.xml</item>" {
+					t.Fatal("earlier page recovery", err)
+				}
+				if objectReads.Load() != before {
+					t.Fatal("earlier page upload re-downloaded the archive")
+				}
+
 			}
 
 			// Literal legacy ref keys must remain usable after a sidecar upgrade.
@@ -288,6 +317,15 @@ func TestArchiveRejectsDamagedGzipBeforeReturningPage(t *testing.T) {
 // Owner boundary: reject directory allocations before parsing and prevent
 // tiny deflate ReadAt calls from amplifying into thousands of S3 requests.
 func TestZipDirectoryBoundsAndBufferedDeflate(t *testing.T) {
+	t.Run("undersized_object", func(t *testing.T) {
+		for _, size := range []int64{-1, 0, 21} {
+			err := checkZipDirectory(bytes.NewReader(nil), size)
+			classified, ok := err.(*quivrplugin.Error)
+			if !ok || classified.Code != "malformed_archive" {
+				t.Fatalf("size %d: %v", size, err)
+			}
+		}
+	})
 	t.Run("directory_limit", func(t *testing.T) {
 		data := syntheticZip(t, "item.xml")
 		end := bytes.LastIndex(data, []byte{'P', 'K', 5, 6})

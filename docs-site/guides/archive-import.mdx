@@ -126,6 +126,9 @@ applies after the already scheduled run; it does not interrupt an active run.
 Disabling an instance is permanent. The checkpoint records the archive ETag and member
 offset. After a worker or plugin restart, the connector scans the compressed
 tar stream to that offset and continues. ZIP uses ranged member reads.
+Escape-heavy archive identities retain compact refs to fit the 1,024-byte
+protocol bound; recovering out-of-order uploads of those refs can require
+more than one gzip prefix scan.
 A small page cache accelerates upload grants; recovery also works when that
 cache is gone. Repeated submissions converge on idempotent receipts.
 

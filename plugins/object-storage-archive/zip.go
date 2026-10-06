@@ -18,6 +18,9 @@ func checkZipDirectory(r io.ReaderAt, size int64) error {
 	limited := func() error {
 		return quivrplugin.SourceError("zip_directory_too_large", "ZIP directory exceeds 4 MiB or 100000 entries; use tar.gz for larger member sets")
 	}
+	if size < 22 {
+		return malformed()
+	}
 	tail := make([]byte, min(size, int64(65535+22)))
 	if _, err := r.ReadAt(tail, size-int64(len(tail))); err != nil {
 		return err
@@ -25,7 +28,7 @@ func checkZipDirectory(r io.ReaderAt, size int64) error {
 	var end []byte
 	var endOffset int64
 	for i := len(tail) - 22; i >= 0; i-- {
-		if bytes.Equal(tail[i:i+4], []byte{'P', 'K', 5, 6}) && i+22+int(binary.LittleEndian.Uint16(tail[i+20:i+22])) == len(tail) {
+		if bytes.Equal(tail[i:i+4], []byte{'P', 'K', 5, 6}) && i+22+int(binary.LittleEndian.Uint16(tail[i+20:i+22])) <= len(tail) {
 			end = tail[i:]
 			endOffset = size - int64(len(tail)) + int64(i)
 			break

@@ -63,3 +63,5 @@ bucket, disables its connector when finished, and leaves them for inspection.
 Remove the local stack with its usual reset command when finished.
 
 ZIP directories are limited to 4 MiB and 100,000 entries before metadata parsing; use tar.gz for larger member sets. A 1 MiB ranged-read window bounds ZIP buffering and avoids a network request for each deflate fragment.
+
+Refs retain the 1,024-byte protocol bound. Escape-heavy object identities use the compact legacy recovery form if page bounds would exceed it; recovering out-of-order uploads of those refs can rescan the gzip prefix more than once.

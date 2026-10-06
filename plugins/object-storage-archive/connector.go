@@ -266,7 +266,7 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 			s.pending = pending
 			break
 		}
-		refBytes, _ := json.Marshal(memberRef{Archive: cp.Archive, ETag: cp.ETag, Offset: pending.offset, BatchStart: batchStart})
+		refBytes, _ := json.Marshal(memberRef{Archive: cp.Archive, ETag: cp.ETag, Offset: pending.offset})
 		ref := string(refBytes)
 		if len(ref) > 1024 {
 			return fail(quivrplugin.SourceError("unsupported_archive_identity", "archive reference exceeds the protocol bound"))
@@ -293,13 +293,17 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 		_ = json.Unmarshal([]byte(at.Ref), &ref)
 		data := s.cache[at.Ref]
 		delete(s.cache, at.Ref)
+		ref.BatchStart = batchStart
 		batchEnd := cp.MemberOffset
 		ref.BatchEnd = &batchEnd
 		raw, _ := json.Marshal(ref)
-		at.Ref = string(raw)
-		if len(at.Ref) > 1024 {
-			return fail(quivrplugin.SourceError("unsupported_archive_identity", "archive reference exceeds the protocol bound"))
+		if len(raw) > 1024 {
+			// Preserve the already-admitted compact ref for escape-heavy object
+			// keys. Legacy bounded recovery remains available after cache loss.
+			ref.BatchStart, ref.BatchEnd = 0, nil
+			raw, _ = json.Marshal(ref)
 		}
+		at.Ref = string(raw)
 		s.cache[at.Ref] = data
 	}
 	page.Checkpoint = cp

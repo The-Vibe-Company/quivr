@@ -326,7 +326,7 @@ class CoreEntrypointTest(unittest.TestCase):
                 self.assertNotIn('QUIVR_PLUGIN_SIGNING_KEYS', child)
         for ambiguous in ('{"same":{},"same":{}}',
                           '{"other":{"active":"one","active":"two","keys":[]}}'):
-            with self.assertRaisesRegex(ValueError, 'Invalid engine plugin signing configuration'):
+            with self.assertRaisesRegex(ValueError, 'Invalid engine plugin signing configuration: duplicate JSON member'):
                 core_entrypoint.engine_signing_environment({**ENV, 'QUIVR_ENGINE_PLUGIN_KEYS': ambiguous})
         generated = core_entrypoint.engine_signing_environment(ENV)
         self.assertEqual(generated, core_entrypoint.engine_signing_environment(dict(ENV)))

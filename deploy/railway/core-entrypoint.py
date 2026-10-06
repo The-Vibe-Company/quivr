@@ -203,11 +203,15 @@ def build_config(env):
     return config
 
 
+class DuplicateSigningMember(ValueError):
+    pass
+
+
 def unique_json_members(pairs):
     result = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError('Duplicate signing member')
+            raise DuplicateSigningMember()
         result[key] = value
     return result
 
@@ -217,6 +221,8 @@ def engine_signing_environment(env):
         keys = json.loads(env.get('QUIVR_ENGINE_PLUGIN_KEYS') or '{}', object_pairs_hook=unique_json_members)
         if not isinstance(keys, dict):
             raise ValueError()
+    except DuplicateSigningMember:
+        raise ValueError('Invalid engine plugin signing configuration: duplicate JSON member in QUIVR_ENGINE_PLUGIN_KEYS') from None
     except (ValueError, TypeError):
         raise ValueError('Invalid engine plugin signing configuration') from None
     for connector in runtime_connectors(env):
