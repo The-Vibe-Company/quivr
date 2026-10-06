@@ -1,0 +1,45 @@
+scripts/eval/test_campaign_reporting.py
+  s_bbcd7c924a5187::t_b5ac7186399eb3 77
+scripts/eval/test_modal_search.py
+  s_bbcd7c924a5187::t_fd330346b86c4a 218-248
+scripts/eval/campaign_compute.py
+  s_bbcd7c924a5187::t_b5ac7186399eb3 91,108
+  s_bbcd7c924a5187::t_845990d6392e95 3,13-14,65-75
+  s_bbcd7c924a5187::t_fafe4236c3d8eb 94,106,111,124,126-127,130-141
+scripts/eval/modal_search.py
+  s_bbcd7c924a5187::t_6579dffda76f4b 28,442-444
+  s_bbcd7c924a5187::t_b5ac7186399eb3 353-354,432-434,436,446-447
+scripts/eval/test_search_campaign.py
+  s_bbcd7c924a5187::t_a3b175aaaa7de5 115-119,124,142-148,195-197,208,210-216
+  s_bbcd7c924a5187::t_d6d272c8418118 138-139
+  s_bbcd7c924a5187::t_b5ac7186399eb3 560,644
+  s_bbcd7c924a5187::t_00c0d848400750 297
+  s_bbcd7c924a5187::t_a895751e72c525 132-136
+  s_bbcd7c924a5187::t_8f63765ec0b42a 162-164,222-224
+  s_bbcd7c924a5187::t_295c384ab23578 8,19-45
+  s_bbcd7c924a5187::t_eb68e48f2bb1c0 114,120-123,125-131,137,140-141,149-161,165-194,199-207,209,217-221,225-226
+  s_bbcd7c924a5187::t_7e21eb81865a64 198
+  s_bbcd7c924a5187::t_7493edf1fb2bc0 231,247,254-255,290-296
+  s_bbcd7c924a5187::t_6047964f912187 46-47
+scripts/eval/search_campaign.py
+  s_bbcd7c924a5187::t_fafe4236c3d8eb 241-242
+  s_bbcd7c924a5187::t_6579dffda76f4b 98-100
+  s_bbcd7c924a5187::t_7a45bc0a6e33e4 586-587
+  s_bbcd7c924a5187::t_b5ac7186399eb3 166-171,173-175,180-182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c139e25d2ab56618880bc1504686cc2076cab91f",
+  "prompts": {},
+  "sessions": {
+    "s_bbcd7c924a5187": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a11030-cc9b-7993-895e-fab683832ebf",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
