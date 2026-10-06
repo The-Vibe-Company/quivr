@@ -76,11 +76,11 @@ scheme declarations remain as supplied. Missing optional values are omitted.
 [search and document lists](https://docs.quivr.thevibecompany.co/guides/search#filter-by-document-metadata)
 across sources and corpora. The reserved namespace needs no manifest ownership.
 
-Publication uses a valid RFC 3339 `firstCreated`, otherwise
+Publication uses an RFC 3339 `firstCreated` with up to 9 fractional digits, otherwise
 `versionCreated`, converted to UTC with its subsecond precision retained.
 A correction therefore keeps the original publication date when available.
 Dates without a timezone, malformed dates and leap seconds are omitted.
-Provider/creator/subject identifiers prefer URI, then QCode, then name or value.
+Provider/creator/subject identifiers prefer nonblank URI, QCode, name, then value.
 Place uses names from `located` and subjects typed `*:geoArea`, falling back to
 that identifier order. Country uses their `iso3166-1a2` QCodes, including broader
 locations. Keywords become tags; no remote vocabulary lookup takes place.

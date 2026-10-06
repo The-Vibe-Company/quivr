@@ -76,14 +76,15 @@ class Normalizer(unittest.TestCase):
         # the invocation boundary owns bounding while retaining source detail.
         name = 'é' * 201
         keywords = ''.join(f'<keyword>{i:02d}-{name}</keyword>' for i in range(51))
-        xml = f'<newsItem xmlns="{NAR}"><itemMeta><provider uri="{name}"/></itemMeta><contentMeta><creator><name>{name}</name></creator><creator><name>{name}extra</name></creator><keyword> </keyword>{keywords}<subject/><located/></contentMeta></newsItem>'
+        xml = f'<newsItem xmlns="{NAR}"><itemMeta><provider uri=" " qcode="{name}"/></itemMeta><contentMeta><creator><name>{name}</name></creator><creator><name>{name}extra</name></creator><creator uri=" " qcode="author:1"/><creator>Writer<name/></creator><keyword> </keyword>{keywords}<subject uri=" " qcode=" "><name/><name>Topic</name></subject><subject/><located qcode="place:1"><name> </name></located><located/></contentMeta></newsItem>'
         response = expect_response(self.invoke(xml))
         self.assertEqual(response.extensions['quivr.metadata'].data, {
             'source_type': 'news_item', 'source': 'é' * 200,
-            'author': ['é' * 200],
+            'author': ['é' * 200, 'author:1', 'Writer'],
+            'subjects': ['Topic'], 'place': ['place:1'],
             'tags': [f'{i:02d}-' + 'é' * 197 for i in range(50)],
         })
-        self.assertEqual(response.extensions['newsml-g2.document'].data['provider'][0]['uri'], name)
+        self.assertEqual(response.extensions['newsml-g2.document'].data['provider'][0]['qcode'], name)
         self.assertEqual(len(response.extensions['newsml-g2.document'].data['keywords']), 52)
 
     def test_single_item_message_keeps_wrapper_and_selected_headers(self):

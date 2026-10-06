@@ -127,7 +127,9 @@ def _common_metadata(item, document):
             except (ValueError, OverflowError):
                 pass  # The original value remains in document and XML metadata.
     def identity(concept):
-        return concept.get('uri') or concept.get('qcode') or next(iter(concept.get('names', [])), concept.get('value', ''))
+        candidates = [concept.get('uri', ''), concept.get('qcode', ''),
+                      *concept.get('names', []), concept.get('value', '')]
+        return next((value for raw in candidates if (value := bounded(raw))), '')
     if providers := document.get('provider'):
         if source := bounded(identity(providers[0])):
             result['source'] = source
@@ -144,7 +146,7 @@ def _common_metadata(item, document):
             if node.attrib.get('type', '').endswith(':geoArea')]
     for located in geo:
         concept = _concept(located)
-        places.extend(concept.get('names') or [identity(concept)])
+        places.extend(distinct(concept.get('names', [])) or [identity(concept)])
         for node in located.iter():
             code = node.attrib.get('qcode', '')
             if code.startswith('iso3166-1a2:'):

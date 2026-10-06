@@ -4,6 +4,8 @@ Plugin API v0 pins a single plugin, so a stack pins one of:
 
 * ``pdf-text``: the reference plugin plugins/pdf-text for application/pdf,
   the default of `make dev`;
+* ``newsml-g2``: the news item plugin plugins/newsml-g2 for NewsML-G2 items
+  and single-item messages;
 * ``template``: the `quivr plugin init` template, scaffolded once per stack,
   for text/markdown; `make verify` starts with it;
 * ``none``: no external normalizer;
@@ -12,7 +14,7 @@ Plugin API v0 pins a single plugin, so a stack pins one of:
   9900) with $QUIVR_NORMALIZER_CONFIG (JSON, default {}). The author runs it,
   for example with `quivr plugin dev --port 9900 <dir>`.
 
-`make dev` reads QUIVR_NORMALIZER (default pdf-text). pdf-text and the template
+`make dev` reads QUIVR_NORMALIZER (default pdf-text). Built-in plugins
 run as their own process with the repository's Python Plugin SDK. Verification proves
 startup refusal of invalid pins and that an unreachable plugin leaves the API
 and worker healthy, then switches the pin to pdf-text. Every oracle is a
@@ -25,8 +27,7 @@ import ports
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 NAME = 'markdown-sections'
 SDK = ROOT / '.scratch' / 'plugin-sdk'
-PDF_TEXT = ROOT / 'plugins' / 'pdf-text'
-# Selection -> Python module, routed media type and plugin configuration.
+# Selection -> Python module, routed media types and plugin configuration.
 PLUGINS = {'pdf-text': ('pdf_text', ['application/pdf'], {}),
            'newsml-g2': ('newsml_g2', ['application/vnd.iptc.g2.newsitem+xml',
                                     'application/vnd.iptc.g2.newsmessage+xml'], {}),
