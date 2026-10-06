@@ -23,23 +23,17 @@ type DeliveryStore struct {
 
 // ClaimDelivery leases one due delivery outbox row.
 func (s DeliveryStore) ClaimDelivery(ctx context.Context, lease time.Duration) (monitoring.DeliveryWork, error) {
-	var w monitoring.DeliveryWork
-	err := s.Pool.QueryRow(ctx, `UPDATE delivery_outbox o SET lease_until=now()+make_interval(secs => $1::double precision)
-FROM (SELECT organization,delivery_id FROM delivery_outbox
-  WHERE available_at<=now() AND lease_until<now() AND ($2='' OR organization=$2)
-  ORDER BY available_at LIMIT 1 FOR UPDATE SKIP LOCKED) due
-WHERE (o.organization,o.delivery_id)=(due.organization,due.delivery_id)
-RETURNING o.organization,o.delivery_id,o.lease_until,o.trace_context`, lease.Seconds(), s.Organization).Scan(&w.Organization, &w.DeliveryID, &w.Lease, &w.TraceContext)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return w, monitoring.ErrNoWork
+	works, err := s.ClaimDeliveries(ctx, lease, 1)
+	if err != nil {
+		return monitoring.DeliveryWork{}, err
 	}
-	return w, err
+	return works[0], nil
 }
 
 // deliveryUpdated appends the feed-only delivery.updated event for one state
 // transition. It creates no Delivery or outbox work, so it never causes a webhook.
 func deliveryUpdated(ctx context.Context, tx pgx.Tx, org, corpusID, deliveryID string, number int, state string) error {
-	return appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "delivery.updated", Resource: "delivery", ResourceID: deliveryID, MutationID: fmt.Sprint(deliveryID, ":", number, ":", state)})
+	return appendEvent(ctx, tx, deliveryStateEvent(org, corpusID, deliveryID, number, state))
 }
 
 func park(ctx context.Context, tx pgx.Tx, org, deliveryID string) error {
@@ -76,6 +70,11 @@ func attemptID(org, deliveryID string, number int) string {
 // creation, except for a notice committed while its Subscription was disabled
 // (a withdrawal), whose window starts at the re-enable (window_start).
 func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, window time.Duration, configured func(org, destinationID string) bool) (monitoring.AdmittedAttempt, string, error) {
+	attempts, refused, errs := s.AdmitDeliveries(ctx, []monitoring.DeliveryWork{w}, window, configured)
+	return attempts[0], refused[0], errs[0]
+}
+
+func (s DeliveryStore) admit(ctx context.Context, w monitoring.DeliveryWork, window time.Duration, configured func(org, destinationID string) bool) (monitoring.AdmittedAttempt, string, error) {
 	org := w.Organization
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -150,7 +149,7 @@ WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.
 		}
 		return monitoring.AdmittedAttempt{}, "window_elapsed", tx.Commit(ctx)
 	}
-	a := monitoring.AdmittedAttempt{Organization: org, DeliveryID: w.DeliveryID, Number: count + 1, EventID: eventID, DestinationID: destination, Body: body}
+	a := monitoring.AdmittedAttempt{Organization: org, DeliveryID: w.DeliveryID, Number: count + 1, EventID: eventID, DestinationID: destination, Body: body, TraceContext: w.TraceContext}
 	a.AttemptID = attemptID(org, w.DeliveryID, a.Number)
 	if _, err = tx.Exec(ctx, `INSERT INTO delivery_attempts(organization,id,delivery_id,number) VALUES($1,$2,$3,$4)`, org, a.AttemptID, a.DeliveryID, a.Number); err != nil {
 		return monitoring.AdmittedAttempt{}, "", err
@@ -170,6 +169,10 @@ WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.
 // retry time. An outcome already recorded (for example unknown after a lease
 // expiry) is never overwritten.
 func (s DeliveryStore) Record(ctx context.Context, a monitoring.AdmittedAttempt, o monitoring.AttemptOutcome, r monitoring.Retry) error {
+	return s.RecordDeliveries(ctx, []monitoring.AdmittedAttempt{a}, []monitoring.AttemptOutcome{o}, []monitoring.Retry{r})[0]
+}
+
+func (s DeliveryStore) record(ctx context.Context, a monitoring.AdmittedAttempt, o monitoring.AttemptOutcome, r monitoring.Retry) error {
 	org := a.Organization
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {

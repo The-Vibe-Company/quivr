@@ -98,6 +98,27 @@ func TestAuditTransactionAndAppendOnlyRetention(t *testing.T) {
 			t.Fatalf("nested %s withdrawal=%v: %v", outcome, withdrawn, err)
 		}
 	}
+	// First-revision acceptance normally uses an implicit batch. A request
+	// transaction must own those writes so its refusal cannot leak accepted work.
+	for _, outcome := range []string{"refused", "accepted"} {
+		event := audit.Event{Action: "receipt.accept", TargetType: "record", Organization: org, Outcome: outcome}
+		err = store.Record(ctx, &event, func(work context.Context) error {
+			receipt, err := (postgres.SubmissionStore{Pool: pool}).Accept(work, corpus.Scope{Organization: org}, content.Command{
+				Key: "accept-" + outcome, Source: content.Source{CorpusID: id, Namespace: "audit", RecordKey: "accept-" + outcome},
+				Content: content.Text{Kind: "text", Text: "Audited acceptance"},
+			})
+			event.TargetID = receipt.RecordID
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var exists bool
+		err = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND request_key=$2)`, org, "accept-"+outcome).Scan(&exists)
+		if err != nil || exists != (outcome == "accepted") {
+			t.Fatalf("%s acceptance persisted=%v: %v", outcome, exists, err)
+		}
+	}
 	// A dry-run caches a confirmation estimate but produces no audit entry.
 	estimate := audit.Event{Action: "operation.backfill", Organization: org}
 	err = store.Record(ctx, &estimate, func(work context.Context) error {
@@ -158,7 +179,7 @@ func TestAuditTransactionAndAppendOnlyRetention(t *testing.T) {
 		t.Fatalf("retention: %d %v", n, err)
 	}
 	events, err = store.List(ctx, org, audit.Filter{Limit: 10})
-	if err != nil || len(events) != 4 {
+	if err != nil || len(events) != 6 {
 		t.Fatalf("retention removed live entries: %+v %v", events, err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -248,6 +249,126 @@ func TestDeliveryShutdownRecordsNoFalseOutcome(t *testing.T) {
 	if len(fake.admitted) != 1 || len(fake.recorded) != 0 {
 		t.Fatalf("admitted %d recorded %v", len(fake.admitted), fake.recorded)
 	}
+}
+
+// The group transport boundary owns bounded fanout and cancellation: one
+// acknowledged sibling is recorded using a fresh context while eight other
+// requests are interrupted, and remaining admitted notices are never started.
+func TestDeliveryBatchBoundsSendsAndRecordsOnlyKnownOutcomes(t *testing.T) {
+	fake := &batchDeliveryFake{attempts: map[string]monitoring.AdmittedAttempt{}}
+	for i := 0; i < 32; i++ {
+		id := strconv.Itoa(i)
+		fake.work = append(fake.work, monitoring.DeliveryWork{Organization: "org_a", DeliveryID: id})
+		fake.attempts[id] = monitoring.AdmittedAttempt{Organization: "org_a", DeliveryID: id, AttemptID: "attempt_" + id, Number: 1, EventID: "event_" + id, DestinationID: "receiver", Body: []byte(`{"event_id":"event_` + id + `","type":"match.created"}`)}
+	}
+	started := make(chan struct{}, 32)
+	var active, peak atomic.Int32
+	var mu sync.Mutex
+	got := map[string][]byte{}
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := active.Add(1)
+		defer active.Add(-1)
+		for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
+		}
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		got[r.Header.Get("webhook-id")] = body
+		mu.Unlock()
+		if r.Header.Get("webhook-id") == "event_0" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		started <- struct{}{}
+		<-r.Context().Done()
+	}))
+	defer receiver.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := monitoring.Deliverer{AllowPrivateAddresses: true, Store: fake, Timeout: 5 * time.Second, Destinations: map[string]monitoring.Destination{"receiver": {Organization: "org_a", URL: receiver.URL, Secret: testSecret}}}
+	done := make(chan struct{})
+	var progressed bool
+	var stepError error
+	go func() { defer close(done); progressed, stepError = d.Step(ctx) }()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for i := 0; i < 8; i++ {
+		select {
+		case <-started:
+		case <-deadline.C:
+			cancel()
+			<-done
+			t.Fatalf("only %d of eight send slots reached the receiver", i)
+		}
+	}
+	select {
+	case <-started:
+		t.Error("more than eight requests started while receiver slots were occupied")
+	default:
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("delivery group did not finish after cancellation")
+	}
+	if !progressed || stepError != nil || peak.Load() != 8 {
+		t.Fatalf("group progress=%t err=%v peak=%d, want progress and eight bounded sends", progressed, stepError, peak.Load())
+	}
+	if len(fake.admitted) != 32 || len(fake.recorded) != 1 || fake.recorded[0].Outcome != monitoring.AttemptAcknowledged || len(fake.recordAttempts) != 1 || fake.recordAttempts[0].DeliveryID != "0" || fake.recordContextError != nil {
+		t.Fatalf("unknown/unstarted group outcomes: admitted=%d recorded=%+v attempts=%+v record context=%v", len(fake.admitted), fake.recorded, fake.recordAttempts, fake.recordContextError)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 9 {
+		t.Fatalf("started %d requests, want one acknowledged and eight interrupted", len(got))
+	}
+	for _, a := range fake.admitted {
+		if body, sent := got[a.EventID]; sent && string(body) != string(a.Body) {
+			t.Fatalf("notice %s bytes changed: got %s, want %s", a.EventID, body, a.Body)
+		}
+	}
+}
+
+// batchDeliveryFake supplies immutable admitted bytes; PostgreSQL owns durable
+// claim, admission, outcome and lease semantics in its adapter tests.
+type batchDeliveryFake struct {
+	deliveryFake
+	attempts           map[string]monitoring.AdmittedAttempt
+	recordAttempts     []monitoring.AdmittedAttempt
+	recordContextError error
+}
+
+func (f *batchDeliveryFake) ClaimDeliveries(ctx context.Context, lease time.Duration, limit int) ([]monitoring.DeliveryWork, error) {
+	var works []monitoring.DeliveryWork
+	for range limit {
+		w, err := f.ClaimDelivery(ctx, lease)
+		if err == monitoring.ErrNoWork {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		works = append(works, w)
+	}
+	return works, nil
+}
+
+func (f *batchDeliveryFake) AdmitDeliveries(_ context.Context, works []monitoring.DeliveryWork, _ time.Duration, _ func(string, string) bool) ([]monitoring.AdmittedAttempt, []string, []error) {
+	admitted := make([]monitoring.AdmittedAttempt, len(works))
+	for i, w := range works {
+		admitted[i] = f.attempts[w.DeliveryID]
+	}
+	f.admitted = admitted
+	return admitted, make([]string, len(works)), make([]error, len(works))
+}
+
+func (f *batchDeliveryFake) RecordDeliveries(ctx context.Context, attempts []monitoring.AdmittedAttempt, outcomes []monitoring.AttemptOutcome, retries []monitoring.Retry) []error {
+	f.recordAttempts, f.recordContextError = attempts, ctx.Err()
+	errs := make([]error, len(attempts))
+	for i, a := range attempts {
+		errs[i] = f.Record(ctx, a, outcomes[i], retries[i])
+	}
+	return errs
 }
 
 // The deliverer hands the store a policy delay for retryable failures only,
