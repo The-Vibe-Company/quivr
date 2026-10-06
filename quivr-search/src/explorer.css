@@ -35,6 +35,16 @@
 .bar-slot > .explorer-search {
   flex: 1;
 }
+/* The switcher takes the bar's right side but never squeezes the search
+   below 240 px: past that, its corpora scroll sideways. */
+@media (min-width: 1100px) {
+  .shell[data-view="explorer"] .bar {
+    grid-template-columns: minmax(max-content, 1fr) minmax(240px, 460px) minmax(0, max-content);
+  }
+  .shell[data-view="explorer"] .bar-actions {
+    min-width: 0;
+  }
+}
 .explorer-switch {
   display: inline-flex;
   max-width: 100%;
@@ -48,6 +58,9 @@
 }
 .explorer-switch::-webkit-scrollbar {
   display: none;
+}
+.explorer-switch[data-overflow] {
+  mask-image: linear-gradient(to left, transparent, #000 32px);
 }
 .explorer-switch button {
   flex: none;
@@ -324,17 +337,25 @@
 .facet {
   transition: opacity var(--duration) var(--ease);
 }
-.facet h3,
-.facets-corpus {
+.facet-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  margin: 0 0 4px;
+  padding: 0 4px;
+}
+.facet h3,
+.facets-corpus {
   margin: 0 0 4px;
   padding: 0 4px;
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.02em;
   color: var(--ink-2);
+}
+.facet .facet-head h3 {
+  margin: 0;
+  padding: 0;
 }
 .facets-corpus {
   padding-top: 14px;
@@ -1175,10 +1196,6 @@
   }
   .explorer-hint {
     display: none;
-  }
-  /* The corpora that do not fit fade out at the right edge. */
-  .explorer > .explorer-switch {
-    mask-image: linear-gradient(to left, transparent, #000 28px);
   }
   .wire-row {
     column-gap: 8px;

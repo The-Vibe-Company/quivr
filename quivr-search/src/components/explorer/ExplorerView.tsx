@@ -141,6 +141,8 @@ export function ExplorerView({
   const reads = useRef<AbortController | null>(null);
   // The list's own scroll, on a desktop.
   const scroller = useRef<HTMLDivElement>(null);
+  // The row the preview shows by default, for the list it was drawn for.
+  const lead = useRef<{ key: string; id: string } | null>(null);
   // The corpora the facets were read for: others picked, their fields go at once.
   const facetsFor = useRef("");
 
@@ -152,6 +154,7 @@ export function ExplorerView({
     if (record || !typed) return;
     const controller = new AbortController();
     reads.current = controller;
+    near.current = false;
     setStatus("loading");
     setMore("idle");
     fetchExplore(picked, predicates, { q: state.q }, controller.signal)
@@ -215,9 +218,24 @@ export function ExplorerView({
       });
   };
 
+  // The corpora that do not fit scroll sideways, the edge faded to say so.
+  const switchRef = useRef<HTMLDivElement>(null);
+  const [switchOverflow, setSwitchOverflow] = useState(false);
+  useEffect(() => {
+    const element = switchRef.current;
+    if (!element) return;
+    const measure = () => setSwitchOverflow(element.scrollWidth > element.clientWidth + 1);
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [narrow, corpora, bar.actions]);
+
   // The next page loads as the end of the list comes near, the button
-  // staying as a fallback; a failed page waits for its "Réessayer".
+  // staying as a fallback; a failed page waits for its "Réessayer". Only
+  // coming near loads: rows a page puts back above the reader (by date)
+  // leave the end in sight, and must not chain page after page unasked.
   const sentinel = useRef<HTMLDivElement>(null);
+  const near = useRef(false);
   const loadNext = useRef(loadMore);
   loadNext.current = loadMore;
   const hasMore = !!page?.next_cursor && more === "idle" && status === "ready";
@@ -226,7 +244,9 @@ export function ExplorerView({
     if (!hasMore || !target) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) loadNext.current();
+        const now = entries.some((e) => e.isIntersecting);
+        if (now && !near.current) loadNext.current();
+        near.current = now;
       },
       // On a narrow screen the page scrolls, not the list.
       { root: narrow ? null : scroller.current, rootMargin: "0px 0px 600px 0px" },
@@ -280,7 +300,13 @@ export function ExplorerView({
   // A search keeps its rank on request; otherwise rows go by date.
   const byDay = !state.q || state.sort !== "relevance";
   const items = useMemo(() => (byDay ? byDate(page?.items || []) : page?.items || []), [page, byDay]);
-  const previewed = state.selected || items[0]?.record_id || null;
+  // With nothing selected, the preview shows the list's first row as first
+  // drawn: a later page putting a newer row on top does not move it.
+  const leadKey = `${listKey}:${byDay}`;
+  if (status === "ready" && items.length && lead.current?.key !== leadKey)
+    lead.current = { key: leadKey, id: items[0].record_id };
+  const previewed =
+    state.selected || (lead.current?.key === leadKey ? lead.current.id : items[0]?.record_id) || null;
   const count = state.q
     ? status === "ready" && page
       ? page.bounded
@@ -363,7 +389,13 @@ export function ExplorerView({
   );
 
   const switcher = corpora.length > 1 && (
-    <div className="explorer-switch" role="group" aria-label="Corpus">
+    <div
+      className="explorer-switch"
+      role="group"
+      aria-label="Corpus"
+      ref={switchRef}
+      data-overflow={switchOverflow || undefined}
+    >
       <button
         type="button"
         aria-pressed={all}

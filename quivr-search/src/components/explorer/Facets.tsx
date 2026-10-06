@@ -114,6 +114,7 @@ function FacetBox({
   onToggle: (value: string) => void;
 }) {
   const [limit, setLimit] = useState(SHOWN_VALUES);
+  const box = useRef<HTMLElement>(null);
   // A value picked stays offered even when no document counted has it.
   const values: { value: Scalar; count?: number }[] = [
     ...picked.filter((v) => !facet.values.some((x) => String(x.value) === v)).map((value) => ({ value })),
@@ -125,15 +126,23 @@ function FacetBox({
   const rest = values.length - shown.length;
   const label = fieldLabel(facet.field);
   return (
-    <section className="facet" aria-label={label}>
-      <h3>
-        {label}
+    <section className="facet" aria-label={label} ref={box}>
+      <div className="facet-head">
+        <h3>{label}</h3>
         {picked.length > 0 && (
-          <button type="button" className="facet-clear" onClick={() => picked.forEach(onToggle)}>
+          <button
+            type="button"
+            className="facet-clear"
+            onClick={() => {
+              picked.forEach(onToggle);
+              // The button goes with the picks: the focus moves to the values.
+              box.current?.querySelector<HTMLElement>(".facet-value")?.focus();
+            }}
+          >
             Effacer<span className="visually-hidden"> {label}</span>
           </button>
         )}
-      </h3>
+      </div>
       <ul>
         {shown.map(({ value, count }) => (
           <li key={String(value)}>
