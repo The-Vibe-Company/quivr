@@ -63,9 +63,9 @@ class NativeCampaign(unittest.TestCase):
                 'digest': 'd' * 64, 'fingerprint': 'e' * 64, 'private': False}}},
             'datasets': {'scifact': {'fingerprint': 'c' * 64, 'split_fingerprint': 'f' * 64}},
             'mapping_policy': {'production': {'ingestion': {'kind': 'hosted',
-                'max_tokens_per_segment': 6144, 'overlap': 192, 'batch_size': 16,
-                'max_batch_tokens': 98304, 'request_timeout_ms': 4000, 'call_budget_ms': 30000,
-                'max_concurrent_requests': 4, 'max_retries': 2}, 'hybrid_fusion': 'relative_score'},
+                'max_tokens_per_segment': 6144, 'overlap': 192, 'batch_size': 32,
+                'max_batch_tokens': 196608, 'request_timeout_ms': 4000, 'call_budget_ms': 30000,
+                'max_concurrent_requests': 16, 'max_retries': 2}, 'hybrid_fusion': 'relative_score'},
                 'resources': {'experiment': spec['policy']['experiment'], 'modal_daily_usd': 10,
                               'modal_usd_per_second': .001}}}
         self.remote_runs, self.artifacts = {}, {}

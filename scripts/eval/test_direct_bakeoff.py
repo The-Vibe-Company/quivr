@@ -334,6 +334,29 @@ class Run(unittest.TestCase):
             self.assertEqual(report['results']['candidate']['latency_ms']['samples'], 1)
             self.assertGreaterEqual(report['results']['candidate']['latency_ms']['p95'], 0)
 
+    def test_reference_import_failures_report_module_and_wrapped_cause(self):
+        # Child JSON owns E5 failures: stdout/stderr are discarded by Modal.
+        missing = ModuleNotFoundError('private dependency detail', name='sentencepiece')
+        wrapped = ModuleNotFoundError("Could not import module 'PreTrainedModel'. private dependency detail")
+        wrapped.__cause__ = RuntimeError('private dependency detail')
+        for error, diagnostic in ((missing, {'missing_module': 'sentencepiece'}),
+                                  (wrapped, {'import_target': 'PreTrainedModel', 'cause_error_type': 'RuntimeError'})):
+            with self.subTest(error=diagnostic), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                trec.write(root / 'set', {'a': {'text': 'relevant'}}, {'q': 'question'}, {'q': {'a': 1}})
+                (root / 'set' / 'manifest.json').write_text('{"sample":{"seed":775}}')
+                with mock.patch.dict(os.environ, {'CI': '', 'GITHUB_ACTIONS': ''}), \
+                     mock.patch.object(bakeoff.public_sets, 'prepare', return_value=root / 'set'), \
+                     mock.patch.object(bakeoff.E5, 'embed', side_effect=error):
+                    code = bakeoff.main(['--set', 'scifact', '--models', bakeoff.BASELINE,
+                        '--max-input-tokens', '1000', '--max-usd', '1', '--out', str(root / 'out.json')])
+                report = json.loads((root / 'out.json').read_text())
+                self.assertEqual(code, 2)
+                self.assertEqual(report['status'], 'failed')
+                self.assertEqual(report['reason'], {'kind': 'provider_error',
+                    'error_type': 'ModuleNotFoundError', **diagnostic})
+                self.assertNotIn('private dependency detail', json.dumps(report))
+
     def test_cached_reference_is_reused_and_stale_samples_are_refused(self):
         # Owns reference provenance and paired scores, using real scoring.
         with tempfile.TemporaryDirectory() as temp:
