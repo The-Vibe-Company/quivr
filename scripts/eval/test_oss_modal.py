@@ -49,12 +49,13 @@ class ModalTransport(unittest.TestCase):
              mock.patch.object(modal.App, 'run', side_effect=RuntimeError('offline')):
             with self.assertRaises(oss_modal.JobFailed):
                 oss_modal.dispatch('granite-r2', 'cpu', ['scifact'], 'a' * 40, 1000, 30, False)
+            granite_mounts = list(mounts)
+            mounts.clear()
             with self.assertRaises(oss_modal.JobFailed):
                 oss_modal.dispatch('embeddinggemma-2', 'L4', ['scifact'], 'a' * 40, 1000, 30, False)
+        self.assertEqual(mounts, granite_mounts)
         self.assertIn((('torch==2.6.0',), 'https://download.pytorch.org/whl/cu124'), wheels)
         self.assertIn((('transformers==5.19.0', 'sentence-transformers==6.1.0'), None), wheels)
-        # Both image variants mount the same files.
-        mounts = list({(str(local), remote): (local, remote, ignored) for local, remote, ignored in mounts}.values())
 
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

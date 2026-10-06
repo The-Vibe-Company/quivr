@@ -37,11 +37,13 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
     root = pathlib.Path(__file__).resolve().parents[2]
     app = modal.App('quivr-embedding-measurement')
     gemma = label in LABELS
-    base = (modal.Image.debian_slim(python_version='3.12') if gemma else
+    spec = image_for(hardware, label)
+    base = (modal.Image.debian_slim(python_version=spec['python']) if gemma else
             modal.Image.from_registry(image_for(hardware), add_python='3.12').entrypoint([]))
-    wheel = 'cu124' if gemma and hardware == 'L4' else 'cpu'
+    torch_package = spec['torch'] if gemma else 'torch==2.6.0'
+    torch_index = spec['torch_index_url'] if gemma else 'https://download.pytorch.org/whl/cpu'
     image = (base
-             .pip_install('torch==2.6.0', index_url='https://download.pytorch.org/whl/' + wheel)
+             .pip_install(torch_package, index_url=torch_index)
              .env({'OMP_NUM_THREADS': '4', 'RAYON_NUM_THREADS': '4', 'TOKENIZERS_PARALLELISM': 'false',
                    'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1'})
              .add_local_dir(root / 'scripts/eval', '/workspace/scripts/eval', copy=True,
@@ -52,7 +54,7 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
              # install here so relative -r requirements.txt resolves correctly.
              .run_commands('python -m pip install -r /workspace/scripts/eval/requirements-direct.txt'))
     if gemma:
-        image = image.pip_install('transformers==5.19.0', 'sentence-transformers==6.1.0')
+        image = image.pip_install(*spec['packages'])
     worker = app.function(image=image, gpu=None if hardware == 'cpu' else 'L4',
                           cpu=(4, 4), memory=(8192, 8192), timeout=timeout,
                           startup_timeout=STARTUP_TIMEOUT,
@@ -75,6 +77,11 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
                 call.cancel(terminate_containers=True)
                 raise
             result['campaign']['modal_app_id'] = app.app_id
+            try:
+                result['campaign']['modal_image_id'] = image.object_id
+            except AttributeError:
+                # Offline SDK definitions have no built image identity.
+                result['campaign']['modal_image_id'] = None
             for report in result['reports']:
                 report['serving_campaign'] = report_campaign(result['campaign'])
             return result

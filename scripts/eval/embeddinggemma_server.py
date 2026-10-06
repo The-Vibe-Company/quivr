@@ -37,12 +37,15 @@ def encode_request(model, body):
             or any(not isinstance(text, str) for text in texts)):
         raise ValueError('invalid embedding request')
     from direct_bakeoff import normalize
-    vectors = model.encode(texts, prompt='', batch_size=16, show_progress_bar=False,
-                           convert_to_numpy=True)
-    if vectors.shape != (len(texts), 768):
-        raise ValueError('unexpected native embedding shape')
-    # Normalize after slicing, even though the full model output is normalized.
-    vectors = normalize(vectors[:, :dimension])
+    try:
+        vectors = model.encode(texts, prompt='', batch_size=16, show_progress_bar=False,
+                               convert_to_numpy=True)
+        if vectors.shape != (len(texts), 768):
+            raise RuntimeError('unexpected native embedding shape')
+        # Normalize after slicing, even though the full model output is normalized.
+        vectors = normalize(vectors[:, :dimension])
+    except (ValueError, TypeError):
+        raise RuntimeError('encoding failed') from None
     return {'data': [{'index': i, 'embedding': vector.tolist()} for i, vector in enumerate(vectors)]}
 
 

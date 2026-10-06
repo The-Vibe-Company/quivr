@@ -29,7 +29,9 @@ class Campaign(unittest.TestCase):
             self.assertEqual(job['model_revision'], '914f7f89142e33e77833254d9c9b90c3cef7303b')
             self.assertEqual(config['model_revision'], job['model_revision'][:16])
             self.assertEqual(config['max_tokens_per_segment'], 8192)
-            self.assertIn('sentence-transformers==6.1.0', job['image'])
+            self.assertIn('sentence-transformers==6.1.0', job['image']['packages'])
+            self.assertEqual(job['image']['base'], 'debian_slim')
+            self.assertTrue(all(len(digest) == 64 for digest in job['image']['requirements'].values()))
             budget = oss_bakeoff.direct_bakeoff.embeddings.Budget(1000, 1)
             client = oss_bakeoff.direct_bakeoff.OpenAI(config, budget, 'scifact', job['model'])
             model = mock.Mock()
@@ -51,6 +53,9 @@ class Campaign(unittest.TestCase):
                     self.assertEqual(model.encode.call_args.kwargs['prompt'], '')
             with self.assertRaises(ValueError):
                 embeddinggemma_server.encode_request(model, {'model': config['model'], 'input': ['example'], 'dimensions': 384})
+            model.encode.return_value = np.zeros((1, 512))
+            with self.assertRaises(RuntimeError):
+                embeddinggemma_server.encode_request(model, {'model': config['model'], 'input': ['example']})
 
     def test_gemma_load_checks_pinned_licence_and_disables_unused_encoders(self):
         loader = mock.Mock()
@@ -94,6 +99,12 @@ class Campaign(unittest.TestCase):
         self.assertIn('embeddinggemma_server.py', start.call_args.args[0][1])
         process.terminate.assert_called_once()
         process.wait.assert_called_once()
+        process.poll.return_value = 17
+        with mock.patch.object(oss_bakeoff.subprocess, 'Popen', return_value=process), \
+             mock.patch.object(oss_bakeoff.subprocess, 'run', side_effect=AssertionError('measurement before readiness')):
+            failed = oss_bakeoff.measure('embeddinggemma-2-256', 'L4', ['scifact'], 'a' * 40, 1000, 600, False)
+        self.assertEqual(failed['campaign']['reason']['kind'], 'server_exit')
+        self.assertEqual(failed['campaign']['reason']['server'], 'embeddinggemma')
 
     def test_dry_run_needs_no_modal_and_accounts_both_resource_types(self):
         # Owner boundary: an operator gets a finite resource estimate before dispatch.

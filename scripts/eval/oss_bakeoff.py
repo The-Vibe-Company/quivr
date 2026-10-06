@@ -9,6 +9,7 @@ import argparse
 import concurrent.futures
 import datetime
 import json
+import hashlib
 import os
 import pathlib
 import subprocess
@@ -41,7 +42,12 @@ CPU_CORES, MEMORY_GIB = 4, 8
 
 def image_for(hardware, label=None):
     if label in embeddinggemma_server.LABELS:
-        return 'sentence-transformers==6.1.0; transformers==5.19.0; torch==2.6.0'
+        requirements = ['requirements-direct.txt', 'requirements.txt']
+        return {'base': 'debian_slim', 'python': '3.12', 'torch': 'torch==2.6.0',
+                'torch_index_url': 'https://download.pytorch.org/whl/' + ('cpu' if hardware == 'cpu' else 'cu124'),
+                'packages': ['transformers==5.19.0', 'sentence-transformers==6.1.0'],
+                'requirements': {name: hashlib.sha256((ROOT / 'scripts/eval' / name).read_bytes()).hexdigest()
+                                 for name in requirements}}
     return TEI + ('cpu-1.9.3' if hardware == 'cpu' else '1.9.3')
 
 
@@ -72,12 +78,12 @@ def write_new(path, value):
         output.write('\n')
 
 
-def wait_ready(process, timeout=300):
+def wait_ready(process, timeout=300, server='TEI'):
     deadline = time.monotonic() + timeout
     opener = urllib.request.build_opener(direct_bakeoff.embeddings.NoRedirect())
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise RuntimeError('TEI exited before readiness')
+            raise RuntimeError(server + ' exited before readiness')
         try:
             with opener.open('http://127.0.0.1:8080/health', timeout=2) as response:
                 if response.status == 200:
@@ -85,15 +91,16 @@ def wait_ready(process, timeout=300):
         except (urllib.error.URLError, TimeoutError):
             pass
         time.sleep(.1)  # bounded runtime readiness; never exercised by sleeping tests
-    raise TimeoutError('TEI readiness deadline exceeded')
+    raise TimeoutError(server + ' readiness deadline exceeded')
 
 
-def stop_reason(error, process=None, stderr=None):
+def stop_reason(error, process=None, stderr=None, server='tei'):
     code = process.poll() if process is not None else None
-    kind = 'tei_exit' if code is not None else 'timeout' if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)) else 'provider_error'
+    kind = ('tei_exit' if server == 'tei' else 'server_exit') if code is not None else 'timeout' if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)) else 'provider_error'
     reason = {'kind': kind, 'error_type': type(error).__name__}
     if code is not None:
         reason['exit_code'] = code
+        reason['server'] = server
     if stderr is not None:
         stderr.seek(0, os.SEEK_END)
         stderr.seek(max(0, stderr.tell() - 8192))
@@ -192,6 +199,7 @@ def measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted, ref
                        '--hostname', '127.0.0.1', '--port', '8080', '--auto-truncate', '--max-client-batch-size', '32',
                        '--dtype', 'float32' if hardware == 'cpu' else 'float16']
             gemma = label in embeddinggemma_server.LABELS
+            server = 'embeddinggemma' if gemma else 'tei'
             if gemma:
                 command = [sys.executable, str(ROOT / 'scripts/eval/embeddinggemma_server.py'), hardware]
             process = None
@@ -201,16 +209,16 @@ def measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted, ref
                 try:
                     process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr)
                     try:
-                        wait_ready(process, min(300, max(1, timeout - 10)))
+                        wait_ready(process, min(300, max(1, timeout - 10)), server)
                     except Exception as error:
-                        reason = stop_reason(error, process, stderr)
+                        reason = stop_reason(error, process, stderr, server)
                     if reason is None:
                         cold = time.monotonic() - started
                         reports, reason = run_comparison(directory, label, sets, git_sha, max_tokens, timeout, restricted, started, reference)
                         if process.poll() is not None:
-                            reason = stop_reason(RuntimeError(), process, stderr)
+                            reason = stop_reason(RuntimeError(), process, stderr, server)
                 except Exception as error:
-                    reason = stop_reason(error, process, stderr)
+                    reason = stop_reason(error, process, stderr, server)
                 finally:
                     if process is not None:
                         process.terminate()
