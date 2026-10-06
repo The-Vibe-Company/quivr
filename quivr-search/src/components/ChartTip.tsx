@@ -49,13 +49,17 @@ export function ChartTip() {
           : next,
       );
     };
-    // A refresh may change the bar's words or height, move it within its
-    // chart, or remove it; other changes of the page leave the tip where it is.
-    const watch = new MutationObserver((records) => {
+    // A change anywhere may move the bar (its own words or height, its chart,
+    // content above it) or remove it: the bar is measured again, once a frame
+    // at most, however many changes come.
+    let frame = 0;
+    const watch = new MutationObserver(() => {
       const bar = shown.current;
       if (!bar?.isConnected) return show(null);
-      const chart = bar.closest("[data-tips]") || bar;
-      if (records.some((record) => chart.contains(record.target))) place(bar);
+      frame ||= requestAnimationFrame(() => {
+        frame = 0;
+        if (shown.current?.isConnected) place(shown.current);
+      });
     });
     function show(bar: Element | null) {
       if (bar === shown.current) return;
@@ -63,6 +67,8 @@ export function ChartTip() {
       shown.current = bar;
       if (!bar) {
         watch.disconnect();
+        cancelAnimationFrame(frame);
+        frame = 0;
         return setTip(null);
       }
       bar.setAttribute("data-hover", "");
@@ -142,6 +148,7 @@ export function ChartTip() {
     document.addEventListener("scroll", scroll, true);
     return () => {
       watch.disconnect();
+      cancelAnimationFrame(frame);
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerdown", hide);
       document.documentElement.removeEventListener("pointerleave", hide);
