@@ -118,7 +118,7 @@ func (p provider) request(ctx context.Context, inputs []string, mode string, inv
 		retry := res.StatusCode == 429 || (res.StatusCode >= 500 && res.StatusCode <= 599)
 		if !retry {
 			refusal := quivrplugin.TerminalIngestError("inference_refused", "provider refused the request (HTTP "+strconv.Itoa(res.StatusCode)+")")
-			if mode == "document" && (res.StatusCode == http.StatusBadRequest || res.StatusCode == http.StatusRequestEntityTooLarge || res.StatusCode == http.StatusUnprocessableEntity) {
+			if mode == "document" && isInputRefusal(res.StatusCode, data) {
 				return nil, &inputRefusal{refusal}
 			}
 			return nil, refusal
@@ -140,6 +140,36 @@ func (p provider) request(ctx context.Context, inputs []string, mode string, inv
 		}
 	}
 	return nil, quivrplugin.RetryableIngestError("provider_unavailable", "provider exhausted bounded retries")
+}
+
+// Unknown validation errors remain request-wide: a bad model or dimension can
+// use the same status as a bad input. Inspect only structured attribution and
+// never retain or expose a provider's error text.
+func isInputRefusal(status int, body []byte) bool {
+	if status == http.StatusRequestEntityTooLarge {
+		return true
+	}
+	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+		return false
+	}
+	var payload struct {
+		Error struct {
+			Param string `json:"param"`
+			Code  string `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return false
+	}
+	param := payload.Error.Param
+	if param != "" {
+		return param == "input" || param == "texts" || strings.HasPrefix(param, "input[") || strings.HasPrefix(param, "texts[") || strings.HasPrefix(param, "input.") || strings.HasPrefix(param, "texts.")
+	}
+	switch payload.Error.Code {
+	case "invalid_input", "invalid_text", "input_too_long", "text_too_long", "context_length_exceeded", "input_validation_error":
+		return true
+	}
+	return false
 }
 func (p provider) usage(invocations []string, items int, mode string, attempt, status, tokens int, estimated bool) {
 	attrs := []any{"event", "hosted_embedding_usage", "space", p.config.spaceID(), "mode", mode, "attempt", attempt + 1, "status", status, "input_tokens", tokens, "input_count", items, "estimated", estimated}

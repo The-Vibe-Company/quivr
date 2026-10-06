@@ -91,6 +91,9 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	if c.BatchWaitMS < 0 || c.BatchWaitMS > 100 {
 		return c, fmt.Errorf("batch_wait_ms must be between 0 and 100")
 	}
+	if c.BatchWaitMS >= c.CallBudgetMS {
+		return c, fmt.Errorf("batch_wait_ms must be less than call_budget_ms")
+	}
 	if c.MaxConcurrentRequests < 1 || c.MaxConcurrentRequests > 32 {
 		return c, fmt.Errorf("max_concurrent_requests must be between 1 and 32")
 	}

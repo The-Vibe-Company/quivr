@@ -66,8 +66,9 @@ EOF
 For Cohere’s own API, use `"base_url":"https://api.cohere.com/v2"` and `"auth":"bearer"` in both configuration copies instead.
 
 For archive imports, `hosted.embed` combines concurrent document inputs from
-the same Organization. It collects for `batch_wait_ms` (default 25, range
-0–100 ms) and respects `batch_size`, `max_batch_tokens` and the shared
+the same Organization within each plugin process. The `batch_wait_ms` window
+(default 25, range 0–100 ms) can extend while awaiting provider admission.
+Batches respect `batch_size`, `max_batch_tokens` and the shared
 `max_concurrent_requests` cap. Set `batch_wait_ms: 0` to disable collection.
 Queries bypass the collection window. See the plugin's
 [limits and defaults](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#limits-and-defaults)

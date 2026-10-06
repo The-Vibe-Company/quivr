@@ -92,7 +92,9 @@ def _summary_only(summary: dict | None) -> dict:
     return {
         "count": int(summary.get("count") or 0),
         "errors": int(summary.get("errors") or 0),
-        "mean_ms": _rounded(summary.get("mean_ms")),
+        # Keep the source rollup precision intact. Derived values are rounded
+        # only after the weighted subtraction below.
+        "mean_ms": _number(summary.get("mean_ms")),
     }
 
 
@@ -159,6 +161,14 @@ def _rollup_delta(before: dict, after: dict) -> dict:
             "percentiles are intentionally omitted because subtracting them is not meaningful",
         ],
     }
+    if before.get("errors") or after.get("errors"):
+        delta.update({
+            "suppressed": True,
+            "suppression_reason": "before or after rollup snapshot had read errors",
+            "before_errors": before.get("errors", []),
+            "after_errors": after.get("errors", []),
+        })
+        return delta
     for kind in ("steps", "plugins"):
         left = {_rollup_key(item, kind): item for item in before.get(kind, [])}
         right = {_rollup_key(item, kind): item for item in after.get(kind, [])}
@@ -172,7 +182,7 @@ def _rollup_delta(before: dict, after: dict) -> dict:
             if count_delta <= 0:
                 values["mean_ms"] = None
             elif previous["count"] == 0 and current["mean_ms"] is not None:
-                values["mean_ms"] = current["mean_ms"]
+                values["mean_ms"] = _rounded(current["mean_ms"])
             elif previous["mean_ms"] is None or current["mean_ms"] is None:
                 values["mean_ms"] = None
             else:
@@ -244,7 +254,7 @@ def _worker_log_paths(directory: pathlib.Path) -> list[pathlib.Path]:
     )
 
 
-def _worker_outcomes(directory: pathlib.Path, started_at: dt.datetime, finished_at: dt.datetime) -> dict:
+def _worker_outcomes(directory: pathlib.Path, started_at: dt.datetime, finished_at: dt.datetime, record_ids: set[str]) -> dict:
     paths = _worker_log_paths(directory)
     records = []
     for path in paths:
@@ -259,6 +269,8 @@ def _worker_outcomes(directory: pathlib.Path, started_at: dt.datetime, finished_
                 continue
             if item.get("msg") != "processing outcome" or item.get("stage") not in {"baseline", "enrichment"}:
                 continue
+            if item.get("record_id") not in record_ids:
+                continue
             occurred = _parse_time(item.get("ts"))
             if occurred is None or occurred < started_at or occurred > finished_at:
                 continue
@@ -269,6 +281,8 @@ def _worker_outcomes(directory: pathlib.Path, started_at: dt.datetime, finished_
         "window": {"from": _iso(started_at), "to": _iso(finished_at)},
         "timing_basis": "worker processing outcome duration_ms; exact stage service duration, not a queue interval",
         "coverage_note": "Worker logs are bounded or rotated; retained records are exact, but a deque that dropped older lines makes these counts a lower bound.",
+        "filter_basis": "record_id observed in this run's public change events",
+        "observed_record_ids": len(record_ids),
         "baseline": {},
         "enrichment": {},
     }
@@ -430,6 +444,7 @@ def main(argv=None):
     seen_materialized = set()
     seen_searchable = set()
     seen_enriched = set()
+    seen_accepted_records = set()
     accepted_events = set()
     samples = []
     expected = fixture["members_total"]
@@ -449,6 +464,8 @@ def main(argv=None):
                     resource_id = resource.get("id")
                     if event_type == "record.accepted":
                         accepted_events.add(event.get("event_id"))
+                        if resource_id:
+                            seen_accepted_records.add(resource_id)
                     elif event_type == "record.materialized" and resource_id:
                         seen_materialized.add(resource_id)
                     elif event_type == "record.retrieval_ready" and resource_id:
@@ -499,7 +516,8 @@ def main(argv=None):
 
     finished_wall = _now()
     after_rollups = _rollup_snapshot(api)
-    worker = _worker_outcomes(directory, run_started_wall, finished_wall)
+    run_record_ids = seen_accepted_records | seen_materialized | seen_searchable | seen_enriched
+    worker = _worker_outcomes(directory, run_started_wall, finished_wall, run_record_ids)
     provider = _read_provider_log(args.provider_log.resolve() if args.provider_log else None)
     accepted_rate = expected / accepted_at if accepted_at else 0
     ready_rate = expected_records / ready_at if ready_at else 0

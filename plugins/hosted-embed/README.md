@@ -128,7 +128,7 @@ Corpora need a rebuild or backfill before they carry a newly configured space.
 | `max_tokens_per_segment` | `512` | Maximum estimated model input tokens, 8–32768 |
 | `overlap` | `48` | Overlapping source bytes, always at code point boundaries |
 | `batch_size` | `16` | Most document inputs per provider request, across Versions, 1–32 |
-| `batch_wait_ms` | `25` | Document collection window, 0–100 ms; 0 disables cross-Version batching |
+| `batch_wait_ms` | `25` | Document collection window, 0–100 ms and less than `call_budget_ms`; 0 disables cross-Version batching |
 | `max_batch_tokens` | `8192` | Maximum summed input estimate per request; at least the segment limit |
 | `request_timeout_ms` | `4000` | Per-request timeout, 100–10000 ms |
 | `call_budget_ms` | `30000` | Document invocation budget, 100–90000 ms |
@@ -136,7 +136,7 @@ Corpora need a rebuild or backfill before they carry a newly configured space.
 | `max_retries` | `2` | Retries after the first attempt on 429 or 5xx, 0–5 |
 | `usd_per_million_tokens` | absent | Optional operator-supplied price for backfill estimates |
 
-Concurrent document calls in the same Organization share a provider batch.
+Concurrent document calls in the same Organization and plugin process share a provider batch.
 Each batch respects `batch_size` and `max_batch_tokens`. A batch can keep
 collecting while waiting for provider admission; the configured window is
 additional collection time, not a bound on provider queueing. Query encoding
@@ -144,9 +144,12 @@ bypasses collection and retains its separate retrieval mode. The queue admits
 at most `min(256, max_concurrent_requests × batch_size)` document subrequests;
 additional callers wait within their invocation deadline. Cancellation drops
 inputs that have not reached the provider and does not cancel siblings. A
-provider input refusal (HTTP 400, 413 or 422) splits a shared batch to isolate
-the refused Version; healthy Versions continue independently. Shared
-authentication or endpoint failures propagate to the batch after one call.
+provider input refusal splits a shared batch to isolate the refused Version;
+healthy Versions continue independently. HTTP 413 is a size refusal; HTTP 400
+or 422 needs a structured `error.param` targeting `input` or `texts`, or a
+recognized input-validation `error.code`. Unknown validation errors and shared
+authentication or endpoint failures are not split by Version. Retryable
+failures keep the configured retry policy.
 
 Usage logs report `input_count` per provider request. A shared request lists
 `invocation_ids`; a single invocation retains `invocation_id`. `input_tokens`

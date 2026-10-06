@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import http.server
 import json
 import os
@@ -51,6 +52,28 @@ def _running(stack: Stack) -> bool:
         return stack.probe("probe_port") == 204 and stack.probe("worker_probe_port") == 204
     except (KeyError, OSError):
         return bool(stack.state.get("pids"))
+
+
+def _acquire_stack_lock(directory: pathlib.Path) -> int:
+    path = directory / ".measure-archive-hosted.lock"
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError) as error:
+        os.close(fd)
+        if isinstance(error, BlockingIOError) or getattr(error, "errno", None) in {11, 13}:
+            raise RuntimeError("another hosted archive measurement already owns this stack") from None
+        raise
+    return fd
+
+
+def _release_stack_lock(fd: int | None) -> None:
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def _json_config(raw: str) -> dict:
@@ -215,11 +238,16 @@ def main(argv=None):
     directory.mkdir(parents=True, exist_ok=True)
     provider_log = directory / f"provider-calls-{run}.jsonl"
     plugin_log = directory / f"plugin-{run}.log"
-    original = {}
-    config_names = ("config.json", "worker.json")
-    for name in config_names:
-        path = stack.directory / name
-        original[name] = {"text": path.read_text(), "mode": stat.S_IMODE(path.stat().st_mode)}
+    lock_fd = _acquire_stack_lock(stack.directory)
+    try:
+        original = {}
+        config_names = ("config.json", "worker.json")
+        for name in config_names:
+            path = stack.directory / name
+            original[name] = {"text": path.read_text(), "mode": stat.S_IMODE(path.stat().st_mode)}
+    except BaseException:
+        _release_stack_lock(lock_fd)
+        raise
 
     binary = None
     manifest = None
@@ -359,6 +387,7 @@ def main(argv=None):
             _write_json(_wrapper_evidence_path(directory, run), evidence)
         except OSError:
             pass
+        _release_stack_lock(lock_fd)
 
     if measurement_error is not None:
         raise measurement_error

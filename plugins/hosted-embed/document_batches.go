@@ -128,6 +128,23 @@ func (b *documentBatcher) flush(batch *documentBatch) {
 }
 
 func (b *documentBatcher) send(ctx context.Context, jobs []documentRequest, admitted bool) {
+	// A caller may cancel during a shared call or an earlier refusal probe.
+	// Remove it before making another request, and settle its queue slot once.
+	active := jobs[:0]
+	for _, job := range jobs {
+		if job.ctx.Err() != nil {
+			b.reply(job, documentResult{err: job.ctx.Err()})
+		} else {
+			active = append(active, job)
+		}
+	}
+	jobs = active
+	if len(jobs) == 0 {
+		if admitted {
+			b.provider.gate.release()
+		}
+		return
+	}
 	var inputs, invocations []string
 	for _, job := range jobs {
 		inputs = append(inputs, job.inputs...)

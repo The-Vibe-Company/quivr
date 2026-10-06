@@ -303,6 +303,7 @@ func TestConfigAndContentRefusals(t *testing.T) {
 	for _, tc := range []struct{ raw, reason string }{
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":-1}`, "batch_wait_ms must be between 0 and 100"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":101}`, "batch_wait_ms must be between 0 and 100"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":100,"call_budget_ms":100}`, "batch_wait_ms must be less than call_budget_ms"},
 		{`{"format":"openai","base_url":"https://key@example.org","auth":"bearer","model":"m","dimensions":8}`, "base_url must be an HTTP(S) base without credentials"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"bearer","model":"m","dimensions":8,"api_key":"secret"}`, "configuration must contain only declared fields"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"overlap":512}`, "invalid segment, overlap or batch limits"},
@@ -512,6 +513,8 @@ func TestConcurrentVersionsShareBoundedProviderBatches(t *testing.T) {
 			defer cancel()
 			req := ingestRequest(c, fmt.Sprintf("bulletin %d", n), true)
 			req.InvocationID = fmt.Sprintf("inv-%d", n)
+			req.Version.RecordID = fmt.Sprintf("record-%d", n)
+			req.Version.RecordVersionID = fmt.Sprintf("version-%d", n)
 			got, err := i.SegmentAndEmbed(ctx, req)
 			if err != nil || len(got) != 1 {
 				t.Errorf("Version %d: %v %v", n, got, err)
@@ -556,6 +559,7 @@ func TestDocumentBatchQueueIsolatesCancellationAndRefusal(t *testing.T) {
 		for _, input := range req.Input {
 			if input == "deny" {
 				w.WriteHeader(400)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"param": "input", "code": "invalid_input"}})
 				return
 			}
 		}
@@ -656,12 +660,15 @@ func TestDocumentBatchQueueIsolatesCancellationAndRefusal(t *testing.T) {
 // Shared credential/endpoint failures belong to the provider boundary: one
 // collected batch must fail once, without replaying its inputs through splits.
 func TestDocumentBatchPropagatesGlobalProviderRefusalOnce(t *testing.T) {
-	for _, status := range []int{401, 403, 404} {
+	for _, status := range []int{400, 401, 403, 404, 422} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
 				w.WriteHeader(status)
+				if status == 400 || status == 422 {
+					_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"param": "model", "code": "invalid_model"}})
+				}
 			}))
 			defer server.Close()
 			c := testConfig("openai", server.URL)
@@ -697,5 +704,79 @@ func TestDocumentBatchPropagatesGlobalProviderRefusalOnce(t *testing.T) {
 				t.Fatalf("global HTTP %d refusal issued %d provider calls, want 1", status, got)
 			}
 		})
+	}
+}
+
+func TestDocumentBatchDropsCancellationBeforeRefusalProbe(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	var mu sync.Mutex
+	var calls [][]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		calls = append(calls, req.Input)
+		first := len(calls) == 1
+		mu.Unlock()
+		if first {
+			close(started)
+			<-release
+		}
+		w.WriteHeader(400)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"param": "input"}})
+	}))
+	defer server.Close()
+	defer releaseOnce.Do(func() { close(release) })
+	c := testConfig("openai", server.URL)
+	c.BatchSize, c.MaxConcurrentRequests = 2, 1
+	i := newIngester(c, "fake-key", slog.Default())
+	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stop()
+	if err := i.provider.gate.acquire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	defer cancel()
+	left, err := i.documents.submit(canceled, "org_a", []string{"cancel"}, "cancel")
+	if err != nil {
+		i.provider.gate.release()
+		t.Fatal(err)
+	}
+	right, err := i.documents.submit(ctx, "org_a", []string{"deny"}, "deny")
+	i.provider.gate.release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("combined request did not start")
+	}
+	cancel()
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case out := <-left:
+		if !errors.Is(out.err, context.Canceled) {
+			t.Fatalf("canceled: %v", out.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("canceled request did not settle")
+	}
+	select {
+	case out := <-right:
+		var refusal *quivrplugin.IngestError
+		if !errors.As(out.err, &refusal) || refusal.Retryable {
+			t.Fatalf("refusal: %v", out.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("refused request did not settle")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 2 || len(calls[1]) != 1 || calls[1][0] != "deny" {
+		t.Fatalf("canceled input retried in provider calls: %v", calls)
 	}
 }

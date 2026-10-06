@@ -103,6 +103,9 @@ func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestR
 			v, err = i.documents.embed(ctx, req.OrganizationID, batch, req.InvocationID)
 		}
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				err = quivrplugin.RetryableIngestError("provider_unavailable", "document embedding cancelled")
+			}
 			var e *quivrplugin.IngestError
 			if errors.As(err, &e) {
 				if e.Retryable {
