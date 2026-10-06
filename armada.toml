@@ -63,7 +63,7 @@ permissions = "full"
 # Known flaky failures: `armada ci why <pr> --rerun` reruns them once. Each needs its root-cause ticket.
 [[ci.known_failure]]
 check = "verify demo"
-pattern = "admin-health-live\\.spec\\.ts.*Reçu"
+pattern = "admin-health-live\\.spec\\.ts:16"
 ticket = "THE-1207"
 
 # Railway demo services. Railway only redeploys a service when a merge touches its
