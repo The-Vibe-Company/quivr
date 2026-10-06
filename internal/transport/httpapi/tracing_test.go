@@ -5,13 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"io"
 	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
@@ -25,8 +27,8 @@ import (
 // Metrics/access completeness tests cannot detect a regenerated trace or an
 // error whose correlation fields disagree with logs. No test-only seams.
 func TestRequestTraceIdentityMatchesErrorAndLog(t *testing.T) {
-	for _, buffered := range []bool{false, true} {
-		t.Run(map[bool]string{false: "ordinary", true: "audited-push"}[buffered], func(t *testing.T) {
+	for _, mode := range []string{"ordinary", "audited-push", "sensitive-command"} {
+		t.Run(mode, func(t *testing.T) {
 			exporter := tracetest.NewInMemoryExporter()
 			provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 			oldProvider := otel.GetTracerProvider()
@@ -41,36 +43,58 @@ func TestRequestTraceIdentityMatchesErrorAndLog(t *testing.T) {
 			slog.SetDefault(logger)
 			t.Cleanup(func() { slog.SetDefault(oldLogger) })
 			var options []httpapi.Option
-			if buffered {
+			var keys map[string]corpus.Scope
+			if mode == "audited-push" {
 				options = append(options, httpapi.WithRelay(connectors.Relay{Store: &onePushInstance{fail: errors.New("storage unavailable")}, Protection: successfulPushAudit{}}))
+			} else if mode == "sensitive-command" {
+				options = append(options, httpapi.WithAudit(&auditSink{}))
+				keys = map[string]corpus.Scope{catalogReader: {Organization: "org_a", Corpora: []string{"*"}}}
 			}
-			handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, nil, catalogCursorKey, options...)
+			handler, err := httpapi.New(knownCorpora{}, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, catalogCursorKey, options...)
 			if err != nil {
 				t.Fatal(err)
 			}
 			method, path, route := "GET", "/v0/corpora/private-corpus?query=private-query", "GET /v0/corpora/{corpus_id}"
-			if buffered {
+			if mode == "audited-push" {
 				method, path, route = "POST", "/v0/connectors/connector_push/api/events", "POST /v0/connectors/{connector_id}/api/{path}"
+			} else if mode == "sensitive-command" {
+				method, path, route = "POST", "/v0/corpora", "POST /v0/corpora"
 			}
 			req := httptest.NewRequest(method, path, nil)
+			if mode == "sensitive-command" {
+				req.Header.Set("Authorization", "Bearer "+catalogReader)
+			}
 			req.Header.Set("traceparent", "00-11111111111111111111111111111111-2222222222222222-01")
 			req.Header.Set("X-Request-ID", "caller-request-123")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, req)
-			var body, event map[string]any
+			var body map[string]any
 			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
-			if err := json.Unmarshal(logs.Bytes(), &event); err != nil {
-				t.Fatal(err)
-			}
-			for key, want := range map[string]string{"request_id": "caller-request-123", "trace_id": "11111111111111111111111111111111"} {
-				if body[key] != want || event[key] != want {
-					t.Fatalf("%s: body %v log %v want %s", key, body[key], event[key], want)
+			decoder := json.NewDecoder(&logs)
+			accessSeen := false
+			for {
+				var event map[string]any
+				if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
+					break
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if event["route"] == strings.TrimPrefix(route, method+" ") {
+					accessSeen = true
+				}
+				for key, want := range map[string]string{"request_id": "caller-request-123", "trace_id": "11111111111111111111111111111111"} {
+					if body[key] != want || event[key] != want {
+						t.Fatalf("%s: body %v log %v want %s", key, body[key], event[key], want)
+					}
+				}
+				if body["span_id"] == "" || body["span_id"] != event["span_id"] {
+					t.Fatalf("span mismatch: body %v log %v", body, event)
 				}
 			}
-			if body["span_id"] == "" || body["span_id"] != event["span_id"] {
-				t.Fatalf("span mismatch: body %v log %v", body, event)
+			if !accessSeen {
+				t.Fatal("missing correlated access event")
 			}
 			spans := exporter.GetSpans()
 			if len(spans) != 1 {

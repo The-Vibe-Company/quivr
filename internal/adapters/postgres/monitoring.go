@@ -42,7 +42,7 @@ func (s MonitoringStore) monitoringCommand(ctx context.Context, org, family, key
 	if err != nil {
 		return "", err
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -116,7 +116,7 @@ func (s MonitoringStore) CreateSavedQuery(ctx context.Context, org string, in mo
 func (s MonitoringStore) SavedQuery(ctx context.Context, org, id string) (monitoring.SavedQuery, error) {
 	q := monitoring.SavedQuery{}
 	var definition, vectors []byte
-	err := s.Pool.QueryRow(ctx, `SELECT q.id,q.name,q.deleted,v.id,v.definition,v.query_vectors FROM saved_queries q JOIN saved_query_versions v ON v.organization=q.organization AND v.id=q.current_version_id WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&q.ID, &q.Name, &q.Deleted, &q.Current.VersionID, &definition, &vectors)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT q.id,q.name,q.deleted,v.id,v.definition,v.query_vectors FROM saved_queries q JOIN saved_query_versions v ON v.organization=q.organization AND v.id=q.current_version_id WHERE q.organization=$1 AND q.id=$2`, org, id).Scan(&q.ID, &q.Name, &q.Deleted, &q.Current.VersionID, &definition, &vectors)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return q, monitoring.ErrNotFound
 	}
@@ -134,7 +134,7 @@ func (s MonitoringStore) SavedQuery(ctx context.Context, org, id string) (monito
 func (s MonitoringStore) SavedQueryVersion(ctx context.Context, org, id, versionID string) (monitoring.SavedQueryVersion, error) {
 	v := monitoring.SavedQueryVersion{SavedQueryID: id, VersionID: versionID}
 	var definition, vectors []byte
-	err := s.Pool.QueryRow(ctx, `SELECT definition,query_vectors FROM saved_query_versions WHERE organization=$1 AND saved_query_id=$2 AND id=$3`, org, id, versionID).Scan(&definition, &vectors)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT definition,query_vectors FROM saved_query_versions WHERE organization=$1 AND saved_query_id=$2 AND id=$3`, org, id, versionID).Scan(&definition, &vectors)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, monitoring.ErrNotFound
 	}
@@ -199,7 +199,7 @@ func (s MonitoringStore) prepareQueryVectors(ctx context.Context, org, family, k
 			return nil, err
 		}
 		var previous []byte
-		err = s.Pool.QueryRow(ctx, "SELECT canonical_request FROM monitoring_requests WHERE organization=$1 AND route_family=$2 AND request_key=$3", org, family, key).Scan(&previous)
+		err = database(ctx, s.Pool).QueryRow(ctx, "SELECT canonical_request FROM monitoring_requests WHERE organization=$1 AND route_family=$2 AND request_key=$3", org, family, key).Scan(&previous)
 		if err == nil {
 			if !bytes.Equal(previous, request) {
 				return nil, monitoring.ErrConflict
@@ -379,7 +379,7 @@ func scanSubscription(row pgx.Row) (monitoring.Subscription, error) {
 }
 
 func (s MonitoringStore) Subscription(ctx context.Context, org, id string) (monitoring.Subscription, error) {
-	sub, err := scanSubscription(s.Pool.QueryRow(ctx, subscriptionSelect+`WHERE s.organization=$1 AND s.id=$2`, org, id))
+	sub, err := scanSubscription(database(ctx, s.Pool).QueryRow(ctx, subscriptionSelect+`WHERE s.organization=$1 AND s.id=$2`, org, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sub, monitoring.ErrNotFound
 	}
@@ -389,7 +389,7 @@ func (s MonitoringStore) Subscription(ctx context.Context, org, id string) (moni
 func (s MonitoringStore) SubscriptionVersion(ctx context.Context, org, id, versionID string) (monitoring.SubscriptionVersion, error) {
 	v := monitoring.SubscriptionVersion{SubscriptionID: id}
 	var evaluator []byte
-	err := s.Pool.QueryRow(ctx, `SELECT `+subscriptionVersionColumns+`
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT `+subscriptionVersionColumns+`
 FROM subscription_versions v
 JOIN subscriptions s ON s.organization=v.organization AND s.id=v.subscription_id
 JOIN saved_query_versions q ON q.organization=v.organization AND q.id=v.saved_query_version_id
@@ -600,7 +600,7 @@ func (s MonitoringStore) RenameSubscription(ctx context.Context, org, key, id, n
 // non-nil corpora keeps those whose every pinned Corpus, of any Version, it
 // contains: the rule every Subscription read applies.
 func (s MonitoringStore) Subscriptions(ctx context.Context, org string, owner monitoring.OwnerFilter, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
-	rows, err := s.Pool.Query(ctx, subscriptionSelect+`WHERE s.organization=$1 AND s.enabled AND NOT s.deleted AND s.id>$2
+	rows, err := database(ctx, s.Pool).Query(ctx, subscriptionSelect+`WHERE s.organization=$1 AND s.enabled AND NOT s.deleted AND s.id>$2
   AND (CASE WHEN $3 THEN s.owner IS NULL ELSE s.owner=$4 END)
   AND ($5::text[] IS NULL OR NOT EXISTS(SELECT 1 FROM subscription_corpora sc WHERE sc.organization=s.organization AND sc.subscription_id=s.id AND NOT sc.corpus_id=ANY($5::text[])))
 ORDER BY s.id LIMIT $6`, org, after, owner.Global, owner.Owner, corpora, limit)
@@ -624,7 +624,7 @@ var _ monitoring.EvaluatorMoves = MonitoringStore{}
 // PinningSubscriptions lists the Subscriptions of org that are not deleted,
 // enabled or not, whose current Version pins pluginID@version (THE-805).
 func (s MonitoringStore) PinningSubscriptions(ctx context.Context, org, pluginID, version string, corpora []string, after string, limit int) ([]monitoring.Subscription, error) {
-	rows, err := s.Pool.Query(ctx, subscriptionSelect+`WHERE s.organization=$1 AND NOT s.deleted AND s.id>$2
+	rows, err := database(ctx, s.Pool).Query(ctx, subscriptionSelect+`WHERE s.organization=$1 AND NOT s.deleted AND s.id>$2
   AND v.evaluator->>'plugin_id'=$3 AND v.evaluator->>'version'=$4
   AND ($5::text[] IS NULL OR NOT EXISTS(SELECT 1 FROM subscription_corpora sc WHERE sc.organization=s.organization AND sc.subscription_id=s.id AND NOT sc.corpus_id=ANY($5::text[])))
 ORDER BY s.id LIMIT $6`, org, after, pluginID, version, corpora, limit)
@@ -648,7 +648,7 @@ func (s MonitoringStore) MoveEvaluator(ctx context.Context, org string, from mon
 	}
 	id := from.SubscriptionID
 	versionID := content.StableID("subscription_version", org, id, "evaluator_move", from.VersionID, monitoring.EvaluatorKey(evaluator))
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return monitoring.SubscriptionVersion{}, err
 	}

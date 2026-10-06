@@ -22,7 +22,7 @@ const spacesLock = 7760001
 // same id is content.ErrSpaceChanged. The owner's version and the role follow
 // the deployment.
 func (s SpaceStore) RegisterSpaces(ctx context.Context, spaces []content.RegisteredSpace) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (s SpaceStore) VectorSpaces(ctx context.Context, org, corpusID string) (con
 	// data has stale statistics. Aggregate coverage by owner/space before
 	// joining totals so an underestimated Version count cannot cause a
 	// quadratic join. Every count still comes from one database snapshot.
-	rows, err := s.Pool.Query(ctx, `WITH current AS MATERIALIZED (
+	rows, err := database(ctx, s.Pool).Query(ctx, `WITH current AS MATERIALIZED (
  SELECT cut.segment_id,v.id AS version_id,cut.plugin_id,cut.role,
  count(*) OVER (PARTITION BY cut.plugin_id,v.id) AS version_segments
  FROM records r JOIN record_versions v ON (v.organization,v.id,v.record_id)=(r.organization,r.current_version_id,r.id)
@@ -180,7 +180,7 @@ FROM carried sp LEFT JOIN owners p ON p.plugin_id=sp.owner
 	for _, id := range g.VectorSpaces() {
 		var c content.SpaceCoverage
 		c.ID = id
-		err := s.Pool.QueryRow(ctx, `SELECT manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role FROM vector_spaces WHERE id=$1`, id).
+		err := database(ctx, s.Pool).QueryRow(ctx, `SELECT manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role FROM vector_spaces WHERE id=$1`, id).
 			Scan(&c.Manifest, &c.Name, &c.Version, &c.OwnerPluginID, &c.OwnerPluginVersion, &c.Model, &c.VectorSpace.Dimensions, &c.Metric, &c.Indexes, &c.QueryModalities, &c.Role)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return g, nil, 0, err
@@ -212,7 +212,7 @@ FROM carried sp LEFT JOIN owners p ON p.plugin_id=sp.owner
 
 // RegisteredSpaces lists the vector space registry.
 func (s SpaceStore) RegisteredSpaces(ctx context.Context) ([]content.RegisteredSpace, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id,manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role FROM vector_spaces ORDER BY id`)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT id,manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role FROM vector_spaces ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
