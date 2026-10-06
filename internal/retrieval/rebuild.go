@@ -3,6 +3,7 @@ package retrieval
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -134,6 +135,16 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 		}
 	}
 	if len(candidates) > 0 {
+		remaining, err := r.Store.RebuildCandidates(ctx, org, operationID, rebuildBatch)
+		if err != nil {
+			return false, err
+		}
+		if slices.Equal(candidates, remaining) {
+			if err = r.Store.FailRebuild(ctx, org, operationID, operations.Error{Code: "rebuild_no_progress", Message: "a successful rebuild batch left the same coverage gaps; verify canonical content and target vector coverage"}); err != nil {
+				return false, err
+			}
+			return r.stop(ctx, org, operationID)
+		}
 		return false, nil
 	}
 	activated, err := r.Store.ActivateRebuild(ctx, org, operationID)
@@ -156,7 +167,19 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 	corpusID := target.Operation.CorpusID
 	v, err := r.Content.TrustedVersion(ctx, org, corpusID, c.RecordID, c.VersionID)
 	if errors.Is(err, corpus.ErrNotFound) {
-		return nil // Withdrawn meanwhile; the next candidate listing excludes it.
+		// Hydration can also miss canonical metadata for a still-eligible
+		// Version. Only ignore it if a fresh listing confirms it left the
+		// batch; otherwise the stable head would be selected forever.
+		candidates, listErr := r.Store.RebuildCandidates(ctx, org, target.Operation.ID, rebuildBatch)
+		if listErr != nil {
+			return listErr
+		}
+		for _, candidate := range candidates {
+			if candidate.VersionID == c.VersionID {
+				return terminal{failure: operations.Error{Code: "canonical_content_unavailable", Message: "an eligible rebuild Version cannot be read from canonical content"}}
+			}
+		}
+		return nil
 	}
 	if errors.Is(err, content.ErrArtifactMissing) || errors.Is(err, content.ErrArtifactCorrupt) {
 		return terminal{failure: operations.Error{Code: "canonical_content_unavailable", Message: "canonical content artifact is missing or failed verification"}}
@@ -173,7 +196,19 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 		if routeErr != nil {
 			return routeErr
 		}
-		req.Current = &routed
+		// A generation can already carry the next owner's space for
+		// evaluation. Only preserve lexical-only readiness when the served
+		// ingestion owner is unchanged, not merely when its space is carried.
+		currentOwner, targetOwner := "", ""
+		if routed.IngestionRouting != nil {
+			currentOwner = routed.IngestionRouting.For(v.SourceMediaType)
+		}
+		if target.Generation.IngestionRouting != nil {
+			targetOwner = target.Generation.IngestionRouting.For(v.SourceMediaType)
+		}
+		if currentOwner == targetOwner {
+			req.Current = &routed
+		}
 	}
 	counter, _ := r.Content.(processing.DeadlineCounter)
 	out := processing.Derive(ctx, org, r.Plugin, counter, req)
