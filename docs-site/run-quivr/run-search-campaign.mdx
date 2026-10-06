@@ -76,8 +76,11 @@ include uncertain charges; Modal builds/storage and other account charges need
 separate budgeting. No measurements run in CI.
 
 Each dataset compares baseline and candidate in one container, alternating fresh
-queries after both indexes are ready. A campaign-wide slot serializes measurement,
-including preparation; busy trials wait for a later supervisor pass before paid dispatch.
+queries after both indexes and quality scores are ready. Up to `parallelism` trials
+prepare, index and score quality concurrently. Only paired fresh warmups and latency
+samples wait for an exclusive campaign-wide window; other trials continue quality work.
+Azure/Cohere requests share an adaptive limiter and 429 cooldown across containers.
+Busy trial slots wait for a later supervisor pass before paid dispatch.
 The latency gate measures local search work plus successful provider round trips.
 Retry HTTP, backoff, admission and ledger waits appear separately in
 `cost.search_timing_ms`, with wall time and the number of retried samples.

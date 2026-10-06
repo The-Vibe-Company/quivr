@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import math
+import network_recovery
 import pathlib
 import re
 import socket
@@ -160,14 +161,15 @@ def rerank(query, passages, budget, key, price, timing=None):
                 or set(scores) != set(passages) or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in scores.values())):
             raise ValueError()
         return sorted(scores, key=lambda name: (-scores[name], name))
-    except embeddings.BudgetExceeded:
+    except (embeddings.BudgetExceeded, network_recovery.Outage, control_store.LeaseLost,
+            control_store.Unavailable, control_store.Contention):
         raise
     except Exception:
         raise RuntimeError('reranker attempt failed; uncertain charge retained') from None
 
 
 def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
-            fresh_latency=True, rerank_key='', flush=lambda: None, private_vectors=None, quality_concurrency=8):
+            fresh_latency=True, rerank_key='', flush=lambda: None, private_vectors=None, quality_concurrency=8, refresh=lambda: None):
     if dataset['split'] != 'dev':
         raise PermissionError('tier 1 accepts campaign-dev data only')
     cfg = configuration(cfg)
@@ -225,54 +227,62 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         concurrency = CACHE_CONCURRENCY if mode == 'document' and cfg['model'] != direct.E5_MODEL else 1
         wave_size = concurrency * control_store.LEASE_BATCH_SIZE
         for wave_start in range(0, len(unique), wave_size):
-            wave = []
-            with contextlib.ExitStack() as validation:
-                for start in range(wave_start, min(wave_start + wave_size, len(unique)), control_store.LEASE_BATCH_SIZE):
-                    chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
-                    if dataset['private']:
-                        pending = []
-                        for text in chunk:
-                            if (mode, text) in entries:
-                                cache_hits += 1
-                                continue
-                            pieces = (direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0]
-                                      if mode == 'document' else [text])
-                            pending.append((text, pieces, None, None))
-                    else:
-                        keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
-                                 'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
-                        started = time.monotonic()
-                        pending = []
-                        try:
-                            # Claims commit before volume I/O; validation failure
-                            # releases claims across the unstarted wave.
-                            claims = validation.enter_context(budget.store.claim_batch(
-                                budget.campaign, keyed, ttl=control_store.VALIDATION_LEASE_TTL, require_available=True))
-                            for cache_key, text in keyed.items():
-                                claim = claims[cache_key]
-                                if claim['status'] == 'done':
-                                    meta = claim['payload']
-                                    path = cache / meta['filename']
-                                    if not path.exists():
-                                        raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
-                                    entry = json.loads(path.read_text())
-                                    if digest(entry) != meta['digest']:
-                                        raise RuntimeError('embedding cache digest mismatch')
-                                    entries[(mode, text)] = entry
-                                    cache_hits += 1
-                                else:
-                                    pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
-                                    pending.append((text, pieces, cache_key, claim['owner']))
-                        except control_store.LeaseBusy:
-                            raise RuntimeError('embedding cache fill already leased; retry after completion') from None
-                        LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
-                    if pending:
-                        if not dataset['private']:
-                            budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=control_store.VALIDATION_LEASE_TTL)
-                        budget.store.renew(budget.campaign, *budget.lease)
-                        wave.append(pending)
+            hits_before = cache_hits
+            while True:
+                try:
+                    wave = []
+                    with contextlib.ExitStack() as validation:
+                        for start in range(wave_start, min(wave_start + wave_size, len(unique)), control_store.LEASE_BATCH_SIZE):
+                            chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
+                            if dataset['private']:
+                                pending = []
+                                for text in chunk:
+                                    if (mode, text) in entries:
+                                        cache_hits += 1
+                                        continue
+                                    pieces = (direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0]
+                                              if mode == 'document' else [text])
+                                    pending.append((text, pieces, None, None))
+                            else:
+                                keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
+                                         'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
+                                started = time.monotonic()
+                                pending = []
+                                # Claims commit before volume I/O; validation failure
+                                # releases claims across the unstarted wave.
+                                claims = validation.enter_context(budget.store.claim_batch(
+                                    budget.campaign, keyed, ttl=control_store.VALIDATION_LEASE_TTL, require_available=True))
+                                for cache_key, text in keyed.items():
+                                    claim = claims[cache_key]
+                                    if claim['status'] == 'done':
+                                        meta = claim['payload']
+                                        path = cache / meta['filename']
+                                        if not path.exists():
+                                            refresh()  # Import another container's committed Volume files.
+                                        if not path.exists():
+                                            raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
+                                        entry = json.loads(path.read_text())
+                                        if digest(entry) != meta['digest']:
+                                            raise RuntimeError('embedding cache digest mismatch')
+                                        entries[(mode, text)] = entry
+                                        cache_hits += 1
+                                    else:
+                                        pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
+                                        pending.append((text, pieces, cache_key, claim['owner']))
+                                LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
+                            if pending:
+                                if not dataset['private']:
+                                    budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=control_store.VALIDATION_LEASE_TTL)
+                                budget.store.renew(budget.campaign, *budget.lease)
+                                wave.append(pending)
+                    break
+                except control_store.LeaseBusy:
+                    cache_hits = hits_before
+                    budget.store.renew(budget.campaign, *budget.lease, ttl=budget.ttl)
+                    LOG.info('cache fill busy; waiting for committed evidence')
+                    time.sleep(1)
             if wave:
-                task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease) for _ in wave]
+                task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease, ttl=budget.ttl) for _ in wave]
                 def fill(item):
                     pending, task_budget = item
                     if not dataset['private']:
@@ -423,7 +433,7 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             wave_dense = dense_batch[offset:offset + concurrency]
             # Independent views prevent overlapping paid attempts from inflating
             # a search's price. SQL still owns campaign-wide admission.
-            task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease) for _ in wave_ids]
+            task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease, ttl=budget.ttl) for _ in wave_ids]
             try:
                 if concurrency == 1:
                     searched = [search(wave_ids[0], False, wave_dense[0], batch_seconds, task_budgets[0])]
@@ -511,27 +521,43 @@ def measure(*args, **kwargs):
 
 
 def measure_pair(configs, data, dataset, cache, budgets, clients, prices, compute_rate,
-                 fresh_latency=True, rerank_key='', private_vectors=None, quality_concurrency=8, flush=lambda: None):
+                 fresh_latency=True, rerank_key='', private_vectors=None, quality_concurrency=8, flush=lambda: None, latency_scope=contextlib.nullcontext, refresh=lambda: None):
     """Prepare both sides, then alternate warmups and identical query samples."""
     runs = {side: _measure(cfg, data, dataset, cache, budgets[side], clients[side], prices,
-                          compute_rate, fresh_latency, rerank_key, flush=flush, private_vectors=private_vectors, quality_concurrency=quality_concurrency)
+                          compute_rate, fresh_latency, rerank_key, flush=flush, private_vectors=private_vectors, quality_concurrency=quality_concurrency, refresh=refresh)
             for side, cfg in configs.items()}
     measured = {}
     try:
         for run in runs.values():
             next(run)  # Complete preparation before either timed serving path.
-        while runs:
-            for side, run in list(runs.items()):
-                try:
-                    next(run)
-                except StopIteration as done:
-                    measured[side] = done.value
-                    del runs[side]
+        waiting = time.monotonic(), time.process_time()
+        with latency_scope() if fresh_latency else contextlib.nullcontext() as slot:
+            window_wait = {'elapsed_seconds': max(0, time.monotonic() - waiting[0]),
+                           'cpu_seconds': max(0, time.process_time() - waiting[1])}
+            if slot:
+                for budget in budgets.values():
+                    budget.extra_leases.append(slot)
+            try:
+                while runs:
+                    for side, run in list(runs.items()):
+                        if slot:
+                            budget = budgets[side]
+                            budget.store.renew_many(budget.campaign, dict([budget.lease, slot]), ttl=budget.ttl)
+                        try:
+                            next(run)
+                        except StopIteration as done:
+                            measured[side] = done.value
+                            del runs[side]
+            finally:
+                if slot:
+                    for budget in budgets.values():
+                        budget.extra_leases.remove(slot)
     finally:
         for run in runs.values():
             run.close()
     if fresh_latency:
         for row in measured.values():
+            row['cost']['phase_usage']['latency_wait'] = window_wait
             row['cost']['latency_method'] = 'paired A/B fresh service embedding+retrieval+rerank; excludes retry/admission/ledger; fixed hash sample up to 50; one fixed first-query warmup per side'
     return measured
 

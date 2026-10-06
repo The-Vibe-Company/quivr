@@ -407,8 +407,10 @@ class Trial(unittest.TestCase):
             busy_key = 'embedding/' + search_trial.digest({'config': identity, 'mode': 'document',
                 'text_hash': hashlib.sha256('passage 1'.encode()).hexdigest()})
             store.claim(campaign, busy_key, ttl=86400)
-            with self.assertRaisesRegex(RuntimeError, 'embedding cache fill already leased'):
+            with mock.patch('time.sleep', side_effect=RuntimeError('cache wait interrupted')) as wait, \
+                    self.assertRaisesRegex(RuntimeError, 'cache wait interrupted'):
                 run(mock.Mock())
+            wait.assert_called_once_with(1)
             network.assert_not_called()
             with psycopg.connect(store.dsn) as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND key LIKE 'embedding/%%'", (campaign,)).fetchone()[0], 1)

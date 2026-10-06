@@ -307,6 +307,113 @@ class Control(unittest.TestCase):
         self.assertEqual(replay['status'], 'done')
         self.assertEqual(replay['payload'], {'record': 'canonical'})
 
+    def test_latency_window_serializes_and_releases_failed_owner(self):
+        # SQL owns exclusion and stale-owner fencing; timing is driven by events.
+        import threading
+        import psycopg
+        leases = [(key, self.store.claim(self.name, key)['owner']) for key in ('trial-a', 'trial-b')]
+        entered, waiting, release = threading.Event(), threading.Event(), threading.Event()
+        order = []
+        def first():
+            with self.assertRaisesRegex(RuntimeError, 'sample crashed'):
+                with self.store.latency_window(self.name, leases[0], 30):
+                    order.append('first')
+                    entered.set()
+                    self.assertTrue(release.wait(5))
+                    raise RuntimeError('sample crashed')
+        def second():
+            self.assertTrue(entered.wait(5))
+            with self.store.latency_window(self.name, leases[1], 30):
+                order.append('second')
+        def retry(_):
+            waiting.set()
+            self.assertEqual(order, ['first'])
+            release.set()
+            self.assertTrue(done.wait(5))
+        done = threading.Event()
+        def run_first():
+            try:
+                first()
+            finally:
+                done.set()
+        with mock.patch('time.sleep', side_effect=retry), ThreadPoolExecutor(max_workers=2) as pool:
+            a, b = pool.submit(run_first), pool.submit(second)
+            a.result(10)
+            b.result(10)
+        self.assertTrue(waiting.is_set())
+        self.assertEqual(order, ['first', 'second'])
+        # A real reranker settlement outage must retain the fresh window and
+        # propagate the outage, without a compensating SQL release/abandon.
+        import io
+        import json
+        import search_trial
+        budget = control_store.Budget(self.store, self.name, leases[0])
+        response = {'model': 'jev-1.13.0', 'usage': {'input_tokens': 20},
+                    'answers': {'a': {'noul': .9}}}
+        with mock.patch('urllib.request.OpenerDirector.open', side_effect=lambda *a, **kw: io.BytesIO(json.dumps(response).encode())), \
+                mock.patch.object(budget, 'settle', side_effect=control_store.NetworkUnavailable('control outage')), \
+                mock.patch.object(self.store, 'release_slot', wraps=self.store.release_slot) as cleanup:
+            with self.assertRaises(control_store.NetworkUnavailable):
+                with self.store.latency_window(self.name, leases[0], 30) as retained:
+                    budget.extra_leases.append(retained)
+                    search_trial.rerank('question', {'a': 'passage'}, budget, 'fixture-key', .042)
+            cleanup.assert_not_called()
+        self.assertEqual(self.store.claim(self.name, 'campaign-latency-slot')['status'], 'leased')
+        self.store.release_slot(self.name, retained)
+        # Hard container death cannot run finally. Expire SQL time directly;
+        # the next owner replaces it and stale cleanup cannot erase that owner.
+        orphan = self.store.claim(self.name, 'campaign-latency-slot', 30)
+        with psycopg.connect(self.dsn) as db:
+            db.execute("UPDATE eval_control.leases SET expires_at=clock_timestamp() WHERE campaign=%s AND key='campaign-latency-slot'", (self.name,))
+        with self.store.latency_window(self.name, leases[1], 30) as replacement:
+            self.store.release_many(self.name, {'campaign-latency-slot': orphan['owner']})
+            self.store.renew(self.name, *replacement, ttl=30)
+            with self.assertRaises(control_store.LeaseLost):
+                self.store.reserve(self.name, 'provider', .01, lease=leases[0],
+                    extra_leases=[('campaign-latency-slot', orphan['owner'])])
+
+    def test_provider_admission_shares_throttling_and_recovers(self):
+        # SQL is the owner of cross-container rate feedback; local thread gates
+        # cannot protect a second remote container against a campaign 429.
+        import psycopg
+        import contextlib
+        transaction = self.store.transaction
+        @contextlib.contextmanager
+        def restricted():
+            with transaction() as db:
+                db.execute('SET LOCAL ROLE quivr_eval_control')
+                yield db
+        role = mock.patch.object(self.store, 'transaction', side_effect=restricted)
+        role.start()
+        self.addCleanup(role.stop)
+        import urllib.error
+        leases = [(key, self.store.claim(self.name, key)['owner']) for key in ('provider-a', 'provider-b')]
+        permits = [self.store.provider_slot(self.name, leases[i % 2]) for i in range(4)]
+        self.assertIsNone(self.store.provider_slot(self.name, leases[1]))
+        throttled = permits.pop()
+        error = urllib.error.HTTPError('https://example.com', 429, 'limited', {'Retry-After': '20'}, None)
+        self.store.provider_feedback(self.name, throttled, error)
+        self.store.provider_feedback(self.name, throttled, error)  # Duplicate feedback must be a no-op.
+        self.assertIsNone(self.store.provider_slot(self.name, leases[1]), 'shared cooldown applies to the other invocation')
+        for permit in permits:
+            self.store.provider_feedback(self.name, permit, None)
+        with psycopg.connect(self.dsn) as db:
+            db.execute("UPDATE eval_control.leases SET expires_at=clock_timestamp() WHERE campaign=%s AND key='provider-admission'", (self.name,))
+        permits = [self.store.provider_slot(self.name, lease) for lease in leases]
+        self.assertIsNone(self.store.provider_slot(self.name, leases[0]), '429 halves the shared bound to two')
+        for permit in permits:
+            self.store.provider_feedback(self.name, permit, None)
+        for _ in range(30):  # 32 clean responses recover exactly one slot.
+            permit = self.store.provider_slot(self.name, leases[0])
+            self.store.provider_feedback(self.name, permit, None)
+        permits = [self.store.provider_slot(self.name, leases[i % 2]) for i in range(3)]
+        self.assertTrue(all(permits))
+        self.assertIsNone(self.store.provider_slot(self.name, leases[1]))
+        for permit in permits:
+            self.store.provider_feedback(self.name, permit, None)
+        with self.store.latency_window(self.name, leases[0], 30):
+            pass  # Window cleanup also works under the documented restricted role.
+
     def test_cache_batch_round_trips_and_mixed_claims_preserve_each_entry(self):
         import psycopg
         keys = ['embedding/' + str(i) for i in range(128)]
