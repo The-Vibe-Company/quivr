@@ -97,7 +97,12 @@ func TestArchiveSourceAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	request(t, "POST", "/v0/connectors/"+state.Connector+"/runs", token, map[string]any{"idempotency_key": "archive-resume-" + connectorRun}, 202)
-	done := awaitHealth(t, token, state.Connector, func(h map[string]any) bool { return archiveDone(h) == float64(fixture.MembersTotal) })
+	// The last member page can commit before a subsequent fetch observes EOF.
+	// Wait for both public progress conditions rather than racing that fetch.
+	done := awaitHealth(t, token, state.Connector, func(h map[string]any) bool {
+		d, _ := h["diagnostics"].(map[string]any)
+		return archiveDone(h) == float64(fixture.MembersTotal) && d["archive_complete"] == true
+	})
 	d := done["health"].(map[string]any)["diagnostics"].(map[string]any)
 	if d["members_left"] != float64(0) || d["archive_complete"] != true || d["progress_percent"] != float64(100) {
 		t.Fatalf("archive progress did not complete: %v", d)
