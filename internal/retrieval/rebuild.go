@@ -206,7 +206,11 @@ func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, 
 		if target.Generation.IngestionRouting != nil {
 			targetOwner = target.Generation.IngestionRouting.For(v.SourceMediaType)
 		}
-		if currentOwner == targetOwner {
+		// Before source routing was recorded, the primary served space
+		// identifies the owner. A carried evaluation owner's space must not
+		// be mistaken for that primary space.
+		legacyOwner := routed.IngestionRouting == nil && routed.ServedFor(targetOwner) == routed.SpaceID
+		if currentOwner == targetOwner || legacyOwner {
 			req.Current = &routed
 		}
 	}

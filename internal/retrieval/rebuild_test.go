@@ -135,6 +135,20 @@ type fakeDeriver struct {
 	onDerive          func()
 }
 
+// ownerDeriver models the route-bound plugin's owner-specific served space.
+type ownerDeriver struct {
+	fakeDeriver
+	owner string
+}
+
+func (d *ownerDeriver) Bound(context.Context, string, []string) processing.DerivationDriver {
+	return d
+}
+func (d *ownerDeriver) ServedSpace(g content.Generation) string { return g.ServedFor(d.owner) }
+func (*ownerDeriver) Serves(context.Context, content.Version, content.Generation) error {
+	return nil
+}
+
 func (*fakeDeriver) Owns(_ context.Context, space string) bool { return space == "space" }
 func (*fakeDeriver) Gone(context.Context, error) (*content.Diagnostic, error) {
 	return nil, nil
@@ -227,6 +241,28 @@ func TestRebuildAfterOwnerSwitchEmbedsCarriedSpace(t *testing.T) {
 	run(t, r)
 	if !store.activated || len(store.covered["v1"]) != 1 {
 		t.Fatalf("owner switch activated=%v vector coverage=%v", store.activated, store.covered)
+	}
+}
+
+func TestRebuildPreservesLegacyLexicalAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		current content.Generation
+		vectors int
+	}{
+		{"primary space", content.Generation{ID: "legacy", SpaceID: "space"}, 0},
+		{"carried owner space", content.Generation{ID: "legacy", SpaceID: "old-space", Spaces: []content.GenerationSpace{{ID: "old-space", OwnerPluginID: "old.owner", Role: content.SpaceServed}, {ID: "space", OwnerPluginID: "same.owner", Role: content.SpaceServed}}}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
+			store.generation = content.Generation{ID: "target", SpaceID: "space", IngestionRouting: &content.IngestionRouting{Default: "same.owner"}, Spaces: []content.GenerationSpace{{ID: "space", OwnerPluginID: "same.owner", Role: content.SpaceServed}}}
+			r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+			r.Plugin, r.Routing = &ownerDeriver{owner: "same.owner"}, routedGeneration(tc.current)
+			run(t, r)
+			if !store.activated || len(store.covered["v1"]) != tc.vectors {
+				t.Fatalf("legacy rebuild activated=%v vector coverage=%v, want %d", store.activated, store.covered, tc.vectors)
+			}
+		})
 	}
 }
 
