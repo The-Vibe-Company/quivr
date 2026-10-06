@@ -21,13 +21,19 @@ class Selection(unittest.TestCase):
         np.select(self.stack, 'none')
         self.assertIsNone(np.pin(self.stack))
 
-    def test_pdf_text_pins_the_reference_plugin_for_pdf(self):
-        np.select(self.stack, 'pdf-text')
-        pin = np.pin(self.stack)
-        self.assertEqual(pin['manifest'], str(local.ROOT / 'plugins/pdf-text/quivr-plugin.yaml'))
-        self.assertEqual(pin['routes'], [{'media_type': 'application/pdf', 'mode': 'required'}])
-        self.assertEqual(pin['configuration'], {})
-        self.assertTrue(pin['endpoint'].startswith('http://127.0.0.1:'))
+    def test_first_party_normalizers_pin_their_required_routes(self):
+        for name, types in [
+            ('pdf-text', ['application/pdf']),
+            ('newsml-g2', ['application/vnd.iptc.g2.newsitem+xml',
+                           'application/vnd.iptc.g2.newsmessage+xml']),
+        ]:
+            with self.subTest(name=name):
+                np.select(self.stack, name)
+                pin = np.pin(self.stack)
+                self.assertEqual(pin['manifest'], str(local.ROOT / 'plugins' / name / 'quivr-plugin.yaml'))
+                self.assertEqual(pin['routes'], [{'media_type': value, 'mode': 'required'} for value in types])
+                self.assertEqual(pin['configuration'], {})
+                self.assertTrue(pin['endpoint'].startswith('http://127.0.0.1:'))
 
     def test_template_pins_markdown_once_scaffolded(self):
         np.select(self.stack, 'template')
@@ -43,7 +49,7 @@ class Selection(unittest.TestCase):
         self.assertEqual(np.selected(local.Stack(self.name)), 'pdf-text')
 
     def test_unknown_selection_is_refused(self):
-        with self.assertRaisesRegex(ValueError, 'pdf-text, template, none'):
+        with self.assertRaisesRegex(ValueError, 'pdf-text.*template.*none'):
             np.select(self.stack, 'pdf')
 
     def test_a_plugin_directory_is_pinned_at_the_port_its_author_runs_it_on(self):

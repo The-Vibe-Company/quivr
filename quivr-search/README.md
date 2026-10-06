@@ -25,7 +25,7 @@ Search covers the corpora the Fil spans. It is lexical, or hybrid with **Idées 
 ### Sources
 
 The **Sources** tab (`?view=sources`) collects news sites into the demo corpus (see
-[From the web interface](#sources)). **Ajouter une source**, in the header or on the
+[From the web interface](#sources)). **Ajouter une source**, at the top right (a **+** on a phone) or on the
 last card, opens a dialog:
 
 1. Paste a site address or a feed address. Once you pause typing (or press Entrée), the

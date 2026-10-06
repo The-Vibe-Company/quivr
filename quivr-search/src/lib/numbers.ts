@@ -12,6 +12,8 @@ const BUILDING_MS = 1000;
  * `current` says whether it answers this key.
  * `arrivals` changes when articles arrive: they are counted again at most
  * every `every` milliseconds.
+ * `seed`, an answer a page kept from its last visit, is shown at once when it
+ * answers the same key, while the numbers are asked again.
  */
 export function useNumbers<T extends { building: boolean }>(
   key: string | null,
@@ -19,8 +21,11 @@ export function useNumbers<T extends { building: boolean }>(
   onUnauthorized: () => void,
   arrivals?: unknown,
   every = 15000,
+  seed?: { key: string; value: T } | null,
 ) {
-  const [data, setData] = useState<{ key: string; value: T } | null>(null);
+  const [data, setData] = useState<{ key: string; value: T } | null>(() =>
+    seed && seed.key === key ? seed : null,
+  );
   const [tick, setTick] = useState(0);
   const [failures, setFailures] = useState(0);
   // A refresh waits for the answer on its way rather than cancel it.

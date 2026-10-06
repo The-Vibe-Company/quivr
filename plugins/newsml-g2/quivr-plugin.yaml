@@ -40,20 +40,6 @@ configuration:
           pattern: '^(\{[^{}]+\})?[A-Za-z_][A-Za-z0-9_.-]*(/(\{[^{}]+\})?[A-Za-z_][A-Za-z0-9_.-]*)*$'
         description: Literal child element paths from the XML root, using {namespace-uri}name for foreign elements; unqualified names use the NewsML namespace.
 extensions:
-  newsml-g2.metadata:
-    "1":
-      type: object
-      additionalProperties: false
-      properties:
-        language: {type: string}
-        published_at: {type: string, format: date-time}
-        source_type: {type: string}
-        source: {type: string}
-        author: {type: array, items: {type: string}}
-        subjects: {type: array, items: {type: string}}
-        tags: {type: array, items: {type: string}}
-        country: {type: array, items: {type: string}}
-        place: {type: array, items: {type: string}}
   newsml-g2.document:
     "1":
       type: object
