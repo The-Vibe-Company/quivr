@@ -108,7 +108,7 @@ def run_unittest(directory, module=None, preload=(), shard=None):
         index, total = shard
         # Stable IDs partition every test exactly once; keep discovery order for class fixtures.
         suite = unittest.TestSuite(test for test in test_cases(suite)
-                                   if int.from_bytes(hashlib.sha256(test.id().encode()).digest()[:8], 'big')
+                                   if int(hashlib.sha256(test.id().encode()).hexdigest(), 16)
                                    % total == index - 1)
     selected = [test.id() for test in test_cases(suite)]
     result = unittest.TextTestRunner(verbosity=2, resultclass=TimedResult).run(suite)
