@@ -19,7 +19,10 @@ trap 'rm -f "$archive"' EXIT
 curl --fail --location --silent --show-error --retry 3 --max-time 180 \
   "https://github.com/anchore/$tool/releases/download/v$version/${tool}_${version}_linux_amd64.tar.gz" \
   --output "$archive"
-printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --status
+if ! printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --status; then
+  echo "checksum verification failed for ${tool}_${version}_linux_amd64.tar.gz" >&2
+  exit 1
+fi
 mkdir -p "$destination"
 tar -xzf "$archive" -C "$destination" "$tool"
 "$destination/$tool" version

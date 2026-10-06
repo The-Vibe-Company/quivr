@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
-# Required check: `verify`. It passes only when `check`, `adapter-postgres` and every
-# verification part pass, so branch protection needs no change when a part is added.
+# Required check: `verify`. It passes only when `check`, `adapter-postgres`,
+# `vulnerabilities` and every verification part pass.
 jobs:
   # Everything that needs no Docker stack (make check): the first result, in a few minutes.
   check:
@@ -321,6 +321,7 @@ jobs:
       - name: Check every Go module for reachable vulnerabilities
         run: |
           while IFS= read -r module; do
+            echo "Scanning $module"
             (cd "$(dirname "$module")" && govulncheck ./...)
           done < <(git ls-files '**/go.mod' 'go.mod')
   # The one check to require: green only when every job above is green.

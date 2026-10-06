@@ -19,8 +19,8 @@ fix with the reporter; no response-time guarantee is offered during alpha.
 
 ## Release inventories and verification
 
-Images published by the release security workflow have an SPDX JSON inventory
-(SBOM) attached to its image digest as a signed cosign attestation and to its
+Each image published by the release security workflow has an SPDX JSON inventory
+(SBOM) attached to its digest as a signed cosign attestation and uploaded to its
 [GitHub release](https://github.com/The-Vibe-Company/quivr/releases).
 [Security of Quivr releases](https://docs.quivr.thevibecompany.co/run-quivr/security)
 explains how to locate and verify them, what scans run, and their limits.
