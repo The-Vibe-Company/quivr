@@ -33,16 +33,16 @@ func (c BackfillConfig) settings() (backfill.Settings, error) {
 	s := backfill.Settings{Rate: c.Rate, Concurrency: c.Concurrency, MaxCostWithoutConfirmation: c.MaxCostWithoutConfirmation}
 	switch {
 	case c.Rate < 0:
-		return s, errors.New("backfill.rate must be a positive number of Versions per second")
+		return s, badConfig(configInvalid, "backfill.rate", "backfill.rate must be a positive number of Versions per second")
 	case c.Concurrency < 0 || c.Concurrency > 32:
-		return s, errors.New("backfill.concurrency must be between 1 and 32 (or 0 for the default 4)")
+		return s, badConfig(configInvalid, "backfill.concurrency", "backfill.concurrency must be between 1 and 32 (or 0 for the default 4)")
 	case c.MaxCostWithoutConfirmation < 0:
-		return s, errors.New("backfill.max_cost_without_confirmation must not be negative")
+		return s, badConfig(configInvalid, "backfill.max_cost_without_confirmation", "backfill.max_cost_without_confirmation must not be negative")
 	}
 	if c.Poll != "" {
 		poll, err := time.ParseDuration(c.Poll)
 		if err != nil || poll <= 0 {
-			return s, errors.New("backfill.poll must be a positive duration")
+			return s, badConfig(configInvalid, "backfill.poll", "backfill.poll must be a positive duration")
 		}
 		s.Poll = poll
 	}

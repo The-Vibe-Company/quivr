@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/outbound"
@@ -39,11 +40,19 @@ func (cfg Config) validateTLS() (dependencyTLS, error) {
 	} {
 		config, err := dep.settings.Build(dep.defaultEnabled)
 		if err != nil {
-			return result, fmt.Errorf("%s TLS: %w", dep.name, err)
+			code := configInvalid
+			if (dep.settings.Enabled != nil && !*dep.settings.Enabled && dep.settings.HasSettings()) || (dep.settings.CertFile == "") != (dep.settings.KeyFile == "") {
+				code = configConflict
+			}
+			return result, &configError{code: code, field: "tls." + dep.name, problem: dep.name + " TLS settings are invalid", cause: err}
 		}
 		if dep.endpoint != "" {
 			if _, err = dep.settings.ForURL(dep.endpoint); err != nil {
-				return result, fmt.Errorf("%s TLS: %w", dep.name, err)
+				code := configInvalid
+				if u, parseErr := url.Parse(dep.endpoint); parseErr == nil && (u.Scheme == "http" || u.Scheme == "https") && dep.settings.Enabled != nil && *dep.settings.Enabled != (u.Scheme == "https") {
+					code = configConflict
+				}
+				return result, &configError{code: code, field: "tls." + dep.name, problem: dep.name + " TLS settings conflict with the endpoint or are invalid", cause: err}
 			}
 		}
 		switch dep.name {
@@ -51,7 +60,7 @@ func (cfg Config) validateTLS() (dependencyTLS, error) {
 			result.temporal = config
 		case "plugins":
 			if dep.settings.CertFile != "" || dep.settings.KeyFile != "" {
-				return result, fmt.Errorf("plugins TLS: client certificates are not supported")
+				return result, badConfig(configInvalid, "tls.plugins", "plugins TLS: client certificates are not supported")
 			}
 			result.plugins = pluginTransport{next: outbound.Transport(config), enabled: dep.settings.Enabled}
 		}
@@ -63,7 +72,11 @@ func (cfg Config) validateTLS() (dependencyTLS, error) {
 	for _, pin := range pins {
 		if cfg.TLS.Plugins.Enabled != nil && pin.Endpoint != "" {
 			if _, err := cfg.TLS.Plugins.ForURL(pin.Endpoint); err != nil {
-				return result, fmt.Errorf("plugins TLS: %w", err)
+				code := configInvalid
+				if u, parseErr := url.Parse(pin.Endpoint); parseErr == nil && (u.Scheme == "http" || u.Scheme == "https") && *cfg.TLS.Plugins.Enabled != (u.Scheme == "https") {
+					code = configConflict
+				}
+				return result, &configError{code: code, field: "tls.plugins", problem: "plugins TLS settings conflict with the endpoint or are invalid", cause: err}
 			}
 		}
 	}
