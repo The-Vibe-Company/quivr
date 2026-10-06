@@ -9,7 +9,12 @@
 //
 // Facet values go through one seam, `facets()`, counted by the engine
 // (`POST /v0/facets`, THE-1184) under the same corpora and predicates as the
-// list. A date field gives a histogram whose step suits the period picked.
+// list. A date field gives a histogram whose step suits the period picked;
+// the publication date is the page's timeline (THE-1204), counted outside the
+// range it picks, within the span it shows.
+//
+// A text query searches the same corpora under the same predicates
+// (`POST /v0/search`), its documents shown as the list's rows.
 //
 // The engine lists no Record's Versions: the history shows those the demo
 // read since it started (the feeds reread each new Version), bounded.
@@ -32,6 +37,11 @@ export const COMMON_FIELDS = [
 }));
 
 const PAGE = 25;
+// A search shows its best documents, this many hits at most.
+const SEARCH_LIMIT = 50;
+const QUERY_CHARS = 500;
+// The field the timeline counts.
+export const TIMELINE_FIELD = "metadata.published_at";
 // The engine returns at most this many values per field, the most frequent.
 const FACET_VALUES = 100;
 // Counting may take the engine up to 25 s, and it admits eight counts at
@@ -118,6 +128,18 @@ export function predicatesOf(raw) {
   return list;
 }
 
+/**
+ * The span the timeline shows (?window=<from>,<to>, RFC 3339), checked for
+ * shape and order; undefined when absent.
+ */
+export function windowOf(raw) {
+  if (!raw) return undefined;
+  const [gte, lte, ...rest] = raw.split(",");
+  if (rest.length || !RFC3339.test(gte || "") || !RFC3339.test(lte || "") || !(Date.parse(gte) < Date.parse(lte)))
+    throw failure(422, "Cette période n’est pas valide.");
+  return { gte, lte };
+}
+
 const PERIOD = { year: 4, month: 7, day: 10 };
 
 // An instant in UTC; Date.UTC would read the years 0–99 as 1900–1999.
@@ -162,8 +184,23 @@ function histogramOf(predicate) {
   if (period?.length === PERIOD.month) return { interval: "day", scope: predicate };
   if (period) return { interval: "day", scope: { field: predicate.field, ...periodBounds(period.slice(0, PERIOD.month)) } };
   // Bounds of another span: the step that keeps it readable.
-  const days = (Date.parse(predicate.lte || predicate.gte) - Date.parse(predicate.gte || predicate.lte)) / 864e5;
-  return { interval: days <= 62 ? "day" : days <= 3 * 366 ? "month" : "year", scope: predicate };
+  return { interval: stepOf(predicate), scope: predicate };
+}
+
+/** The step that keeps a span readable: days within two months, months within three years. */
+function stepOf({ gte, lte }) {
+  const days = (Date.parse(lte || gte) - Date.parse(gte || lte)) / 864e5;
+  return days <= 62 ? "day" : days <= 3 * 366 ? "month" : "year";
+}
+
+/**
+ * How the timeline is counted: outside the range it picks, so the documents
+ * around it stay drawn, and within the span it shows, at the step that span
+ * asks; unbounded, it starts with months as an unpicked date does.
+ */
+function timelineOf(field, window) {
+  if (!window) return { interval: "month", scope: undefined, adapt: true };
+  return { interval: stepOf(window), scope: { field, ...window } };
 }
 
 const monthIndex = (value) => Number(value.slice(0, 4)) * 12 + Number(value.slice(5, 7));
@@ -172,16 +209,23 @@ const monthIndex = (value) => Number(value.slice(0, 4)) * 12 + Number(value.slic
  * Each field's values counted by the engine, most frequent first; a date
  * field's are periods in time order ("2026", "2026-10", "2026-10-05"). A
  * field's own predicate is left out of its count, so its other values stay
- * offered; a date keeps the period it zooms in. `count` posts one
- * `POST /v0/facets` body and returns the engine's answer. The corpora
- * excluded are those of the common fields' count under every predicate, as
- * the list's: a corpus's own fields, counted apart, 16 at a time, exclude
- * nothing the page would announce.
+ * offered; a date keeps the period it zooms in. The timeline's field
+ * (`timeline.field`) leaves its whole range out and keeps the span shown
+ * (`timeline.window`), and `total` then counts the dated documents every
+ * predicate keeps. `count` posts one `POST /v0/facets` body and returns the
+ * engine's answer. The corpora excluded are those of the common fields'
+ * count under every predicate, as the list's: a corpus's own fields, counted
+ * apart, 16 at a time, exclude nothing the page would announce.
  */
-export async function countFacets({ count, ids, fields, predicates }) {
+export async function countFacets({ count, ids, fields, predicates, timeline }) {
   const own = new Map(predicates.map((p) => [p.field, p]));
   const histograms = new Map(
-    fields.filter((f) => f.type === "datetime").map((f) => [f.name, histogramOf(own.get(f.name))]),
+    fields
+      .filter((f) => f.type === "datetime")
+      .map((f) => [
+        f.name,
+        f.name === timeline?.field ? timelineOf(f.name, timeline.window) : histogramOf(own.get(f.name)),
+      ]),
   );
   const ask = (names, kept, intervals = {}) =>
     count({
@@ -195,26 +239,32 @@ export async function countFacets({ count, ids, fields, predicates }) {
   // Fields counted under every predicate, and each other one under its own.
   const shared = [];
   const alone = [];
+  const keptBy = new Map();
   for (const field of fields) {
     const p = own.get(field.name);
     const histogram = histograms.get(field.name);
-    if (!p || (histogram && histogram.scope === p)) shared.push(field.name);
-    else
-      alone.push({
-        field: field.name,
-        kept: [...predicates.filter((x) => x !== p), ...(histogram?.scope ? [histogram.scope] : [])],
-      });
+    if ((!p && !histogram?.scope) || (histogram && histogram.scope === p)) {
+      shared.push(field.name);
+      keptBy.set(field.name, predicates);
+    } else {
+      const kept = [...predicates.filter((x) => x !== p), ...(histogram?.scope ? [histogram.scope] : [])];
+      alone.push({ field: field.name, kept });
+      keptBy.set(field.name, kept);
+    }
   }
   // The common fields' count under every predicate also names the corpora
   // the predicates exclude.
   const common = shared.filter((name) => name.startsWith("metadata."));
   const ownShared = shared.filter((name) => !name.startsWith("metadata."));
+  // The timeline counted apart: its total is its years under every predicate.
+  const totalApart = timeline && !shared.includes(timeline.field);
   const tasks = [
     () => ask(common.length ? common : [fields[0].name], predicates),
     ...Array.from({ length: Math.ceil(ownShared.length / FACET_FIELDS) }, (_, i) => () =>
       ask(ownShared.slice(i * FACET_FIELDS, (i + 1) * FACET_FIELDS), predicates),
     ),
     ...alone.map(({ field, kept }) => () => ask([field], kept)),
+    ...(totalApart ? [() => ask([timeline.field], predicates, { [timeline.field]: "year" })] : []),
   ];
   // A failed count stops the others from starting; those running end first.
   const answers = [];
@@ -231,23 +281,25 @@ export async function countFacets({ count, ids, fields, predicates }) {
   );
   const rejected = workers.find((w) => w.status === "rejected");
   if (rejected) throw rejected.reason;
-  const [all, ...others] = answers;
+  const all = answers[0];
+  const years = totalApart ? answers.pop() : undefined;
+  const others = answers.slice(1);
   const buckets = new Map();
   for (const item of [...(common.length ? all.items : []), ...others.flatMap((o) => o.items)])
     buckets.set(item.field, item.buckets);
   const intervals = new Map([...histograms].map(([name, h]) => [name, h.interval]));
 
-  // Unpicked dates over a short span are counted again by day; over a long
+  // Unbounded dates over a short span are counted again by day; over a long
   // one, by year: summed from the months, or asked again when the months
-  // were cut at the engine's bound.
-  const again = { day: [], year: [] };
+  // were cut at the engine's bound. Each keeps the predicates it was counted under.
+  const again = [];
   for (const [name, histogram] of histograms) {
     if (!histogram.adapt) continue;
     const months = buckets.get(name) || [];
     if (!months.length) continue;
     const span = monthIndex(months.at(-1).value) - monthIndex(months[0].value) + 1;
-    if (span <= DAYS_UP_TO_MONTHS) again.day.push(name);
-    else if (months.length >= FACET_VALUES) again.year.push(name);
+    if (span <= DAYS_UP_TO_MONTHS) again.push([name, "day"]);
+    else if (months.length >= FACET_VALUES) again.push([name, "year"]);
     else if (span > YEARS_FROM_MONTHS) {
       const years = new Map();
       for (const b of months) years.set(b.value.slice(0, 4), (years.get(b.value.slice(0, 4)) || 0) + b.count);
@@ -255,16 +307,15 @@ export async function countFacets({ count, ids, fields, predicates }) {
       intervals.set(name, "year");
     }
   }
-  for (const interval of ["day", "year"])
-    for (let i = 0; i < again[interval].length; i += FACET_FIELDS) {
-      const names = again[interval].slice(i, i + FACET_FIELDS);
-      const data = await ask(names, predicates, Object.fromEntries(names.map((n) => [n, interval])));
-      for (const item of data.items) {
-        buckets.set(item.field, item.buckets);
-        intervals.set(item.field, interval);
-      }
+  for (const [name, interval] of again) {
+    const data = await ask([name], keptBy.get(name), { [name]: interval });
+    for (const item of data.items) {
+      buckets.set(item.field, item.buckets);
+      intervals.set(item.field, interval);
     }
+  }
 
+  const sum = (list = []) => list.reduce((n, b) => n + b.count, 0);
   return {
     fields: fields.map((field) => {
       const interval = intervals.get(field.name);
@@ -275,6 +326,9 @@ export async function countFacets({ count, ids, fields, predicates }) {
       return { field: field.name, type: field.type, ...(interval ? { interval } : {}), values };
     }),
     ...(all.excluded_corpora?.length ? { excluded_corpora: all.excluded_corpora } : {}),
+    ...(timeline
+      ? { total: years ? sum(years.items[0]?.buckets) : sum(buckets.get(timeline.field)) }
+      : {}),
   };
 }
 
@@ -321,6 +375,18 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
     return value;
   }
 
+  // How many documents a corpus holds, for the corpus switcher only, read
+  // again after a minute; a count the engine cannot give now is left out.
+  const counts = new Map();
+  async function documents(id) {
+    const known = counts.get(id);
+    if (known && Date.now() - known.at < CORPUS_TTL_MS) return known.value;
+    const response = await upstream(`/v0/records/count?corpus_id=${encodeURIComponent(id)}`).catch(() => null);
+    const value = response?.status === 200 && Number.isInteger(response.data?.count) ? response.data.count : undefined;
+    if (value !== undefined) counts.set(id, { at: Date.now(), value });
+    return value;
+  }
+
   // Versions are immutable: each is read once and kept, the latest MAX_VERSIONS.
   const versions = new Map();
   async function version(record, id) {
@@ -356,6 +422,60 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
     if (response.status === 422) throw failure(422, "Ce filtre n’est pas valide.");
     if (response.status !== 200) throw failure(503, "Ces documents sont momentanément indisponibles. Réessayez.");
     return response.data;
+  }
+
+  // The best documents for a text under the predicates, as listing rows
+  // would carry them: one per Record, in rank order.
+  async function search(ids, predicates, query) {
+    const response = await upstream("/v0/search", "POST", {
+      query,
+      corpus_ids: ids,
+      limit: SEARCH_LIMIT,
+      ...(predicates.length ? { filter: { metadata: predicates } } : {}),
+    });
+    if (response.status === 422 && response.data?.code === "metadata_filter_unavailable")
+      throw failure(
+        422,
+        "Un corpus choisi ne peut pas encore être filtré par métadonnées : il doit être reconstruit.",
+        "metadata_filter_unavailable",
+      );
+    if (response.status === 422 && response.data?.code === "query_too_long")
+      throw failure(422, "Cette recherche est trop longue.");
+    if (response.status === 422) throw failure(422, "Cette recherche n’est pas valide.");
+    if (response.status !== 200) throw failure(503, "La recherche est momentanément indisponible. Réessayez.");
+    const seen = new Set();
+    const hits = [...(response.data.items || [])]
+      .sort((a, b) => a.rank - b.rank)
+      .filter((hit) => !seen.has(hit.record_id) && seen.add(hit.record_id));
+    const records = [];
+    const queue = [...hits.entries()];
+    await Promise.all(
+      Array.from({ length: HYDRATE_CONCURRENCY }, async () => {
+        for (let next; (next = queue.shift()); ) {
+          const [index, hit] = next;
+          const source = await sourceOf(hit.record_id);
+          if (source) records[index] = { record_id: hit.record_id, source, withdrawn: false, current_version_id: hit.version_id };
+        }
+      }),
+    );
+    return {
+      items: records.filter(Boolean),
+      excluded_corpora: response.data.excluded_corpora,
+      // As many passages as asked: more documents may match.
+      bounded: (response.data.items || []).length >= SEARCH_LIMIT,
+    };
+  }
+
+  // A Record's source identity, which never changes: read once, the latest kept.
+  const sources = new Map();
+  async function sourceOf(record) {
+    if (sources.has(record)) return sources.get(record);
+    const response = await upstream(`/v0/records/${encodeURIComponent(record)}`);
+    if (response.status === 404 || response.status === 403) return null;
+    if (response.status !== 200) throw failure(503, "Ces documents sont momentanément indisponibles. Réessayez.");
+    sources.set(record, response.data.source);
+    if (sources.size > MAX_VERSIONS) sources.delete(sources.keys().next().value);
+    return response.data.source;
   }
 
   // One count of field values, as the engine answers it.
@@ -397,7 +517,10 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       const values = fieldValues(data, field);
       if (values.length) metadata[field.name] = values;
     }
-    return { ...item, metadata };
+    // Its place among the Versions the demo read of it: 1 for the first.
+    const known = history.of(record.record_id);
+    const at = known.findIndex((v) => v.version_id === data.version_id);
+    return { ...item, metadata, version: at >= 0 ? at + 1 : Math.max(1, known.length) };
   }
 
   return {
@@ -415,22 +538,27 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       return {
         items: (
           await Promise.all(
-            (await readable()).map((id) =>
-              corpus(id).catch((error) => {
+            (await readable()).map(async (id) => {
+              const described = await corpus(id).catch((error) => {
                 if (error.status !== 404) return fallback(id);
                 console.warn(`Explorer: corpus ${id} is not readable with the demo's key.`);
                 return null;
-              }),
-            ),
+              });
+              if (!described) return null;
+              const count = await documents(id);
+              return count === undefined ? described : { ...described, documents: count };
+            }),
           )
         ).filter(Boolean),
       };
     },
-    /** GET /demo/explore: a page of documents, newest first. */
+    /** GET /demo/explore: a page of documents, newest first, or a search's best (?q=). */
     async page(params) {
       const ids = await picked(params);
       const predicates = predicatesOf(params.get("metadata"));
-      const data = await list(ids, predicates, PAGE, params.get("cursor"));
+      const query = (params.get("q") || "").trim();
+      if (query.length > QUERY_CHARS) throw failure(422, "Cette recherche est trop longue.");
+      const data = query ? await search(ids, predicates, query) : await list(ids, predicates, PAGE, params.get("cursor"));
       const infos = new Map((await Promise.all(ids.map(corpus))).map((c) => [c.corpus_id, c]));
       const rows = await hydrate(data.items || []);
       const page = {
@@ -438,6 +566,7 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       };
       if (data.next_page_cursor) page.next_cursor = data.next_page_cursor;
       if (data.excluded_corpora?.length) page.excluded_corpora = data.excluded_corpora;
+      if (data.bounded) page.bounded = true;
       return page;
     },
     /** GET /demo/explore/facets: each field's values and how many documents have them. */
@@ -450,6 +579,7 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
         ids,
         fields: [...COMMON_FIELDS, ...(ids.length === 1 ? infos[0].own : [])],
         predicates,
+        timeline: { field: TIMELINE_FIELD, window: windowOf(params.get("window")) },
       });
     },
     /**
