@@ -5,6 +5,7 @@ import io
 import json
 import os
 import pathlib
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -13,6 +14,35 @@ from unittest import mock
 
 import control_store
 import embeddings
+
+
+class ModalTermination(unittest.TestCase):
+    def test_failed_stop_requires_visible_stopped_app_with_zero_tasks(self):
+        import campaign_compute
+        import campaign_store
+        running = {'app_id': 'ap-trial', 'state': 'running', 'tasks': 1}
+        for state, tasks, acknowledged in (('stopped', 0, True), ('stopped', 1, False),
+                                           ('running', 0, False), (None, None, False)):
+            with self.subTest(state=state, tasks=tasks):
+                listing = [dict(running, state=state, tasks=tasks)] if state else []
+                calls = []
+                def cli(command, **kwargs):
+                    calls.append(command)
+                    if 'stop' in command:
+                        raise subprocess.CalledProcessError(1, command,
+                            stderr=b'already stopped token=fixture-secret https://provider/private')
+                    rows = [running] if len(calls) == 1 else listing
+                    return subprocess.CompletedProcess(command, 0, stdout=json.dumps(rows))
+                with mock.patch('campaign_compute.subprocess.run', side_effect=cli), \
+                     self.assertLogs('campaign_compute', level='WARNING') as diagnostic:
+                    if acknowledged:
+                        campaign_compute.ModalCompute().stop('ap-trial')
+                    else:
+                        with self.assertRaises(campaign_store.CleanupPending):
+                            campaign_compute.ModalCompute().stop('ap-trial')
+                self.assertIn('already stopped', ' '.join(diagnostic.output))
+                self.assertNotIn('fixture-secret', ' '.join(diagnostic.output))
+                self.assertNotIn('https://provider/private', ' '.join(diagnostic.output))
 
 
 @unittest.skipUnless(importlib.util.find_spec('yaml'), 'requires PyYAML')
@@ -81,10 +111,124 @@ class Lifecycle(unittest.TestCase):
         self.store = campaign_store.CampaignStore(self.dsn)
         self.store.register(self.value, 'a' * 40, 'sha256:fixture')
 
+    def test_cleanup_failure_preserves_report_and_watchdog_drains_before_next_trial(self):
+        for failure in ('stop', 'slot-outage'):
+            with self.subTest(failure=failure):
+                self.assert_cleanup_recovery(failure)
+
+    def assert_cleanup_recovery(self, failure):
+        # Own the successful-result/cleanup ordering through the supervisor.
+        # SQL, publication, aggregation, Optuna and watchdog are real; only
+        # the Modal SDK/CLI, measured provider response and notifications are fake.
+        import optuna
+        import network_recovery
+        import search_campaign
+        import search_trial
+        name = self.value['name']
+        self.value.update(max_trials=2, parallelism=1)
+        # Use a distinct frozen campaign because register forbids spec changes.
+        import uuid
+        name = self.value['name'] = uuid.uuid4().hex
+        root = pathlib.Path(__file__).parent
+        scorer = 'sha256:' + search_trial.digest({filename: (root / filename).read_text() for filename in
+            ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py',
+             'private_working.py', 'protected_inputs.py')})
+        self.store.register(self.value, 'a' * 40, scorer)
+        study = optuna.create_study(directions=['maximize', 'minimize', 'minimize'])
+        study.enqueue_trial({'dense_weight': .2})
+        study.enqueue_trial({'dense_weight': .8})
+        apps, measurements, waits = {}, [], []
+        fail_cleanup = True
+        release_slot = control_store.Store.release_slot
+        lost_release = []
+        def release(store, campaign, slot):
+            if failure == 'slot-outage' and not lost_release:
+                lost_release.append(True)
+                raise network_recovery.Outage('slot release unavailable')
+            return release_slot(store, campaign, slot)
+        def app(label):
+            identity = 'ap-' + str(len(apps))
+            apps[identity] = {'app_id': identity, 'description': label, 'state': 'running', 'tasks': 1}
+            handle = mock.MagicMock(app_id=identity)
+            handle.function.return_value = lambda _: mock.Mock()
+            return handle
+        def cli(command, **kwargs):
+            if 'list' in command:
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(list(apps.values())))
+            if 'stop' in command:
+                if fail_cleanup:
+                    raise subprocess.CalledProcessError(1, command, stderr=b'termination refused')
+                apps[command[-1]].update(state='stopped', tasks=0)
+                if len(apps) == 2:
+                    # The watchdog/operator can fence this owner during cleanup.
+                    self.store.stop(name)
+            return subprocess.CompletedProcess(command, 0)
+        def measured(remote, request, check):
+            check()
+            measurements.append(request)
+            row = {'schema_version': 1, 'experiment': self.value['policy']['experiment'], 'git_sha': 'a' * 40,
+                   'plugin_digest': 'sha256:fixture', 'config': request['config'], 'tier': 'direct',
+                   'machine': 'fake-modal', 'duration_seconds': 1,
+                   'dataset': {'name': request['dataset'], 'version': '1', 'split': 'dev',
+                               'fingerprint': 'fixture', 'private': False},
+                   'metrics': {'ndcg@10': .7, 'latency_p95_ms': 20, 'cost_per_search_usd': .0001,
+                               'cost_per_1000_documents_usd': 1},
+                   'cost': {'resource_class': 'fixture', 'latency_method': 'fixture',
+                            'latency_sample': {'policy': 'sha256-query-id-v1; max=50',
+                                              'query_ids': ['q1'], 'warmup_query_ids': ['q1']}},
+                   'per_query': {'ndcg@10': {'q1': .7}}}
+            baseline = {**row, 'config': {**request['policy']['baseline'], 'paired_side': 'baseline',
+                        'paired_candidate_hash': search_trial.digest(request['config'])},
+                        'metrics': {**row['metrics'], 'ndcg@10': .65}, 'per_query': {'ndcg@10': {'q1': .65}}}
+            row['provenance'] = {'public_pair': {
+                'baseline_lease_key': request['lease_key'] + '/' + request['owner'] + '/baseline'}}
+            return search_trial.publish_pair(self.store, request, {'baseline': baseline, 'candidate': row})
+        def retry(delay):
+            nonlocal fail_cleanup
+            waits.append(delay)
+            self.assertEqual(len(apps), 1, 'cleanup must drain before the next app launches')
+            status = search_campaign.public_status(self.store, name, study)
+            report = status['trials'][0]['report']
+            self.assertEqual(report['status'], 'rejected')  # One query cannot establish a corrected quality gain.
+            self.assertTrue(report['gates']['no_loss']['passed'])
+            self.assertEqual(len(report['evidence']), 6)
+            expected_state = optuna.trial.TrialState.RUNNING if lost_release else optuna.trial.TrialState.COMPLETE
+            self.assertEqual(study.trials[0].state, expected_state)
+            for actual, expected in zip(search_campaign.objectives(report, self.value['goal']['weights']), [.7, .0001, 20]):
+                self.assertAlmostEqual(actual, expected)
+            self.assertTrue(status['cleanup_pending'])
+            fail_cleanup = False
+        with tempfile.TemporaryDirectory() as temp, \
+             mock.patch.dict(os.environ, EVAL_CONTROL_DATABASE_URL=self.dsn, MLFLOW_TRACKING_URI=''), \
+             mock.patch('modal.App', side_effect=app), mock.patch('modal.Image'), \
+             mock.patch('modal.Secret'), mock.patch('modal.Volume'), mock.patch('modal_search.shipped_trial'), \
+             mock.patch('modal_search.invoke', side_effect=measured), \
+             mock.patch('subprocess.run', side_effect=cli), \
+             mock.patch('subprocess.check_output', side_effect=lambda args, **kw: b'' if 'ls-files' in args else 'a' * 40), \
+             mock.patch('control_store.Store.release_slot', autospec=True, side_effect=release), \
+             mock.patch('campaign_reporting.Notifications.send'), mock.patch('time.sleep', side_effect=retry):
+            if failure == 'slot-outage':
+                with self.assertRaises(network_recovery.Outage):
+                    search_campaign.supervise(self.store, name, study, temp)
+                snapshot = self.store.snapshot(name)
+                self.assertEqual(len(snapshot['trials']['0']['report']['evidence']), 6)
+                # A restarted process gives up its old owner; no wall-clock expiry.
+                self.store.release_owner(name, snapshot['owner'])
+            status = search_campaign.supervise(self.store, name, study, temp)
+        self.assertEqual(waits, [15])
+        self.assertEqual(len(measurements), 6)
+        self.assertEqual(len(apps), 2)
+        self.assertFalse(status['cleanup_pending'])
+        self.assertEqual(status['stopped'], 'operator stop')
+        self.assertEqual(status['trials'][1]['report']['status'], 'rejected')
+        self.assertEqual(len(status['trials'][1]['report']['evidence']), 6)
+        self.assertTrue(all(r['status'] == 'closed' for r in self.store.snapshot(name)['resources'].values()))
+
     def test_busy_measurement_allocates_no_compute_intent(self):
         # Own intent lifecycle at the supervisor adapter; a busy slot should
         # leave nothing for the watchdog. Only Modal launch/termination is fake.
         import campaign_compute
+        import campaign_store
         import network_recovery
         name = self.value['name']
         owner = self.store.acquire(name)
@@ -100,13 +244,15 @@ class Lifecycle(unittest.TestCase):
                 self.assertTrue(kwargs['app_name']((slot_key, slot['owner'])))
                 if fail_setup[0] == 'outage':
                     raise network_recovery.Outage('control store unavailable')
-                if fail_setup[0]:
+                if fail_setup[0] is True:
                     # Known local setup failure before any AppCreate attempt.
                     with self.store.transaction() as db:
                         db.execute('UPDATE eval_control.campaign_runs SET expires_at=clock_timestamp() WHERE campaign=%s', (name,))
                     raise control_store.LeaseLost('setup lost its owner')
                 kwargs['on_launch']()
                 kwargs['on_app']('ap-tracked')
+                if fail_setup[0] == 'measurement':
+                    raise ValueError('original measurement failure')
                 return {'status': 'rejected'}
             admitted, fail_setup = [False], [False]
             with mock.patch('modal_search.launch', side_effect=launch):
@@ -141,6 +287,14 @@ class Lifecycle(unittest.TestCase):
             self.assertEqual(len(resources), 3)
             self.assertTrue(all(r['status'] == 'closed' for r in resources))
             compute.stop.assert_called_once_with('ap-tracked')
+            # Cleanup must not mask the error that explains an interrupted trial.
+            fail_setup[0] = 'measurement'
+            compute.stop.side_effect = campaign_store.CleanupPending('termination refused')
+            with mock.patch('modal_search.launch', side_effect=launch):
+                with self.assertRaisesRegex(ValueError, '^original measurement failure$'):
+                    measure({})
+            resources = list(self.store.snapshot(name)['resources'].values())
+            self.assertEqual(sorted(r['status'] for r in resources), ['closed', 'closed', 'closed', 'running'])
 
     def test_network_gap_recovers_same_owner_and_watchdog_fences_cleanup_after_grace(self):
         import psycopg
@@ -403,7 +557,7 @@ class Lifecycle(unittest.TestCase):
         class Measurement:
             def __init__(self, store, name, owner, *_):
                 self.store, self.name, self.owner = store, name, owner
-            def __call__(self, config):
+            def __call__(self, config, **_):
                 nonlocal calls
                 with lock:
                     calls += 1
@@ -487,7 +641,7 @@ class Lifecycle(unittest.TestCase):
         owner = self.store.acquire(name)
         calls = []
         scores = [(0.7, .001, 20), (0.8, .002, 30), (0.6, .003, 40)]
-        def measurement(config):
+        def measurement(config, **_):
             i = len(calls)
             calls.append(config)
             q, c, l = scores[i]

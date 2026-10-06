@@ -74,7 +74,7 @@ class Reporting(unittest.TestCase):
         with self.assertRaises(ValueError):
             reporting.propose(self.store, self.name, {'id': 'unsafe', 'space': {'provider_daily_usd': {'low': 1, 'high': 2}}})
         observed = []
-        def measure(config):
+        def measure(config, **_):
             observed.append(config['dense_weight'])
             return {'status': 'failed'}
         study = optuna.create_study(directions=['maximize', 'minimize', 'minimize'])
