@@ -19,9 +19,11 @@ const ingestionBatchQueue = "quivr-ingestion-batches-v1"
 const ingestionBatchWorkflow = "process-ingestion-batch-v1"
 const ingestionBatchActivity = "process-receipt-batch-v1"
 const ingestionBatchReleaseActivity = "release-receipt-batch-v1"
-const ingestionReceiptConcurrency = 8
+const ingestionReceiptConcurrency = 16
 
-// Four waves of eight receipts cover a full batch. Each receipt retains the
+// Two waves of sixteen receipts cover a full batch. Four activities admit at
+// most 64 receipts per worker; provider admission remains independently bounded.
+// Each receipt retains the
 // legacy stage deadlines; a silent worker is recovered by the heartbeat bound.
 const ingestionBatchTimeout = 4 * (30*time.Second + maxNormalizationRounds*(normalizationActivityTimeout+30*time.Second) + enrichmentActivityTimeout)
 

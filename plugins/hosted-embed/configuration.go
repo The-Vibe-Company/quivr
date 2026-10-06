@@ -15,22 +15,24 @@ import (
 const pluginID = "hosted.embed"
 
 type configuration struct {
-	PluginID              string   `json:"plugin_id"`
-	Format                string   `json:"format"`
-	BaseURL               string   `json:"base_url"`
-	Auth                  string   `json:"auth"`
-	Model                 string   `json:"model"`
-	Dimensions            int      `json:"dimensions"`
-	SendDimensions        bool     `json:"send_dimensions"`
-	Metric                string   `json:"metric"`
-	Revision              string   `json:"model_revision"`
-	PluginVersion         string   `json:"plugin_version"`
-	QueryPrefix           string   `json:"query_prefix"`
-	DocumentPrefix        string   `json:"document_prefix"`
-	QueryInputType        string   `json:"query_input_type"`
-	DocumentInputType     string   `json:"document_input_type"`
-	MaxTokens             int      `json:"max_tokens_per_segment"`
-	Overlap               int      `json:"overlap"`
+	PluginID          string `json:"plugin_id"`
+	Format            string `json:"format"`
+	BaseURL           string `json:"base_url"`
+	Auth              string `json:"auth"`
+	Model             string `json:"model"`
+	Dimensions        int    `json:"dimensions"`
+	SendDimensions    bool   `json:"send_dimensions"`
+	Metric            string `json:"metric"`
+	Revision          string `json:"model_revision"`
+	PluginVersion     string `json:"plugin_version"`
+	QueryPrefix       string `json:"query_prefix"`
+	DocumentPrefix    string `json:"document_prefix"`
+	QueryInputType    string `json:"query_input_type"`
+	DocumentInputType string `json:"document_input_type"`
+	MaxTokens         int    `json:"max_tokens_per_segment"`
+	Overlap           int    `json:"overlap"`
+	// BatchWaitMS collects concurrent document inputs; zero disables collection.
+	BatchWaitMS           int      `json:"batch_wait_ms"`
 	BatchSize             int      `json:"batch_size"`
 	BatchTokens           int      `json:"max_batch_tokens"`
 	RequestTimeoutMS      int      `json:"request_timeout_ms"`
@@ -41,7 +43,7 @@ type configuration struct {
 }
 
 func parseConfiguration(raw []byte) (configuration, error) {
-	c := configuration{PluginID: pluginID, SendDimensions: true, Metric: "cosine", Revision: "1", PluginVersion: "1.0.0", QueryInputType: "search_query", DocumentInputType: "search_document", MaxTokens: 512, Overlap: 48, BatchSize: 16, BatchTokens: 8192, RequestTimeoutMS: 4000, CallBudgetMS: 30000, MaxRetries: 2, MaxConcurrentRequests: 4}
+	c := configuration{PluginID: pluginID, SendDimensions: true, Metric: "cosine", Revision: "1", PluginVersion: "1.0.0", QueryInputType: "search_query", DocumentInputType: "search_document", MaxTokens: 512, Overlap: 48, BatchSize: 16, BatchWaitMS: 25, BatchTokens: 8192, RequestTimeoutMS: 4000, CallBudgetMS: 30000, MaxRetries: 2, MaxConcurrentRequests: 4}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
@@ -85,6 +87,12 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	}
 	if c.RequestTimeoutMS < 100 || c.RequestTimeoutMS > 10000 || c.CallBudgetMS < 100 || c.CallBudgetMS > 90000 || c.MaxRetries < 0 || c.MaxRetries > 5 {
 		return c, fmt.Errorf("invalid timeout or retry bounds")
+	}
+	if c.BatchWaitMS < 0 || c.BatchWaitMS > 100 {
+		return c, fmt.Errorf("batch_wait_ms must be between 0 and 100")
+	}
+	if c.BatchWaitMS >= c.CallBudgetMS {
+		return c, fmt.Errorf("batch_wait_ms must be less than call_budget_ms")
 	}
 	if c.MaxConcurrentRequests < 1 || c.MaxConcurrentRequests > 32 {
 		return c, fmt.Errorf("max_concurrent_requests must be between 1 and 32")
