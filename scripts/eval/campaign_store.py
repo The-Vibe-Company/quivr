@@ -201,6 +201,21 @@ class CampaignStore(control_store.Store):
             state['trials'][str(number)] = value
 
     @control_store.retry_contention
+    def trial_report(self, name, owner, number, report):
+        """Keep an admitted trial's evidence after stop, without reopening work.
+
+        Cleanup may have released this supervisor. A replacement supervisor
+        still fences it out, and this cannot create a trial or change its config.
+        """
+        with self.edit(name) as (db, state):
+            current = db.execute('SELECT owner FROM eval_control.campaign_runs WHERE campaign=%s', (name,)).fetchone()[0]
+            key = str(number)
+            value = state['trials'].get(key)
+            if current != owner or not isinstance(value, dict):
+                raise control_store.LeaseLost('trial belongs to another supervisor')
+            value['report'] = report
+
+    @control_store.retry_contention
     def clear_leases(self, name):
         with self.mutation(name, cleanup=True) as (db, state, _):
             if any(r['status'] != 'closed' for r in state['resources'].values()):

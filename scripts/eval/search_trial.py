@@ -183,6 +183,8 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         usage = phase_usage.setdefault(name, {'elapsed_seconds': 0., 'cpu_seconds': 0.})
         usage['elapsed_seconds'] += max(0, elapsed)
         usage['cpu_seconds'] += max(0, cpu)
+        if name != 'latency':
+            LOG.info('phase complete name=%s elapsed_seconds=%.3f cpu_seconds=%.3f', name, elapsed, cpu)
     indexing_phase = phase_start()
     LOG.info('indexing started')
     indexing_started = time.monotonic()
@@ -538,6 +540,7 @@ def measure_pair(configs, data, dataset, cache, budgets, clients, prices, comput
         with latency_scope() if fresh_latency else contextlib.nullcontext() as slot:
             window_wait = {'elapsed_seconds': max(0, time.monotonic() - waiting[0]),
                            'cpu_seconds': max(0, time.process_time() - waiting[1])}
+            LOG.info('latency window acquired wait_seconds=%.3f', window_wait['elapsed_seconds'])
             if slot:
                 for budget in budgets.values():
                     budget.extra_leases.append(slot)
@@ -580,6 +583,15 @@ def publish_pair(store, request, rows):
     claim = store.claim(request['campaign'], baseline_key, request['policy']['max_seconds'])
     if claim['status'] != 'claimed':
         raise RuntimeError('paired baseline evidence unavailable')
-    store.publish_many(request['campaign'], {baseline_key: (claim['owner'], rows['baseline']),
-        request['lease_key']: (request['owner'], rows['candidate'])})
+    try:
+        store.publish_many(request['campaign'], {baseline_key: (claim['owner'], rows['baseline']),
+            request['lease_key']: (request['owner'], rows['candidate'])})
+    except network_recovery.Outage:
+        raise  # Preserve uncertain publication; the bounded outage window has ended.
+    except Exception:
+        try:
+            store.abandon(request['campaign'], baseline_key, claim['owner'], 'failed')
+        except control_store.LeaseLost:
+            pass  # Publication may already have committed.
+        raise
     return rows['candidate']

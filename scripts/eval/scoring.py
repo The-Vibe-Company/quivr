@@ -1,6 +1,6 @@
-"""Scores rankings with ranx and compares two systems with a paired test (THE-775).
+"""Scores the pinned top-ten metrics and pairs systems per query (THE-775).
 
-Needs ranx (and scipy, one of its dependencies): pip install -r scripts/eval/requirements.txt.
+Paired significance needs scipy: pip install -r scripts/eval/requirements.txt.
 """
 import math
 
@@ -19,10 +19,24 @@ def score(qrels, ranking):
 
     qrels: {qid: {doc: grade}}; ranking: {qid: [doc, ...]} best first. Every judged query is
     scored, including those the system returned nothing for."""
-    from ranx import Qrels, Run, evaluate
-    run = Run({q: {d: 1 / (i + 1) for i, d in enumerate(ranking.get(q, []))} for q in qrels}, name='system')
-    evaluate(Qrels(qrels), run, METRICS)
-    per_query = {m: {q: float(run.scores[m][q]) for q in sorted(qrels)} for m in METRICS}
+    # These three fixed top-ten metrics need no JIT or worker pool. Avoid
+    # compiling ranx/Numba in every single-use measurement container.
+    per_query = {m: {} for m in METRICS}
+    discounts = [math.log2(i + 2) for i in range(10)]
+    for query in sorted(qrels):
+        judged = qrels[query]
+        # Match Run's doc -> reciprocal-rank mapping, including duplicates:
+        # the last occurrence supplies a document's score.
+        positions = {doc: i for i, doc in enumerate(ranking.get(query, []))}
+        docs = sorted(positions, key=positions.get)[:10]
+        gains = [judged.get(doc, 0) for doc in docs]
+        ideal = sorted(judged.values(), reverse=True)[:10]
+        dcg = sum(gain / discount for gain, discount in zip(gains, discounts))
+        idcg = sum(gain / discount for gain, discount in zip(ideal, discounts))
+        relevant = sum(grade > 0 for grade in judged.values())
+        per_query['ndcg@10'][query] = dcg / idcg if idcg else 0.
+        per_query['recall@10'][query] = sum(gain > 0 for gain in gains) / relevant if relevant else 0.
+        per_query['mrr@10'][query] = next((1 / (i + 1) for i, gain in enumerate(gains) if gain > 0), 0.)
     return {'mean': {m: sum(v.values()) / len(v) for m, v in per_query.items()}, 'per_query': per_query}
 
 
