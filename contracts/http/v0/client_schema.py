@@ -16,6 +16,13 @@ from bundle import load
 
 spec = load()
 spec.pop("webhooks", None)
+# The generator treats required-only anyOf branches as model alternatives and
+# drops MetadataFilter's properties from Python from_dict. This object has
+# exactly field/any_of/gte/lte, forbids extra keys and requires field, so two
+# properties expresses the same requirement: at least one predicate operator.
+metadata_filter = spec["components"]["schemas"]["MetadataFilter"]
+metadata_filter.pop("anyOf")
+metadata_filter["minProperties"] = 2
 if "--opaque-plugin-responses" in sys.argv[1:]:
     for path in spec["paths"].values():
         for operation in path.values():

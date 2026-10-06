@@ -366,6 +366,27 @@ func (e EvaluationRetirementOutcome) Valid() bool {
 	}
 }
 
+// Defines values for FacetFieldInterval.
+const (
+	Day   FacetFieldInterval = "day"
+	Month FacetFieldInterval = "month"
+	Year  FacetFieldInterval = "year"
+)
+
+// Valid indicates whether the value is a known member of the FacetFieldInterval enum.
+func (e FacetFieldInterval) Valid() bool {
+	switch e {
+	case Day:
+		return true
+	case Month:
+		return true
+	case Year:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FieldMappingRoles.
 const (
 	Filter FieldMappingRoles = "filter"
@@ -1971,6 +1992,68 @@ type Extensions map[string]struct {
 	SchemaVersion string                 `json:"schema_version"`
 }
 
+// Facet defines model for Facet.
+type Facet struct {
+	Buckets []FacetBucket `json:"buckets"`
+	Field   string        `json:"field"`
+}
+
+// FacetBucket defines model for FacetBucket.
+type FacetBucket struct {
+	Count int64 `json:"count"`
+
+	// Value Typed scalar value, array member, or RFC 3339 UTC date bucket start.
+	Value FacetBucket_Value `json:"value"`
+}
+
+// FacetBucketValue0 defines model for FacetBucket.Value.0.
+type FacetBucketValue0 = string
+
+// FacetBucketValue1 defines model for FacetBucket.Value.1.
+type FacetBucketValue1 = float64
+
+// FacetBucketValue2 defines model for FacetBucket.Value.2.
+type FacetBucketValue2 = bool
+
+// FacetBucket_Value Typed scalar value, array member, or RFC 3339 UTC date bucket start.
+type FacetBucket_Value struct {
+	union json.RawMessage
+}
+
+// FacetField defines model for FacetField.
+type FacetField struct {
+	Field string `json:"field"`
+
+	// Interval Required only for datetime fields; bucket start in UTC.
+	Interval *FacetFieldInterval `json:"interval,omitempty"`
+	Limit    *int                `json:"limit,omitempty"`
+}
+
+// FacetFieldInterval Required only for datetime fields; bucket start in UTC.
+type FacetFieldInterval string
+
+// FacetRequest defines model for FacetRequest.
+type FacetRequest struct {
+	// AcceptedAfter Inclusive current-Version acceptance-time lower bound, as in listing.
+	AcceptedAfter *time.Time `json:"accepted_after,omitempty"`
+
+	// AcceptedBefore Exclusive current-Version acceptance-time upper bound, as in listing.
+	AcceptedBefore *time.Time `json:"accepted_before,omitempty"`
+	CorpusIds      []string   `json:"corpus_ids"`
+
+	// Fields Distinct logical metadata field names, in response order.
+	Fields []FacetField `json:"fields"`
+
+	// Filter Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
+	Filter *SearchFilter `json:"filter,omitempty"`
+}
+
+// FacetResponse defines model for FacetResponse.
+type FacetResponse struct {
+	ExcludedCorpora *[]CorpusExclusion `json:"excluded_corpora,omitempty"`
+	Items           []Facet            `json:"items"`
+}
+
 // FieldMapping v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Core validates role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are validated and preserved; no public filter API consumes them in v0.
 type FieldMapping struct {
 	Name          string              `json:"name"`
@@ -2083,8 +2166,7 @@ type MetadataFilter struct {
 	Gte *time.Time `json:"gte,omitempty"`
 
 	// Lte Inclusive upper datetime bound. Requires a datetime field.
-	Lte   *time.Time `json:"lte,omitempty"`
-	union json.RawMessage
+	Lte *time.Time `json:"lte,omitempty"`
 }
 
 // MetadataFilterAnyOf0 defines model for MetadataFilter.AnyOf.0.
@@ -2100,15 +2182,6 @@ type MetadataFilterAnyOf2 = bool
 type MetadataFilter_AnyOf_Item struct {
 	union json.RawMessage
 }
-
-// MetadataFilter0 defines model for MetadataFilter.0.
-type MetadataFilter0 = interface{}
-
-// MetadataFilter1 defines model for MetadataFilter.1.
-type MetadataFilter1 = interface{}
-
-// MetadataFilter2 defines model for MetadataFilter.2.
-type MetadataFilter2 = interface{}
 
 // MonitoringReferences owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
 type MonitoringReferences struct {
@@ -3599,6 +3672,9 @@ type RebuildCorpusProjectionJSONRequestBody = ActionRequest
 // ConfigureRetrievalJSONRequestBody defines body for ConfigureRetrieval for application/json ContentType.
 type ConfigureRetrievalJSONRequestBody = ConfigUpdate
 
+// CountFacetsJSONRequestBody defines body for CountFacets for application/json ContentType.
+type CountFacetsJSONRequestBody = FacetRequest
+
 // CancelOperationJSONRequestBody defines body for CancelOperation for application/json ContentType.
 type CancelOperationJSONRequestBody = ActionRequest
 
@@ -3658,6 +3734,94 @@ type CreateSubscriptionVersionJSONRequestBody = SubscriptionVersionCreate
 
 // CreateUploadJSONRequestBody defines body for CreateUpload for application/json ContentType.
 type CreateUploadJSONRequestBody = UploadRequest
+
+// AsFacetBucketValue0 returns the union data inside the FacetBucket_Value as a FacetBucketValue0
+func (t FacetBucket_Value) AsFacetBucketValue0() (FacetBucketValue0, error) {
+	var body FacetBucketValue0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromFacetBucketValue0 overwrites any union data inside the FacetBucket_Value as the provided FacetBucketValue0
+func (t *FacetBucket_Value) FromFacetBucketValue0(v FacetBucketValue0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeFacetBucketValue0 performs a merge with any union data inside the FacetBucket_Value, using the provided FacetBucketValue0
+func (t *FacetBucket_Value) MergeFacetBucketValue0(v FacetBucketValue0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsFacetBucketValue1 returns the union data inside the FacetBucket_Value as a FacetBucketValue1
+func (t FacetBucket_Value) AsFacetBucketValue1() (FacetBucketValue1, error) {
+	var body FacetBucketValue1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromFacetBucketValue1 overwrites any union data inside the FacetBucket_Value as the provided FacetBucketValue1
+func (t *FacetBucket_Value) FromFacetBucketValue1(v FacetBucketValue1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeFacetBucketValue1 performs a merge with any union data inside the FacetBucket_Value, using the provided FacetBucketValue1
+func (t *FacetBucket_Value) MergeFacetBucketValue1(v FacetBucketValue1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsFacetBucketValue2 returns the union data inside the FacetBucket_Value as a FacetBucketValue2
+func (t FacetBucket_Value) AsFacetBucketValue2() (FacetBucketValue2, error) {
+	var body FacetBucketValue2
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromFacetBucketValue2 overwrites any union data inside the FacetBucket_Value as the provided FacetBucketValue2
+func (t *FacetBucket_Value) FromFacetBucketValue2(v FacetBucketValue2) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeFacetBucketValue2 performs a merge with any union data inside the FacetBucket_Value, using the provided FacetBucketValue2
+func (t *FacetBucket_Value) MergeFacetBucketValue2(v FacetBucketValue2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t FacetBucket_Value) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *FacetBucket_Value) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsTextContent returns the union data inside the IngestCommand_Content as a TextContent
 func (t IngestCommand_Content) AsTextContent() (TextContent, error) {
@@ -3793,168 +3957,6 @@ func (t IngestCommand_Content) MarshalJSON() ([]byte, error) {
 
 func (t *IngestCommand_Content) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
-	return err
-}
-
-// AsMetadataFilter0 returns the union data inside the MetadataFilter as a MetadataFilter0
-func (t MetadataFilter) AsMetadataFilter0() (MetadataFilter0, error) {
-	var body MetadataFilter0
-	err := json.Unmarshal(t.union, &body)
-	return body, err
-}
-
-// FromMetadataFilter0 overwrites any union data inside the MetadataFilter as the provided MetadataFilter0
-func (t *MetadataFilter) FromMetadataFilter0(v MetadataFilter0) error {
-	b, err := json.Marshal(v)
-	t.union = b
-	return err
-}
-
-// MergeMetadataFilter0 performs a merge with any union data inside the MetadataFilter, using the provided MetadataFilter0
-func (t *MetadataFilter) MergeMetadataFilter0(v MetadataFilter0) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	merged, err := runtime.JSONMerge(t.union, b)
-	t.union = merged
-	return err
-}
-
-// AsMetadataFilter1 returns the union data inside the MetadataFilter as a MetadataFilter1
-func (t MetadataFilter) AsMetadataFilter1() (MetadataFilter1, error) {
-	var body MetadataFilter1
-	err := json.Unmarshal(t.union, &body)
-	return body, err
-}
-
-// FromMetadataFilter1 overwrites any union data inside the MetadataFilter as the provided MetadataFilter1
-func (t *MetadataFilter) FromMetadataFilter1(v MetadataFilter1) error {
-	b, err := json.Marshal(v)
-	t.union = b
-	return err
-}
-
-// MergeMetadataFilter1 performs a merge with any union data inside the MetadataFilter, using the provided MetadataFilter1
-func (t *MetadataFilter) MergeMetadataFilter1(v MetadataFilter1) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	merged, err := runtime.JSONMerge(t.union, b)
-	t.union = merged
-	return err
-}
-
-// AsMetadataFilter2 returns the union data inside the MetadataFilter as a MetadataFilter2
-func (t MetadataFilter) AsMetadataFilter2() (MetadataFilter2, error) {
-	var body MetadataFilter2
-	err := json.Unmarshal(t.union, &body)
-	return body, err
-}
-
-// FromMetadataFilter2 overwrites any union data inside the MetadataFilter as the provided MetadataFilter2
-func (t *MetadataFilter) FromMetadataFilter2(v MetadataFilter2) error {
-	b, err := json.Marshal(v)
-	t.union = b
-	return err
-}
-
-// MergeMetadataFilter2 performs a merge with any union data inside the MetadataFilter, using the provided MetadataFilter2
-func (t *MetadataFilter) MergeMetadataFilter2(v MetadataFilter2) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	merged, err := runtime.JSONMerge(t.union, b)
-	t.union = merged
-	return err
-}
-
-func (t MetadataFilter) MarshalJSON() ([]byte, error) {
-	b, err := t.union.MarshalJSON()
-	if err != nil {
-		return nil, err
-	}
-	object := make(map[string]json.RawMessage)
-	if t.union != nil {
-		err = json.Unmarshal(b, &object)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if t.AnyOf != nil {
-		object["any_of"], err = json.Marshal(t.AnyOf)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'any_of': %w", err)
-		}
-	}
-
-	object["field"], err = json.Marshal(t.Field)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling 'field': %w", err)
-	}
-
-	if t.Gte != nil {
-		object["gte"], err = json.Marshal(t.Gte)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'gte': %w", err)
-		}
-	}
-
-	if t.Lte != nil {
-		object["lte"], err = json.Marshal(t.Lte)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'lte': %w", err)
-		}
-	}
-	b, err = json.Marshal(object)
-	return b, err
-}
-
-func (t *MetadataFilter) UnmarshalJSON(b []byte) error {
-	err := t.union.UnmarshalJSON(b)
-	if err != nil {
-		return err
-	}
-	object := make(map[string]json.RawMessage)
-	err = json.Unmarshal(b, &object)
-	if err != nil {
-		return err
-	}
-
-	if raw, found := object["any_of"]; found {
-		err = json.Unmarshal(raw, &t.AnyOf)
-		if err != nil {
-			return fmt.Errorf("error reading 'any_of': %w", err)
-		}
-	}
-
-	if raw, found := object["field"]; found {
-		err = json.Unmarshal(raw, &t.Field)
-		if err != nil {
-			return fmt.Errorf("error reading 'field': %w", err)
-		}
-	}
-
-	if raw, found := object["gte"]; found {
-		err = json.Unmarshal(raw, &t.Gte)
-		if err != nil {
-			return fmt.Errorf("error reading 'gte': %w", err)
-		}
-	}
-
-	if raw, found := object["lte"]; found {
-		err = json.Unmarshal(raw, &t.Lte)
-		if err != nil {
-			return fmt.Errorf("error reading 'lte': %w", err)
-		}
-	}
-
 	return err
 }
 
@@ -4272,6 +4274,9 @@ type ServerInterface interface {
 
 	// (GET /v0/deliveries/{delivery_id}/attempts)
 	ListDeliveryAttempts(w http.ResponseWriter, r *http.Request, deliveryId string, params ListDeliveryAttemptsParams)
+
+	// (POST /v0/facets)
+	CountFacets(w http.ResponseWriter, r *http.Request)
 
 	// (GET /v0/ingestion-receipts/{receipt_id})
 	GetReceipt(w http.ResponseWriter, r *http.Request, receiptId string)
@@ -5018,6 +5023,17 @@ func (siw *ServerInterfaceWrapper) ListDeliveryAttempts(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+func (siw *ServerInterfaceWrapper) CountFacets(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CountFacets(w, r)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
 func (siw *ServerInterfaceWrapper) GetReceipt(w http.ResponseWriter, r *http.Request) {
 	receiptId := string(r.PathValue("receipt_id"))
 
@@ -5505,6 +5521,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/version", wrapper.GetBuildVersion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/records", wrapper.ListRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records", wrapper.IngestRecord)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/facets", wrapper.CountFacets)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/records/count", wrapper.CountRecords)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records/batch", wrapper.IngestBatch)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/records/withdrawals", wrapper.WithdrawRecord)
@@ -8455,6 +8472,55 @@ func (response ListDeliveryAttemptsdefaultJSONResponse) VisitListDeliveryAttempt
 	return err
 }
 
+type CountFacetsRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Body        *CountFacetsJSONRequestBody
+}
+
+type CountFacetsResponseObject interface {
+	VisitCountFacetsResponse(w http.ResponseWriter) error
+}
+
+// CountFacetsResponseFunc writes a deferred response, including streams and plugin answers.
+type CountFacetsResponseFunc func(http.ResponseWriter)
+
+func (response CountFacetsResponseFunc) VisitCountFacetsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type CountFacets200JSONResponse FacetResponse
+
+func (response CountFacets200JSONResponse) VisitCountFacetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CountFacetsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CountFacetsdefaultJSONResponse) VisitCountFacetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetReceiptRequestObject struct {
 	// HTTPRequest retains bounded, deferred input parsing after service authorization.
 	HTTPRequest *http.Request
@@ -10454,6 +10520,9 @@ type StrictServerInterface interface {
 	// (GET /v0/deliveries/{delivery_id}/attempts)
 	ListDeliveryAttempts(ctx context.Context, request ListDeliveryAttemptsRequestObject) (ListDeliveryAttemptsResponseObject, error)
 
+	// (POST /v0/facets)
+	CountFacets(ctx context.Context, request CountFacetsRequestObject) (CountFacetsResponseObject, error)
+
 	// (GET /v0/ingestion-receipts/{receipt_id})
 	GetReceipt(ctx context.Context, request GetReceiptRequestObject) (GetReceiptResponseObject, error)
 
@@ -12106,6 +12175,33 @@ func (sh *strictHandler) ListDeliveryAttempts(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListDeliveryAttemptsResponseObject); ok {
 		if err := validResponse.VisitListDeliveryAttemptsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CountFacets operation middleware
+func (sh *strictHandler) CountFacets(w http.ResponseWriter, r *http.Request) {
+	var request CountFacetsRequestObject
+
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CountFacets(ctx, request.(CountFacetsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CountFacets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CountFacetsResponseObject); ok {
+		if err := validResponse.VisitCountFacetsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

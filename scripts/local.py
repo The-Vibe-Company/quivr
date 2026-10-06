@@ -568,7 +568,7 @@ def parts():
             # order-sensitive acceptance and timed outage scenarios. The outages kill every process, so
             # the short-retention API starts after them.
             step('short_retention_api',Stack.start_short_retention_api),
-            acceptance('changes_catalog_rebuild','TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestEnrichedVersions'),
+            acceptance('changes_catalog_rebuild','TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestFacets|TestEnrichedVersions'),
             step('newsml_normalizer_pin',normalizer_plugin.switch,'newsml-g2'),
             acceptance('metadata_filters','^TestMetadataFiltersAcrossCorpora$'),
             step('template_normalizer_pin',normalizer_plugin.switch,'template'),

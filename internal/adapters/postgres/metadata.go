@@ -26,6 +26,13 @@ func catalogMetadata(q content.RecordQuery, args *[]any) string {
 	if len(q.Metadata) == 0 {
 		return ""
 	}
+	conditions := metadataRouteConditions(q, args)
+	return " AND EXISTS(SELECT 1 FROM projection_metadata pm WHERE pm.organization=records.organization AND pm.version_id=records.current_version_id AND (" + conditions + "))"
+}
+
+// metadataRouteConditions also serves aggregations that already join the
+// pinned projection, avoiding a second metadata lookup for every document.
+func metadataRouteConditions(q content.RecordQuery, args *[]any) string {
 	bind := func(value any) string { *args = append(*args, value); return fmt.Sprintf("$%d", len(*args)) }
 	branches := []string{}
 	for _, route := range q.FilterRoutes {
@@ -58,7 +65,7 @@ func catalogMetadata(q content.RecordQuery, args *[]any) string {
 		branches = append(branches, "("+strings.Join(conditions, " AND ")+")")
 	}
 	if len(branches) == 0 {
-		return " AND false"
+		return "false"
 	}
-	return " AND EXISTS(SELECT 1 FROM projection_metadata pm WHERE pm.organization=records.organization AND pm.version_id=records.current_version_id AND (" + strings.Join(branches, " OR ") + "))"
+	return strings.Join(branches, " OR ")
 }

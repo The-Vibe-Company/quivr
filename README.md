@@ -107,6 +107,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   rechecks on every hit, with common metadata and typed Corpus filters across sources,
   optionally within chosen Source Namespaces (filtered before
   ranking).
+- **Metadata facets**: exact document counts across Corpora, bounded top values
+  and UTC day, month or year histograms, under the same metadata filters.
 - **Change feed** through polling and resumable SSE, plus **catalog resync** after
   cursor expiry. List a Corpus's Records newest first by current-Version acceptance
   time, filter by time bounds, and read exact range counts through the API or CLI.
