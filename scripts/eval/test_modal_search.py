@@ -293,13 +293,17 @@ class Dispatch(unittest.TestCase):
         campaign = uuid.uuid4().hex
         local = threading.local()
         indexing = threading.Barrier(2)
-        quality_active, first_window, second_wait, first_done = [threading.Event() for _ in range(4)]
+        quality_active, first_window, first_done = [threading.Event() for _ in range(3)]
         fresh_order = []
         original_measure, original_results = search_trial.measure_pair, results.Results
         original_rank = search_trial.SearchIndex.rank
         def clock():
             return getattr(local, 'clock', 0.)
         def rank(*args, **kwargs):
+            if local.trial == 'second' and not quality_active.is_set():
+                quality_active.set()
+                self.assertTrue(first_done.wait(20))
+                self.assertTrue(first_window.is_set())
             local.clock += .02
             return original_rank(*args, **kwargs)
         def provider(request, timeout):
@@ -308,24 +312,16 @@ class Dispatch(unittest.TestCase):
                 local.trial = 'first' if 'first' in body['texts'][0] else 'second'
                 local.clock = 0.
             if body['input_type'] == 'search_document':
-                indexing.wait(5)  # Both trial preparations must overlap.
-            elif len(body['texts']) > 1 and local.trial == 'second':
-                quality_active.set()
-                self.assertTrue(first_window.wait(5))
+                indexing.wait(20)  # Both trial preparations must overlap.
             elif len(body['texts']) == 1:
                 if local.trial == 'first' and not first_window.is_set():
-                    self.assertTrue(quality_active.wait(5))
+                    self.assertTrue(quality_active.wait(20))
                     first_window.set()
-                    self.assertTrue(second_wait.wait(5))
                 fresh_order.append(local.trial)
             local.clock += .1
             count = len(body['texts'])
             return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
                 'meta': {'billed_units': {'input_tokens': count}}}).encode())
-        def wait(_):
-            self.assertEqual(local.trial, 'second')
-            second_wait.set()
-            self.assertTrue(first_done.wait(5))
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
             for trial in ('first', 'second'):
@@ -360,11 +356,11 @@ class Dispatch(unittest.TestCase):
                     mock.patch.object(search_trial, 'measure_pair', side_effect=measure), \
                     mock.patch.object(results, 'Results', side_effect=outbox), \
                     mock.patch.object(search_trial.SearchIndex, 'rank', rank), \
-                    mock.patch('time.monotonic', side_effect=clock), mock.patch('time.sleep', side_effect=wait), \
+                    mock.patch('time.monotonic', side_effect=clock), mock.patch('time.sleep', side_effect=AssertionError('unexpected admission wait')), \
                     mock.patch('urllib.request.OpenerDirector.open', side_effect=provider), \
                     ThreadPoolExecutor(max_workers=2) as pool:
                 a, b = pool.submit(run, 'first'), pool.submit(run, 'second')
-                rows = [a.result(15), b.result(15)]
+                rows = [a.result(30), b.result(30)]
             self.assertEqual(fresh_order, ['first'] * 10 + ['second'] * 10)
             for row in rows:
                 self.assertIn('metrics', row, row)
@@ -463,6 +459,20 @@ class Dispatch(unittest.TestCase):
                 mock.patch('modal_search.subprocess.run', return_value=subprocess.CompletedProcess([], 0)), \
                 mock.patch('modal_search.subprocess.check_output', side_effect=lambda args, **kw: b'' if 'ls-files' in args else 'a' * 40), \
                 mock.patch('modal_search.invoke', side_effect=control_store.LeaseLost('detached')):
+            import network_recovery
+            gate = network_recovery.admission(campaign)
+            gate.pause()
+            try:
+                with mock.patch.dict(os.environ, EVAL_NETWORK_OUTAGE_SECONDS='0'), \
+                        self.assertRaises(network_recovery.Outage):
+                    modal_search.launch(policy, search_trial.configuration({'dense_weight': .1}),
+                        campaign, temp, True, parallelism=3)
+            finally:
+                gate.finish(False)
+            apps.assert_not_called()
+            with store.transaction() as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND expires_at>clock_timestamp()',
+                    (campaign,)).fetchone()[0], 0, 'an unlaunched trial must not retain a slot')
             for weight in (.2, .4, .6):
                 with self.assertRaises(control_store.LeaseLost):
                     modal_search.launch(policy, search_trial.configuration({'dense_weight': weight}),

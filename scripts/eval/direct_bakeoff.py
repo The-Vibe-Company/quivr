@@ -197,7 +197,7 @@ class Hosted:
         admission = (self.provider_gate.request() if self.provider_gate else
                      self.documents.request() if mode == 'document' else contextlib.nullcontext())
         with self.blocked():
-            admitted, previous_http = time.monotonic(), self.http_seconds
+            admitted, http_elapsed = time.monotonic(), 0.
             try:
                 with admission:
                     started = time.monotonic()
@@ -207,9 +207,10 @@ class Hosted:
                         self.service_seconds += time.monotonic() - started
                         return raw
                     finally:
-                        self.http_seconds += time.monotonic() - started
+                        http_elapsed = time.monotonic() - started
+                        self.http_seconds += http_elapsed
             finally:
-                self.admission_seconds += time.monotonic() - admitted - (self.http_seconds - previous_http)
+                self.admission_seconds += time.monotonic() - admitted - http_elapsed
 
     def post(self, path, body, texts, label, model, mode):
         # The shared gate's supported byte/subword bound, including special tokens.

@@ -368,7 +368,13 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
     ttl = policy['max_seconds'] + policy['startup_seconds']
     # Retain one slot per admitted app until acknowledged termination. Latency
     # has its own remote window; indexing and quality may overlap across slots.
-    slot_identity = store.claim_slot(campaign, 'campaign-measurement-slot', parallelism, ttl)
+    gate = network_recovery.admission(campaign)
+    while True:
+        try:
+            slot_identity = store.claim_slot(campaign, 'campaign-measurement-slot', parallelism, ttl, gate=gate)
+            break
+        except network_recovery.AdmissionPaused:
+            gate.wait()  # Rollback precedes waiting; no unused trial slot remains.
     if slot_identity is None:
         return {'status': 'leased', 'reason': 'all campaign trial slots are busy', 'work': {}}
     slot_key, slot_owner = slot_identity
@@ -379,7 +385,6 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
     # Ambiguous detached calls retain the slot until their bounded lifetime expires.
     completed, launch_attempted = False, False
     try:
-        network_recovery.admission(campaign).wait()
         image = (modal.Image.debian_slim(python_version='3.12')
                  .apt_install('age')
                  .pip_install_from_requirements(str(ROOT / 'scripts/eval/requirements-modal.txt'))

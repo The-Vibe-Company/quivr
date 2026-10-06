@@ -121,7 +121,7 @@ then alternate baseline/candidate warmups and samples (A/B/A/B).
 Each candidate gets its own paired baseline; completed pairs replay without provider calls.
 Up to the spec’s `parallelism` trials index and score concurrently. Only paired fresh warmups/samples
 wait for an exclusive campaign window; other trials continue quality. Window waits stay outside timing. Busy trial slots return `leased` before paid dispatch; detached calls retain their bounded trial slots.
-Failed sample loops release the window; control outages retain its bounded fence until recovery or expiry.
+Failed sample loops release the window; control outages retain its bounded fence until expiry.
 Public `cost.latency_sample` records sample/warmup IDs and policy; `gates.latency.samples`
 rejects missing/mismatched evidence. Private samples remain internal; comparability is published.
 P95 includes local embedding/retrieval/reranking and successful provider round trips;

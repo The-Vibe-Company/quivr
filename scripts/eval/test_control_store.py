@@ -390,6 +390,12 @@ class Control(unittest.TestCase):
         leases = [(key, self.store.claim(self.name, key)['owner']) for key in ('provider-a', 'provider-b')]
         permits = [self.store.provider_slot(self.name, leases[i % 2]) for i in range(4)]
         self.assertIsNone(self.store.provider_slot(self.name, leases[1]))
+        # A slow streaming response can outlive a socket timeout. Advance the
+        # SQL permit age without sleeping: active work must retain admission
+        # for the entire bounded invocation, not just a 180-second guess.
+        with psycopg.connect(self.dsn) as db:
+            db.execute("UPDATE eval_control.leases SET expires_at=expires_at-interval '200 seconds' WHERE campaign=%s AND key LIKE 'provider-request/%%'", (self.name,))
+        self.assertIsNone(self.store.provider_slot(self.name, leases[1]), 'slow active responses still own every permit')
         throttled = permits.pop()
         error = urllib.error.HTTPError('https://example.com', 429, 'limited', {'Retry-After': '20'}, None)
         self.store.provider_feedback(self.name, throttled, error)

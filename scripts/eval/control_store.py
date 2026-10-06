@@ -166,10 +166,10 @@ class Store:
             raise LeaseLost('lease expired, completed or held by another worker')
 
     @retry_contention
-    def claim_slot(self, name, prefix, count, ttl, *, lease=None):
+    def claim_slot(self, name, prefix, count, ttl, *, lease=None, gate=None):
         """Admit one bounded slot under the campaign lock, fenced by its caller."""
         keys = lease_batch([prefix + (f'/{i}' if count > 1 else '') for i in range(count)], ttl)
-        with self.transaction() as db:
+        with contextlib.ExitStack() as admission_fence, self.transaction() as db:
             policy, stopped = self.lock(db, name)
             if self.terminal(db, name, policy, stopped):
                 raise LeaseLost('campaign stopped or ended')
@@ -180,6 +180,8 @@ class Store:
                 (name, keys)).fetchall()}
             for key in keys:
                 if key not in occupied:
+                    if gate is not None:
+                        admission_fence.enter_context(gate.commit())
                     owner = uuid.uuid4().hex
                     # Recheck parent ownership at the write after SQL round trips.
                     predicate, parameters = '', ()
@@ -211,11 +213,15 @@ class Store:
                 return None
             key = next('provider-request/' + str(i) for i in range(4) if 'provider-request/' + str(i) not in active)
             owner = uuid.uuid4().hex
-            # HTTP attempts are bounded at 120 seconds; crashed permits expire.
+            # Only the bounded Modal callers install ProviderAdmission. Socket
+            # timeouts do not bound a streaming response: retain the permit for
+            # a full invocation lifetime, beyond its hard container deadline.
+            ttl = policy.get('max_seconds', 3600) + policy.get('startup_seconds', 0)
+            lease_batch([], ttl)
             predicates = ['EXISTS (SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL)' for _ in (lease, *extra_leases)]
             parameters = tuple(value for fence in (lease, *extra_leases) for value in (name, *fence))
-            row = db.execute("INSERT INTO eval_control.leases(campaign,key,owner,expires_at) SELECT %s,%s,%s,clock_timestamp()+interval '180 seconds' WHERE " + ' AND '.join(predicates) +
-                ' ON CONFLICT (campaign,key) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at RETURNING key', (name, key, owner) + parameters).fetchone()
+            row = db.execute("INSERT INTO eval_control.leases(campaign,key,owner,expires_at) SELECT %s,%s,%s,clock_timestamp()+%s*interval '1 second' WHERE " + ' AND '.join(predicates) +
+                ' ON CONFLICT (campaign,key) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at RETURNING key', (name, key, owner, ttl) + parameters).fetchone()
             if not row:
                 raise LeaseLost('invocation or latency window expired before provider admission')
             return key, owner, state['generation']

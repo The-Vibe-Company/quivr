@@ -186,6 +186,7 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     indexing_phase = phase_start()
     LOG.info('indexing started')
     indexing_started = time.monotonic()
+    cache_wait_deadline = indexing_started + budget.ttl
     doc_ids, query_ids = sorted(data['corpus']), sorted(data['qrels'])
     docs = [(data['corpus'][d].get('title', '') + '\n' if data['corpus'][d].get('title') else '')
             + data['corpus'][d]['text'] for d in doc_ids]
@@ -278,9 +279,12 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                     break
                 except control_store.LeaseBusy:
                     cache_hits = hits_before
+                    remaining = cache_wait_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise RuntimeError('cache wait exceeded invocation bound; retry after fill expiry') from None
                     budget.store.renew(budget.campaign, *budget.lease, ttl=budget.ttl)
                     LOG.info('cache fill busy; waiting for committed evidence')
-                    time.sleep(1)
+                    time.sleep(min(1, remaining))
             if wave:
                 task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease, ttl=budget.ttl) for _ in wave]
                 def fill(item):
