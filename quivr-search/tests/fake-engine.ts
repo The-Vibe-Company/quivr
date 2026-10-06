@@ -9,8 +9,8 @@ import type { Page, Route } from "@playwright/test";
 // The facade's own counting, over this workspace's articles.
 import { feedStats, filterOf, sourceStats } from "../stats.mjs";
 import { topics } from "../topics.mjs";
-// The facade's reading of fields and facet values (THE-1171).
-import { COMMON_FIELDS, fieldValues, sampleValues } from "../explore.mjs";
+// The facade's reading of fields, and its facet counts (THE-1171, THE-1184).
+import { COMMON_FIELDS, countFacets, fieldValues } from "../explore.mjs";
 
 const minutes = (n: number) => new Date(Date.now() - n * 60000).toISOString();
 /** A local time `n` days ago, at that hour. */
@@ -325,18 +325,21 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     ...(corpora.includes("demo") ? ws.articles : []),
     ...(corpora.includes("wires") ? ws.wires : []),
   ];
-  // Like the engine: a predicate on a field a corpus lacks excludes it.
-  const explore = (url: URL) => {
-    const corpora = pickedOf(url);
-    const predicates: { field: string; any_of?: unknown[]; gte?: string; lte?: string }[] = JSON.parse(
-      url.searchParams.get("metadata") || "[]",
-    );
-    const fieldsOf = (id: string) => {
-      const c = ws.corpora.find((x) => x.corpus_id === id)!;
-      return [...c.common, ...c.own];
-    };
+  type Predicate = { field: string; any_of?: unknown[]; gte?: string; lte?: string };
+  const fieldsOf = (id: string) => {
+    const c = ws.corpora.find((x) => x.corpus_id === id)!;
+    return [...c.common, ...c.own];
+  };
+  // Like the engine: a predicate, or a counted field, on a field a corpus
+  // lacks excludes it.
+  const matching = (corpora: string[], predicates: Predicate[], counted: string[] = []) => {
     const excluded = corpora
-      .map((id) => ({ corpus_id: id, fields: predicates.map((p) => p.field).filter((f) => !fieldsOf(id).some((x) => x.name === f)) }))
+      .map((id) => ({
+        corpus_id: id,
+        fields: [...new Set([...predicates.map((p) => p.field), ...counted])].filter(
+          (f) => !fieldsOf(id).some((x) => x.name === f),
+        ),
+      }))
       .filter((e) => e.fields.length);
     const kept = inCorpora(corpora.filter((id) => !excluded.some((e) => e.corpus_id === id))).filter((a) =>
       predicates.every((p) => {
@@ -346,7 +349,42 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
         return values.some((v: unknown) => (!p.gte || String(v) >= p.gte) && (!p.lte || String(v) <= p.lte));
       }),
     );
-    return { corpora, kept: kept.sort((a, b) => arrived(b) - arrived(a)), excluded };
+    return { kept: kept.sort((a, b) => arrived(b) - arrived(a)), excluded };
+  };
+  const explore = (url: URL) => {
+    const corpora = pickedOf(url);
+    const predicates: Predicate[] = JSON.parse(url.searchParams.get("metadata") || "[]");
+    return { corpora, predicates, ...matching(corpora, predicates) };
+  };
+  // Like the engine's POST /v0/facets: documents per value under the
+  // predicates, each value once per document, a date by its UTC period.
+  const facetCounts = (body: {
+    corpus_ids: string[];
+    fields: { field: string; limit?: number; interval?: "day" | "month" | "year" }[];
+    filter?: { metadata?: Predicate[] };
+  }) => {
+    const { kept, excluded } = matching(body.corpus_ids, body.filter?.metadata || [], body.fields.map((f) => f.field));
+    const start = { year: "-01-01T00:00:00Z", month: "-01T00:00:00Z", day: "T00:00:00Z" };
+    const length = { year: 4, month: 7, day: 10 };
+    return {
+      items: body.fields.map(({ field, limit = 20, interval }) => {
+        const counts = new Map<unknown, number>();
+        for (const a of kept) {
+          const f = fieldsOf(a.corpus_id || "demo").find((x) => x.name === field)!;
+          const values = fieldValues(versionOf(a), f).map((v: unknown) =>
+            interval ? new Date(String(v)).toISOString().slice(0, length[interval]) + start[interval] : v,
+          );
+          for (const v of new Set(values)) counts.set(v, (counts.get(v) || 0) + 1);
+        }
+        const buckets = [...counts]
+          .map(([value, count]) => ({ value, count }))
+          .sort((a, b) => b.count - a.count || String(a.value).localeCompare(String(b.value)))
+          .slice(0, limit);
+        if (interval) buckets.sort((a, b) => String(a.value).localeCompare(String(b.value)));
+        return { field, buckets };
+      }),
+      ...(excluded.length ? { excluded_corpora: excluded } : {}),
+    };
   };
   const arrived = (a: Article) => Date.parse(a.received_at!);
   // What the facade's index holds: every article, dated, and what alerts caught.
@@ -395,13 +433,17 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       });
     }
     if (path === "/demo/explore/facets") {
-      const { corpora, kept } = explore(url);
+      const { corpora, predicates } = explore(url);
       const own = corpora.length === 1 ? ws.corpora.find((c) => c.corpus_id === corpora[0])!.own : [];
-      return json(route, {
-        fields: sampleValues(kept.map((a) => versionOf(a)), [...COMMON_FIELDS, ...own]),
-        counted: false,
-        sample: kept.length,
-      });
+      return json(
+        route,
+        await countFacets({
+          count: async (body: Parameters<typeof facetCounts>[0]) => facetCounts(body),
+          ids: corpora,
+          fields: [...COMMON_FIELDS, ...own],
+          predicates,
+        }),
+      );
     }
     const explored = path.match(/^\/demo\/explore\/records\/([\w-]+)$/);
     if (explored) {

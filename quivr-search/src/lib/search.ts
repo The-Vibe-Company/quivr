@@ -31,6 +31,7 @@ export async function request<T>(
   body?: unknown,
   signal?: AbortSignal,
   method: "GET" | "POST" | "PUT" = body === undefined ? "GET" : "POST",
+  timeout = 20000,
 ): Promise<T> {
   const started = method === "GET" ? early.get(path) : undefined;
   early.delete(path);
@@ -45,8 +46,8 @@ export async function request<T>(
         headers: { "Content-Type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(20000)])
-          : AbortSignal.timeout(20000),
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+          : AbortSignal.timeout(timeout),
       }).catch((error) => {
         if (signal?.aborted) throw error;
         throw new APIError(

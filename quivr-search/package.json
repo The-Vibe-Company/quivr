@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "start": "node server.mjs",
-    "test": "node --test tests/server.test.mjs tests/perf-check.test.mjs tests/stats.test.mjs tests/feeds.test.mjs tests/alerts.test.mjs tests/admin.test.mjs tests/admin-plugins.test.mjs && playwright test",
+    "test": "node --test tests/server.test.mjs tests/perf-check.test.mjs tests/stats.test.mjs tests/feeds.test.mjs tests/alerts.test.mjs tests/admin.test.mjs tests/admin-plugins.test.mjs tests/explore.test.mjs && playwright test",
     "perf": "node perf/measure.mjs"
   },
   "dependencies": {
