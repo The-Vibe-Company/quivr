@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate
+.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -92,6 +92,9 @@ image-context:
 # Fails when a migration added here sorts before main's latest; see scripts/migrations.py.
 migrations:
 	python3 scripts/migrations.py check
+# Run the previous merge-base binary against the expanded schema (Linux x86_64).
+migration-compatibility:
+	GO=$(GO) python3 scripts/migration_compatibility.py $(args)
 # New migration named by the current UTC time: make migration name=<slug>
 migration:
 	python3 scripts/migrations.py new $(name)

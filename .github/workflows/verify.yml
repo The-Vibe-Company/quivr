@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
-# Required check: `verify`. It passes only when `check`, `adapter-postgres`,
-# `vulnerabilities` and every verification part pass.
+# Required check: `verify`. It passes only when `check`, `adapter-postgres` and every
+# verification part pass, so branch protection needs no change when a part is added.
 jobs:
   # Isolated groups preserve make check while returning the complete quick result sooner.
   check-group:
@@ -348,6 +348,40 @@ jobs:
       # Failed tests with their error, slowest tests and step timings on the run page (THE-755).
       - if: always()
         run: python3 scripts/ci_summary.py "${{ steps.verification-artifact.outputs.artifact-url }}"
+  # Schema rollback proof, independent of release/image publication (THE-1051).
+  migration-compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.12'
+      - run: pip install -r contracts/http/v0/checks/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .scratch/e5-model
+            .scratch/tokenizer
+          key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'plugins/core-ingest/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia*
+      - run: make migration-compatibility args='--base ${{ github.event.pull_request.base.sha || github.event.before }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: migration-compatibility
+          include-hidden-files: true
+          path: |
+            .scratch/quivr-compatibility-*/report.json
+            .scratch/quivr-compatibility-*/*.log
+          if-no-files-found: warn
   vulnerabilities:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -368,12 +402,12 @@ jobs:
   # The one check to require: green only when every job above is green.
   verify:
     if: always()
-    needs: [check, adapter-postgres, part, vulnerabilities]
+    needs: [check, adapter-postgres, part, migration-compatibility, vulnerabilities]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
         run: |
-          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, vulnerabilities: ${{ needs.vulnerabilities.result }}"
+          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, migration-compatibility: ${{ needs.migration-compatibility.result }}, vulnerabilities: ${{ needs.vulnerabilities.result }}"
           exit 1
-      - run: echo "check, adapter-postgres, vulnerabilities and every verification part passed"
+      - run: echo "check, adapter-postgres, migration-compatibility, vulnerabilities and every verification part passed"

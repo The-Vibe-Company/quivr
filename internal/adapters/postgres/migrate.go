@@ -10,17 +10,31 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Migrate applies every embedded migration that is not yet recorded.
+// Migrate applies pending expand migrations, leaving contracts for the operator.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return MigrateFS(ctx, pool, migrations.Files)
 }
 
-// MigrateFS applies, in one transaction and in lexical filename order, every
+// MigrateFS applies, in one transaction and in lexical filename order, every expand
 // migration of fsys that is not yet recorded in schema_migrations. Any missing
 // file is applied, not only files after the latest applied one, so a database
 // at an older head migrates forward without manual steps.
 func MigrateFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
-	names, err := migrations.NamesIn(fsys)
+	return migrateFS(ctx, pool, fsys, false)
+}
+
+// MigrateContracts explicitly applies pending expand and contract migrations.
+func MigrateContracts(ctx context.Context, pool *pgxpool.Pool) error {
+	return MigrateContractsFS(ctx, pool, migrations.Files)
+}
+
+// MigrateContractsFS is the explicit operator path for a supplied migration set.
+func MigrateContractsFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
+	return migrateFS(ctx, pool, fsys, true)
+}
+
+func migrateFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, includeContract bool) error {
+	names, err := migrations.Plan(fsys, includeContract)
 	if err != nil {
 		return err
 	}
@@ -29,6 +43,11 @@ func MigrateFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	// Bound locks and SQL work while older processes are serving. Both settings
+	// are transaction-local and disappear on commit or rollback.
+	if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout = '2s'; SET LOCAL statement_timeout = '5s'"); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(642001)"); err != nil {
 		return err
 	}
@@ -61,7 +80,7 @@ func MigrateFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 // some, the latest recorded migration sorting after every file of fsys ("" if
 // none).
 func schemaState(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) (pending []string, newer string, err error) {
-	names, err := migrations.NamesIn(fsys)
+	names, err := migrations.Plan(fsys, false)
 	if err != nil {
 		return nil, "", err
 	}
@@ -115,7 +134,7 @@ var ErrMigrationsPending = errors.New("migrations pending")
 // without that migration, so waiting for the api's migrate would not help.
 var ErrSchemaNewer = errors.New("schema newer than this binary")
 
-// SchemaReady fails unless every embedded migration has been applied. It is
+// SchemaReady fails unless every embedded expand migration has been applied. It is
 // derived from the embedded set, so adding a migration edits no other file.
 // A schema that only misses migrations wraps ErrMigrationsPending, one newer
 // than the binary ErrSchemaNewer. Migrations recorded beyond the embedded set
