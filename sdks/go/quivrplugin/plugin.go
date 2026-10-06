@@ -488,11 +488,25 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 	if page == nil {
 		return nil, "Fetch returned no page and no error"
 	}
+	for _, item := range page.Items {
+		if item.Content != nil && item.Content.Kind == "manifest" && len(item.Content.Parts) == 0 {
+			if len(item.Attachments) == 0 {
+				return nil, "a connector Manifest needs at least one Part or attachment"
+			}
+			at := item.Attachments[0]
+			if len(item.Attachments) != 1 || len(item.Content.Relations) != 0 || at.Key != "source" || at.Role != "source" || at.ParentKey != "" || len(at.Extensions) != 0 {
+				return nil, "attachment-only input requires exactly one attachment with key and role source, no parent or Part extensions, and no relations"
+			}
+			if !resolveAPIFeatures(p.m.pluginAPI).speaks("connector_attachment_only") {
+				return nil, "attachment-only Manifests require Plugin API " + FeatureSince["connector_attachment_only"]
+			}
+		}
+	}
 	checkpoint, err := json.Marshal(page.Checkpoint)
 	if err != nil {
 		return nil, "the checkpoint is not JSON-encodable: " + err.Error()
 	}
-	out := pageJSON{Items: page.Items, Checkpoint: checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice, Push: page.Push}
+	out := pageJSON{SubmissionConcurrency: page.SubmissionConcurrency, Items: page.Items, Checkpoint: checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice, Push: page.Push}
 	if out.Items == nil {
 		out.Items = []Item{}
 	}
@@ -505,6 +519,8 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 	body := buf.Bytes()
 	diagnostics, _ := json.Marshal(page.Diagnostics)
 	switch {
+	case page.SubmissionConcurrency != 0 && !resolveAPIFeatures(p.m.pluginAPI).speaks("connector_submission_concurrency"):
+		return nil, "submission_concurrency requires Plugin API " + FeatureSince["connector_submission_concurrency"]
 	case p.m.Connector.Attachments == nil && hasAttachments(page.Items):
 		return nil, "items carry attachments; declare contributions.connector.attachments in the manifest (Plugin API 0.4) and implement AttachmentSource"
 	case len(page.Items) > p.m.maxItems:

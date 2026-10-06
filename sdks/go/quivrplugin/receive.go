@@ -290,6 +290,9 @@ func (p *Plugin) encodeDelivery(d *Delivery) ([]byte, string) {
 		return nil, fmt.Sprintf("the answer body is %d bytes; the source is answered at most 64 KiB", len(d.Body))
 	}
 	for _, item := range d.Items {
+		if item.Content != nil && item.Content.Kind == "manifest" && len(item.Content.Parts) == 0 {
+			return nil, fmt.Sprintf("item %q of a delivery has no Manifest Parts", item.RecordKey)
+		}
 		if len(item.Attachments) > 0 {
 			return nil, fmt.Sprintf("item %q of a delivery carries attachments; a pull run returns them", item.RecordKey)
 		}

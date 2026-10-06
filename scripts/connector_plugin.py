@@ -27,7 +27,7 @@ them. The Railway image pins the same plugins (deploy/railway/core-entrypoint.py
 ``CONNECTORS``).
 """
 import plugin_environment
-import json, os, pathlib, signal, subprocess, time, urllib.request
+import base64, hashlib, hmac, json, os, pathlib, signal, subprocess, time, urllib.request
 
 import ports
 from prepare_tokenizer import prepare as prepare_tokenizer
@@ -52,6 +52,8 @@ FIRST_PARTY = [
     # Microsoft 365 mail, pinned to the local fake Graph (tests/fakes/cmd/graph), never to Microsoft.
     {'id': 'm365-mail', 'configuration': lambda stack: {'login_endpoint': f"http://127.0.0.1:{stack.state['graph_port']}",
                                                          'graph_endpoint': f"http://127.0.0.1:{stack.state['graph_port']}/v1.0"}},
+    # Immutable archives in an S3-compatible source bucket.
+    {'id': 'object-storage-archive', 'signing_id': 'connector.object_storage_archive', 'configuration': lambda stack: {}},
     # Token windows and E5 embeddings through the stack's TEI and the pinned tokenizer. The api and
     # the worker refuse to start without an ingestion plugin; scripts/ingestion_plugin.py swaps it.
     {'id': 'core-ingest', 'configuration': lambda stack: {'tei_url': stack.state['tei_url'], 'tokenizer': prepare_tokenizer()}},
@@ -63,6 +65,21 @@ FIRST_PARTY = [
 # The first-party plugins without which the api and worker refuse to start: the engine segments,
 # embeds and ranks nothing itself. Measurement stacks (make measure, make eval) pin only these.
 CORE = ['core-ingest', 'core-retrieve']
+
+
+def signing_ring(stack, row):
+    secret = hmac.new(stack.state['cursor_key'].encode(),
+                      ('quivr-local-plugin:' + row['signing_id']).encode(), hashlib.sha256).digest()
+    return {'active': 'local', 'keys': [{'id': 'local',
+            'secret': base64.urlsafe_b64encode(secret).decode().rstrip('=')}]}
+
+
+def engine_environment(stack, inherited=None):
+    keys = json.loads((inherited or {}).get('QUIVR_ENGINE_PLUGIN_KEYS') or os.environ.get('QUIVR_ENGINE_PLUGIN_KEYS', '{}'))
+    for row in first_party(stack):
+        if row.get('signing_id'):
+            keys[row['signing_id']] = signing_ring(stack, row)
+    return {'QUIVR_ENGINE_PLUGIN_KEYS': json.dumps(keys)}
 
 
 def variable(row):
@@ -139,6 +156,8 @@ def start_first_party(stack, only=None):
         subprocess.run([GO, 'build', '-o', str(binary), '.'], cwd=directory, check=True)
         port = first_party_port(stack, row)
         env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
+        if row.get('signing_id'):
+            env['QUIVR_PLUGIN_SIGNING_KEYS'] = json.dumps(signing_ring(stack, row))
         with log.open('a') as out:
             p = subprocess.Popen([str(binary)], cwd=directory, env=env, stdout=out, stderr=out, start_new_session=True)
         stack.state[f"{row['id']}_plugin_pid"] = p.pid

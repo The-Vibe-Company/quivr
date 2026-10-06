@@ -41,6 +41,7 @@ CONNECTORS = [
     {'id': 'x-list', 'port': 9930, 'push': True},
     # Microsoft 365 mail on the public cloud endpoints (the plugin's defaults).
     {'id': 'm365-mail', 'port': 9940},
+    {'id': 'object-storage-archive', 'port': 9990, 'signing_id': 'connector.object_storage_archive'},
     # Token windows and E5 embeddings through the deployment's TEI (plugins/core-ingest).
     {'id': 'core-ingest', 'port': 9950, 'api': True,
      'configuration': lambda env: {'tei_url': env['TEI_URL'], 'tokenizer': TOKENIZER}},
@@ -202,6 +203,23 @@ def build_config(env):
     return config
 
 
+def engine_signing_environment(env):
+    try:
+        keys = json.loads(env.get('QUIVR_ENGINE_PLUGIN_KEYS') or '{}')
+        if not isinstance(keys, dict):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ValueError('Invalid engine plugin signing configuration') from None
+    for connector in runtime_connectors(env):
+        plugin_id = connector.get('signing_id')
+        if plugin_id and plugin_id not in keys:
+            secret = hmac.new(env['QUIVR_CURSOR_KEY'].encode(),
+                              ('quivr-packaged-plugin:' + plugin_id).encode(), hashlib.sha256).digest()
+            keys[plugin_id] = {'active': 'packaged', 'keys': [{'id': 'packaged',
+                'secret': base64.urlsafe_b64encode(secret).decode().rstrip('=')}]}
+    return {'QUIVR_ENGINE_PLUGIN_KEYS': json.dumps(keys)}
+
+
 def sidecar_commands(env, role='worker'):
     """(name, argv, cwd, env) of each plugin process of a role: the worker runs every
     plugin but the retrieval plugin, the API only the connector plugins it relays push
@@ -222,6 +240,9 @@ def sidecar_commands(env, role='worker'):
         child = {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
                  'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(connector['port']),
                  'QUIVR_PLUGIN_MANIFEST': connector.get('manifest', str(directory / 'quivr-plugin.yaml'))}
+        if connector.get('signing_id'):
+            rings = json.loads(engine_signing_environment(env)['QUIVR_ENGINE_PLUGIN_KEYS'])
+            child['QUIVR_PLUGIN_SIGNING_KEYS'] = json.dumps(rings[connector['signing_id']])
         child.update({name: env[name] for name in connector.get('secrets', []) if env.get(name, '').strip()})
         if 'module' in connector:
             child['PYTHONUNBUFFERED'] = '1'
@@ -298,7 +319,8 @@ def main():
     # Plugin-only credentials belong to declared sidecar environments, not the engine.
     plugin_secrets = {name for plugin in PLUGINS + runtime_connectors(os.environ) + [HOSTED_EMBED]
                       for name in plugin.get('secrets', [])}
-    core_env = {name: value for name, value in os.environ.items() if name not in plugin_secrets}
+    core_env = {name: value for name, value in os.environ.items() if name not in plugin_secrets and name != 'QUIVR_PLUGIN_SIGNING_KEYS'}
+    core_env.update(engine_signing_environment(os.environ))
     # Only the API applies startup migrations; failures abort before serving.
     if mode == 'api':
         subprocess.run(['quivr', 'migrate'], check=True, env=core_env)

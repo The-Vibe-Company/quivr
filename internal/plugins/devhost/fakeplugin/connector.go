@@ -144,7 +144,14 @@ func connectorRoutes(mux *http.ServeMux, mode string, m *plugins.Manifest, write
 		if mode == "connector-stalled-checkpoint" {
 			next = map[string]any{"offset": offset}
 		}
-		write(w, 200, map[string]any{"items": items, "checkpoint": next, "more": end < len(config.Items), "reads": len(items)})
+		answer := map[string]any{"items": items, "checkpoint": next, "more": end < len(config.Items), "reads": len(items)}
+		if mode == "connector-unsupported-concurrency" {
+			answer["submission_concurrency"] = 2
+		}
+		if mode == "connector-invalid-concurrency" {
+			answer["submission_concurrency"] = 33
+		}
+		write(w, 200, answer)
 	})
 	mux.HandleFunc("POST /v0/contributions/connector/receive", func(w http.ResponseWriter, r *http.Request) {
 		req, ok := read(w, r, "connector-receive-request.schema.json")

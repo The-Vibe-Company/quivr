@@ -1,0 +1,33 @@
+{
+  "items": [
+    {
+      "record_key": "archive/member.xml",
+      "revision": "sha256:member-1",
+      "content": {
+        "kind": "manifest",
+        "relations": [
+          {
+            "type": "derived_from",
+            "target": {
+              "record_key": "related",
+              "corpus_id": "corpus_a",
+              "namespace": "archive"
+            }
+          }
+        ]
+      },
+      "attachments": [
+        {
+          "key": "source",
+          "role": "source",
+          "media_type": "application/xml",
+          "ref": "member:1"
+        }
+      ]
+    }
+  ],
+  "checkpoint": {
+    "member": 1
+  },
+  "more": false
+}

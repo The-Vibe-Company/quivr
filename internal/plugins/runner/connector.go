@@ -96,7 +96,7 @@ func (r *run) callFetch(ctx context.Context, body []byte) (*devhost.Result, *plu
 	}
 	_ = json.Unmarshal(body, &request)
 	result, err := devhost.InvokeConnectorFetch(callCtx, r.baseURL, body, plugins.ConnectorMaxResponseBytes(r.m), func(b []byte) []plugins.Issue {
-		return plugins.CheckConnectorOutput(ctx, b, request.Checkpoint, r.m)
+		return plugins.CheckConnectorOutput(ctx, b, request.Checkpoint, r.m, r.pluginAPI)
 	})
 	return r.connectorResult(ctx, callCtx, result, err)
 }

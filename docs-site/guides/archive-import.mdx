@@ -1,0 +1,148 @@
+---
+title: "Import archives"
+description: "Import immutable tar.gz and ZIP members from object storage, with checkpoints and source revision ordering."
+---
+
+Use the `object_storage_archive` connector to import individual members of
+`.tar.gz` and `.zip` objects under an S3-compatible prefix. Each matching member
+becomes a raw source Blob, the immutable bytes Quivr normalizes into a document.
+
+## Before you start
+
+You need a running Quivr with the `connector.object_storage_archive` plugin
+pinned. External processes require [engine call signing](/reference/plugin-protocol#signed-engine-requests);
+local and packaged launchers provision the signing ring automatically. Local stacks and the packaged worker include it. For an external
+plugin process, [pin its manifest and endpoint](/run-quivr/pin).
+
+Create a [Corpus](/guides/add-content), the collection that will hold the
+imported documents. Your API key needs `connectors:write`, `connectors:read`
+and access to that Corpus. A storage reader needs `ListBucket` on the prefix
+and `GetObject` on its archives. Temporary credentials also need their session
+token. A normalizer must support the configured media type: for XML, pin a
+normalizer with the matching XML route before importing.
+
+Keep the source objects immutable. Archives are visited in lexicographic
+object-key order. New keys must sort after the last completed archive. Use a
+separate Connector Instance, a scheduled source reader, to import earlier
+keys or a different historical range.
+
+## Choose the member identity
+
+A Record Key groups revisions of the same document. A Source Position is its
+non-negative numeric revision number; Quivr keeps the highest position current,
+even if an older version arrives later.
+
+By default, the key is the URL-decoded basename and the position is the
+matching-member ordinal across archives. **The ordinal default is correct only
+when archive order equals revision order.** A basename that includes a revision
+suffix also needs a key capture to group those revisions into one document.
+
+For example, these synthetic paths carry version 12 before version 3:
+
+```text
+2026/01/01/10/urn%3Aexample%3AITEM7-12.xml
+2026/01/02/11/urn%3Aexample%3AITEM7-3.xml
+```
+
+Use `record_key_pattern: "urn:example:([A-Z0-9]+)-"` and
+`source_position_pattern: "-([0-9]+)\\.xml$"`. The connector URL-decodes the
+path first, so the first capture sees `urn:example:ITEM7-12.xml` and yields
+`ITEM7`. The second yields `12` or `3`. Both revisions remain available;
+revision 12 stays current after importing the later folder.
+
+Each pattern is a Go regular expression with exactly one capture group.
+Every matched member must produce a nonempty key and a position containing
+only decimal digits. A malformed URL escape or invalid capture stops the page
+before it can advance its checkpoint. Instance configuration is fixed: disable
+the failed instance and create one with a corrected mapping or member filter.
+Keep the same Corpus and `source_namespace` when the Record Key mapping remains
+the same; a new instance rereads the prefix. Changing keys creates different
+Records, so withdraw any previously accepted incorrect identities separately.
+Revisions of one Record are submitted on separate pages.
+
+## Configure and start the source
+
+Use the [connector creation and credential workflow](/guides/connectors#create-an-instance)
+with kind `object_storage_archive`. Put these settings in its `config`.
+This is an example for your own storage; replace the bucket, prefix and region:
+
+```json
+{
+  "bucket": "example-archives",
+  "prefix": "inbox/",
+  "region": "us-east-1",
+  "archive_patterns": ["**/*.tar.gz", "**/*.zip"],
+  "member_pattern": "**/*.xml",
+  "media_type": "application/xml",
+  "record_key_pattern": "urn:example:([A-Z0-9]+)-",
+  "source_position_pattern": "-([0-9]+)\\.xml$",
+  "batch_size": 100,
+  "concurrency": 8
+}
+```
+
+Set `endpoint` to an HTTP or HTTPS origin for an S3-compatible store.
+Omit it for AWS S3. Globs match the raw object key or member path; `*` stays
+within one directory, `**` spans directories, and `?` matches one character.
+Archive patterns default to both supported archive types; the member pattern
+defaults to `**`. Directories and links are excluded.
+
+Deposit `access_key_id`, `secret_access_key` and, when needed, `session_token`
+in the credential's `secret` object. These fields are write-only and never
+returned by the API. The plugin uses deposited credentials exclusively.
+Keep these values out of source control and shell history.
+
+`batch_size` accepts 1–1000 matching members, default 100. The page cache also
+caps the batch at 64 MiB. `concurrency` accepts 1–32 distinct Record submissions,
+default 1. Each member must contain 1 byte to 25 MiB of uncompressed data.
+An empty or larger matched member stops the page with a source error.
+
+## Read progress and resume
+
+Read the Connector Instance's health as shown in [Check collection](/guides/connectors#watch-its-health).
+Its diagnostics report:
+
+| Field | Meaning |
+| --- | --- |
+| `archive`, `member_offset` | Current object key and next archive entry |
+| `members_done` | Matching members processed across the prefix |
+| `archive_members_done` | Matching members processed in the current archive |
+| `members_left` | Remaining matching members in the ZIP archive, or across the prefix when `members_total` is supplied; unknown (`null`) for an unfinished tar.gz without a configured total |
+| `compressed_bytes_read`, `object_size_bytes` | Compressed source bytes read and current object size |
+| `progress_percent` | Compressed byte reads divided by object size, capped at 100; buffered or repeated ranged reads can reach 100 before every member is submitted |
+| `archive_complete` | All members of the current archive were traversed |
+
+For a known total across the prefix, set optional `members_total`. Tar archives
+are never scanned once just to count members. ZIP's directory supplies its
+matching-member count. A percentage measures source reading, while
+`members_done` measures committed ingestion progress, including permanent
+rejections reported as `item_rejected` in health. Accepted members can still
+be waiting for normalization or search publication; acceptance does not mean
+searchability.
+
+Use a [long schedule and a manual run](/guides/connectors#change-the-schedule-or-check-now)
+to leave collection idle between runs and continue later. A longer interval
+applies after the already scheduled run; it does not interrupt an active run.
+Disabling an instance is permanent. The checkpoint records the archive ETag and member
+offset. After a worker or plugin restart, the connector scans the compressed
+tar stream to that offset and continues. ZIP uses ranged member reads.
+A small page cache accelerates upload grants; recovery also works when that
+cache is gone. Repeated submissions converge on idempotent receipts.
+
+Replacing an in-progress source archive reports `archive_changed`; deleting
+it reports `archive_missing`. Restore the original object with its original ETag
+and request another run, or disable it
+and create another for the replacement immutable source. Identical bytes alone
+may produce a different ETag. Credential failures show as access errors.
+Invalid identity captures and malformed archives show as source errors;
+retryable storage failures retain the last committed checkpoint.
+
+## Measure throughput
+
+On a running local demo or development stack, run `make measure-archive`
+with its stack name, as described in the plugin's
+[package README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/object-storage-archive/README.md).
+The measurement seeds synthetic source objects and reports accepted members
+per second against the 50 members/second acquisition target. It also reports
+searchable unique Records per second and any processing delay after acceptance.
+It is outside CI.

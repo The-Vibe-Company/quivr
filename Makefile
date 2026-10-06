@@ -1,5 +1,5 @@
 GO ?= go
-.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility
+.PHONY: dev env check verify down reset migrate adapter-postgres test test-go test-python test-eval test-sdk-python test-sdk-go contracts generate demo demo-reset verify-demo demo-perf measure measure-backfill measure-upgrade measure-archive eval load docs start-pages docs-site docs-site-check docs-preview denylist migrations migration migration-restamp image-context plugin-boundary conformance conformance-validate migration-compatibility
 
 dev down reset migrate:
 	GO=$(GO) python3 scripts/local.py $@
@@ -51,6 +51,9 @@ measure-backfill:
 # outside api restarts (THE-786); not part of verify.
 measure-upgrade:
 	GO=$(GO) python3 scripts/measure_upgrade.py
+# Synthetic object-storage archive throughput on an existing local demo/dev stack; outside CI.
+measure-archive:
+	GO=$(GO) python3 scripts/measure_archive.py $(args)
 # Search quality on public evaluation sets (THE-775, docs/agents/evaluation.md); not part of verify.
 # Needs scripts/eval/requirements.txt. make eval [args='--sets scifact --baseline <report.json>']
 eval:

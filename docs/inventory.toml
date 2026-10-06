@@ -104,6 +104,7 @@ excluded = [
 "plugins/core-retrieve/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party retrieval plugin: keyword, vector and hybrid search, and its parity with the engine" }
 "plugins/hosted-embed/README.md" = { audience = "plugin-author", kind = "concept", summary = "configure hosted text embeddings in OpenAI and Cohere formats" }
 "plugins/jev-rerank/README.md" = { audience = "plugin-author", kind = "concept", summary = "optional Jev reranking, bounded pair caching and hybrid fallback" }
+"plugins/object-storage-archive/README.md" = { audience = "plugin-author", kind = "concept", summary = "stream immutable object-storage archives through upload grants" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
 "plugins/push-source/README.md" = { audience = "plugin-author", kind = "guide", summary = "an offline instance-token push source and its certification" }
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }

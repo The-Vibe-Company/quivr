@@ -42,7 +42,9 @@ const (
 	CodeWrongErrorClass     = "wrong_error_class"
 	// CodeAttachmentsUnsupported: items carry attachments but the manifest
 	// declares no contributions.connector.attachments (Plugin API 0.4).
-	CodeAttachmentsUnsupported = "attachments_unsupported"
+	CodeAttachmentsUnsupported           = "attachments_unsupported"
+	CodeSubmissionConcurrencyUnsupported = "submission_concurrency_unsupported"
+	CodeAttachmentOnlyUnsupported        = "attachment_only_unsupported"
 	// CodeAttachmentTooLarge: an exact attachment size above the effective
 	// attachments.max_bytes.
 	CodeAttachmentTooLarge = "attachment_too_large"
@@ -123,18 +125,20 @@ type ConnectorAttachment struct {
 
 // ConnectorPage is a decoded valid fetch response.
 type ConnectorPage struct {
-	Items       []ConnectorItem `json:"items"`
-	Checkpoint  json.RawMessage `json:"checkpoint"`
-	More        bool            `json:"more"`
-	Reads       int64           `json:"reads,omitempty"`
-	Diagnostics json.RawMessage `json:"diagnostics,omitempty"`
-	Notice      string          `json:"notice,omitempty"`
-	NotDue      bool            `json:"not_due,omitempty"`
+	SubmissionConcurrency int             `json:"submission_concurrency,omitempty"`
+	Items                 []ConnectorItem `json:"items"`
+	Checkpoint            json.RawMessage `json:"checkpoint"`
+	More                  bool            `json:"more"`
+	Reads                 int64           `json:"reads,omitempty"`
+	Diagnostics           json.RawMessage `json:"diagnostics,omitempty"`
+	Notice                string          `json:"notice,omitempty"`
+	NotDue                bool            `json:"not_due,omitempty"`
 	// Push is a push kind's report on its push channel (Plugin API 0.5).
 	Push *ConnectorPushStatus `json:"push,omitempty"`
 }
 
-// CheckConnectorOutput judges a 200 fetch response exactly as the engine does
+// CheckConnectorOutput judges a 200 fetch response for the API the peer serves,
+// exactly as the engine does
 // before it accepts any item: the response bound, the response schema
 // (unknown fields are rejected), the declared max_items and
 // max_checkpoint_bytes, the diagnostics bound, not_due coherence against the request's checkpoint,
@@ -142,7 +146,7 @@ type ConnectorPage struct {
 // attachments only beside a Manifest, the engine's structural Manifest rules
 // with the attachments as Parts, no Blob Parts, and extensions only in
 // namespaces and schema versions the manifest declares.
-func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint json.RawMessage, m *Manifest) []Issue {
+func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint json.RawMessage, m *Manifest, api string) []Issue {
 	if limit := ConnectorMaxResponseBytes(m); len(raw) > limit {
 		return []Issue{{Code: CodeResponseTooLarge, Message: fmt.Sprintf("the response is %d bytes; the limit is %d (declared max_response_bytes, capped by the engine at %d)", len(raw), limit, EngineMaxResponseBytes)}}
 	}
@@ -154,6 +158,9 @@ func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint jso
 		return []Issue{{Code: CodeSchema, Message: err.Error()}}
 	}
 	var issues []Issue
+	if page.SubmissionConcurrency != 0 && !ResolveAPI(api).Speaks(FeatureConnectorSubmissionConcurrency) {
+		issues = append(issues, Issue{Code: CodeSubmissionConcurrencyUnsupported, Path: "/submission_concurrency", Message: "submission_concurrency requires Plugin API " + FeatureSince(FeatureConnectorSubmissionConcurrency)})
+	}
 	if limit := ConnectorMaxItems(m); len(page.Items) > limit {
 		issues = append(issues, Issue{Code: CodeTooManyItems, Path: "/items",
 			Message: fmt.Sprintf("%d items exceed the declared max_items %d; answer more: true and return the rest on the next page", len(page.Items), limit)})
@@ -169,6 +176,12 @@ func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint jso
 	if page.NotDue && (len(page.Items) > 0 || page.More || !SameJSON(page.Checkpoint, requestCheckpoint)) {
 		issues = append(issues, Issue{Code: CodeInvalidNotDue, Path: "/not_due",
 			Message: "not_due: true skips the run: answer no items, more: false and the request's checkpoint unchanged"})
+	}
+	for index, item := range page.Items {
+		var manifest content.Manifest
+		if len(item.Attachments) > 0 && json.Unmarshal(item.Content, &manifest) == nil && manifest.Kind == "manifest" && len(manifest.Parts) == 0 && !ResolveAPI(api).Speaks(FeatureConnectorAttachmentOnly) {
+			issues = append(issues, Issue{Code: CodeAttachmentOnlyUnsupported, Path: fmt.Sprintf("/items/%d/content/parts", index), Message: "attachment-only Manifests require Plugin API " + FeatureSince(FeatureConnectorAttachmentOnly)})
+		}
 	}
 	issues = append(issues, pushStatusIssues(page.Push, m)...)
 	return append(issues, checkItems(ctx, page.Items, m)...)
@@ -236,6 +249,12 @@ func checkConnectorItem(ctx context.Context, item ConnectorItem, validator *decl
 		var manifest content.Manifest
 		if err := json.Unmarshal(item.Content, &manifest); err != nil {
 			return &Issue{Code: CodeSchema, Path: "/content", Message: err.Error()}
+		}
+		if len(manifest.Parts) == 0 && len(item.Attachments) > 0 {
+			at := item.Attachments[0]
+			if len(item.Attachments) != 1 || len(manifest.Relations) != 0 || at.Key != "source" || at.Role != "source" || at.ParentKey != "" || len(at.Extensions) != 0 {
+				return &Issue{Code: CodeInvalidItem, Path: "/attachments", Message: "attachment-only input requires exactly one attachment with key and role source, no parent or Part extensions, and no relations"}
+			}
 		}
 		declared := len(manifest.Parts)
 		// The core appends each attachment as a Blob Part once its bytes are
