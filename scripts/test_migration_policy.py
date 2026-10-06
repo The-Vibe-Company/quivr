@@ -36,6 +36,9 @@ class PolicyTests(unittest.TestCase):
             ("CREATE TABLE items (LIKE old INCLUDING ALL);", False),
             ("CREATE TABLE IF NOT EXISTS items(id int); CREATE UNIQUE INDEX one ON items(id);", False),
             ("CREATE TEMP TABLE items(id int);", False),
+            ("CREATE SEQUENCE items_seq;", True),
+            ("CREATE TEMP SEQUENCE items_seq;", False),
+            ("CREATE UNLOGGED SEQUENCE items_seq;", False),
             ("CREATE UNLOGGED TABLE items(id int);", False),
             ("CREATE TABLE items(id int) ON COMMIT DROP;", False),
             ("CREATE TABLE items(id int); CREATE INDEX CONCURRENTLY by_id ON items(id);", False),
@@ -48,6 +51,7 @@ class PolicyTests(unittest.TestCase):
     def test_contract_requires_expansion_already_in_previous_version(self):
         old = '20261001T0000Z_expand.sql'
         self.assertEqual(p.policy_errors('-- quivr:contract\n-- quivr:expand '+old+'\nDROP TABLE items;', {old}), [])
+        self.assertEqual(p.policy_errors('-- quivr:contract\n-- quivr:expand '+old+'\nCREATE SEQUENCE items_seq;', {old}), [])
         self.assertEqual(p.policy_errors('-- quivr:contract\r\n-- quivr:expand '+old+'\r\nDROP TABLE items;', {old}), [])
         for ending in ['\v', '\f', '\u2028']:
             self.assertTrue(p.policy_errors('-- quivr:contract'+ending+'\n-- quivr:expand '+old+'\nDROP TABLE items;', {old}))
@@ -62,6 +66,8 @@ class PolicyTests(unittest.TestCase):
             '-- quivr:contract\n-- quivr:expand '+old+"\nALTER TABLE items ADD COLUMN x text DEFAULT set_config('lock_timeout','0',true);",
             '-- quivr:contract\n-- quivr:expand '+old+'\nDROP INDEX CONCURRENTLY by_id;',
             '-- quivr:contract\n-- quivr:expand '+old+'\nCREATE TEMP TABLE items(id int);',
+            '-- quivr:contract\n-- quivr:expand '+old+'\nCREATE TEMP SEQUENCE items_seq;',
+            '-- quivr:contract\n-- quivr:expand '+old+'\nCREATE UNLOGGED SEQUENCE items_seq;',
         ]:
             with self.subTest(sql=sql):
                 self.assertTrue(p.policy_errors(sql, {old}))
