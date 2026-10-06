@@ -125,6 +125,7 @@
                 "pages": [
                   "guides/connectors",
                   "guides/rss",
+                  "guides/archive-import",
                   "guides/microsoft-365",
                   "guides/x"
                 ]

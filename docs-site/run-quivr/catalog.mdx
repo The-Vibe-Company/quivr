@@ -18,6 +18,7 @@ These plugins live in the `plugins/` folder of the repository. They use the same
 | `rss` | `connector.rss` 1.0.0 | Connector | kind `rss`: RSS, Atom and JSON Feed |
 | `m365-mail` | `connector.m365_mail` 1.0.0 | Connector | kind `m365_mail`: a Microsoft 365 mailbox folder |
 | `x-list` | `connector.x_list` 1.1.0 | Connector | kind `x_list`: the posts of an X list |
+| `object-storage-archive` | `connector.object_storage_archive` 1.0.0 | Connector | kind `object_storage_archive`: resumable tar.gz and ZIP imports from an S3-compatible prefix |
 | `push-source` | `push-source` 0.1.0 | Connector | kind `events`: versioned text records received through an instance-token route |
 
 ## pdf-text
@@ -123,3 +124,7 @@ Polls the posts of one X list, turns edits into corrections, and withdraws posts
 ## push-source
 
 The offline Python sample accepts versioned text records at `POST records`, secured by a Quivr instance token. Its `events` kind maps each record into title and body Parts, preserving the sender's key and revision. It has no upstream credential or configuration, and its scheduled fetch only reports channel health. [Write a push source](/plugins/push-source) explains its route; [Receive and secure pushes](/run-quivr/receive-pushes) walks through access and tokens.
+
+## object-storage-archive
+
+Streams members of immutable tar.gz and ZIP objects into raw source Blobs through upload grants. Batches can submit distinct Record Keys concurrently; checkpoints advance after each accepted page. Identity captures preserve numeric source revision order even when folder order differs. See [Import archives](/guides/archive-import) for deposited credentials, configuration and progress.

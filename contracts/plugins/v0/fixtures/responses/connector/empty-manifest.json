@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "record_key": "member",
+      "content": {
+        "kind": "manifest"
+      }
+    }
+  ],
+  "checkpoint": null,
+  "more": false
+}

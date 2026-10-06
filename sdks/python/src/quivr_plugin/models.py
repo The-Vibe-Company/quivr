@@ -659,6 +659,15 @@ class ConnectorFetchRequest(Model):
 
 
 @dataclass(kw_only=True)
+class ConnectorManifestContent(Model):
+    "Connector Manifest content. Since Plugin API 0.15, text parts may be absent or empty for raw Blob input: exactly one attachment with key and role source, no parent_key or Part extensions, and no relations. The engine submits the verified Blob for normalization. With text parts, attachments supply ordinary binary Manifest Parts."
+
+    kind: Literal["manifest"] = "manifest"
+    parts: list[Part] | None = None
+    relations: list[RelationInput] | None = None
+
+
+@dataclass(kw_only=True)
 class ConnectorAttachment(Model):
     "A binary Part of the item. Since Plugin API 0.4, the core asks for the bytes later through describe_attachment and upload_attachment, only when the item is not already accepted; the manifest must declare contributions.connector.attachments."
 
@@ -679,7 +688,7 @@ class ConnectorItem(Model):
     record_key: str
     revision: str | None = None
     source_position: str | None = None
-    content: TextContent | ManifestContent | None = None
+    content: TextContent | ConnectorManifestContent | None = None
     extensions: dict[str, ExtensionEntry] | None = None
     withdraw: bool | None = None
     attachments: list[ConnectorAttachment] | None = None
@@ -707,6 +716,7 @@ class ConnectorFetchResponse(Model):
     notice: str | None = None
     not_due: bool | None = None
     push: PushStatus | None = None
+    submission_concurrency: int | None = None
 
 
 @dataclass(kw_only=True)
@@ -1283,6 +1293,7 @@ __all__ = [
     "ConnectorItem",
     "ConnectorKind",
     "ConnectorLimits",
+    "ConnectorManifestContent",
     "ConnectorOrigin",
     "ConnectorReceiveRequest",
     "ConnectorReceiveResponse",

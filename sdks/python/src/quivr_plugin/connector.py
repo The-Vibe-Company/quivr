@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from .api_versions import FEATURE_SINCE
 from .credential import Credential, CredentialLogger
 from .errors import ConfigurationError, PluginError
 from ._json import storage_encoded
@@ -249,6 +250,16 @@ def _manifest_problems(manifest: LoadedManifest, content: dict[str, Any], prefix
     """
     problems: list[str] = []
     parts = list(content.get("parts") or [])
+    if not parts and not attachments:
+        problems.append(f"{prefix}/parts: the Manifest needs at least one Part or attachment")
+    if not parts and attachments:
+        attachment = attachments[0]
+        if (len(attachments) != 1 or content.get("relations") or attachment.get("key") != "source"
+                or attachment.get("role") != "source" or attachment.get("parent_key")
+                or attachment.get("extensions")):
+            problems.append(f"{prefix}: attachment-only input requires exactly one attachment with key and role source, no parent or Part extensions, and no relations")
+    if not parts and attachments and tuple(map(int, manifest.plugin_api.split("."))) < tuple(map(int, FEATURE_SINCE["connector_attachment_only"].split("."))):
+        problems.append(f"{prefix}/parts: attachment-only Manifests require Plugin API " + FEATURE_SINCE["connector_attachment_only"])
     if len(parts) + len(attachments) > 256:
         problems.append(f"{prefix}/parts: the Manifest has more than 256 Parts")
 
@@ -425,6 +436,8 @@ def _response_problems(manifest: LoadedManifest, document: dict[str, Any], opera
     if operation == "upload_attachment":
         return problems
     if operation == "fetch":
+        if document.get("submission_concurrency") is not None and tuple(map(int, manifest.plugin_api.split("."))) < tuple(map(int, FEATURE_SINCE["connector_submission_concurrency"].split("."))):
+            problems.append("submission_concurrency requires Plugin API " + FEATURE_SINCE["connector_submission_concurrency"])
         items = document.get("items", [])
         if len(items) > manifest.connector_max_items:
             problems.append("the page exceeds max_items")
