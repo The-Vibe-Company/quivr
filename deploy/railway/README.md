@@ -86,7 +86,7 @@ their vectors attach at the rebuild, which re-embeds with the same model, so res
 
 Set `QUIVR_DEMO_HOSTED_EMBED=1`, `AZURE_FOUNDRY_ENDPOINT` (Foundry resource root)
 and the secret `AZURE_FOUNDRY_KEY` identically on api and worker. For existing Corpora,
-complete step 1 below before redeploying both.
+save the plan and restore it if needed before redeploying; finish step 1's checks afterward.
 The default ingestion is `hosted.embed`: Cohere-Embed-V5-Pro, 1024 dimensions, for every source format after normalization, including NewsML-G2 XML.
 PDFs still need `QUIVR_DEMO_PLUGINS=1` for `pdf-text`. Other switch values keep E5.
 The generated config has no E5 evaluation route, saving CPU after plan verification. Keep core.ingest and TEI reachable for historical generations and already-pinned work.
