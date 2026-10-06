@@ -125,7 +125,7 @@ curl -s "$QUIVR_API_URL/v0/admin/quarantine?corpus_id=$CORPUS_ID" -H "Authorizat
 
 | Answer | Cause | Fix |
 | --- | --- | --- |
-| `409 dry_run_required` | No dry run with this key and body | Send it with `"dry_run": true` first |
+| `409 dry_run_required` | No dry run recorded under this key and Corpus | Send it with `"dry_run": true` first |
 | `409 idempotency_conflict` | The key was used with another scope or restart stage | Use a new key |
 | `409 reprocess_in_progress` | Another reprocess of the Corpus has not finished | Wait for it, or cancel it |
 | `422 invalid_reprocess` | `quarantined_after` is not before `quarantined_before` | Fix the window |

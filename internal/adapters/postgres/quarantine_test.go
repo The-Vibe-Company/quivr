@@ -478,6 +478,21 @@ func TestNormalizationRestartLifecycle(t *testing.T) {
 	if done := w.run(op.ID); done.State != operations.StateCanceled || done.Counters["skipped_canceled"] != 1 {
 		t.Fatalf("canceled normalization restart %+v", done)
 	}
+	// An ordinary retry still ingests the published Manifest after cancellation.
+	if err := w.contents.Materialize(ctx, w.org, receipt.ID); err != nil {
+		t.Fatalf("resolved receipt needs no normalization outcome: %v", err)
+	}
+	w.baseline.refuse[original.ID] = reason
+	if done := w.reprocess("ordinary-after-cancel", quarantine.Filter{Code: reason.Code}); done.Counters["versions_quarantined"] != 1 || w.events("record.materialized", item.RecordID) != 1 {
+		t.Fatalf("ordinary retry republished instead of ingesting the existing Manifest: %+v", done)
+	}
+	if v := w.read(original.ID); v.Manifest.Parts[0].Content.Text != original.Manifest.Parts[0].Content.Text {
+		t.Fatalf("ordinary retry changed the published Manifest: %+v", v)
+	}
+	if _, found, err := w.store.Normalized(ctx, w.org, original.ID); err != nil || found {
+		t.Fatalf("ordinary ingestion retry invoked normalization: found=%v err=%v", found, err)
+	}
+	delete(w.baseline.refuse, original.ID)
 	rerun, err := w.store.AcceptRerun(ctx, w.org, op.ID, "rerun", []byte(`{"rerun":true}`))
 	if err != nil || rerun.Reprocess.FromStage != content.QuarantineNormalization {
 		t.Fatalf("rerun lost restart stage: %+v %v", rerun, err)

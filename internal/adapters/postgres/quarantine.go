@@ -366,7 +366,7 @@ func (s QuarantineStore) StartReprocessItem(ctx context.Context, org, id string)
 	if it.Stage == content.QuarantineNormalization {
 		// Do not invalidate a stored outcome that cannot be republished.
 		var republishable bool
-		if err = tx.QueryRow(ctx, `SELECT a.command->'content'->>'kind'='blob'
+		if err = tx.QueryRow(ctx, `SELECT coalesce(a.command->'content'->>'kind','')='blob'
  AND NOT EXISTS(SELECT 1 FROM segmentations WHERE organization=$1 AND version_id=$2)
  FROM accepted_revisions a JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.slot)=(a.organization,a.record_id,a.slot)
  WHERE rc.organization=$1 AND rc.id=$3`, org, it.VersionID, it.ReceiptID).Scan(&republishable); err != nil {
