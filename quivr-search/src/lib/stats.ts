@@ -2,6 +2,7 @@
 // (quivr-search/catalog.mjs), never over the feed's latest articles. While
 // the facade builds its index, `building` says the numbers are not whole yet.
 import { request } from "./search";
+import { scoped } from "./feed";
 import { dayOf, localInstant } from "./moments";
 
 const HOUR = 3600000;
@@ -37,8 +38,8 @@ export interface FeedStatsQuery {
   read_ids: string[];
 }
 
-export const fetchFeedStats = (query: FeedStatsQuery, signal?: AbortSignal) =>
-  request<FeedStats>("/demo/feed/stats", query, signal);
+export const fetchFeedStats = (query: FeedStatsQuery, scope: string, signal?: AbortSignal) =>
+  request<FeedStats>(scoped("/demo/feed/stats", scope), query, signal);
 
 export interface Topic {
   label: string;
@@ -47,13 +48,14 @@ export interface Topic {
 
 export const fetchTopics = (
   query: { after: string; before: string; sources: string[]; muted: string[]; alerts: string[] },
+  scope: string,
   signal?: AbortSignal,
 ) => {
   const params = new URLSearchParams({ after: query.after, before: query.before });
   for (const s of query.sources) params.append("source", s);
   for (const s of query.muted) params.append("muted", s);
   for (const a of query.alerts) params.append("alert", a);
-  return request<Progress & { items: Topic[] }>(`/demo/feed/topics?${params}`, undefined, signal);
+  return request<Progress & { items: Topic[] }>(scoped(`/demo/feed/topics?${params}`, scope), undefined, signal);
 };
 
 export interface SourceNumbers {

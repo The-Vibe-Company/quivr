@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.0-alpha.5](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.4...v2.0.0-alpha.5) (2026-10-06)
+
+
+### Features
+
+* **connectors:** import object-storage archives resumably ([#3782](https://github.com/The-Vibe-Company/quivr/issues/3782)) ([a77071a](https://github.com/The-Vibe-Company/quivr/commit/a77071a4254008b46af460d3a11b53177cd12188))
+* **demo:** explore each corpus with facets and span corpora in the feed ([#3787](https://github.com/The-Vibe-Company/quivr/issues/3787)) ([86216ab](https://github.com/The-Vibe-Company/quivr/commit/86216ab920e50251880017fa3f334e8b188db8cf))
+* **quivr-search:** move page actions into the top bar and smooth page switches ([#3751](https://github.com/The-Vibe-Company/quivr/issues/3751)) ([d176389](https://github.com/The-Vibe-Company/quivr/commit/d176389ea84048106d8eb9b5f0094fc976e18602))
+* **retrieval:** filter search and catalogs by document metadata ([#3780](https://github.com/The-Vibe-Company/quivr/issues/3780)) ([719f612](https://github.com/The-Vibe-Company/quivr/commit/719f612694b8e707460cb7f158059d92f8a7c8ff))
+
+
+### Bug Fixes
+
+* **newsml-g2:** emit filterable common metadata ([#3786](https://github.com/The-Vibe-Company/quivr/issues/3786)) ([c884053](https://github.com/The-Vibe-Company/quivr/commit/c8840530e962ea2161d6f5d020073b19d8324188))
+* **railway:** run the NewsML-G2 normalizer in the demo ([#3788](https://github.com/The-Vibe-Company/quivr/issues/3788)) ([1c4af0f](https://github.com/The-Vibe-Company/quivr/commit/1c4af0fa77a42150d1fe515ee539674628441a1c))
+
 ## [2.0.0-alpha.4](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.3...v2.0.0-alpha.4) (2026-10-06)
 
 

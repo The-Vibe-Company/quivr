@@ -4440,3 +4440,29 @@ button.caught-title:hover {
 .plug-spark .spark-idle {
   fill: transparent;
 }
+
+/* Several corpora in the feed (THE-1171): each row names its corpus, and a
+   filter that left corpora out says which. */
+.row-corpus {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--tint);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.exclusion-note {
+  margin: 12px 22px 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--warn-bg);
+  box-shadow: inset 3px 0 0 var(--warn-line);
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
