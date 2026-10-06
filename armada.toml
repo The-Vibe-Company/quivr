@@ -63,5 +63,32 @@ permissions = "full"
 # Known flaky failures: `armada ci why <pr> --rerun` reruns them once. Each needs its root-cause ticket.
 [[ci.known_failure]]
 check = "verify demo"
-pattern = "admin-health-live\\.spec\\.ts.*Reçu"
+pattern = "admin-health-live\\.spec\\.ts:16"
 ticket = "THE-1207"
+
+# Railway demo services. Railway only redeploys a service when a merge touches its
+# watch paths, so each target lists the same paths. The coordinator's shell sets
+# RAILWAY_LINK_DIR to a directory linked to the demo project.
+[[deploy.target]]
+name = "railway-api"
+branch = "main"
+live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && set -o pipefail && railway deployment list --service api --limit 20 --json | jq -er '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
+paths = ["go.mod", "go.sum", "cmd/**", "internal/**", "client/**", "migrations/**", "contracts/**", "scripts/prepare_tokenizer.py", "scripts/token_offsets.py", "third_party/tokenizer/**", "sdks/**", "plugins/**", "deploy/railway/core.Dockerfile", "deploy/railway/core-entrypoint.py"]
+timeout_minutes = 30
+pause_on_failure = true
+
+[[deploy.target]]
+name = "railway-worker"
+branch = "main"
+live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && set -o pipefail && railway deployment list --service worker --limit 20 --json | jq -er '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
+paths = ["go.mod", "go.sum", "cmd/**", "internal/**", "client/**", "migrations/**", "contracts/**", "scripts/prepare_tokenizer.py", "scripts/token_offsets.py", "third_party/tokenizer/**", "sdks/**", "plugins/**", "deploy/railway/core.Dockerfile", "deploy/railway/core-entrypoint.py"]
+timeout_minutes = 30
+pause_on_failure = true
+
+[[deploy.target]]
+name = "railway-web"
+branch = "main"
+live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && set -o pipefail && railway deployment list --service web --limit 20 --json | jq -er '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
+paths = ["quivr-search/**", "deploy/railway/web.Dockerfile"]
+timeout_minutes = 20
+pause_on_failure = true

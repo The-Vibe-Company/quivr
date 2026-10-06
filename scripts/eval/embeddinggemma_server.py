@@ -15,9 +15,10 @@ LABELS = {'embeddinggemma-2': 768, 'embeddinggemma-2-256': 256}
 
 
 def load_model(hardware):
-    from huggingface_hub import ModelCard
+    from huggingface_hub import ModelCard, hf_hub_download
     # Fail closed before loading any weights. Never substitute the gated v1.
-    card = ModelCard.load(MODEL, revision=REVISION)
+    # ModelCard.load takes no revision: read the pinned README itself.
+    card = ModelCard.load(hf_hub_download(MODEL, 'README.md', revision=REVISION))
     if card.data.license not in ('apache-2.0', 'mit'):
         raise ValueError('model card licence must be Apache-2.0 or MIT')
     import torch
