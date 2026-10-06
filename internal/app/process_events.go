@@ -6,7 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 )
 
 type processEvent struct {
@@ -28,7 +31,10 @@ type processEvents struct {
 
 func newProcessEvents(logger *slog.Logger, summary slog.Attr) *processEvents {
 	e := &processEvents{queue: make(chan processEvent, 4), done: make(chan struct{})}
-	e.emit("process starting", "quivr.start", summary)
+	e.emit("process starting", "quivr.start", summary,
+		slog.String("revision", buildinfo.Revision),
+		slog.String("api_version", string(transport.V0)),
+		slog.String("plugin_engine_version", plugins.EngineVersion))
 	go func() {
 		defer close(e.done)
 		for event := range e.queue {

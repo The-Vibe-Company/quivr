@@ -6,11 +6,16 @@ import (
 	"io"
 	"os"
 	"testing"
+
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 )
 
 // Startup failures occur before config loading, so the configured process
 // identity must already be present at this executable boundary.
 func TestBootstrapHonorsEnvironmentIdentityWithInvalidLevel(t *testing.T) {
+	previousVersion := buildinfo.Version
+	buildinfo.Version = "2.0.0-alpha.7"
+	t.Cleanup(func() { buildinfo.Version = previousVersion })
 	t.Setenv("QUIVR_INSTANCE", "replica-7")
 	t.Setenv("QUIVR_ENVIRONMENT", "staging")
 	t.Setenv("QUIVR_LOG_LEVEL", "invalid-credential-sentinel")
@@ -38,7 +43,7 @@ func TestBootstrapHonorsEnvironmentIdentityWithInvalidLevel(t *testing.T) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		t.Fatal(err)
 	}
-	if record["instance"] != "replica-7" || record["environment"] != "staging" {
+	if record["instance"] != "replica-7" || record["environment"] != "staging" || record["version"] != "2.0.0-alpha.7" {
 		t.Fatalf("bootstrap identity: %v", record)
 	}
 }

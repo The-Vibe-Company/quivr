@@ -2,6 +2,12 @@
 .scratch
 .agents
 .codex
+.context
+.conductor
+.claude
+plans
+**/__pycache__
+**/.venv
 node_modules
 **/node_modules
 **/dist

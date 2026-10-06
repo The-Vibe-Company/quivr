@@ -24,6 +24,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/changes"
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -216,7 +217,7 @@ func Run(command string) error {
 	if cfg.Telemetry.ResourceAttributes == nil {
 		cfg.Telemetry.ResourceAttributes = map[string]string{}
 	}
-	for key, value := range map[string]string{"service.name": "quivr." + command, "service.version": plugins.EngineVersion, "service.instance.id": cfg.Instance, "deployment.environment.name": cfg.Environment} {
+	for key, value := range map[string]string{"service.name": "quivr." + command, "service.version": buildinfo.Version, "service.instance.id": cfg.Instance, "deployment.environment.name": cfg.Environment} {
 		if _, ok := cfg.Telemetry.ResourceAttributes[key]; !ok && value != "" {
 			cfg.Telemetry.ResourceAttributes[key] = value
 		}
@@ -721,12 +722,12 @@ func Run(command string) error {
 			evaluationMetrics.Write(w)
 			recorder.WriteMetrics(w)
 		}
-		probes.Handle("GET /metrics", deliveryMetrics.Handler(deliveryStore.DeliveryBacklog))
+		probes.Handle("GET /metrics", buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)))
 		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators.Load().Served))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
-		probes.Handle("GET /metrics", apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics))
+		probes.Handle("GET /metrics", buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)))
 	}
 	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes), ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {

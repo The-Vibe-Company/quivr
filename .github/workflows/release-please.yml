@@ -1,0 +1,25 @@
+name: Release please
+on:
+  push:
+    branches: [main]
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # A PAT or GitHub App token triggers CI on the release PR and the
+      # published-release workflow. GITHUB_TOKEN suppresses those events.
+      - name: Require release automation credentials
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: test -n "$RELEASE_PLEASE_TOKEN" || { echo 'Configure the RELEASE_PLEASE_TOKEN repository secret'; exit 1; }
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

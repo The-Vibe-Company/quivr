@@ -21,6 +21,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 
 | Endpoint | Operation | Permissions |
 | --- | --- | --- |
+| [`GET /v0/version`](#get-v0version) | `getBuildVersion` |  |
 | [`POST /v0/records`](#post-v0records) | `ingestRecord` | `content:write` |
 | [`GET /v0/records`](#get-v0records) | `listRecords` | `content:read` |
 | [`GET /v0/records/count`](#get-v0recordscount) | `countRecords` | `content:read` |
@@ -111,6 +112,23 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/stats/top-queries`](#get-v0adminstatstop-queries) | `getTopQueries` | `observability:read` |
 | [`POST /v0/search`](#post-v0search) | `searchRecords` | `content:read`, `search:query` |
 | [`GET /v0/search/profiles`](#get-v0searchprofiles) | `listSearchProfiles` | `search:query` |
+
+### Version endpoints
+
+#### `GET /v0/version`
+
+Operation `getBuildVersion`.
+
+Read the running Quivr build
+
+Reports the distribution release, source revision and API and plugin engine compatibility versions. Any valid API key can read it; no database access is needed.
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`BuildVersion`](#buildversion) | The running build identity. |
+| `default` | `application/json` [`Error`](#error) | Structured error. 401 unauthenticated. |
 
 ### Records
 
@@ -1910,6 +1928,39 @@ Receiver endpoint, not a Quivr API route. Verify Standard Webhooks v1 HMAC-SHA25
 | `default` |  | Transport retry policy applies; do not create another Match. |
 
 ## Schemas
+
+### `BuildVersion`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `version` | string | yes | Distribution release version, or dev for an unversioned build. |
+| `revision` | string | yes | Full source commit, or unknown for an unversioned build. |
+| `api_version` | string | yes | One of `v0`. |
+| `plugin_engine_version` | string | yes | Engine compatibility version checked against plugin manifests, independent of the distribution release. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [version, revision, api_version, plugin_engine_version]
+properties:
+  version:
+    type: string
+    description: Distribution release version, or dev for an unversioned build.
+  revision:
+    type: string
+    description: Full source commit, or unknown for an unversioned build.
+  api_version:
+    type: string
+    enum: [v0]
+  plugin_engine_version:
+    type: string
+    description: Engine compatibility version checked against plugin manifests, independent of the distribution release.
+```
+
+</details>
 
 ### `AuditEvent`
 

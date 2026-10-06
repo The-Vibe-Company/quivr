@@ -2,6 +2,8 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/monitoring"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
@@ -40,6 +43,9 @@ func TestProcessSettingsRespectEnvironmentAndRejectInvalidDurations(t *testing.T
 // Owns real process stdout/file setup and safe startup diagnostics, beyond the
 // logger's generic redaction tests: configuration supplies the secret inventory.
 func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
+	previousVersion, previousRevision := buildinfo.Version, buildinfo.Revision
+	buildinfo.Version, buildinfo.Revision = "2.0.0-alpha.7", "0123456789abcdef0123456789abcdef01234567"
+	t.Cleanup(func() { buildinfo.Version, buildinfo.Revision = previousVersion, previousRevision })
 	previousLogger, previousStdout := slog.Default(), os.Stdout
 	stdout, err := os.CreateTemp(t.TempDir(), "stdout")
 	if err != nil {
@@ -61,7 +67,8 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	slog.Info("process starting", "event", "quivr.start", cfg.processSummary(grace))
+	events := newProcessEvents(slog.Default(), cfg.processSummary(grace))
+	events.stop(context.Background(), false)
 	slog.Info("provider metadata", "detail", "sentinel-plugin-secret")
 	slog.Info("signer metadata", "detail", signingSecret)
 	LogFailure(errors.New("sentinel-db-secret sentinel-env-secret"))
@@ -77,6 +84,13 @@ func TestProcessLogsKeepConfigurationCredentialsOutOfBothSinks(t *testing.T) {
 	}
 	if !bytes.Equal(fileLog, stdoutLog) || len(fileLog) == 0 {
 		t.Fatal("stdout and opt-in file must contain identical JSON events")
+	}
+	var start map[string]any
+	if err := json.NewDecoder(bytes.NewReader(stdoutLog)).Decode(&start); err != nil {
+		t.Fatal(err)
+	}
+	if start["event"] != "quivr.start" || start["version"] != "2.0.0-alpha.7" || start["revision"] != "0123456789abcdef0123456789abcdef01234567" || start["api_version"] != "v0" || start["plugin_engine_version"] != "0.2.0" {
+		t.Fatalf("startup build identity: %v", start)
 	}
 	for _, secret := range []string{signingSecret, "sentinel-cursor-secret", "sentinel-credential-secret", "sentinel-db-secret", "sentinel-bearer-secret", "sentinel-env-secret", "sentinel-plugin-secret", "sentinel-access-secret", "sentinel-storage-secret"} {
 		if bytes.Contains(fileLog, []byte(secret)) {

@@ -31,6 +31,7 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCKERFILE = ROOT / 'deploy' / 'railway' / 'core.Dockerfile'
+ENGINE_DOCKERFILE = ROOT / 'deploy' / 'images' / 'quivr.Dockerfile'
 WEB_DOCKERFILE = ROOT / 'deploy' / 'railway' / 'web.Dockerfile'
 WEB_ENTRY = 'quivr-search/server.mjs'
 TEI_DOCKERFILE = ROOT / 'deploy' / 'railway' / 'tei.Dockerfile'
@@ -91,7 +92,7 @@ def context_sources(text):
     return sources
 
 
-def check(root, dockerfile, go):
+def check_engine(root, dockerfile, go):
     """Build ./cmd/quivr from only the build stage's copies; return the failure text or None."""
     for source in context_sources(dockerfile.read_text()):
         if not any(root.glob(source)):
@@ -107,7 +108,12 @@ def check(root, dockerfile, go):
             return (f'{dockerfile.name}: the image build stage cannot build ./cmd/quivr.\n'
                     f'{result.stderr.strip()}\n'
                     'Fix: COPY every top-level Go package the binary imports into the build stage.')
-    return check_connectors(root, dockerfile, go) or check_python_plugins(root, dockerfile)
+    return None
+
+
+def check(root, dockerfile, go):
+    return (check_engine(root, dockerfile, go) or check_connectors(root, dockerfile, go)
+            or check_python_plugins(root, dockerfile))
 
 
 def materialize(root, copies, context, dockerfile):
@@ -283,7 +289,8 @@ def main(argv):
     dockerfile = pathlib.Path(argv[1]).resolve() if len(argv) > 1 else DOCKERFILE
     failure = check(ROOT, dockerfile, os.environ.get('GO', 'go'))
     if not failure and len(argv) <= 1:
-        failure = check_web(ROOT, WEB_DOCKERFILE) or check_python(ROOT, TEI_DOCKERFILE, TEI_ENTRY)
+        failure = (check_engine(ROOT, ENGINE_DOCKERFILE, os.environ.get('GO', 'go'))
+                   or check_web(ROOT, WEB_DOCKERFILE) or check_python(ROOT, TEI_DOCKERFILE, TEI_ENTRY))
     if failure:
         print(failure, file=sys.stderr)
         return 1

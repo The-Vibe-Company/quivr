@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "133bbed3664595c7386a9cddffc305e271f581f2",
+  "release-type": "simple",
+  "versioning": "prerelease",
+  "prerelease": true,
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "packages": {
+    ".": {
+      "initial-version": "2.0.0-alpha.1",
+      "prerelease-type": "alpha"
+    }
+  }
+}
