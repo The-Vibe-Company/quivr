@@ -629,12 +629,6 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
         ],
       });
     if (path === "/demo/feeds/discover") {
-      if (/\/\/(10\.|127\.|192\.168\.)/.test(body.url))
-        return json(route, {
-          code: "demo_request_failed",
-          message: "Cette adresse pointe vers un réseau privé ou local : elle ne peut pas être collectée.",
-          retryable: false,
-        }, 422);
       const host = new URL(body.url).hostname;
       return json(route, {
         feeds: [{ url: `https://${host}/rss.xml`, title: `${host} — À la une` }],

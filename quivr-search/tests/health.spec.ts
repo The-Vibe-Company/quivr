@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   bottleneck,
-  pluginState,
+  pluginRows,
   stepRows,
   type Waiting,
 } from "../src/lib/health";
@@ -157,8 +157,11 @@ test("la phrase nomme l’étape ralentie, sinon une file qui dure, sinon la plu
 });
 
 test("un plugin est en panne, dégradé, rétabli ou au repos selon ses dernières minutes", () => {
-  const state = (at: (ago: number) => Partial<StatsPoint> | null) =>
-    pluginState(list([call(minutes(at))]), [call(minutes(at))]);
+  // The hour of calls the Plugins section reads, for one plugin.
+  const state = (at: (ago: number) => Partial<StatsPoint> | null) => {
+    const hour = list([call(minutes(at))]);
+    return pluginRows([], hour, hour)[0];
+  };
   const cases: [
     string,
     (ago: number) => Partial<StatsPoint> | null,

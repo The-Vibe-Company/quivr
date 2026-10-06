@@ -332,7 +332,7 @@ const calls = (n: number) =>
  * without a call, healthy otherwise. A plugin whose calls succeed again is
  * healthy at once, and says it recovered.
  */
-export function pluginState(
+function pluginState(
   hour: List<PluginCallStats> | null,
   series: PluginCallStats[],
 ): { state: PluginState; reason: string } {
