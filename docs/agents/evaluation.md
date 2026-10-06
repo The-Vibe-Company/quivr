@@ -119,7 +119,7 @@ Use `scripts/eval/direct_bakeoff.py` to compare dense embeddings without an engi
 with e5-small as the paired baseline. Long documents use the
 reference windows: 1,800 characters for e5 and 6,000 for hosted models, with 200-character overlap. A document's best piece wins. The local encoder can truncate at its token limit.
 
-Use Python 3.11+ and a virtual environment. The first run downloads a pinned `intfloat/multilingual-e5-small` revision.
+Use Python 3.12+ and a virtual environment. The first run downloads a pinned `intfloat/multilingual-e5-small` revision.
 Hosted runs need Azure AI Foundry serving the requested deployments, with its endpoint and key in environment
 variables `AZURE_FOUNDRY_ENDPOINT` and `AZURE_FOUNDRY_KEY`. Keep keys out of Git. Paid measurements run locally; this command refuses CI execution.
 

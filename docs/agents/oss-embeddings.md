@@ -1,7 +1,7 @@
 # Measure open-source embeddings
 
 Compare embedding models on public samples with `hosted.embed` and `direct_bakeoff.py`.
-Python 3.11+ and the requirements below install the Modal CLI; paid runs need operator authentication.
+Python 3.12+ and the requirements below install the Modal CLI; paid runs need operator authentication.
 The coordinator dispatches paid runs; CI uses offline fixtures only.
 
 ## Preview the campaign
