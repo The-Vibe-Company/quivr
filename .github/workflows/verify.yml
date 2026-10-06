@@ -43,15 +43,15 @@ jobs:
       NUMBA_NUM_THREADS: 2
       OPENBLAS_NUM_THREADS: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache-dependency-path: '**/go.sum'
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         id: python
         with:
           python-version: '3.12'
@@ -69,7 +69,7 @@ jobs:
           pip install --no-deps -e plugins/jev-rerank
       # ranx marks its kernels cacheable. Retain compilation, with portable CPU instructions.
       - if: startsWith(matrix.group, 'eval-')
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .scratch/numba
           key: quick-numba-${{ matrix.group }}-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('scripts/check-requirements.txt', 'scripts/eval/requirements-campaign.txt') }}
@@ -86,7 +86,7 @@ jobs:
       - run: make check check-group=${{ matrix.group }}
       - if: always()
         run: python3 scripts/check.py --summary
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: check-${{ matrix.group }}
@@ -94,98 +94,98 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
       # Contract Runner reports (scripts/plugin_sdk.sh), under the artifact names the plugin READMEs give.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-python'
         with:
           name: plugin-contract-report
           path: .scratch/plugin-sdk/contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-python'
         with:
           name: subscription-plugin-contract-report
           path: .scratch/plugin-sdk/subscription-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-python'
         with:
           name: python-connector-scaffold-contract-report
           path: .scratch/plugin-sdk/connector-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-python'
         with:
           name: push-source-contract-reports
           path: .scratch/plugin-sdk/push-*-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-python'
         with:
           name: python-connector-contract-report
           path: .scratch/plugin-sdk/python-static-source-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-python'
         with:
           name: pdf-text-contract-report
           path: .scratch/plugin-sdk/pdf-text-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-python'
         with:
           name: alerts-contract-report
           path: .scratch/plugin-sdk/alerts-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-go'
         with:
           name: go-connector-contract-report
           path: .scratch/plugin-sdk/static-source-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-go'
         with:
           name: go-ingestion-contract-report
           path: .scratch/plugin-sdk/hash-embedder-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-go'
         with:
           name: go-retrieval-contract-report
           path: .scratch/plugin-sdk/fusion-retriever-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-go'
         with:
           name: rss-contract-report
           path: .scratch/plugin-sdk/rss-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-go'
         with:
           name: x-list-contract-report
           path: .scratch/plugin-sdk/x-list-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-go'
         with:
           name: m365-mail-contract-report
           path: .scratch/plugin-sdk/m365-mail-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-go'
         with:
           name: hosted-embedding-contract-reports
@@ -193,7 +193,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
       # The public contracts this commit checked.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'contracts'
         with:
           name: contracts
@@ -215,15 +215,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: make adapter-postgres args=-v
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: adapter-postgres
@@ -245,33 +245,33 @@ jobs:
       matrix:
         part: [core, monitoring, plugins, connectors, demo]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         id: python
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: contracts/http/v0/checks/requirements.txt
       # The pinned E5 model and tokenizer; scripts/prepare_*.py check them by digest after a restore.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             .scratch/e5-model
             .scratch/tokenizer
           key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'plugins/core-ingest/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
       - if: matrix.part == 'demo'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: quivr-search/package-lock.json
       - if: matrix.part == 'demo'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('quivr-search/package-lock.json') }}
@@ -285,7 +285,7 @@ jobs:
         env:
           # A missing base (including a first push) runs lifecycle by default.
           QUIVR_VERIFY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         id: verification-artifact
         if: always()
         with:
@@ -352,19 +352,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         id: python
         with:
           python-version: '3.12'
       - run: pip install -r contracts/http/v0/checks/requirements.txt
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             .scratch/e5-model
@@ -372,7 +372,7 @@ jobs:
           key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'plugins/core-ingest/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
       - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia*
       - run: make migration-compatibility args='--base ${{ github.event.pull_request.base.sha || github.event.before }}'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: migration-compatibility
@@ -385,10 +385,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
