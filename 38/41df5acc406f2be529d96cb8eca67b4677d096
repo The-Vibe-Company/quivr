@@ -1,0 +1,72 @@
+quivr-search/src/dashboard.css
+  s_c21c70c5aa40f0::t_4884228827e4ec 4443-4468
+quivr-search/src/lib/stats.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 5,41-42,51,58
+quivr-search/tests/server.test.mjs
+  s_c21c70c5aa40f0::t_4884228827e4ec 654,933-936,1276-1491
+  s_c21c70c5aa40f0::t_daa6b4c55abc69 1492
+quivr-search/src/components/explorer/ExplorerView.tsx
+  s_c21c70c5aa40f0::t_4884228827e4ec 1-416
+quivr-search/src/App.tsx
+  s_c21c70c5aa40f0::t_4884228827e4ec 18,40,48,56-58,71,74-75,78,85,92,102,117-120,285-294,302,314-332,370-372,386,419,426,472-473,619-622,679-688
+  s_c21c70c5aa40f0::t_aadd300e9b9a58 689-690
+quivr-search/feed.mjs
+  s_c21c70c5aa40f0::t_4884228827e4ec 1-6,94,152,162,164-166,180,220,397,460-463,478-486
+quivr-search/explore.mjs
+  s_c21c70c5aa40f0::t_4884228827e4ec 1-336
+quivr-search/src/components/feed/Reader.tsx
+  s_c21c70c5aa40f0::t_4884228827e4ec 107-108
+quivr-search/src/components/explorer/RecordPage.tsx
+  s_c21c70c5aa40f0::t_4884228827e4ec 1-300
+quivr-search/src/lib/search.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 79,92
+quivr-search/src/explorer.css
+  s_c21c70c5aa40f0::t_4884228827e4ec 1-375
+quivr-search/README.md
+  s_c21c70c5aa40f0::t_4884228827e4ec 15-17,21
+  s_c21c70c5aa40f0::t_7ae7d914d33613 23,96
+quivr-search/src/components/feed/FeedPage.tsx
+  s_c21c70c5aa40f0::t_4884228827e4ec 38,49,92-95,121-127,161-162,179,181,200-201,215-216,235,254,287,308,332-335,450,664-668,801-826,1061-1065,1135,1194-1195,1226,1286
+quivr-search/src/lib/explore.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 1-220
+quivr-search/server.mjs
+  s_c21c70c5aa40f0::t_4884228827e4ec 16-17,31-35,115-149,155-167,405,582-584,598-605,610,614,617,619-620,624-643,719,722-725,756,758-761
+quivr-search/src/components/feed/days.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 33,52,71,101,117,140
+quivr-search/src/lib/workspace.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 6,24-25,39,66-73,140,167,198
+quivr-search/catalog.mjs
+  s_c21c70c5aa40f0::t_4884228827e4ec 1,32,36,363-366,379,387-388,391-411,461-464
+  s_c21c70c5aa40f0::t_30363c39fb0ed0 465
+quivr-search/src/types.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 46-52
+quivr-search/tests/fake-engine.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 12-13,38-42,161-184,193,256-257,292-350,353-354,377-428,435,451,462,490-491,515,537-538,585,781-784,788
+  s_c21c70c5aa40f0::t_8dee5f5421633c 785-787
+quivr-search/src/lib/feed.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 9-10,30-37,39,44,58,62,72,74
+quivr-search/src/components/RailIcons.tsx
+  s_c21c70c5aa40f0::t_4884228827e4ec 8,220-237
+quivr-search/tests/explorer.spec.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 1-142
+quivr-search/views.mjs
+  s_c21c70c5aa40f0::t_4884228827e4ec 1-172
+quivr-search/src/lib/corpora.ts
+  s_c21c70c5aa40f0::t_4884228827e4ec 1-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3841df5acc406f2be529d96cb8eca67b4677d096",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}
