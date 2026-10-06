@@ -90,6 +90,10 @@ def expect(base, token, method, path, body=None, status=200):
     return result
 
 
+class ConditionTimeout(RuntimeError):
+    """The measurement's condition stayed false until its deadline."""
+
+
 def await_condition(what, read, done, deadline=120, interval=.2):
     """Poll read() until done(value), or fail naming what and the last value."""
     start = time.monotonic()
@@ -98,7 +102,7 @@ def await_condition(what, read, done, deadline=120, interval=.2):
         if done(value):
             return value
         if time.monotonic() - start > deadline:
-            raise RuntimeError(f'{what} not reached within {deadline} s; last: {value}')
+            raise ConditionTimeout(f'{what} not reached within {deadline} s; last: {value}')
         time.sleep(interval)
 
 
@@ -442,7 +446,14 @@ def scenario(stack, report, clock):
         stack.start_worker()
         clock.restart_api(stack)
         report['plans_after_restart'].append({'phase': 'backfill', 'want': plan_b['plan_id'], 'got': active_plan(base, operator)})
-        done = await_condition('the backfill finished', lambda: expect(base, backfiller, 'GET', op_path), lambda o: o['state'] not in ('queued', 'running', 'paused', 'cancel_requested'), deadline=600, interval=.2)
+        try:
+            done = await_condition('the backfill finished', lambda: expect(base, backfiller, 'GET', op_path), lambda o: o['state'] not in ('queued', 'running', 'paused', 'cancel_requested'), deadline=600, interval=.2)
+        except ConditionTimeout:
+            # A blocked step keeps heartbeating. Preserve its goroutine stacks
+            # in the redacted worker log before teardown cancels the call.
+            if worker_pid := stack.state.get('worker_pid'):
+                stack.signal_owned(worker_pid, signal.SIGQUIT)
+            raise
         report['backfill'] = {'state': done['state'], 'counters': done['counters'], 'estimated_versions': estimate['versions'], 'window_records': len(window),
                               'estimate': estimate, 'seconds': round(clock.now() - started, 3), 'state_at_restart': state_at_restart}
         load('backfill', expectations['backfill']['since'])
