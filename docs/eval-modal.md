@@ -149,12 +149,12 @@ Other campaigns have independent caps. Exact reported `agent_token_usage` contai
 input/output tokens; absent usage remains unknown, never inferred or capped.
 
 **The compute cap covers runner reservations, not the full Modal invoice.**
-It reserves configured CPU/memory cost for the enforced execution and startup
-timeouts before each invocation, disables automatic retries and retains charges
-when completion is unknown. Successful RPC elapsed time is a conservative
-compute charge, including queue/transport time. Builds, Volume storage and other
-account charges need separate operator budgets. Bounds depend on correct rates
-and provider token limits; observed overages cannot undo already incurred bills.
+It reserves execution plus startup timeouts and two shutdown seconds before dispatch.
+Settlement uses a container execution receipt plus startup/shutdown bounds. Remote
+cache, provider and latency-window waits count; queue and client polling waits do not.
+Application retries are disabled; infrastructure restarts reserve another attempt.
+Missing receipts retain unknown charges. Genuine overruns stop paid admission and
+keep published evidence. Builds/storage need separate budgets; rates must be correct.
 
 Tier 1 accepts public campaign-dev sets and private working descriptors. An upstream
 public `test` partition differs from campaign-heldout data, which tier 1 cannot consume.

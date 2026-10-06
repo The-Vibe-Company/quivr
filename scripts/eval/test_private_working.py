@@ -295,6 +295,20 @@ class Runner(unittest.TestCase):
         self.assertEqual(replay['status'], 'reused')
         self.assertEqual(len(self.calls), before)
         self.assertEqual(replay['record'], candidate)
+        source = self.campaign
+        self.store.stop(source)
+        self.campaign = uuid.uuid4().hex
+        self.policy = dict(self.policy, reuse_campaign=source)
+        reused = self.run_trial()
+        self.assertEqual(reused['status'], 'reused')
+        self.assertEqual(len(self.calls), before)
+        report = gates.evaluate({self.name: {'candidate': reused['record'],
+            'baseline': reused['baseline_record']}}, self.policy)
+        self.assertEqual(report['missing_or_incompatible_sets'], [])
+        self.assertTrue(report['gates']['quality']['passed'])
+        self.assertEqual(reused['record']['per_query'], {})
+        original_key = reused['record']['provenance']['measurement_reuse']['lease_key']
+        self.assertEqual(self.store.evidence(source, [original_key])[original_key], candidate)
 
     def test_wrong_fingerprint_and_heldout_key_fail_before_provider_or_publication(self):
         held_key = self.root / 'heldout-key'

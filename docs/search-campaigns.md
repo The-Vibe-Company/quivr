@@ -96,6 +96,10 @@ its compute has been reconciled. Results saved before an interrupted Optuna upda
 are replayed without re-measuring; measurement leases reuse canonical baseline and
 candidate evidence. An incomplete run is retried only after old compute is stopped.
 
+Set `policy.reuse_campaign` to a prior campaign's identifier to reuse its completed
+datasets, including after a stop. Code/scorer, baseline, prices and measurement policy
+must match; budget caps and execution limits may differ. Original evidence stays intact.
+
 Daily exhaustion cancels active compute and pauses until the next UTC day.
 A running supervisor resumes automatically that day; a dead one needs managed
 restart or `resume`. Ownership leases last 120 seconds and renew every 10 seconds. Total

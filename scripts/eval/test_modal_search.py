@@ -215,6 +215,58 @@ class FailureLogging(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN'), 'requires disposable PostgreSQL')
 class Dispatch(unittest.TestCase):
+    def test_settlement_uses_execution_receipt_and_retains_evidence_on_overrun(self):
+        # Dispatch owns billing versus client waits and canonical-result survival.
+        # Real SQL/Results; the fake replaces only Modal's remote transport.
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        cfg = search_trial.configuration({})
+        policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
+            'modal_usd_per_second': .001, 'price_revision': 'fixture-v1',
+            'max_seconds': 30, 'startup_seconds': 10})
+        for execution, expected, charged in ((12, 'complete', .024), (40, 'capped', .052),
+                                             (None, 'complete', .042)):
+            with self.subTest(execution=execution), tempfile.TemporaryDirectory() as temp:
+                campaign, clock, calls = uuid.uuid4().hex, [0.], []
+                def remote(request):
+                    calls.append(request)
+                    row = {'schema_version': 1, 'experiment': 'public/example', 'git_sha': 'a' * 40,
+                        'plugin_digest': 'sha256:fixture', 'config': request['config'], 'tier': 'direct',
+                        'machine': 'offline', 'duration_seconds': 12, 'cost': {},
+                        'dataset': {'name': 'scifact', 'version': '1', 'split': 'dev', 'fingerprint': 'fixture', 'private': False},
+                        'metrics': {'ndcg@10': .5}, 'per_query': {'ndcg@10': {'q': .5}}}
+                    store.publish(request['campaign'], request['lease_key'], request['owner'], row)
+                    clock[0] += 12861.9  # Queue/retrieval, without wall-clock waits.
+                    return {'row': row, 'compute': {'reservation': request.get('modal_reservation', 'unavailable'),
+                        'execution_seconds': execution}} if execution is not None else row
+                with mock.patch('modal_search.time.monotonic', side_effect=lambda: clock[0]), \
+                     mock.patch.dict(os.environ, MLFLOW_TRACKING_URI=''):
+                    outcome = modal_search.dispatch(store, campaign, policy, cfg, 'scifact', 'a' * 40,
+                        'sha256:fixture', remote, pathlib.Path(temp), True)
+                    self.assertEqual(outcome['status'], expected)
+                    self.assertIn('record', outcome, 'settlement must retain completed evidence')
+                    self.assertIn('receipt', outcome)
+                    self.assertAlmostEqual(float(store.summary(campaign)['modal']['charged_usd']), charged)
+                    replay = modal_search.dispatch(store, campaign, policy, cfg, 'scifact', 'a' * 40,
+                        'sha256:fixture', remote, pathlib.Path(temp), True)
+                    self.assertEqual(replay['status'], 'reused')
+                    self.assertEqual(len(calls), 1)
+                    if execution == 40:
+                        self.assertEqual(store.availability(campaign)['stopped'], 'usage exceeded reservation')
+                        denied = modal_search.dispatch(store, campaign, policy, dict(cfg, dense_weight=0),
+                            'scifact', 'a' * 40, 'sha256:fixture', remote, pathlib.Path(temp), True)
+                        self.assertEqual(denied['status'], 'capped')
+                        self.assertEqual(len(calls), 1)
+                        next_policy = dict(policy, reuse_campaign=campaign, modal_daily_usd=2)
+                        reused = modal_search.dispatch(store, uuid.uuid4().hex, next_policy, cfg,
+                            'scifact', 'a' * 40, 'sha256:fixture', remote, pathlib.Path(temp), True)
+                        self.assertEqual(reused['status'], 'reused')
+                        self.assertEqual(len(calls), 1)
+                        incompatible = dict(next_policy, baseline=search_trial.configuration({'dense_weight': .5}))
+                        measured = modal_search.dispatch(store, uuid.uuid4().hex, incompatible, cfg,
+                            'scifact', 'a' * 40, 'sha256:fixture', remote, pathlib.Path(temp), True)
+                        self.assertEqual(measured['status'], 'capped')
+                        self.assertEqual(len(calls), 2, 'a different baseline needs new paired evidence')
+
     def test_failed_dataset_dispatch_is_not_an_empty_quality_rejection_on_replay(self):
         # Own failed dataset aggregation at launch, including a subsequent
         # attempt after the first app exited. Existing dispatch tests own SQL
@@ -291,7 +343,7 @@ class Dispatch(unittest.TestCase):
                     mock.patch('urllib.request.OpenerDirector.open', side_effect=provider):
                 def run(config):
                     return modal_search.dispatch(store, campaign, policy, config, 'scifact', 'a' * 40,
-                        'sha256:fixture', modal_search.remote_trial, root / 'local', True)
+                        'sha256:fixture', modal_search.metered_trial, root / 'local', True)
                 outcome = run(cfg)
                 self.assertEqual(outcome['status'], 'complete')
                 self.assertIn('baseline_record', outcome)
@@ -310,6 +362,30 @@ class Dispatch(unittest.TestCase):
                 other = run(dict(cfg, dense_weight=.8))
                 self.assertNotEqual(other['baseline_record']['config'], baseline['config'],
                                     'each candidate needs its own paired baseline identity')
+                store.stop(campaign)
+                before = len(calls)
+                destination = uuid.uuid4().hex
+                with mock.patch.object(store, 'publish_many', side_effect=RuntimeError('publication unavailable')):
+                    with self.assertRaises(RuntimeError):
+                        modal_search.dispatch(store, destination, dict(policy, reuse_campaign=campaign),
+                            cfg, 'scifact', 'a' * 40, 'sha256:fixture', modal_search.metered_trial, root / 'local', True)
+                with store.transaction() as db:
+                    live = db.execute('SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND payload IS NULL AND expires_at>clock_timestamp()', (destination,)).fetchone()[0]
+                self.assertEqual(live, 0, 'failed reuse releases candidate and baseline claims')
+                reused = modal_search.dispatch(store, destination, dict(policy, reuse_campaign=campaign),
+                    cfg, 'scifact', 'a' * 40, 'sha256:fixture', modal_search.metered_trial, root / 'local', True)
+                self.assertEqual(reused['status'], 'reused')
+                for side, original in (('baseline_record', baseline), ('record', candidate)):
+                    self.assertEqual(reused[side]['metrics'], original['metrics'])
+                    self.assertEqual(reused[side]['per_query'], original['per_query'])
+                    self.assertEqual(reused[side]['cost'], original['cost'])
+                    self.assertNotEqual(reused[side]['config']['campaign'], campaign)
+                    self.assertEqual(reused[side]['provenance']['measurement_reuse']['campaign'], campaign)
+                original_key = reused['record']['provenance']['measurement_reuse']['lease_key']
+                self.assertEqual(store.evidence(campaign, [original_key])[original_key], candidate)
+                new_campaign = reused['record']['config']['campaign']
+                self.assertEqual(store.evidence(new_campaign, [original_key])[original_key], reused['record'])
+                self.assertEqual(len(calls), before)
 
     def test_paired_aa_latency_stays_exclusive_during_concurrent_quality(self):
         # Own phase placement end to end: real paired measurement, scorer,
@@ -441,7 +517,8 @@ class Dispatch(unittest.TestCase):
                     'paired_candidate_hash': search_trial.digest(request['config'])}}
                 row['provenance'] = {'public_pair': {
                     'baseline_lease_key': request['lease_key'] + '/' + request['owner'] + '/baseline'}}
-                return search_trial.publish_pair(store, request, {'baseline': baseline, 'candidate': row})
+                row = search_trial.publish_pair(store, request, {'baseline': baseline, 'candidate': row})
+                return {'row': row, 'compute': {'reservation': request['modal_reservation'], 'execution_seconds': 1}}
             call = mock.Mock(object_id=identity)
             call.get.side_effect = get
             calls[identity] = call
@@ -603,7 +680,7 @@ class Dispatch(unittest.TestCase):
         cfg = search_trial.configuration({})
         policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
             'modal_usd_per_second': .001, 'price_revision': '2026-10-03',
-            'modal_daily_usd': .08, 'max_seconds': 30, 'startup_seconds': 10})
+            'modal_daily_usd': .084, 'max_seconds': 30, 'startup_seconds': 10})
         campaign, calls = uuid.uuid4().hex, []
         def remote(request):
             calls.append(request)
