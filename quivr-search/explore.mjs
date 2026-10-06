@@ -7,9 +7,9 @@
 // read through their `source_pointer`. The listing filters with the engine's
 // metadata predicates and relays which corpora a field excluded.
 //
-// Facet values go through one seam, `facets()`: until the engine counts
-// values per field, they are the distinct values of the newest matching
-// documents, without counts.
+// Facet values go through one seam, `facets()`, counted by the engine
+// (`POST /v0/facets`, THE-1184) under the same corpora and predicates as the
+// list. A date field gives a histogram whose step suits the period picked.
 //
 // The engine lists no Record's Versions: the history shows those the demo
 // read since it started (the feeds reread each new Version), bounded.
@@ -32,8 +32,16 @@ export const COMMON_FIELDS = [
 }));
 
 const PAGE = 25;
-const SAMPLE = 100;
-const MAX_VALUES = 30;
+// The engine returns at most this many values per field, the most frequent.
+const FACET_VALUES = 100;
+// Counting may take the engine up to 25 s, and it admits eight counts at
+// once per instance: one Explorer view sends at most four.
+const FACET_TIMEOUT_MS = 30000;
+const FACET_CONCURRENCY = 4;
+// Unpicked dates: months, or days when they span at most this many months,
+// or years when they span more than this many.
+const DAYS_UP_TO_MONTHS = 2;
+const YEARS_FROM_MONTHS = 36;
 const MAX_VERSIONS = 5000;
 const CORPUS_TTL_MS = 60000;
 const MAX_BLOBS = 5;
@@ -108,29 +116,144 @@ export function predicatesOf(raw) {
   return list;
 }
 
-const monthOf = (value) => {
-  if (!RFC3339.test(String(value))) return undefined;
-  const at = Date.parse(String(value));
-  return Number.isNaN(at) ? undefined : new Date(at).toISOString().slice(0, 7);
-};
+const PERIOD = { year: 4, month: 7, day: 10 };
 
-/** Distinct values of each field in some Versions, most frequent first. A date gives its month. */
-export function sampleValues(versions, fields) {
-  return fields.map((field) => {
-    const seen = new Map();
-    for (const version of versions)
-      for (const raw of fieldValues(version, field)) {
-        // A date counts in its UTC month, the month a picked value filters on.
-        const value = field.type === "datetime" ? monthOf(raw) : raw;
-        if (value === undefined) continue;
-        seen.set(value, (seen.get(value) || 0) + 1);
-      }
-    const values = [...seen]
-      .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
-      .slice(0, MAX_VALUES)
-      .map(([value]) => ({ value }));
-    return { field: field.name, type: field.type, values };
-  });
+/** The UTC instants that bound a period: "2026", "2026-10" or "2026-10-05". */
+export function periodBounds(period) {
+  const [year, month = 1, day = 1] = period.split("-").map(Number);
+  const start = Date.UTC(year, month - 1, day);
+  const next =
+    period.length === PERIOD.year
+      ? Date.UTC(year + 1, 0, 1)
+      : period.length === PERIOD.month
+        ? Date.UTC(year, month, 1)
+        : Date.UTC(year, month - 1, day + 1);
+  return { gte: new Date(start).toISOString(), lte: new Date(next - 1).toISOString() };
+}
+
+/** The period a date predicate picks, if its bounds are exactly a year, a month or a day. */
+function periodOf(predicate) {
+  if (!predicate?.gte || !predicate?.lte || predicate.any_of) return undefined;
+  const start = Date.parse(predicate.gte);
+  if (Number.isNaN(start)) return undefined;
+  const iso = new Date(start).toISOString();
+  return Object.values(PERIOD)
+    .map((length) => iso.slice(0, length))
+    .find((period) => {
+      const bounds = periodBounds(period);
+      return Date.parse(bounds.gte) === start && Date.parse(bounds.lte) === Date.parse(predicate.lte);
+    });
+}
+
+/**
+ * How a date field is counted: its step, and the predicate its own count
+ * keeps. A year picked shows its months, a month its days, a day the days of
+ * its month so the others stay offered; nothing picked starts with months.
+ */
+function histogramOf(predicate) {
+  if (!predicate) return { interval: "month", scope: undefined, adapt: true };
+  const period = periodOf(predicate);
+  if (period?.length === PERIOD.year) return { interval: "month", scope: predicate };
+  if (period?.length === PERIOD.month) return { interval: "day", scope: predicate };
+  if (period) return { interval: "day", scope: { field: predicate.field, ...periodBounds(period.slice(0, PERIOD.month)) } };
+  // Bounds of another span: the step that keeps it readable.
+  const days = (Date.parse(predicate.lte || predicate.gte) - Date.parse(predicate.gte || predicate.lte)) / 864e5;
+  return { interval: days <= 62 ? "day" : days <= 3 * 366 ? "month" : "year", scope: predicate };
+}
+
+const monthIndex = (value) => Number(value.slice(0, 4)) * 12 + Number(value.slice(5, 7));
+
+/**
+ * Each field's values counted by the engine, most frequent first; a date
+ * field's are periods in time order ("2026", "2026-10", "2026-10-05"). A
+ * field's own predicate is left out of its count, so its other values stay
+ * offered; a date keeps the period it zooms in. `count` posts one
+ * `POST /v0/facets` body and returns the engine's answer. The corpora a field
+ * excluded are those of the count under every predicate, as the list's.
+ */
+export async function countFacets({ count, ids, fields, predicates }) {
+  const own = new Map(predicates.map((p) => [p.field, p]));
+  const histograms = new Map(
+    fields.filter((f) => f.type === "datetime").map((f) => [f.name, histogramOf(own.get(f.name))]),
+  );
+  const ask = (names, kept, intervals = {}) =>
+    count({
+      corpus_ids: ids,
+      fields: names.map((field) => {
+        const interval = intervals[field] || histograms.get(field)?.interval;
+        return { field, limit: FACET_VALUES, ...(interval ? { interval } : {}) };
+      }),
+      ...(kept.length ? { filter: { metadata: kept } } : {}),
+    });
+  // Fields counted under every predicate, and each other one under its own.
+  const shared = [];
+  const alone = [];
+  for (const field of fields) {
+    const p = own.get(field.name);
+    const histogram = histograms.get(field.name);
+    if (!p || (histogram && histogram.scope === p)) shared.push(field.name);
+    else
+      alone.push({
+        field: field.name,
+        kept: [...predicates.filter((x) => x !== p), ...(histogram?.scope ? [histogram.scope] : [])],
+      });
+  }
+  // The count under every predicate also names the corpora they exclude.
+  const tasks = [
+    () => ask(shared.length ? shared : [fields[0].name], predicates),
+    ...alone.map(({ field, kept }) => () => ask([field], kept)),
+  ];
+  const answers = [];
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(FACET_CONCURRENCY, tasks.length) }, async () => {
+      for (let i; (i = next++) < tasks.length; ) answers[i] = await tasks[i]();
+    }),
+  );
+  const [all, ...others] = answers;
+  const buckets = new Map();
+  for (const item of [...(shared.length ? all.items : []), ...others.flatMap((o) => o.items)])
+    buckets.set(item.field, item.buckets);
+  const intervals = new Map([...histograms].map(([name, h]) => [name, h.interval]));
+
+  // Unpicked dates over a short span are counted again by day; over a long
+  // one, by year: summed from the months, or asked again when the months
+  // were cut at the engine's bound.
+  const again = { day: [], year: [] };
+  for (const [name, histogram] of histograms) {
+    if (!histogram.adapt) continue;
+    const months = buckets.get(name) || [];
+    if (!months.length) continue;
+    const span = monthIndex(months.at(-1).value) - monthIndex(months[0].value) + 1;
+    if (span <= DAYS_UP_TO_MONTHS) again.day.push(name);
+    else if (months.length >= FACET_VALUES) again.year.push(name);
+    else if (span > YEARS_FROM_MONTHS) {
+      const years = new Map();
+      for (const b of months) years.set(b.value.slice(0, 4), (years.get(b.value.slice(0, 4)) || 0) + b.count);
+      buckets.set(name, [...years].map(([value, n]) => ({ value: `${value}-01-01T00:00:00Z`, count: n })));
+      intervals.set(name, "year");
+    }
+  }
+  for (const interval of ["day", "year"]) {
+    if (!again[interval].length) continue;
+    const data = await ask(again[interval], predicates, Object.fromEntries(again[interval].map((n) => [n, interval])));
+    for (const item of data.items) {
+      buckets.set(item.field, item.buckets);
+      intervals.set(item.field, interval);
+    }
+  }
+
+  return {
+    fields: fields.map((field) => {
+      const interval = intervals.get(field.name);
+      const values = (buckets.get(field.name) || []).map(({ value, count: n }) => ({
+        value: interval ? String(value).slice(0, PERIOD[interval]) : value,
+        count: n,
+      }));
+      return { field: field.name, type: field.type, ...(interval ? { interval } : {}), values };
+    }),
+    ...(all.excluded_corpora?.length ? { excluded_corpora: all.excluded_corpora } : {}),
+  };
 }
 
 /** The Versions the demo read of each Record, newest last, bounded. */
@@ -213,6 +336,20 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
     return response.data;
   }
 
+  // One count of field values, as the engine answers it.
+  async function count(body) {
+    const response = await upstream("/v0/facets", "POST", body, FACET_TIMEOUT_MS);
+    if (response.status === 422 && response.data?.code === "metadata_filter_unavailable")
+      throw failure(
+        422,
+        "Un corpus choisi doit être reconstruit avant que ses valeurs soient comptées.",
+        "metadata_filter_unavailable",
+      );
+    if (response.status === 422) throw failure(422, "Ce filtre n’est pas valide.");
+    if (response.status !== 200) throw failure(503, "Les nombres sont momentanément indisponibles. Réessayez.");
+    return response.data;
+  }
+
   // The current Version of each listed Record, in order; withdrawn ones left out.
   async function hydrate(records) {
     const out = [];
@@ -281,29 +418,17 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       if (data.excluded_corpora?.length) page.excluded_corpora = data.excluded_corpora;
       return page;
     },
-    /**
-     * GET /demo/explore/facets: the values each field offers. The seam the
-     * engine's value counts will fill: values come without `count` for now,
-     * from the newest SAMPLE matching documents. A field's own predicate is
-     * left out of its sample, so its other values stay offered.
-     */
+    /** GET /demo/explore/facets: each field's values and how many documents have them. */
     async facets(params) {
       const ids = await picked(params);
       const predicates = predicatesOf(params.get("metadata"));
       const infos = await Promise.all(ids.map(corpus));
-      const fields = [...COMMON_FIELDS, ...(ids.length === 1 ? infos[0].own : [])];
-      const sampleOf = async (without) => {
-        const kept = predicates.filter((p) => p.field !== without);
-        const data = await list(ids, kept, SAMPLE);
-        return (await hydrate(data.items || [])).map((r) => r.version);
-      };
-      const all = await sampleOf(undefined);
-      const facets = sampleValues(all, fields);
-      for (const p of predicates) {
-        const i = fields.findIndex((f) => f.name === p.field);
-        if (i >= 0) facets[i] = sampleValues(await sampleOf(p.field), [fields[i]])[0];
-      }
-      return { fields: facets, counted: false, sample: all.length };
+      return countFacets({
+        count,
+        ids,
+        fields: [...COMMON_FIELDS, ...(ids.length === 1 ? infos[0].own : [])],
+        predicates,
+      });
     },
     /**
      * GET /demo/explore/records/{id}: the Record, its current Version, the

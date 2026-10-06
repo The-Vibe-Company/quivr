@@ -1307,6 +1307,7 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
   });
   const listings = [];
   const searches = [];
+  const counts = [];
   const upstream = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://x");
     const json = (status, data) => {
@@ -1326,6 +1327,18 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
       for await (const chunk of req) chunks.push(chunk);
       searches.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
       return json(200, { items: [], retrieval_profile: { name: "default", version: "v" } });
+    }
+    if (url.pathname === "/v0/facets") {
+      // One desk value; the demo corpus lacks desk, when it is filtered on.
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      counts.push(body);
+      const desk = body.filter?.metadata?.some((p) => p.field === "desk");
+      return json(200, {
+        items: body.fields.map(({ field }) => ({ field, buckets: field === "desk" ? [{ value: "economy", count: 1 }] : [] })),
+        ...(desk && body.corpus_ids.includes("demo") ? { excluded_corpora: [{ corpus_id: "demo", fields: ["desk"] }] } : {}),
+      });
     }
     const corpus = url.pathname.match(/^\/v0\/corpora\/(\w+)$/);
     if (corpus) return corpora[corpus[1]] ? json(200, corpora[corpus[1]]) : json(404, { code: "not_found" });
@@ -1412,11 +1425,31 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
     ["rec_wire", "wires", { "metadata.language": ["en"], desk: ["economy"] }],
   ]);
   assert.deepEqual(page.data.excluded_corpora, [{ corpus_id: "demo", fields: ["desk"] }]);
-  // A corpus's own fields are offered only when it is picked alone.
-  const fieldsOf = async (corpora) =>
-    (await get(`/demo/explore/facets?corpora=${corpora}`)).data.fields.map((f) => f.field);
-  assert.ok((await fieldsOf("wires")).includes("desk"));
-  assert.ok(!(await fieldsOf("demo,wires")).includes("desk"));
+  // The engine counts the facets under the same corpora and predicates, and
+  // its exclusions are relayed. A corpus's own fields are counted only when it
+  // is picked alone, and a field's own filter is left out of its count.
+  const filtered = `metadata=${encodeURIComponent(JSON.stringify(predicates))}`;
+  const both = await get(`/demo/explore/facets?corpora=demo,wires&${filtered}`);
+  assert.deepEqual(both.data.excluded_corpora, [{ corpus_id: "demo", fields: ["desk"] }]);
+  const alone = await get(`/demo/explore/facets?corpora=wires&${filtered}`);
+  assert.deepEqual(
+    counts.map((b) => [b.corpus_ids, b.filter?.metadata, b.fields.map((f) => f.field).filter((f) => !f.startsWith("metadata."))]),
+    [
+      [["demo", "wires"], predicates, []],
+      [["wires"], predicates, []],
+      [["wires"], undefined, ["desk"]],
+    ],
+  );
+  assert.deepEqual(counts[0].fields.find((f) => f.field === "metadata.published_at"), {
+    field: "metadata.published_at",
+    limit: 100,
+    interval: "month",
+  });
+  assert.deepEqual(alone.data.fields.find((f) => f.field === "desk"), {
+    field: "desk",
+    type: "string",
+    values: [{ value: "economy", count: 1 }],
+  });
   for (const path of [
     "/demo/explore?corpora=private",
     "/demo/explore/facets?corpora=wires,private",
