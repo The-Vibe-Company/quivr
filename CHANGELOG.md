@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.0-alpha.3](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.2...v2.0.0-alpha.3) (2026-10-06)
+
+
+### Bug Fixes
+
+* **images:** update Python runtimes and scan release images before merge ([#3776](https://github.com/The-Vibe-Company/quivr/issues/3776)) ([ae52859](https://github.com/The-Vibe-Company/quivr/commit/ae52859093109ca2fccf87aa16d6e023400c1cfa))
+
 ## [2.0.0-alpha.2](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.1...v2.0.0-alpha.2) (2026-10-06)
 
 

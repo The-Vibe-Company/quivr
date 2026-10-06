@@ -11,7 +11,7 @@ concurrency:
 permissions:
   contents: read
 # Required check: `verify`. It passes only when `check`, `adapter-postgres` and every
-# verification part pass, so branch protection needs no change when a part is added.
+# verification part and release image scan pass, so branch protection needs no change.
 jobs:
   # Isolated groups preserve make check while returning the complete quick result sooner.
   check-group:
@@ -405,15 +405,73 @@ jobs:
             echo "Scanning $module"
             (cd "$(dirname "$module")" && govulncheck ./...)
           done < <(git ls-files '**/go.mod' 'go.mod')
+  image-inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.images.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: pip install -r contracts/http/v0/checks/requirements.txt
+      - id: images
+        run: |
+          matrix=$(python3 -c 'import json, os, sys; sys.path.insert(0, "scripts"); import release_images; print(json.dumps(release_images.inventory(release_images.ROOT, os.environ["GITHUB_REPOSITORY"])))')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+  image-vulnerabilities:
+    needs: image-inventory
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.image-inventory.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the release runtime without publishing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          load: true
+          # Always refresh Debian security packages, even with a cached base image.
+          no-cache: true
+          tags: quivr-scan:local
+          build-args: |
+            VERSION=dev
+            REVISION=${{ github.sha }}
+            PLUGIN=${{ matrix.plugin }}
+      - name: Install checksum-verified scanner
+        env:
+          TOOLS_DIR: ${{ runner.temp }}/security-tools
+        run: |
+          bash scripts/security_tools.sh grype "$TOOLS_DIR"
+          echo "$TOOLS_DIR" >> "$GITHUB_PATH"
+      - name: Reject critical vulnerabilities with an available fix
+        run: bash scripts/scan_image.sh docker:quivr-scan:local
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: image-vulnerabilities-${{ matrix.plugin || 'engine' }}
+          path: vulnerabilities.json
+          if-no-files-found: warn
   # The one check to require: green only when every job above is green.
   verify:
     if: always()
-    needs: [check, adapter-postgres, part, migration-compatibility, vulnerabilities]
+    needs: [check, adapter-postgres, part, migration-compatibility, vulnerabilities, image-vulnerabilities]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
         run: |
-          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, migration-compatibility: ${{ needs.migration-compatibility.result }}, vulnerabilities: ${{ needs.vulnerabilities.result }}"
+          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, migration-compatibility: ${{ needs.migration-compatibility.result }}, vulnerabilities: ${{ needs.vulnerabilities.result }}, image-vulnerabilities: ${{ needs.image-vulnerabilities.result }}"
           exit 1
-      - run: echo "check, adapter-postgres, migration-compatibility, vulnerabilities and every verification part passed"
+      - run: echo "check, adapter-postgres, migration-compatibility, vulnerabilities, image-vulnerabilities and every verification part passed"

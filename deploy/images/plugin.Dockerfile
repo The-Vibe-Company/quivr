@@ -48,7 +48,12 @@ RUN python scripts/prepare_tokenizer.py \
 
 # The interpreter is required at runtime; package installers and headers are not.
 FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python-runtime
-RUN rm -rf /usr/local/lib/python3.12/site-packages/pip* \
+# Apply Debian security fixes newer than the pinned interpreter image before
+# removing package managers. Every Python plugin and core-ingest shares this.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* \
+      /usr/local/lib/python3.12/site-packages/pip* \
       /usr/local/lib/python3.12/site-packages/setuptools* \
       /usr/local/lib/python3.12/site-packages/pkg_resources* \
       /usr/local/lib/python3.12/site-packages/wheel* \
