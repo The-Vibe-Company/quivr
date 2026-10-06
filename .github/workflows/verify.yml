@@ -13,10 +13,210 @@ permissions:
 # Required check: `verify`. It passes only when `check`, `adapter-postgres` and every
 # verification part pass, so branch protection needs no change when a part is added.
 jobs:
-  # Everything that needs no Docker stack (make check): the first result, in a few minutes.
-  check:
+  # Isolated groups preserve make check while returning the complete quick result sooner.
+  check-group:
+    name: check ${{ matrix.group }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [guards, contracts, go, python, eval, sdk-python, sdk-go]
+    services:
+      evaluation-postgres:
+        # Only eval needs SQL; an empty image disables the service in the other groups.
+        image: ${{ matrix.group == 'eval' && 'postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73' || '' }}
+        env:
+          POSTGRES_DB: evaluation_tests
+          POSTGRES_USER: evaluation
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55433:5432
+        options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=512m
+          --health-cmd "pg_isready -U evaluation -d evaluation_tests"
+          --health-interval 2s --health-timeout 2s --health-retries 20
+    env:
+      EVAL_CONTROL_TEST_DSN: ${{ matrix.group == 'eval' && 'postgresql://evaluation@localhost:55433/evaluation_tests' || '' }}
+      NUMBA_CACHE_DIR: ${{ github.workspace }}/.scratch/numba
+      NUMBA_CPU_NAME: generic
+      NUMBA_NUM_THREADS: 2
+      OPENBLAS_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+          cache-dependency-path: '**/go.sum'
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.12'
+          # Cold benchmark: do not restore pip downloads.
+          cache-dependency-path: |
+            contracts/http/v0/checks/requirements.txt
+            scripts/eval/requirements-news.txt
+            scripts/eval/requirements-campaign.txt
+            scripts/check-requirements.txt
+            plugins/jev-rerank/pyproject.toml
+      - run: pip install -r contracts/http/v0/checks/requirements.txt
+      - if: matrix.group == 'eval'
+        run: |
+          pip install -r scripts/eval/requirements-news.txt -r scripts/eval/requirements-campaign.txt -r scripts/check-requirements.txt
+          pip install --no-deps -e plugins/jev-rerank
+      # ranx marks its kernels cacheable. Retain compilation, with portable CPU instructions.
+      - if: false
+        uses: actions/cache@v4
+        with:
+          path: .scratch/numba
+          key: quick-numba-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('scripts/check-requirements.txt', 'scripts/eval/requirements-campaign.txt') }}
+      # Real encryption owner tests need both age and age-keygen; avoid apt's index update.
+      - if: matrix.group == 'eval'
+        run: |
+          curl --fail --silent --show-error --location --retry 3 https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz -o "$RUNNER_TEMP/age.tar.gz"
+          echo 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377  '"$RUNNER_TEMP/age.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/age.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/age" >> "$GITHUB_PATH"
+      - run: make check check-group=${{ matrix.group }}
+      - if: always()
+        run: python3 scripts/check.py --summary
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-${{ matrix.group }}
+          path: .scratch/check/
+          include-hidden-files: true
+          if-no-files-found: warn
+      # Contract Runner reports (scripts/plugin_sdk.sh), under the artifact names the plugin READMEs give.
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-python'
+        with:
+          name: plugin-contract-report
+          path: .scratch/plugin-sdk/contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-python'
+        with:
+          name: subscription-plugin-contract-report
+          path: .scratch/plugin-sdk/subscription-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-python'
+        with:
+          name: python-connector-scaffold-contract-report
+          path: .scratch/plugin-sdk/connector-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-python'
+        with:
+          name: push-source-contract-reports
+          path: .scratch/plugin-sdk/push-*-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-python'
+        with:
+          name: python-connector-contract-report
+          path: .scratch/plugin-sdk/python-static-source-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-python'
+        with:
+          name: pdf-text-contract-report
+          path: .scratch/plugin-sdk/pdf-text-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-python'
+        with:
+          name: alerts-contract-report
+          path: .scratch/plugin-sdk/alerts-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-go'
+        with:
+          name: go-connector-contract-report
+          path: .scratch/plugin-sdk/static-source-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-go'
+        with:
+          name: go-ingestion-contract-report
+          path: .scratch/plugin-sdk/hash-embedder-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-go'
+        with:
+          name: go-retrieval-contract-report
+          path: .scratch/plugin-sdk/fusion-retriever-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-go'
+        with:
+          name: rss-contract-report
+          path: .scratch/plugin-sdk/rss-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-go'
+        with:
+          name: x-list-contract-report
+          path: .scratch/plugin-sdk/x-list-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-go'
+        with:
+          name: m365-mail-contract-report
+          path: .scratch/plugin-sdk/m365-mail-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'sdk-go'
+        with:
+          name: hosted-embedding-contract-reports
+          path: .scratch/plugin-sdk/hosted-embed/hosted-embed-*-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      # The public contracts this commit checked.
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.group == 'contracts'
+        with:
+          name: contracts
+          path: |
+            contracts/http/v0/openapi.yaml
+            contracts/shared/v0/manifest.schema.json
+          if-no-files-found: warn
+  # Keep the public check name; a skipped or canceled group must never pass it.
+  check:
+    if: always()
+    needs: [check-group]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: test '${{ needs.check-group.result }}' = 'success'
+  # Temporary evidence only: removed after three exact baseline cold measurements.
+  baseline-cold:
+    name: baseline cold ${{ matrix.run }}
+    if: github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3]
     services:
       evaluation-postgres:
         image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
@@ -32,143 +232,45 @@ jobs:
     env:
       EVAL_CONTROL_TEST_DSN: postgresql://evaluation@localhost:55433/evaluation_tests
     steps:
-      # The frozen-docs rule compares with the merge base of this checkout and main,
-      # so it needs full history (about 25 MB); the migration guard reads main's tree.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - name: Original main checkout with the stdlib timing wrapper
+        run: |
+          mkdir -p .scratch
+          cp scripts/check.py .scratch/baseline_check.py
+          git checkout c28e7b6a904827b526dc1f7efa2ead5e4b89f7ae
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: |
-            contracts/http/v0/checks/requirements.txt
-            scripts/eval/requirements-news.txt
-            scripts/eval/requirements-campaign.txt
-            plugins/jev-rerank/pyproject.toml
-      # PyYAML for `make docs`, which regenerates the documentation site's bundled contract to compare it.
       - run: pip install -r contracts/http/v0/checks/requirements.txt
       - run: pip install -r scripts/eval/requirements-news.txt
       - run: pip install -r scripts/eval/requirements-campaign.txt
-      # Build the OSS runner's SDK and exercise prepared scoring on offline vectors.
       - run: pip install modal==1.6.1 numpy==2.0.2 ranx==0.3.21
-      # The builder reuses this pinned stdlib client, without the plugin runtime dependencies.
       - run: pip install --no-deps -e plugins/jev-rerank
-      # Private news-set owner tests exercise real encryption with disposable keys and synthetic text.
       - run: sudo apt-get update -qq && sudo apt-get install -y age
-      - run: make check
-      # Contract Runner reports (scripts/plugin_sdk.sh), under the artifact names the plugin READMEs give.
+      - name: Original serial make check targets, timed without changing their commands
+        run: |
+          PYTHONPATH=scripts python3 - <<'PYTHON'
+          import sys
+          sys.path.insert(0, '.scratch')
+          import baseline_check as check
+          check.GROUPS = {'baseline': ['docs', 'denylist', 'migrations', 'contracts', 'image-context', 'plugin-boundary', 'conformance-validate', 'test']}
+          raise SystemExit(check.run_targets('baseline'))
+          PYTHON
+      - if: always()
+        run: PYTHONPATH=scripts python3 .scratch/baseline_check.py --summary
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: plugin-contract-report
-          path: .scratch/plugin-sdk/contract-report.json
+          name: baseline-cold-${{ matrix.run }}
+          path: .scratch/check/
           include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: subscription-plugin-contract-report
-          path: .scratch/plugin-sdk/subscription-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: python-connector-scaffold-contract-report
-          path: .scratch/plugin-sdk/connector-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: push-source-contract-reports
-          path: .scratch/plugin-sdk/push-*-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: python-connector-contract-report
-          path: .scratch/plugin-sdk/python-static-source-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pdf-text-contract-report
-          path: .scratch/plugin-sdk/pdf-text-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: alerts-contract-report
-          path: .scratch/plugin-sdk/alerts-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: go-connector-contract-report
-          path: .scratch/plugin-sdk/static-source-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: go-ingestion-contract-report
-          path: .scratch/plugin-sdk/hash-embedder-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: go-retrieval-contract-report
-          path: .scratch/plugin-sdk/fusion-retriever-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: rss-contract-report
-          path: .scratch/plugin-sdk/rss-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: x-list-contract-report
-          path: .scratch/plugin-sdk/x-list-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: m365-mail-contract-report
-          path: .scratch/plugin-sdk/m365-mail-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: hosted-embedding-contract-reports
-          path: .scratch/plugin-sdk/hosted-embed/hosted-embed-*-contract-report.json
-          include-hidden-files: true
-          if-no-files-found: warn
-      # The public contracts this commit checked.
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: contracts
-          path: |
-            contracts/http/v0/openapi.yaml
-            contracts/shared/v0/manifest.schema.json
-          if-no-files-found: warn
+          if-no-files-found: error
   # Fast signal on the PostgreSQL adapters (THE-699): a bare migrated database, no other
   # dependency. It proves the suite needs no state left by acceptance scenarios.
   adapter-postgres:
