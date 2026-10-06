@@ -41,6 +41,7 @@ type DeliveryWork struct {
 // AdmittedAttempt is an attempt whose admission fact is already committed. It
 // carries the exact immutable notice bytes to send.
 type AdmittedAttempt struct {
+	TraceContext  string
 	Organization  string
 	DeliveryID    string
 	AttemptID     string
@@ -96,6 +97,18 @@ type DeliveryStore interface {
 	// elapsed window, otherwise pending until the window-bounded retry time.
 	Record(ctx context.Context, a AdmittedAttempt, o AttemptOutcome, r Retry) error
 }
+
+// DeliveryBatchStore optionally groups same-Organization delivery facts.
+// Admission and recording results follow input order; each error leaves that
+// item's work recoverable without preventing successful siblings' progress.
+type DeliveryBatchStore interface {
+	ClaimDeliveries(ctx context.Context, lease time.Duration, limit int) ([]DeliveryWork, error)
+	AdmitDeliveries(ctx context.Context, works []DeliveryWork, window time.Duration, configured func(org, destinationID string) bool) ([]AdmittedAttempt, []string, []error)
+	RecordDeliveries(ctx context.Context, attempts []AdmittedAttempt, outcomes []AttemptOutcome, retries []Retry) []error
+}
+
+const deliveryBatchLimit = 32
+const deliveryBatchConcurrency = 8
 
 // Deliverer sends admitted notices to deployment-configured destinations.
 // Durable state lives in the store; a crash loses at most a lease.
@@ -211,6 +224,9 @@ func (d Deliverer) Run(ctx context.Context) {
 // Step claims, admits, sends and records one Delivery attempt. It returns
 // false when no work was due.
 func (d Deliverer) Step(ctx context.Context) (bool, error) {
+	if store, ok := d.Store.(DeliveryBatchStore); ok {
+		return d.stepBatch(ctx, store)
+	}
 	w, err := d.Store.ClaimDelivery(ctx, d.lease())
 	if errors.Is(err, ErrNoWork) {
 		return false, nil
@@ -250,10 +266,105 @@ func (d Deliverer) Step(ctx context.Context) (bool, error) {
 	if err = d.Store.Record(record, a, outcome, retry); err != nil {
 		return true, err
 	}
+	d.observeAttempt(ctx, a, outcome, retry, elapsed)
+	return true, nil
+}
+
+func (d Deliverer) stepBatch(ctx context.Context, store DeliveryBatchStore) (bool, error) {
+	works, err := store.ClaimDeliveries(ctx, d.lease(), deliveryBatchLimit)
+	if errors.Is(err, ErrNoWork) || (err == nil && len(works) == 0) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	policy := d.Retry.WithDefaults()
+	admitted, refused, admissionErrors := store.AdmitDeliveries(ctx, works, policy.Window, d.configured)
+	if len(admitted) != len(works) || len(refused) != len(works) || len(admissionErrors) != len(works) {
+		return true, errors.New("delivery batch admission results differ from inputs")
+	}
+	var attempts []AdmittedAttempt
+	var errs []error
+	for i, w := range works {
+		if admissionErrors[i] != nil {
+			errs = append(errs, admissionErrors[i])
+		} else if refused[i] != "" {
+			slog.InfoContext(telemetry.Restore(ctx, w.TraceContext), "delivery not admitted", "organization", w.Organization, "delivery_id", w.DeliveryID, "reason", refused[i])
+		} else {
+			attempts = append(attempts, admitted[i])
+		}
+	}
+	if d.client == nil {
+		d.client = NewWebhookClient(d.timeout(), d.AllowPrivateAddresses)
+	}
+	outcomes, elapsed, known := make([]AttemptOutcome, len(attempts)), make([]time.Duration, len(attempts)), make([]bool, len(attempts))
+	pending := make(chan int, len(attempts))
+	for i := range attempts {
+		pending <- i
+	}
+	close(pending)
+	var wg sync.WaitGroup
+	for range deliveryBatchConcurrency {
+		wg.Go(func() {
+			for i := range pending {
+				if ctx.Err() != nil {
+					return
+				}
+				start := time.Now()
+				sendCtx, span := telemetry.Start(telemetry.Restore(ctx, attempts[i].TraceContext), "webhook.delivery")
+				outcomes[i], known[i] = d.send(sendCtx, attempts[i])
+				if !known[i] {
+					telemetry.Fail(span, sendCtx.Err())
+				} else if outcomes[i].Outcome != AttemptAcknowledged {
+					telemetry.Fail(span, errors.New(outcomes[i].ErrorCode))
+				}
+				attempts[i].TraceContext = telemetry.Encode(sendCtx)
+				span.End()
+				elapsed[i] = time.Since(start)
+			}
+		})
+	}
+	wg.Wait()
+	var recordAttempts []AdmittedAttempt
+	var recordOutcomes []AttemptOutcome
+	var retries []Retry
+	var durations []time.Duration
+	for i, a := range attempts {
+		if !known[i] {
+			// Interrupted and not-yet-started admitted attempts have no known
+			// receiver outcome. Their leases retain the existing recovery path.
+			slog.WarnContext(telemetry.Restore(ctx, a.TraceContext), "delivery attempt interrupted", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number)
+			continue
+		}
+		retry := Retry{Window: policy.Window}
+		if outcomes[i].Outcome == AttemptRetryableError {
+			retry.Delay = policy.Delay(a.Number, outcomes[i])
+		}
+		recordAttempts, recordOutcomes = append(recordAttempts, a), append(recordOutcomes, outcomes[i])
+		retries, durations = append(retries, retry), append(durations, elapsed[i])
+	}
+	if len(recordAttempts) > 0 {
+		record, cancel := lifecycle.CleanupContext(ctx, 10*time.Second)
+		recorded := store.RecordDeliveries(record, recordAttempts, recordOutcomes, retries)
+		cancel()
+		if len(recorded) != len(recordAttempts) {
+			return true, errors.Join(append(errs, errors.New("delivery batch recording results differ from inputs"))...)
+		}
+		for i, err := range recorded {
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				d.observeAttempt(telemetry.Restore(ctx, recordAttempts[i].TraceContext), recordAttempts[i], recordOutcomes[i], retries[i], durations[i])
+			}
+		}
+	}
+	return true, errors.Join(errs...)
+}
+
+func (d Deliverer) observeAttempt(ctx context.Context, a AdmittedAttempt, outcome AttemptOutcome, retry Retry, elapsed time.Duration) {
 	d.Metrics.Observe(outcome.Outcome)
 	d.Metrics.ObserveDuration(elapsed)
 	slog.InfoContext(ctx, "delivery attempt", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number, "outcome", outcome.Outcome, "http_status", outcome.HTTPStatus, "error_code", outcome.ErrorCode, "retry_delay_ms", retry.Delay.Milliseconds(), "duration_ms", elapsed.Milliseconds())
-	return true, nil
 }
 
 func (d Deliverer) configured(org, destinationID string) bool {

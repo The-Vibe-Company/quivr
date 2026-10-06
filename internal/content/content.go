@@ -928,6 +928,16 @@ func (s Service) Republication(ctx context.Context, org, receiptID string) (Work
 // Dispatch names one accepted command that still needs a durable workflow start.
 type Dispatch struct{ Organization, ReceiptID, TraceContext string }
 
+// DispatchBatch is an immutable, durable group of receipt intents. Its ID
+// survives a lost workflow-start acknowledgement and worker restarts.
+type DispatchBatch struct {
+	ID       string
+	Receipts []Dispatch
+	// Legacy preserves an old receipt's workflow identity after a lost start
+	// acknowledgement, including receipts accepted by an older API process.
+	Legacy bool
+}
+
 var ErrNoDispatch = errors.New("no_pending_dispatch")
 
 // NormalizerRoutes reports whether a Blob media type is routed to an external

@@ -79,6 +79,19 @@ type MatchEvidence struct {
 	Details     map[string]any `json:"details,omitempty"`
 }
 
+// MatchCommit is one validated positive decision in a Record Version group.
+type MatchCommit struct {
+	Intent   Intent
+	Evidence MatchEvidence
+}
+
+// MatchBatchStore optionally commits ordered positive decisions for one
+// Organization, Record and Record Version atomically. Outcomes follow input
+// order; an error commits none of the group.
+type MatchBatchStore interface {
+	CommitMatches(ctx context.Context, matches []MatchCommit) ([]string, error)
+}
+
 // Backlog is the bounded diagnostic view of evaluation work.
 type Backlog struct {
 	Pending  int

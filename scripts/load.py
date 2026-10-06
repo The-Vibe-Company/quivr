@@ -69,7 +69,12 @@ class Receiver:
                 self.end_headers()
             def log_message(self, *_):
                 pass
-        self.server = http.server.ThreadingHTTPServer(('127.0.0.1', port), Handler)
+        class Server(http.server.ThreadingHTTPServer):
+            # Keep the local receiver ahead of bounded webhook fan-out. A
+            # small listen queue adds one-second TCP retransmission stalls
+            # to otherwise immediate fake acknowledgements.
+            request_queue_size = 128
+        self.server = Server(('127.0.0.1', port), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 

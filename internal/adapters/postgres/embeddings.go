@@ -26,7 +26,7 @@ func (s EmbeddingStore) SaveEmbedding(ctx context.Context, e content.Embedding, 
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, e.Organization); err != nil {
+	if err = lockProcessingVersion(ctx, tx, e.Organization, e.VersionID); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO vector_spaces VALUES($1,$2) ON CONFLICT DO NOTHING`, space.ID, space.Manifest); err != nil {
@@ -129,12 +129,16 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
-		return err
-	}
+
 	var recordID, corpusID string
 	var eligible bool
-	err = tx.QueryRow(ctx, `SELECT r.id,r.corpus_id,`+eligibleVersionSQL+` FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, org, seg.VersionID).Scan(&recordID, &corpusID, &eligible)
+	var routing []byte
+	var sourceMediaType *string
+	err = readJournal(ctx, tx, org, `SELECT r.id,r.corpus_id,`+eligibleVersionSQL+`,
+ (SELECT ingestion_routing FROM projection_generations WHERE id=$3),
+ (SELECT coalesce(nullif(ar.source_media_type,''),'text/plain') FROM accepted_revisions ar WHERE (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot))
+ FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
+ WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, []any{org, seg.VersionID, g.ID}, &recordID, &corpusID, &eligible, &routing, &sourceMediaType)
 	if err != nil {
 		return err
 	}
@@ -144,14 +148,15 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 		}
 		return tx.Commit(ctx)
 	}
-	if err = loadGenerationIngestion(ctx, tx, &g); err != nil {
-		return err
+	if len(routing) > 0 {
+		if err = json.Unmarshal(routing, &g.IngestionRouting); err != nil {
+			return err
+		}
 	}
-	var sourceMediaType string
-	if err = tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(ar.source_media_type,''),'text/plain') FROM record_versions v JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot) WHERE v.organization=$1 AND v.id=$2`, org, seg.VersionID).Scan(&sourceMediaType); err != nil {
-		return err
+	if sourceMediaType == nil {
+		return pgx.ErrNoRows
 	}
-	if g.IngestionRouting != nil && g.IngestionRouting.For(sourceMediaType) != "" && g.IngestionRouting.For(sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
+	if g.IngestionRouting != nil && g.IngestionRouting.For(*sourceMediaType) != "" && g.IngestionRouting.For(*sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
 		var routed bool
 		if err = tx.QueryRow(ctx, `SELECT `+routedGenerationSQL("$1", "$2")+`=$3`, org, corpusID, g.ID).Scan(&routed); err != nil {
 			return err
@@ -197,6 +202,7 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 	for _, p := range seg.Segments {
 		segments[p.ID] = true
 	}
+	writes := &pgx.Batch{}
 	for _, e := range artifacts {
 		if e.Organization != org || !segments[e.SegmentID] || !g.Carries(e.SpaceID) {
 			return content.ErrInvalid
@@ -208,24 +214,21 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 		if stored != e.ID {
 			return content.ErrConflict
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, g.ID, e.ID, e.SpaceID); err != nil {
-			return err
-		}
+		writes.Queue(`INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, g.ID, e.ID, e.SpaceID)
 	}
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL,enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
-		return err
-	}
+	writes.Queue(`UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL,enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID)
 	mutation := content.StableID("enrichment", seg.ID, g.ID)
 	var emitted bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM change_events WHERE organization=$1 AND event_id=$2)`, org, content.StableID("event", org, "record.enrichment_available", "record", mutation)).Scan(&emitted); err != nil {
 		return err
 	}
 	if !emitted {
-		if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.enrichment_available", Resource: "record", ResourceID: recordID, MutationID: mutation, VersionID: seg.VersionID}); err != nil {
-			return err
-		}
+		queueEvent(ctx, writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.enrichment_available", Resource: "record", ResourceID: recordID, MutationID: mutation, VersionID: seg.VersionID})
 	}
 
+	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 

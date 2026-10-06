@@ -58,15 +58,25 @@ ON CONFLICT DO NOTHING`); err != nil {
 	}
 	progressed := 0
 	for _, org := range orgs {
-		for i := 0; i < fanOutEvents; i++ {
-			moved, err := s.dispatchStep(ctx, org)
+		for remaining := fanOutEvents; remaining > 0; {
+			processed, paged, err := s.dispatchPrefix(ctx, org, remaining)
 			if err != nil {
 				return progressed, err
 			}
-			if !moved {
+			if paged {
+				moved, err := s.dispatchStep(ctx, org)
+				if err != nil {
+					return progressed, err
+				}
+				if moved {
+					processed = 1
+				}
+			}
+			if processed == 0 {
 				break
 			}
-			progressed++
+			remaining -= processed
+			progressed += processed
 		}
 	}
 	return progressed, nil
@@ -355,7 +365,11 @@ func (s EvaluationStore) Backlog(ctx context.Context) (monitoring.Backlog, error
 // Match on a correction of an already matched Record links its predecessor
 // and is announced as match.corrected.
 func (s EvaluationStore) CommitMatch(ctx context.Context, in monitoring.Intent, evidence monitoring.MatchEvidence) (string, error) {
-	return s.commit(ctx, in, func(tx pgx.Tx) (string, error) { return commitMatch(ctx, tx, in, evidence) })
+	outcomes, err := s.CommitMatches(ctx, []monitoring.MatchCommit{{Intent: in, Evidence: evidence}})
+	if err != nil {
+		return "", err
+	}
+	return outcomes[0], nil
 }
 
 // CommitNoMatch records a negative decision. On an eligible correction of a
