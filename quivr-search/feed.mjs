@@ -1,9 +1,9 @@
-// Live feed of the demo Corpus, kept by the facade. It follows the public
-// resynchronization procedure once, server-side: capture a start-now change
-// cursor, scan the Record catalog newest first, then consume the change
-// stream with the server key and reread each Record an event names. Browsers
-// read a snapshot and a fan-out SSE stream; the core key and change cursors
-// never reach them. Older days are read on demand: one range of the catalog
+// Live feed of one Corpus the demo reads, kept by the facade. It follows the
+// public resynchronization procedure once, server-side: capture a start-now
+// change cursor, scan the Record catalog newest first, then consume the
+// change stream with the server key and reread each Record an event names.
+// Browsers read a snapshot and a fan-out SSE stream over the corpora they
+// pick (views.mjs); the core key and change cursors never reach them. Older days are read on demand: one range of the catalog
 // by acceptance date, and cached counts per day. Every article it reads, or
 // sees withdrawn, is told to the index of the whole corpus (catalog.mjs).
 //
@@ -16,8 +16,6 @@ const MAX_ITEMS = 1000;
 const SNAPSHOT_ITEMS = 300;
 const CATALOG_PAGES = 10;
 const HYDRATE_CONCURRENCY = 6;
-const MAX_CLIENTS = 200;
-const KEEPALIVE_MS = 15000;
 const IDLE_MS = 45000;
 const TITLE_CHARS = 300; // the page cuts titles to one line, the tooltip shows them whole
 const EXCERPT_CHARS = 320;
@@ -93,6 +91,7 @@ export function describe(record, version, receivedAt) {
   const item = {
     record_id: record.record_id,
     version_id: version.version_id,
+    corpus_id: record.source?.corpus_id,
     namespace: record.source?.namespace || "",
     title: clip(title, TITLE_CHARS),
     excerpt: clip(excerpt, EXCERPT_CHARS),
@@ -150,7 +149,7 @@ const unavailable = (status) =>
       )
     : failure(503, "La veille est momentanément indisponible. Réessayez.");
 // What a browser is told when a day cannot be listed or counted.
-const unlisted = (status) =>
+export const unlisted = (status) =>
   status === 409
     ? failure(409, "La liste de ce jour a changé. Choisissez-le à nouveau.")
     : failure(
@@ -160,9 +159,11 @@ const unlisted = (status) =>
           : "Les articles de ce jour sont momentanément indisponibles. Réessayez.",
       );
 
-export function createFeed({ core, key, corpus, upstream, index }) {
+export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
   const items = new Map();
-  const clients = new Set();
+  // The streams of browsers following this corpus (views.mjs), told of each
+  // item, removal, reset and liveness.
+  const listeners = new Set();
   // Other views of the demo corpus (the Admin tab) told of each change as it
   // is read, before its Record is reread, and of the stream's liveness.
   const watchers = new Set();
@@ -176,8 +177,7 @@ export function createFeed({ core, key, corpus, upstream, index }) {
     new URLSearchParams({ corpus_id: corpus, ...extra }).toString();
 
   function broadcast(event, data) {
-    const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const res of clients) res.write(frame);
+    for (const listener of listeners) listener(event, data);
   }
   function setLive(value) {
     if (live === value) return;
@@ -217,6 +217,7 @@ export function createFeed({ core, key, corpus, upstream, index }) {
     if (version.status === 404) return;
     if (version.status !== 200) throw failure(version.status, "version read");
     const arrived = date(version.data.accepted_at) || receivedAt;
+    onVersion?.(id, version.data.version_id, arrived);
     const item = describe(current, version.data, arrived || known?.received_at);
     // A new Version of an article already in the feed whose title or text
     // changed is a correction: the reader says so, dated by that Version's
@@ -393,6 +394,7 @@ export function createFeed({ core, key, corpus, upstream, index }) {
           ).catch(() => ({ status: 503 }));
           if (version.status === 404) continue;
           if (version.status !== 200) throw unlisted(503);
+          onVersion?.(record.record_id, version.data.version_id, date(version.data.accepted_at));
           out[index] = describe(record, version.data, date(version.data.accepted_at));
         }
       }),
@@ -446,11 +448,6 @@ export function createFeed({ core, key, corpus, upstream, index }) {
     );
     return started;
   }
-  const keepalive = setInterval(() => {
-    for (const res of clients) res.write(": keepalive\n\n");
-  }, KEEPALIVE_MS);
-  keepalive.unref();
-
   return {
     /** Reads the catalog once and follows the change stream from then on. */
     start() {
@@ -474,6 +471,15 @@ export function createFeed({ core, key, corpus, upstream, index }) {
         live,
       };
     },
+    /** Whether the change stream is followed right now. */
+    live: () => live,
+    /** listener(event, data) for each item, remove, reset and status; returns its removal. */
+    listen(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    /** The feed items of listed Records of this corpus, in their order. */
+    describeRecords: (records) => describeListed(records),
     /**
      * One page of a period, newest first: ?after=…&before=… (RFC 3339, the
      * browser's local day) and the cursor of the page before, if any.
@@ -525,23 +531,6 @@ export function createFeed({ core, key, corpus, upstream, index }) {
         });
       }
       return entry.answer;
-    },
-    async subscribe(req, res) {
-      await start();
-      // The browser may have left during the first catalog scan.
-      if (req.socket.destroyed || res.destroyed) return;
-      if (clients.size >= MAX_CLIENTS)
-        throw failure(503, "Trop de connexions au flux. Réessayez.");
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-Accel-Buffering": "no",
-      });
-      res.write(
-        `retry: 3000\nevent: status\ndata: ${JSON.stringify({ live })}\n\n`,
-      );
-      clients.add(res);
-      req.on("close", () => clients.delete(res));
     },
   };
 }

@@ -1,4 +1,4 @@
-// An index of every article of the demo corpus, so the demo's numbers cover
+// An index of every article of one corpus the demo reads, so the demo's numbers cover
 // all of them and not only the latest the feed keeps (THE-1038). It holds
 // one small entry per Record: its source, current Version and acceptance
 // time. The engine's listing does not return acceptance times, so the index
@@ -33,7 +33,7 @@ const TOPIC_TITLES = 20000;
 const MAX_TOPIC_SPAN = 8 * DAY;
 // A Version whose title could not be read is tried again after this.
 const UNREADABLE_MS = 10 * 60000;
-const TOPICS = 10;
+export const TOPICS = 10;
 const TOPICS_FRESH_MS = 15000;
 const TOPICS_TTL_MS = 60000;
 // While titles are still being read, topics are counted again this often.
@@ -360,18 +360,10 @@ export function createCatalog({ upstream: read, corpus, caught, ready = async ()
     }
   }
 
-  const topicsCache = new Map();
-  async function topicsOf(q, key) {
+  // The known titles of a period's articles (the newest TOPIC_TITLES), and
+  // whether some are still being read or were left out.
+  async function periodTitles(q) {
     const now = Date.now();
-    const hit = topicsCache.get(key);
-    const age = hit ? now - hit.at : Infinity;
-    if (
-      hit &&
-      (hit.value.building
-        ? age < TOPICS_PARTIAL_MS
-        : age < TOPICS_FRESH_MS || (age < TOPICS_TTL_MS && hit.generation === generation))
-    )
-      return hit.value;
     const matched = q.alerts.length ? await matchedMap() : new Map();
     const keep = filterOf({ ...q, read: "all" }, matched);
     let period = [];
@@ -391,11 +383,31 @@ export function createCatalog({ upstream: read, corpus, caught, ready = async ()
     }
     if (missing)
       pump().catch((error) => console.warn(`Index: titles not read (${error.message})`));
+    return {
+      known,
+      building: status().building || missing > 0,
+      partial: capped || truncated,
+    };
+  }
+
+  const topicsCache = new Map();
+  async function topicsOf(q, key) {
+    const now = Date.now();
+    const hit = topicsCache.get(key);
+    const age = hit ? now - hit.at : Infinity;
+    if (
+      hit &&
+      (hit.value.building
+        ? age < TOPICS_PARTIAL_MS
+        : age < TOPICS_FRESH_MS || (age < TOPICS_TTL_MS && hit.generation === generation))
+    )
+      return hit.value;
+    const { known, building, partial } = await periodTitles(q);
     const value = {
       items: topics(known, TOPICS),
       ...status(),
-      building: status().building || missing > 0,
-      partial: capped || truncated,
+      building,
+      partial,
       as_of: iso(now),
     };
     topicsCache.delete(key);
@@ -444,6 +456,11 @@ export function createCatalog({ upstream: read, corpus, caught, ready = async ()
     async topics(q) {
       ensure();
       return topicsOf(q, JSON.stringify(q));
+    },
+    /** The titles topics count for a period, to merge with other corpora's. */
+    async titles(q) {
+      ensure();
+      return { ...status(), ...(await periodTitles(q)) };
     },
     /** GET /demo/sources/stats: each source's numbers. */
     async sources(bounds) {
