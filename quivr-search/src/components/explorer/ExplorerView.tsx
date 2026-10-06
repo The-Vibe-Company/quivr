@@ -115,6 +115,18 @@ export function ExplorerView({
         }
     return out;
   }, [corpora, picked]);
+  // Once the corpora are read, a field none of them declares leaves the
+  // address: a shared link naming one filters nothing.
+  useEffect(() => {
+    if (!corpora.length) return;
+    const unknown = Object.keys(state.selection).filter((field) => !types.has(field));
+    if (!unknown.length) return;
+    setState((s) => {
+      const selection = { ...s.selection };
+      for (const field of unknown) delete selection[field];
+      return { ...s, selection };
+    });
+  }, [corpora, types, state.selection]);
   const predicates = useMemo(
     () => predicatesOf(state.selection, types, state.range),
     [state.selection, state.range, types],
@@ -230,7 +242,10 @@ export function ExplorerView({
       ? counted.reduce((n, c) => n + c.documents!, 0)
       : undefined;
   const fresh = facets?.key === facetsKey ? facets : null;
-  const picks = Object.entries(state.selection).flatMap(([field, values]) => values.map((value) => ({ field, value })));
+  // Only filters the requests carry show as active: a field of unknown type is not.
+  const picks = Object.entries(state.selection)
+    .filter(([field]) => types.has(field))
+    .flatMap(([field, values]) => values.map((value) => ({ field, value })));
   const active = picks.length + (state.range ? 1 : 0);
   // The corpora left out, as the list and the counts of the same filters report them.
   const excluded = mergeExclusions([...(page?.excluded_corpora || []), ...(fresh?.excluded_corpora || [])]);
