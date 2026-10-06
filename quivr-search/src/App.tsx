@@ -107,7 +107,8 @@ function urlState() {
     alert: p.get("alert"),
     // A document's timeline on the Admin tab.
     version: p.get("version"),
-    query: p.get("q") || "",
+    // The Explorer keeps its own search in the address.
+    query: view === "explorer" ? "" : p.get("q") || "",
     // "Idées proches" is on unless the address turns it off.
     near: p.get("near") !== "0" && p.get("mode") !== "lexical",
     doc:
@@ -291,6 +292,11 @@ function Dashboard({
     initial.view === "explorer" && initial.corpora.length ? initial.corpora : [corpus],
   );
   const [record, setRecord] = useState<string | null>(initial.explored);
+  // The Explorer's own part of the address: its search, filters, range and
+  // the document it previews (THE-1204).
+  const [explorerParams, setExplorerParams] = useState(() =>
+    initial.view === "explorer" ? location.search : "",
+  );
   const scope = scopeOf(feedCorpora, corpus);
   const searchRef = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -369,6 +375,8 @@ function Dashboard({
     if (view === "feed" && query && !near) p.set("near", "0");
     if (view === "feed" && scope) p.set("corpora", scope);
     if (view === "explorer" && scopeOf(explored, corpus)) p.set("corpora", explored.join(","));
+    if (view === "explorer")
+      for (const [key, value] of new URLSearchParams(explorerParams)) p.append(key, value);
     if (view === "explorer" && record) p.set("record", record);
     if (view === "feed" && doc) {
       p.set("record", doc.record);
@@ -383,7 +391,7 @@ function Dashboard({
       view === "feed" && query
         ? `${query} — Quivr Veille`
         : `${TITLES[view]} — Quivr Veille`;
-  }, [view, alert, version, query, near, doc, scope, explored, record, corpus]);
+  }, [view, alert, version, query, near, doc, scope, explored, explorerParams, record, corpus]);
 
   // "/" or Ctrl/Cmd+K puts the cursor in the search box, from any page.
   useEffect(() => {
@@ -398,8 +406,10 @@ function Dashboard({
         ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k")
       ) {
         event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
+        // The Explorer has its own search field, in place of the bar's.
+        const field = document.querySelector<HTMLInputElement>("#explorer-search") || searchRef.current;
+        field?.focus();
+        field?.select();
       }
     };
     window.addEventListener("keydown", listener);
@@ -555,6 +565,7 @@ function Dashboard({
           {/* A page's own figures beside its title: its count, what needs a look. */}
           <span className="bar-meta" ref={setBarMeta} data-stale={view !== page || undefined} />
         </span>
+        {view !== "explorer" && (
         <form
           role="search"
           className="bar-search"
@@ -607,6 +618,7 @@ function Dashboard({
             </kbd>
           )}
         </form>
+        )}
         {/* A page's main action, at the top right. Until the page asked for
             is drawn (`page` follows `view`), the previous page's stay hidden. */}
         <div className="bar-actions" ref={setBarActions} data-stale={view !== page || undefined} />
@@ -686,6 +698,8 @@ function Dashboard({
                 setRecord(id);
                 window.scrollTo(0, 0);
               }}
+              initial={explorerParams}
+              onState={setExplorerParams}
               onUnauthorized={onUnauthorized}
             />
           ) : page === "admin" ? (

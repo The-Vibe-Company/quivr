@@ -23,6 +23,8 @@ export interface Corpus {
   demo: boolean;
   common: Field[];
   own: Field[];
+  /** How many documents it holds, when the engine could count them. */
+  documents?: number;
 }
 
 export const fetchCorpora = (signal?: AbortSignal) =>

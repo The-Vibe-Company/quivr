@@ -10,7 +10,7 @@ import type { Page, Route } from "@playwright/test";
 import { feedStats, filterOf, sourceStats } from "../stats.mjs";
 import { topics } from "../topics.mjs";
 // The facade's reading of fields, and its facet counts (THE-1171, THE-1184).
-import { COMMON_FIELDS, countFacets, fieldValues } from "../explore.mjs";
+import { COMMON_FIELDS, countFacets, fieldValues, windowOf } from "../explore.mjs";
 
 const minutes = (n: number) => new Date(Date.now() - n * 60000).toISOString();
 /** A local time `n` days ago, at that hour. */
@@ -413,12 +413,19 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       return json(route, { corpus_id: "demo", name: "Espace démo" });
     if (path === "/demo/feed")
       return json(route, { items: inCorpora(pickedOf(url)).map(feedItem), live: true });
-    if (path === "/demo/corpora") return json(route, { items: ws.corpora });
-    if (path === "/demo/explore") {
-      const { kept, excluded } = explore(url);
-      const start = Number(url.searchParams.get("cursor") || 0);
+    if (path === "/demo/corpora")
       return json(route, {
-        items: kept.slice(start, start + 3).map((a) => {
+        items: ws.corpora.map((c) => ({ ...c, documents: stored([c.corpus_id]).length })),
+      });
+    if (path === "/demo/explore") {
+      const { kept: listed, excluded } = explore(url);
+      // A text keeps the documents that hold it, all on one page.
+      const q = (url.searchParams.get("q") || "").toLowerCase();
+      const kept = q ? listed.filter((a) => `${a.title} ${a.body}`.toLowerCase().includes(q)) : listed;
+      const start = Number(url.searchParams.get("cursor") || 0);
+      const size = q ? kept.length : 3;
+      return json(route, {
+        items: kept.slice(start, start + size).map((a) => {
           const v = versionOf(a);
           const c = ws.corpora.find((x) => x.corpus_id === (a.corpus_id || "demo"))!;
           const metadata: Record<string, unknown[]> = {};
@@ -426,9 +433,9 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
             const values = fieldValues(v, f);
             if (values.length) metadata[f.name] = values;
           }
-          return { ...feedItem(a), metadata };
+          return { ...feedItem(a), metadata, version: a.previous ? 2 : 1 };
         }),
-        next_cursor: start + 3 < kept.length ? String(start + 3) : undefined,
+        next_cursor: start + size < kept.length ? String(start + size) : undefined,
         ...(excluded.length ? { excluded_corpora: excluded } : {}),
       });
     }
@@ -442,6 +449,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
           ids: corpora,
           fields: [...COMMON_FIELDS, ...own],
           predicates,
+          timeline: { field: "metadata.published_at", window: windowOf(url.searchParams.get("window")) },
         }),
       );
     }
