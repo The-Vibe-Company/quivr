@@ -110,10 +110,11 @@ class Forwarding(unittest.TestCase):
                         if len(received) == 1:
                             self.wfile.write(b'{"error":"private-provider-error"}')
                         else:
-                            self.wfile.write(json.dumps({'usage': {'prompt_tokens': 2},
-                                                        'meta': {'billed_units': {'input_tokens': 2}},
-                                                        'data': [{'index': 0, 'embedding': [1, 0]}],
-                                                        'embeddings': {'float': [[1, 0]]}}).encode())
+                            result = ({'usage': {'prompt_tokens': 2},
+                                       'data': [{'index': 0, 'embedding': [1, 0]}]} if format == 'openai' else
+                                      {'meta': {'billed_units': {'input_tokens': 2}},
+                                       'embeddings': {'float': [[1, 0]]}})
+                            self.wfile.write(json.dumps(result).encode())
                 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Provider)
                 thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01})
                 thread.start()

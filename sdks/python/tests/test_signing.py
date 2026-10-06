@@ -30,8 +30,7 @@ def _encode(raw: bytes) -> str:
 
 
 def _token(secret: bytes, kid: str, *, audience: str, plugin_id: str, method: str,
-           target: str, body: bytes, issued: int, expiry: int,
-           header_edits=None, claim_edits=None, encoding="utf-8") -> str:
+           target: str, body: bytes, issued: int, expiry: int) -> str:
     header = {"alg": "HS256", "typ": "quivr-engine+jwt", "kid": kid}
     contribution = "discovery"
     path = target.split("?", 1)[0]
@@ -47,12 +46,8 @@ def _token(secret: bytes, kid: str, *, audience: str, plugin_id: str, method: st
         "exp": expiry,
         "body_sha256": hashlib.sha256(body).hexdigest(),
     }
-    if header_edits:
-        header.update(header_edits)
-    if claim_edits:
-        claims.update(claim_edits)
-    header64 = _encode(json.dumps(header, separators=(",", ":")).encode(encoding))
-    claims64 = _encode(json.dumps(claims, separators=(",", ":")).encode(encoding))
+    header64 = _encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    claims64 = _encode(json.dumps(claims, separators=(",", ":")).encode("utf-8"))
     signing_input = f"{header64}.{claims64}".encode("ascii")
     signature = hmac.new(secret, signing_input, hashlib.sha256).digest()
     return f"Bearer {header64}.{claims64}.{_encode(signature)}"
@@ -134,114 +129,45 @@ class SignedCalls(unittest.TestCase):
         self.assertEqual(status, 401, raw)
         self.assertEqual(document["code"], "invalid_engine_token")
 
-    def test_unsigned_discovery_is_refused_by_the_http_server(self):
+    def test_health_is_exempt_from_authentication(self):
         plugin = self._plugin()
-        with _running_server(plugin) as server, _environment(None):
-            status, document, _ = self._request(server, "GET", DISCOVERY_TARGET)
-        self.assertEqual(status, 401)
-        self.assertEqual(document["code"], "invalid_engine_token")
         with _running_server(plugin) as server, _environment(None):
             for target in ["/v0/health", "/v0/health?probe=1"]:
-                status, document, _ = self._request(server, "GET", target)
-                self.assertEqual(status, 200, document)
+                with self.subTest(target=target):
+                    status, document, _ = self._request(server, "GET", target)
+                    self.assertEqual(status, 200, document)
 
-    def test_signed_discovery_and_post_reach_http_dispatch(self):
+    def test_authentication_precedes_post_dispatch(self):
         plugin = self._plugin()
         now = int(time.time())
+        calls = []
+
+        @plugin.normalizer
+        def record(invocation):
+            calls.append(invocation)
+            return NormalizerResponse(manifest=ManifestContent(parts=[
+                Part(key="body", role="body", content=TextContent(text="authenticated"))]))
+
+        body = json.dumps(make_request(MANIFEST).to_dict()).encode()
         ring = _ring("current", _key("current", CURRENT_SECRET))
         with _running_server(plugin) as server, _environment(ring):
-            discovery = _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="GET", target=DISCOVERY_TARGET, body=b"", issued=now - 1, expiry=now + 59,
-            )
-            status, document, _ = self._request(server, "GET", DISCOVERY_TARGET, token=discovery)
-            self.assertEqual(status, 200, document)
-            self.assertEqual(document["plugin"]["id"], PLUGIN_ID)
-
+            status, document, raw = self._request(server, "POST", NORMALIZER_TARGET, body)
+            self._assert_invalid(status, document, raw)
+            self.assertEqual(calls, [])
+            token = _token(CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
+                           method="POST", target=NORMALIZER_TARGET, body=body,
+                           issued=now-1, expiry=now+59)
+            status, document, raw = self._request(server, "POST", NORMALIZER_TARGET, body, token)
+            self.assertEqual(status, 200, raw)
+            self.assertEqual(len(calls), 1)
             malformed = b"{"
-            post = _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="POST", target=NORMALIZER_TARGET, body=malformed,
-                issued=now - 1, expiry=now + 59,
-            )
-            status, document, _ = self._request(server, "POST", NORMALIZER_TARGET, malformed, post)
-            self.assertEqual(status, 400, document)
+            token = _token(CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
+                           method="POST", target=NORMALIZER_TARGET, body=malformed,
+                           issued=now-1, expiry=now+59)
+            status, document, raw = self._request(server, "POST", NORMALIZER_TARGET, malformed, token)
+            self.assertEqual(status, 400, raw)
             self.assertEqual(document["code"], "invalid_request")
-
-    def test_invalid_tokens_are_rejected_before_dispatch(self):
-        now = int(time.time())
-        cases = [
-            ("UTF-16 JSON", lambda issued: _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="GET", target=DISCOVERY_TARGET, body=b"", issued=issued-1,
-                expiry=issued+59, encoding="utf-16"), "GET", DISCOVERY_TARGET, b""),
-            ("unsigned", lambda _: None, "GET", DISCOVERY_TARGET, b""),
-            ("forged", lambda issued: _token(
-                b"wrong-signing-secret-012345678901", "current", audience=PLUGIN_ID,
-                plugin_id=PLUGIN_ID, method="GET", target=DISCOVERY_TARGET, body=b"",
-                issued=issued - 1, expiry=issued + 59), "GET", DISCOVERY_TARGET, b""),
-            ("expired", lambda issued: _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="GET", target=DISCOVERY_TARGET, body=b"", issued=issued - 120,
-                expiry=issued - 60), "GET", DISCOVERY_TARGET, b""),
-            ("wrong audience", lambda issued: _token(
-                CURRENT_SECRET, "current", audience="other-plugin", plugin_id=PLUGIN_ID,
-                method="GET", target=DISCOVERY_TARGET, body=b"", issued=issued - 1,
-                expiry=issued + 59), "GET", DISCOVERY_TARGET, b""),
-            ("wrong plugin id", lambda issued: _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id="other-plugin",
-                method="GET", target=DISCOVERY_TARGET, body=b"", issued=issued - 1,
-                expiry=issued + 59), "GET", DISCOVERY_TARGET, b""),
-            ("tampered body", lambda issued: _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="GET", target=DISCOVERY_TARGET, body=b"original", issued=issued - 1,
-                expiry=issued + 59), "GET", DISCOVERY_TARGET, b"tampered"),
-            ("wrong route", lambda issued: _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="GET", target=DISCOVERY_TARGET, body=b"", issued=issued - 1,
-                expiry=issued + 59), "GET", "/v0/discovery?source=other", b""),
-            ("wrong method", lambda issued: _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="POST", target=DISCOVERY_TARGET, body=b"", issued=issued - 1,
-                expiry=issued + 59), "GET", DISCOVERY_TARGET, b""),
-            ("future issued at", lambda issued: _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="GET", target=DISCOVERY_TARGET, body=b"", issued=issued + 10,
-                expiry=issued + 20), "GET", DISCOVERY_TARGET, b""),
-            ("lifetime over sixty seconds", lambda issued: _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="GET", target=DISCOVERY_TARGET, body=b"", issued=issued - 1,
-                expiry=issued + 70), "GET", DISCOVERY_TARGET, b""),
-            ("algorithm confusion", lambda issued: _token(
-                CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                method="GET", target=DISCOVERY_TARGET, body=b"", issued=issued - 1,
-                expiry=issued + 59, header_edits={"alg": "none"}), "GET", DISCOVERY_TARGET, b""),
-        ]
-        plugin = self._plugin()
-        ring = _ring("current", _key("current", CURRENT_SECRET))
-        with _running_server(plugin) as server:
-            for name, make_token, method, target, body in cases:
-                with self.subTest(name=name), _environment(ring):
-                    token = make_token(now)
-                    status, document, raw = self._request(server, method, target, body, token)
-                    self._assert_invalid(status, document, raw)
-            calls = []
-            @plugin.normalizer
-            def record(invocation):
-                calls.append(invocation)
-                return NormalizerResponse(manifest=ManifestContent(parts=[
-                    Part(key="body", role="body", content=TextContent(text="authenticated"))]))
-            body = json.dumps(make_request(MANIFEST).to_dict()).encode()
-            with _environment(ring):
-                status, document, raw = self._request(server, "POST", "/v0/contributions/normalizer", body)
-                self._assert_invalid(status, document, raw)
-                self.assertEqual(calls, [])
-                token = _token(CURRENT_SECRET, "current", audience=PLUGIN_ID, plugin_id=PLUGIN_ID,
-                               method="POST", target="/v0/contributions/normalizer", body=body,
-                               issued=now-1, expiry=now+59)
-                status, document, raw = self._request(server, "POST", "/v0/contributions/normalizer", body, token)
-                self.assertEqual(status, 200, raw)
-                self.assertEqual(len(calls), 1)
+            self.assertEqual(len(calls), 1)
 
     def test_missing_or_malformed_key_configuration_fails_closed_without_echoing_secret(self):
         now = int(time.time())

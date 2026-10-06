@@ -150,7 +150,7 @@ func (p *Plugin) serveSubscription(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	req.logger = p.logger.With("invocation_id", req.InvocationID, "idempotency_key", req.IdempotencyKey)
+	req.logger = p.requestLogger(r.Context(), Credential{}, req.InvocationID).With("idempotency_key", req.IdempotencyKey)
 	defer p.ingestPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(s.TimeoutMS)*time.Millisecond)
 	defer cancel()

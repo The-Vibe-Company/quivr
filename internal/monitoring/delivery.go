@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/netguard"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 // Attempt outcomes. An attempt without an outcome fact reads as in_flight.
@@ -29,6 +30,7 @@ const (
 
 // DeliveryWork is one leased unit of durable delivery work.
 type DeliveryWork struct {
+	TraceContext string
 	Organization string
 	DeliveryID   string
 	// Lease fences the claim: admission is refused once another claim or a
@@ -39,6 +41,7 @@ type DeliveryWork struct {
 // AdmittedAttempt is an attempt whose admission fact is already committed. It
 // carries the exact immutable notice bytes to send.
 type AdmittedAttempt struct {
+	TraceContext  string
 	Organization  string
 	DeliveryID    string
 	AttemptID     string
@@ -147,7 +150,7 @@ func NewWebhookClient(timeout time.Duration, allowPrivate bool) *http.Client {
 	transport.MaxResponseHeaderBytes = 16 << 10
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: transport,
+		Transport: telemetry.Transport(transport, "webhook.request"),
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -201,7 +204,7 @@ func (d Deliverer) Run(ctx context.Context) {
 				progressed, err := d.Step(step)
 				cancel()
 				if err != nil && ctx.Err() == nil {
-					slog.Warn("delivery worker unavailable", "error", boundedError(err))
+					slog.WarnContext(ctx, "delivery worker unavailable", "error", boundedError(err))
 				}
 				if progressed && err == nil {
 					wait = poll
@@ -231,13 +234,16 @@ func (d Deliverer) Step(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	ctx = telemetry.Restore(ctx, w.TraceContext)
+	ctx, span := telemetry.Start(ctx, "webhook.delivery")
+	defer span.End()
 	policy := d.Retry.WithDefaults()
 	a, refused, err := d.Store.Admit(ctx, w, policy.Window, d.configured)
 	if err != nil {
 		return true, err
 	}
 	if refused != "" {
-		slog.Info("delivery not admitted", "organization", w.Organization, "delivery_id", w.DeliveryID, "reason", refused)
+		slog.InfoContext(ctx, "delivery not admitted", "organization", w.Organization, "delivery_id", w.DeliveryID, "reason", refused)
 		return true, nil
 	}
 	sent := time.Now()
@@ -247,7 +253,7 @@ func (d Deliverer) Step(ctx context.Context) (bool, error) {
 		// Shutdown interrupted the request after admission: the receiver may
 		// have processed it. Leave the attempt without an outcome; lease
 		// recovery records it unknown and admits the notice again.
-		slog.Warn("delivery attempt interrupted", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number)
+		slog.WarnContext(ctx, "delivery attempt interrupted", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number)
 		return true, nil
 	}
 	// The outcome is recorded even when the step context is ending.
@@ -260,7 +266,7 @@ func (d Deliverer) Step(ctx context.Context) (bool, error) {
 	if err = d.Store.Record(record, a, outcome, retry); err != nil {
 		return true, err
 	}
-	d.observeAttempt(a, outcome, retry, elapsed)
+	d.observeAttempt(ctx, a, outcome, retry, elapsed)
 	return true, nil
 }
 
@@ -305,7 +311,11 @@ func (d Deliverer) stepBatch(ctx context.Context, store DeliveryBatchStore) (boo
 					return
 				}
 				start := time.Now()
-				outcomes[i], known[i] = d.send(ctx, attempts[i])
+				sendCtx, span := telemetry.Start(telemetry.Restore(ctx, attempts[i].TraceContext), "webhook.delivery")
+				outcomes[i], known[i] = d.send(sendCtx, attempts[i])
+				telemetry.Fail(span, ctx.Err())
+				attempts[i].TraceContext = telemetry.Encode(sendCtx)
+				span.End()
 				elapsed[i] = time.Since(start)
 			}
 		})
@@ -340,17 +350,17 @@ func (d Deliverer) stepBatch(ctx context.Context, store DeliveryBatchStore) (boo
 			if err != nil {
 				errs = append(errs, err)
 			} else {
-				d.observeAttempt(recordAttempts[i], recordOutcomes[i], retries[i], durations[i])
+				d.observeAttempt(telemetry.Restore(ctx, recordAttempts[i].TraceContext), recordAttempts[i], recordOutcomes[i], retries[i], durations[i])
 			}
 		}
 	}
 	return true, errors.Join(errs...)
 }
 
-func (d Deliverer) observeAttempt(a AdmittedAttempt, outcome AttemptOutcome, retry Retry, elapsed time.Duration) {
+func (d Deliverer) observeAttempt(ctx context.Context, a AdmittedAttempt, outcome AttemptOutcome, retry Retry, elapsed time.Duration) {
 	d.Metrics.Observe(outcome.Outcome)
 	d.Metrics.ObserveDuration(elapsed)
-	slog.Info("delivery attempt", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number, "outcome", outcome.Outcome, "http_status", outcome.HTTPStatus, "error_code", outcome.ErrorCode, "retry_delay_ms", retry.Delay.Milliseconds(), "duration_ms", elapsed.Milliseconds())
+	slog.InfoContext(ctx, "delivery attempt", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number, "outcome", outcome.Outcome, "http_status", outcome.HTTPStatus, "error_code", outcome.ErrorCode, "retry_delay_ms", retry.Delay.Milliseconds(), "duration_ms", elapsed.Milliseconds())
 }
 
 func (d Deliverer) configured(org, destinationID string) bool {
@@ -391,6 +401,7 @@ func (d Deliverer) attempt(ctx context.Context, a AdmittedAttempt) (AttemptOutco
 		return AttemptOutcome{Outcome: AttemptPermanentError, ErrorCode: "destination_unavailable", ErrorMessage: "destination URL unusable"}, nil
 	}
 	timestamp := strconv.FormatInt(d.now().Unix(), 10)
+	telemetry.Inject(ctx, req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "quivr-webhook/0")
 	req.Header.Set("webhook-id", a.EventID)
@@ -401,7 +412,7 @@ func (d Deliverer) attempt(ctx context.Context, a AdmittedAttempt) (AttemptOutco
 		var refused *netguard.RefusedError
 		if errors.As(err, &refused) {
 			// The refused IP is for operators only; the recorded outcome stays address-free.
-			slog.Warn("delivery destination address refused", "organization", a.Organization, "delivery_id", a.DeliveryID, "destination_id", a.DestinationID, "address", refused.Address)
+			slog.WarnContext(ctx, "delivery destination address refused", "organization", a.Organization, "delivery_id", a.DeliveryID, "destination_id", a.DestinationID, "address", refused.Address)
 			return AttemptOutcome{Outcome: AttemptPermanentError, ErrorCode: "destination_address_refused", ErrorMessage: "destination address is not allowed"}, nil
 		}
 		var netErr net.Error

@@ -922,7 +922,7 @@ func (s Service) Republication(ctx context.Context, org, receiptID string) (Work
 }
 
 // Dispatch names one accepted command that still needs a durable workflow start.
-type Dispatch struct{ Organization, ReceiptID string }
+type Dispatch struct{ Organization, ReceiptID, TraceContext string }
 
 // DispatchBatch is an immutable, durable group of receipt intents. Its ID
 // survives a lost workflow-start acknowledgement and worker restarts.

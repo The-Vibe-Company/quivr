@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/monitoring"
@@ -30,14 +31,14 @@ due AS MATERIALIZED (
 claimed AS (
   UPDATE delivery_outbox o SET lease_until=now()+make_interval(secs => $1::double precision)
   FROM due WHERE (o.organization,o.delivery_id)=(due.organization,due.delivery_id)
-  RETURNING o.organization,o.delivery_id,o.lease_until,o.available_at)
-SELECT organization,delivery_id,lease_until FROM claimed ORDER BY available_at,delivery_id`, lease.Seconds(), s.Organization, limit)
+  RETURNING o.organization,o.delivery_id,o.lease_until,o.available_at,o.trace_context)
+SELECT organization,delivery_id,lease_until,trace_context FROM claimed ORDER BY available_at,delivery_id`, lease.Seconds(), s.Organization, limit)
 	if err != nil {
 		return nil, err
 	}
 	works, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (monitoring.DeliveryWork, error) {
 		var w monitoring.DeliveryWork
-		err := row.Scan(&w.Organization, &w.DeliveryID, &w.Lease)
+		err := row.Scan(&w.Organization, &w.DeliveryID, &w.Lease, &w.TraceContext)
 		return w, err
 	})
 	if err == nil && len(works) == 0 {
@@ -139,7 +140,7 @@ func (s DeliveryStore) AdmitDeliveries(ctx context.Context, works []monitoring.D
 		}
 	}
 	for i, w := range works {
-		attempts[i], refused[i], errs[i] = s.admit(ctx, w, window, configured)
+		attempts[i], refused[i], errs[i] = s.admit(telemetry.Restore(ctx, w.TraceContext), w, window, configured)
 	}
 	return attempts, refused, errs
 }
@@ -176,7 +177,7 @@ func (s DeliveryStore) admitDeliveryGroup(ctx context.Context, works []monitorin
 	attemptIDs, eventIDs, corpusIDs := make([]string, len(works)), make([]string, len(works)), make([]string, len(works))
 	writes := &pgx.Batch{}
 	for i, g := range guards {
-		a := monitoring.AdmittedAttempt{Organization: org, DeliveryID: works[i].DeliveryID, Number: 1, EventID: g.eventID, DestinationID: g.destination, Body: g.body}
+		a := monitoring.AdmittedAttempt{Organization: org, DeliveryID: works[i].DeliveryID, Number: 1, EventID: g.eventID, DestinationID: g.destination, Body: g.body, TraceContext: works[i].TraceContext}
 		a.AttemptID = attemptID(org, a.DeliveryID, a.Number)
 		attempts[i] = a
 		attemptIDs[i], eventIDs[i], corpusIDs[i] = a.AttemptID, eventID(deliveryStateEvent(org, g.corpusID, a.DeliveryID, a.Number, "delivering")), g.corpusID
@@ -184,7 +185,7 @@ func (s DeliveryStore) admitDeliveryGroup(ctx context.Context, works []monitorin
 	writes.Queue(`INSERT INTO delivery_attempts(organization,id,delivery_id,number)
 SELECT $1,x.attempt_id,x.delivery_id,1 FROM unnest($2::text[],$3::text[]) AS x(attempt_id,delivery_id)`, org, attemptIDs, ids)
 	writes.Queue(`UPDATE deliveries SET state='delivering',attempt_count=1 WHERE organization=$1 AND id=ANY($2::text[])`, org, ids)
-	writes.Queue(deliveryEventsBatchSQL, org, eventIDs, corpusIDs, ids)
+	writes.Queue(deliveryEventsBatchSQL, org, eventIDs, corpusIDs, ids, attemptTraceContexts(attempts))
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return true, nil, err
 	}
@@ -202,13 +203,13 @@ func deliveryStateEvent(org, corpusID, deliveryID string, number int, state stri
 // journal lock. Ordinality assigns each event its original input position;
 // the committed head is visible only with the whole range and its other facts.
 const deliveryEventsBatchSQL = `WITH inputs AS (
-  SELECT * FROM unnest($2::text[],$3::text[],$4::text[])
-    WITH ORDINALITY AS x(event_id,corpus_id,delivery_id,ordinal)),
+  SELECT * FROM unnest($2::text[],$3::text[],$4::text[],$5::text[])
+    WITH ORDINALITY AS x(event_id,corpus_id,delivery_id,trace_context,ordinal)),
 position AS (
   UPDATE organization_journals SET last_sequence=last_sequence+cardinality($2::text[])
   WHERE organization=$1 RETURNING last_sequence-cardinality($2::text[]) AS base)
-INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id)
-SELECT $1,position.base+inputs.ordinal,inputs.event_id,inputs.corpus_id,'delivery.updated','delivery',inputs.delivery_id,NULL
+INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id,trace_context)
+SELECT $1,position.base+inputs.ordinal,inputs.event_id,inputs.corpus_id,'delivery.updated','delivery',inputs.delivery_id,NULL,inputs.trace_context
 FROM inputs CROSS JOIN position ORDER BY inputs.ordinal`
 
 type deliveryRecordGuard struct {
@@ -266,7 +267,7 @@ func (s DeliveryStore) RecordDeliveries(ctx context.Context, attempts []monitori
 		}
 	}
 	for i, a := range attempts {
-		errs[i] = s.record(ctx, a, outcomes[i], retries[i])
+		errs[i] = s.record(telemetry.Restore(ctx, a.TraceContext), a, outcomes[i], retries[i])
 	}
 	return errs
 }
@@ -306,10 +307,18 @@ func (s DeliveryStore) recordDeliveryGroup(ctx context.Context, attempts []monit
 SELECT $1,x.attempt_id,'acknowledged',NULLIF(x.http_status,0),x.error_code,left(x.error_message,200)
 FROM unnest($2::text[],$3::integer[],$4::text[],$5::text[]) AS x(attempt_id,http_status,error_code,error_message)`, org, attemptIDs, statuses, codes, messages)
 	writes.Queue(`UPDATE deliveries SET state='delivered',exhausted_reason='',last_outcome='acknowledged' WHERE organization=$1 AND id=ANY($2::text[])`, org, ids)
-	writes.Queue(deliveryEventsBatchSQL, org, eventIDs, corpusIDs, ids)
+	writes.Queue(deliveryEventsBatchSQL, org, eventIDs, corpusIDs, ids, attemptTraceContexts(attempts))
 	writes.Queue(`DELETE FROM delivery_outbox WHERE organization=$1 AND delivery_id=ANY($2::text[])`, org, ids)
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return true, err
 	}
 	return true, tx.Commit(ctx)
+}
+
+func attemptTraceContexts(attempts []monitoring.AdmittedAttempt) []string {
+	out := make([]string, len(attempts))
+	for i, a := range attempts {
+		out[i] = a.TraceContext
+	}
+	return out
 }

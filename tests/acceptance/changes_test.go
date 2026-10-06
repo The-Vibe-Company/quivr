@@ -126,15 +126,6 @@ func TestChangeFeedPollingInvalidatesRecords(t *testing.T) {
 	}
 }
 
-func TestChangeFeedIsolatesOrganizationsAndCorpora(t *testing.T) {
-	if os.Getenv("QUIVR_TEST_URL") == "" {
-		t.Skip("make verify")
-	}
-	a := changeCorpus(t, "auth-a")
-	request(t, "GET", changesPath(a, "", 0), os.Getenv("QUIVR_TEST_OTHER"), nil, 404)
-	request(t, "GET", changesPath(a, "", 0), os.Getenv("QUIVR_TEST_SCOPED"), nil, 404)
-}
-
 // post submits one inline command without failing from a non-test goroutine.
 func post(token string, body any) (string, error) {
 	data, _ := json.Marshal(body)

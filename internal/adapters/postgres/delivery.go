@@ -149,7 +149,7 @@ WHERE d.organization=$1 AND d.id=$2 FOR UPDATE OF d`, org, w.DeliveryID, window.
 		}
 		return monitoring.AdmittedAttempt{}, "window_elapsed", tx.Commit(ctx)
 	}
-	a := monitoring.AdmittedAttempt{Organization: org, DeliveryID: w.DeliveryID, Number: count + 1, EventID: eventID, DestinationID: destination, Body: body}
+	a := monitoring.AdmittedAttempt{Organization: org, DeliveryID: w.DeliveryID, Number: count + 1, EventID: eventID, DestinationID: destination, Body: body, TraceContext: w.TraceContext}
 	a.AttemptID = attemptID(org, w.DeliveryID, a.Number)
 	if _, err = tx.Exec(ctx, `INSERT INTO delivery_attempts(organization,id,delivery_id,number) VALUES($1,$2,$3,$4)`, org, a.AttemptID, a.DeliveryID, a.Number); err != nil {
 		return monitoring.AdmittedAttempt{}, "", err

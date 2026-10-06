@@ -10,7 +10,10 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"go.temporal.io/sdk/testsuite"
+	"net/http"
 )
 
 // The activity boundary owns bounded receipt execution, retry checkpoints and
@@ -19,12 +22,13 @@ import (
 func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
-	steps := &batchSteps{started: make(chan struct{}, 32), release: make(chan struct{}), runs: map[string]int{}, enriched: map[string]int{}}
+	steps := &batchSteps{started: make(chan struct{}, 32), release: make(chan struct{}), runs: map[string]int{}, enriched: map[string]int{}, parents: map[string]string{}}
 	pins := &batchPins{steps: steps, expected: 32, held: map[string]bool{}, released: map[string]int{}}
 	registerIngestionBatches(env, steps, pins)
 	in := content.DispatchBatch{ID: "batch"}
 	for i := 0; i < 32; i++ {
-		in.Receipts = append(in.Receipts, content.Dispatch{Organization: "org_a", ReceiptID: fmt.Sprint(i)})
+		parent := telemetry.Extract(logging.WithRequestID(context.Background(), fmt.Sprint(i)), http.Header{"Traceparent": {fmt.Sprintf("00-%032x-2222222222222222-01", i+1)}})
+		in.Receipts = append(in.Receipts, content.Dispatch{Organization: "org_a", ReceiptID: fmt.Sprint(i), TraceContext: telemetry.Encode(parent)})
 	}
 	finished := make(chan struct{})
 	go func() { defer close(finished); env.ExecuteWorkflow(ingestionBatchWorkflow, in) }()
@@ -55,6 +59,9 @@ func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) 
 		t.Fatalf("peak receipt concurrency %d, want 8", peak)
 	}
 	for i := 0; i < 32; i++ {
+		if got := steps.parents[fmt.Sprint(i)]; got != fmt.Sprint(i) {
+			t.Fatalf("receipt %d lost its caller context: %q", i, got)
+		}
 		want := 1
 		if i == 0 || i == 1 {
 			want = 2
@@ -90,6 +97,7 @@ type batchSteps struct {
 	active, peak atomic.Int32
 	mu           sync.Mutex
 	runs         map[string]int
+	parents      map[string]string
 	enriched     map[string]int
 	normalized   bool
 	failed       bool
@@ -112,6 +120,7 @@ func (s *batchSteps) Run(ctx context.Context, _, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.runs[id]++
+	s.parents[id] = logging.RequestID(ctx)
 	if id == "0" && !s.normalized {
 		return content.ErrNormalizationPending
 	}

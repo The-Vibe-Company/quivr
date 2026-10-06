@@ -3,6 +3,9 @@ package postgres_test
 import (
 	"context"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"net/http"
 	"reflect"
 	"regexp"
 	"strings"
@@ -84,7 +87,7 @@ func acceptDispatchBacklog(t *testing.T, ctx context.Context, store fixtureConte
 		if err != nil {
 			t.Fatal(err)
 		}
-		expected = append(expected, content.Dispatch{Organization: org, ReceiptID: receipt.ID})
+		expected = append(expected, content.Dispatch{Organization: org, ReceiptID: receipt.ID, TraceContext: telemetry.Encode(ctx)})
 	}
 	return expected
 }
@@ -241,5 +244,30 @@ func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
 	mixed, err := store.ClaimIngestionBatches(ctx, 8)
 	if err != nil || len(mixed) != 2 || !mixed[0].Legacy || mixed[0].ID != content.StableID("ingestion-e5-v4", oldAPI.Organization, oldAPI.ReceiptID) || !reflect.DeepEqual(mixed[0].Receipts, []content.Dispatch{oldAPI}) || mixed[1].Legacy || !reflect.DeepEqual(mixed[1].Receipts, newAPI) {
 		t.Fatalf("rolling upgrade dispatch: %+v %v", mixed, err)
+	}
+}
+
+// Owns the durable API-to-dispatch handoff: a new pool must recover the original
+// W3C parent and caller ID. Temporal tests cannot detect missing persisted data.
+func TestAcceptancePersistsTraceAcrossDispatcherRestart(t *testing.T) {
+	ctx := telemetry.Extract(context.Background(), http.Header{"Traceparent": []string{"00-11111111111111111111111111111111-2222222222222222-01"}})
+	ctx = logging.WithRequestID(ctx, "caller-request-123")
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	expected := acceptDispatchBacklog(t, ctx, contentStores(pool), 1)
+	next, err := pgxpool.NewWithConfig(ctx, pool.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer next.Close()
+	claimed, err := contentStores(next).ClaimIngestionBatches(context.Background(), 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim: %v (%v)", claimed, err)
+	}
+	restored := telemetry.Capture(telemetry.Restore(context.Background(), claimed[0].Receipts[0].TraceContext))
+	if restored.Traceparent != "00-11111111111111111111111111111111-2222222222222222-01" || restored.RequestID != "caller-request-123" || claimed[0].Receipts[0].ReceiptID != expected[0].ReceiptID {
+		t.Fatalf("durable trace lost: %+v", restored)
 	}
 }

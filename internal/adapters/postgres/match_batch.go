@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -198,9 +199,9 @@ func writeNewMatches(ctx context.Context, tx pgx.Tx, matches []monitoring.MatchC
 		completeVersions, completeSequences, completeOutcomes = append(completeVersions, in.SubscriptionVersionID), append(completeSequences, in.Sequence), append(completeOutcomes, outcomes[i])
 	}
 	if len(ids) > 0 {
-		writes.Queue(`INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id)
-SELECT $1,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$6::bigint+x.position,x.event_id,x.corpus_id,'match.created','match',x.match_id,NULL
-FROM unnest($2::bigint[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(position,event_id,corpus_id,match_id,ordinal) ORDER BY x.ordinal`, org, ordinals, eventIDs, corpusIDs, ids, count)
+		writes.Queue(`INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id,trace_context)
+SELECT $1,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$6::bigint+x.position,x.event_id,x.corpus_id,'match.created','match',x.match_id,NULL,$7
+FROM unnest($2::bigint[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(position,event_id,corpus_id,match_id,ordinal) ORDER BY x.ordinal`, org, ordinals, eventIDs, corpusIDs, ids, count, telemetry.Encode(ctx))
 		writes.Queue(`INSERT INTO matches(organization,id,subscription_id,subscription_version_id,saved_query_id,saved_query_version_id,corpus_id,record_id,record_version_id,previous_match_id,evidence,position)
 SELECT $1,x.match_id,x.subscription_id,x.subscription_version_id,x.query_id,x.query_version_id,x.corpus_id,$2,$3,NULL,x.evidence,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$12::bigint+x.position
 FROM unnest($4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::text[],$10::jsonb[],$11::bigint[])
@@ -212,8 +213,8 @@ FROM unnest($2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(de
 SELECT $1,x.event_id,'match.created',x.match_id,$2,$3,x.subscription_id,x.subscription_version_id,x.delivery_id,NULL,x.body,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$11::bigint+x.position
 FROM unnest($4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::bytea[],$10::bigint[])
   WITH ORDINALITY AS x(event_id,match_id,subscription_id,subscription_version_id,delivery_id,body,position,ordinal) ORDER BY x.ordinal`, org, matches[0].Intent.RecordID, matches[0].Intent.VersionID, eventIDs, ids, subscriptionIDs, subscriptionVersions, deliveryIDs, bodies, ordinals, count)
-		writes.Queue(`INSERT INTO delivery_outbox(organization,delivery_id)
-SELECT $1,x.delivery_id FROM unnest($2::text[]) WITH ORDINALITY AS x(delivery_id,ordinal) ORDER BY x.ordinal`, org, deliveryIDs)
+		writes.Queue(`INSERT INTO delivery_outbox(organization,delivery_id,trace_context)
+SELECT $1,x.delivery_id,$3 FROM unnest($2::text[]) WITH ORDINALITY AS x(delivery_id,ordinal) ORDER BY x.ordinal`, org, deliveryIDs, telemetry.Encode(ctx))
 	}
 	if len(completeVersions) > 0 {
 		writes.Queue(completeMatchGroupSQL, org, completeVersions, completeSequences, completeOutcomes)

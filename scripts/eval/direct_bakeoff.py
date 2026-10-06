@@ -29,6 +29,8 @@ import public_sets
 import scoring
 import trec
 
+import ci_guard
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = 'multilingual-e5-small (current)'
 E5_MODEL = 'intfloat/multilingual-e5-small'
@@ -365,7 +367,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.out.exists():
         raise FileExistsError('output exists; choose a new evidence filename')
-    if any(os.environ.get(name, '').lower() not in ('', '0', 'false') for name in ('CI', 'GITHUB_ACTIONS')):
+    if ci_guard.in_ci():
         raise SystemExit('direct comparison runs locally only; CI execution is refused')
     budget = embeddings.Budget(args.max_input_tokens, args.max_usd)
     prices = dict(PRICES)

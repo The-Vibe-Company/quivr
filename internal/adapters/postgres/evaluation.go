@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -101,10 +102,10 @@ func (s EvaluationStore) dispatchStep(ctx context.Context, org string) (bool, er
 		return false, err
 	}
 	var sequence int64
-	var corpusID, recordID, versionID, eventType string
-	err = tx.QueryRow(ctx, `SELECT sequence,corpus_id,resource_id,coalesce(record_version_id,''),event_type FROM change_events
+	var corpusID, recordID, versionID, eventType, traceContext string
+	err = tx.QueryRow(ctx, `SELECT sequence,corpus_id,resource_id,coalesce(record_version_id,''),event_type,trace_context FROM change_events
 WHERE organization=$1 AND sequence>$2 AND sequence<=$3 AND event_type IN ('record.retrieval_ready','record.enrichment_available','record.withdrawn')
-ORDER BY sequence LIMIT 1`, org, position, head).Scan(&sequence, &corpusID, &recordID, &versionID, &eventType)
+ORDER BY sequence LIMIT 1`, org, position, head).Scan(&sequence, &corpusID, &recordID, &versionID, &eventType, &traceContext)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if position == head {
 			return false, nil
@@ -168,7 +169,7 @@ ORDER BY s.id LIMIT $5`, org, corpusID, sequence, after, s.page(), versionID, ev
 			return false, err
 		}
 		for _, c := range page {
-			if _, err = tx.Exec(ctx, `INSERT INTO evaluation_intents(organization,subscription_version_id,sequence,subscription_id,corpus_id,record_id,record_version_id,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`, org, c.version, sequence, c.subscription, corpusID, recordID, c.recordVersion, kind); err != nil {
+			if _, err = tx.Exec(ctx, `INSERT INTO evaluation_intents(organization,subscription_version_id,sequence,subscription_id,corpus_id,record_id,record_version_id,kind,trace_context) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, org, c.version, sequence, c.subscription, corpusID, recordID, c.recordVersion, kind, traceContext); err != nil {
 				return false, err
 			}
 		}
@@ -270,9 +271,9 @@ ORDER BY c.available_at,c.sequence LIMIT 1`, busy).Scan(&in.Kind, &in.Organizati
 	}
 	err = tx.QueryRow(ctx, `UPDATE evaluation_intents i SET lease_until=now()+make_interval(secs => $4::double precision)
 WHERE i.organization=$1 AND i.subscription_version_id=$2 AND i.sequence=$3 AND i.state='pending' AND i.available_at<=now() AND i.lease_until<now()
-RETURNING i.kind,i.organization,i.subscription_id,i.subscription_version_id,i.sequence,i.corpus_id,i.record_id,i.record_version_id,i.attempts`,
+RETURNING i.kind,i.organization,i.subscription_id,i.subscription_version_id,i.sequence,i.corpus_id,i.record_id,i.record_version_id,i.attempts,i.trace_context`,
 		in.Organization, in.SubscriptionVersionID, in.Sequence, lease.Seconds()).Scan(
-		&in.Kind, &in.Organization, &in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID, &in.Attempts)
+		&in.Kind, &in.Organization, &in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID, &in.Attempts, &in.TraceContext)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return in, errClaimLost
 	}
@@ -651,7 +652,7 @@ func commitNotice(ctx context.Context, tx pgx.Tx, org string, n notice, withMatc
 		org, eventID(event), n.Kind, r.MatchID, r.RecordID, r.RecordVersionID, r.SubscriptionID, r.SubscriptionVersionID, r.DeliveryID, previous, body, position); err != nil {
 		return false, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO delivery_outbox(organization,delivery_id) VALUES($1,$2)`, org, r.DeliveryID); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO delivery_outbox(organization,delivery_id,trace_context) VALUES($1,$2,$3)`, org, r.DeliveryID, telemetry.Encode(ctx)); err != nil {
 		return false, err
 	}
 	return true, nil

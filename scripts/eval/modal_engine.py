@@ -17,6 +17,8 @@ import control_store
 import results
 import embeddings
 
+import ci_guard
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 COMPUTE_NOTICE = ('The compute cap covers runner reservations, not the full Modal invoice; '
                   'image builds, storage and other account charges need separate operator budgeting.')
@@ -307,7 +309,7 @@ def main(argv=None):
                               'modal_reservation_usd': float(reservation(cfg)),
                               'confirmation_available': False, 'compute_cap_notice': COMPUTE_NOTICE}))
         return 0
-    if any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
+    if ci_guard.in_ci():
         parser.error('CI measurements are refused')
     if not args.smoke or not args.allow_paid or not re.fullmatch(r'[A-Za-z0-9_.-]+', args.campaign):
         parser.error('live smoke requires --smoke --allow-paid --campaign with a plain identifier')

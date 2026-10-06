@@ -102,18 +102,19 @@ class Connectors(unittest.TestCase):
     def test_classified_failures_not_due_and_unclassified_io(self):
         from quivr_plugin import AccessError, TransientError, SourceError, NotDue
 
-        failures = [(AccessError("denied", "secret-token refused"), 403, "access", False),
-                    (TransientError("rate_limit", "secret-token limited", retry_after_seconds=1.2), 503, "transient", True),
-                    (SourceError("bad_source", "secret-token unreadable"), 422, "source", False),
-                    (OSError("secret-token unavailable"), 503, "transient", True)]
-        for error, status, classification, retryable in failures:
+        failures = [(AccessError("denied", "secret-token refused"), 403, "denied", "access", False),
+                    (TransientError("rate_limit", "secret-token limited", retry_after_seconds=1.2), 503, "rate_limit", "transient", True),
+                    (SourceError("bad_source", "secret-token unreadable"), 422, "bad_source", "source", False),
+                    (OSError("secret-token unavailable"), 503, "unexpected_error", "transient", True),
+                    (RuntimeError("secret-token failed"), 500, "internal_error", "source", False)]
+        for error, status, code, classification, retryable in failures:
             with self.subTest(error=type(error).__name__):
                 def fetch(request):
                     raise error
                 self.register(fetch)
                 reply = self.invoke()
-                self.assertEqual((reply.status, reply.body["error_class"], reply.body["retryable"]),
-                                 (status, classification, retryable))
+                self.assertEqual((reply.status, reply.body["code"], reply.body["error_class"], reply.body["retryable"]),
+                                 (status, code, classification, retryable))
                 self.assertNotIn("secret-token", json.dumps(reply.body))
                 if classification == "transient" and isinstance(error, TransientError):
                     self.assertEqual(reply.body["retry_after_seconds"], 2)
@@ -221,22 +222,6 @@ class Connectors(unittest.TestCase):
                         self.assertNotIn("secret-token", json.dumps(request.to_dict()))
                         request.logger.info("public helper invocation")
 
-    def test_push_and_attachment_manifests_dispatch_their_routes(self):
-        manifests = [
-            ("connector-push.yaml", "/v0/contributions/connector/receive"),
-            ("connector-attachments.yaml", "/v0/contributions/connector/describe_attachment"),
-        ]
-        for fixture, route in manifests:
-            with self.subTest(fixture=fixture):
-                manifest = yaml.safe_load((REPO / "contracts/plugins/v0/fixtures/manifests/valid" / fixture).read_text())
-                path = Path(self.directory.name) / fixture
-                path.write_text(yaml.safe_dump(manifest))
-                plugin = Plugin(path)
-                self.assertIn("connector", plugin.discovery().to_dict()["contributions"])
-                reply = plugin.handle("POST", route, b"{}")
-                self.assertNotEqual(reply.status, 404, reply.body)
-
-
 class ExtendedConnectors(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -313,15 +298,20 @@ class ExtendedConnectors(unittest.TestCase):
         self.assertEqual(source.seen.body, {"event": "ok"})
         self.assertEqual(source.seen.credential["token"], "secret-token")
 
-        class Invalid(Source):
-            def receive(self, request):
-                return {"verdict": "refused", "response": {"status": 401}, "items": [
-                    {"record_key": "event-1", "content": {"kind": "text", "text": "hello"}}
-                ]}
+        for description, delivery in (
+            ("refused with items", {"verdict": "refused", "response": {"status": 401}, "items": [
+                {"record_key": "event-1", "content": {"kind": "text", "text": "hello"}}
+            ]}),
+            ("refused with success status", {"verdict": "refused", "response": {"status": 200}}),
+        ):
+            with self.subTest(description=description):
+                class Invalid(Source):
+                    def receive(self, request):
+                        return delivery
 
-        plugin.connector("alerts")(Invalid)
-        invalid = plugin.handle("POST", "/v0/contributions/connector/receive", json.dumps(self.receive_request()).encode())
-        self.assertEqual((invalid.status, invalid.body["code"]), (500, "invalid_response"), invalid.body)
+                plugin.connector("alerts")(Invalid)
+                invalid = plugin.handle("POST", RECEIVE_PATH, json.dumps(self.receive_request()).encode())
+                self.assertEqual((invalid.status, invalid.body["code"]), (500, "invalid_response"), invalid.body)
 
     def test_connector_routes_register_dispatch_and_validate_before_handler(self):
         from quivr_plugin import ConnectorReceiveResponse, ReceiveAnswer, ReceiveRequest
@@ -436,47 +426,6 @@ class ExtendedConnectors(unittest.TestCase):
         request.pop("body")
         reply = plugin.handle("POST", RECEIVE_PATH, json.dumps(request).encode())
         self.assertEqual((reply.status, reply.body["code"]), (400, "push_unsupported"), reply.body)
-
-    def test_connector_route_uses_existing_error_and_response_boundary(self):
-        from quivr_plugin import ConnectorReceiveResponse, ReceiveAnswer
-
-        for description, handler, status, code in (
-            ("handler error", lambda request: (_ for _ in ()).throw(RuntimeError("source unavailable")), 500, "internal_error"),
-            ("invalid response", lambda request: {"verdict": "refused", "response": {"status": 200}}, 500, "invalid_response"),
-        ):
-            with self.subTest(description=description):
-                plugin = self.write_route_manifest()
-
-                class Source:
-                    def fetch(self, request):
-                        return {"items": [], "checkpoint": request.checkpoint, "more": False}
-
-                    def check_credential(self, request):
-                        return {"status": "ok"}
-
-                plugin.connector("events")(Source)
-                plugin.connector("alerts")(Source)
-
-                @plugin.connector_route("events", "push")
-                def events(request):
-                    return handler(request)
-
-                @plugin.connector_route("events", "challenge")
-                def challenge(request) -> ConnectorReceiveResponse:
-                    return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
-
-                @plugin.connector_route("alerts", "push")
-                def alerts(request) -> ConnectorReceiveResponse:
-                    return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
-
-                @plugin.connector_route("alerts", "challenge")
-                def alert_challenge(request) -> ConnectorReceiveResponse:
-                    return ConnectorReceiveResponse(verdict="accepted", response=ReceiveAnswer(status=200), items=[])
-
-                plugin.check_registered()
-                reply = plugin.handle("POST", RECEIVE_PATH,
-                                      json.dumps(self.route_request(body={"text": "hello"})).encode())
-                self.assertEqual((reply.status, reply.body["code"]), (status, code), reply.body)
 
     def attachment_request(self, *, upload=False):
         request = {

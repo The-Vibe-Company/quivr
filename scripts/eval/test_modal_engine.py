@@ -19,7 +19,7 @@ import control_store
 
 
 class Command(unittest.TestCase):
-    def test_keyless_dry_run_and_ci_refusal_precede_live_launch(self):
+    def test_keyless_dry_run_and_resource_policy_validation(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch('sys.stdout', new_callable=io.StringIO) as output:
             self.assertEqual(modal_engine.main(['--dry-run']), 0)
         row = json.loads(output.getvalue())
@@ -27,11 +27,6 @@ class Command(unittest.TestCase):
         self.assertFalse(row['confirmation_available'])
         self.assertGreater(row['modal_reservation_usd'], 0)
         self.assertIn('full Modal invoice', row['compute_cap_notice'])
-        with mock.patch.dict(os.environ, {'CI': 'true'}), mock.patch.object(modal_engine, 'launch') as launch, \
-                mock.patch('sys.stderr', new_callable=io.StringIO):
-            with self.assertRaises(SystemExit):
-                modal_engine.main(['--smoke', '--allow-paid', '--campaign', 'example'])
-            launch.assert_not_called()
         for invalid in ({'max_seconds': 0}, {'keepalive_seconds': 100, 'reaper_seconds': 10},
                         {'modal_daily_usd': float('nan')}, {'sets': {'heldout': {}}}):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):

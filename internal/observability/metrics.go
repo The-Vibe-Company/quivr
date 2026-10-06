@@ -1,12 +1,8 @@
 package observability
 
 import (
-	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"io"
-	"sort"
-	"strconv"
-	"strings"
-	"sync"
 )
 
 // Outcome label values.
@@ -21,78 +17,29 @@ const (
 // guards against a misconfiguration.
 const maxSeries = 256
 
-// family is one Prometheus metric family with dynamic but bounded labels.
 type family struct {
-	name, help string
-	labels     []string
+	instrument *telemetry.Family
 	histogram  bool
-	mu         sync.Mutex
-	series     map[string]*sample
-}
-
-type sample struct {
-	values  []string
-	count   int64
-	sumSec  float64
-	buckets [Buckets]int64
 }
 
 func newFamily(name, help string, histogram bool, labels ...string) *family {
-	return &family{name: name, help: help, labels: labels, histogram: histogram, series: map[string]*sample{}}
-}
-
-func (f *family) observe(ms float64, values ...string) {
-	key := strings.Join(values, "\x00")
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	s, ok := f.series[key]
-	if !ok {
-		if len(f.series) >= maxSeries {
-			return
-		}
-		s = &sample{values: values}
-		f.series[key] = s
-	}
-	s.count++
-	if f.histogram {
-		s.sumSec += ms / 1000
-		s.buckets[bucketOf(ms)]++
-	}
-}
-
-func (f *family) write(w io.Writer) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	kind := "counter"
-	if f.histogram {
-		kind = "histogram"
-	}
-	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s %s\n", f.name, f.help, f.name, kind)
-	keys := make([]string, 0, len(f.series))
-	for k := range f.series {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		s := f.series[k]
-		pairs := make([]string, len(s.values))
-		for i, v := range s.values {
-			pairs[i] = fmt.Sprintf("%s=%q", f.labels[i], v)
-		}
-		labels := strings.Join(pairs, ",")
-		if !f.histogram {
-			fmt.Fprintf(w, "%s{%s} %d\n", f.name, labels, s.count)
-			continue
-		}
-		var cumulative int64
+	var bounds []float64
+	if histogram {
+		bounds = make([]float64, len(BoundsMS))
 		for i, b := range BoundsMS {
-			cumulative += s.buckets[i]
-			fmt.Fprintf(w, "%s_bucket{%s,le=%q} %d\n", f.name, labels, strconv.FormatFloat(b/1000, 'g', -1, 64), cumulative)
+			bounds[i] = b / 1000
 		}
-		fmt.Fprintf(w, "%s_bucket{%s,le=\"+Inf\"} %d\n%s_sum{%s} %s\n%s_count{%s} %d\n", f.name, labels, s.count,
-			f.name, labels, strconv.FormatFloat(s.sumSec, 'g', -1, 64), f.name, labels, s.count)
+	}
+	return &family{telemetry.NewFamily(name, help, labels, bounds, maxSeries), histogram}
+}
+func (f *family) observe(ms float64, values ...string) {
+	if f.histogram {
+		f.instrument.Observe(ms/1000, values...)
+	} else {
+		f.instrument.Add(1, values...)
 	}
 }
+func (f *family) write(w io.Writer) { f.instrument.Write(w) }
 
 // metrics are the Prometheus metrics a Recorder keeps beside its rollups.
 // They are per process and reset at restart, like every /metrics value.
@@ -139,8 +86,4 @@ func (m *metrics) write(w io.Writer) {
 	m.searches.write(w)
 	m.searchDurations.write(w)
 	m.matches.write(w)
-}
-
-func writeCounter(w io.Writer, name, help string, value int64) {
-	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, value)
 }

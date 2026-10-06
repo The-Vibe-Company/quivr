@@ -117,14 +117,18 @@ func (s SpaceStore) VectorSpaces(ctx context.Context, org, corpusID string) (con
 	if err != nil {
 		return g, nil, 0, notFound(err)
 	}
-	// Bound cut lookup by each eligible Version even when freshly indexed
+	// Bound current-version and cut lookups by each eligible Record even when freshly indexed
 	// data has stale statistics. Aggregate coverage by owner/space before
 	// joining totals so an underestimated Version count cannot cause a
 	// quadratic join. Every count still comes from one database snapshot.
 	rows, err := s.Pool.Query(ctx, `WITH current AS MATERIALIZED (
  SELECT cut.segment_id,v.id AS version_id,cut.plugin_id,cut.role,
  count(*) OVER (PARTITION BY cut.plugin_id,v.id) AS version_segments
- FROM records r JOIN record_versions v ON (v.organization,v.id,v.record_id)=(r.organization,r.current_version_id,r.id)
+ FROM records r JOIN LATERAL (
+  SELECT v.* FROM record_versions v
+  WHERE (v.organization,v.id)=(r.organization,r.current_version_id)
+  OFFSET 0
+ ) v ON v.record_id=r.id
  JOIN LATERAL (
   SELECT sg.id AS segment_id,pc.plugin_id,pc.role FROM projection_coverage pc
   JOIN segments sg ON (sg.organization,sg.version_id,sg.segmentation_id)=(pc.organization,pc.version_id,pc.segmentation_id)

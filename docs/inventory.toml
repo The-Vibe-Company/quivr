@@ -105,6 +105,7 @@ excluded = [
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
 "plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources, live feed and the admin view" }
+"sdks/AGENTS.md" = { audience = "contributor", kind = "guide", summary = "keep each SDK test contract at its owning boundary" }
 "sdks/go/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and certify every kind of plugin in Go" }
 "sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run Python plugins" }
 "tests/acceptance/README.md" = { audience = "contributor", kind = "guide", summary = "the public acceptance suite and how to run it" }
@@ -144,6 +145,7 @@ excluded = [
 "plugins/rss/README.md" = 60
 "plugins/x-list/README.md" = 60
 "quivr-search/README.md" = 117
+"sdks/AGENTS.md" = 8
 "sdks/go/README.md" = 212
 "sdks/python/README.md" = 166
 "tests/acceptance/README.md" = 50

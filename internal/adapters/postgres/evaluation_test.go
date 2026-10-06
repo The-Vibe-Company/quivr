@@ -14,7 +14,9 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/monitoring"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"github.com/jackc/pgx/v5/pgconn"
+	"net/http"
 )
 
 // TestEvaluationDispatchAndAtomicMatchCommit proves the evaluation boundaries
@@ -26,6 +28,7 @@ import (
 func TestEvaluationDispatchAndAtomicMatchCommit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	ctx = telemetry.Extract(ctx, http.Header{"Traceparent": {"00-11111111111111111111111111111111-2222222222222222-01"}})
 	pool := adapterPool(t, ctx)
 	run := fmt.Sprint(time.Now().UnixNano())
 	org := "adapter-evaluation-" + run
@@ -352,7 +355,7 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		}
 	}
 	var retry monitoring.Intent
-	if err = pool.QueryRow(ctx, `SELECT subscription_id,subscription_version_id,sequence FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='pending'`, org, laterVersion).Scan(&retry.SubscriptionID, &retry.SubscriptionVersionID, &retry.Sequence); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT subscription_id,subscription_version_id,sequence,trace_context FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2 AND state='pending'`, org, laterVersion).Scan(&retry.SubscriptionID, &retry.SubscriptionVersionID, &retry.Sequence, &retry.TraceContext); err != nil {
 		t.Fatal(err)
 	}
 	retry.Kind, retry.Organization, retry.CorpusID, retry.RecordID, retry.VersionID = monitoring.IntentEvaluation, org, a.ID, laterRecord, laterVersion
@@ -370,15 +373,18 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	// numeric range, so this fails during the real writes, after the first one.
 	groupRecord, groupVersion := searchable(a.ID, "group")
 	drain()
-	rows, err = pool.Query(ctx, `SELECT subscription_id,subscription_version_id,sequence FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2`, org, groupVersion)
+	rows, err = pool.Query(ctx, `SELECT subscription_id,subscription_version_id,sequence,trace_context FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2`, org, groupVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
 	groupIntents := map[string]monitoring.Intent{}
 	for rows.Next() {
 		in := monitoring.Intent{Kind: monitoring.IntentEvaluation, Organization: org, CorpusID: a.ID, RecordID: groupRecord, VersionID: groupVersion}
-		if err = rows.Scan(&in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence); err != nil {
+		if err = rows.Scan(&in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.TraceContext); err != nil {
 			t.Fatal(err)
+		}
+		if in.TraceContext != telemetry.Encode(ctx) {
+			t.Fatalf("prefix fanout lost its event parent: %q", in.TraceContext)
 		}
 		groupIntents[in.SubscriptionID] = in
 	}
@@ -501,6 +507,10 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		e := window.Events[i]
 		if e.ID != eventID || e.Type != monitoring.NoticeCreated || e.ResourceID != id || e.ResourceKind != "match" || e.Monitoring == nil || e.Monitoring.DeliveryID != deliveryID || !e.OccurredAt.Equal(window.Events[0].OccurredAt) {
 			t.Fatalf("group feed event %d: %+v", i, e)
+		}
+		var parent string
+		if err := pool.QueryRow(ctx, "SELECT trace_context FROM delivery_outbox WHERE organization=$1 AND delivery_id=$2", org, deliveryID).Scan(&parent); err != nil || parent != telemetry.Encode(ctx) {
+			t.Fatalf("batch match lost durable delivery parent: %q %v", parent, err)
 		}
 		delivery, err := store.Delivery(ctx, org, deliveryID)
 		if err != nil || delivery.State != "pending" || delivery.AttemptCount != 0 || !delivery.Admission.Allowed {

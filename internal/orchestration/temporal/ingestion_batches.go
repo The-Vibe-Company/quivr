@@ -3,6 +3,8 @@ package temporal
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"go.opentelemetry.io/otel/trace"
 	"sync"
 	"time"
 
@@ -104,7 +106,7 @@ func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 			for _, receipt := range in.Receipts {
 				// Release is idempotent: a crash or dependency failure can retry
 				// already released receipts without replaying their processing.
-				if err := pins.Release(ctx, workIngestion, receipt.Organization, receipt.ReceiptID); err != nil {
+				if err := pins.Release(telemetry.Restore(ctx, receipt.TraceContext), workIngestion, receipt.Organization, receipt.ReceiptID); err != nil {
 					return err
 				}
 			}
@@ -114,6 +116,9 @@ func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 }
 
 func processBatchedReceipt(ctx context.Context, steps Steps, pins Pinner, in content.Dispatch) error {
+	parent := trace.SpanContextFromContext(ctx)
+	ctx, span := telemetry.Start(telemetry.Restore(ctx, in.TraceContext), "ingestion.receipt", trace.WithLinks(trace.Link{SpanContext: parent}))
+	defer span.End()
 	pinned, err := pins.Pin(ctx, workIngestion, in.Organization, in.ReceiptID)
 	if err != nil {
 		return err

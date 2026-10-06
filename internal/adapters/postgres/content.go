@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -70,21 +71,21 @@ func appendEvent(ctx context.Context, tx pgx.Tx, event eventInput) error {
 // hold the Organization journal lock, so positions commit in order.
 const appendEventSQL = `WITH position AS (
 UPDATE organization_journals SET last_sequence=last_sequence+1 WHERE organization=$1 RETURNING last_sequence
-) INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id)
-SELECT $1,last_sequence,$2,$3,$4,$5,$6,NULLIF($7,'') FROM position RETURNING sequence`
+) INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id,trace_context)
+SELECT $1,last_sequence,$2,$3,$4,$5,$6,NULLIF($7,''),$8 FROM position RETURNING sequence`
 
-func eventArguments(event eventInput) []any {
-	return []any{event.Organization, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID}
+func eventArguments(ctx context.Context, event eventInput) []any {
+	return []any{event.Organization, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID, telemetry.Encode(ctx)}
 }
 
 func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, error) {
 	var sequence int64
-	err := tx.QueryRow(ctx, appendEventSQL, eventArguments(event)...).Scan(&sequence)
+	err := tx.QueryRow(ctx, appendEventSQL, eventArguments(ctx, event)...).Scan(&sequence)
 	return sequence, err
 }
 
-func queueEvent(batch *pgx.Batch, event eventInput) {
-	batch.Queue(appendEventSQL, eventArguments(event)...)
+func queueEvent(ctx context.Context, batch *pgx.Batch, event eventInput) {
+	batch.Queue(appendEventSQL, eventArguments(ctx, event)...)
 }
 
 func notFound(err error) error {
@@ -181,15 +182,15 @@ func (s MaterializationStore) Publish(ctx context.Context, w content.Work, publi
 			for _, part := range publication.Parts {
 				writes.Queue("INSERT INTO version_parts VALUES($1,$2,$3,$4,$5)", w.Organization, w.VersionID, part.Key, part.Role, content.StableID("blob", w.Organization, part.Blob.SHA256))
 			}
-			queueEvent(writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.materialized", Resource: "record", ResourceID: w.RecordID, MutationID: w.VersionID})
+			queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.materialized", Resource: "record", ResourceID: w.RecordID, MutationID: w.VersionID})
 			if q := publication.Quarantine; q != nil {
-				queueEvent(writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.quarantined", Resource: "record", ResourceID: w.RecordID, MutationID: content.StableID("quarantine", w.VersionID, q.Code)})
+				queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.quarantined", Resource: "record", ResourceID: w.RecordID, MutationID: content.StableID("quarantine", w.VersionID, q.Code)})
 			}
 
 		}
 	}
 	writes.Queue("UPDATE ingestion_receipts SET state='resolved',outcome=$3,version_id=nullif($4,''),processing=$5,error_code=$6 WHERE organization=$1 AND id=$2", w.Organization, w.ReceiptID, outcome, versionID, processing, code)
-	queueEvent(writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "receipt.resolved", Resource: "receipt", ResourceID: w.ReceiptID})
+	queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "receipt.resolved", Resource: "receipt", ResourceID: w.ReceiptID})
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return err
 	}

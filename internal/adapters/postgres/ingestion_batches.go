@@ -82,8 +82,8 @@ FROM pending p WHERE b.id=p.id RETURNING b.id,b.receipts,b.legacy_workflow`, bef
 ), moved AS (
  DELETE FROM ingestion_outbox o USING chosen p
  WHERE (o.organization,o.receipt_id)=(p.organization,p.receipt_id)
- RETURNING o.organization,o.receipt_id,o.enqueued_at,o.legacy_workflow
-) SELECT organization,receipt_id,enqueued_at,legacy_workflow FROM moved ORDER BY enqueued_at,organization,receipt_id`)
+ RETURNING o.organization,o.receipt_id,o.enqueued_at,o.legacy_workflow,o.trace_context
+) SELECT organization,receipt_id,enqueued_at,legacy_workflow,trace_context FROM moved ORDER BY enqueued_at,organization,receipt_id`)
 	if err != nil {
 		return b, err
 	}
@@ -92,7 +92,7 @@ FROM pending p WHERE b.id=p.id RETURNING b.id,b.receipts,b.legacy_workflow`, bef
 	for rows.Next() {
 		var d content.Dispatch
 		var arrived time.Time
-		if err = rows.Scan(&d.Organization, &d.ReceiptID, &arrived, &b.Legacy); err != nil {
+		if err = rows.Scan(&d.Organization, &d.ReceiptID, &arrived, &b.Legacy, &d.TraceContext); err != nil {
 			rows.Close()
 			return b, err
 		}

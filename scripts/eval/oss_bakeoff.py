@@ -21,6 +21,8 @@ import urllib.request
 import direct_bakeoff
 import public_sets
 
+import ci_guard
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TEI = 'ghcr.io/huggingface/text-embeddings-inference:'
 CANDIDATES = {
@@ -302,7 +304,7 @@ def main(argv=None):
                             'estimate_only': True, 'price_date': '2026-10-03', 'price_source': 'https://modal.com/pricing',
                             'rates': RATES, 'excluded_costs': 'image builds, scheduling/startup, egress, credits; metered usage can differ'})
         return 0
-    if any(os.environ.get(n, '').lower() not in ('', '0', 'false') for n in ('CI', 'GITHUB_ACTIONS')):
+    if ci_guard.in_ci():
         raise SystemExit('paid Modal dispatch is refused in CI')
     if not args.acknowledge_cost:
         parser.error('run requires coordinator --acknowledge-cost; inspect plan first')

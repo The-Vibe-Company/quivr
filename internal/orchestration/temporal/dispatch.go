@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"log/slog"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ type Intent interface {
 	Start() (client.StartWorkflowOptions, string, interface{})
 	Complete(context.Context) error
 	Retry(context.Context) error
+	Context(context.Context) context.Context
 }
 
 type IntentSource interface {
@@ -32,12 +34,16 @@ type intentSource func(context.Context) ([]Intent, error)
 func (s intentSource) Claim(ctx context.Context) ([]Intent, error) { return s(ctx) }
 
 type dispatchIntent struct {
+	traceContext    string
 	options         client.StartWorkflowOptions
 	name            string
 	input           interface{}
 	complete, retry func(context.Context) error
 }
 
+func (i dispatchIntent) Context(ctx context.Context) context.Context {
+	return telemetry.Restore(ctx, i.traceContext)
+}
 func (i dispatchIntent) Start() (client.StartWorkflowOptions, string, interface{}) {
 	return i.options, i.name, i.input
 }
@@ -130,6 +136,7 @@ func (r *Runtime) dispatchBatch(ctx context.Context, source IntentSource, starts
 
 func (r *Runtime) dispatchIntent(ctx context.Context, intent Intent) {
 	options, name, input := intent.Start()
+	ctx = intent.Context(ctx)
 	_, err := r.Client.ExecuteWorkflow(ctx, options, name, input)
 	var already *serviceerror.WorkflowExecutionAlreadyStarted
 	if err == nil || errors.As(err, &already) {
@@ -137,7 +144,7 @@ func (r *Runtime) dispatchIntent(ctx context.Context, intent Intent) {
 	}
 	if err != nil {
 		_ = intent.Retry(ctx)
-		slog.Warn("background dispatch pending", "workflow_id", options.ID)
+		slog.WarnContext(ctx, "background dispatch pending", "workflow_id", options.ID)
 	}
 }
 
@@ -159,8 +166,9 @@ func (r *Runtime) ingestionIntents() IntentSource {
 				input = Input{Organization: d.Organization, ReceiptID: d.ReceiptID}
 			}
 			intents = append(intents, dispatchIntent{
-				options: client.StartWorkflowOptions{ID: b.ID, TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
-				name:    name, input: input,
+				traceContext: b.Receipts[0].TraceContext,
+				options:      client.StartWorkflowOptions{ID: b.ID, TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
+				name:         name, input: input,
 				complete: func(ctx context.Context) error { return r.Store.IngestionBatchDispatched(ctx, b.ID) },
 				retry: func(ctx context.Context) error {
 					for _, d := range b.Receipts {
@@ -191,7 +199,7 @@ func (r *Runtime) operationIntents() IntentSource {
 			case operations.KindQuarantineReprocess:
 				name, queue = reprocessWorkflowName, backfillTaskQueue
 			}
-			intents = append(intents, dispatchIntent{
+			intents = append(intents, dispatchIntent{traceContext: d.TraceContext,
 				// IDs deliberately retain the legacy per-kind name, independent of the
 				// shared workflow implementation, including completed executions.
 				options: client.StartWorkflowOptions{ID: content.StableID(name, d.Organization, d.OperationID), TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},

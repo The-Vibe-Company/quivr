@@ -328,7 +328,7 @@ func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Se
 		writes.Queue(`UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, org, recordID, seg.VersionID)
 	}
 	if !ready {
-		queueEvent(writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID), VersionID: seg.VersionID})
+		queueEvent(ctx, writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID), VersionID: seg.VersionID})
 	}
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return err

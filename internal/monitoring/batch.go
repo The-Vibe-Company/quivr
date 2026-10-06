@@ -2,6 +2,8 @@ package monitoring
 
 import (
 	"context"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"go.opentelemetry.io/otel/trace"
 
 	"encoding/json"
 	"errors"
@@ -134,7 +136,7 @@ type pending struct {
 // evaluation intents of one Record Version pinned to one evaluator (up to the
 // group bound), decided in batches of distinct evaluations. It returns false
 // when no work was due.
-func (e Engine) Step(ctx context.Context) (bool, error) {
+func (e Engine) Step(ctx context.Context) (worked bool, stepErr error) {
 	in, err := e.Store.Claim(ctx, e.lease())
 	if errors.Is(err, ErrNoWork) {
 		return false, nil
@@ -142,12 +144,15 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	ctx = telemetry.Restore(ctx, in.TraceContext)
+	ctx, span := telemetry.Start(ctx, "monitoring.evaluate")
+	defer func() { telemetry.Fail(span, stepErr); span.End() }()
 	if in.Kind == IntentWithdrawal {
 		outcome, err := e.Store.CommitWithdrawal(ctx, in)
 		if err != nil {
 			return true, e.retry(ctx, in, "storage_unavailable")
 		}
-		slog.Info("withdrawal notification committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_id", in.RecordID, "outcome", outcome)
+		slog.InfoContext(ctx, "withdrawal notification committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_id", in.RecordID, "outcome", outcome)
 		return true, nil
 	}
 	first, ok, err := e.admit(ctx, in)
@@ -164,12 +169,12 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 		related, err := e.Store.ClaimRelated(ctx, in, first.target.Subscription.Evaluator, limit-1, e.lease())
 		if err != nil {
 			// The first intent alone still makes progress.
-			slog.Warn("related evaluation claim unavailable", "error", boundedError(err))
+			slog.WarnContext(ctx, "related evaluation claim unavailable", "error", boundedError(err))
 		}
 		for _, r := range related {
 			p, ok, err := e.admit(ctx, r)
 			if err != nil {
-				slog.Warn("evaluation admission unavailable", "error", boundedError(err))
+				slog.WarnContext(ctx, "evaluation admission unavailable", "error", boundedError(err))
 			}
 			if !ok {
 				continue
@@ -192,6 +197,9 @@ func (e Engine) Step(ctx context.Context) (bool, error) {
 	batch := Batch{Organization: in.Organization, CorpusID: in.CorpusID, RecordID: in.RecordID, VersionID: in.VersionID, Enriched: first.target.Enriched, Article: article, Items: items}
 	outcomes, calls := e.evaluate(ctx, evaluator, batch)
 	e.Metrics.observeRecordVersion(calls)
+	for _, p := range group {
+		telemetry.Fail(span, outcomes[p.item].Err)
+	}
 	return true, e.applyGroup(ctx, group, article.Parts, outcomes)
 }
 
@@ -375,7 +383,14 @@ func (e Engine) applyGroup(ctx context.Context, group []pending, parts []Part, o
 		if len(matches) == 0 {
 			return
 		}
-		committed, err := store.CommitMatches(ctx, matches)
+		commitCtx, commitSpan := commitContext(ctx, group[0].in.TraceContext, matches[0].Intent.TraceContext)
+		if commitSpan != nil {
+			defer commitSpan.End()
+		}
+		committed, err := store.CommitMatches(commitCtx, matches)
+		if commitSpan != nil {
+			telemetry.Fail(commitSpan, err)
+		}
 		if err != nil || len(committed) != len(matches) {
 			for _, match := range matches {
 				if err := e.retry(ctx, match.Intent, "storage_unavailable"); err != nil {
@@ -384,7 +399,7 @@ func (e Engine) applyGroup(ctx context.Context, group []pending, parts []Part, o
 			}
 		} else {
 			for i, match := range matches {
-				e.observeMatch(match.Intent, match.Evidence, committed[i])
+				e.observeMatch(commitCtx, match.Intent, match.Evidence, committed[i])
 			}
 		}
 		matches = nil
@@ -394,12 +409,21 @@ func (e Engine) applyGroup(ctx context.Context, group []pending, parts []Part, o
 		if batched && result.Err == nil && result.Decision == DecisionMatch {
 			evidence := MatchEvidence{Evaluator: p.target.Subscription.Evaluator, Explanation: result.Explanation, PartKeys: result.PartKeys, Details: result.Details}
 			if validEvidence(evidence, parts) {
+				if len(matches) > 0 && matches[0].Intent.TraceContext != p.in.TraceContext {
+					flush()
+				}
 				matches = append(matches, MatchCommit{Intent: p.in, Evidence: evidence})
 				continue
 			}
 		}
 		flush()
-		if err := e.apply(ctx, p, parts, result); err != nil {
+		commitCtx, commitSpan := commitContext(ctx, group[0].in.TraceContext, p.in.TraceContext)
+		err := e.apply(commitCtx, p, parts, result)
+		if commitSpan != nil {
+			telemetry.Fail(commitSpan, err)
+			commitSpan.End()
+		}
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -421,7 +445,7 @@ func (e Engine) apply(ctx context.Context, p pending, parts []Part, result Outco
 		if err != nil {
 			return e.retry(ctx, in, "storage_unavailable")
 		}
-		slog.Info("evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
+		slog.InfoContext(ctx, "evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
 		return nil
 	case DecisionNotReady:
 		// A later trigger (for example enrichment) creates a new intent.
@@ -438,15 +462,15 @@ func (e Engine) apply(ctx context.Context, p pending, parts []Part, result Outco
 	if err != nil {
 		return e.retry(ctx, in, "storage_unavailable")
 	}
-	e.observeMatch(in, evidence, outcome)
+	e.observeMatch(ctx, in, evidence, outcome)
 	return nil
 }
 
-func (e Engine) observeMatch(in Intent, evidence MatchEvidence, outcome string) {
+func (e Engine) observeMatch(ctx context.Context, in Intent, evidence MatchEvidence, outcome string) {
 	if outcome == OutcomeMatched && e.Matched != nil {
 		e.Matched(in.Organization, evidence.Evaluator.PluginID)
 	}
-	slog.Info("evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
+	slog.InfoContext(ctx, "evaluation committed", "organization", in.Organization, "subscription_id", in.SubscriptionID, "record_version_id", in.VersionID, "outcome", outcome)
 }
 
 // errorCode is the bounded retry code of an evaluation error.
@@ -473,4 +497,12 @@ func (e Engine) retryAll(ctx context.Context, group []pending, code string) erro
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// Commits with another durable parent link back to their shared evaluation.
+func commitContext(ctx context.Context, parent, stored string) (context.Context, trace.Span) {
+	if stored == parent {
+		return ctx, nil
+	}
+	return telemetry.Start(telemetry.Restore(ctx, stored), "monitoring.commit", trace.WithLinks(trace.Link{SpanContext: trace.SpanContextFromContext(ctx)}))
 }

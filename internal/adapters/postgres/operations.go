@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -182,7 +183,7 @@ WHERE d.active AND c.organization=$2 AND c.id=$3 AND r.id=`+routedGenerationSQL(
 	if _, err = tx.Exec(ctx, `INSERT INTO operations(organization,id,kind,corpus_id,request_key,canonical_request,target_generation_id,previous_operation_id) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''))`, org, id, kind, corpusID, key, canonical, generation, previous); err != nil {
 		return operations.Operation{}, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id) VALUES($1,$2)`, org, id); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id,trace_context) VALUES($1,$2,$3)`, org, id, telemetry.Encode(ctx)); err != nil {
 		return operations.Operation{}, err
 	}
 	if err = operationEvent(ctx, tx, org, corpusID, id, operations.StateQueued); err != nil {
@@ -343,8 +344,8 @@ func (s OperationStore) ClaimOperations(ctx context.Context, limit int) ([]opera
  UPDATE operation_outbox o SET lease_until=now()+interval '5 seconds'
  FROM (SELECT organization,operation_id FROM operation_outbox WHERE NOT dispatched AND lease_until<now() ORDER BY operation_id,organization FOR UPDATE SKIP LOCKED LIMIT $1) pending
  WHERE o.organization=pending.organization AND o.operation_id=pending.operation_id
- RETURNING o.organization,o.operation_id)
- SELECT c.organization,c.operation_id,p.kind FROM claimed c JOIN operations p ON p.organization=c.organization AND p.id=c.operation_id ORDER BY c.operation_id,c.organization`, limit)
+ RETURNING o.organization,o.operation_id,o.trace_context)
+ SELECT c.organization,c.operation_id,p.kind,c.trace_context FROM claimed c JOIN operations p ON p.organization=c.organization AND p.id=c.operation_id ORDER BY c.operation_id,c.organization`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +353,7 @@ func (s OperationStore) ClaimOperations(ctx context.Context, limit int) ([]opera
 	var batch []operations.Dispatch
 	for rows.Next() {
 		var d operations.Dispatch
-		if err = rows.Scan(&d.Organization, &d.OperationID, &d.Kind); err != nil {
+		if err = rows.Scan(&d.Organization, &d.OperationID, &d.Kind, &d.TraceContext); err != nil {
 			return nil, err
 		}
 		batch = append(batch, d)

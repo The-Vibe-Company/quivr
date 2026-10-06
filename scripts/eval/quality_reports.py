@@ -20,6 +20,8 @@ import embeddings
 import public_sets
 import trec
 
+import ci_guard
+
 
 PRICE_REFERENCE_DATE = '2026-10-03'
 HOSTED_WINDOW_CHARS = 6000
@@ -438,7 +440,7 @@ def main(argv=None):
     parser.add_argument('--out', required=True, type=pathlib.Path)
     parser.add_argument('--include-restricted', action='store_true', help='include a restricted diagnostic set')
     args = parser.parse_args(argv)
-    if any(os.environ.get(name, '').lower() not in ('', '0', 'false') for name in ('CI', 'GITHUB_ACTIONS')):
+    if ci_guard.in_ci():
         raise SystemExit('quality reports run locally only; CI/GITHUB_ACTIONS preparation is refused')
     directory = public_sets.prepare(args.set, args.cache, include_restricted=args.include_restricted)
     data = trec.load(directory)

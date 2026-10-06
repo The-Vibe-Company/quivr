@@ -223,7 +223,7 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 		return err
 	}
 	if !emitted {
-		queueEvent(writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.enrichment_available", Resource: "record", ResourceID: recordID, MutationID: mutation, VersionID: seg.VersionID})
+		queueEvent(ctx, writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.enrichment_available", Resource: "record", ResourceID: recordID, MutationID: mutation, VersionID: seg.VersionID})
 	}
 
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {

@@ -29,13 +29,13 @@ func (s EvaluationStore) dispatchPrefix(ctx context.Context, org string, limit i
 	err = tx.QueryRow(ctx, `WITH head AS MATERIALIZED (
  SELECT last_sequence FROM organization_journals WHERE organization=$1
 ), events AS MATERIALIZED (
- SELECT e.sequence,e.corpus_id,e.resource_id,coalesce(e.record_version_id,'') AS version_id,e.event_type
+ SELECT e.sequence,e.corpus_id,e.resource_id,coalesce(e.record_version_id,'') AS version_id,e.event_type,e.trace_context
  FROM change_events e CROSS JOIN head h
  WHERE e.organization=$1 AND e.sequence>$2 AND e.sequence<=h.last_sequence
  AND e.event_type IN ('record.retrieval_ready','record.enrichment_available','record.withdrawn')
  ORDER BY e.sequence LIMIT $3
 ), targets AS MATERIALIZED (
- SELECT e.sequence,e.corpus_id,e.resource_id,t.subscription_id,t.subscription_version_id,t.record_version_id,t.kind
+ SELECT e.sequence,e.corpus_id,e.resource_id,t.subscription_id,t.subscription_version_id,t.record_version_id,t.kind,e.trace_context
  FROM events e CROSS JOIN LATERAL (
   (SELECT s.id AS subscription_id,v.id AS subscription_version_id,e.version_id AS record_version_id,'evaluation'::text AS kind
   FROM subscription_corpora sc
@@ -71,8 +71,8 @@ func (s EvaluationStore) dispatchPrefix(ctx context.Context, org string, limit i
  SELECT e.sequence FROM events e CROSS JOIN oversized o
  WHERE o.first_sequence IS NULL OR e.sequence<o.first_sequence
 ), intents AS (
- INSERT INTO evaluation_intents(organization,subscription_version_id,sequence,subscription_id,corpus_id,record_id,record_version_id,kind)
- SELECT $1,t.subscription_version_id,t.sequence,t.subscription_id,t.corpus_id,t.resource_id,t.record_version_id,t.kind
+ INSERT INTO evaluation_intents(organization,subscription_version_id,sequence,subscription_id,corpus_id,record_id,record_version_id,kind,trace_context)
+ SELECT $1,t.subscription_version_id,t.sequence,t.subscription_id,t.corpus_id,t.resource_id,t.record_version_id,t.kind,t.trace_context
  FROM targets t JOIN selected s ON s.sequence=t.sequence
  ORDER BY t.sequence,t.subscription_id ON CONFLICT DO NOTHING
 ), progress AS (

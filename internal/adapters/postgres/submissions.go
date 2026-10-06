@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"strconv"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -130,7 +131,7 @@ func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c conte
 	if err != nil {
 		return content.Receipt{}, err
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until) VALUES($1,$2,false,'infinity')", scope.Organization, receiptID); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context) VALUES($1,$2,false,'infinity',$3)", scope.Organization, receiptID, telemetry.Encode(ctx)); err != nil {
 		return content.Receipt{}, err
 	}
 	if err = appendEvent(ctx, tx, eventInput{Organization: scope.Organization, CorpusID: c.Source.CorpusID, Kind: "receipt.pending", Resource: "receipt", ResourceID: receiptID}); err != nil {

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -76,7 +79,12 @@ func (s *dispatchStore) OperationDispatched(_ context.Context, d operations.Disp
 func TestIngestionDispatchRestartAcknowledgesExistingWorkflow(t *testing.T) {
 	for _, legacy := range []bool{false, true} {
 		t.Run(map[bool]string{false: "receipt_batch", true: "legacy_receipt"}[legacy], func(t *testing.T) {
-			d := content.Dispatch{Organization: "org_a", ReceiptID: "receipt_1"}
+			ctx := telemetry.Extract(logging.WithRequestID(context.Background(), "caller-request-123"), http.Header{"Traceparent": []string{"00-11111111111111111111111111111111-2222222222222222-01"}})
+			d := content.Dispatch{Organization: "org_a", ReceiptID: "receipt_1", TraceContext: telemetry.Encode(ctx)}
+			propagated := mock.MatchedBy(func(ctx context.Context) bool {
+				c := telemetry.Capture(ctx)
+				return c.Traceparent == "00-11111111111111111111111111111111-2222222222222222-01" && c.RequestID == "caller-request-123"
+			})
 			store := &dispatchStore{legacy: legacy, batch: []content.Dispatch{d}, acknowledgementError: errors.New("connection lost after workflow start")}
 			queue, name := ingestionBatchQueue, ingestionBatchWorkflow
 			var input any = store.receiptBatch(d)
@@ -90,7 +98,7 @@ func TestIngestionDispatchRestartAcknowledgesExistingWorkflow(t *testing.T) {
 			options := mock.MatchedBy(func(o client.StartWorkflowOptions) bool {
 				return o.ID == id && o.WorkflowIDReusePolicy == enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE && o.TaskQueue == queue
 			})
-			tc.On("ExecuteWorkflow", mock.Anything, options, name, input).Return(nil, nil).Once()
+			tc.On("ExecuteWorkflow", propagated, options, name, input).Return(nil, nil).Once()
 			r := Runtime{Client: tc, Store: store}
 			r.dispatchBatch(context.Background(), r.ingestionIntents(), 1)
 			if len(store.acknowledged) != 0 || len(store.feedback) != 1 {
@@ -98,7 +106,7 @@ func TestIngestionDispatchRestartAcknowledgesExistingWorkflow(t *testing.T) {
 			}
 			// Temporal rejects even a completed execution's ID. The retained
 			// legacy ID makes a pre-upgrade start a successful durable dispatch.
-			tc.On("ExecuteWorkflow", mock.Anything, options, name, input).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{Message: "already completed"}).Once()
+			tc.On("ExecuteWorkflow", propagated, options, name, input).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{Message: "already completed"}).Once()
 			restarted := Runtime{Client: tc, Store: store}
 			restarted.dispatchBatch(context.Background(), restarted.ingestionIntents(), 1)
 			if len(store.acknowledged) != 1 || store.acknowledged[0] != d {
