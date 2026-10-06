@@ -64,7 +64,7 @@ jobs:
         env:
           IMAGE: ${{ matrix.image }}
           GRYPE_CHECK_FOR_APP_UPDATE: false
-        run: grype "registry:$IMAGE" --only-fixed --fail-on critical --output json > vulnerabilities.json
+        run: bash scripts/scan_image.sh "registry:$IMAGE"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
