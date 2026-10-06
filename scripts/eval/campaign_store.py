@@ -210,9 +210,10 @@ class CampaignStore(control_store.Store):
         with self.edit(name) as (db, state):
             current = db.execute('SELECT owner FROM eval_control.campaign_runs WHERE campaign=%s', (name,)).fetchone()[0]
             key = str(number)
-            if current != owner or key not in state['trials']:
+            value = state['trials'].get(key)
+            if current != owner or not isinstance(value, dict):
                 raise control_store.LeaseLost('trial belongs to another supervisor')
-            state['trials'][key]['report'] = report
+            value['report'] = report
 
     @control_store.retry_contention
     def clear_leases(self, name):

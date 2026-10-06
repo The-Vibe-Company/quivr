@@ -76,8 +76,8 @@ include uncertain charges; Modal builds/storage and other account charges need
 separate budgeting. No measurements run in CI.
 
 Set `policy.reuse_campaign` to a prior campaign's identifier to reuse completed
-datasets after a stop. Keep the same code/scorer, baseline, prices and measurement
-policy; budget caps and execution limits may differ. Original evidence stays intact.
+datasets after a stop. Keep code/scorer, baseline, prices, measurement policy and
+parallelism identical; budget caps and timeouts may differ. Source evidence stays intact.
 Modal settlement includes container execution, the startup bound and two shutdown
 seconds. Remote cache, provider and latency-window waits count; queue and client
 polling waits do not. Infrastructure restarts reserve

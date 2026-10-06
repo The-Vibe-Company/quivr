@@ -586,6 +586,8 @@ def publish_pair(store, request, rows):
     try:
         store.publish_many(request['campaign'], {baseline_key: (claim['owner'], rows['baseline']),
             request['lease_key']: (request['owner'], rows['candidate'])})
+    except network_recovery.Outage:
+        raise  # Preserve uncertain publication; the bounded outage window has ended.
     except Exception:
         try:
             store.abandon(request['campaign'], baseline_key, claim['owner'], 'failed')

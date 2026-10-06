@@ -20,6 +20,7 @@ import direct_bakeoff
 import results
 import trec
 import modal_search
+import network_recovery
 import protected_inputs
 import search_trial
 
@@ -223,8 +224,9 @@ class Dispatch(unittest.TestCase):
         policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
             'modal_usd_per_second': .001, 'price_revision': 'fixture-v1',
             'max_seconds': 30, 'startup_seconds': 10})
-        for execution, expected, charged in ((12, 'complete', .024), (40, 'capped', .052),
-                                             (None, 'complete', .042)):
+        for execution, row_status, expected, charged in ((12, None, 'complete', .024), (40, None, 'capped', .052),
+                                             (None, None, 'complete', .042), (40, 'failed', 'capped', .052),
+                                             (40, 'capped', 'capped', .052)):
             with self.subTest(execution=execution), tempfile.TemporaryDirectory() as temp:
                 campaign, clock, calls = uuid.uuid4().hex, [0.], []
                 def remote(request):
@@ -234,7 +236,11 @@ class Dispatch(unittest.TestCase):
                         'machine': 'offline', 'duration_seconds': 12, 'cost': {},
                         'dataset': {'name': 'scifact', 'version': '1', 'split': 'dev', 'fingerprint': 'fixture', 'private': False},
                         'metrics': {'ndcg@10': .5}, 'per_query': {'ndcg@10': {'q': .5}}}
-                    store.publish(request['campaign'], request['lease_key'], request['owner'], row)
+                    if row_status:
+                        store.abandon(request['campaign'], request['lease_key'], request['owner'], row_status)
+                        row = {'status': row_status, 'reason': 'remote measurement ended'}
+                    else:
+                        store.publish(request['campaign'], request['lease_key'], request['owner'], row)
                     clock[0] += 12861.9  # Queue/retrieval, without wall-clock waits.
                     return {'row': row, 'compute': {'reservation': request.get('modal_reservation', 'unavailable'),
                         'execution_seconds': execution}} if execution is not None else row
@@ -243,6 +249,10 @@ class Dispatch(unittest.TestCase):
                     outcome = modal_search.dispatch(store, campaign, policy, cfg, 'scifact', 'a' * 40,
                         'sha256:fixture', remote, pathlib.Path(temp), True)
                     self.assertEqual(outcome['status'], expected)
+                    if row_status:
+                        self.assertEqual(outcome['reason'], 'confirmed usage exceeded reservation; campaign stopped')
+                        self.assertAlmostEqual(float(store.summary(campaign)['modal']['charged_usd']), charged)
+                        continue
                     self.assertIn('record', outcome, 'settlement must retain completed evidence')
                     self.assertIn('receipt', outcome)
                     self.assertAlmostEqual(float(store.summary(campaign)['modal']['charged_usd']), charged)
@@ -372,6 +382,16 @@ class Dispatch(unittest.TestCase):
                 with store.transaction() as db:
                     live = db.execute('SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND payload IS NULL AND expires_at>clock_timestamp()', (destination,)).fetchone()[0]
                 self.assertEqual(live, 0, 'failed reuse releases candidate and baseline claims')
+                publish_many = store.publish_many
+                def lost_ack(*args, **kwargs):
+                    publish_many(*args, **kwargs)
+                    raise network_recovery.Outage('publication acknowledgement lost')
+                with mock.patch.object(store, 'publish_many', side_effect=lost_ack), \
+                        mock.patch.object(store, 'abandon', wraps=store.abandon) as abandon:
+                    with self.assertRaises(network_recovery.Outage):
+                        modal_search.dispatch(store, destination, dict(policy, reuse_campaign=campaign),
+                            cfg, 'scifact', 'a' * 40, 'sha256:fixture', modal_search.metered_trial, root / 'local', True)
+                    abandon.assert_not_called()  # No compensating SQL after the bounded outage window.
                 reused = modal_search.dispatch(store, destination, dict(policy, reuse_campaign=campaign),
                     cfg, 'scifact', 'a' * 40, 'sha256:fixture', modal_search.metered_trial, root / 'local', True)
                 self.assertEqual(reused['status'], 'reused')

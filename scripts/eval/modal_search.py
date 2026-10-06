@@ -193,6 +193,8 @@ def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, out
             if row is not None:
                 row = reuse_measurement(store, request, source, row)
                 return completed(store, campaign, key, row, tracking, 'reused')
+        except network_recovery.Outage:
+            raise  # Publication is uncertain; do not compensate after the outage window.
         except Exception:
             try:
                 store.abandon(campaign, key, owner, 'failed')
@@ -222,7 +224,8 @@ def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, out
             except embeddings.BudgetExceeded:
                 exceeded = True
         if row.get('status') in ('capped', 'failed'):
-            return row
+            return {**row, 'status': 'capped',
+                    'reason': 'confirmed usage exceeded reservation; campaign stopped'} if exceeded else row
         # Remote publication must be canonical before any MLflow upload.
         canonical = store.claim(campaign, key)
         if canonical['status'] != 'done':
