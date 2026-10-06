@@ -204,6 +204,11 @@
   max-width: 1180px;
   min-width: 0;
 }
+/* The page scrolls as a whole: no panel shrinks to fit the window. */
+.explorer > *,
+.record-page > * {
+  flex-shrink: 0;
+}
 .explorer-back {
   display: inline-flex;
   align-items: center;
@@ -358,5 +363,10 @@
     max-height: none;
     flex-direction: row;
     flex-wrap: wrap;
+    gap: 14px 24px;
+  }
+  .facets-corpus,
+  .facets-note {
+    flex-basis: 100%;
   }
 }
