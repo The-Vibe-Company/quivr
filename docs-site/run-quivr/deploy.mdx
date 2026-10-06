@@ -59,6 +59,8 @@ docker run --rm --read-only --tmpfs /tmp "$IMAGE" --version
 
 Verification checks the digest, GitHub's OIDC issuer and the exact release workflow identity. A failed verification stops deployment. The version command prints the release version and full commit. `latest-alpha` is a moving tag; use a verified digest to keep a deployment fixed. Every image also has `<version>` and `sha-<full commit>` tags.
 
+See [Security of Quivr releases](/run-quivr/security) for the signed component inventory and vulnerability checks.
+
 ## Run the image
 
 Put the configuration in `config.json`, readable by UID/GID `10001`, the image's non-root user. Set `listen` to `0.0.0.0:8080` and `probe_listen` to `0.0.0.0:8081` so container ports can reach them. Put the four services and plugins on a Docker network named `quivr`; their hostnames in the file must resolve on that network. Keep probes reachable only by your operator tools.

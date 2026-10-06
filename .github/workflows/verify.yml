@@ -341,15 +341,32 @@ jobs:
             .scratch/quivr-compatibility-*/report.json
             .scratch/quivr-compatibility-*/*.log
           if-no-files-found: warn
+  vulnerabilities:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      - name: Check every Go module for reachable vulnerabilities
+        run: |
+          while IFS= read -r module; do
+            echo "Scanning $module"
+            (cd "$(dirname "$module")" && govulncheck ./...)
+          done < <(git ls-files '**/go.mod' 'go.mod')
   # The one check to require: green only when every job above is green.
   verify:
     if: always()
-    needs: [check, adapter-postgres, part, migration-compatibility]
+    needs: [check, adapter-postgres, part, migration-compatibility, vulnerabilities]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
         run: |
-          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, migration-compatibility: ${{ needs.migration-compatibility.result }}"
+          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, migration-compatibility: ${{ needs.migration-compatibility.result }}, vulnerabilities: ${{ needs.vulnerabilities.result }}"
           exit 1
-      - run: echo "check, adapter-postgres, migration-compatibility and every verification part passed"
+      - run: echo "check, adapter-postgres, migration-compatibility, vulnerabilities and every verification part passed"

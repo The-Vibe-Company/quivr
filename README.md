@@ -90,7 +90,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   runs only with `quivr migrate --contract`. CI checks the merge-base binary against
   expansions. See [Upgrade Quivr](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-quivr).
 
-- **Release images and build identity.** Release-please manages alpha release PRs, versions and changelogs. Publishing a release builds signed engine and first-party plugin images on GHCR. `quivr --version`, `GET /v0/version`, startup logs and process metrics report the build. See [Deploy and configure Quivr](https://docs.quivr.thevibecompany.co/run-quivr/deploy).
+- **Release images and build identity.** Release-please manages alpha release PRs, versions and changelogs. Publishing a release builds signed engine and first-party plugin images on GHCR, with signed SPDX inventories and vulnerability scans. `quivr --version`, `GET /v0/version`, startup logs and process metrics report the build. See [Deploy and configure Quivr](https://docs.quivr.thevibecompany.co/run-quivr/deploy) and [release security](https://docs.quivr.thevibecompany.co/run-quivr/security).
 - **Declarative conformance cases**: contribute generic requirements and measure them locally with
   `make conformance`; [case format and reports](conformance/README.md). CI never executes cases.
 

@@ -60,7 +60,8 @@
             "pages": [
               "run-quivr/overview",
               "run-quivr/deploy",
-            "run-quivr/upgrade-quivr",
+              "run-quivr/upgrade-quivr",
+              "run-quivr/security",
               "run-quivr/tls",
               {
                 "group": "Plugins",
