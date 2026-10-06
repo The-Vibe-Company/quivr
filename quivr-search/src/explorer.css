@@ -97,6 +97,64 @@
 .facet .link-button {
   margin: 4px 0 0 6px;
 }
+.facets .facet {
+  transition: opacity var(--duration) var(--ease);
+}
+.facets[data-stale] .facet {
+  opacity: 0.6;
+}
+/* A date: documents per period, the feed's bars, a period picked in accent. */
+.facet-histogram {
+  height: 64px;
+  margin: 2px 6px 0;
+}
+/* No gap between columns: each is a target up to its neighbours, its bar
+   inset to draw the gap, so even a hundred bars fit the column. */
+.facet-histogram:has(.pulse-column) {
+  gap: 0;
+}
+.facet-histogram .pulse-column {
+  justify-content: center;
+}
+.facet-histogram .pulse-column .pulse-bar {
+  flex: none;
+  width: calc(100% - 2px);
+  min-width: 1px;
+}
+.facet-histogram .pulse-column:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.facet-histogram .pulse-column[aria-pressed="true"] .pulse-bar {
+  background: var(--accent);
+}
+.facet-dates .pulse-axis {
+  margin: 6px 6px 0;
+}
+.facet-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 0;
+  margin: 0 0 8px 6px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.facet-path li + li::before {
+  content: "›";
+  margin: 0 6px;
+  color: var(--ink-faint);
+}
+.facet-path .link-button {
+  margin: 0;
+  font-size: inherit;
+}
+.facet-path [aria-current] {
+  font-weight: 600;
+  color: var(--ink);
+}
 .facets-note {
   margin: 0;
   font-size: 12px;
