@@ -149,9 +149,11 @@ cd "$root/plugins/newsml-g2"
 "$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
 python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 "$quivr" plugin inspect . > "$work/newsml-g2-inspect.log"
-"$quivr" plugin test --fixture fixtures/sample.json --fixture fixtures/message.json --report "$work/newsml-g2-contract-report.json" . > "$work/newsml-g2-contract.log" 2>&1 || { cat "$work/newsml-g2-contract.log"; exit 1; }
+"$quivr" plugin test --fixture fixtures/sample.json --fixture fixtures/message.json --fixture fixtures/multi-item.json --fixture fixtures/oversized-header.json --report "$work/newsml-g2-contract-report.json" . > "$work/newsml-g2-contract.log" 2>&1 || { cat "$work/newsml-g2-contract.log"; exit 1; }
 grep -q "^CERTIFIED" "$work/newsml-g2-contract.log" || { cat "$work/newsml-g2-contract.log"; exit 1; }
 echo "quivr plugin test certified plugins/newsml-g2: $work/newsml-g2-contract-report.json"
+# Exercise normalizer output through the real ingestion segmentation recipe.
+(cd "$root/plugins/core-ingest" && QUIVR_NEWSML_TEST_PYTHON="$work/venv/bin/python" "$GO" test -count=1 -run '^TestNewsMLMessagesFitIngestion$' .)
 
 # The first-party alerts plugin plugins/alerts: unit tests (grammar, matching,
 # evidence, described alerts against the fake System One server), a replayed

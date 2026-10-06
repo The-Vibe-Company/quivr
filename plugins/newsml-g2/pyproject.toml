@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "newsml-g2"
-version = "0.1.0"
+version = "0.1.1"
 description = "Quivr normalizer for IPTC NewsML-G2 text news items."
 requires-python = ">=3.12"
 license = "MIT"
