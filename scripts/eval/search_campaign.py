@@ -167,7 +167,7 @@ class Loop:
         def publish(report):
             nonlocal result
             saved = {**value, 'report': aggregate(report, self.spec['policy']['sets'])}
-            self.store.trial(self.name, self.owner, trial.number, saved)
+            self.store.trial_report(self.name, self.owner, trial.number, saved['report'])
             result = saved
         try:
             report = self.measure(value['config'], on_report=publish)

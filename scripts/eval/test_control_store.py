@@ -240,6 +240,36 @@ class Control(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.campaign(self.name, dict(self.policy, provider_daily_usd=2))
 
+    def test_modal_restarts_reserve_each_attempt_and_keep_interrupted_charges(self):
+        # SQL owns infrastructure retries, which are distinct from client
+        # retrieval retries: an interrupted execution stays fully reserved.
+        key = 'measurement'
+        owner = self.store.claim(self.name, key)['owner']
+        slot = ('campaign-measurement-slot/0', self.store.claim(self.name, 'campaign-measurement-slot/0')['owner'])
+        reservation = self.store.reserve(self.name, 'modal', .4,
+            {'measurement_key': key, 'extra_leases': [slot]}, (key, owner), extra_leases=[slot])
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.start_modal_attempt(reservation, (key, 'wrong-owner'))
+        first = self.store.start_modal_attempt(reservation, (key, owner))
+        self.assertEqual(first, reservation)
+        second = self.store.start_modal_attempt(reservation, (key, owner))
+        self.assertNotEqual(second, first)
+        self.store.settle(second, .1)
+        self.assertEqual(self.store.summary(self.name)['modal'], {'charged_usd': .5, 'unknown_usd': .4})
+        with self.store.transaction() as db:
+            db.execute("UPDATE eval_control.leases SET owner='replacement' WHERE campaign=%s AND key=%s", (self.name, slot[0]))
+        with self.assertRaises(control_store.LeaseLost):
+            self.store.start_modal_attempt(reservation, (key, owner))
+        with self.store.transaction() as db:
+            db.execute('UPDATE eval_control.leases SET owner=%s WHERE campaign=%s AND key=%s', (slot[1], self.name, slot[0]))
+        third = self.store.start_modal_attempt(reservation, (key, owner))
+        with self.assertRaises(embeddings.BudgetExceeded):
+            self.store.start_modal_attempt(reservation, (key, owner))
+        self.assertEqual(self.store.summary(self.name)['modal'], {'charged_usd': .9, 'unknown_usd': .8})
+        self.store.stop(self.name)
+        with self.assertRaises(embeddings.BudgetExceeded):
+            self.store.start_modal_attempt(third, (key, owner))
+
     def test_total_end_and_stop_guard_paid_work_and_confirmation(self):
         # New lifetime contract: the old daily tests cannot see cross-day
         # totals, deadlines or stopped confirmation. Real SQL owns races.
