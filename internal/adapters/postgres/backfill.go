@@ -189,7 +189,7 @@ func (s BackfillStore) BackfillSize(ctx context.Context, org string, spec operat
 	if !g.SpacesProjected {
 		return size, backfill.ErrRebuildRequired
 	}
-	err = s.Pool.QueryRow(ctx, `SELECT count(DISTINCT scope.version_id),count(*),COALESCE(sum(sg.end_offset-sg.start_offset),0)
+	err = database(ctx, s.Pool).QueryRow(ctx, `SELECT count(DISTINCT scope.version_id),count(*),COALESCE(sum(sg.end_offset-sg.start_offset),0)
 FROM `+backfillScopeSQL+` scope
 JOIN segments sg ON sg.organization=$1 AND sg.version_id=scope.version_id AND sg.segmentation_id=scope.segmentation_id`,
 		org, corpusID, g.ID, spec.AcceptedAfter, spec.AcceptedBefore, g.SpaceID, spec.Spaces, spec.RegistrationID, spec.PlanID, false).Scan(&size.Versions, &size.Segments, &size.CodePoints)
@@ -202,7 +202,7 @@ func (s BackfillStore) RecordEstimate(ctx context.Context, org, corpusID, key st
 	if err != nil {
 		return err
 	}
-	tag, err := s.Pool.Exec(ctx, `INSERT INTO backfill_estimates(organization,corpus_id,request_key,canonical_request,estimate) VALUES($1,$2,$3,$4,$5)
+	tag, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO backfill_estimates(organization,corpus_id,request_key,canonical_request,estimate) VALUES($1,$2,$3,$4,$5)
 ON CONFLICT(organization,corpus_id,request_key) DO UPDATE SET estimate=EXCLUDED.estimate,created_at=now() WHERE backfill_estimates.canonical_request=EXCLUDED.canonical_request`, org, corpusID, key, canonical, raw)
 	if err != nil {
 		return err
@@ -217,7 +217,7 @@ ON CONFLICT(organization,corpus_id,request_key) DO UPDATE SET estimate=EXCLUDED.
 func (s BackfillStore) BackfillEstimate(ctx context.Context, org, corpusID, key string) ([]byte, operations.BackfillEstimate, error) {
 	var canonical, raw []byte
 	var e operations.BackfillEstimate
-	err := s.Pool.QueryRow(ctx, `SELECT canonical_request,estimate FROM backfill_estimates WHERE organization=$1 AND corpus_id=$2 AND request_key=$3`, org, corpusID, key).Scan(&canonical, &raw)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT canonical_request,estimate FROM backfill_estimates WHERE organization=$1 AND corpus_id=$2 AND request_key=$3`, org, corpusID, key).Scan(&canonical, &raw)
 	if err != nil {
 		return nil, e, notFound(err)
 	}
@@ -228,7 +228,7 @@ func (s BackfillStore) BackfillEstimate(ctx context.Context, org, corpusID, key 
 // intent and journal event. Its target generation is the Corpus's routed
 // one at acceptance; each step follows the route.
 func (s BackfillStore) AcceptBackfill(ctx context.Context, org, corpusID, key string, canonical []byte, spec operations.Backfill) (operations.Operation, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
 	}
@@ -313,7 +313,7 @@ func insertBackfill(ctx context.Context, tx pgx.Tx, org, id, corpusID, key strin
 // BeginBackfill starts a backfill step: see backfill.RunStore.
 func (s BackfillStore) BeginBackfill(ctx context.Context, org, id, plan string) (backfill.Target, error) {
 	var out backfill.Target
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -355,7 +355,7 @@ func (s BackfillStore) BeginBackfill(ctx context.Context, org, id, plan string) 
 // afterwards (a generation routed later, by a rebuild, gets them too), and
 // counts the scope the first time.
 func (s BackfillStore) CarryBackfillSpaces(ctx context.Context, org, id string) (content.Generation, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return content.Generation{}, err
 	}
@@ -389,7 +389,7 @@ func (s BackfillStore) CarryBackfillSpaces(ctx context.Context, org, id string) 
 // BackfillByKey returns the backfill accepted under a key, or
 // corpus.ErrNotFound.
 func (s BackfillStore) BackfillByKey(ctx context.Context, org, corpusID, key string) (operations.Operation, error) {
-	return scanOperation(s.Pool.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND request_key=$4 AND previous_operation_id IS NULL`, org, operations.KindBackfill, corpusID, key))
+	return scanOperation(database(ctx, s.Pool).QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND request_key=$4 AND previous_operation_id IS NULL`, org, operations.KindBackfill, corpusID, key))
 }
 
 // routedGeneration reads the generation a Corpus is routed to inside tx.
@@ -465,7 +465,7 @@ func (s BackfillStore) BackfillCandidates(ctx context.Context, org, id string, g
 	if op.Backfill == nil {
 		return nil, operations.ErrUnsupportedKind
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT scope.record_id,scope.version_id,scope.namespace,scope.source_media_type,scope.owner_recipe,scope.plugin_id,scope.independent
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT scope.record_id,scope.version_id,scope.namespace,scope.source_media_type,scope.owner_recipe,scope.plugin_id,scope.independent
 FROM `+backfillScopeSQL+` scope
 WHERE scope.version_id>$11
 ORDER BY scope.version_id
@@ -493,7 +493,7 @@ func (s BackfillStore) CoveredEmbeddings(ctx context.Context, org, generationID 
 	for i, p := range seg.Segments {
 		ids[i] = p.ID
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT a.metadata FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT a.metadata FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id)
 WHERE ec.organization=$1 AND ec.generation_id=$2 AND ec.segment_id=ANY($3) ORDER BY ec.segment_id,ec.space_id`, org, generationID, ids)
 	if err != nil {
 		return nil, err
@@ -531,7 +531,7 @@ func runningBackfill(ctx context.Context, tx pgx.Tx, org, id string) (operations
 // CoverBackfill records the target vectors of one Version, with no journal
 // event, and moves the checkpoint past it.
 func (s BackfillStore) CoverBackfill(ctx context.Context, org, id string, g content.Generation, versionID string, artifacts []content.Embedding) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -589,7 +589,7 @@ FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v
 // transaction. The external projection writes happen before this database
 // fence and are idempotent on retry.
 func (s BackfillStore) CoverBackfillEvaluation(ctx context.Context, org, id string, g content.Generation, versionID string, seg content.Segmentation, artifacts []content.Embedding) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -683,7 +683,7 @@ func advance(ctx context.Context, tx pgx.Tx, org, id, versionID string, counters
 
 // SkipBackfill moves the checkpoint past a Version the backfill cannot fill.
 func (s BackfillStore) SkipBackfill(ctx context.Context, org, id, versionID, code string) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -700,7 +700,7 @@ func (s BackfillStore) SkipBackfill(ctx context.Context, org, id, versionID, cod
 // CompleteBackfill records a backfill's success; its result names the
 // generation it filled.
 func (s BackfillStore) CompleteBackfill(ctx context.Context, org, id, generationID string) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -727,7 +727,7 @@ func (s BackfillStore) CompleteBackfill(ctx context.Context, org, id, generation
 
 // FailBackfill records a terminal failure of a queued or running backfill.
 func (s BackfillStore) FailBackfill(ctx context.Context, org, id string, failure operations.Error) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}

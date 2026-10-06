@@ -63,7 +63,7 @@ func (s OperationStore) AcceptRetrievalConfiguration(ctx context.Context, org, c
 // acceptCommand commits an originating Operation command, or returns the one
 // already accepted for Organization + kind + Corpus + key + canonical request.
 func (s OperationStore) acceptCommand(ctx context.Context, org, kind, corpusID, key string, canonical, resolved []byte) (operations.Operation, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
 	}
@@ -195,7 +195,7 @@ WHERE d.active AND c.organization=$2 AND c.id=$3 AND r.id=`+routedGenerationSQL(
 // CancelOperation applies an operator cancellation under the journal lock and
 // Operation row lock that every effect-committing transition also holds.
 func (s OperationStore) CancelOperation(ctx context.Context, org, id string) (operations.Operation, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
 	}
@@ -233,7 +233,7 @@ func (s OperationStore) CancelOperation(ctx context.Context, org, id string) (op
 
 // ConfirmCancel settles a cancellation request once the worker has stopped.
 func (s OperationStore) ConfirmCancel(ctx context.Context, org, id string) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -263,7 +263,7 @@ func transition(ctx context.Context, tx pgx.Tx, op operations.Operation, state s
 // AcceptRerun links a new Operation to a terminal source. Replays are resolved
 // before the terminal check, so they return the same rerun forever.
 func (s OperationStore) AcceptRerun(ctx context.Context, org, sourceID, key string, canonical []byte) (operations.Operation, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
 	}
@@ -331,7 +331,7 @@ func (s OperationStore) AcceptRerun(ctx context.Context, org, sourceID, key stri
 }
 
 func (s OperationStore) Operation(ctx context.Context, org, id string) (operations.Operation, error) {
-	return scanOperation(s.Pool.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2`, org, id))
+	return scanOperation(database(ctx, s.Pool).QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2`, org, id))
 }
 
 // ClaimOperations leases a bounded batch of undispatched Operations. Locked
@@ -340,7 +340,7 @@ func (s OperationStore) ClaimOperations(ctx context.Context, limit int) ([]opera
 	if limit <= 0 {
 		return nil, nil
 	}
-	rows, err := s.Pool.Query(ctx, `WITH claimed AS (
+	rows, err := database(ctx, s.Pool).Query(ctx, `WITH claimed AS (
  UPDATE operation_outbox o SET lease_until=now()+interval '5 seconds'
  FROM (SELECT organization,operation_id FROM operation_outbox WHERE NOT dispatched AND lease_until<now() ORDER BY operation_id,organization FOR UPDATE SKIP LOCKED LIMIT $1) pending
  WHERE o.organization=pending.organization AND o.operation_id=pending.operation_id
@@ -362,7 +362,7 @@ func (s OperationStore) ClaimOperations(ctx context.Context, limit int) ([]opera
 }
 
 func (s OperationStore) OperationDispatched(ctx context.Context, d operations.Dispatch) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE operation_outbox SET dispatched=true WHERE organization=$1 AND operation_id=$2`, d.Organization, d.OperationID)
+	_, err := database(ctx, s.Pool).Exec(ctx, `UPDATE operation_outbox SET dispatched=true WHERE organization=$1 AND operation_id=$2`, d.Organization, d.OperationID)
 	return err
 }
 
@@ -383,7 +383,7 @@ func (s OperationStore) ResumeOperation(ctx context.Context, org, id string) (op
 // Operation row lock that every effect also takes; other states are
 // returned unchanged.
 func (s OperationStore) control(ctx context.Context, org, id string, next map[string]string) (operations.Operation, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
 	}

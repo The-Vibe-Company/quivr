@@ -13,6 +13,7 @@ func TestActionPermissions(t *testing.T) {
 		grants     []string
 		allCorpora bool
 	}{
+		{ActionAuditRead, []string{"audit:read"}, true},
 		{ActionBackfillPromote, []string{"plugins:admin"}, false},
 		{ActionBackfillRequest, []string{"plugins:admin"}, false},
 		{ActionConnectorsCreate, []string{"connectors:write"}, false},
