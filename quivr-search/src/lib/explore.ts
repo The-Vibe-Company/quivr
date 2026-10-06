@@ -96,10 +96,15 @@ function monthBounds(month: string) {
   };
 }
 
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
 /** The engine's predicates for what is picked; a date field picks one month. */
 export function predicatesOf(selection: Selection, types: Map<string, Field["type"]>) {
   return Object.entries(selection)
-    .filter(([, values]) => values.length)
+    // A date value that is not a month cannot bound a period: it is left out.
+    .filter(([field, values]) =>
+      values.length && (types.get(field) !== "datetime" || MONTH.test(String(values[0]))),
+    )
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([field, values]): MetadataFilter =>
       types.get(field) === "datetime"

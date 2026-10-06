@@ -1290,7 +1290,7 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
     },
   };
   const records = {
-    rec_note: { corpus: "demo", version: "v_note", at: "2026-10-05T08:00:00Z", text: "Note du matin", language: "fr" },
+    rec_note: { corpus: "demo", version: "v_note", at: "2026-10-05T08:00:00Z", text: "Port : note du matin", language: "fr" },
     rec_wire: { corpus: "wires", version: "v_wire2", at: "2026-10-05T09:00:00Z", text: "Port reopens", language: "en", desk: "economy", blobs: ["blob_1"] },
     rec_secret: { corpus: "private", version: "v_secret", at: "2026-10-05T10:00:00Z", text: "Hidden" },
   };
@@ -1329,13 +1329,21 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
     if (corpus) return corpora[corpus[1]] ? json(200, corpora[corpus[1]]) : json(404, { code: "not_found" });
     if (url.pathname === "/v0/blobs/blob_1")
       return json(200, { blob_id: "blob_1", size_bytes: 2048, sha256: "ab".repeat(32), media_type: "application/xml" });
+    // Records accepted within the asked bounds, if any.
+    const after = Date.parse(url.searchParams.get("accepted_after") || "") || -Infinity;
+    const before = Date.parse(url.searchParams.get("accepted_before") || "") || Infinity;
+    const within = (r) => Date.parse(r.at) >= after && Date.parse(r.at) < before;
+    if (url.pathname === "/v0/records/count") {
+      const corpus = url.searchParams.get("corpus_id");
+      return json(200, { count: Object.values(records).filter((r) => r.corpus === corpus && within(r)).length });
+    }
     if (url.pathname === "/v0/records") {
       listings.push(Object.fromEntries(url.searchParams));
       const asked = (url.searchParams.get("corpus_ids") || url.searchParams.get("corpus_id")).split(",");
       const filtered = url.searchParams.has("metadata");
       return json(200, {
         items: Object.entries(records)
-          .filter(([, r]) => asked.includes(r.corpus) && (!filtered || r.corpus !== "demo"))
+          .filter(([, r]) => asked.includes(r.corpus) && within(r) && (!filtered || r.corpus !== "demo"))
           .sort(([, a], [, b]) => b.at.localeCompare(a.at))
           .map(([record_id, r]) => ({
             record_id,
@@ -1430,4 +1438,31 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
   const feed = await get("/demo/feed?corpora=demo,wires");
   assert.deepEqual(feed.data.items.map((i) => [i.record_id, i.corpus_id]), [["rec_wire", "wires"], ["rec_note", "demo"]]);
   assert.deepEqual((await get("/demo/feed")).data.items.map((i) => i.record_id), ["rec_note"]);
+  // Its numbers too: each corpus's day counts and index summed, one listing
+  // for a day's page, and topics over both corpora's titles.
+  const day = { after: "2026-10-05T00:00:00Z", before: "2026-10-06T00:00:00Z" };
+  const days = await get(`/demo/feed/days?corpora=demo,wires&bounds=${day.before},${day.after}`);
+  assert.deepEqual([days.data.total, days.data.days, days.data.older], [2, [2], 0]);
+  const dayPage = await get(`/demo/feed/page?corpora=demo,wires&after=${day.after}&before=${day.before}`);
+  assert.deepEqual(dayPage.data.items.map((i) => i.record_id), ["rec_wire", "rec_note"]);
+  assert.equal(listings.at(-1).corpus_ids, "demo,wires");
+  const stats = await fetch(base + "/demo/feed/stats?corpora=demo,wires", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: base },
+    body: JSON.stringify({ ...day, buckets: [day.before, day.after], read: "all" }),
+  }).then((r) => r.json());
+  assert.deepEqual([stats.total, stats.buckets, stats.sources.wire], [2, [2], 2]);
+  const topics = await get(`/demo/feed/topics?corpora=demo,wires&after=${day.after}&before=${day.before}`);
+  assert.ok(
+    topics.data.items.some((topic) => topic.label.toLowerCase() === "port" && topic.count === 2),
+    JSON.stringify(topics.data.items),
+  );
+
+  // Another corpus is read, never written to.
+  const write = await fetch(base + "/v0/records", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: base },
+    body: JSON.stringify({ source: { corpus_id: "wires", namespace: "web-demo", record_key: "k" }, content: { kind: "text", text: "x" } }),
+  });
+  assert.equal(write.status, 403);
 });

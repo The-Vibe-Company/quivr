@@ -232,7 +232,20 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
   return {
     /** GET /demo/corpora: the corpora the demo reads and their fields. */
     async corpora() {
-      return { items: await Promise.all((await readable()).map(corpus)) };
+      // A corpus the engine cannot describe now is listed by its id with
+      // the common fields; it is read again on the next call.
+      const fallback = (id) => ({
+        corpus_id: id,
+        name: id === demo() ? "Espace démo" : id,
+        demo: id === demo(),
+        common: COMMON_FIELDS,
+        own: [],
+      });
+      return {
+        items: await Promise.all(
+          (await readable()).map((id) => corpus(id).catch(() => fallback(id))),
+        ),
+      };
     },
     /** GET /demo/explore: a page of documents, newest first. */
     async page(params) {

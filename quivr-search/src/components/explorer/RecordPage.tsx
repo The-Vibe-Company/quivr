@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
 import { fieldLabel } from "../../lib/corpora";
@@ -42,6 +42,12 @@ export function RecordPage({
   // The Version shown, and the ones read to compare, by id.
   const [shown, setShown] = useState<string | null>(null);
   const [read, setRead] = useState<Map<string, VersionDetail>>(new Map());
+  const heading = useRef<HTMLHeadingElement>(null);
+  // Focus moves to the document's title once it shows, for keyboard and screen readers.
+  const loaded = !!detail;
+  useEffect(() => {
+    if (loaded) heading.current?.focus();
+  }, [loaded]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -131,7 +137,9 @@ export function RecordPage({
           )}
           {record.withdrawn && <span className="record-withdrawn">Retiré</span>}
         </p>
-        <h2 id="record-title">{shownText?.title || "Sans titre"}</h2>
+        <h2 id="record-title" ref={heading} tabIndex={-1}>
+          {shownText?.title || "Sans titre"}
+        </h2>
         {version && current && version.version_id !== current.version_id && (
           <p className="record-older" role="note">
             Vous lisez une version antérieure.{" "}
@@ -143,7 +151,9 @@ export function RecordPage({
       </header>
       <div className="record-grid">
         <section className="panel panel-pad record-text" aria-label="Texte">
-          {!version ? (
+          {!shown ? (
+            <p className="muted">Ce document n’a plus de version lisible.</p>
+          ) : !version ? (
             <LoadingState label="Chargement du texte…" rows={3} />
           ) : shownText?.texts.length ? (
             shownText.texts.map((t) => (

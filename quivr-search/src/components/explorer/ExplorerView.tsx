@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { APIError } from "../../lib/search";
 import {
   corpusNames,
@@ -78,12 +78,23 @@ export function ExplorerView({
   );
   const predicates = useMemo(() => predicatesOf(selection, types), [selection, types]);
   const key = JSON.stringify([picked, predicates]);
+  // The list's current reads: a filter or corpus change aborts the page of
+  // "more" still on its way, which belongs to the list it leaves.
+  const reads = useRef<AbortController | null>(null);
+  // The corpora the facets were read for: others picked, their fields go at once.
+  const facetsFor = useRef("");
 
   useEffect(() => {
     if (record) return;
     const controller = new AbortController();
+    reads.current = controller;
     setStatus("loading");
     setMore("idle");
+    const corporaKey = picked.join(",");
+    if (facetsFor.current !== corporaKey) {
+      facetsFor.current = corporaKey;
+      setFacets(null);
+    }
     fetchExplore(picked, predicates, undefined, controller.signal)
       .then((data) => {
         setPage(data);
@@ -105,10 +116,12 @@ export function ExplorerView({
   }, [key, attempt, record, onUnauthorized]);
 
   const loadMore = () => {
-    if (!page?.next_cursor || more === "loading") return;
+    const controller = reads.current;
+    if (!page?.next_cursor || more === "loading" || !controller) return;
     setMore("loading");
-    fetchExplore(picked, predicates, page.next_cursor)
+    fetchExplore(picked, predicates, page.next_cursor, controller.signal)
       .then((next) => {
+        if (controller.signal.aborted) return;
         setPage((shown) => ({
           ...next,
           items: [
@@ -119,6 +132,7 @@ export function ExplorerView({
         setMore("idle");
       })
       .catch((e) => {
+        if (controller.signal.aborted) return;
         if (e instanceof APIError && e.status === 401) return onUnauthorized();
         setMore("error");
       });

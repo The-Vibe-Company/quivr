@@ -224,6 +224,9 @@
   letter-spacing: -0.4px;
   color: var(--title-ink);
 }
+.record-head h2:focus {
+  outline: none;
+}
 .record-head .row-meta {
   margin: 0;
 }
