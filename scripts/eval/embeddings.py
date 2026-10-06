@@ -18,6 +18,32 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+
+def error_identity(error):
+    """Dependency identity without raw exception text, inputs or credentials."""
+    identity = {'error_type': type(error).__name__}
+    current, seen = error, set()
+    for _ in range(8):
+        if id(current) in seen:
+            break
+        seen.add(id(current))
+        if isinstance(current, ModuleNotFoundError):
+            name = current.name
+            if isinstance(name, str) and re.fullmatch(r'[A-Za-z_][A-Za-z_0-9.]{0,199}', name):
+                identity.setdefault('missing_module', name)
+            elif name is None:
+                # Transformers lazy imports wrap arbitrary failures in this
+                # fixed message. The symbol is not necessarily an absent package.
+                target = re.match(r"Could not import module '([A-Za-z_][A-Za-z_0-9]{0,199})'\.", str(current))
+                if target:
+                    identity.setdefault('import_target', target[1])
+        cause = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+        if cause is None:
+            break
+        identity['cause_error_type'] = type(cause).__name__
+        current = cause
+    return identity
+
 MAX_REQUEST_BYTES = 2 << 20
 MAX_RESPONSE_BYTES = 32 << 20
 

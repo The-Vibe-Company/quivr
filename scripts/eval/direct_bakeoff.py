@@ -511,7 +511,7 @@ def main(argv=None):
         except Exception as error:
             # Raw dependency/provider errors may contain URLs, input or credentials.
             report['status'] = 'failed'
-            report.setdefault('reason', {'kind': 'provider_error', 'error_type': type(error).__name__})
+            report.setdefault('reason', {'kind': 'provider_error', **embeddings.error_identity(error)})
             print('failed', len(report['results']), len(systems), flush=True)
         finally:
             save()
