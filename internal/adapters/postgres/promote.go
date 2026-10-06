@@ -34,7 +34,7 @@ SELECT count(DISTINCT (organization,corpus_id)),count(*) FROM gaps`
 // space: see backfill.PromotionStore.
 func (s BackfillStore) PromoteSpace(ctx context.Context, space string, force bool) (backfill.Promotion, error) {
 	out := backfill.Promotion{Served: space}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return out, err
 	}

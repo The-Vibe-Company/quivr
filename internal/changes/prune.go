@@ -26,11 +26,15 @@ type PruneStore interface {
 // Pruner is the worker loop that keeps the journal bounded by retention.
 // Organizations restricts it (all when empty).
 type Pruner struct {
-	Store         PruneStore
-	Retention     time.Duration
-	Interval      time.Duration
-	Organizations []string
-	Metrics       *telemetry.ChangePrune
+	Audit interface {
+		PruneAudit(context.Context, int, int) (int, error)
+	}
+	AuditRetentionMonths int
+	Store                PruneStore
+	Retention            time.Duration
+	Interval             time.Duration
+	Organizations        []string
+	Metrics              *telemetry.ChangePrune
 }
 
 // Run prunes immediately, then on every interval until ctx ends.
@@ -44,6 +48,18 @@ func (p Pruner) Run(ctx context.Context) {
 		}
 		n, err := p.Store.PruneChanges(work, p.Retention, p.Organizations, PruneBatch, PruneBatches)
 		p.Metrics.Pruned(n)
+		if p.Audit != nil {
+			for pass := 0; pass < PruneBatches; pass++ {
+				count, pruneErr := p.Audit.PruneAudit(work, p.AuditRetentionMonths, PruneBatch)
+				if pruneErr != nil {
+					slog.WarnContext(work, "audit retention prune failed; retrying next interval", "error", pruneErr)
+					break
+				}
+				if count < PruneBatch {
+					break
+				}
+			}
+		}
 		if err != nil && ctx.Err() == nil {
 			p.Metrics.Failed()
 			slog.Warn("change journal prune failed; retrying next interval", "error", err)
