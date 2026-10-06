@@ -717,6 +717,7 @@ async function handle(req, res) {
           !Array.isArray(body.corpus_ids) ||
           !body.corpus_ids.length ||
           body.corpus_ids.length > 16 ||
+          new Set(body.corpus_ids).size !== body.corpus_ids.length ||
           !body.corpus_ids.every((corpus) => allowed.includes(corpus))
         )
           throw fail(403, "Corpus non autorisé.");

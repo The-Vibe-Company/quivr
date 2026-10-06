@@ -3,6 +3,9 @@
 // carries the fields a filter can use: the common ones of every corpus and
 // its own typed mappings.
 import { request } from "./search";
+import type { Exclusion } from "../types";
+
+export type { Exclusion };
 
 export type FieldType = "string" | "number" | "boolean" | "datetime" | "string_array";
 
@@ -49,22 +52,31 @@ export const fieldLabel = (name: string) =>
 export const scopeOf = (picked: string[], demo: string) =>
   picked.length === 1 && picked[0] === demo ? "" : picked.join(",");
 
+/** Items for a sentence: A, A et B, A, B et C. */
+const list = (items: string[]) =>
+  items.length > 1 ? `${items.slice(0, -1).join(", ")} et ${items.at(-1)}` : items[0] || "";
+
 /** The corpora's names, for a sentence: « A », « A » et « B »… */
 export function corpusNames(ids: string[], corpora: Corpus[]) {
-  const names = ids.map((id) => `« ${corpora.find((c) => c.corpus_id === id)?.name || id} »`);
-  return names.length > 1 ? `${names.slice(0, -1).join(", ")} et ${names.at(-1)}` : names[0] || "";
+  return list(ids.map((id) => `« ${corpora.find((c) => c.corpus_id === id)?.name || id} »`));
 }
 
-/** Which corpora a type-specific filter left out, as the engine says. */
-export interface Exclusion {
-  corpus_id: string;
-  fields: string[];
-}
-
-/** The sentence telling which corpora a filter excluded, and why. */
+/**
+ * The sentences telling which corpora a filter excluded and why: corpora
+ * lacking the same fields share one.
+ */
 export function exclusionNotice(excluded: Exclusion[], corpora: Corpus[]) {
-  if (!excluded.length) return "";
-  const fields = [...new Set(excluded.flatMap((e) => e.fields))].map((f) => `« ${fieldLabel(f)} »`);
-  const one = excluded.length === 1;
-  return `${one ? "Le corpus" : "Les corpus"} ${corpusNames(excluded.map((e) => e.corpus_id), corpora)} ${one ? "est exclu" : "sont exclus"} : ${one ? "il n’a" : "ils n’ont"} pas le champ ${fields.join(", ")}.`;
+  const byFields = new Map<string, Exclusion[]>();
+  for (const e of excluded) {
+    const key = [...e.fields].sort().join("\n");
+    byFields.set(key, [...(byFields.get(key) || []), e]);
+  }
+  return [...byFields.values()]
+    .map((group) => {
+      const one = group.length === 1;
+      const fields = group[0].fields.map((f) => `« ${fieldLabel(f)} »`);
+      const lacks = `${one ? "il n’a" : "ils n’ont"} pas ${fields.length > 1 ? "les champs" : "le champ"} ${list(fields)}`;
+      return `${one ? "Le corpus" : "Les corpus"} ${corpusNames(group.map((e) => e.corpus_id), corpora)} ${one ? "est exclu" : "sont exclus"} : ${lacks}.`;
+    })
+    .join(" ");
 }

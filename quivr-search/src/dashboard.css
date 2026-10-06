@@ -4408,6 +4408,9 @@ button.caught-title:hover {
 /* Several corpora in the feed (THE-1171): each row names its corpus, and a
    filter that left corpora out says which. */
 .row-corpus {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 0 7px;
   border-radius: 999px;
   background: var(--tint);

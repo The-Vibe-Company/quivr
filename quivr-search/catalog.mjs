@@ -29,7 +29,7 @@ const RETRY_MS = 30000;
 const MAX_TITLES = 30000;
 // Topics count at most the newest titles of a period of at most eight days
 // (seven local days and a clock change), so one period never evicts itself.
-const TOPIC_TITLES = 20000;
+export const TOPIC_TITLES = 20000;
 const MAX_TOPIC_SPAN = 8 * DAY;
 // A Version whose title could not be read is tried again after this.
 const UNREADABLE_MS = 10 * 60000;
@@ -360,7 +360,8 @@ export function createCatalog({ upstream: read, corpus, caught, ready = async ()
     }
   }
 
-  // The known titles of a period's articles (the newest TOPIC_TITLES), and
+  // The known titles of a period's articles (the newest TOPIC_TITLES) with
+  // their times, and
   // whether some are still being read or were left out.
   async function periodTitles(q) {
     const now = Date.now();
@@ -375,7 +376,7 @@ export function createCatalog({ upstream: read, corpus, caught, ready = async ()
     for (const entry of period) {
       if (now - (unreadable.get(entry.version_id) ?? -Infinity) < UNREADABLE_MS) continue;
       const title = titles.get(entry.version_id);
-      if (title !== undefined) known.push(title);
+      if (title !== undefined) known.push({ title, at: entry.at });
       else {
         missing += 1;
         if (wanted.size < MAX_TITLES) wanted.set(entry.version_id, entry);
@@ -404,7 +405,7 @@ export function createCatalog({ upstream: read, corpus, caught, ready = async ()
       return hit.value;
     const { known, building, partial } = await periodTitles(q);
     const value = {
-      items: topics(known, TOPICS),
+      items: topics(known.map((k) => k.title), TOPICS),
       ...status(),
       building,
       partial,

@@ -289,8 +289,12 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     capped: false,
     created_at: "created_at" in a ? a.created_at : undefined,
   });
-  const stored = () => [...ws.articles, ...ws.archive];
-  const find = (id: string) => [...stored(), ...ws.wires].find((a) => a.record_id === id);
+  // Every stored article of the corpora asked (the demo corpus by default).
+  const stored = (corpora = ["demo"]) => [
+    ...(corpora.includes("demo") ? [...ws.articles, ...ws.archive] : []),
+    ...(corpora.includes("wires") ? ws.wires : []),
+  ];
+  const find = (id: string) => stored(["demo", "wires"]).find((a) => a.record_id === id);
   // A Version as the engine returns it: its text, metadata and own fields.
   const versionOf = (a: Article, version_id = a.version_id) => {
     const shown = a.previous?.version_id === version_id ? a.previous : a;
@@ -346,8 +350,8 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
   };
   const arrived = (a: Article) => Date.parse(a.received_at!);
   // What the facade's index holds: every article, dated, and what alerts caught.
-  const rows = () =>
-    stored().map((a) => ({ record_id: a.record_id, version_id: a.version_id, namespace: a.namespace, at: arrived(a) }));
+  const rows = (corpora?: string[]) =>
+    stored(corpora).map((a) => ({ record_id: a.record_id, version_id: a.version_id, namespace: a.namespace, at: arrived(a) }));
   const catchesOf = () => {
     const out = new Map<string, string[]>();
     for (const a of ws.alerts)
@@ -428,7 +432,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       const bounds = (url.searchParams.get("bounds") || "").split(",").map(Date.parse);
       if (bounds.some((b, i) => Number.isNaN(b) || (i > 0 && b >= bounds[i - 1])))
         return json(route, { message: "Cette période n’est pas valide." }, 422);
-      const all = stored();
+      const all = stored(pickedOf(url));
       return json(route, {
         total: all.length,
         days: bounds.slice(1).map(
@@ -444,7 +448,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       if (Number.isNaN(after) || Number.isNaN(before) || after >= before)
         return json(route, { message: "Cette période n’est pas valide." }, 422);
       const start = Number(url.searchParams.get("cursor") || 0);
-      const day = stored()
+      const day = stored(pickedOf(url))
         .filter((a) => arrived(a) >= after && arrived(a) < before)
         .sort((a, b) => arrived(b) - arrived(a));
       return json(route, {
@@ -455,7 +459,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
     if (path === "/demo/feed/stats" && method === "POST")
       return json(route, {
         ...feedStats(
-          rows(),
+          rows(pickedOf(url)),
           {
             after: instant(body.after),
             before: instant(body.before),
@@ -483,8 +487,8 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
         },
         catchesOf(),
       );
-      const all = rows();
-      const titles = stored()
+      const all = rows(pickedOf(url));
+      const titles = stored(pickedOf(url))
         .filter((_, i) => keep(all[i]))
         .map((a) => a.title);
       return json(route, { items: topics(titles, 10), building: false });
@@ -530,8 +534,8 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
       }
       if (body.mode === "semantic") {
         // The reader's neighbours: articles sharing a topic with the seed's article.
-        const seed = ws.articles.find((a) => body.query.startsWith(a.title));
-        const related = ws.articles.filter(
+        const seed = inCorpora(body.corpus_ids).find((a) => body.query.startsWith(a.title));
+        const related = inCorpora(body.corpus_ids).filter(
           (a) => seed && a !== seed && a.topics.some((t) => seed.topics.includes(t)),
         );
         return json(route, {

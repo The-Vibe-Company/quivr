@@ -447,6 +447,7 @@ export function FeedPage({
     ...statsQuery,
     since: filter.read === "unread" ? statsQuery.since : "",
     read_ids: filter.read === "unread" ? readKey : "",
+    scope,
   });
   const lastBars = useRef<{ key: string; buckets: number[] } | null>(null);
   if (counted?.current) lastBars.current = { key: barsKey, buckets: counted.value.buckets };

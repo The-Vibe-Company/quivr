@@ -1314,6 +1314,8 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
       res.end(JSON.stringify(data));
     };
     if (url.pathname === "/v0/changes/stream") {
+      // The second corpus's change stream is down: its feed is not live.
+      if (url.searchParams.get("corpus_id") === "wires") return json(503, { code: "unavailable" });
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       res.write(": live\n\n");
       return;
@@ -1457,6 +1459,27 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
     topics.data.items.some((topic) => topic.label.toLowerCase() === "port" && topic.count === 2),
     JSON.stringify(topics.data.items),
   );
+
+  // The merged stream is live only when every corpus's feed is: the demo
+  // corpus's alone goes live, both together stay off while one is down.
+  const statusOf = async (path, wanted) => {
+    const response = await fetch(base + path, { signal: AbortSignal.timeout(5000) });
+    const reader = response.body.getReader();
+    let text = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return undefined;
+        text += new TextDecoder().decode(value);
+        const statuses = [...text.matchAll(/event: status\ndata: (.*)\n/g)].map((m) => JSON.parse(m[1]).live);
+        if (statuses.length && (wanted === undefined || statuses.includes(wanted))) return statuses.at(-1);
+      }
+    } finally {
+      await reader.cancel();
+    }
+  };
+  assert.equal(await statusOf("/demo/feed/stream", true), true);
+  assert.equal(await statusOf("/demo/feed/stream?corpora=demo,wires"), false);
 
   // Another corpus is read, never written to.
   const write = await fetch(base + "/v0/records", {

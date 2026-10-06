@@ -42,6 +42,14 @@ export function RecordPage({
   // The Version shown, and the ones read to compare, by id.
   const [shown, setShown] = useState<string | null>(null);
   const [read, setRead] = useState<Map<string, VersionDetail>>(new Map());
+  // Versions that could not be read, until asked again.
+  const [failed, setFailed] = useState<Set<string>>(new Set());
+  const retryVersion = (id: string) =>
+    setFailed((known) => {
+      const next = new Set(known);
+      next.delete(id);
+      return next;
+    });
   const heading = useRef<HTMLHeadingElement>(null);
   // Focus moves to the document's title once it shows, for keyboard and screen readers.
   const loaded = !!detail;
@@ -73,14 +81,16 @@ export function RecordPage({
   useEffect(() => {
     const controller = new AbortController();
     for (const wanted of [shown, before?.version_id])
-      if (wanted && !read.has(wanted))
+      if (wanted && !read.has(wanted) && !failed.has(wanted))
         fetchVersion(id, wanted, controller.signal)
           .then((v) => setRead((known) => new Map(known).set(v.version_id, v)))
-          .catch(() => {
-            // The history says the earlier text could not be read.
+          .catch((e) => {
+            if (controller.signal.aborted) return;
+            if (e instanceof APIError && e.status === 401) return onUnauthorized();
+            setFailed((known) => new Set(known).add(wanted));
           });
     return () => controller.abort();
-  }, [id, shown, before?.version_id, read]);
+  }, [id, shown, before?.version_id, read, failed, onUnauthorized]);
 
   const version = shown ? read.get(shown) : undefined;
   const previous = before ? read.get(before.version_id) : undefined;
@@ -108,6 +118,9 @@ export function RecordPage({
   const { record, corpus, blobs } = detail;
   const current = detail.version;
   const shownText = version ? textsOf(version) : null;
+  // A text without a title Part (one added by hand) is titled by its first line.
+  const title =
+    shownText?.title || shownText?.texts[0]?.text.trim().split("\n")[0] || "Sans titre";
   const fields = [...corpus.common, ...corpus.own];
   const values = version
     ? fields
@@ -138,7 +151,7 @@ export function RecordPage({
           {record.withdrawn && <span className="record-withdrawn">Retiré</span>}
         </p>
         <h2 id="record-title" ref={heading} tabIndex={-1}>
-          {shownText?.title || "Sans titre"}
+          {title}
         </h2>
         {version && current && version.version_id !== current.version_id && (
           <p className="record-older" role="note">
@@ -153,6 +166,10 @@ export function RecordPage({
         <section className="panel panel-pad record-text" aria-label="Texte">
           {!shown ? (
             <p className="muted">Ce document n’a plus de version lisible.</p>
+          ) : failed.has(shown) ? (
+            <Notice title="Cette version ne s’affiche pas." onRetry={() => retryVersion(shown)}>
+              Le moteur n’a pas pu la lire. Réessayez dans un instant.
+            </Notice>
           ) : !version ? (
             <LoadingState label="Chargement du texte…" rows={3} />
           ) : shownText?.texts.length ? (
@@ -229,7 +246,11 @@ export function RecordPage({
             Changements depuis la version
             {before.accepted_at ? ` du ${formatAbsolute(before.accepted_at)}` : " précédente"}
           </h3>
-          {changes ? (
+          {failed.has(before.version_id) ? (
+            <Notice title="La version précédente ne s’affiche pas." onRetry={() => retryVersion(before.version_id)}>
+              Les changements s’afficheront quand elle pourra être lue.
+            </Notice>
+          ) : changes ? (
             <>
               <p className="record-changes-summary">{summarize(changes)}</p>
               <p className="reader-diff-text" aria-label="Texte avec les changements">
@@ -253,7 +274,8 @@ export function RecordPage({
         <details className="panel record-raw">
           <summary>Source brute</summary>
           <div className="record-raw-body">
-            {blobs.length > 0 && (
+            {/* The files the current Version was read from; another Version's are not listed. */}
+            {blobs.length > 0 && version?.version_id === current?.version_id && (
               <ul className="record-blobs" aria-label="Fichiers sources">
                 {blobs.map((b) => (
                   <li key={b.blob_id}>

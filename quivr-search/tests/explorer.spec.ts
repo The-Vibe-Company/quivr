@@ -102,7 +102,10 @@ test("un document de l’Explorer montre son texte, ses métadonnées, ce qui a 
   await expect(article.getByRole("heading", { level: 2 })).toHaveText("Port remains closed for a third day");
   await expect(article.getByText("Vous lisez une version antérieure.")).toBeVisible();
 
-  // The raw source opens on demand: the source file described, the Version's extensions.
+  // The raw source opens on demand: the current Version's source file
+  // described, and its extensions.
+  await article.getByRole("button", { name: "Revenir à la version actuelle" }).click();
+  await expect(article.getByRole("heading", { level: 2 })).toHaveText("Port reopens after three-day closure");
   const raw = article.locator("details");
   await expect(raw.locator("pre")).toBeHidden();
   await raw.getByText("Source brute").click();

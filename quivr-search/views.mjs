@@ -6,7 +6,7 @@
 // corpus, where the demo writes.
 import { newestFirst, instant, unlisted } from "./feed.mjs";
 import { topics } from "./topics.mjs";
-import { TOPICS } from "./catalog.mjs";
+import { TOPICS, TOPIC_TITLES } from "./catalog.mjs";
 
 const SNAPSHOT_ITEMS = 300;
 const DAY_PAGE = 40;
@@ -70,30 +70,42 @@ export function createViews({ feedFor, indexFor, upstream }) {
     },
     /** One SSE stream over the corpora: their items, removals and resets, live when all are. */
     async subscribe(req, res, corpora) {
-      const feeds = corpora.map((id) => feedFor(id));
-      // A feed that cannot start refuses the stream, so the browser retries.
-      await Promise.all(feeds.map((feed) => feed.opened()));
-      // The browser may have left during the first catalog scan.
-      if (req.socket.destroyed || res.destroyed) return;
       if (clients.size >= MAX_CLIENTS)
         throw Object.assign(new Error("Trop de connexions au flux. Réessayez."), { status: 503 });
+      const feeds = corpora.map((id) => feedFor(id));
       const live = () => feeds.every((feed) => feed.live());
-      const frame = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      // Followed from now on: what arrives during the first catalog scans
+      // waits here, and is written once the stream is open.
+      let waiting = [];
+      const frame = (event, data) => {
+        const text = `event: ${event}\ndata: ${JSON.stringify(event === "status" ? { live: live() } : data)}\n\n`;
+        if (waiting) waiting.push(text);
+        else res.write(text);
+      };
+      const stops = feeds.map((feed) => feed.listen(frame));
+      const stop = () => {
+        clients.delete(res);
+        for (const end of stops) end();
+      };
+      clients.add(res);
+      req.on("close", stop);
+      try {
+        // A feed that cannot start refuses the stream, so the browser retries.
+        await Promise.all(feeds.map((feed) => feed.opened()));
+      } catch (error) {
+        stop();
+        throw error;
+      }
+      // The browser may have left during the first catalog scans.
+      if (req.socket.destroyed || res.destroyed) return stop();
       res.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-store",
         "X-Accel-Buffering": "no",
       });
-      res.write(`retry: 3000\n`);
-      frame("status", { live: live() });
-      const stops = feeds.map((feed) =>
-        feed.listen((event, data) => frame(event, event === "status" ? { live: live() } : data)),
-      );
-      clients.add(res);
-      req.on("close", () => {
-        clients.delete(res);
-        for (const stop of stops) stop();
-      });
+      res.write(`retry: 3000\nevent: status\ndata: ${JSON.stringify({ live: live() })}\n\n`);
+      for (const text of waiting) res.write(text);
+      waiting = null;
     },
     /** A period's page, newest first, from one listing over the corpora. */
     async page(corpora, params) {
@@ -115,12 +127,12 @@ export function createViews({ feedFor, indexFor, upstream }) {
       const records = response.data.items || [];
       // Each corpus's feed describes its own Records; the listing's order holds.
       const described = new Map();
-      await Promise.all(
-        corpora.map(async (id) => {
-          const own = records.filter((record) => record.source?.corpus_id === id);
-          for (const item of await feedFor(id).describeRecords(own)) described.set(item.record_id, item);
-        }),
-      );
+      // One corpus after the other, so the page reads Versions a few at a time.
+      for (const id of corpora) {
+        const own = records.filter((record) => record.source?.corpus_id === id);
+        if (!own.length) continue;
+        for (const item of await feedFor(id).describeRecords(own)) described.set(item.record_id, item);
+      }
       const page = { items: records.map((r) => described.get(r.record_id)).filter(Boolean) };
       if (response.data.next_page_cursor) page.next_cursor = response.data.next_page_cursor;
       return page;
@@ -144,9 +156,14 @@ export function createViews({ feedFor, indexFor, upstream }) {
     async topics(corpora, q) {
       if (corpora.length === 1) return indexFor(corpora[0]).topics(q);
       const answers = await Promise.all(corpora.map((id) => indexFor(id).titles(q)));
+      // The newest TOPIC_TITLES over every corpus, as for one.
+      const known = answers.flatMap((a) => a.known);
+      const kept = known.length > TOPIC_TITLES ? known.sort((a, b) => b.at - a.at).slice(0, TOPIC_TITLES) : known;
+      const status = progress(answers.map(statusOf));
       return {
-        items: topics(answers.flatMap((a) => a.known), TOPICS),
-        ...progress(answers.map(statusOf)),
+        items: topics(kept.map((k) => k.title), TOPICS),
+        ...status,
+        partial: status.partial || kept.length < known.length,
         as_of: new Date().toISOString(),
       };
     },

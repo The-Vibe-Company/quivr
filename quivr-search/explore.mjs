@@ -108,13 +108,20 @@ export function predicatesOf(raw) {
   return list;
 }
 
+const monthOf = (value) => {
+  const at = Date.parse(String(value));
+  return Number.isNaN(at) ? undefined : new Date(at).toISOString().slice(0, 7);
+};
+
 /** Distinct values of each field in some Versions, most frequent first. A date gives its month. */
 export function sampleValues(versions, fields) {
   return fields.map((field) => {
     const seen = new Map();
     for (const version of versions)
       for (const raw of fieldValues(version, field)) {
-        const value = field.type === "datetime" ? String(raw).slice(0, 7) : raw;
+        // A date counts in its UTC month, the month a picked value filters on.
+        const value = field.type === "datetime" ? monthOf(raw) : raw;
+        if (value === undefined) continue;
         seen.set(value, (seen.get(value) || 0) + 1);
       }
     const values = [...seen]
@@ -153,7 +160,9 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
     if (known && Date.now() - known.at < CORPUS_TTL_MS) return known.value;
     const response = await upstream(`/v0/corpora/${encodeURIComponent(id)}`);
     if (response.status >= 500) throw failure(503, "Le moteur est momentanément indisponible. Réessayez.");
-    const data = response.status === 200 ? response.data : { corpus_id: id };
+    // A corpus the key cannot read, or that is gone, is not offered.
+    if (response.status !== 200) throw failure(404, "Corpus introuvable.");
+    const data = response.data;
     const value = {
       corpus_id: id,
       name: data.name || (id === demo() ? "Espace démo" : id),
@@ -242,9 +251,17 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
         own: [],
       });
       return {
-        items: await Promise.all(
-          (await readable()).map((id) => corpus(id).catch(() => fallback(id))),
-        ),
+        items: (
+          await Promise.all(
+            (await readable()).map((id) =>
+              corpus(id).catch((error) => {
+                if (error.status !== 404) return fallback(id);
+                console.warn(`Explorer: corpus ${id} is not readable with the demo's key.`);
+                return null;
+              }),
+            ),
+          )
+        ).filter(Boolean),
       };
     },
     /** GET /demo/explore: a page of documents, newest first. */

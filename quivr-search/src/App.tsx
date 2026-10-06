@@ -674,7 +674,6 @@ function Dashboard({
               record={record}
               onRecord={(id) => {
                 setRecord(id);
-                scroller.current?.scrollTo?.(0, 0);
                 window.scrollTo(0, 0);
               }}
               onUnauthorized={onUnauthorized}

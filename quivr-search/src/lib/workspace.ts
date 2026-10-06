@@ -63,10 +63,13 @@ export function useFeedStream(
   );
 
   useEffect(() => {
-    // Other corpora picked: what waited belongs to the ones left.
+    // Other corpora picked: what was shown or waited belongs to the ones
+    // left, so the feed starts over from their snapshot.
     if (scopeRef.current !== scope) {
       scopeRef.current = scope;
-      commit(itemsRef.current, []);
+      commit([], []);
+      setStatus("loading");
+      setLive(false);
     }
     const controller = new AbortController();
     let retry: ReturnType<typeof setTimeout>;

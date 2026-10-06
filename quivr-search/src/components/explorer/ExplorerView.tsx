@@ -63,15 +63,16 @@ export function ExplorerView({
   const [facets, setFacets] = useState<Facets | null>(null);
   const [attempt, setAttempt] = useState(0);
 
-  // Every field of the corpora read, for its type and the corpus it belongs to.
+  // Every field of the corpora read, for its type: the picked corpora's
+  // first, so a name two corpora share takes the type of the one browsed.
   const fields = useMemo(() => {
-    const out = new Map<string, Field & { corpus?: string }>();
-    for (const c of corpora) {
-      for (const f of c.common) out.set(f.name, f);
-      for (const f of c.own) if (!out.has(f.name)) out.set(f.name, { ...f, corpus: c.corpus_id });
-    }
+    const out = new Map<string, Field>();
+    const order = [...corpora].sort(
+      (a, b) => Number(!picked.includes(a.corpus_id)) - Number(!picked.includes(b.corpus_id)),
+    );
+    for (const c of order) for (const f of [...c.common, ...c.own]) if (!out.has(f.name)) out.set(f.name, f);
     return out;
-  }, [corpora]);
+  }, [corpora, picked]);
   const types = useMemo(
     () => new Map([...fields].map(([name, f]) => [name, f.type])),
     [fields],
@@ -264,7 +265,7 @@ export function ExplorerView({
               <Notice title="Les documents ne s’affichent pas." onRetry={() => setAttempt((n) => n + 1)}>
                 {error}
               </Notice>
-            ) : page && page.items.length === 0 ? (
+            ) : page && page.items.length === 0 && !page.next_cursor ? (
               <EmptyState title={picks.length ? "Aucun document pour ces filtres." : "Aucun document pour l’instant."}>
                 {picks.length
                   ? "Retirez un filtre pour élargir la liste."
