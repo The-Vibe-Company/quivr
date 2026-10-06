@@ -110,7 +110,7 @@ func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
 			if format == "zip" {
 				makeArchive = syntheticZip
 			}
-			data := makeArchive(t, "folder/001.xml", "folder/skip.txt", "folder/002.xml", "folder/003\n.xml")
+			data := makeArchive(t, "fólder/001.xml", "fólder/skip.txt", "fólder/002.xml", "fólder/003\n.xml")
 			srv := objectServer(t, data)
 			var objectReads atomic.Int64
 			handler := srv.Config.Handler
@@ -122,7 +122,7 @@ func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
 			})
 			source := NewArchiveConnector()
 			t.Cleanup(source.Close)
-			req := fetchRequest(t, srv.URL, nil, `,"member_pattern":"**/*.xml"`)
+			req := fetchRequest(t, srv.URL, nil, `,"member_pattern":"fólder/**/*.xml"`)
 			page, err := source.Fetch(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)
@@ -153,7 +153,7 @@ func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(got) != "<item>folder/002.xml</item>" {
+			if string(got) != "<item>fólder/002.xml</item>" {
 				t.Fatalf("lost-cache bytes: %q", got)
 			}
 			// A cold last-member upload must recover earlier page uploads
@@ -165,7 +165,7 @@ func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
 			}
 			firstBytes, err := io.ReadAll(earlier)
 			earlier.Close()
-			if err != nil || string(firstBytes) != "<item>folder/001.xml</item>" {
+			if err != nil || string(firstBytes) != "<item>fólder/001.xml</item>" {
 				t.Fatal("earlier page recovery", err)
 			}
 			if objectReads.Load() != before {
@@ -188,10 +188,10 @@ func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
 			}
 			oldBytes, err := io.ReadAll(oldBody)
 			oldBody.Close()
-			if err != nil || string(oldBytes) != "<item>folder/002.xml</item>" {
+			if err != nil || string(oldBytes) != "<item>fólder/002.xml</item>" {
 				t.Fatal("legacy bytes", err)
 			}
-			req = fetchRequest(t, srv.URL, page.Checkpoint, `,"member_pattern":"**/*.xml"`)
+			req = fetchRequest(t, srv.URL, page.Checkpoint, `,"member_pattern":"fólder/**/*.xml"`)
 			resumed, err := fresh.Fetch(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)

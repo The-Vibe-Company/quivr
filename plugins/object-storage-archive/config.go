@@ -56,7 +56,7 @@ func glob(pattern string) (*regexp.Regexp, error) {
 		case '?':
 			b.WriteString("[^/]")
 		default:
-			b.WriteString(regexp.QuoteMeta(string(pattern[i])))
+			b.WriteString(regexp.QuoteMeta(pattern[i : i+1]))
 		}
 	}
 	b.WriteString("$")
