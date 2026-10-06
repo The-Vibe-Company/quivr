@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -64,7 +63,10 @@ func (cfg Config) loadPins(command string) (*plugins.PinSet, error) {
 		return pins, err
 	}
 	_, err = pins.RetrievalProfiles(cfg.Retrieval.Profiles)
-	return pins, err
+	if err != nil {
+		return pins, invalidConfig("retrieval.profiles", "invalid retrieval profile mapping", err)
+	}
+	return pins, nil
 }
 
 // migrationPins loads the pins for `quivr migrate`, which registers the
@@ -131,19 +133,23 @@ type DeliveryConfig struct {
 
 func (c DeliveryConfig) parse() (monitoring.RetryPolicy, time.Duration, error) {
 	durations := make([]time.Duration, 4)
-	for i, value := range []string{c.RetryInitial, c.RetryMax, c.Window, c.Timeout} {
+	for i, setting := range []struct{ field, value string }{
+		{"delivery.retry_initial", c.RetryInitial}, {"delivery.retry_max", c.RetryMax},
+		{"delivery.window", c.Window}, {"delivery.timeout", c.Timeout},
+	} {
+		value := setting.value
 		if value == "" {
 			continue
 		}
 		d, err := time.ParseDuration(value)
 		if err != nil || d <= 0 {
-			return monitoring.RetryPolicy{}, 0, errors.New("delivery durations must be positive Go durations")
+			return monitoring.RetryPolicy{}, 0, badConfig(configInvalid, setting.field, "delivery durations must be positive Go durations")
 		}
 		durations[i] = d
 	}
 	policy := monitoring.RetryPolicy{Initial: durations[0], Max: durations[1], Window: durations[2]}.WithDefaults()
 	if policy.Initial > policy.Max {
-		return monitoring.RetryPolicy{}, 0, errors.New("delivery retry_initial must not exceed retry_max")
+		return monitoring.RetryPolicy{}, 0, badConfig(configConflict, "delivery.retry_initial", "delivery retry_initial must not exceed retry_max")
 	}
 	timeout := durations[3]
 	if timeout == 0 {
@@ -164,10 +170,10 @@ func validateDestinations(destinations map[string]monitoring.Destination, allowP
 		target, err := url.Parse(d.URL)
 		_, secretErr := monitoring.ParseSecret(d.Secret)
 		if id == "" || d.Organization == "" || secretErr != nil || err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
-			return errors.New("invalid webhook destination configuration")
+			return badConfig(configInvalid, "destinations", "invalid webhook destination configuration")
 		}
 		if !allowPrivate && netguard.CheckLiteral(target.Hostname()) != nil {
-			return fmt.Errorf("webhook destination %q targets a private or internal address; set delivery.allow_private_destinations only for trusted internal receivers (increases SSRF exposure)", id)
+			return invalidConfig("destinations", "webhook destination targets a private or internal address; review delivery.allow_private_destinations", fmt.Errorf("webhook destination %q targets a private or internal address; set delivery.allow_private_destinations only for trusted internal receivers (increases SSRF exposure)", id))
 		}
 		destinations[id] = d
 	}

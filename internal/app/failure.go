@@ -5,12 +5,18 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 // LogFailure reports stable, engine-owned issue codes without serializing the
 // raw error, which can include a configuration value or provider response.
 func LogFailure(err error) {
+	var config *configError
+	if errors.As(err, &config) {
+		slog.Error("process failed", "event", logging.Diagnostic("quivr.failed"), "error_code", logging.Diagnostic(config.code), "field", logging.Diagnostic(config.field), "problem", logging.Diagnostic(config.problem))
+		return
+	}
 	code := "process_failed"
 	var pin *plugins.PinError
 	if errors.As(err, &pin) {
@@ -32,5 +38,5 @@ func LogFailure(err error) {
 			code = strings.Join(codes, ",")
 		}
 	}
-	slog.Error("process failed", "event", "quivr.failed", "error_code", code)
+	slog.Error("process failed", "event", logging.Diagnostic("quivr.failed"), "error_code", logging.Diagnostic(code))
 }
