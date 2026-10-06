@@ -99,6 +99,12 @@ func (o processingObserver) record(org string, steps content.Steps, names ...str
 // apiMetrics serves accepted-command counters and the ingestion backlog gauges.
 // A backlog read failure omits the gauges rather than reporting zero.
 func apiMetrics(commands telemetry.Commands, backlog func(context.Context) (int64, time.Duration, error), extra func(io.Writer)) http.Handler {
+	gauges := []telemetry.GaugeDefinition{{Name: "quivr_ingestion_pending", Help: "Receipts accepted but not yet materialized."}, {Name: "quivr_ingestion_oldest_pending_age_seconds", Help: "Age of the oldest Receipt accepted but not yet materialized."}}
+	telemetry.RegisterGauges(gauges, func(ctx context.Context) ([]float64, error) {
+		pending, age, err := backlog(ctx)
+		return []float64{float64(pending), age.Seconds()}, err
+	})
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		commands.Write(w)
@@ -109,7 +115,7 @@ func apiMetrics(commands telemetry.Commands, backlog func(context.Context) (int6
 		if err != nil {
 			return
 		}
-		telemetry.Gauge(w, "quivr_ingestion_pending", "Receipts accepted but not yet materialized.", float64(pending))
-		telemetry.Gauge(w, "quivr_ingestion_oldest_pending_age_seconds", "Age of the oldest Receipt accepted but not yet materialized.", age.Seconds())
+		telemetry.Gauge(w, gauges[0].Name, gauges[0].Help, float64(pending))
+		telemetry.Gauge(w, gauges[1].Name, gauges[1].Help, age.Seconds())
 	})
 }

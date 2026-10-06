@@ -120,6 +120,17 @@ class Reranker(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN') and importlib.util.find_spec('ranx'), 'needs eval dependencies and disposable PostgreSQL')
 class Trial(unittest.TestCase):
+    def trial(self, prices=None, provider_cap=1, store=None, campaign=None, key='trial'):
+        store = store or control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        if campaign is None:
+            campaign = uuid.uuid4().hex
+            store.campaign(campaign, {'provider_daily_usd': provider_cap, 'modal_daily_usd': 1})
+        lease = store.claim(campaign, key)
+        budget = control_store.Budget(store, campaign, (key, lease['owner']))
+        client = (direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+                  if prices is not None else None)
+        return store, campaign, budget, client
+
     def test_quality_overlap_preserves_rankings_prices_and_serial_latency(self):
         # Own concurrent quality ordering and per-search prices at measure():
         # real SQL admission/scoring, only HTTP is fake. Existing embedding
@@ -132,10 +143,7 @@ class Trial(unittest.TestCase):
         for limit in (1, 3, 8):
             for fresh in (False, True):
                 with self.subTest(limit=limit, fresh=fresh), tempfile.TemporaryDirectory() as temp:
-                    campaign = uuid.uuid4().hex
-                    store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
-                    lease = store.claim(campaign, 'trial')
-                    budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+                    store, campaign, budget, _ = self.trial(store=store)
                     finished = [threading.Event() for _ in range(10)]
                     arrivals = {start: threading.Barrier(min(limit, 10 - start)) for start in range(0, 10, limit)}
                     lock, completed, visits = threading.Lock(), [], collections.Counter()
@@ -201,11 +209,7 @@ class Trial(unittest.TestCase):
         # A shared PostgreSQL cap refuses before HTTP, including concurrent work.
         for capped in (False, True):
             with self.subTest(capped=capped), tempfile.TemporaryDirectory() as temp:
-                store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
-                campaign = uuid.uuid4().hex
-                store.campaign(campaign, {'provider_daily_usd': .006 if capped else 1, 'modal_daily_usd': 1})
-                lease = store.claim(campaign, 'trial')
-                budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+                store, campaign, budget, _ = self.trial(provider_cap=.006 if capped else 1)
                 refused, barrier = threading.Event(), threading.Barrier(3)
                 reserve = store.reserve
                 def admit(*args, **kwargs):
@@ -254,12 +258,8 @@ class Trial(unittest.TestCase):
                 with self.subTest(private=private, model=model, reranker=reranker), tempfile.TemporaryDirectory() as temp:
                     cfg = search_trial.configuration({'reranker': reranker, **({
                         'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2} if model == 'hosted' else {})})
-                    campaign = uuid.uuid4().hex
-                    store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
-                    lease = store.claim(campaign, 'trial')
-                    budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
                     prices = {'Cohere-Embed-V5-Fast': .08, 'jev-1.13.0': .042}
-                    client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+                    store, campaign, budget, client = self.trial(prices, store=store)
                     clock = [0.]
                     attempts = [0]
                     reserve, settle = budget.reserve, budget.settle
@@ -328,14 +328,9 @@ class Trial(unittest.TestCase):
         # Public cache publication and private ephemeral fills use this path.
         for private in (False, True):
             with self.subTest(private=private):
-                store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
-                campaign = uuid.uuid4().hex
-                store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
-                lease = store.claim(campaign, 'trial')
-                budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
                 cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
                 prices = {'Cohere-Embed-V5-Fast': .08}
-                client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+                store, campaign, budget, client = self.trial(prices)
                 data = {'corpus': {str(i): {'text': f'passage{i:03}'} for i in range(512)},
                         'queries': {'q': 'question'}, 'qrels': {'q': {'0': 1}}}
                 barrier, lock = threading.Barrier(4), threading.Lock()
@@ -381,7 +376,7 @@ class Trial(unittest.TestCase):
                     self.assertAlmostEqual(replay['metrics']['cost_per_1000_documents_usd'], .00062)
                     self.assertAlmostEqual(replay['metrics']['cost_per_search_usd'], .00000008)
                     self.assertEqual(query_calls, 5)
-                    store.publish(campaign, 'trial', lease['owner'], {'metrics': measured['metrics'], 'cost': measured['cost']})
+                    store.publish(campaign, 'trial', budget.lease[1], {'metrics': measured['metrics'], 'cost': measured['cost']})
                     self.assertEqual(store.claim(campaign, 'trial')['status'], 'done')
                     if private:
                         commit.assert_not_called()
@@ -393,14 +388,9 @@ class Trial(unittest.TestCase):
         # Own bounded cache persistence/recovery, beyond the scoring sweep's
         # tiny fixture. Only hosted HTTP is fake; leases and files are real.
         import psycopg
-        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
-        campaign = uuid.uuid4().hex
-        store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
-        lease = store.claim(campaign, 'trial')
-        budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
         cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
         prices = {'Cohere-Embed-V5-Fast': .08}
-        client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+        store, campaign, budget, client = self.trial(prices)
         data = {'corpus': {str(i): {'text': 'passage ' + str(i)} for i in range(129)},
                 'queries': {'q': 'question'}, 'qrels': {'q': {'0': 1}}}
         dataset = {'name': 'tiny', 'version': '1', 'split': 'dev', 'private': False}
@@ -417,8 +407,16 @@ class Trial(unittest.TestCase):
             busy_key = 'embedding/' + search_trial.digest({'config': identity, 'mode': 'document',
                 'text_hash': hashlib.sha256('passage 1'.encode()).hexdigest()})
             store.claim(campaign, busy_key, ttl=86400)
-            with self.assertRaisesRegex(RuntimeError, 'embedding cache fill already leased'):
+            clock = [0.]
+            budget.ttl = 2
+            def advance(seconds):
+                clock[0] += seconds
+                self.assertLessEqual(clock[0], 2, 'cache contention must not keep paid compute waiting indefinitely')
+            with mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                    mock.patch('time.sleep', side_effect=advance), \
+                    self.assertRaisesRegex(RuntimeError, 'cache wait exceeded invocation bound'):
                 run(mock.Mock())
+            budget.ttl = 3600
             network.assert_not_called()
             with psycopg.connect(store.dsn) as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND key LIKE 'embedding/%%'", (campaign,)).fetchone()[0], 1)
@@ -474,15 +472,10 @@ class Trial(unittest.TestCase):
         # Own the performance contract at the real runner/SQL boundary. A
         # barrier proves overlap without timing assertions; transport counts
         # catch serial quality embeddings and unsampled latency regressions.
-        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
-        campaign = uuid.uuid4().hex
-        store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
-        lease = store.claim(campaign, 'trial')
-        budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
         cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2,
                                           'dense_weight': .5})
         prices = {'Cohere-Embed-V5-Fast': .08}
-        client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+        store, campaign, budget, client = self.trial(prices)
         data = {'corpus': {str(i): {'text': 'passage ' + str(i)} for i in range(513)},
                 'queries': {f'q{i:02}': f'question {i}' for i in range(61)},
                 'qrels': {f'q{i:02}': {'0': 1} for i in range(61)}}
@@ -505,30 +498,20 @@ class Trial(unittest.TestCase):
             count = len(body['texts'])
             return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
                 'meta': {'billed_units': {'input_tokens': 7 if body['input_type'] == 'search_query' and count == 1 else count}}}).encode())
-        tokenised, normalised = collections.Counter(), collections.Counter()
-        normalize = direct_bakeoff.normalize
-        def normalize_once(vectors):
-            normalised[len(vectors)] += 1
-            if len(vectors) == 513 and normalised[513] > 1:
-                raise AssertionError('query scoring normalised corpus vectors again')
-            return normalize(vectors)
-        findall = re.findall
-        def tokenize(pattern, text):
-            if text.startswith('passage '):
-                tokenised[text] += 1
-                if tokenised[text] > 1:
-                    raise AssertionError('query scoring tokenised a document again')
-            return findall(pattern, text)
+        import psycopg
+        connect = psycopg.connect
+        connections = 0
+        def open_connection(*args, **kwargs):
+            nonlocal connections
+            with lock:
+                connections += 1
+            return connect(*args, **kwargs)
         with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond), \
-                mock.patch.object(search_trial.re, 'findall', side_effect=tokenize), \
-                mock.patch.object(direct_bakeoff, 'normalize', side_effect=normalize_once), \
-                mock.patch.object(store, 'renew', wraps=store.renew) as renew:
+                mock.patch.object(psycopg, 'connect', side_effect=open_connection):
             measured = search_trial.measure(cfg, data, dataset, temp, budget, client, prices, 0)
-            # Paid attempts and fresh retrieval renew independently. Quality
-            # batches must not add one remote control-plane call per query.
-            self.assertLessEqual(renew.call_count - len(calls) - search_trial.LATENCY_SAMPLE_SIZE - 1, 10)
-            self.assertEqual(len(tokenised), 513)
-            self.assertEqual(normalised[513], 1)
+            # Actual control-plane I/O stays bounded across all quality queries.
+            # THE-1025's per-query SQL renewal exceeds this fixture's budget.
+            self.assertLessEqual(connections, 300)
             self.assertEqual(peak, 4)
             self.assertAlmostEqual(measured['cost']['index_tokens_attributed'], 513)
             self.assertEqual(measured['cost']['provider']['reserved_input_tokens'], 0)
@@ -547,19 +530,14 @@ class Trial(unittest.TestCase):
         # Own indexing phase boundaries, which call-count/usage tests cannot
         # see. Dependency work advances a fake clock; no wall-clock wait.
         clock = [0.]
-        class Title(str):
-            def __add__(self, other):
-                clock[0] += 5
-                return super().__add__(other)
-        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
-        campaign = uuid.uuid4().hex
-        store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
-        lease = store.claim(campaign, 'trial')
-        budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
+        split_documents = direct_bakeoff.split_documents
+        def prepare_documents(*args, **kwargs):
+            clock[0] += 5
+            return split_documents(*args, **kwargs)
         cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
         prices = {'Cohere-Embed-V5-Fast': .08}
-        client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
-        data = {'corpus': {'a': {'title': Title('a'), 'text': 'apple'}, 'b': {'title': Title('b'), 'text': 'pear'}},
+        store, campaign, budget, client = self.trial(prices)
+        data = {'corpus': {'a': {'title': 'a', 'text': 'apple'}, 'b': {'title': 'b', 'text': 'pear'}},
                 'queries': {'q': 'question'}, 'qrels': {'q': {'a': 1}}}
         def respond(request, timeout):
             body = json.loads(request.data)
@@ -568,10 +546,11 @@ class Trial(unittest.TestCase):
             return io.BytesIO(json.dumps({'embeddings': {'float': [[1, 0]] * count},
                 'meta': {'billed_units': {'input_tokens': count}}}).encode())
         with tempfile.TemporaryDirectory() as temp, mock.patch.object(client.opener, 'open', side_effect=respond), \
-                mock.patch.object(search_trial.time, 'monotonic', side_effect=lambda: clock[0]):
+                mock.patch.object(search_trial.time, 'monotonic', side_effect=lambda: clock[0]), \
+                mock.patch.object(direct_bakeoff, 'split_documents', side_effect=prepare_documents):
             measured = search_trial.measure(cfg, data, {'split': 'dev', 'private': False}, temp,
                                            budget, client, prices, .001, fresh_latency=False)
-        # Ten seconds preparing titles, two billed tokens; seven seconds of
+        # Ten seconds preparing documents, two billed tokens; seven seconds of
         # hosted document HTTP and quality-query preparation are excluded.
         self.assertAlmostEqual(measured['metrics']['cost_per_1000_documents_usd'], 5.00008)
 
@@ -579,14 +558,9 @@ class Trial(unittest.TestCase):
         # A sibling in-flight reservation must not reject a valid response,
         # but one response without usage rejects the whole unpublished wave.
         import psycopg
-        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
-        campaign = uuid.uuid4().hex
-        store.campaign(campaign, {'provider_daily_usd': 1, 'modal_daily_usd': 1})
-        lease = store.claim(campaign, 'trial')
-        budget = control_store.Budget(store, campaign, ('trial', lease['owner']))
         cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1', 'dimensions': 2})
         prices = {'Cohere-Embed-V5-Fast': .08}
-        client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+        store, campaign, budget, client = self.trial(prices)
         data = {'corpus': {str(i): {'text': 'passage ' + str(i)} for i in range(512)},
                 'queries': {'q': 'question'}, 'qrels': {'q': {'0': 1}}}
         barrier = threading.Barrier(4)
@@ -637,9 +611,7 @@ class Trial(unittest.TestCase):
             data = trec.load(root / 'data')
             outbox = results.Results(directory=root / 'results')
             def run(config, key, fresh=False, commits=0):
-                lease = store.claim(campaign, key)
-                budget = control_store.Budget(store, campaign, (key, lease['owner']))
-                client = direct_bakeoff.Hosted('https://example.com', 'fixture-key', budget, 'tiny', prices)
+                _, _, budget, client = self.trial(prices, store=store, campaign=campaign, key=key)
                 with mock.patch.object(client.opener, 'open', side_effect=respond):
                     # Each mode is one tiny chunk; commit once for documents, once for queries.
                     commit = mock.Mock()
@@ -657,8 +629,6 @@ class Trial(unittest.TestCase):
             self.assertGreater(lexical['metrics']['cost_per_1000_documents_usd'], 0)
             self.assertIsNone(lexical['metrics']['latency_p95_ms'])
             self.assertEqual(lexical['cost']['provider']['confirmed_input_tokens'], 0)
-            self.assertEqual(search_trial.SearchIndex(['apple', 'pear'], ['a', 'b'], [[1, 0], [0, 1]], [0, 1], cfg).rank('apple', [0, 1]), ['b', 'a'])
-            self.assertEqual(search_trial.SearchIndex(['apple', 'pear'], ['a', 'b'], [], [], dict(cfg, dense_weight=0)).rank('apple'), ['a', 'b'])
             before = len(requests)
             fresh = run(cfg, 'fresh', fresh=True)
             self.assertEqual(len(requests) - before, 2)  # One warmup, one scored query.

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { alertStats, arrivedAt, busiestPeriod, streakStart } from "../src/lib/alertStats";
+import { alertStats, busiestPeriod, streakStart } from "../src/lib/alertStats";
 import type { FeedItem } from "../src/lib/feed";
 
 // The owner of an alert's sheet numbers (THE-1017): which window they cover,
@@ -20,21 +20,20 @@ const at = (ago: number, namespace = "Dépêches"): FeedItem => ({
   received_at: new Date(NOW - ago).toISOString(),
 });
 /**
- * The sheet's numbers for an alert, `feed` standing for every article the
- * facade indexed: it gives the oldest one, and how many arrived since the
- * alert started (or since the oldest), as the facade counts them.
+ * The sheet's numbers for an alert. The facade gives the oldest article it
+ * indexed and how many arrived since the alert started (or since the oldest);
+ * server.test.mjs owns how it counts them.
  */
-const run = (createdAt: string | undefined, caught: FeedItem[], feed: FeedItem[], total = caught.length) => {
-  const times = feed.map((i) => Date.parse(arrivedAt(i))).filter((t) => !Number.isNaN(t));
-  const oldest = times.length ? Math.min(...times) : null;
-  const since = createdAt ? Date.parse(createdAt) : oldest;
-  const arrived = since === null ? 0 : times.filter((t) => t >= since).length;
-  return alertStats({ createdAt, caught, oldest, arrived, now: NOW, total });
-};
+const run = (
+  createdAt: string | undefined,
+  caught: FeedItem[],
+  index: { oldest: number | null; arrived: number },
+  total = caught.length,
+) => alertStats({ createdAt, caught, ...index, now: NOW, total });
 
 test("une alerte récente se lit heure par heure, depuis sa création", () => {
   const caught = [at(1 * HOUR), at(2 * HOUR), at(2.5 * HOUR)];
-  const s = run(new Date(NOW - 5 * HOUR).toISOString(), caught, [...caught, at(3 * HOUR), at(4 * HOUR)]);
+  const s = run(new Date(NOW - 5 * HOUR).toISOString(), caught, { oldest: NOW - 4 * HOUR, arrived: 5 });
   expect(s.mode).toBe("hours");
   expect(s.bars).toHaveLength(24);
   expect(s.young).toBe(true);
@@ -47,8 +46,7 @@ test("une alerte récente se lit heure par heure, depuis sa création", () => {
 
 test("une alerte sans date se mesure depuis le plus ancien article indexé, pas depuis sa première prise", () => {
   const caught = [at(1 * HOUR)];
-  const feed = [...caught, at(30 * HOUR), at(20 * HOUR)];
-  const s = run(undefined, caught, feed, 9);
+  const s = run(undefined, caught, { oldest: NOW - 30 * HOUR, arrived: 3 }, 9);
   expect(s.dated).toBe(false);
   expect(s.young).toBe(false);
   expect(s.since).toBe(NOW - 30 * HOUR);
@@ -61,9 +59,9 @@ test("la croissance ne compare deux semaines que si l’index les couvre", () =>
   const created = new Date(NOW - 20 * DAY).toISOString();
   const caught = [at(1 * DAY), at(2 * DAY), at(9 * DAY)];
   // An index of a few hours: nothing before is known, so no growth.
-  expect(run(created, caught.slice(0, 1), [at(1 * HOUR), at(3 * HOUR)]).growth).toBeNull();
+  expect(run(created, caught.slice(0, 1), { oldest: NOW - 3 * HOUR, arrived: 2 }).growth).toBeNull();
   // An index of three weeks: 2 this week against 1 the week before.
-  const s = run(created, caught, [...caught, at(21 * DAY)]);
+  const s = run(created, caught, { oldest: NOW - 21 * DAY, arrived: 3 });
   expect(s.feedSince).toBe(NOW - 21 * DAY);
   expect(s.growth).toEqual({ week: 2, before: 1, change: 100 });
   expect(s.mode).toBe("days");
@@ -75,18 +73,18 @@ test("la croissance ne compare deux semaines que si l’index les couvre", () =>
 test("une baisse et une semaine vide se lisent comme telles", () => {
   const created = new Date(NOW - 30 * DAY).toISOString();
   const caught = [at(8 * DAY), at(9 * DAY), at(10 * DAY), at(1 * DAY)];
-  const s = run(created, caught, [...caught, at(25 * DAY)]);
+  const s = run(created, caught, { oldest: NOW - 25 * DAY, arrived: 5 });
   expect(s.growth).toEqual({ week: 1, before: 3, change: -67 });
-  const quiet = run(created, [at(9 * DAY)], [at(9 * DAY), at(25 * DAY)]);
+  const quiet = run(created, [at(9 * DAY)], { oldest: NOW - 25 * DAY, arrived: 2 });
   expect(quiet.growth).toEqual({ week: 0, before: 1, change: -100 });
 });
 
 test("sans rien attrapé, aucune fréquence ni part n’est inventée", () => {
-  const s = run(new Date(NOW - 3 * DAY).toISOString(), [], [at(1 * HOUR)]);
+  const s = run(new Date(NOW - 3 * DAY).toISOString(), [], { oldest: NOW - HOUR, arrived: 1 });
   expect(s.perDay).toBeNull();
   expect(s.share).toBe(0);
   expect(s.sources).toEqual([]);
-  expect(run(undefined, [], []).since).toBeNull();
+  expect(run(undefined, [], { oldest: null, arrived: 0 }).since).toBeNull();
 });
 
 test("la phrase repère une série de jours et le moment où les articles arrivent", () => {

@@ -256,6 +256,7 @@ func serve() error {
 			}
 			write(w, 200, ok)
 		case "hang":
+			fmt.Fprintln(os.Stderr, "normalizer hanging:", request.InvocationID)
 			<-r.Context().Done()
 		case "wrong-error-class":
 			write(w, 200, ok)

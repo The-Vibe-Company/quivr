@@ -14,7 +14,7 @@ import (
 )
 
 func (s MonitoringStore) EvaluationBacklog(ctx context.Context, org string, corpora []string, after string, limit int) ([]monitoring.EvaluationCounts, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT v.evaluator->>'plugin_id',v.evaluator->>'version',
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT v.evaluator->>'plugin_id',v.evaluator->>'version',
 count(*) FILTER (WHERE i.state='pending'),
 count(*) FILTER (WHERE i.state='pending' AND i.error_code<>''),
 count(*) FILTER (WHERE i.state='pending' AND i.error_code='evaluator_unavailable'),
@@ -56,7 +56,7 @@ func (s MonitoringStore) RetireEvaluations(ctx context.Context, org string, corp
 	if err != nil {
 		return out, err
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -140,7 +140,7 @@ AND i.lease_until<now() ORDER BY i.sequence,i.subscription_version_id LIMIT $5 F
 func (s MonitoringStore) EvaluationRetirement(ctx context.Context, org string, corpora []string, id string) (monitoring.EvaluationRetirement, error) {
 	var out monitoring.EvaluationRetirement
 	var canonical, result []byte
-	err := s.Pool.QueryRow(ctx, `SELECT canonical_request,result FROM evaluation_retirements WHERE organization=$1 AND id=$2`, org, id).Scan(&canonical, &result)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT canonical_request,result FROM evaluation_retirements WHERE organization=$1 AND id=$2`, org, id).Scan(&canonical, &result)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, monitoring.ErrNotFound
 	}

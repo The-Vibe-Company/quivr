@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,21 +73,29 @@ func TestReceiveHandsTheExactDeliveryAndReturnsTheVerdict(t *testing.T) {
 	}
 }
 
-func TestReceiveRefusesAnIncoherentDeliveryBeforeTheEngineDoes(t *testing.T) {
+func TestReceiveClassifiesErrorsAndRefusesIncoherentDeliveries(t *testing.T) {
 	item := Item{RecordKey: "alert-1", Content: Text("Fog")}
-	for name, d := range map[string]*Delivery{
-		"accepted with a 4xx": {Verdict: VerdictAccepted, Status: 400},
-		"refused with items":  {Verdict: VerdictRefused, Status: 401, Items: []Item{item}},
-		"refused with a 2xx":  {Verdict: VerdictRefused, Status: 204},
-		"too many items":      Accept(item, item, item),
-		"attachments":         Accept(Item{RecordKey: "a", Content: NewManifest(TextPart("b", "body", "x")), Attachments: []Attachment{{Key: "f", Role: "attachment", MediaType: "text/plain", Ref: "r"}}}),
-		"no delivery":         nil,
+	for name, tc := range map[string]struct {
+		delivery *Delivery
+		err      error
+	}{
+		"accepted with a 4xx": {delivery: &Delivery{Verdict: VerdictAccepted, Status: 400}},
+		"refused with items":  {delivery: &Delivery{Verdict: VerdictRefused, Status: 401, Items: []Item{item}}},
+		"refused with a 2xx":  {delivery: &Delivery{Verdict: VerdictRefused, Status: 200}},
+		"too many items":      {delivery: Accept(item, item, item)},
+		"attachments":         {delivery: Accept(Item{RecordKey: "a", Content: NewManifest(TextPart("b", "body", "x")), Attachments: []Attachment{{Key: "f", Role: "attachment", MediaType: "text/plain", Ref: "r"}}})},
+		"no delivery":         {},
+		"handler error":       {err: errors.New("source unavailable")},
 	} {
 		t.Run(name, func(t *testing.T) {
-			p := newPushPlugin(t, nil, func(*ReceiveRequest) (*Delivery, error) { return d, nil })
+			p := newPushPlugin(t, nil, func(*ReceiveRequest) (*Delivery, error) { return tc.delivery, tc.err })
 			h, _ := p.Handler()
 			status, out, raw := call(h, receiveRoute, receiveBody("GET", "", map[string][]string{}, nil))
-			if status != 500 || out["code"] != "invalid_response" {
+			wantStatus, wantCode, wantClass, retryable := 500, "invalid_response", "source", false
+			if tc.err != nil {
+				wantStatus, wantCode, wantClass, retryable = 503, "unexpected_error", "transient", true
+			}
+			if status != wantStatus || out["code"] != wantCode || out["error_class"] != wantClass || out["retryable"] != retryable {
 				t.Fatalf("status %d: %s", status, raw)
 			}
 		})
@@ -258,50 +265,6 @@ func TestRouteOnlyPushKindRefusesLegacyReceive(t *testing.T) {
 	status, out, raw := call(h, receiveRoute, receiveBody("GET", "", map[string][]string{}, nil))
 	if status != 400 || out["code"] != "push_unsupported" {
 		t.Fatalf("legacy route status %d: %s", status, raw)
-	}
-}
-
-func TestDeclaredRouteUsesExistingErrorAndResponseBoundary(t *testing.T) {
-	for name, routeHandler := range map[string]func(context.Context, *ReceiveRequest) (*Delivery, error){
-		"handler error": func(context.Context, *ReceiveRequest) (*Delivery, error) {
-			return nil, errors.New("source unavailable")
-		},
-		"invalid delivery": func(context.Context, *ReceiveRequest) (*Delivery, error) {
-			return &Delivery{Verdict: VerdictRefused, Status: http.StatusOK}, nil
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			expectedStatus := 503
-			if name == "invalid delivery" {
-				expectedStatus = 500
-			}
-			p, err := New("testdata/routes.json")
-			if err != nil {
-				t.Fatal(err)
-			}
-			p.MustConnector("events", fake{}).MustConnector("alerts", fake{})
-			if err := p.Route("events", "event", routeHandler); err != nil {
-				t.Fatal(err)
-			}
-			if err := p.Route("events", "challenge", func(context.Context, *ReceiveRequest) (*Delivery, error) {
-				return Respond(200, "text/plain", "ok"), nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if err := p.Route("alerts", "event", func(context.Context, *ReceiveRequest) (*Delivery, error) {
-				return Accept(), nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			h, err := p.Handler()
-			if err != nil {
-				t.Fatal(err)
-			}
-			status, out, raw := call(h, receiveRoute, routeReceiveBody("events", "event", "POST", "events/news", map[string]any{"text": "hello"}))
-			if status != expectedStatus || out["code"] == nil {
-				t.Fatalf("status %d: %s", status, raw)
-			}
-		})
 	}
 }
 

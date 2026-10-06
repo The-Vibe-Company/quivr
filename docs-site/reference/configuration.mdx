@@ -16,6 +16,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `cursor_key` | yes | A secret of at least 32 bytes that signs change-feed cursors. Keep it stable. |
 | `keys` | yes | The API keys, by bearer token. See [API keys](#api-keys). |
 | `temporal_address` | yes | Temporal's frontend address, such as `temporal:7233` |
+| `telemetry` | no | Opt-in OTLP traces and metrics export. See [OpenTelemetry](#opentelemetry). |
 | `tls` | no | Outgoing connection encryption and trust. See [Outbound TLS](#outbound-tls). |
 | `weaviate_url` | yes | The Weaviate search index, such as `http://weaviate:8080` |
 | `s3` | yes | Object storage for original bytes and derived artifacts. See [Object storage](#object-storage). |
@@ -37,6 +38,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `public_url` | no | The address where sources reach this API, such as `https://quivr.example.com`. Connector kinds that receive webhooks need it. |
 | `connector_min_interval` | no | Shortest polling interval an instance may ask for, a Go duration. Default `30s`. |
 | `connector_push` | no | Declared source API protection: `rate_per_second` (default `10`, range `0.001`–`100000`), `burst` (default `100`, maximum `100000`), `idempotency_ttl` (Go duration, default `24h`, range `1ms`–`168h`) and `trusted_proxy_cidrs` (default empty). Instance `push_policy` can override rate/burst and set `allowed_cidrs`. |
+| `audit_retention_months` | no | Calendar months to retain sensitive-action audit entries. Default `12`, range `1`–`1200`; `0` selects the default. The worker prunes them on the change-pruning schedule. See [Audit trail](#audit-trail). |
 | `change_retention` | no | How long the change feed keeps events and a cursor stays valid. Default `168h` (7 days). |
 | `change_stream_poll` | no | How often an open change stream (`/v0/changes/stream`) checks for new events. Shorter delivers sooner and reads the database more often. Api only. Default `250ms`. |
 | `change_prune` | no | When the worker prunes the change feed. See [Change feed pruning](#change-feed-pruning). |
@@ -51,15 +53,51 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 
 Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup. Remove the former `connector_fixtures` and `monitoring_fixture_evaluator` settings; the acceptance harness now pins its fixture plugin through `plugins`.
 
+## Audit trail
+
+Quivr records sensitive HTTP commands in PostgreSQL and emits a `quivr.audit` JSON log event after each audit entry commits. The API key identifier matches `api_key_id` in the access log; bearer tokens, issued token secrets, credential values and request bodies are excluded. Audit targets retain resolved Record IDs even when a write-only command response omits them; reading those entries still requires `audit:read` and organization-wide Corpus scope. Each entry records the time, organization, action, target, accepted or refused outcome, request ID and bounded status details. Plugin activation and rollback also record the resulting plan ID. Connector creation includes any credential deposit in the same transaction; credential deposits and replacements record the credential version.
+
+Audited commands cover Corpus creation and retrieval configuration, plugin registration, activation and rollback, connector creation, disable, schedule changes, runs, credential replacement and token creation, rotation and revocation, Record withdrawals, Saved Query and Subscription deletion, and rebuild, backfill, reprocess, cancel, rerun, pause, resume, vector-space promotion and evaluation retirement commands. Reads, searches and successful dry-run estimates create no audit entry. API keys and their permissions are file configuration; there is no HTTP mutation route to audit. Connector deletion is represented by its disable command.
+
+Read entries with `GET /v0/admin/audit` using a key with `audit:read` and `corpora: ["*"]`. Other admin permissions do not grant access. Results belong only to that key's organization. Filter by `since` (inclusive), `until` (exclusive), `actor`, `action`, `target_type` and `target_id`; use `limit` (default `50`, range `1`–`200`) and `page_cursor` for paging. Pass a response's `next_page_cursor` as the next request's `page_cursor`, carrying the same filters and limit. The last page omits `next_page_cursor`. Time filters use RFC3339 timestamps; other filters match exact identifiers or action names. Audit IDs are decimal strings. Unknown API keys are refused before database admission and remain visible in structured access logs. Authenticated command refusals are retained in the organization's audit trail.
+
+Successful command changes and their entry commit together. If the audit write fails, the command rolls back and returns `503`. Refused commands roll back any command writes before recording their refusal. Process configuration changes made outside the HTTP API are outside this request audit trail.
+
+`audit_retention_months` defaults to twelve calendar months. Restart the worker after changing this configuration. The existing worker pruning loop removes expired entries in bounded batches; no worker means no retention pruning. Ordinary `UPDATE`, `DELETE` and `TRUNCATE` of `audit_events` are rejected. The retention function is the supported removal path; its execution privilege is revoked from `PUBLIC`. The migration role owns the function and retains execution; a separate runtime role needs an explicit grant on `public.prune_audit_events(integer, integer)`. For privilege separation, run migrations as a schema owner and use a separate runtime role with `SELECT` and `INSERT` on `audit_events`, sequence access and `EXECUTE` on `prune_audit_events`, without table ownership or `UPDATE`, `DELETE`, `TRUNCATE` grants. A database owner or superuser can change schema guards and must remain outside the runtime role.
+
 ## Logs and shutdown
 
-Engine processes write one JSON event per line to stdout. Every event includes `ts`, `level`, `msg`, `service`, `version`, `instance` and `environment`; events within an HTTP request also include `request_id`. `service` distinguishes `quivr.api`, `quivr.worker` and `quivr.migrate`. `version` reports the distribution release, independent of API `v0` and plugin engine compatibility `0.2.0`. The startup event also includes the commit as `revision`, `api_version` and `plugin_engine_version`; [Check that it is ready](/run-quivr/deploy#check-that-it-is-ready) lists the HTTP and metric version checks. Debug events are hidden at the default `info` level. Nonempty environment overrides take precedence over the JSON file; unknown levels, malformed durations and nonpositive grace periods refuse startup.
+Engine processes write one JSON event per line to stdout. Every event includes `ts`, `level`, `msg`, `service`, `version`, `instance`, `environment`, `trace_id` and `span_id` (empty outside a trace); events within an HTTP request also include `request_id`. `service` distinguishes `quivr.api`, `quivr.worker` and `quivr.migrate`. `version` reports the distribution release, independent of API `v0` and plugin engine compatibility `0.2.0`. The startup event also includes the commit as `revision`, `api_version` and `plugin_engine_version`; [Check that it is ready](/run-quivr/deploy#check-that-it-is-ready) lists the HTTP and metric version checks. Debug events are hidden at the default `info` level. Nonempty environment overrides take precedence over the JSON file; unknown levels, malformed durations and nonpositive grace periods refuse startup.
 
 Each completed public or probe HTTP request writes an access event with `route`, `method`, `status`, `duration_ms`, `response_size` (bytes written), `client_ip`, `api_key_id`, `error_code` and `request_id`. Routes are registered templates, with `unmatched` for unknown paths. For public requests, client IP follows the trusted proxy policy in `connector_push.trusted_proxy_cidrs`; otherwise it is the socket peer. Probe requests use the socket peer. The key ID is a 128-bit SHA-256 fingerprint of a bearer token present in the configured `keys`; it is empty for instance tokens and requests without a configured API key. No bearer token, request body, query string or arbitrary request path is logged.
 
 Lifecycle events use `event`: `quivr.start`, `quivr.ready`, `quivr.draining` and `quivr.stop`. Startup includes an allowlisted summary of effective process settings, with counts and enabled flags for sensitive configuration. Credentials, plugin settings and connection URLs are excluded. Raw error details are redacted at the logging boundary; use stable event and error codes for routing.
 
 On SIGTERM or SIGINT, readiness becomes `503` before drain begins. New public requests are refused, public listeners close, and admitted work can finish within one `shutdown_grace` budget. Probes remain available during the drain. Work still running at the deadline is canceled, open HTTP connections are closed, and unfinished durable work can resume on another worker. Streaming connections count as in-flight requests and may use the whole grace period. The final counter flush shares this deadline.
+
+## OpenTelemetry
+
+Set `telemetry.endpoint` in every engine process to export traces and metrics to your collector. An omitted or empty endpoint disables export; tracing uses a no-op provider and installs no dependency tracing or exporter goroutines. `/metrics` remains available with the same Prometheus metric names, labels and buckets. SDK meters own aggregation; no collector is needed for scraping. The OTLP reader samples backlog gauges even when nobody scrapes `/metrics`.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `endpoint` | Empty (export off) | Collector base URL, such as `https://collector.example.com:4318`. HTTP appends `/v1/traces` and `/v1/metrics`; signal-specific URLs ending in either path are refused. gRPC permits no path. URLs with credentials, queries or fragments are refused. |
+| `protocol` | `http/protobuf` | `http/protobuf` or `grpc`. Use an `https` endpoint for verified TLS, or `http` for plaintext to a trusted local collector. |
+| `headers` | `{}` | Collector authentication headers, used for both signals. Values are excluded from logs. |
+| `sampling_ratio` | `1` | Root trace sampling probability, from `0` to `1`. Children honor their parent's sampled flag, including incoming W3C context. |
+| `resource_attributes` | Engine service and version | Deployment identity as string key/value pairs. `service.name` and `service.version` use process settings. Configured `instance` and `environment` also become resource attributes unless you override them. |
+
+For example, not run:
+
+```json
+{"telemetry":{"endpoint":"https://collector.example.com:4318","protocol":"http/protobuf","sampling_ratio":0.1,"resource_attributes":{"deployment.environment.name":"staging"}}}
+```
+
+The API honors W3C `traceparent` and `tracestate`. Send `X-Request-ID` as 1–128 ASCII letters, digits, dots, underscores or hyphens; missing, duplicate or invalid IDs are replaced. Responses echo `X-Request-ID`; JSON errors include `request_id` and, when a valid trace context is present (including an incoming `traceparent` while export is disabled), `trace_id` and `span_id`. Logs carry the same trace fields. Request IDs are correlation values, so use opaque IDs rather than names or secrets.
+
+One trace crosses durable ingestion and operation queues, Temporal workflows and activities, plugin calls, monitoring evaluation and webhook retries. Spans cover HTTP route templates, PostgreSQL, Weaviate and S3. They exclude SQL statements, query text, URLs, object keys, record identifiers, bodies and baggage. Resource attributes are operator-controlled: keep customer data out of them. `observability.record_query_text` only governs the stored search statistics below, not span attributes.
+
+Export runs asynchronously. A collector outage does not stop requests; the SDK's bounded queue can drop telemetry. Look for `quivr.telemetry.export_failed`, with no collector credentials or raw error details. Shutdown flushes exporters within the shared grace deadline. Plugin SDKs continue W3C context automatically; configure an exporter separately in each plugin process to observe its internal spans. See [Plugin protocol](/reference/plugin-protocol#trace-context).
 
 ## Outbound TLS
 
@@ -115,6 +153,7 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 | `operations:read`, `operations:write` | reading, cancelling and rerunning Operations |
 | `projections:rebuild` | starting a Corpus rebuild |
 | `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`), backfilling a Corpus (`/v0/admin/backfills`) and promoting a vector space (`/v0/admin/spaces/{id}/promote`); give it only to an operator key |
+| `audit:read` | Reading sensitive-action audit entries in the key's organization (`/v0/admin/audit`); requires `corpora: ["*"]`. |
 | `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches, steps, documents received and Matches (`/v0/admin/stats/*`) |
 
 ## Object storage

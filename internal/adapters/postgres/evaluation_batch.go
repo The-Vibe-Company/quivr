@@ -27,14 +27,14 @@ FROM (SELECT e.organization,e.subscription_version_id,e.sequence FROM evaluation
     AND v.evaluator->>'plugin_id'=$5 AND v.evaluator->>'version'=$6
   ORDER BY e.available_at,e.sequence LIMIT $8 FOR UPDATE OF e SKIP LOCKED) due
 WHERE (i.organization,i.subscription_version_id,i.sequence)=(due.organization,due.subscription_version_id,due.sequence)
-RETURNING i.kind,i.organization,i.subscription_id,i.subscription_version_id,i.sequence,i.corpus_id,i.record_id,i.record_version_id,i.attempts`,
+RETURNING i.kind,i.organization,i.subscription_id,i.subscription_version_id,i.sequence,i.corpus_id,i.record_id,i.record_version_id,i.attempts,i.trace_context`,
 		first.Organization, first.VersionID, first.SubscriptionVersionID, first.Sequence, evaluator.PluginID, evaluator.Version, lease.Seconds(), limit)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (monitoring.Intent, error) {
 		var in monitoring.Intent
-		return in, r.Scan(&in.Kind, &in.Organization, &in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID, &in.Attempts)
+		return in, r.Scan(&in.Kind, &in.Organization, &in.SubscriptionID, &in.SubscriptionVersionID, &in.Sequence, &in.CorpusID, &in.RecordID, &in.VersionID, &in.Attempts, &in.TraceContext)
 	})
 }
 

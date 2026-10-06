@@ -39,7 +39,7 @@ test("des recherches faites sur la démo apparaissent dans l’utilisation et le
   const top = usage.getByRole("region", { name: "Requêtes fréquentes" });
   // The core flushes its counts every 200 ms, but the facade caches a read
   // for 10 s and an earlier spec may have read this one: reload until the
-  // counts show. At worst about 11 s, inside the browser budget.
+  // counts show, at worst about 11 s, leaving the rest of the 15 s budget.
   await expect(async () => {
     await page.goto("/?view=admin");
     await page.getByRole("tab", { name: "Utilisation" }).click();
@@ -49,7 +49,7 @@ test("des recherches faites sur la démo apparaissent dans l’utilisation et le
         .filter({ hasText: query })
         .locator(".usage-query-count"),
     ).toHaveText(new RegExp(`^${SEARCHES}\\s*fois$`), { timeout: 2000 });
-  }).toPass({ timeout: 15000 });
+  }).toPass({ timeout: 12000 });
   const searches = usage.getByRole("region", { name: "Recherches" });
   await expect(
     searches

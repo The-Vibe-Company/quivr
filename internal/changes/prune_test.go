@@ -23,12 +23,16 @@ type fakePruneStore struct {
 	mu      sync.Mutex
 	calls   []pruneCall
 	results []error
+	called  chan struct{}
 }
 
 func (f *fakePruneStore) PruneChanges(_ context.Context, retention time.Duration, organizations []string, batch, batches int) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, pruneCall{retention, organizations, batch, batches})
+	if len(f.calls) == 3 {
+		close(f.called)
+	}
 	if i := len(f.calls) - 1; i < len(f.results) && f.results[i] != nil {
 		return 2, f.results[i]
 	}
@@ -45,17 +49,19 @@ func (f *fakePruneStore) count() int {
 // each interval with the bounded batch policy, counts pruned events (also
 // from a failed pass) and failures, and stops with its context.
 func TestPrunerRunsBoundedPassesAndCountsThem(t *testing.T) {
-	store := &fakePruneStore{results: []error{nil, errors.New("database unavailable")}}
+	store := &fakePruneStore{results: []error{nil, errors.New("database unavailable")}, called: make(chan struct{})}
 	metrics := &telemetry.ChangePrune{}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		Pruner{Store: store, Retention: time.Hour, Interval: 10 * time.Millisecond, Organizations: []string{"org_r"}, Metrics: metrics}.Run(ctx)
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for store.count() < 3 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-store.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pruner did not run three passes on its interval")
 	}
 	cancel()
 	select {

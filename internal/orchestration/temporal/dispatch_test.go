@@ -3,7 +3,12 @@ package temporal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +24,7 @@ import (
 // dispatchStore records acknowledgements and can interrupt one after the
 // durable workflow start. Queue ordering and leases are owned by PostgreSQL tests.
 type dispatchStore struct {
+	legacy                 bool
 	operations             []operations.Dispatch
 	operationsAcknowledged []operations.Dispatch
 	onClaim                func(context.Context)
@@ -28,19 +34,27 @@ type dispatchStore struct {
 	feedback               []content.Dispatch
 }
 
-func (s *dispatchStore) Claim(ctx context.Context, _ int) ([]content.Dispatch, error) {
+func (s *dispatchStore) ClaimIngestionBatches(ctx context.Context, _ int) ([]content.DispatchBatch, error) {
 	if s.onClaim != nil {
 		s.onClaim(ctx)
 	}
-	return s.batch, nil
+	out := make([]content.DispatchBatch, len(s.batch))
+	for i, d := range s.batch {
+		out[i] = s.receiptBatch(d)
+	}
+	return out, nil
 }
-func (s *dispatchStore) Dispatched(_ context.Context, d content.Dispatch) error {
+func (s *dispatchStore) IngestionBatchDispatched(_ context.Context, id string) error {
 	if s.acknowledgementError != nil {
 		err := s.acknowledgementError
 		s.acknowledgementError = nil
 		return err
 	}
-	s.acknowledged = append(s.acknowledged, d)
+	for _, d := range s.batch {
+		if s.receiptBatch(d).ID == id {
+			s.acknowledged = append(s.acknowledged, d)
+		}
+	}
 	return nil
 }
 func (s *dispatchStore) Progress(_ context.Context, org, id, state, code string) error {
@@ -63,27 +77,44 @@ func (s *dispatchStore) OperationDispatched(_ context.Context, d operations.Disp
 // A restart after Temporal accepted a workflow but before PostgreSQL saw the
 // acknowledgement must reuse that workflow, including when it already completed.
 func TestIngestionDispatchRestartAcknowledgesExistingWorkflow(t *testing.T) {
-	d := content.Dispatch{Organization: "org_a", ReceiptID: "receipt_1"}
-	store := &dispatchStore{batch: []content.Dispatch{d}, acknowledgementError: errors.New("connection lost after workflow start")}
-	tc := &mocks.Client{}
-	options := mock.MatchedBy(func(o client.StartWorkflowOptions) bool {
-		return o.ID == "ingestion-e5-v4_f1c908eb4bb786fcba81e0904e1af852ab851dce29ef594561e9e37ca080d782" && o.WorkflowIDReusePolicy == enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE && o.TaskQueue == taskQueue
-	})
-	tc.On("ExecuteWorkflow", mock.Anything, options, "process-e5-v3", Input{Organization: d.Organization, ReceiptID: d.ReceiptID}).Return(nil, nil).Once()
-	r := Runtime{Client: tc, Store: store}
-	r.dispatchBatch(context.Background(), r.ingestionIntents())
-	if len(store.acknowledged) != 0 || len(store.feedback) != 1 {
-		t.Fatalf("lost acknowledgement: ack=%v feedback=%v", store.acknowledged, store.feedback)
+	for _, legacy := range []bool{false, true} {
+		t.Run(map[bool]string{false: "receipt_batch", true: "legacy_receipt"}[legacy], func(t *testing.T) {
+			ctx := telemetry.Extract(logging.WithRequestID(context.Background(), "caller-request-123"), http.Header{"Traceparent": []string{"00-11111111111111111111111111111111-2222222222222222-01"}})
+			d := content.Dispatch{Organization: "org_a", ReceiptID: "receipt_1", TraceContext: telemetry.Encode(ctx)}
+			propagated := mock.MatchedBy(func(ctx context.Context) bool {
+				c := telemetry.Capture(ctx)
+				return c.Traceparent == "00-11111111111111111111111111111111-2222222222222222-01" && c.RequestID == "caller-request-123"
+			})
+			store := &dispatchStore{legacy: legacy, batch: []content.Dispatch{d}, acknowledgementError: errors.New("connection lost after workflow start")}
+			queue, name := ingestionBatchQueue, ingestionBatchWorkflow
+			var input any = store.receiptBatch(d)
+			id := content.StableID("ingestion-batch-v1", d.Organization, d.ReceiptID)
+			if legacy {
+				queue, name = taskQueue, "process-e5-v3"
+				input = Input{Organization: d.Organization, ReceiptID: d.ReceiptID}
+				id = "ingestion-e5-v4_f1c908eb4bb786fcba81e0904e1af852ab851dce29ef594561e9e37ca080d782"
+			}
+			tc := &mocks.Client{}
+			options := mock.MatchedBy(func(o client.StartWorkflowOptions) bool {
+				return o.ID == id && o.WorkflowIDReusePolicy == enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE && o.TaskQueue == queue
+			})
+			tc.On("ExecuteWorkflow", propagated, options, name, input).Return(nil, nil).Once()
+			r := Runtime{Client: tc, Store: store}
+			r.dispatchBatch(context.Background(), r.ingestionIntents(), 1)
+			if len(store.acknowledged) != 0 || len(store.feedback) != 1 {
+				t.Fatalf("lost acknowledgement: ack=%v feedback=%v", store.acknowledged, store.feedback)
+			}
+			// Temporal rejects even a completed execution's ID. The retained
+			// legacy ID makes a pre-upgrade start a successful durable dispatch.
+			tc.On("ExecuteWorkflow", propagated, options, name, input).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{Message: "already completed"}).Once()
+			restarted := Runtime{Client: tc, Store: store}
+			restarted.dispatchBatch(context.Background(), restarted.ingestionIntents(), 1)
+			if len(store.acknowledged) != 1 || store.acknowledged[0] != d {
+				t.Fatalf("restart acknowledgement: got %v, want %v", store.acknowledged, d)
+			}
+			tc.AssertExpectations(t)
+		})
 	}
-	// Replace the dispatcher, as a worker restart does. Temporal rejects reuse of
-	// the completed workflow ID; that is a successful durable dispatch.
-	tc.On("ExecuteWorkflow", mock.Anything, options, "process-e5-v3", Input{Organization: d.Organization, ReceiptID: d.ReceiptID}).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{Message: "already completed"}).Once()
-	restarted := Runtime{Client: tc, Store: store}
-	restarted.dispatchBatch(context.Background(), restarted.ingestionIntents())
-	if len(store.acknowledged) != 1 || store.acknowledged[0] != d {
-		t.Fatalf("restart acknowledgement: got %v, want %v", store.acknowledged, d)
-	}
-	tc.AssertExpectations(t)
 }
 
 // A failed workflow start must keep its intent, without holding up other
@@ -97,16 +128,16 @@ func TestIngestionDispatchFailureKeepsUnstartedWorkRecoverable(t *testing.T) {
 			tc := &mocks.Client{}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, "process-e5-v3", Input{Organization: first.Organization, ReceiptID: first.ReceiptID}).Return(nil, errors.New("start unavailable")).Run(func(mock.Arguments) {
+			tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, ingestionBatchWorkflow, testDispatchBatch(first)).Return(nil, errors.New("start unavailable")).Run(func(mock.Arguments) {
 				if stop {
 					cancel()
 				}
 			}).Once()
 			if !stop {
-				tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, "process-e5-v3", Input{Organization: second.Organization, ReceiptID: second.ReceiptID}).Return(nil, nil).Once()
+				tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, ingestionBatchWorkflow, testDispatchBatch(second)).Return(nil, nil).Once()
 			}
 			r := Runtime{Client: tc, Store: store}
-			r.dispatchBatch(ctx, r.ingestionIntents())
+			r.dispatchBatch(ctx, r.ingestionIntents(), 1)
 			want := 0
 			if !stop {
 				want = 1
@@ -159,13 +190,13 @@ func TestBackgroundDispatchKeepsLegacyOperationIdentities(t *testing.T) {
 			in := RebuildInput{Organization: d.Organization, OperationID: d.OperationID}
 			tc.On("ExecuteWorkflow", mock.Anything, options, name, in).Return(nil, nil).Once()
 			r := Runtime{Client: tc, Store: store}
-			r.dispatchBatch(context.Background(), r.operationIntents())
+			r.dispatchBatch(context.Background(), r.operationIntents(), 1)
 			if len(store.operationsAcknowledged) != 0 {
 				t.Fatal("lost acknowledgement was recorded")
 			}
 			tc.On("ExecuteWorkflow", mock.Anything, options, name, in).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{Message: "completed"}).Once()
 			restarted := Runtime{Client: tc, Store: store}
-			restarted.dispatchBatch(context.Background(), restarted.operationIntents())
+			restarted.dispatchBatch(context.Background(), restarted.operationIntents(), 1)
 			if len(store.operationsAcknowledged) != 1 || store.operationsAcknowledged[0] != d {
 				t.Fatalf("acknowledged %+v", store.operationsAcknowledged)
 			}
@@ -184,14 +215,14 @@ func TestConnectorDispatchRetriesFailedStartsUnderTheSameRun(t *testing.T) {
 	in := AcquireInput{Organization: run.Organization, ConnectorID: run.ConnectorID, Run: run.Run}
 	tc.On("ExecuteWorkflow", mock.Anything, options, acquireWorkflow, in).Return(nil, errors.New("start unavailable")).Once()
 	r := Runtime{Client: tc, Connectors: &Connectors{Scheduler: s}}
-	r.dispatchBatch(context.Background(), r.connectorIntents())
+	r.dispatchBatch(context.Background(), r.connectorIntents(), 1)
 	if len(s.released) != 1 || s.released[0] != run {
 		t.Fatalf("released %+v", s.released)
 	}
 	tc.On("ExecuteWorkflow", mock.Anything, options, acquireWorkflow, in).Return(nil, nil).Once()
-	r.dispatchBatch(context.Background(), r.connectorIntents())
+	r.dispatchBatch(context.Background(), r.connectorIntents(), 1)
 	tc.On("ExecuteWorkflow", mock.Anything, options, acquireWorkflow, in).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{Message: "active or completed"}).Once()
-	r.dispatchBatch(context.Background(), r.connectorIntents())
+	r.dispatchBatch(context.Background(), r.connectorIntents(), 1)
 	if len(s.released) != 1 {
 		t.Fatal("released an accepted/duplicate workflow run")
 	}
@@ -211,7 +242,7 @@ func TestBackgroundDispatcherDoesNotBlockReceiptsBehindConnectors(t *testing.T) 
 		}
 	}}
 	tc := &mocks.Client{}
-	tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, "process-e5-v3", Input{Organization: receipt.Organization, ReceiptID: receipt.ReceiptID}).Return(nil, nil).Run(func(mock.Arguments) { cancel() }).Once()
+	tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, ingestionBatchWorkflow, testDispatchBatch(receipt)).Return(nil, nil).Run(func(mock.Arguments) { cancel() }).Once()
 	r := Runtime{Client: tc, Store: store, Connectors: &Connectors{Scheduler: s}}
 	done := make(chan struct{})
 	go func() { r.dispatch(ctx); close(done) }()
@@ -224,4 +255,100 @@ func TestBackgroundDispatcherDoesNotBlockReceiptsBehindConnectors(t *testing.T) 
 		t.Fatalf("acknowledged %+v, want receipt despite stalled connector source", store.acknowledged)
 	}
 	tc.AssertExpectations(t)
+}
+
+// A burst fills the receipt start slots while each accepted start is blocked.
+// No receipt beyond the bound may start, and all work must be acknowledged
+// before shutdown. Dependency channels control progress without clock waits.
+func TestReceiptDispatchStartsABoundedBurst(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	starts := make(chan struct{}, 32)
+	release := make(chan struct{})
+	acks := make(chan struct{}, 32)
+	var active, peak atomic.Int32
+	store := &burstDispatchStore{acks: acks}
+	tc := &burstStartClient{start: func(ctx context.Context) error {
+		n := active.Add(1)
+		defer active.Add(-1)
+		for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
+		}
+		starts <- struct{}{}
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}}
+	r := Runtime{Client: tc, Store: store}
+	done := make(chan struct{})
+	go func() { r.dispatch(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	for i := 0; i < 8; i++ {
+		select {
+		case <-starts:
+		case <-time.After(time.Second):
+			t.Fatalf("only %d starts ran while peers were blocked; want 8 receipt start slots", i)
+		}
+	}
+	select {
+	case <-starts:
+		t.Fatal("receipt dispatch exceeded 8 in-flight starts")
+	default:
+	}
+	close(release)
+	for i := 0; i < 32; i++ {
+		select {
+		case <-acks:
+		case <-time.After(time.Second):
+			t.Fatalf("acknowledged %d/32 burst receipts", i)
+		}
+	}
+	if n := peak.Load(); n != 8 {
+		t.Fatalf("peak starts %d, want bounded capacity 8", n)
+	}
+}
+
+type burstStartClient struct {
+	client.Client
+	start func(context.Context) error
+}
+
+func (c *burstStartClient) ExecuteWorkflow(ctx context.Context, _ client.StartWorkflowOptions, _ interface{}, _ ...interface{}) (client.WorkflowRun, error) {
+	return nil, c.start(ctx)
+}
+
+type burstDispatchStore struct {
+	dispatchStore
+	claimed atomic.Bool
+	acks    chan struct{}
+}
+
+func (s *burstDispatchStore) ClaimIngestionBatches(context.Context, int) ([]content.DispatchBatch, error) {
+	if s.claimed.Swap(true) {
+		return nil, nil
+	}
+	out := make([]content.DispatchBatch, 32)
+	for i := range out {
+		out[i] = testDispatchBatch(content.Dispatch{Organization: "org_a", ReceiptID: fmt.Sprint(i)})
+	}
+	return out, nil
+}
+
+func (s *burstDispatchStore) IngestionBatchDispatched(context.Context, string) error {
+	s.acks <- struct{}{}
+	return nil
+}
+
+func testDispatchBatch(d content.Dispatch) content.DispatchBatch {
+	return content.DispatchBatch{ID: content.StableID("ingestion-batch-v1", d.Organization, d.ReceiptID), Receipts: []content.Dispatch{d}}
+}
+
+func (s *dispatchStore) receiptBatch(d content.Dispatch) content.DispatchBatch {
+	b := testDispatchBatch(d)
+	if s.legacy {
+		b.ID, b.Legacy = content.StableID("ingestion-e5-v4", d.Organization, d.ReceiptID), true
+	}
+	return b
 }

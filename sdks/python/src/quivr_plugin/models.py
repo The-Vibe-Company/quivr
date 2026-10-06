@@ -439,18 +439,31 @@ class InvocationFixture(Model):
 
 
 @dataclass(kw_only=True)
+class AuthenticationFixtureCasesItemClaims(Model):
+    "Signed claim replacements; other-plugin resolves to an id distinct from the tested plugin."
+
+    plugin_id: str | None = None
+    method: Literal["GET", "POST"] | None = None
+    target: str | None = None
+
+
+@dataclass(kw_only=True)
 class AuthenticationFixtureCasesItem(Model):
-    name: Literal["valid", "expired", "wrong-audience", "tampered", "unsigned", "forged"]
+    name: Literal["valid", "expired", "wrong-audience", "tampered", "unsigned", "forged", "wrong-plugin-id", "wrong-route", "wrong-method", "future-iat", "overlong-lifetime", "alg-none", "utf16"]
     audience: str
     issued_seconds_ago: int
     body: str
     sent_body: str
     expected_status: Literal[200, 401]
+    claims: AuthenticationFixtureCasesItemClaims | None = None
+    lifetime_seconds: int | None = None
+    algorithm: Literal["HS256", "none"] | None = None
+    json_encoding: Literal["utf-8", "utf-16"] | None = None
 
 
 @dataclass(kw_only=True)
 class AuthenticationFixture(Model):
-    "Normative authentication probes used by the Contract Runner. The plugin audience placeholder resolves to the tested plugin id. Tokens use the configured key, issued_seconds_ago relative to probe time, a 60-second lifetime and GET /v0/discovery. The unsigned and forged names omit or corrupt the token."
+    "Normative authentication probes used by the Contract Runner. The plugin audience placeholder resolves to the tested plugin id; other audiences and the other-plugin claim placeholder resolve to a distinct id. Tokens bind GET /v0/discovery?source=engine and the exact body. Optional claim, lifetime, algorithm and JSON encoding edits are applied before signing. Unsigned omits the token; forged changes a signature byte."
 
     cases: list[AuthenticationFixtureCasesItem]
 
@@ -1246,6 +1259,7 @@ __all__ = [
     "AttachmentItem",
     "AuthenticationFixture",
     "AuthenticationFixtureCasesItem",
+    "AuthenticationFixtureCasesItemClaims",
     "BlobContent",
     "Candidate",
     "CandidateRequest",

@@ -2,10 +2,12 @@ package postgres_test
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +49,7 @@ type pluginWorld struct {
 	manifest string
 	port     int
 	proc     *devhost.Process
+	output   io.Writer
 	pin      *plugins.Pin
 	store    fixtureContentStores
 	objects  *objectMemory
@@ -108,7 +111,7 @@ func liveOf(t *testing.T, pin *plugins.Pin) *plugins.Live {
 // start runs the fake plugin in mode on the world's fixed port.
 func (w *pluginWorld) start(mode string) {
 	w.t.Helper()
-	proc, err := devhost.Start(devhost.Options{Command: fakeplugin.Command(), Manifest: w.manifest, Port: w.port, Env: []string{fakeplugin.EnvEnable + "=1", fakeplugin.EnvMode + "=" + mode}})
+	proc, err := devhost.Start(devhost.Options{Command: fakeplugin.Command(), Manifest: w.manifest, Port: w.port, Output: w.output, Env: []string{fakeplugin.EnvEnable + "=1", fakeplugin.EnvMode + "=" + mode}})
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -174,13 +177,25 @@ func TestPluginKilledMidInvocationConvergesOnOneManifest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	w := newPluginWorld(t, ctx, "normalizer-kill")
+	entered := &hangingInvocation{started: make(chan struct{})}
+	w.output = entered
+	// This case kills an in-flight process rather than testing its deadline.
+	w.pin.Manifest.Contributions.Normalizer.TimeoutMS = 30000
 	w.start("hang")
 	receipt := w.accept("guide", "text/markdown", "")
 
 	done := make(chan error, 1)
 	go func() { done <- w.service.Normalize(ctx, w.org, receipt.ID) }()
-	time.Sleep(300 * time.Millisecond)
-	_ = w.proc.Stop(0)
+	select {
+	case <-entered.started:
+	case err := <-done:
+		t.Fatalf("normalization returned before reaching the hanging plugin: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the plugin never received the normalizer invocation")
+	}
+	if err := w.proc.Stop(0); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case err := <-done:
 		if err == nil || !strings.Contains(err.Error(), "plugin_unavailable") {
@@ -222,6 +237,25 @@ func TestPluginKilledMidInvocationConvergesOnOneManifest(t *testing.T) {
 	if n, _ := v.Provenance["normalization"].(map[string]any); n["plugin_id"] != "acme.faulty" {
 		t.Fatalf("provenance %+v", v.Provenance)
 	}
+}
+
+// hangingInvocation observes the real process's validated request through
+// devhost's output stream. A connection or discovery failure emits no signal.
+type hangingInvocation struct {
+	mu      sync.Mutex
+	output  string
+	started chan struct{}
+	once    sync.Once
+}
+
+func (h *hangingInvocation) Write(p []byte) (int, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.output += string(p)
+	if strings.Contains(h.output, "normalizer hanging: inv_") && strings.Contains(h.output, "\n") {
+		h.once.Do(func() { close(h.started) })
+	}
+	return len(p), nil
 }
 
 // TestFailedNormalizationsQuarantineBeforeAnyCanonicalCommit drives every

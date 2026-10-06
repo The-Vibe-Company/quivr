@@ -182,7 +182,7 @@ func (p *Plugin) serveSegmentAndEmbed(w http.ResponseWriter, r *http.Request) {
 	if !p.readIngestion(w, r, "plugins/v0/ingestion-segment-and-embed-request.schema.json", &req) || p.undeclared(w, req.Spaces...) {
 		return
 	}
-	req.logger = p.logger.With("invocation_id", req.InvocationID)
+	req.logger = p.requestLogger(r.Context(), Credential{}, req.InvocationID)
 	defer p.ingestPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(p.m.Ingestion.TimeoutMS)*time.Millisecond)
 	defer cancel()
@@ -277,7 +277,7 @@ func (p *Plugin) serveEmbedQuery(w http.ResponseWriter, r *http.Request) {
 	if !p.readIngestion(w, r, "plugins/v0/ingestion-embed-query-request.schema.json", &req) || p.undeclared(w, req.Space) {
 		return
 	}
-	req.logger = p.logger.With("invocation_id", req.InvocationID)
+	req.logger = p.requestLogger(r.Context(), Credential{}, req.InvocationID)
 	defer p.ingestPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(p.m.Ingestion.QueryTimeoutMS)*time.Millisecond)
 	defer cancel()

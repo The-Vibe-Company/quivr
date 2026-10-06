@@ -24,7 +24,7 @@ class CampaignStore(control_store.Store):
         from search_campaign import specification
         spec = specification(spec)
         name = spec['name']
-        self.campaign(name, modal_search.frozen_policy(spec['policy'], sha, scorer))
+        self.campaign(name, modal_search.frozen_policy(spec['policy'], sha, scorer, parallelism=spec['parallelism']))
         with self.transaction() as db:
             self.lock(db, name)
             db.execute('INSERT INTO eval_control.campaign_runs(campaign,spec,git_sha,scorer_digest) VALUES (%s,%s::jsonb,%s,%s) ON CONFLICT DO NOTHING',

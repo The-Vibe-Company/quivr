@@ -55,12 +55,12 @@ func TestKeywordAlertsExplainMatchedTerms(t *testing.T) {
 	_, sub := keywordSubscription(t, "query-"+run, c, query, destinationCapture, 201)
 	subID := sub["subscription_id"].(string)
 
-	awaitReady(t, ingest(t, c, "keyword-sport-"+run, "Grève au club de sport "+word))
-	awaitReady(t, ingest(t, c, "keyword-other-"+run, "Réunion sans incident "+word))
+	sport := awaitReady(t, ingest(t, c, "keyword-sport-"+run, "Grève au club de sport "+word))
+	other := awaitReady(t, ingest(t, c, "keyword-other-"+run, "Réunion sans incident "+word))
 	hit := awaitReady(t, ingest(t, c, "keyword-hit-"+run, "Les dockers ("+word+") votent la GREVE au port"))
 	awaitMatches(t, admin, c, start, 1)
-	// Let any late decision of the earlier, non-matching articles surface.
-	time.Sleep(3 * time.Second)
+	awaitEvaluated(t, sport)
+	awaitEvaluated(t, other)
 	seen, _ := drain(t, admin, c, start, 0)
 	created := matchCreatedFor(seen, subID)
 	if len(created) != 1 || created[0]["monitoring"].(map[string]any)["record_id"] != hit["record_id"] {
@@ -102,13 +102,13 @@ func TestKeywordAlertsFilterAloneAlerts(t *testing.T) {
 	_, sub := keywordSubscription(t, "source-"+run, c, map[string]any{"field": "source", "equals": namespace}, destinationA, 201)
 	subID := sub["subscription_id"].(string)
 
-	awaitReady(t, ingest(t, c, "keyword-feed-"+run, "Dépêche d'un autre fil"))
+	other := awaitReady(t, ingest(t, c, "keyword-feed-"+run, "Dépêche d'un autre fil"))
 	ours := inlineCommand(c, "keyword-wire-"+run, "story-"+run, "Dépêche du fil suivi")
 	ours["source"].(map[string]any)["namespace"] = namespace
 	hit := awaitReady(t, request(t, "POST", "/v0/records", admin, ours, 202)["receipt_id"].(string))
 
 	awaitMatches(t, admin, c, start, 1)
-	time.Sleep(3 * time.Second)
+	awaitEvaluated(t, other)
 	seen, _ := drain(t, admin, c, start, 0)
 	created := matchCreatedFor(seen, subID)
 	if len(created) != 1 || created[0]["monitoring"].(map[string]any)["record_id"] != hit["record_id"] {

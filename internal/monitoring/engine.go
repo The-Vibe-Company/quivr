@@ -43,6 +43,7 @@ const (
 // committed trigger event. An evaluation intent names the evaluated Record
 // Version; a withdrawal intent names the Record's latest matched Version.
 type Intent struct {
+	TraceContext          string
 	Kind                  string
 	Organization          string
 	SubscriptionID        string
@@ -76,6 +77,19 @@ type MatchEvidence struct {
 	Explanation string         `json:"explanation"`
 	PartKeys    []string       `json:"part_keys,omitempty"`
 	Details     map[string]any `json:"details,omitempty"`
+}
+
+// MatchCommit is one validated positive decision in a Record Version group.
+type MatchCommit struct {
+	Intent   Intent
+	Evidence MatchEvidence
+}
+
+// MatchBatchStore optionally commits ordered positive decisions for one
+// Organization, Record and Record Version atomically. Outcomes follow input
+// order; an error commits none of the group.
+type MatchBatchStore interface {
+	CommitMatches(ctx context.Context, matches []MatchCommit) ([]string, error)
 }
 
 // Backlog is the bounded diagnostic view of evaluation work.

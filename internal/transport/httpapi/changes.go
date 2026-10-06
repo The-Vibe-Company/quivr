@@ -153,6 +153,7 @@ func (a *API) streamChanges(w http.ResponseWriter, r *http.Request, scope corpus
 		}
 		if err != nil {
 			_, body := errorResponse(err, publicerr.ChangesUnavailable, corpusID)
+			correlateError(r.Context(), &body)
 			b, _ := json.Marshal(body)
 			write("event: stream_error\ndata: %s\n\n", b)
 			return

@@ -24,6 +24,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/changes"
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -47,24 +48,26 @@ import (
 )
 
 type Config struct {
-	TLS TLSConfig `json:"tls"`
+	TLS       TLSConfig        `json:"tls"`
+	Telemetry telemetry.Config `json:"telemetry"`
 	// TEIURL encodes queries for generations built before the core.ingest
 	// plugin (THE-777), which serve the legacy E5 space until rebuilt.
-	TEIURL          string                  `json:"tei_url"`
-	WeaviateURL     string                  `json:"weaviate_url"`
-	TemporalAddress string                  `json:"temporal_address"`
-	S3              s3store.Config          `json:"s3"`
-	LogLevel        string                  `json:"log_level"`
-	Instance        string                  `json:"instance"`
-	Environment     string                  `json:"environment"`
-	ShutdownGrace   string                  `json:"shutdown_grace"`
-	LogDirectory    string                  `json:"log_directory"`
-	DatabaseURL     string                  `json:"database_url"`
-	Listen          string                  `json:"listen"`
-	ProbeListen     string                  `json:"probe_listen"`
-	CursorKey       string                  `json:"cursor_key"`
-	ChangeRetention string                  `json:"change_retention"`
-	Keys            map[string]corpus.Scope `json:"keys"`
+	TEIURL               string                  `json:"tei_url"`
+	WeaviateURL          string                  `json:"weaviate_url"`
+	TemporalAddress      string                  `json:"temporal_address"`
+	S3                   s3store.Config          `json:"s3"`
+	LogLevel             string                  `json:"log_level"`
+	Instance             string                  `json:"instance"`
+	Environment          string                  `json:"environment"`
+	ShutdownGrace        string                  `json:"shutdown_grace"`
+	LogDirectory         string                  `json:"log_directory"`
+	DatabaseURL          string                  `json:"database_url"`
+	Listen               string                  `json:"listen"`
+	ProbeListen          string                  `json:"probe_listen"`
+	CursorKey            string                  `json:"cursor_key"`
+	AuditRetentionMonths int                     `json:"audit_retention_months"`
+	ChangeRetention      string                  `json:"change_retention"`
+	Keys                 map[string]corpus.Scope `json:"keys"`
 	// Destinations are deployment-configured webhook receivers. Real
 	// deployments reference their signing secret through secret_env.
 	Destinations map[string]monitoring.Destination `json:"destinations"`
@@ -211,12 +214,32 @@ func Run(command string) error {
 	if err != nil {
 		return err
 	}
+	if cfg.Telemetry.ResourceAttributes == nil {
+		cfg.Telemetry.ResourceAttributes = map[string]string{}
+	}
+	for key, value := range map[string]string{"service.name": "quivr." + command, "service.version": buildinfo.Version, "service.instance.id": cfg.Instance, "deployment.environment.name": cfg.Environment} {
+		if _, ok := cfg.Telemetry.ResourceAttributes[key]; !ok && value != "" {
+			cfg.Telemetry.ResourceAttributes[key] = value
+		}
+	}
+	telemetryRuntime, err := telemetry.Init(context.Background(), cfg.Telemetry)
+	if err != nil {
+		return err
+	}
+
 	events := newProcessEvents(slog.Default(), cfg.processSummary(grace))
 	graceExpired := false
 	defer func() {
 		deadline, cancel := shutdownDeadline(events.shutdownStart(), grace)
 		defer cancel()
 		events.stop(deadline, graceExpired)
+	}()
+	defer func() {
+		deadline, cancel := shutdownDeadline(events.shutdownStart(), grace)
+		defer cancel()
+		if telemetryRuntime.Shutdown(deadline) != nil {
+			slog.Warn("telemetry shutdown failed", "event", "quivr.telemetry.shutdown_failed")
+		}
 	}()
 	slog.Debug("debug logging enabled", "event", "quivr.debug")
 	tlsSettings, err := cfg.validateTLS()
@@ -296,6 +319,10 @@ func Run(command string) error {
 		return err
 	}
 	retryPolicy, deliveryTimeout, err := cfg.Delivery.parse()
+	if err != nil {
+		return err
+	}
+	auditMonths, err := auditRetentionMonths(cfg.AuditRetentionMonths)
 	if err != nil {
 		return err
 	}
@@ -387,6 +414,7 @@ func Run(command string) error {
 	if err != nil {
 		return errors.New("invalid database configuration")
 	}
+	auditStore := postgres.AuditStore{Pool: pool}
 	closeResources = func(deadline context.Context) {
 		done := make(chan struct{})
 		go func() { pool.Close(); close(done) }()
@@ -708,7 +736,7 @@ func Run(command string) error {
 		loops.Go(func(ctx context.Context) { pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute) })
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithLifecycle(loops),
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore),
 			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(spaces),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
@@ -742,7 +770,7 @@ func Run(command string) error {
 		// The change-journal prune is a bounded PostgreSQL loop beside
 		// evaluation and delivery; its watermark keeps cursor expiry exact.
 		loops.Go(func(ctx context.Context) {
-			changes.Pruner{Store: journal, Retention: prune.Retention, Interval: prune.Interval, Organizations: prune.Organizations, Metrics: pruneMetrics}.Run(ctx)
+			changes.Pruner{Audit: auditStore, AuditRetentionMonths: auditMonths, Store: journal, Retention: prune.Retention, Interval: prune.Interval, Organizations: prune.Organizations, Metrics: pruneMetrics}.Run(ctx)
 		})
 		// Projection purge (THE-698): a bounded PostgreSQL-leased sweep that
 		// deletes objects no route or current Version can serve again.

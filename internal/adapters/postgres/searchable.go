@@ -18,7 +18,7 @@ import (
 // already has an active default keeps it; AlignDefaultGeneration moves it
 // onto the registry's spaces.
 func (s ProjectionStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
-	_, err := s.Pool.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected)
+	_, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected)
 SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true
 WHERE NOT EXISTS(SELECT 1 FROM projection_generations WHERE active) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
 	return err
@@ -46,7 +46,7 @@ type DefaultMove struct {
 // migrate and at api and worker startup.
 func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMove, error) {
 	var move DefaultMove
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return move, err
 	}
@@ -96,7 +96,7 @@ func (s ProjectionStore) Generation(ctx context.Context, org, corpusID string) (
 	var g content.Generation
 	var cfg []byte
 	var spaces []byte
-	err := s.Pool.QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &cfg)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &cfg)
 	if err != nil {
 		return g, err
 	}
@@ -105,13 +105,13 @@ func (s ProjectionStore) Generation(ctx context.Context, org, corpusID string) (
 	}
 	g.Fields, err = retrievalFields(cfg)
 	if err == nil {
-		err = loadGenerationIngestion(ctx, s.Pool, &g)
+		err = loadGenerationIngestion(ctx, database(ctx, s.Pool), &g)
 	}
 	return g, err
 }
 func (s ProjectionStore) Authorize(ctx context.Context, scope corpus.Scope, ids []string) error {
 	var count int
-	err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM corpora WHERE organization=$1 AND id=ANY($2)`, scope.Organization, ids).Scan(&count)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT count(*) FROM corpora WHERE organization=$1 AND id=ANY($2)`, scope.Organization, ids).Scan(&count)
 	if err != nil {
 		return err
 	}
@@ -126,12 +126,12 @@ func (s ProjectionStore) Authorize(ctx context.Context, scope corpus.Scope, ids 
 var ErrGenerationChanged = errors.New("projection generation changed")
 
 func (s ProjectionStore) SaveSegmentation(ctx context.Context, org string, result content.Segmentation) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
+	if err = lockProcessingVersion(ctx, tx, org, result.VersionID); err != nil {
 		return err
 	}
 	digest := content.SegmentationDigest(result)
@@ -169,14 +169,14 @@ func (s ProjectionStore) SaveSegmentation(ctx context.Context, org string, resul
 // segments in order.
 func (s ProjectionStore) StoredSegmentation(ctx context.Context, org, versionID, recipe string) (content.StoredSegmentation, error) {
 	var out content.StoredSegmentation
-	err := s.Pool.QueryRow(ctx, `SELECT id,digest,provenance FROM segmentations WHERE organization=$1 AND version_id=$2 AND recipe=$3`, org, versionID, recipe).Scan(&out.ID, &out.Digest, &out.Provenance)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT id,digest,provenance FROM segmentations WHERE organization=$1 AND version_id=$2 AND recipe=$3`, org, versionID, recipe).Scan(&out.ID, &out.Digest, &out.Provenance)
 	if err != nil {
 		return out, notFound(err)
 	}
 	if string(out.Provenance) == "{}" {
 		out.Provenance = nil
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT id,part_key,start_offset,end_offset,derivation FROM segments WHERE organization=$1 AND segmentation_id=$2 ORDER BY (derivation->>'ordinal')::integer`, org, out.ID)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT id,part_key,start_offset,end_offset,derivation FROM segments WHERE organization=$1 AND segmentation_id=$2 ORDER BY (derivation->>'ordinal')::integer`, org, out.ID)
 	if err != nil {
 		return out, err
 	}
@@ -220,7 +220,7 @@ func (s ProjectionStore) quarantine(ctx context.Context, org, id, state, code st
 			return err
 		}
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -265,17 +265,23 @@ func quarantinedEvent(ctx context.Context, tx pgx.Tx, org, corpusID, recordID, v
 	return appendEvent(ctx, tx, event)
 }
 func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Segmentation, g content.Generation) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
-		return err
-	}
+
 	var recordID, corpusID, desired string
 	var withdrawn, quarantined, ready, active bool
-	err = tx.QueryRow(ctx, `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),`+recordGoneSQL+`,v.quarantined,v.baseline_ready FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, org, seg.VersionID).Scan(&recordID, &corpusID, &desired, &withdrawn, &quarantined, &ready)
+	var digest, sourceMediaType *string
+	var routing []byte
+	err = readJournal(ctx, tx, org, `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),`+recordGoneSQL+`,v.quarantined,v.baseline_ready,
+ $3=`+routedGenerationSQL("r.organization", "r.corpus_id")+`,
+ (SELECT digest FROM segmentations WHERE organization=$1 AND id=$4 AND version_id=$2),
+ (SELECT ingestion_routing FROM projection_generations WHERE id=$3),
+ (SELECT coalesce(nullif(ar.source_media_type,''),'text/plain') FROM accepted_revisions ar WHERE (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot))
+ FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
+ WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, []any{org, seg.VersionID, g.ID, seg.ID}, &recordID, &corpusID, &desired, &withdrawn, &quarantined, &ready, &active, &digest, &routing, &sourceMediaType)
 	if err != nil {
 		return err
 	}
@@ -289,27 +295,24 @@ func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Se
 		}
 		return tx.Commit(ctx)
 	}
-	if err = tx.QueryRow(ctx, `SELECT $3=`+routedGenerationSQL("$1", "$2"), org, corpusID, g.ID).Scan(&active); err != nil {
-		return err
-	}
 	if !active {
 		return ErrGenerationChanged
 	}
-	var digest string
-	if err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2 AND version_id=$3`, org, seg.ID, seg.VersionID).Scan(&digest); err != nil {
-		return err
+	if digest == nil {
+		return pgx.ErrNoRows
 	}
-	if digest != content.SegmentationDigest(seg) {
+	if *digest != content.SegmentationDigest(seg) {
 		return content.ErrConflict
 	}
-	if err = loadGenerationIngestion(ctx, tx, &g); err != nil {
-		return err
+	if len(routing) > 0 {
+		if err = json.Unmarshal(routing, &g.IngestionRouting); err != nil {
+			return err
+		}
 	}
-	var sourceMediaType string
-	if err = tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(ar.source_media_type,''),'text/plain') FROM record_versions v JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot) WHERE v.organization=$1 AND v.id=$2`, org, seg.VersionID).Scan(&sourceMediaType); err != nil {
-		return err
+	if sourceMediaType == nil {
+		return pgx.ErrNoRows
 	}
-	if g.IngestionRouting != nil && g.IngestionRouting.For(sourceMediaType) != "" && g.IngestionRouting.For(sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
+	if g.IngestionRouting != nil && g.IngestionRouting.For(*sourceMediaType) != "" && g.IngestionRouting.For(*sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
 		if err = coverOwnerProjection(ctx, tx, org, g, seg, nil); err != nil {
 			return err
 		}
@@ -318,22 +321,19 @@ func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Se
 		}
 		return tx.Commit(ctx)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET baseline_ready=true,processing='idle',error_code='',retrieval_ready_at=`+firstStep("retrieval_ready_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
-		return err
-	}
+	writes := &pgx.Batch{}
+	writes.Queue(`INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID)
+	writes.Queue(`UPDATE record_versions SET baseline_ready=true,processing='idle',error_code='',retrieval_ready_at=`+firstStep("retrieval_ready_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID)
 	if desired == seg.VersionID {
-		if _, err = tx.Exec(ctx, `UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, org, recordID, seg.VersionID); err != nil {
-			return err
-		}
+		writes.Queue(`UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, org, recordID, seg.VersionID)
 	}
 	if !ready {
-		if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID), VersionID: seg.VersionID}); err != nil {
-			return err
-		}
+		queueEvent(ctx, writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID), VersionID: seg.VersionID})
 	}
+	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
+		return err
+	}
+
 	return tx.Commit(ctx)
 }
 
@@ -376,7 +376,7 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		orgs[i], segments[i], generations[i], evaluations[i] = scope.Organization, c.SegmentID, c.GenerationID, c.EvaluationPlugin
 		spaces[i] = c.EvaluationSpace
 	}
-	rows, err := s.Pool.Query(ctx, hydrateSQL, orgs, segments, generations, evaluations, spaces)
+	rows, err := database(ctx, s.Pool).Query(ctx, hydrateSQL, orgs, segments, generations, evaluations, spaces)
 	if err != nil {
 		return nil, err
 	}

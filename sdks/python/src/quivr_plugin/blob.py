@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from .tracing import inject_headers
 from .errors import RetryableError, TerminalError
 from .models import FileReference, InputBlob
 
@@ -53,7 +54,9 @@ def read_input(blob: InputBlob, *, timeout: float = 30.0) -> bytes:
         except OSError as exc:
             raise RetryableError("input_unavailable", f"cannot read input file {path}: {exc}") from exc
     else:
-        request = urllib.request.Request(reference.url, method="GET")
+        headers: dict[str, str] = {}
+        inject_headers(headers)
+        request = urllib.request.Request(reference.url, method="GET", headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 data = _read_limited(response, limit)

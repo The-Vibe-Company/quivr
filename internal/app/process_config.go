@@ -75,6 +75,10 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 
 func (cfg Config) logSecrets() []string {
 	secrets := []string{cfg.CursorKey, cfg.CredentialKey, cfg.DatabaseURL, cfg.S3.AccessKey, cfg.S3.SecretKey}
+	for _, value := range cfg.Telemetry.Headers {
+		secrets = append(secrets, value)
+	}
+	secrets = append(secrets, cfg.Telemetry.Endpoint)
 	for token := range cfg.Keys {
 		secrets = append(secrets, token)
 	}
@@ -146,6 +150,7 @@ func (cfg Config) processSummary(grace time.Duration) slog.Attr {
 	return slog.Group("effective_config",
 		slog.String("log_level", cfg.LogLevel), slog.Duration("shutdown_grace", grace),
 		slog.String("listen", cfg.Listen), slog.String("probe_listen", cfg.ProbeListen),
+		slog.Bool("tracing", cfg.Telemetry.Endpoint != ""),
 		slog.Bool("file_logging", cfg.LogDirectory != ""), slog.Int("key_count", len(cfg.Keys)),
 		slog.Bool("credential_deposits", cfg.CredentialKey != ""), slog.Int("destinations", len(cfg.Destinations)),
 		slog.Int("ingestion_evaluation_concurrency", concurrency),

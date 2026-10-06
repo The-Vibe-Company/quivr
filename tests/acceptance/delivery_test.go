@@ -204,8 +204,13 @@ func TestMonitoringDeliverySignedNotifications(t *testing.T) {
 	c := changeCorpus(t, "delivery-"+run)
 	start := request(t, "GET", changesPath(c, "", 0), admin, nil, 200)["next_cursor"].(string)
 	query := request(t, "POST", "/v0/saved-queries", admin, savedQueryCommand("delivery-"+run, c), 201)
+	owner := "user-" + run
 	subscribe := func(name string, status int) string {
-		sub := request(t, "POST", "/v0/subscriptions", admin, subscriptionCommand("delivery-"+name+"-"+run, query, destinationCapture), 201)
+		command := subscriptionCommand("delivery-"+name+"-"+run, query, destinationCapture)
+		if name == "acked" {
+			command["owner"] = owner
+		}
+		sub := request(t, "POST", "/v0/subscriptions", admin, command, 201)
 		id := sub["subscription_id"].(string)
 		receiver.script(id, reply{status: status})
 		return id
@@ -252,6 +257,9 @@ func TestMonitoringDeliverySignedNotifications(t *testing.T) {
 	var body map[string]any
 	if err := json.Unmarshal(ackedCapture.Body, &body); err != nil {
 		t.Fatal(err)
+	}
+	if body["references"].(map[string]any)["owner"] != owner {
+		t.Fatal("webhook owner", body)
 	}
 	if body["event_id"] != feedEvent["event_id"] || body["type"] != "match.created" || body["occurred_at"] != feedEvent["occurred_at"] ||
 		!reflect.DeepEqual(body["references"], feedEvent["monitoring"]) || !reflect.DeepEqual(body, delivered["event"]) {

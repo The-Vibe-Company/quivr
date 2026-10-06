@@ -62,6 +62,24 @@ func ingestSearchable(t *testing.T, corpusID, key, text string) map[string]any {
 	return awaitReady(t, ingest(t, corpusID, key, text))
 }
 
+// awaitEvaluated waits for every Subscription asked about this Version to
+// decide. A later Record's Match cannot order concurrent evaluations.
+func awaitEvaluated(t *testing.T, receipt map[string]any) {
+	t.Helper()
+	path := "/v0/records/" + receipt["record_id"].(string) + "/versions/" + receipt["version_id"].(string)
+	deadline := time.Now().Add(monitoringWait)
+	for {
+		version := request(t, "GET", path, os.Getenv("QUIVR_TEST_ADMIN"), nil, 200)
+		if steps, ok := version["steps"].(map[string]any); ok && steps["evaluated_at"] != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("evaluation never decided for %s: %v", path, version)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // awaitEnriched waits for the Record's enrichment event in the feed after cursor.
 func awaitEnriched(t *testing.T, token, corpusID, cursor, recordID string) {
 	t.Helper()
@@ -122,7 +140,7 @@ func eventPosition(items []map[string]any, kind, id string) int {
 }
 
 // TestMonitoringMatchesEvaluateLaterEligibleVersions drives the public
-// evaluation journey: no backfill, positive/negative/not-ready fixture
+// evaluation journey: no backfill, positive/negative fixture
 // decisions, an enrichment-gated Match, the shared notice identity in polling,
 // SSE and the pending Delivery, and disable stopping new Matches.
 func TestMonitoringMatchesEvaluateLaterEligibleVersions(t *testing.T) {
@@ -145,9 +163,8 @@ func TestMonitoringMatchesEvaluateLaterEligibleVersions(t *testing.T) {
 
 	positiveID := ingest(t, c, "positive-"+run, "Dépêche "+markerMatch+" séisme")
 	negativeID := ingest(t, c, "negative-"+run, "Dépêche "+markerNegative+" météo")
-	pendingID := ingest(t, c, "pending-"+run, "Dépêche "+markerPending+" résultats")
 	enrichedID := ingest(t, c, "enriched-"+run, "Dépêche "+markerEnriched+" portuaire")
-	positive, negative, pending, enriched := awaitReady(t, positiveID), awaitReady(t, negativeID), awaitReady(t, pendingID), awaitReady(t, enrichedID)
+	positive, negative, enriched := awaitReady(t, positiveID), awaitReady(t, negativeID), awaitReady(t, enrichedID)
 
 	feed, created := awaitMatches(t, admin, c, start, 2)
 	byRecord := map[string]map[string]any{}
@@ -171,24 +188,22 @@ func TestMonitoringMatchesEvaluateLaterEligibleVersions(t *testing.T) {
 		t.Fatal("enrichment-gated Match committed before enrichment", feed)
 	}
 
-	// Negative and not-ready Versions never produce a Match; the pre-activation
-	// Record is not backfilled. Give evaluation time to finish before checking.
-	// Evaluation work is claimed in trigger order, so once a positive sentinel
-	// ingested after every negative trigger has matched, the earlier negative
-	// work has been claimed too; the short settle then covers its completion.
-	awaitEnriched(t, admin, c, start, pending["record_id"].(string))
+	// Wait for the negative Version's actual decision before asserting absence.
+	// Permanent not_ready decisions are owned by the engine and SQL suites;
+	// they intentionally have no public evaluated_at completion signal.
 	awaitEnriched(t, admin, c, start, negative["record_id"].(string))
+	awaitEvaluated(t, negative)
+	// A third positive Version also exercises Match pagination below.
 	sentinel := ingestSearchable(t, c, "sentinel-"+run, "Dépêche "+markerMatch+" sentinelle")
 	awaitEnriched(t, admin, c, start, sentinel["record_id"].(string))
 	awaitMatches(t, admin, c, start, 3)
-	time.Sleep(2 * time.Second)
 	list := request(t, "GET", matchesPath(subID, "", 0), admin, nil, 200)["items"].([]any)
 	if len(list) != 3 {
 		t.Fatal("exactly the three positive Versions match, without duplicates or backfill", list)
 	}
 	for _, item := range list {
 		m := item.(map[string]any)
-		if id := m["record_id"]; id == before["record_id"] || id == negative["record_id"] || id == pending["record_id"] {
+		if id := m["record_id"]; id == before["record_id"] || id == negative["record_id"] {
 			t.Fatal("non-positive or pre-activation Record matched", m)
 		}
 	}
@@ -265,9 +280,16 @@ func TestMonitoringMatchesEvaluateLaterEligibleVersions(t *testing.T) {
 	// commit-time recheck is proven by the adapter test) and shows in the
 	// Delivery admission view.
 	request(t, "POST", "/v0/subscriptions/"+subID+"/disable", admin, map[string]any{"idempotency_key": "matches-disable-" + run}, 200)
+	// An active control evaluates the same late Version, so the absence check
+	// cannot pass merely because its trigger has not been dispatched yet.
+	control := request(t, "POST", "/v0/subscriptions", admin, fixtureSubscription("matches-control-"+run, query), 201)
 	late := ingestSearchable(t, c, "late-"+run, "Dépêche "+markerMatch+" tardive")
 	awaitEnriched(t, admin, c, start, late["record_id"].(string))
-	time.Sleep(2 * time.Second)
+	awaitEvaluated(t, late)
+	controlMatches := request(t, "GET", matchesPath(control["subscription_id"].(string), "", 0), admin, nil, 200)["items"].([]any)
+	if len(controlMatches) != 1 || controlMatches[0].(map[string]any)["record_version_id"] != late["version_id"] {
+		t.Fatal("active control must match the late Version", controlMatches)
+	}
 	if items := request(t, "GET", matchesPath(subID, "", 0), admin, nil, 200)["items"].([]any); len(items) != 3 {
 		t.Fatal("disabled Subscription committed a new Match", items)
 	}

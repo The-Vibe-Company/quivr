@@ -104,13 +104,6 @@ type Router interface {
 	Normalizer(ctx context.Context, mediaType string) (*plugins.Pin, plugins.RouteConfig, bool)
 }
 
-// IdempotencyKey is the stable key of one logical invocation: the Plugin
-// Generation placeholder, the Contribution, the Organization, the Record
-// Version and the input checksum.
-func IdempotencyKey(generation, contribution, org, versionID, inputSHA256 string) string {
-	return plugins.NormalizerKey(generation, contribution, org, versionID, inputSHA256)
-}
-
 // MaxAttempts is the retry budget of a normalizer: its declared
 // retry.max_attempts, capped by MaxAttemptsCap.
 func MaxAttempts(n *plugins.Normalizer) int {
@@ -181,7 +174,7 @@ func (s Service) normalize(ctx context.Context, org, receiptID string, published
 	normalizer := pin.Manifest.Contributions.Normalizer
 	inv := invocation{org: org, receiptID: receiptID, work: work, optional: route.Mode == plugins.RouteOptional, budget: MaxAttempts(normalizer),
 		provenance: content.Normalization{PluginID: pin.Manifest.ID, PluginVersion: pin.Manifest.Version, PluginAPI: pin.PluginAPI(), Contribution: Contribution, InvocationID: plugins.InvocationID(),
-			IdempotencyKey: IdempotencyKey(pin.Generation(), Contribution, org, work.VersionID, c.Content.BlobSHA256), InputSHA256: c.Content.BlobSHA256}}
+			IdempotencyKey: plugins.NormalizerKey(pin.Generation(), Contribution, org, work.VersionID, c.Content.BlobSHA256), InputSHA256: c.Content.BlobSHA256}}
 	input, err := s.Content.BlobSource.VerifiedBlob(ctx, org, c.Content.BlobID)
 	if errors.Is(err, content.ErrUnverifiedBlob) || (err == nil && (input.Blob.SHA256 != c.Content.BlobSHA256 || input.MediaType != c.Content.MediaType)) {
 		return s.fail(ctx, inv, CodeInputUnverified, "The input Blob is no longer the verified accepted input.", false)

@@ -280,13 +280,13 @@ func TestJourneyWorkerStopped(t *testing.T) {
 		command := inlineCommand(s.Corpus, "journey-d-"+s.Run, "journey-d", "Dépêche séisme au large du Japon")
 		accepted := request(t, "POST", "/v0/records", admin, command, 202)
 		s.ReceiptD = accepted["receipt_id"].(string)
-		time.Sleep(2 * time.Second)
+		// The harness has confirmed worker termination before this phase.
+		if replay := request(t, "POST", "/v0/records", admin, command, 202); replay["receipt_id"] != s.ReceiptD {
+			t.Fatal("replay during the outage diverged", replay)
+		}
 		pending := request(t, "GET", "/v0/ingestion-receipts/"+s.ReceiptD, admin, nil, 200)
 		if pending["state"] != "pending" || pending["outcome"] != nil {
 			t.Fatal("accepted work must wait durably for the worker", pending)
-		}
-		if replay := request(t, "POST", "/v0/records", admin, command, 202); replay["receipt_id"] != s.ReceiptD {
-			t.Fatal("replay during the outage diverged", replay)
 		}
 	})
 	j.step("reads_survive_worker_outage", func() {

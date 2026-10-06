@@ -29,6 +29,8 @@ import public_sets
 import scoring
 import trec
 
+import ci_guard
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = 'multilingual-e5-small (current)'
 E5_MODEL = 'intfloat/multilingual-e5-small'
@@ -175,6 +177,7 @@ class Hosted:
         self.opener = urllib.request.build_opener(embeddings.NoRedirect())
         # Shallow task copies retain this limiter across all document batches.
         self.documents = DocumentAdmission()
+        self.provider_gate = None
         self.blocked_seconds = self.http_seconds = self.service_seconds = 0.
         self.ledger_seconds = self.backoff_seconds = self.admission_seconds = 0.
         self.retry_attempts = 0
@@ -191,19 +194,23 @@ class Hosted:
                 setattr(self, phase + '_seconds', getattr(self, phase + '_seconds') + elapsed)
 
     def read(self, request, mode):
-        admission = self.documents.request() if mode == 'document' else contextlib.nullcontext()
+        admission = (self.provider_gate.request() if self.provider_gate else
+                     self.documents.request() if mode == 'document' else contextlib.nullcontext())
         with self.blocked():
-            admitted = time.monotonic()
-            with admission:
-                self.admission_seconds += time.monotonic() - admitted
-                started = time.monotonic()
-                try:
-                    with self.opener.open(request, timeout=120) as response:
-                        raw = response.read(embeddings.MAX_RESPONSE_BYTES + 1)
-                    self.service_seconds += time.monotonic() - started
-                    return raw
-                finally:
-                    self.http_seconds += time.monotonic() - started
+            admitted, http_elapsed = time.monotonic(), 0.
+            try:
+                with admission:
+                    started = time.monotonic()
+                    try:
+                        with self.opener.open(request, timeout=120) as response:
+                            raw = response.read(embeddings.MAX_RESPONSE_BYTES + 1)
+                        self.service_seconds += time.monotonic() - started
+                        return raw
+                    finally:
+                        http_elapsed = time.monotonic() - started
+                        self.http_seconds += http_elapsed
+            finally:
+                self.admission_seconds += time.monotonic() - admitted - http_elapsed
 
     def post(self, path, body, texts, label, model, mode):
         # The shared gate's supported byte/subword bound, including special tokens.
@@ -365,7 +372,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.out.exists():
         raise FileExistsError('output exists; choose a new evidence filename')
-    if any(os.environ.get(name, '').lower() not in ('', '0', 'false') for name in ('CI', 'GITHUB_ACTIONS')):
+    if ci_guard.in_ci():
         raise SystemExit('direct comparison runs locally only; CI execution is refused')
     budget = embeddings.Budget(args.max_input_tokens, args.max_usd)
     prices = dict(PRICES)

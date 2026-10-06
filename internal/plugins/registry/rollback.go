@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
@@ -171,7 +172,7 @@ func (s Service) Rollback(ctx context.Context, scope corpus.Scope, req RollbackR
 		return a, nil
 	})
 	if err == nil && s.Activated != nil {
-		s.Activated(ctx)
+		audit.AfterCommit(ctx, s.Activated)
 	}
 	return plan, err
 }

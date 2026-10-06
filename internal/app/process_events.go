@@ -77,7 +77,7 @@ func (e *processEvents) shutdownStart() time.Time {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.drainStart.IsZero() {
-		return time.Now()
+		e.drainStart = time.Now()
 	}
 	return e.drainStart
 }

@@ -130,11 +130,12 @@ func (unpinned) Pin(ctx context.Context, _, _, _ string) (context.Context, error
 func (unpinned) Release(context.Context, string, string, string) error            { return nil }
 
 type Runtime struct {
-	dispatchDone     <-chan struct{}
-	EvaluationWorker worker.Worker
-	Evaluation       *processing.Evaluator
-	Client           client.Client
-	Worker           worker.Worker
+	dispatchDone         <-chan struct{}
+	IngestionBatchWorker worker.Worker
+	EvaluationWorker     worker.Worker
+	Evaluation           *processing.Evaluator
+	Client               client.Client
+	Worker               worker.Worker
 	// BackfillWorker serves backfills on their own task queue, one activity
 	// at a time, below live content processing.
 	BackfillWorker worker.Worker
@@ -234,7 +235,23 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		c.Close()
 		return nil, err
 	}
-	runtime := &Runtime{EvaluationWorker: ew, Evaluation: service.Evaluation, Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
+	batchWorker := worker.New(c, ingestionBatchQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
+	registerIngestionBatches(batchWorker, service, pins)
+	if err = batchWorker.Start(); err != nil {
+		w.Stop()
+		if ew != nil {
+			ew.Stop()
+		}
+		if cw != nil {
+			cw.Stop()
+		}
+		if bw != nil {
+			bw.Stop()
+		}
+		c.Close()
+		return nil, err
+	}
+	runtime := &Runtime{IngestionBatchWorker: batchWorker, EvaluationWorker: ew, Evaluation: service.Evaluation, Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
 	done := make(chan struct{})
 	runtime.dispatchDone = done
 	go func() { defer close(done); runtime.dispatch(ctx) }()
@@ -329,7 +346,7 @@ type RuntimeOptions struct{ ShutdownGrace time.Duration }
 func (r *Runtime) Close(ctx context.Context) {
 	defer r.Client.Close()
 	var wg sync.WaitGroup
-	for _, w := range []worker.Worker{r.EvaluationWorker, r.Worker, r.ConnectorWorker, r.BackfillWorker} {
+	for _, w := range []worker.Worker{r.IngestionBatchWorker, r.EvaluationWorker, r.Worker, r.ConnectorWorker, r.BackfillWorker} {
 		if w != nil {
 			wg.Add(1)
 			go func() { defer wg.Done(); w.Stop() }()
@@ -352,8 +369,8 @@ func (r *Runtime) Close(ctx context.Context) {
 
 // ReceiptDispatchStore owns receipt dispatch and failed-start progress.
 type ReceiptDispatchStore interface {
-	Claim(context.Context, int) ([]content.Dispatch, error)
-	Dispatched(context.Context, content.Dispatch) error
+	ClaimIngestionBatches(context.Context, int) ([]content.DispatchBatch, error)
+	IngestionBatchDispatched(context.Context, string) error
 	Progress(context.Context, string, string, string, string) error
 }
 

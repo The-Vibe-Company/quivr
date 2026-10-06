@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -47,7 +48,7 @@ func stuckArgs(org string, corpora []string, f quarantine.Filter) []any {
 // Quarantined lists one page of stuck Versions in Version id order.
 func (s QuarantineStore) Quarantined(ctx context.Context, org string, corpora []string, f quarantine.Filter, after string, limit int) ([]quarantine.Entry, error) {
 	args := append(stuckArgs(org, corpora, f), after, limit)
-	rows, err := s.Pool.Query(ctx, `SELECT v.id,v.record_id,r.corpus_id,rc.id,coalesce(v.quarantine_stage,'ingestion'),`+reasonSQL+`,coalesce(v.quarantined_at,rc.accepted_at)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT v.id,v.record_id,r.corpus_id,rc.id,coalesce(v.quarantine_stage,'ingestion'),`+reasonSQL+`,coalesce(v.quarantined_at,rc.accepted_at)
 FROM `+stuckSQL+` AND v.id>$8 ORDER BY v.id LIMIT $9`, args...)
 	if err != nil {
 		return nil, err
@@ -73,13 +74,13 @@ FROM `+stuckSQL+` AND v.id>$8 ORDER BY v.id LIMIT $9`, args...)
 func (s QuarantineStore) ReprocessSize(ctx context.Context, org string, f quarantine.Filter) (operations.ReprocessEstimate, error) {
 	e := operations.ReprocessEstimate{Stages: map[string]int64{content.QuarantineNormalization: 0, content.QuarantineIngestion: 0}, Codes: map[string]int64{}}
 	var exists bool
-	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$2)`, org, f.CorpusID).Scan(&exists); err != nil {
+	if err := database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM corpora WHERE organization=$1 AND id=$2)`, org, f.CorpusID).Scan(&exists); err != nil {
 		return e, err
 	}
 	if !exists {
 		return e, corpus.ErrNotFound
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT coalesce(v.quarantine_stage,'ingestion'),v.error_code,count(*) FROM `+stuckSQL+` GROUP BY 1,2`, stuckArgs(org, nil, f)...)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT coalesce(v.quarantine_stage,'ingestion'),v.error_code,count(*) FROM `+stuckSQL+` GROUP BY 1,2`, stuckArgs(org, nil, f)...)
 	if err != nil {
 		return e, err
 	}
@@ -103,7 +104,7 @@ func (s QuarantineStore) RecordReprocessEstimate(ctx context.Context, org, corpu
 	if err != nil {
 		return err
 	}
-	tag, err := s.Pool.Exec(ctx, `INSERT INTO quarantine_reprocess_estimates(organization,corpus_id,request_key,canonical_request,estimate) VALUES($1,$2,$3,$4,$5)
+	tag, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO quarantine_reprocess_estimates(organization,corpus_id,request_key,canonical_request,estimate) VALUES($1,$2,$3,$4,$5)
 ON CONFLICT(organization,corpus_id,request_key) DO UPDATE SET estimate=EXCLUDED.estimate,created_at=now() WHERE quarantine_reprocess_estimates.canonical_request=EXCLUDED.canonical_request`, org, corpusID, key, canonical, raw)
 	if err != nil {
 		return err
@@ -118,7 +119,7 @@ ON CONFLICT(organization,corpus_id,request_key) DO UPDATE SET estimate=EXCLUDED.
 func (s QuarantineStore) ReprocessEstimate(ctx context.Context, org, corpusID, key string) ([]byte, operations.ReprocessEstimate, error) {
 	var canonical, raw []byte
 	var e operations.ReprocessEstimate
-	err := s.Pool.QueryRow(ctx, `SELECT canonical_request,estimate FROM quarantine_reprocess_estimates WHERE organization=$1 AND corpus_id=$2 AND request_key=$3`, org, corpusID, key).Scan(&canonical, &raw)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT canonical_request,estimate FROM quarantine_reprocess_estimates WHERE organization=$1 AND corpus_id=$2 AND request_key=$3`, org, corpusID, key).Scan(&canonical, &raw)
 	if err != nil {
 		return nil, e, notFound(err)
 	}
@@ -128,7 +129,7 @@ func (s QuarantineStore) ReprocessEstimate(ctx context.Context, org, corpusID, k
 // AcceptReprocess commits a queued reprocess with the Versions it takes,
 // pinned to the active plan, or replays the one accepted under the key.
 func (s QuarantineStore) AcceptReprocess(ctx context.Context, org, key string, canonical []byte, f quarantine.Filter, e operations.ReprocessEstimate) (operations.Operation, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
 	}
@@ -203,7 +204,7 @@ SELECT $1,$8,v.id,v.record_id,rc.id,coalesce(v.quarantine_stage,'ingestion'),`+r
 	if _, err = tx.Exec(ctx, `INSERT INTO pipeline_plan_work(kind,organization,work_id,plan_id) VALUES('operation',$1,$2,$3)`, org, id, plan); err != nil {
 		return operations.Operation{}, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id) VALUES($1,$2)`, org, id); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO operation_outbox(organization,operation_id,trace_context) VALUES($1,$2,$3)`, org, id, telemetry.Encode(ctx)); err != nil {
 		return operations.Operation{}, err
 	}
 	if err = operationEvent(ctx, tx, org, f.CorpusID, id, operations.StateQueued); err != nil {
@@ -249,7 +250,7 @@ func scanItem(row pgx.Row) (*quarantine.Item, error) {
 
 // BeginReprocess starts a reprocess step: see quarantine.RunStore.
 func (s QuarantineStore) BeginReprocess(ctx context.Context, org, id string) (operations.Operation, *quarantine.Item, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, nil, err
 	}
@@ -318,7 +319,7 @@ func release(ctx context.Context, tx pgx.Tx, org, versionID string) error {
 // StartReprocessItem takes and prepares the next pending item: see
 // quarantine.RunStore.
 func (s QuarantineStore) StartReprocessItem(ctx context.Context, org, id string) (*quarantine.Item, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +410,7 @@ func (s QuarantineStore) RepublishItem(ctx context.Context, org, id string, item
 }
 
 func (s QuarantineStore) republish(ctx context.Context, org, id string, item quarantine.Item, w content.Work, p content.Publication, released *bool) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -489,7 +490,7 @@ func (s QuarantineStore) RequarantineItem(ctx context.Context, org, id string, i
 	if err != nil {
 		return err
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -532,7 +533,7 @@ func (s QuarantineStore) AbandonItem(ctx context.Context, org, id string, item q
 // is quarantined again with its previous reason: it never waits for a
 // processing nobody runs.
 func (s QuarantineStore) endItem(ctx context.Context, org, id string, item quarantine.Item, canceled bool) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -587,7 +588,7 @@ func (s QuarantineStore) endItem(ctx context.Context, org, id string, item quara
 // SkipItem ends a started item that no retry can carry further, leaving its
 // Version quarantined with its reason.
 func (s QuarantineStore) SkipItem(ctx context.Context, org, id string, item quarantine.Item, code string) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -604,7 +605,7 @@ func (s QuarantineStore) SkipItem(ctx context.Context, org, id string, item quar
 
 // CompleteReprocess records a reprocess's success.
 func (s QuarantineStore) CompleteReprocess(ctx context.Context, org, id string) error {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}

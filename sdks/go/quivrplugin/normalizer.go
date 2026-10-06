@@ -82,6 +82,7 @@ func (r *NormalizerRequest) ReadInput(ctx context.Context) ([]byte, error) {
 		if err != nil {
 			return nil, TerminalError("invalid_input", "invalid input reference")
 		}
+		InjectTrace(ctx, req.Header)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return nil, RetryableError("input_unavailable", "cannot read input")
@@ -171,7 +172,7 @@ func (p *Plugin) serveNormalize(w http.ResponseWriter, r *http.Request) {
 		refuse(w, 400, "unsupported_media_type", "media type is not declared", Credential{})
 		return
 	}
-	req.logger = p.logger.With("invocation_id", req.InvocationID, "idempotency_key", req.IdempotencyKey)
+	req.logger = p.requestLogger(r.Context(), Credential{}, req.InvocationID).With("idempotency_key", req.IdempotencyKey)
 	defer p.ingestPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(p.m.Normalizer.TimeoutMS)*time.Millisecond)
 	defer cancel()

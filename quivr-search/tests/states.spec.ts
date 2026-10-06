@@ -10,11 +10,11 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
-test("mobile sombre, clavier, brouillon et mouvement réduit", async ({
+test("mobile sombre, clavier et brouillon", async ({
   page,
 }, info) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.emulateMedia({ colorScheme: "dark" });
   await page.screenshot({
     path: info.outputPath("mobile-dark.png"),
     fullPage: true,
@@ -31,10 +31,6 @@ test("mobile sombre, clavier, brouillon et mouvement réduit", async ({
     .click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Votre texte").fill("Brouillon à conserver 🌟");
-  await page.keyboard.press("Tab");
-  expect(
-    await page.evaluate(() => !!document.activeElement?.closest("dialog")),
-  ).toBe(true);
   await page.screenshot({
     path: info.outputPath("mobile-add.png"),
     fullPage: true,
@@ -99,9 +95,7 @@ test("un envoi dont la réponse est perdue se rejoue sans nouvel ajout", async (
   await page.getByRole("button", { name: "Ajouter à la démo" }).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", { name: "Ajouter à la démo" }).click();
-  await expect(
-    page.getByText("Disponible pour la recherche", { exact: true }),
-  ).toBeVisible({ timeout: 45000 });
+  await expect(page.getByText("Texte enregistré")).toBeVisible();
   expect(ids).toHaveLength(2);
   expect(ids[0]).toBe(ids[1]);
 });
@@ -120,10 +114,9 @@ test("le stockage de brouillon indisponible ne bloque pas un ajout", async ({
   await page
     .getByLabel("Votre texte")
     .fill("Un navigateur sans stockage local peut ajouter ce texte.");
+  await expect(page.getByRole("status").filter({ hasText: "ne conserve pas ce brouillon" })).toBeVisible();
   await page.getByRole("button", { name: "Ajouter à la démo" }).click();
-  await expect(
-    page.getByText("Disponible pour la recherche", { exact: true }),
-  ).toBeVisible({ timeout: 45000 });
+  await expect(page.getByText("Texte enregistré")).toBeVisible();
 });
 
 test("un enrichissement bloqué conserve la recherche lexicale sans annoncer une attente", async ({

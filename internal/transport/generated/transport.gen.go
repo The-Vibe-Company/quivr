@@ -48,6 +48,24 @@ func (e AdminDocumentState) Valid() bool {
 	}
 }
 
+// Defines values for AuditEventOutcome.
+const (
+	AuditEventOutcomeAccepted AuditEventOutcome = "accepted"
+	AuditEventOutcomeRefused  AuditEventOutcome = "refused"
+)
+
+// Valid indicates whether the value is a known member of the AuditEventOutcome enum.
+func (e AuditEventOutcome) Valid() bool {
+	switch e {
+	case AuditEventOutcomeAccepted:
+		return true
+	case AuditEventOutcomeRefused:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AvailabilityState.
 const (
 	AvailabilityStateBuildingBaseline AvailabilityState = "building_baseline"
@@ -1266,6 +1284,40 @@ type AdminDocumentPage struct {
 	NextPageCursor *string         `json:"next_page_cursor,omitempty"`
 }
 
+// AuditEvent defines model for AuditEvent.
+type AuditEvent struct {
+	Action string `json:"action"`
+
+	// Actor SHA-256-derived API key identifier; empty for unauthenticated attempts.
+	Actor  string `json:"actor"`
+	Detail struct {
+		CredentialVersion *int    `json:"credential_version,omitempty"`
+		ErrorCode         *string `json:"error_code,omitempty"`
+		PlanId            *string `json:"plan_id,omitempty"`
+		Status            int     `json:"status"`
+	} `json:"detail"`
+
+	// Id Decimal audit identifier, represented as text to preserve bigint precision.
+	Id           string            `json:"id"`
+	Organization string            `json:"organization"`
+	Outcome      AuditEventOutcome `json:"outcome"`
+	RequestId    string            `json:"request_id"`
+
+	// TargetId Target identifier; empty if refusal occurred before the target could be resolved.
+	TargetId   string    `json:"target_id"`
+	TargetType string    `json:"target_type"`
+	Time       time.Time `json:"time"`
+}
+
+// AuditEventOutcome defines model for AuditEvent.Outcome.
+type AuditEventOutcome string
+
+// AuditEventPage defines model for AuditEventPage.
+type AuditEventPage struct {
+	Items          []AuditEvent `json:"items"`
+	NextPageCursor *string      `json:"next_page_cursor,omitempty"`
+}
+
 // Availability defines model for Availability.
 type Availability struct {
 	IsCurrent  bool              `json:"is_current"`
@@ -1834,10 +1886,19 @@ type Error struct {
 	Code string `json:"code"`
 
 	// Field JSON Pointer (RFC 6901) to the request member that caused a 422, when known (for example /config/url or /credential/secret/token on connector commands).
-	Field     *string `json:"field,omitempty"`
-	Message   string  `json:"message"`
+	Field   *string `json:"field,omitempty"`
+	Message string  `json:"message"`
+
+	// RequestId Bounded caller X-Request-ID, or an engine-generated correlation ID.
+	RequestId *string `json:"request_id,omitempty"`
 	ResyncUrl *string `json:"resync_url,omitempty"`
 	Retryable bool    `json:"retryable"`
+
+	// SpanId W3C span ID of the API handler when a trace context is present.
+	SpanId *string `json:"span_id,omitempty"`
+
+	// TraceId W3C trace ID when a trace context is present.
+	TraceId *string `json:"trace_id,omitempty"`
 }
 
 // EvaluationBacklogPage defines model for EvaluationBacklogPage.
@@ -3198,6 +3259,29 @@ type WithdrawalCommand struct {
 	Source         SourceIdentity `json:"source"`
 }
 
+// ListAuditEventsParams defines parameters for ListAuditEvents.
+type ListAuditEventsParams struct {
+	// Since Inclusive RFC3339 timestamp.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// Until Exclusive RFC3339 timestamp.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
+
+	// Actor Exact API key identifier; no substring matching.
+	Actor *string `form:"actor,omitempty" json:"actor,omitempty"`
+
+	// Action Exact audit action name; no substring matching.
+	Action *string `form:"action,omitempty" json:"action,omitempty"`
+
+	// TargetType Exact target type; no substring matching.
+	TargetType *string `form:"target_type,omitempty" json:"target_type,omitempty"`
+
+	// TargetId Exact target identifier; no substring matching.
+	TargetId   *string `form:"target_id,omitempty" json:"target_id,omitempty"`
+	Limit      *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
+}
+
 // ListAdminDocumentsParams defines parameters for ListAdminDocuments.
 type ListAdminDocumentsParams struct {
 	PageCursor *string `form:"page_cursor,omitempty" json:"page_cursor,omitempty"`
@@ -3726,6 +3810,9 @@ type ServerInterface interface {
 	// (GET /v0/admin/active-plugins)
 	ListActivePlugins(w http.ResponseWriter, r *http.Request)
 
+	// (GET /v0/admin/audit)
+	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
+
 	// (POST /v0/admin/backfills)
 	RequestBackfill(w http.ResponseWriter, r *http.Request)
 
@@ -4007,6 +4094,17 @@ func (siw *ServerInterfaceWrapper) ListActivePlugins(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListActivePlugins(w, r)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
+	var params ListAuditEventsParams
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAuditEvents(w, r, params)
 	}))
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
@@ -5160,6 +5258,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/schedule", wrapper.ChangeConnectorSchedule)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/runs", wrapper.RequestConnectorRun)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connector-kinds", wrapper.ListConnectorKinds)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/audit", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins", wrapper.ListPluginRegistrations)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/plugins", wrapper.RegisterPlugin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/{registration_id}", wrapper.GetPluginRegistration)
@@ -5231,6 +5330,55 @@ type ListActivePluginsdefaultJSONResponse struct {
 }
 
 func (response ListActivePluginsdefaultJSONResponse) VisitListActivePluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEventsRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	Params      ListAuditEventsParams
+}
+
+type ListAuditEventsResponseObject interface {
+	VisitListAuditEventsResponse(w http.ResponseWriter) error
+}
+
+// ListAuditEventsResponseFunc writes a deferred response, including streams and plugin answers.
+type ListAuditEventsResponseFunc func(http.ResponseWriter)
+
+func (response ListAuditEventsResponseFunc) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type ListAuditEvents200JSONResponse AuditEventPage
+
+func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEventsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListAuditEventsdefaultJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -9843,6 +9991,9 @@ type StrictServerInterface interface {
 	// (GET /v0/admin/active-plugins)
 	ListActivePlugins(ctx context.Context, request ListActivePluginsRequestObject) (ListActivePluginsResponseObject, error)
 
+	// (GET /v0/admin/audit)
+	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+
 	// (POST /v0/admin/backfills)
 	RequestBackfill(ctx context.Context, request RequestBackfillRequestObject) (RequestBackfillResponseObject, error)
 
@@ -10170,6 +10321,34 @@ func (sh *strictHandler) ListActivePlugins(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListActivePluginsResponseObject); ok {
 		if err := validResponse.VisitListActivePluginsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAuditEvents operation middleware
+func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams) {
+	var request ListAuditEventsRequestObject
+
+	request.Params = params
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAuditEvents(ctx, request.(ListAuditEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAuditEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
+		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

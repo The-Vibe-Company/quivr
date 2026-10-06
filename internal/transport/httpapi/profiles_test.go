@@ -2,9 +2,13 @@ package httpapi_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/pluginhttp"
@@ -30,32 +34,46 @@ func (*deadlineRouting) Generation(context.Context, string, string) (content.Gen
 // A router-backed search reaches authorization under its selected profile's
 // hard bound, even when it exceeds the ordinary HTTP request deadline.
 func TestSearchUsesRoutedProfileDeadline(t *testing.T) {
-	set, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: "../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:1"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	live, err := plugins.NewLive("first", set)
-	if err != nil {
-		t.Fatal(err)
-	}
-	routing := &deadlineRouting{}
-	s := retrieval.Service{Routing: routing, ProfilesRouter: pluginhttp.LiveRetriever{Live: live}}
-	handler, err := httpapi.New(knownCorpora{}, content.Service{}, s, uploads.Service{}, map[string]corpus.Scope{
-		observer: {Organization: "org_a", Actions: []string{"search:query", "content:read"}, Corpora: []string{"*"}},
-	}, []byte("cursor-key-0123456789abcdef0123456789"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(checkedAPI(t, handler))
-	defer server.Close()
-	res, body := operationCall(t, server, "POST", "/v0/search", observer, "application/json", `{"query":"library","corpus_ids":["corpus_a"],"profile":"deep"}`)
-	if res.StatusCode != 503 || body["code"] != "search_unavailable" || routing.remaining < 8*time.Second || routing.remaining > 9*time.Second {
-		t.Fatalf("profile deadline %s, response %d: %v", routing.remaining, res.StatusCode, body)
-	}
-	res, body = operationCall(t, server, "POST", "/v0/search", observer, "application/json", `{"query":"library","corpus_ids":["corpus_a"],"profile":"balanced"}`)
-	if res.StatusCode != 422 || body["code"] != "unsupported_profile" {
-		t.Fatalf("removed profile: response %d: %v", res.StatusCode, body)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		set, err := plugins.LoadPins([]plugins.PinConfig{{Manifest: "../../../sdks/go/examples/fusion-retriever/quivr-plugin.yaml", Endpoint: "http://127.0.0.1:1"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		live, err := plugins.NewLive("first", set)
+		if err != nil {
+			t.Fatal(err)
+		}
+		routing := &deadlineRouting{}
+		s := retrieval.Service{Routing: routing, ProfilesRouter: pluginhttp.LiveRetriever{Live: live}}
+		handler, err := httpapi.New(knownCorpora{}, content.Service{}, s, uploads.Service{}, map[string]corpus.Scope{
+			observer: {Organization: "org_a", Actions: []string{"search:query", "content:read"}, Corpora: []string{"*"}},
+		}, []byte("cursor-key-0123456789abcdef0123456789"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		call := func(body string) (*http.Response, map[string]any) {
+			req := httptest.NewRequest("POST", "/v0/search", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+observer)
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			checkedAPI(t, handler).ServeHTTP(recorder, req)
+			res := recorder.Result()
+			defer res.Body.Close()
+			var out map[string]any
+			if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+				t.Fatal(err)
+			}
+			return res, out
+		}
+		res, body := call(`{"query":"library","corpus_ids":["corpus_a"],"profile":"deep"}`)
+		if res.StatusCode != 503 || body["code"] != "search_unavailable" || routing.remaining != 9*time.Second {
+			t.Fatalf("profile deadline %s, response %d: %v", routing.remaining, res.StatusCode, body)
+		}
+		res, body = call(`{"query":"library","corpus_ids":["corpus_a"],"profile":"balanced"}`)
+		if res.StatusCode != 422 || body["code"] != "unsupported_profile" {
+			t.Fatalf("removed profile: response %d: %v", res.StatusCode, body)
+		}
+	})
 }
 
 // The public list serializes the full name and aliases, including an empty
