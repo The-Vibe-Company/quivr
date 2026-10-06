@@ -26,10 +26,14 @@ const facet = (page: Page, name: string) =>
 const counts = (page: Page, name: string) => facet(page, name).getByRole("listitem");
 const pills = (page: Page) => page.getByRole("group", { name: "Filtres actifs" });
 const preview = (page: Page) => page.getByRole("complementary", { name: "Aperçu" });
-// The address the next Explorer page is read from. Start it before the action.
+// The address the next Explorer list is read from, its next pages left
+// out. Start it before the action.
 const listed = (page: Page) =>
   page
-    .waitForRequest((r) => new URL(r.url()).pathname === "/demo/explore", { timeout: 10_000 })
+    .waitForRequest(
+      (r) => new URL(r.url()).pathname === "/demo/explore" && !new URL(r.url()).searchParams.has("cursor"),
+      { timeout: 10_000 },
+    )
     .then((r) => new URL(r.url()).searchParams);
 
 test("l’Explorer passe d’un corpus à l’autre, filtre par facettes comptées et dit quels corpus il exclut", async ({
@@ -43,7 +47,9 @@ test("l’Explorer passe d’un corpus à l’autre, filtre par facettes compté
   await expect(corpus(page, "Dépêches d’agence")).toHaveText("Dépêches d’agence4");
   await expect(page.getByRole("heading", { name: "Champs de Espace démo" })).toHaveCount(0);
 
-  // One corpus at a time: its rows by date, a page at a time, and its own field.
+  // One corpus at a time and its own field. Its rows come by date, though
+  // the cup final was read last, and the next page loads on its own as the
+  // end of the list shows.
   let next = listed(page);
   await corpus(page, "Dépêches d’agence").click();
   expect((await next).get("corpora")).toBe("wires");
@@ -55,9 +61,8 @@ test("l’Explorer passe d’un corpus à l’autre, filtre par facettes compté
     "Port reopens after three-day closure",
     "Récolte de blé : les prix reculent",
     "Cup final moved to Sunday",
+    "Le conseil vote le budget",
   ]);
-  await page.getByRole("button", { name: "Afficher plus de documents" }).click();
-  await expect(rows(page)).toHaveCount(4);
   await expect(counts(page, "Desk")).toHaveText(["economy2", "politics1", "sport1"]);
   await expect(counts(page, "Langue")).toHaveText(["anglais2", "français2"]);
   await expect(pills(page).getByRole("status")).toHaveText("4 documents");
@@ -83,7 +88,7 @@ test("l’Explorer passe d’un corpus à l’autre, filtre par facettes compté
   await expect(facet(page, "Desk")).toHaveCount(0);
   await expect(headlines(page)).toHaveText(["Cup final moved to Sunday"]);
   // Removing the field's pill brings the demo corpus back; "Tout effacer" the rest.
-  await pills(page).getByRole("button", { name: /Desk : sport/ }).click();
+  await pills(page).getByRole("button", { name: /^Desk sport/ }).click();
   await expect(page.getByRole("note")).toHaveCount(0);
   await pills(page).getByRole("button", { name: "Tout effacer" }).click();
   await expect(pills(page).getByRole("button")).toHaveCount(0);
@@ -95,7 +100,7 @@ test("la chronologie choisit une période en glissant, et l’adresse garde la v
   const bars = page.getByRole("region", { name: "Chronologie" }).getByRole("group", { name: "Documents par jour" });
   const bar = bars.getByRole("button");
   await expect(bar).toHaveCount(3);
-  await expect(rows(page)).toHaveCount(3);
+  await expect(rows(page)).toHaveCount(4);
 
   // A drag from the first day to the second picks both, as one date filter.
   const from = (await bar.nth(0).boundingBox())!;
@@ -115,7 +120,7 @@ test("la chronologie choisit une période en glissant, et l’adresse garde la v
     "Cup final moved to Sunday",
     "Le conseil vote le budget",
   ]);
-  await expect(pills(page).getByRole("button", { name: /^Période :/ })).toBeVisible();
+  await expect(pills(page).getByRole("button", { name: /^Période/ })).toBeVisible();
   await expect(pills(page).getByRole("status")).toHaveText("3 documents");
 
   // Zoomed in, the timeline shows the range alone; the overview widens it back.
@@ -132,13 +137,13 @@ test("la chronologie choisit une période en glissant, et l’adresse garde la v
   await expect(page).toHaveURL(/selected=rec_wvote/);
   await page.reload();
   await expect(headlines(page)).toHaveText(["Récolte de blé : les prix reculent", "Le conseil vote le budget"]);
-  await expect(pills(page).getByRole("button", { name: /^Langue : français/ })).toBeVisible();
+  await expect(pills(page).getByRole("button", { name: /^Langue français/ })).toBeVisible();
   await expect(bar.nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect(rows(page).nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(preview(page).getByRole("heading", { level: 2 })).toHaveText("Le conseil vote le budget");
 
   // The period's pill removes the range.
-  await pills(page).getByRole("button", { name: /^Période :/ }).click();
+  await pills(page).getByRole("button", { name: /^Période/ }).click();
   await expect(bar.nth(1)).toHaveAttribute("aria-pressed", "false");
   await expect(page).not.toHaveURL(/range=/);
 });
@@ -156,20 +161,24 @@ test("le clavier parcourt la liste, l’aperçu montre les versions, Entrée ouv
   await expect(versions.last()).toContainText("première version");
   await expect(card.getByRole("definition").first()).toHaveText("transport");
 
-  // ↓ and ↑ move the selection and the preview follows.
+  // ↓ and ↑ move the selection and the preview follows, without moving the
+  // list; on a desktop only the columns scroll, never the page.
+  const list = page.getByRole("region", { name: "Documents trouvés" });
+  const frame = await list.boundingBox();
   await rows(page).first().focus();
   await page.keyboard.press("ArrowDown");
   await expect(rows(page).nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(rows(page).nth(1)).toBeFocused();
   await expect(card.getByRole("heading", { level: 2 })).toHaveText("Récolte de blé : les prix reculent");
+  expect(await list.boundingBox()).toEqual(frame);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   await expect(card.getByText("corrigée", { exact: true })).toHaveCount(0);
   await page.keyboard.press("ArrowUp");
   await expect(card.getByRole("heading", { level: 2 })).toHaveText("Port reopens after three-day closure");
 
   // The source opens on demand.
-  const source = card.locator("details");
-  await source.getByText("Source XML").click();
-  await expect(source.locator("pre")).toContainText('"desk": "economy"');
+  await card.getByRole("button", { name: "Source XML" }).click();
+  await expect(card.getByRole("region", { name: "Source XML" }).locator("pre")).toContainText('"desk": "economy"');
 
   // Enter opens the full document.
   await rows(page).first().focus();
@@ -182,7 +191,7 @@ test("le clavier parcourt la liste, l’aperçu montre les versions, Entrée ouv
 
 test("la recherche cherche dans le corpus choisi, et une liste vide propose d’élargir", async ({ page }) => {
   await page.goto("/?view=explorer&corpora=wires");
-  await expect(rows(page)).toHaveCount(3);
+  await expect(rows(page)).toHaveCount(4);
   const search = page.getByRole("searchbox", { name: "Chercher dans les documents" });
   let next = listed(page);
   await search.fill("port");
@@ -197,13 +206,13 @@ test("la recherche cherche dans le corpus choisi, et une liste vide propose d’
   await next;
   await expect(page.getByRole("heading", { name: "Aucun document pour ces critères." })).toBeVisible();
   await page.getByRole("button", { name: "Effacer la recherche" }).click();
-  await expect(rows(page)).toHaveCount(3);
+  await expect(rows(page)).toHaveCount(4);
 });
 
 test("sur un écran étroit, l’Explorer tient en une colonne et une ligne ouvre son document", async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 900 });
   await page.goto("/?view=explorer&corpora=wires");
-  await expect(rows(page)).toHaveCount(3);
+  await expect(rows(page)).toHaveCount(4);
   await expect(preview(page)).toHaveCount(0);
   const list = (await page.getByRole("region", { name: "Documents trouvés" }).boundingBox())!;
   const filters = (await page.getByText("Filtres", { exact: true }).boundingBox())!;
@@ -249,7 +258,7 @@ test("un document de l’Explorer montre son texte, ses métadonnées, ce qui a 
   await expect(raw.locator("pre")).toContainText('"desk": "economy"');
 
   await article.getByRole("button", { name: "Tous les documents" }).click();
-  await expect(rows(page)).toHaveCount(3);
+  await expect(rows(page)).toHaveCount(4);
 });
 
 test("le fil et la recherche couvrent les corpus choisis, et une dépêche arrive en direct", async ({ page }) => {

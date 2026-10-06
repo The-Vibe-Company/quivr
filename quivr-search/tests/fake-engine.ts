@@ -165,7 +165,8 @@ export function workspace() {
   const wires: Article[] = [
     wire("wport", 30, "Port reopens after three-day closure", "Traffic resumed at the port on Monday after a three-day closure.", { language: "en", subjects: ["transport"], published_at: daysAgo(0, 6) }, "economy", { previous: { version_id: "ver_wport_0", title: "Port remains closed for a third day", body: "Traffic is still halted at the port for a third day." } }),
     wire("wgrain", 90, "Récolte de blé : les prix reculent", "Les prix du blé reculent après une récolte abondante.", { language: "fr", subjects: ["agriculture"], published_at: daysAgo(1, 9) }, "economy"),
-    wire("wcup", 150, "Cup final moved to Sunday", "The cup final has been moved to Sunday because of the storms.", { language: "en", subjects: ["sport"], published_at: daysAgo(1, 7) }, "sport"),
+    // Read last, though it dates from yesterday: the Explorer lists by date.
+    wire("wcup", 10, "Cup final moved to Sunday", "The cup final has been moved to Sunday because of the storms.", { language: "en", subjects: ["sport"], published_at: daysAgo(1, 7) }, "sport"),
     wire("wvote", 260, "Le conseil vote le budget", "Le conseil a voté le budget de l’année prochaine.", { language: "fr", subjects: ["politique"], published_at: daysAgo(2, 11) }, "politics"),
   ];
   const wireIncoming: Article[] = [

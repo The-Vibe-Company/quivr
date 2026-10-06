@@ -25,10 +25,14 @@ export function PageHeader({
   );
 }
 
-/** The top bar's two places a page fills: beside its title, and at the right. */
+/**
+ * The top bar's places a page fills: beside its title, at the right, and,
+ * for a page with a search of its own (the Explorer), the search's place.
+ */
 export interface Bar {
   meta: Element | null;
   actions: Element | null;
+  search?: Element | null;
 }
 
 /** What a page shows in the top bar (its figures, its main action). */
