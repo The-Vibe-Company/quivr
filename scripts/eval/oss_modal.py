@@ -45,7 +45,7 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
     torch_package = spec['torch'] if gemma else TORCH_PACKAGE
     torch_index = spec['torch_index_url'] if gemma else 'https://download.pytorch.org/whl/cpu'
     image = (base
-             .pip_install(torch_package, index_url=torch_index)
+             .pip_install(torch_package, *(['torchvision==0.23.0'] if gemma else []), index_url=torch_index)
              .env({'OMP_NUM_THREADS': '4', 'RAYON_NUM_THREADS': '4', 'TOKENIZERS_PARALLELISM': 'false',
                    'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1'})
              .add_local_dir(root / 'scripts/eval', '/workspace/scripts/eval', copy=True,
