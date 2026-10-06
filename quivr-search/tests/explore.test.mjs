@@ -8,12 +8,13 @@ import { countFacets, periodBounds } from "../explore.mjs";
 const date = { name: "metadata.published_at", type: "datetime" };
 const language = { name: "metadata.language", type: "string" };
 
-async function counted(predicates, buckets) {
+async function counted(predicates, buckets, timeline) {
   const sent = [];
   const out = await countFacets({
     ids: ["c1"],
     fields: [language, date],
     predicates,
+    timeline,
     count: async (body) => {
       sent.push(body);
       return {
@@ -27,7 +28,12 @@ async function counted(predicates, buckets) {
     b.fields.find((f) => f.field === date.name)?.interval,
     (b.filter?.metadata || []).map((p) => `${p.field.slice(9)} ${p.gte || ""}`.trim()),
   ]);
-  return { interval: histogram.interval, values: histogram.values.map((v) => `${v.value} ${v.count}`), asked };
+  return {
+    interval: histogram.interval,
+    values: histogram.values.map((v) => `${v.value} ${v.count}`),
+    asked,
+    ...(out.total === undefined ? {} : { total: out.total }),
+  };
 }
 
 const at = (value, count = 1) => ({ value, count });
@@ -94,6 +100,60 @@ test("a date's histogram steps by the period picked, or by the span of its docum
     },
   ];
   for (const c of cases) assert.deepEqual(await counted(c.predicates, c.buckets), c.want, c.name);
+});
+
+// The timeline (THE-1204) draws the documents around the range it picks: it
+// leaves the range out, keeps the span it shows, and counts the documents
+// every filter keeps.
+test("the timeline counts outside its range, within its window, and totals what every filter keeps", async () => {
+  const range = { field: date.name, gte: "2026-10-03T00:00:00.000Z", lte: "2026-10-04T23:59:59.999Z" };
+  const window = { gte: "2026-09-20T00:00:00.000Z", lte: "2026-10-10T23:59:59.999Z" };
+  const timeline = (w) => ({ field: date.name, ...(w ? { window: w } : {}) });
+  const days = { day: [at("2026-10-01T00:00:00Z", 2), at("2026-10-03T00:00:00Z", 3)] };
+  const cases = [
+    {
+      name: "nothing picked: its months, refined to days, and their sum as the total",
+      predicates: [],
+      timeline: timeline(),
+      buckets: { month: [at("2026-10-01T00:00:00Z", 5)], ...days },
+      want: { interval: "day", values: ["2026-10-01 2", "2026-10-03 3"], asked: [["month", []], ["day", []]], total: 5 },
+    },
+    {
+      name: "a range picked: counted without it, the total from its years under every filter",
+      predicates: [en, range],
+      timeline: timeline(),
+      buckets: { month: [at("2026-10-01T00:00:00Z", 5)], year: [at("2026-01-01T00:00:00Z", 3)], ...days },
+      want: {
+        interval: "day",
+        values: ["2026-10-01 2", "2026-10-03 3"],
+        asked: [
+          [undefined, ["language", "published_at 2026-10-03T00:00:00.000Z"]],
+          [undefined, ["published_at 2026-10-03T00:00:00.000Z"]],
+          ["month", ["language"]],
+          ["year", ["language", "published_at 2026-10-03T00:00:00.000Z"]],
+          ["day", ["language"]],
+        ],
+        total: 3,
+      },
+    },
+    {
+      name: "a window shown: counted within it, by the step its length asks",
+      predicates: [range],
+      timeline: timeline(window),
+      buckets: { year: [at("2026-01-01T00:00:00Z", 3)], ...days },
+      want: {
+        interval: "day",
+        values: ["2026-10-01 2", "2026-10-03 3"],
+        asked: [
+          [undefined, ["published_at 2026-10-03T00:00:00.000Z"]],
+          ["day", ["published_at 2026-09-20T00:00:00.000Z"]],
+          ["year", ["published_at 2026-10-03T00:00:00.000Z"]],
+        ],
+        total: 3,
+      },
+    },
+  ];
+  for (const c of cases) assert.deepEqual(await counted(c.predicates, c.buckets, c.timeline), c.want, c.name);
 });
 
 test("a corpus's own fields are counted apart, 16 at a time, and only the common count names exclusions", async () => {
