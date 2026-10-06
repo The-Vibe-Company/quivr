@@ -8,6 +8,7 @@ These plugins live in the `plugins/` folder of the repository. They use the same
 
 | Plugin | Id | Type | Provides |
 | --- | --- | --- | --- |
+| `newsml-g2` | `newsml-g2` 0.1.0 | Normalizer | IPTC NewsML-G2 text items, metadata and raw XML |
 | `pdf-text` | `pdf-text` 0.1.0 | Normalizer | `application/pdf`: one Part per page |
 | `alerts` | `alerts` 0.3.0 | Alert rule | keyword and meaning alerts, alone or combined |
 | `core-ingest` | `core.ingest` 1.0.0 | Ingestion | token windows embedded with `multilingual-e5-small` |
@@ -30,6 +31,25 @@ Turns a PDF into one `body` Part per page with text, keyed `page-1`, `page-2`…
 | `include_source` | `true` | Add the `source` Part that references the PDF |
 
 Pin it with a route for `application/pdf`. See [Add content](/guides/add-content#upload-a-file) to upload a PDF.
+
+## newsml-g2
+
+Turns one IPTC NewsML-G2 text item into headline, slugline and paragraph Parts,
+preserving Arabic and other scripts in logical order. Each text Part retains its
+inherited language and direction. The original XML remains a source Blob.
+The `newsml-g2.document` extension exposes identity and editorial metadata;
+`newsml-g2.xml` retains every element, attribute and mixed text with namespace URIs.
+
+Pin required routes for `application/vnd.iptc.g2.newsitem+xml` and
+`application/vnd.iptc.g2.newsmessage+xml`. A message must contain one item; split
+multi-item messages before submitting. The submitter uses the item's `guid` as
+Record Key and `version` as Source Position before normalization.
+
+`max_input_bytes` defaults to 1 MiB and `max_text_bytes` to 256 KiB. The
+`header_paths` list selects literal element paths into `newsml-g2.headers`, using
+`{namespace-uri}name` for foreign elements. DTDs and entities are refused. Oversize
+text or output is refused with a diagnostic instead of dropping metadata.
+See the [installation, mapping and limits](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/newsml-g2/README.md).
 
 ## alerts
 
