@@ -18,8 +18,9 @@ if not 0 <= MIN_CONTAINERS <= MAX_CONTAINERS or MAX_CONTAINERS < 1:
 
 
 def cache_model():
-    from huggingface_hub import ModelCard, snapshot_download
-    card = ModelCard.load(MODEL, revision=REVISION)
+    from huggingface_hub import ModelCard, hf_hub_download, snapshot_download
+    # ModelCard.load takes no revision: read the pinned README itself.
+    card = ModelCard.load(hf_hub_download(MODEL, 'README.md', revision=REVISION))
     if card.data.license != 'apache-2.0':
         raise ValueError('pinned model card licence must be Apache-2.0')
     snapshot_download(MODEL, revision=REVISION, local_dir='/model',
