@@ -79,7 +79,7 @@ func catalogServer(t *testing.T, catalog *memoryCatalog, stores ...corpus.Store)
 }
 
 func TestCatalogReadOutages(t *testing.T) {
-	for _, stage := range []string{"corpus read", "record listing"} {
+	for _, stage := range []string{"corpus read", "record listing", "metadata routing"} {
 		t.Run(stage, func(t *testing.T) {
 			store := &readCorpora{}
 			catalog := &memoryCatalog{}
@@ -87,10 +87,14 @@ func TestCatalogReadOutages(t *testing.T) {
 			outage := errors.New("storage offline")
 			if stage == "corpus read" {
 				store.fail = outage
-			} else {
+			} else if stage == "record listing" {
 				catalog.fail = outage
 			}
-			body := getJSON(t, server, recordsPath("corpus_a", "", 0), catalogReader, 503)
+			path := recordsPath("corpus_a", "", 0)
+			if stage == "metadata routing" {
+				path += "&metadata=" + url.QueryEscape(`[{"field":"metadata.language","any_of":["en"]}]`)
+			}
+			body := getJSON(t, server, path, catalogReader, 503)
 			if body["code"] != "content_unavailable" || body["retryable"] != true {
 				t.Fatalf("%s: want retryable content_unavailable, got %v", stage, body)
 			}

@@ -178,7 +178,13 @@ func orNull(raw json.RawMessage) json.RawMessage {
 func goldenOf(t *testing.T, g *fakeGraph, c *Mail, sc goldenScenario, item quivrplugin.Item) goldenItem {
 	t.Helper()
 	content, _ := json.Marshal(item.Content)
-	exts, _ := json.Marshal(item.Extensions)
+	legacyExtensions := make(map[string]quivrplugin.Extension, len(item.Extensions))
+	for namespace, extension := range item.Extensions {
+		if namespace != quivrplugin.CommonMetadataNamespace {
+			legacyExtensions[namespace] = extension
+		}
+	}
+	exts, _ := json.Marshal(legacyExtensions)
 	out := goldenItem{RecordKey: item.RecordKey, Revision: item.Revision, Content: content, Extensions: exts, Attachments: []goldenAttachment{}}
 	for _, at := range item.Attachments {
 		var r quivrplugin.AttachmentRequest

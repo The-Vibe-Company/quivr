@@ -49,6 +49,13 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	if wire.EvaluationSpace != nil {
 		q.Space = *wire.EvaluationSpace
 	}
+	if wire.Filter != nil && wire.Filter.Metadata != nil {
+		encoded, _ := json.Marshal(wire.Filter.Metadata)
+		if json.Unmarshal(encoded, &q.Metadata) != nil {
+			writeError(w, publicerr.InvalidQuery, nil)
+			return
+		}
+	}
 	started := time.Now()
 	select {
 	case a.searches <- struct{}{}:
@@ -65,7 +72,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 		writeError(w, err, publicerr.SearchUnavailable)
 		return
 	}
-	response := transport.SearchResponse{Items: []transport.SearchHit{}, RetrievalProfile: transport.SearchProfile{Name: result.Profile, Version: result.ProfileVersion}}
+	response := transport.SearchResponse{ExcludedCorpora: exclusionsToTransport(result.ExcludedCorpora), Items: []transport.SearchHit{}, RetrievalProfile: transport.SearchProfile{Name: result.Profile, Version: result.ProfileVersion}}
 	for i, h := range result.Hits {
 		response.Items = append(response.Items, transport.SearchHit{EmbeddingArtifactId: optionalString(h.EmbeddingID), VectorSpaceId: optionalString(h.SpaceID), RecordId: h.RecordID, VersionId: h.VersionID, PartKey: h.Segment.PartKey, SegmentId: h.Segment.ID, SegmentationId: h.SegmentationID, ProjectionGenerationId: h.GenerationID, Rank: i + 1, Excerpt: transport.SearchExcerpt{Text: h.Segment.Text, Start: h.Segment.Start, End: h.Segment.End, CoordinateSystem: "unicode_codepoint"}, Availability: availabilityToTransport(h.Availability), Explanation: optionalString(h.Explanation)})
 	}

@@ -18,8 +18,8 @@ import (
 // already has an active default keeps it; AlignDefaultGeneration moves it
 // onto the registry's spaces.
 func (s ProjectionStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
-	_, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected)
-SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true
+	_, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected)
+SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true,true
 WHERE NOT EXISTS(SELECT 1 FROM projection_generations WHERE active) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
 	return err
 }
@@ -57,7 +57,7 @@ func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMov
 	}
 	// A default built before named spaces carries its one space.
 	var matches bool
-	err = tx.QueryRow(ctx, `SELECT d.id,d.space_id=`+servedSpaceSQL+` AND
+	err = tx.QueryRow(ctx, `SELECT d.id,d.metadata_projected AND d.space_id=`+servedSpaceSQL+` AND
  (SELECT array_agg(e->>'id' ORDER BY e->>'id') FROM jsonb_array_elements(CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id)) END) e)
  =(SELECT array_agg(vs.id ORDER BY vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation')) AND (NOT d.spaces_projected OR NOT EXISTS
  (SELECT 1 FROM vector_spaces vs WHERE vs.role IN ('served','evaluation') AND NOT d.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id))))
@@ -84,8 +84,8 @@ SELECT c.organization,c.id,$1 FROM corpora c WHERE NOT EXISTS(SELECT 1 FROM corp
 		return move, err
 	}
 	move.Current = content.StableID("generation", collection, profile, move.Previous)
-	if _, err = tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected)
-SELECT $1,$2,$3,true,`+servedSpaceSQL+`,true,`+deploymentSpacesSQL+`,true`, move.Current, collection, profile); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected)
+SELECT $1,$2,$3,true,`+servedSpaceSQL+`,true,`+deploymentSpacesSQL+`,true,true`, move.Current, collection, profile); err != nil {
 		return move, err
 	}
 	return move, tx.Commit(ctx)
@@ -96,7 +96,7 @@ func (s ProjectionStore) Generation(ctx context.Context, org, corpusID string) (
 	var g content.Generation
 	var cfg []byte
 	var spaces []byte
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &cfg)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &cfg)
 	if err != nil {
 		return g, err
 	}

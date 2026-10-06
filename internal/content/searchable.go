@@ -55,6 +55,7 @@ type Generation struct {
 	// SourceNamespaceProjected reports that every object of the generation
 	// carries its Record's Source Namespace, so search can filter on it.
 	SourceNamespaceProjected bool
+	MetadataProjected        bool
 	// Spaces are the vector spaces whose named vectors the generation's
 	// objects carry, the served one first. SpacesProjected is false for a
 	// generation built before named spaces: it serves SpaceID only and

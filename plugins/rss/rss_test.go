@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -188,6 +189,14 @@ func TestMapsRSS2ItemsToStructuredManifests(t *testing.T) {
 	if fmt.Sprint(item["enclosures"]) != "[map[length:1234 type:audio/mpeg url:https://news.example.org/audio.mp3]]" {
 		t.Fatalf("enclosures %v", item["enclosures"])
 	}
+	common, ok := second.Extensions[quivrplugin.CommonMetadataNamespace]
+	if !ok || common.SchemaVersion != quivrplugin.CommonMetadataVersion {
+		t.Fatalf("common metadata extension missing: %+v", second.Extensions)
+	}
+	wantCommon := map[string]any{"language": "fr", "published_at": "2026-09-01T10:00:00Z", "source_type": "rss", "source": "https://news.example.org/", "author": []string{"Jane Reporter"}, "tags": []string{"Economy", "Europe"}}
+	if !reflect.DeepEqual(common.Data, wantCommon) {
+		t.Fatalf("common metadata %v, want %v", common.Data, wantCommon)
+	}
 	if feedMeta["format"] != "rss" || feedMeta["version"] != "2.0" || feedMeta["title"] != "Example Newsroom" || feedMeta["language"] != "fr" {
 		t.Fatalf("feed metadata %v", feedMeta)
 	}
@@ -230,6 +239,43 @@ func TestEmitsOnlyNewOrChangedItemsAndIgnoresFeedMetadata(t *testing.T) {
 	gone, err := rssFetch(t, feed{}, cfg(srv.URL, `,"honor_ttl":false`), "", cp(again))
 	if err != nil || len(gone.Items) != 0 {
 		t.Fatalf("dropped item %v %+v", err, gone.Items)
+	}
+}
+
+func TestRevisionIncludesEmittedFeedMetadata(t *testing.T) {
+	doc := testdata(t, "rss2.xml")
+	srv := newFeedServer(t, doc)
+	first, err := rssFetch(t, feed{}, cfg(srv.URL, `,"honor_ttl":false`), "", nil)
+	if err != nil || len(first.Items) != 2 {
+		t.Fatalf("initial fetch: %v %+v", err, first)
+	}
+
+	changed := strings.Replace(doc, "<link>https://news.example.org/</link>", "<link>https://feeds.example.net/</link>", 1)
+	changed = strings.Replace(changed, "<language>fr</language>", "<language>en</language>", 1)
+	srv.set(changed, `"v2"`)
+	second, err := rssFetch(t, feed{}, cfg(srv.URL, `,"honor_ttl":false`), "", nil)
+	if err != nil || len(second.Items) != 2 {
+		t.Fatalf("changed feed fetch: %v %+v", err, second)
+	}
+	for i := range first.Items {
+		if first.Items[i].RecordKey != second.Items[i].RecordKey {
+			t.Fatalf("item %d key changed from %q to %q", i, first.Items[i].RecordKey, second.Items[i].RecordKey)
+		}
+		if first.Items[i].Revision == second.Items[i].Revision {
+			t.Fatalf("item %q revision did not change with feed metadata", first.Items[i].RecordKey)
+		}
+	}
+}
+
+func TestInitialCheckpointStoresCommonMetadataRevisions(t *testing.T) {
+	srv := newFeedServer(t, testdata(t, "rss2.xml"))
+	page, err := rssFetch(t, feed{}, cfg(srv.URL, `,"honor_ttl":false`), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"etag":"\"v1\"","last_modified":"Tue, 01 Sep 2026 10:00:00 GMT","ttl_seconds":900,"seen":[{"k":"32c3b9364cde3e16","r":"f6e8686356403ff3"},{"k":"6c9b19cb967b563d","r":"ebabe9539175d4cd"}]}`
+	if got := string(cp(page)); got != want {
+		t.Fatalf("checkpoint:\n got %s\nwant %s", got, want)
 	}
 }
 

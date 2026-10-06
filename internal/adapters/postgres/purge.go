@@ -116,9 +116,28 @@ RETURNING p.organization,p.kind,p.corpus_id,p.generation_id,p.version_id`, grace
 // RecordPurge adds deleted objects to the item and releases its lease; a
 // complete purge is stamped and never claimed again.
 func (s PurgeStore) RecordPurge(ctx context.Context, it retrieval.PurgeItem, deleted int, complete bool) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE projection_purges SET objects_deleted=objects_deleted+$6,lease_until='-infinity',purged_at=CASE WHEN $7 THEN now() END
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	changed, err := tx.Exec(ctx, `UPDATE projection_purges SET objects_deleted=objects_deleted+$6,lease_until='-infinity',purged_at=CASE WHEN $7 THEN now() END
 WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND generation_id=$4 AND version_id=$5 AND purged_at IS NULL`, it.Organization, it.Kind, it.CorpusID, it.GenerationID, it.VersionID, deleted, complete)
-	return err
+	if err != nil {
+		return err
+	}
+	if complete && changed.RowsAffected() > 0 {
+		if it.Kind == retrieval.PurgeVersion {
+			_, err = tx.Exec(ctx, `DELETE FROM projection_metadata WHERE organization=$1 AND version_id=$2`, it.Organization, it.VersionID)
+		} else {
+			_, err = tx.Exec(ctx, `DELETE FROM projection_metadata pm USING record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
+WHERE pm.organization=$1 AND pm.generation_id=$2 AND (pm.organization,pm.version_id)=(v.organization,v.id) AND r.corpus_id=$3`, it.Organization, it.GenerationID, it.CorpusID)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 var _ retrieval.PurgeStore = PurgeStore{}

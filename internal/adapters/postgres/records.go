@@ -43,6 +43,11 @@ func catalogBound(t time.Time) time.Time {
 
 func catalogRange(q content.RecordQuery, args *[]any) string {
 	where := "organization=$1 AND corpus_id=$2"
+	if len(q.CorpusIDs) > 0 {
+		(*args)[1] = q.CorpusIDs
+		where = "organization=$1 AND corpus_id=ANY($2::text[])"
+	}
+	where += catalogMetadata(q, args)
 	if q.AcceptedAfter != nil || q.AcceptedBefore != nil {
 		where += " AND current_accepted_at IS NOT NULL"
 	}

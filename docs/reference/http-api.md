@@ -151,13 +151,15 @@ Commit durable input, Receipt and dispatch intent before responding. Same key an
 
 Operation `listRecords`. Requires `content:read`.
 
-List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
+List authorized canonical Records from one or several Corpora. Without metadata predicates the catalog includes withdrawn Records. Metadata predicates require the current Version to be projected in the routed generation; withdrawn Records can disappear from filtered pages after projection purge or rebuild. Use the unfiltered catalog and change feed for complete resynchronization. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus selection, authorization scope, order, time bounds and metadata predicates with their routed generations; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 
 **Parameters**
 
 | Name | In | Type | Required | Description |
 | --- | --- | --- | --- | --- |
-| `corpus_id` | query | string | yes | Minimum length `1`. |
+| `corpus_id` | query | string |  | Minimum length `1`. |
+| `corpus_ids` | query | array of string |  | Comma-separated selection of up to 16 distinct Corpora. Supply exactly one of corpus_id or corpus_ids. At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
+| `metadata` | query | string |  | JSON array of MetadataFilter predicates, at most 16. Applied before ordering and pagination to current Versions projected in the routed generation. Withdrawn Records can be omitted after projection purge or rebuild; use the unfiltered catalog for full resynchronization. Repeat on later pages. Filters require a metadata-capable generation; rebuild older Corpora first. Maximum length `262144`. |
 | `order` | query | string |  | One of `record_id`, `accepted_at_desc`. Default `record_id`. |
 | `accepted_after` | query | string (date-time) |  | Inclusive lower bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits; clients convert local days into bounds. Quivr applies no time-zone rules. |
 | `accepted_before` | query | string (date-time) |  | Exclusive upper bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits. |
@@ -7701,6 +7703,7 @@ required:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| `excluded_corpora` | array of [`CorpusExclusion`](#corpusexclusion) |  |  |
 | `items` | array of [`Record`](#record) | yes |  |
 | `next_page_cursor` | string |  | Minimum length `1`. |
 
@@ -7711,6 +7714,10 @@ required:
 type: object
 additionalProperties: false
 properties:
+  excluded_corpora:
+    type: array
+    items:
+      $ref: '#/components/schemas/CorpusExclusion'
   items:
     type: array
     items:
@@ -9704,6 +9711,7 @@ Candidate filter applied before ranking. Every present condition must hold. A re
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `source_namespaces` | array of string |  | Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them. At least `1` items. At most `50` items. Items are unique. Each item: Minimum length `1`. Maximum length `200`. |
+| `metadata` | array of [`MetadataFilter`](#metadatafilter) |  | ANDed typed filters. Common fields use metadata.language, metadata.published_at, metadata.source_type, metadata.source, metadata.author, metadata.subjects, metadata.tags, metadata.country and metadata.place. Other names require the filter role in the Corpus's effective retrieval mapping. Corpora missing a requested filter field are excluded and reported. A metadata-capable generation is required; rebuild older Corpora first (422 metadata_filter_unavailable). At least `1` items. At most `16` items. |
 
 <details>
 <summary>Full schema</summary>
@@ -9723,7 +9731,96 @@ properties:
     maxItems: 50
     uniqueItems: true
     description: Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them.
+  metadata:
+    type: array
+    minItems: 1
+    maxItems: 16
+    items:
+      $ref: '#/components/schemas/MetadataFilter'
+    description: ANDed typed filters. Common fields use metadata.language, metadata.published_at, metadata.source_type, metadata.source, metadata.author, metadata.subjects, metadata.tags, metadata.country and metadata.place. Other names require the filter role in the Corpus's effective retrieval mapping. Corpora missing a requested filter field are excluded and reported. A metadata-capable generation is required; rebuild older Corpora first (422 metadata_filter_unavailable).
 description: Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
+```
+
+</details>
+
+### `MetadataFilter`
+
+Every present condition must hold. Field names are unique within a request; at most 16 predicates. Wrong types and reversed bounds return 422 invalid_query. Missing/mistyped source values do not match. Datetimes are normalized to UTC milliseconds (submillisecond digits are truncated).
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `field` | string | yes | Pattern `^(metadata\.)?[a-z][a-z0-9_]{0,63}$`. |
+| `any_of` | array of one of string, number, boolean |  | Exact equality (one value) or any-of equality. String-array fields match any element; values retain their declared type. Datetime equality uses RFC3339 strings. At least `1` items. At most `50` items. |
+| `gte` | string (date-time) |  | Inclusive lower datetime bound. Requires a datetime field. |
+| `lte` | string (date-time) |  | Inclusive upper datetime bound. Requires a datetime field. |
+
+Further rules (conditional requirements or combinations) are in the full schema below.
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  field:
+    type: string
+    pattern: '^(metadata\.)?[a-z][a-z0-9_]{0,63}$'
+  any_of:
+    type: array
+    minItems: 1
+    maxItems: 50
+    items:
+      anyOf:
+        - type: string
+          minLength: 1
+          maxLength: 200
+        - type: number
+          x-go-type: float64
+        - type: boolean
+    description: Exact equality (one value) or any-of equality. String-array fields match any element; values retain their declared type. Datetime equality uses RFC3339 strings.
+  gte:
+    type: string
+    format: date-time
+    description: Inclusive lower datetime bound. Requires a datetime field.
+  lte:
+    type: string
+    format: date-time
+    description: Inclusive upper datetime bound. Requires a datetime field.
+required: [field]
+anyOf:
+  - required: [any_of]
+  - required: [gte]
+  - required: [lte]
+description: Every present condition must hold. Field names are unique within a request; at most 16 predicates. Wrong types and reversed bounds return 422 invalid_query. Missing/mistyped source values do not match. Datetimes are normalized to UTC milliseconds (submillisecond digits are truncated).
+```
+
+</details>
+
+### `CorpusExclusion`
+
+Authorized Corpus excluded because these logical fields are not declared with the filter role. Common metadata fields are always declared.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `corpus_id` | string | yes |  |
+| `fields` | array of string | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  corpus_id:
+    type: string
+  fields:
+    type: array
+    items:
+      type: string
+required: [corpus_id, fields]
+description: Authorized Corpus excluded because these logical fields are not declared with the filter role. Common metadata fields are always declared.
 ```
 
 </details>
@@ -10156,6 +10253,7 @@ Bounded top-k results after canonical rechecks. May contain fewer hits than requ
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| `excluded_corpora` | array of [`CorpusExclusion`](#corpusexclusion) |  |  |
 | `items` | array of [`SearchHit`](#searchhit) | yes | At most `50` items. |
 | `retrieval_profile` | [`SearchProfile`](#searchprofile) | yes |  |
 | `usage` | [`SearchUsage`](#searchusage) |  |  |
@@ -10283,6 +10381,10 @@ Example `plugin_ranked_search_results`:
 type: object
 additionalProperties: false
 properties:
+  excluded_corpora:
+    type: array
+    items:
+      $ref: '#/components/schemas/CorpusExclusion'
   items:
     type: array
     items:

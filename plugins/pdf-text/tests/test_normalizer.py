@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pypdf import PdfReader, PdfWriter
 from quivr_plugin.testing import expect_response, invoke_fixture
@@ -61,6 +62,43 @@ class Normalizer(unittest.TestCase):
         entry = response.extensions["pdf-text.document"]
         self.assertEqual(entry.schema_version, "1")
         self.assertEqual(entry.data, {"page_count": 3, "text_pages": 2})
+
+    def test_common_metadata_uses_pdf_author_when_present(self):
+        source = make_fixtures.build_pdf([["Metadata page"]])
+        writer = PdfWriter(clone_from=PdfReader(io.BytesIO(source)))
+        writer.add_metadata({"/Author": "Ada Example"})
+        output = io.BytesIO()
+        writer.write(output)
+
+        response = expect_response(self.invoke(output.getvalue(), {"include_source": False}))
+        entry = response.extensions["quivr.metadata"]
+        self.assertEqual(entry.schema_version, "1")
+        self.assertEqual(entry.data, {"source_type": "document", "author": ["Ada Example"]})
+
+        # Normalization adds document metadata without relabeling its source.
+        from quivr_plugin.testing import build_request
+        from quivr_plugin.models import ExtensionEntry
+        request = build_request(self.fixture(output.getvalue()))
+        request.extensions = {"quivr.metadata": ExtensionEntry(schema_version="1", data={"source_type": "mail"})}
+        reply = plugin.handle("POST", "/v0/contributions/normalizer", json.dumps(request.to_dict()).encode())
+        self.assertEqual(expect_response(reply).extensions["quivr.metadata"].data["source_type"], "mail")
+
+    def test_broken_pdf_info_is_advisory(self):
+        class Page:
+            def extract_text(self):
+                return "Readable page"
+
+        class Reader:
+            pages = [Page()]
+
+            @property
+            def metadata(self):
+                raise ValueError("malformed Info dictionary")
+
+        with patch("pdf_text.normalizer._open", return_value=Reader()):
+            response = expect_response(self.invoke(b"placeholder", {"include_source": False}))
+        self.assertEqual(response.extensions["quivr.metadata"].data, {"source_type": "document"})
+        self.assertEqual(response.manifest.parts[0].content.text, "Readable page")
 
     def test_source_part_references_the_input_blob(self):
         from quivr_plugin.testing import build_request
