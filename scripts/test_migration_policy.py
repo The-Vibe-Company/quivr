@@ -35,6 +35,10 @@ class PolicyTests(unittest.TestCase):
             ("CREATE INDEX by_id ON items(id);", False),
             ("CREATE TABLE items (LIKE old INCLUDING ALL);", False),
             ("CREATE TABLE IF NOT EXISTS items(id int); CREATE UNIQUE INDEX one ON items(id);", False),
+            ("CREATE TEMP TABLE items(id int);", False),
+            ("CREATE UNLOGGED TABLE items(id int);", False),
+            ("CREATE TABLE items(id int) ON COMMIT DROP;", False),
+            ("CREATE TABLE items(id int); CREATE INDEX CONCURRENTLY by_id ON items(id);", False),
             ("BEGIN; DROP TABLE items; COMMIT;", False),
         ]
         for sql, allowed in cases:
@@ -53,6 +57,11 @@ class PolicyTests(unittest.TestCase):
             '-- intro\n-- quivr:contract\nDROP TABLE items;',
             '-- quivr:contrcat\nDROP TABLE items;',
             '-- quivr:contract\n-- quivr:expand '+old+'\nCOMMIT; DROP TABLE items;',
+            '-- quivr:contract\n-- quivr:expand '+old+"\nSELECT set_config('statement_timeout','0',true);",
+            '-- quivr:contract\n-- quivr:expand '+old+"\nDO $$ BEGIN PERFORM set_config('lock_timeout','0',true); END $$;",
+            '-- quivr:contract\n-- quivr:expand '+old+"\nALTER TABLE items ADD COLUMN x text DEFAULT set_config('lock_timeout','0',true);",
+            '-- quivr:contract\n-- quivr:expand '+old+'\nDROP INDEX CONCURRENTLY by_id;',
+            '-- quivr:contract\n-- quivr:expand '+old+'\nCREATE TEMP TABLE items(id int);',
         ]:
             with self.subTest(sql=sql):
                 self.assertTrue(p.policy_errors(sql, {old}))
@@ -71,8 +80,12 @@ class PolicyTests(unittest.TestCase):
             original = b'CREATE TABLE items(id int);'
             path.write_bytes(original)
             entry = {'sha256': hashlib.sha256(original).hexdigest(), 'classification': 'additive', 'risks': []}
+            legacy_risk = root / 'migrations/20261001T0001Z_risk.sql'
+            legacy_risk.write_text('DROP TABLE old_items;')
             inventory = root / p.INVENTORY
-            baseline = json.dumps({path.name: entry})
+            baseline = json.dumps({path.name: entry, legacy_risk.name: {
+                'sha256': hashlib.sha256(legacy_risk.read_bytes()).hexdigest(),
+                'classification': 'legacy-risk', 'risks': ['DropStmt']}})
             inventory.write_text(baseline)
             git('add', '.')
             git('-c', 'commit.gpgsign=false', 'commit', '-qm', 'base')
@@ -93,3 +106,26 @@ class PolicyTests(unittest.TestCase):
                 'sha256': hashlib.sha256(unsafe.read_bytes()).hexdigest(),
                 'classification': 'legacy-risk', 'risks': ['DropStmt']}}))
             self.assertTrue(any('classification is frozen' in e for e in p.check(root, 'main', {path.name})))
+            inventory.write_text(baseline)
+            unsafe.unlink()
+            down = root / 'migrations/20261002T0000Z_down.sql'
+            down.write_text('DROP TABLE items;')
+            self.assertEqual(p.check(root, 'main', {path.name}), [down.name+': down migrations are forbidden; roll back the application'])
+            down.unlink()
+            path.unlink()
+            self.assertTrue(any('merged migration is missing' in e for e in p.check(root, 'main', {path.name})))
+            path.write_bytes(original)
+            expansion = root / 'migrations/20261002T0000Z_expand.sql'
+            expansion.write_text('ALTER TABLE items ADD COLUMN note text;')
+            contract.write_text('-- quivr:contract\n-- quivr:expand '+path.name+'\nDROP TABLE items;')
+            git('add', '.')
+            git('-c', 'commit.gpgsign=false', 'commit', '-qm', 'later release')
+            previous = {path.name, expansion.name, contract.name, legacy_risk.name}
+            self.assertEqual(p.check(root, 'main', previous), [])
+            expansion.write_text('ALTER TABLE items ADD COLUMN changed text;')
+            self.assertTrue(any('merged migration is frozen' in e for e in p.check(root, 'main', previous)))
+            expansion.write_text('ALTER TABLE items ADD COLUMN note text;')
+            pending = root / 'migrations/20261003T0000Z_cleanup.sql'
+            for reference in (contract.name, legacy_risk.name):
+                pending.write_text('-- quivr:contract\n-- quivr:expand '+reference+'\nDROP TABLE items;')
+                self.assertTrue(any('additive expansion' in e for e in p.check(root, 'main', previous)))

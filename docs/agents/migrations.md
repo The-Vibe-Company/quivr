@@ -13,12 +13,12 @@ write successfully. Keep later expansions independent of any deferred contract.
 
 `make check` parses PostgreSQL SQL with the pinned `pglast` dependency in
 `contracts/http/v0/checks/requirements.txt`. Its conservative allowlist accepts
-new tables without foreign keys into existing tables, sequences, enum types,
-indexes on tables created in the same file,
+permanent tables without foreign keys into existing tables, sequences, enum types,
+non-concurrent indexes on tables created in the same file,
 and added columns without new checks, uniqueness or references. Mixed ALTER
-commands are checked separately. Row rewrites, renames, type changes, procedural
-SQL, constraints and indexes on existing tables require a separate contract
-release. The lint is a guard, not a proof of every application's semantics.
+commands are checked separately. Renames, type changes, constraints and indexes
+on existing tables require a separate contract release. Backfills use resumable
+application work. The lint is a guard, not a proof of every application's semantics.
 
 For a rename, add the new field in release N, keep reading the old field and
 write both forms while older binaries run. Backfill with resumable application
@@ -36,12 +36,13 @@ for example (replace the filename with the already released expansion):
 -- quivr:expand 20261001T0000Z_expand_example.sql
 ```
 
-The expansion reference must exist in the previous version's migration set.
-Until release artifacts are wired into this check, CI uses the merge-base commit
-as that version; reviewers still verify that the expansion shipped in an earlier
-release. The filename reference records that dependency without rewriting SQL.
+The reference must name additive SQL in the lint's base tree (`origin/main`, or
+`MIGRATIONS_BASE`); tagged contracts and legacy risks cannot serve as expansions.
+Compatibility uses the merge-base commit until release artifacts are wired in.
+Reviewers still verify that the expansion shipped in an earlier release.
 Tags use physical LF or CRLF lines; other separators are rejected.
-Contract SQL cannot manage transactions or change session settings. Ordinary
+Contracts accept declarative DDL without function calls, procedural SQL,
+transaction/session commands, transient objects or concurrent DDL. Ordinary
 `quivr migrate`, API readiness and worker startup skip tagged contracts.
 `quivr migrate --contract` applies all pending expansions and contracts in
 filename order, with transactional bookkeeping and an advisory lock.

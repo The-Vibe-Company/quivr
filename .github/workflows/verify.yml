@@ -352,4 +352,4 @@ jobs:
         run: |
           echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, migration-compatibility: ${{ needs.migration-compatibility.result }}"
           exit 1
-      - run: echo "check, adapter-postgres and every verification part passed"
+      - run: echo "check, adapter-postgres, migration-compatibility and every verification part passed"

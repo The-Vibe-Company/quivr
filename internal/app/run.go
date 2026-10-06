@@ -193,7 +193,7 @@ func isCommand(name string) bool {
 func Run(command string, args ...string) error {
 	contract := command == "migrate" && len(args) == 1 && args[0] == "--contract"
 	if len(args) != 0 && !contract {
-		return errors.New("usage: quivr migrate [--contract]")
+		return errors.New(engineUsage())
 	}
 	if !isCommand(command) {
 		return errors.New(engineUsage())

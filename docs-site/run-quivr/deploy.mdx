@@ -144,8 +144,8 @@ quivr worker    # in its own process
 ```
 
 1. `quivr migrate` updates the database schema, creates the storage bucket when it is missing, and prepares the search index. It gives up after 30 seconds when storage or the search index does not answer; run it again once they do.
-2. `quivr api` refuses to start while migrations are pending; run `quivr migrate` first.
-3. `quivr worker` started before the migrations waits for them for up to `migration_wait` (5 minutes by default), then exits.
+2. `quivr api` refuses to start while required expansions are pending; run `quivr migrate` first. Deferred contracts do not block startup.
+3. `quivr worker` started before the expansions waits for them for up to `migration_wait` (5 minutes by default), then exits.
 
 To deploy a new `quivr` binary, run its `quivr migrate` first, then roll `api` and `worker` on it. Missing required expansions prevent startup; older binaries can start on compatible expanded schemas. Applying contracts ends rollback support. See [Upgrade Quivr](/run-quivr/upgrade-quivr) for the upgrade order and rollback window. The [CLI reference](/reference/cli#engine-commands) lists the commands' exit codes.
 

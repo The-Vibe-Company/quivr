@@ -14,6 +14,29 @@ from pglast import parse_sql, Error
 CONTRACT = '-- quivr:contract'
 EXPANSION = re.compile(r'^-- quivr:expand ([0-9]{8}T[0-9]{4}Z_[a-z0-9_]+\.sql)$', re.M)
 INVENTORY = 'migrations/legacy.json'
+CONTRACT_DDL = {'CreateStmt', 'CreateSeqStmt', 'CreateEnumStmt', 'IndexStmt',
+                'AlterTableStmt', 'AlterSeqStmt', 'AlterEnumStmt', 'DropStmt', 'RenameStmt', 'CommentStmt'}
+
+
+def nodes(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from nodes(child)
+    elif isinstance(value, (tuple, list)):
+        for child in value:
+            yield from nodes(child)
+
+
+def runner_risks(stmt):
+    found = []
+    if any(node.get('concurrent') for node in nodes(stmt)):
+        found.append('concurrent DDL cannot run inside the migration transaction')
+    if stmt['@'] in ('CreateStmt', 'CreateSeqStmt'):
+        relation = stmt.get('relation') or stmt['sequence']
+        if relation['relpersistence'] != 'p' or stmt.get('oncommit', {}).get('name', 'ONCOMMIT_NOOP') != 'ONCOMMIT_NOOP':
+            found.append('schema objects must be permanent without ON COMMIT actions')
+    return found
 
 
 def constant(expr):
@@ -33,6 +56,7 @@ def expand_risks(sql):
     for raw in parse_sql(sql):
         stmt = raw.stmt()
         kind = stmt['@']
+        risks.extend(runner_risks(stmt))
         if kind == 'CreateStmt':
             # LIKE, inheritance and partitions can change existing tables.
             columns = stmt.get('tableElts') or ()
@@ -100,9 +124,17 @@ def policy_errors(sql, previous):
         if any(s.stmt()['@'] in ('TransactionStmt', 'VariableSetStmt', 'AlterSystemStmt') for s in statements):
             errors.append('transaction control and session settings are forbidden')
         if contract:
+            for raw in statements:
+                stmt = raw.stmt()
+                errors.extend(runner_risks(stmt))
+                # Declarative DDL only: SELECT, DML, CALL and procedural bodies
+                # can invoke session-setting functions indirectly. Reject calls
+                # in DDL expressions too, rather than trusting their names.
+                if stmt['@'] not in CONTRACT_DDL or any(node.get('@') == 'FuncCall' for node in nodes(stmt)):
+                    errors.append('contracts require declarative DDL without function calls or procedural SQL')
             expands = [match.group(1) for line in lines if (match := EXPANSION.fullmatch(line))]
             if len(expands) != 1 or expands[0] not in previous:
-                errors.append('contract needs exactly one -- quivr:expand <migration.sql> already in the previous version')
+                errors.append('contract needs exactly one -- quivr:expand <migration.sql> naming an additive expansion already in the base version')
         else:
             errors.extend('requires a separate contract release: '+risk for risk in expand_risks(sql))
             if any(EXPANSION.fullmatch(line) for line in lines):
@@ -125,12 +157,22 @@ def check(root, base, previous):
             found.append(name+': historical migration was changed or removed')
     for name in previous - {path.name for path in (root / 'migrations').glob('*.sql')}:
         found.append(name+': merged migration is missing; merge main or restore it')
+    expansions = set()
+    for name in previous:
+        old = subprocess.run(['git', 'show', f'{base}:migrations/{name}'], cwd=root, capture_output=True, check=True)
+        sql = old.stdout.decode('utf-8')
+        try:
+            if sql.split('\n')[0].removesuffix('\r') != CONTRACT and not expand_risks(sql):
+                expansions.add(name)
+        except Error:
+            pass
     for path in sorted((root / 'migrations').glob('*.sql')):
         if path.name in inventory:
             continue
         if path.name.endswith(('_down.sql', '.down.sql')):
             found.append(path.name+': down migrations are forbidden; roll back the application')
-        found.extend(path.name+': '+error for error in policy_errors(path.read_bytes().decode('utf-8'), previous))
+            continue
+        found.extend(path.name+': '+error for error in policy_errors(path.read_bytes().decode('utf-8'), expansions))
         # Merged post-policy migrations are frozen too.
         if path.name in previous:
             old = subprocess.run(['git', 'show', f'{base}:migrations/{path.name}'], cwd=root, capture_output=True, check=True)

@@ -51,8 +51,8 @@ stay visible. The Spec 1 obligation map is in
 - Expiry uses both the pruned watermark and the age rule, so a cursor can
   get 410 while its next events are still stored (the prune lags or dispatch
   holds it back). It never resumes over a gap.
-- Migrations may break in-flight work. Restarts are reported, not avoided, and
-  there is no expand/contract or compatibility matrix.
+- Legacy-risk migrations may break in-flight work. New migrations use
+  expand/contract; there is no full released-version compatibility matrix yet.
 
 **Ingestion**
 

@@ -33,6 +33,8 @@ def main():
     if args.previous_source:
         exercise(args)
         return
+    if not args.base or set(args.base) == {'0'}:
+        parser.error('--base has no previous revision; bootstrap pushes cannot prove compatibility')
     base = subprocess.check_output(['git', 'merge-base', 'HEAD', args.base], cwd=ROOT, text=True).strip()
     output = ROOT / '.scratch' / ('quivr-compatibility-'+uuid.uuid4().hex[:10])
     output.mkdir(parents=True, mode=0o700)
