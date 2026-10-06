@@ -41,7 +41,11 @@ func (cfg Config) validateTLS() (dependencyTLS, error) {
 		config, err := dep.settings.Build(dep.defaultEnabled)
 		if err != nil {
 			code := configInvalid
-			if (dep.settings.Enabled != nil && !*dep.settings.Enabled && dep.settings.HasSettings()) || (dep.settings.CertFile == "") != (dep.settings.KeyFile == "") {
+			enabled := dep.defaultEnabled
+			if dep.settings.Enabled != nil {
+				enabled = *dep.settings.Enabled
+			}
+			if (!enabled && dep.settings.HasSettings()) || (dep.settings.CertFile == "") != (dep.settings.KeyFile == "") {
 				code = configConflict
 			}
 			return result, &configError{code: code, field: "tls." + dep.name, problem: dep.name + " TLS settings are invalid", cause: err}

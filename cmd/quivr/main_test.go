@@ -62,6 +62,9 @@ func TestConfigurationRefusalDiagnostics(t *testing.T) {
 	const required = `"database_url":"postgres://localhost/db?sslmode=disable","cursor_key":"01234567890123456789012345678901","keys":{"01234567890123456789012345678901":{"organization":"example","actions":["corpora:read"],"corpora":["*"]}}`
 	for _, tc := range []struct{ name, raw, code, field string }{
 		{"missing", `{}`, "config_missing", "database_url"},
+		{"missing-config-env", "", "config_missing", "QUIVR_CONFIG"},
+		{"missing-config-file", "", "config_invalid", "QUIVR_CONFIG"},
+		{"malformed-json", `{"log_level":"secret-value-sentinel"`, "config_invalid", "QUIVR_CONFIG"},
 		{"invalid", `{"log_level":"secret-value-sentinel"}`, "config_invalid", "log_level"},
 		{"conflict", `{"weaviate_url":"http://localhost:1","tls":{"weaviate":{"enabled":true}}}`, "config_conflict", "tls.weaviate"},
 		{"wrong-type", `{"log_level":42}`, "config_invalid", "log_level"},
@@ -70,6 +73,7 @@ func TestConfigurationRefusalDiagnostics(t *testing.T) {
 		{"code-matches-secret", `{"database_url":"postgres://config:secret-value-sentinel@localhost/db","weaviate_url":"http://localhost:1","tls":{"weaviate":{"enabled":true}}}`, "config_conflict", "tls.weaviate"},
 		{"field-matches-secret", `{"database_url":"postgres://weaviate:secret-value-sentinel@localhost/db","weaviate_url":"http://localhost:1","tls":{"weaviate":{"enabled":true}}}`, "config_conflict", "tls.weaviate"},
 		{"tls-disabled", `{"tls":{"temporal":{"enabled":false,"ca_file":"secret-value-sentinel"}}}`, "config_conflict", "tls.temporal"},
+		{"tls-default-disabled", `{"tls":{"temporal":{"ca_file":"secret-value-sentinel"}}}`, "config_conflict", "tls.temporal"},
 		{"tls-certificate", `{"tls":{"temporal":{"enabled":true,"ca_file":"/missing/secret-value-sentinel"}}}`, "config_invalid", "tls.temporal"},
 		{"missing-keys", `{"database_url":"postgres://localhost/db","cursor_key":"01234567890123456789012345678901"}`, "config_missing", "keys"},
 		{"retry-conflict", `{` + required + `,"delivery":{"retry_initial":"2s","retry_max":"1s"}}`, "config_conflict", "delivery.retry_initial"},
@@ -80,8 +84,14 @@ func TestConfigurationRefusalDiagnostics(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := filepath.Join(t.TempDir(), "config.json")
-			if err := os.WriteFile(file, []byte(tc.raw), 0600); err != nil {
-				t.Fatal(err)
+			if tc.raw != "" {
+				if err := os.WriteFile(file, []byte(tc.raw), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else if tc.name == "missing-config-env" {
+				file = ""
+			} else {
+				file = filepath.Join(filepath.Dir(file), "secret-value-sentinel.json")
 			}
 			cmd := exec.Command(os.Args[0], "-test.run=^TestConfigurationRefusalDiagnostics$")
 			// Keep inherited credentials and logging overrides out of the child.

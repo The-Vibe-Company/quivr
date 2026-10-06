@@ -55,7 +55,7 @@ Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup.
 
 ## Configuration refusals
 
-A rejected configuration exits with status `1` and logs `event: quivr.failed`, an `error_code`, a `field`, and a safe `problem` explanation. The field names a setting, such as `log_level` or `cursor_key`, or a settings group, such as `tls.weaviate`. Missing or unreadable configuration files, malformed JSON and unknown keys use `QUIVR_CONFIG`; JSON type errors name the declared field when one is identifiable; a type error at the JSON root uses `QUIVR_CONFIG`. Diagnostic fields omit supplied values, file paths and raw causes, including secret values.
+Engine configuration refusals exit with status `1` and log `event: quivr.failed`, an `error_code`, a `field`, and a safe `problem` explanation. The field names a setting, such as `log_level` or `cursor_key`, or a settings group, such as `tls.weaviate`. Missing or unreadable configuration files, malformed JSON and unknown keys use `QUIVR_CONFIG`; JSON type errors name the declared field when one is identifiable; a type error at the JSON root uses `QUIVR_CONFIG`. Diagnostic fields omit supplied values, file paths and raw causes, including secret values.
 
 | Error code | Meaning |
 | --- | --- |
@@ -63,7 +63,7 @@ A rejected configuration exits with status `1` and logs `event: quivr.failed`, a
 | `config_invalid` | A setting has the wrong type, format or range, or cannot be loaded. |
 | `config_conflict` | Settings contradict each other, such as a TLS switch with the wrong endpoint scheme or an initial retry delay above its maximum. |
 
-Plugin validation keeps its existing plugin issue codes. Other process failures use `process_failed`.
+Plugin-pin validation also exits with status `1` but keeps its existing plugin issue codes without `field` or `problem`. Other process failures use `process_failed`.
 
 ## Audit trail
 
