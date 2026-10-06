@@ -60,6 +60,7 @@
             "pages": [
               "run-quivr/overview",
               "run-quivr/deploy",
+            "run-quivr/upgrade-quivr",
               "run-quivr/tls",
               {
                 "group": "Plugins",

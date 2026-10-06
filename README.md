@@ -86,6 +86,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What works today
 
+- Rolling application upgrades use additive schema expansions; destructive cleanup
+  runs only with `quivr migrate --contract`. CI checks the merge-base binary against
+  expansions. See [Upgrade Quivr](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-quivr).
+
 - **Declarative conformance cases**: contribute generic requirements and measure them locally with
   `make conformance`; [case format and reports](conformance/README.md). CI never executes cases.
 
@@ -358,7 +362,7 @@ contracts/plugins/v0/ Plugin Protocol v0 schemas and normative fixtures
 sdks/go/            Go Plugin SDK for every Contribution
 sdks/python/        Python Plugin SDK
 plugins/pdf-text/   reference normalizer: PDF text, one Part per page
-migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)
+migrations/         expand/contract PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)
 scripts/            local stack, verification and measurement tooling
 quivr-search/       demo web UI
 deploy/             Docker Compose and Railway deployment

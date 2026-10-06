@@ -24,7 +24,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 
 ## Engine commands {#engine-commands}
 
-Engine commands run Quivr itself. Each reads the JSON configuration file named by `QUIVR_CONFIG` and connects to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. They take no flags.
+Engine commands run Quivr itself. Each reads the JSON configuration file named by `QUIVR_CONFIG` and connects to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. `migrate --contract` also applies deferred contract migrations and closes the application rollback window. `api` and `worker` take no flags.
 
 | Environment variable | Meaning |
 | --- | --- |
@@ -34,7 +34,7 @@ Engine commands run Quivr itself. Each reads the JSON configuration file named b
 | --- | --- |
 | 0 | stopped cleanly, or migrate finished |
 | 1 | the process failed, or the command is unknown; the reason is logged as JSON on stderr |
-| 2 | no command, or more than one argument |
+| 2 | invalid command arguments |
 
 ### quivr api {#quivr-api}
 
@@ -57,7 +57,7 @@ quivr worker
 Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready.
 
 ```text
-quivr migrate
+quivr migrate [--contract]
 ```
 
 ## Offline commands {#offline-commands}

@@ -24,11 +24,12 @@ func main() {
 		}
 	}
 	slog.SetDefault(bootstrapLogger())
-	if len(os.Args) != 2 {
+	contract := len(os.Args) == 3 && os.Args[1] == "migrate" && os.Args[2] == "--contract"
+	if len(os.Args) != 2 && !contract {
 		slog.Error(usage())
 		os.Exit(2)
 	}
-	if err := app.Run(os.Args[1]); err != nil {
+	if err := app.Run(os.Args[1], os.Args[2:]...); err != nil {
 		// Keep startup failures useful without serializing dependency or
 		// configuration diagnostics that may contain credentials.
 		app.LogFailure(err)

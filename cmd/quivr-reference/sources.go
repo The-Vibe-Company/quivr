@@ -20,16 +20,20 @@ func cliSource() (commands.Source, error) {
 	engine := commands.Group{
 		Title: "Engine commands",
 		Needs: "a configuration file (`" + app.ConfigEnv + "`)",
-		Intro: "Engine commands run Quivr itself. Each reads the JSON configuration file named by `" + app.ConfigEnv + "` and connects to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. They take no flags.",
+		Intro: "Engine commands run Quivr itself. Each reads the JSON configuration file named by `" + app.ConfigEnv + "` and connects to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. `migrate --contract` also applies deferred contract migrations and closes the application rollback window. `api` and `worker` take no flags.",
 		Env:   []commands.EnvVar{{Name: app.ConfigEnv, Meaning: "path of the JSON configuration file"}},
 		ExitCodes: []commands.ExitCode{
 			{Code: 0, Meaning: "stopped cleanly, or migrate finished"},
 			{Code: 1, Meaning: "the process failed, or the command is unknown; the reason is logged as JSON on stderr"},
-			{Code: 2, Meaning: "no command, or more than one argument"},
+			{Code: 2, Meaning: "invalid command arguments"},
 		},
 	}
 	for _, c := range app.Commands {
-		engine.Commands = append(engine.Commands, commands.Command{Name: "quivr " + c.Name, Usage: "quivr " + c.Name, Summary: c.Summary})
+		usage := "quivr " + c.Name
+		if c.Name == "migrate" {
+			usage += " [--contract]"
+		}
+		engine.Commands = append(engine.Commands, commands.Command{Name: "quivr " + c.Name, Usage: usage, Summary: c.Summary})
 	}
 
 	offline := commands.Group{

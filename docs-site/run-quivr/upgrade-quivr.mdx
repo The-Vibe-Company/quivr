@@ -1,0 +1,42 @@
+---
+title: "Upgrade Quivr and keep a rollback window"
+description: "Apply compatible schema changes, roll the API and worker, and defer destructive cleanup."
+keywords: [upgrade, migration, rollback, deployment]
+---
+Apply the new version's additive database changes while the previous API and worker keep running. Keep destructive cleanup deferred until you no longer need application rollback.
+
+## Prerequisites
+
+You need operator access to the deployment, the new and previous binaries, and their configuration files. Keep the previous configuration and plugin versions available. Your platform must run overlapping instances and route traffic to ready instances; Quivr does not provide the rollout controller.
+
+Read the release notes for required backfills and contract migrations. Historical migrations classified as risks in the repository's `migrations/legacy.json` predate this rule; the rollback guarantee does not extend across those changes.
+
+## Steps
+
+1. Run the new binary's `quivr migrate` with `QUIVR_CONFIG` pointing to its deployment configuration. It applies pending expansions and leaves tagged contracts untouched. A failed database step rolls back its transaction; rerunning finishes remaining dependency setup.
+2. Roll the API instances. Wait for each new instance's `/readyz` to return HTTP 204 before routing traffic to it, then drain the previous instance. Keep at least one ready API serving throughout.
+3. Roll the workers. Start a new worker and wait for its `/readyz`, then signal the previous worker to drain. Keep the compatible plugin versions available to both versions while work is in flight.
+4. Observe ingestion, search and worker processing before ending the rollback window. Until you apply contracts, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place.
+5. Once all previous instances and their work have drained, and you accept closing the rollback window, run the new binary's `quivr migrate --contract`. This applies every pending contract as well as expansions; review all deferred steps before running it. The current application must already work with and without those contracts.
+
+Do not run the previous version's migrator during rollback. Rollback switches application binaries; there are no hand-written down migrations. After contracts remove old fields or constraints, restoring the previous application is no longer supported. Recovery then needs a forward fix or your deployment's data recovery procedure.
+
+## Check it worked
+
+The new API and worker report ready, ingestion resolves new receipts, and search returns the expected records. CI checks the previous version's inline ingestion, authorization and lexical search against the expanded schema, including a restart. Until versioned release artifacts supply the previous binary, CI uses the branch's merge-base commit; this is a focused compatibility check, not a complete release matrix.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| Migration times out | DDL lock acquisition is bounded to two seconds and each SQL batch to five seconds. Let conflicting transactions finish, then rerun; the failed database transaction is rolled back. |
+| Worker never becomes ready | An expansion is pending or a dependency is unavailable. Run the new migrator and inspect startup logs. |
+| Previous binary fails after cleanup | The contract step closed the rollback window. Deploy a forward fix or follow your data recovery procedure. |
+
+Database writes can wait briefly for additive DDL locks. Compatibility requires both application versions to support the expanded representation; rollout and data backfills still need deployment-specific review.
+
+## Next
+
+- [Deploy Quivr](/run-quivr/deploy)
+- [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin)
+- [Command reference](/reference/cli)
