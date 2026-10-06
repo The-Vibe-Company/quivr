@@ -11,12 +11,16 @@ import sys
 import time
 
 # First-party plugins baked into the core image (core.Dockerfile), pinned when
-# QUIVR_DEMO_PLUGINS=1. The worker calls them (normalization, alert
+# QUIVR_DEMO_PLUGINS=1, except newsml-g2, which is always pinned alongside
+# the archive connector. The worker calls them (normalization, alert
 # evaluation), so it runs them all on loopback. The API also calls a
 # ``preview`` plugin, for Subscription previews, so it runs that one beside it.
 PLUGIN_ROOT = pathlib.Path('/app/plugins')
 PLUGIN_PYTHON = '/opt/quivr-plugins/bin/python'
 PLUGINS = [
+    {'id': 'newsml-g2', 'module': 'newsml_g2', 'port': 9905, 'always': True,
+     'routes': [{'media_type': 'application/vnd.iptc.g2.newsitem+xml', 'mode': 'required'},
+                {'media_type': 'application/vnd.iptc.g2.newsmessage+xml', 'mode': 'required'}]},
     {'id': 'pdf-text', 'module': 'pdf_text', 'port': 9900,
      'routes': [{'media_type': 'application/pdf', 'mode': 'required'}]},
     # TYPESAFE_API_KEY lets alerts decide described alerts (https://docs.quivr.thevibecompany.co/guides/described-alerts).
@@ -122,6 +126,8 @@ def prepare_hosted_manifest(env):
 def plugin_pins(env):
     pins = []
     for plugin in PLUGINS:
+        if not plugin.get('always') and not plugins_enabled(env):
+            continue
         pin = {'manifest': str(PLUGIN_ROOT / plugin['id'] / 'quivr-plugin.yaml'),
                'endpoint': f"http://127.0.0.1:{plugin['port']}", 'configuration': {}}
         if 'routes' in plugin:
@@ -184,13 +190,13 @@ def build_config(env):
                                                 'plugins:admin', 'observability:read']}
     if CONNECTORS:
         config['plugins'] = connector_pins(env)
+    config['plugins'] = config.get('plugins', []) + plugin_pins(env)
     if env.get('QUIVR_DEMO_HOSTED_EMBED') == '1':
         config['ingestion'] = {'default': 'core.ingest',
                                'evaluation': {media: ['hosted.embed'] for media in HOSTED_MEDIA_TYPES}}
     if env.get('QUIVR_DEMO_JEV_RERANK') == '1':
         config['retrieval'] = {'profiles': {'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'}}
     if plugins_enabled(env):
-        config['plugins'] = config.get('plugins', []) + plugin_pins(env)
         config['destinations'] = {DESTINATION_ID: {'organization': 'quivr-demo', 'url': SINK_URL,
                                                    'secret': sink_secret(env['QUIVR_CURSOR_KEY'])}}
     # Optional: without it the core starts and refuses only credential deposits.
@@ -265,9 +271,9 @@ def sidecar_commands(env, role='worker'):
         else:
             argv = ['/usr/local/bin/quivr-' + connector['id']]
         commands.append((connector['id'], argv, str(directory), child))
-    if not plugins_enabled(env):
-        return commands
     for plugin in PLUGINS:
+        if not plugin.get('always') and not plugins_enabled(env):
+            continue
         if role == 'api' and not plugin.get('preview'):
             continue
         directory = PLUGIN_ROOT / plugin['id']

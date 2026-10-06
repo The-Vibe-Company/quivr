@@ -35,7 +35,8 @@ COPY third_party/tokenizer ./third_party/tokenizer
 COPY plugins/core-ingest/profile.json ./plugins/core-ingest/profile.json
 RUN python scripts/prepare_tokenizer.py
 
-# First-party Python sidecars: alerts/pdf-text use QUIVR_DEMO_PLUGINS=1;
+# First-party Python sidecars: newsml-g2 always runs for archive ingestion;
+# alerts/pdf-text use QUIVR_DEMO_PLUGINS=1;
 # API retrieval uses QUIVR_DEMO_JEV_RERANK=1 and TYPESAFE_API_KEY
 # (core-entrypoint.py). Each plugin reads the manifest next to its package, so
 # they are installed in editable mode at the path the final image keeps.
@@ -44,10 +45,11 @@ COPY contracts/http/v0/checks/requirements.txt /tmp/constraints.txt
 COPY sdks/python /tmp/sdk
 COPY plugins/alerts /app/plugins/alerts
 COPY plugins/pdf-text /app/plugins/pdf-text
+COPY plugins/newsml-g2 /app/plugins/newsml-g2
 COPY plugins/jev-rerank /app/plugins/jev-rerank
 RUN python -m venv /opt/quivr-plugins \
  && /opt/quivr-plugins/bin/pip install --no-cache-dir --disable-pip-version-check -c /tmp/constraints.txt \
-    /tmp/sdk -e /app/plugins/alerts -e /app/plugins/pdf-text -e /app/plugins/jev-rerank
+    /tmp/sdk -e /app/plugins/alerts -e /app/plugins/pdf-text -e /app/plugins/newsml-g2 -e /app/plugins/jev-rerank
 
 FROM python:3.12-slim-bookworm
 WORKDIR /app

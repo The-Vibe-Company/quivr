@@ -44,6 +44,10 @@ built into the core image as `/usr/local/bin/quivr-rss`. `core-entrypoint.py` al
 pins it and the worker always runs it on `127.0.0.1:9920`, whatever `QUIVR_DEMO_PLUGINS`
 says, so feed instances keep polling. It logs `quivr-rss: serving connector.rss@…` at start.
 
+The core image includes the [`NewsML-G2 normalizer`](../../plugins/newsml-g2/README.md), pinned by api and worker
+with required routes for `application/vnd.iptc.g2.newsitem+xml` and `application/vnd.iptc.g2.newsmessage+xml`.
+The worker runs it on `127.0.0.1:9905`, regardless of `QUIVR_DEMO_PLUGINS`: the always-pinned archive connector needs it.
+
 ## Credential key (optional)
 
 The demo runs without `QUIVR_CREDENTIAL_KEY`. Ingestion, search and connectors that
