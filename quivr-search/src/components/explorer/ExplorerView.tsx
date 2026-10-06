@@ -17,12 +17,12 @@ import {
   type Facets,
   type Range,
 } from "../../lib/explore";
-import { EmptyState, LoadingState, Notice } from "../ui";
+import { EmptyState, InBar, Notice, type Bar } from "../ui";
 import { FacetColumn } from "./Facets";
 import { Preview } from "./Preview";
 import { RecordPage } from "./RecordPage";
 import { Timeline } from "./Timeline";
-import { dateOf, WireList } from "./WireList";
+import { byDate, WireList, WireSkeleton } from "./WireList";
 import "../../explorer.css";
 
 // Below this width the page is one column and a row opens its document.
@@ -45,6 +45,7 @@ const subscribeNarrow = (change: () => void) => {
  * keeps the whole view, and a document opens on its own page.
  */
 export function ExplorerView({
+  bar,
   corpora,
   corporaRead,
   picked,
@@ -55,6 +56,8 @@ export function ExplorerView({
   onState,
   onUnauthorized,
 }: {
+  /** The top bar: the search goes in its search's place, the corpora at its right. */
+  bar: Bar;
   corpora: Corpus[];
   /** Whether the corpora were read, or could not be. */
   corporaRead: boolean;
@@ -74,6 +77,10 @@ export function ExplorerView({
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [more, setMore] = useState<"idle" | "loading" | "error">("idle");
+  // With nothing selected, the preview shows the list's first row as first
+  // drawn, by date and by rank: a later page putting a newer row on top
+  // does not move it.
+  const [lead, setLead] = useState<{ key: string; byDate?: string; byRank?: string } | null>(null);
   // The counts, with the corpora and filters they were read for.
   const [facets, setFacets] = useState<(Facets & { key: string }) | null>(null);
   const [facetsError, setFacetsError] = useState("");
@@ -136,6 +143,9 @@ export function ExplorerView({
   // The list's current reads: a filter or corpus change aborts the page of
   // "more" still on its way, which belongs to the list it leaves.
   const reads = useRef<AbortController | null>(null);
+  // The list's own scroll, on a desktop.
+  const scroller = useRef<HTMLDivElement>(null);
+  const listBox = useRef<HTMLElement>(null);
   // The corpora the facets were read for: others picked, their fields go at once.
   const facetsFor = useRef("");
 
@@ -147,12 +157,19 @@ export function ExplorerView({
     if (record || !typed) return;
     const controller = new AbortController();
     reads.current = controller;
+    near.current = false;
     setStatus("loading");
     setMore("idle");
     fetchExplore(picked, predicates, { q: state.q }, controller.signal)
       .then((data) => {
         setPage(data);
+        setLead({ key: listKey, byDate: byDate(data.items)[0]?.record_id, byRank: data.items[0]?.record_id });
         setStatus("ready");
+        // Another list starts from its top: the list's own scroll on a
+        // desktop, else the page brought back to the list when past it.
+        scroller.current?.scrollTo({ top: 0 });
+        if (listBox.current && listBox.current.getBoundingClientRect().top < 0)
+          listBox.current.scrollIntoView({ block: "start" });
       })
       .catch((e) => {
         if (controller.signal.aborted) return;
@@ -208,6 +225,49 @@ export function ExplorerView({
       });
   };
 
+  // The corpora that do not fit scroll sideways, the edge faded while some
+  // remain hidden past it.
+  const switchRef = useRef<HTMLDivElement>(null);
+  const [switchOverflow, setSwitchOverflow] = useState(false);
+  useEffect(() => {
+    const element = switchRef.current;
+    if (!element) return;
+    const measure = () =>
+      setSwitchOverflow(element.scrollLeft + element.clientWidth < element.scrollWidth - 1);
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    element.addEventListener("scroll", measure, { passive: true });
+    return () => {
+      observer.disconnect();
+      element.removeEventListener("scroll", measure);
+    };
+  }, [narrow, corpora, bar.actions]);
+
+  // The next page loads as the end of the list comes near, the button
+  // staying as a fallback; a failed page waits for its "Réessayer". Only
+  // coming near loads: rows a page puts back above the reader (by date)
+  // leave the end in sight, and must not chain page after page unasked.
+  const sentinel = useRef<HTMLDivElement>(null);
+  const near = useRef(false);
+  const loadNext = useRef(loadMore);
+  loadNext.current = loadMore;
+  const hasMore = !!page?.next_cursor && more === "idle" && status === "ready";
+  useEffect(() => {
+    const target = sentinel.current;
+    if (!hasMore || !target) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const now = entries.some((e) => e.isIntersecting);
+        if (now && !near.current) loadNext.current();
+        near.current = now;
+      },
+      // On a narrow screen the page scrolls, not the list.
+      { root: narrow ? null : scroller.current, rootMargin: "0px 0px 600px 0px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, narrow, page]);
+
   // A filter change starts the list again, with nothing selected.
   const filter = (change: (s: ExplorerState) => Partial<ExplorerState>) =>
     setState((s) => ({ ...s, ...change(s), selected: null }));
@@ -250,15 +310,11 @@ export function ExplorerView({
   // The corpora left out, as the list and the counts of the same filters report them.
   const excluded = mergeExclusions([...(page?.excluded_corpora || []), ...(fresh?.excluded_corpora || [])]);
   const timeline = facets?.fields.find((f) => f.field === TIMELINE_FIELD);
-  const items = useMemo(() => {
-    const list = page?.items || [];
-    // The list comes newest first, page after page; a search comes by
-    // relevance, its hits sorted by date on request.
-    if (!state.q || state.sort === "relevance") return list;
-    const at = (item: (typeof list)[number]) => Date.parse(dateOf(item)) || 0;
-    return [...list].sort((a, b) => at(b) - at(a));
-  }, [page, state.q, state.sort]);
-  const previewed = state.selected || items[0]?.record_id || null;
+  // A search keeps its rank on request; otherwise rows go by date.
+  const byDay = !state.q || state.sort !== "relevance";
+  const items = useMemo(() => (byDay ? byDate(page?.items || []) : page?.items || []), [page, byDay]);
+  const first = lead?.key === listKey ? (byDay ? lead.byDate : lead.byRank) : undefined;
+  const previewed = state.selected || first || items[0]?.record_id || null;
   const count = state.q
     ? status === "ready" && page
       ? page.bounded
@@ -295,71 +351,92 @@ export function ExplorerView({
     />
   );
 
+  const search = (
+    <form
+      role="search"
+      className="bar-search explorer-search"
+      data-active={!!input || undefined}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const q = input.trim();
+        setState((s) => (s.q === q ? s : { ...s, q, selected: null }));
+      }}
+    >
+      <span className="bar-search-icon" aria-hidden="true">
+        <MagnifyingGlass size={16} />
+      </span>
+      <input
+        id="explorer-search"
+        type="search"
+        aria-label="Chercher dans les documents"
+        placeholder={
+          documents !== undefined
+            ? `Chercher dans ${countLabel(documents)} document${documents > 1 ? "s" : ""}`
+            : "Chercher dans les documents"
+        }
+        value={input}
+        maxLength={500}
+        onChange={(event) => setInput(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && input) {
+            event.preventDefault();
+            setInput("");
+          }
+        }}
+      />
+      {input ? (
+        <button type="button" className="bar-clear" onClick={() => setInput("")}>
+          Effacer
+        </button>
+      ) : (
+        <kbd className="bar-kbd" aria-hidden="true">
+          /
+        </kbd>
+      )}
+    </form>
+  );
+
+  const switcher = corpora.length > 1 && (
+    <div
+      className="explorer-switch"
+      role="group"
+      aria-label="Corpus"
+      ref={switchRef}
+      data-overflow={switchOverflow || undefined}
+    >
+      <button
+        type="button"
+        aria-pressed={all}
+        onClick={() => onPicked(corpora.map((c) => c.corpus_id))}
+      >
+        Tous
+        {corpora.every((c) => c.documents !== undefined) && (
+          <span className="explorer-switch-count">
+            {countLabel(corpora.reduce((n, c) => n + (c.documents || 0), 0))}
+          </span>
+        )}
+      </button>
+      {corpora.map((c) => (
+        <button
+          key={c.corpus_id}
+          type="button"
+          aria-pressed={single?.corpus_id === c.corpus_id}
+          onClick={() => onPicked([c.corpus_id])}
+        >
+          {c.name}
+          {c.documents !== undefined && <span className="explorer-switch-count">{countLabel(c.documents)}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <main className="board explorer-board">
       <h1 className="visually-hidden">Explorer</h1>
+      <InBar to={bar.search || null}>{search}</InBar>
+      {!narrow && <InBar to={bar.actions}>{switcher}</InBar>}
       <div className="explorer">
-        <div className="explorer-head">
-          <form
-            role="search"
-            className="explorer-search"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const q = input.trim();
-              setState((s) => (s.q === q ? s : { ...s, q, selected: null }));
-            }}
-          >
-            <MagnifyingGlass size={16} aria-hidden="true" />
-            <input
-              id="explorer-search"
-              type="search"
-              aria-label="Chercher dans les documents"
-              placeholder={
-                documents !== undefined
-                  ? `Chercher dans ${countLabel(documents)} document${documents > 1 ? "s" : ""}`
-                  : "Chercher dans les documents"
-              }
-              value={input}
-              maxLength={500}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && input) {
-                  event.preventDefault();
-                  setInput("");
-                }
-              }}
-            />
-          </form>
-          {corpora.length > 1 && (
-            <div className="segments explorer-switch" role="group" aria-label="Corpus">
-              <button
-                type="button"
-                className="chip"
-                aria-pressed={all}
-                onClick={() => onPicked(corpora.map((c) => c.corpus_id))}
-              >
-                Tous
-                {corpora.every((c) => c.documents !== undefined) && (
-                  <span className="chip-count">
-                    {countLabel(corpora.reduce((n, c) => n + (c.documents || 0), 0))}
-                  </span>
-                )}
-              </button>
-              {corpora.map((c) => (
-                <button
-                  key={c.corpus_id}
-                  type="button"
-                  className="chip"
-                  aria-pressed={single?.corpus_id === c.corpus_id}
-                  onClick={() => onPicked([c.corpus_id])}
-                >
-                  {c.name}
-                  {c.documents !== undefined && <span className="chip-count">{countLabel(c.documents)}</span>}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {narrow && switcher}
         <Timeline
           facet={timeline}
           stale={!fresh && !facetsError}
@@ -369,26 +446,29 @@ export function ExplorerView({
           onWindow={(window) => setState((s) => ({ ...s, window }))}
         />
         <div className="explorer-picks" role="group" aria-label="Filtres actifs">
+          <span className="explorer-count" role="status">
+            {count}
+            {state.q && count && <span className="explorer-query"> pour « {state.q} »</span>}
+          </span>
           {state.range && (
             <button type="button" className="pick-chip" onClick={() => filter(() => ({ range: undefined }))}>
-              Période : {rangeLabel(state.range)}
-              <X size={13} aria-hidden="true" />
+              <span className="pick-field">Période</span> {rangeLabel(state.range)}
+              <X size={12} aria-hidden="true" />
               <span className="visually-hidden">, retirer ce filtre</span>
             </button>
           )}
           {picks.map(({ field, value }) => (
             <button key={`${field}:${value}`} type="button" className="pick-chip" onClick={() => toggle(field, value)}>
-              {fieldLabel(field)} : {valueLabel(value, types.get(field), field)}
-              <X size={13} aria-hidden="true" />
+              <span className="pick-field">{fieldLabel(field)}</span> {valueLabel(value, types.get(field), field)}
+              <X size={12} aria-hidden="true" />
               <span className="visually-hidden">, retirer ce filtre</span>
             </button>
           ))}
-          <span className="explorer-count" role="status">
-            {count}
-            {state.q && <> pour « {state.q} »</>}
-          </span>
+          {active === 0 && !state.q && (
+            <span className="explorer-hint">Aucun filtre : cochez une valeur à gauche ou glissez sur la chronologie.</span>
+          )}
           {active > 0 && (
-            <button type="button" className="link-button" onClick={clearAll}>
+            <button type="button" className="link-button explorer-clear" onClick={clearAll}>
               Tout effacer
             </button>
           )}
@@ -402,24 +482,25 @@ export function ExplorerView({
           ) : (
             facetColumn
           )}
-          <section className="panel explorer-list" aria-label="Documents trouvés">
-            <div className="explorer-list-head">
+          <section className="explorer-list" aria-label="Documents trouvés" ref={listBox}>
+            {state.q && (
               <label className="explorer-sort">
                 <span className="visually-hidden">Trier</span>
                 <select
-                  value={state.q ? state.sort : "recent"}
+                  value={state.sort}
                   onChange={(event) =>
                     setState((s) => ({ ...s, sort: event.target.value === "relevance" ? "relevance" : "recent" }))
                   }
                 >
                   <option value="recent">Plus récentes</option>
-                  {state.q && <option value="relevance">Pertinence</option>}
+                  <option value="relevance">Pertinence</option>
                 </select>
               </label>
-            </div>
-            <div className="explorer-scroll">
+            )}
+            {!state.q && <span className="explorer-sort explorer-sort-fixed">Plus récentes</span>}
+            <div className="explorer-scroll" ref={scroller}>
               {status === "loading" && !page ? (
-                <LoadingState label="Chargement des documents…" rows={8} />
+                <WireSkeleton />
               ) : status === "error" ? (
                 <Notice title="Les documents ne s’affichent pas." onRetry={() => setAttempt((n) => n + 1)}>
                   {error}
@@ -456,22 +537,31 @@ export function ExplorerView({
                   <div data-pending={status === "loading" || undefined} className="explorer-rows">
                     <WireList
                       items={items}
+                      byDay={byDay}
                       selected={previewed}
                       corpusOf={(item) => (picked.length > 1 ? nameOf(item.corpus_id) : "")}
                       onSelect={select}
                       onOpen={(id) => onRecord(id)}
                     />
-                    {page.next_cursor && (
-                      <div className="explorer-more">
-                        <button type="button" className="button" disabled={more === "loading"} onClick={loadMore}>
-                          {more === "loading" ? "Chargement…" : "Afficher plus de documents"}
-                        </button>
-                        {more === "error" && (
-                          <p className="error-text" role="alert">
-                            La suite ne s’affiche pas. Réessayez.
-                          </p>
+                    {page.next_cursor ? (
+                      <div className="explorer-more" ref={sentinel}>
+                        {more === "error" ? (
+                          <>
+                            <p className="error-text" role="alert">
+                              La suite ne s’affiche pas.
+                            </p>
+                            <button type="button" className="button" onClick={loadMore}>
+                              Réessayer
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" className="link-button" disabled={more === "loading"} onClick={loadMore}>
+                            {more === "loading" ? "Chargement…" : "Afficher plus de documents"}
+                          </button>
                         )}
                       </div>
+                    ) : (
+                      items.length > 0 && <p className="explorer-end">Fin de la liste · {countLabel(items.length)} document{items.length > 1 ? "s" : ""}</p>
                     )}
                   </div>
                 )
@@ -483,7 +573,9 @@ export function ExplorerView({
               {previewed ? (
                 <Preview id={previewed} onOpen={() => onRecord(previewed)} onUnauthorized={onUnauthorized} />
               ) : (
-                <p className="facets-note">Choisissez un document pour le lire ici.</p>
+                <p className="facets-note">
+                  {status === "ready" ? "Choisissez un document pour le lire ici." : ""}
+                </p>
               )}
             </aside>
           )}
