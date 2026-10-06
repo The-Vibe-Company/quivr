@@ -13,7 +13,6 @@ links and into their titles, so each test run gets its own sources.
                          id as a word, one about a storm and one about a flower market
 - GET /feeds/bulk.xml?source=<n>&items=<k>  RSS of k synthetic articles (at most 500), the
                          same on every fetch, for the demo's performance corpus (make demo-perf)
-- GET /_hits?path=/feeds/ticker.xml&run=<id>  {"hits": n} fetches of that feed
 
 All content is synthetic.
 """
@@ -46,10 +45,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             key = (url.path, run)
             self.hits[key] = self.hits.get(key, 0) + 1
             count = self.hits[key]
-        if url.path == '/_hits':
-            with self.lock:
-                hits = self.hits.get((query.get('path', [''])[0], run), 0)
-            return self.send(200, 'application/json', json.dumps({'hits': hits}))
         if url.path == '/site/':
             return self.send(200, 'text/html; charset=utf-8', page('Le Journal exemple' + suffix, [
                 ('application/rss+xml', '/feeds/news.xml' + tail, 'Le Journal exemple — À la une' + suffix)]))
@@ -65,7 +60,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ('news-2', 'Un marché flottant ouvre sur le canal', 'Des maraîchers vendent leurs légumes depuis des barques amarrées.')], run))
         if url.path == '/feeds/world.xml':
             return self.send(200, 'application/rss+xml; charset=utf-8', rss('La Revue exemple — Monde' + suffix, [
-                ('world-1', 'Les cartographes redessinent la lagune', 'Un relevé au sonar corrige les cartes anciennes de la lagune.')], run))
+                # Markup in the description: the reader shows its text, never its HTML.
+                ('world-1', 'Les cartographes redessinent la lagune', 'Un relevé au <b>sonar</b> corrige les cartes anciennes de la lagune.')], run))
         if url.path == '/feeds/tech.atom':
             return self.send(200, 'application/atom+xml; charset=utf-8', atom('La Revue exemple — Technologie' + suffix, [
                 ('tech-1', 'Un métier à tisser programmable par cartes perforées', 'Un atelier restaure un métier à tisser et ses cartes perforées.')], run))

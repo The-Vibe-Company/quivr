@@ -102,6 +102,7 @@ export function FeedPage({
   feed,
   alerts,
   connectors,
+  onSourcesOpen,
   reading,
   scroller,
   onAdd,
@@ -127,6 +128,8 @@ export function FeedPage({
   feed: ReturnType<typeof useFeedStream>;
   alerts: ReturnType<typeof useAlertList>;
   connectors: Connector[];
+  /** Rereads the sources, so one added elsewhere can be picked at once. */
+  onSourcesOpen: () => void;
   reading: ReturnType<typeof useReadState>;
   scroller: RefObject<HTMLDivElement | null>;
   onAdd: () => void;
@@ -837,6 +840,7 @@ export function FeedPage({
               title="Sources"
               icon={<SourcesIcon size={15} />}
               summary={named(filter.sources, sourceName, "sources")}
+              onOpen={onSourcesOpen}
             >
               {sourceRows.map((ns) => {
                 const silenced = muted.has(ns);

@@ -3,7 +3,7 @@ export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.ts",
   workers: 1,
-  timeout: 60000,
+  timeout: 15000,
   expect: { timeout: 10000 },
   use: {
     baseURL: process.env.QUIVR_DEMO_URL || "http://127.0.0.1:5182",
