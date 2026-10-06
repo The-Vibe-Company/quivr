@@ -3,38 +3,38 @@
   "skills": {
     "armada-coordinator": {
       "source": "The-Vibe-Company/armada",
-      "sourceType": "github",
+      "sourceType": "armada-cli",
       "skillPath": "skills/armada-coordinator/SKILL.md",
-      "ref": "v0.2.54",
-      "computedHash": "fb6b660277a354ca2c84ec22451430073e691a2a3294e0f0a6993427bf511222"
+      "ref": "v0.2.57",
+      "computedHash": "b2ad86619d9012b866dc2799a5aeddb6886df7dd2b3eabdb6349c9f9f4027ddc"
     },
     "armada-runtime-claude-code": {
       "source": "The-Vibe-Company/armada",
-      "sourceType": "github",
+      "sourceType": "armada-cli",
       "skillPath": "skills/armada-runtime-claude-code/SKILL.md",
-      "ref": "v0.2.54",
-      "computedHash": "fc9934091c587dd85073ac0bd5ca86d45f464f8b2c7292578a4e4592df6af35c"
+      "ref": "v0.2.57",
+      "computedHash": "6bcf6138852388b5d77ac0b5e66ec20eb4d627f03af4180639bc89787d7f9e08"
     },
     "armada-runtime-conductor": {
       "source": "The-Vibe-Company/armada",
-      "sourceType": "github",
+      "sourceType": "armada-cli",
       "skillPath": "skills/armada-runtime-conductor/SKILL.md",
-      "ref": "v0.2.54",
-      "computedHash": "392d329db85729c14d239a6152c472ce08850a88d6c6bf85388ebaaba6626a95"
+      "ref": "v0.2.57",
+      "computedHash": "3155e7672455cbb37d09510cafec256a0531162f0e1a06fef3ae64b7060b981b"
     },
     "armada-runtime-herdr": {
       "source": "The-Vibe-Company/armada",
-      "sourceType": "github",
+      "sourceType": "armada-cli",
       "skillPath": "skills/armada-runtime-herdr/SKILL.md",
-      "ref": "v0.2.54",
-      "computedHash": "a5c58e59c68614fc5b802c52f6bc1bdf2e86f87f3877aa30774bc1e59c092131"
+      "ref": "v0.2.57",
+      "computedHash": "79856ce172d614f939b35b23d235104f1d31ad3e78a661aaa3d63173779dd5c4"
     },
     "armada-worker": {
       "source": "The-Vibe-Company/armada",
-      "sourceType": "github",
+      "sourceType": "armada-cli",
       "skillPath": "skills/armada-worker/SKILL.md",
-      "ref": "v0.2.54",
-      "computedHash": "c77ef21e4028a6bed2b5caafcae63a8819f0cc33278cadcfa8ee9d06a121b663"
+      "ref": "v0.2.57",
+      "computedHash": "a9eaa1472fd9c8123df2dcc800ba0ccc9e815a271affe5bf70ce100fd82a74fd"
     },
     "ask-matt": {
       "source": "mattpocock/skills",
