@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestEmbeddedMigrationsFollowTheNamingRules(t *testing.T) {
@@ -52,5 +53,29 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("want error mentioning %q, got %v", c.want, err)
 			}
 		})
+	}
+}
+
+func TestPlanDefersContractsUnlessExplicitlySelected(t *testing.T) {
+	fsys := fstest.MapFS{
+		"20990101T0000Z_expand.sql":   &fstest.MapFile{Data: []byte("CREATE TABLE probe(id int)")},
+		"20990101T0001Z_contract.sql": &fstest.MapFile{Data: []byte("-- quivr:contract\nDROP TABLE probe")},
+		"20990101T0002Z_expand.sql":   &fstest.MapFile{Data: []byte("-- contract appears in prose\nCREATE TABLE next(id int)")},
+	}
+	for _, ending := range []string{"\n", "\r\n"} {
+		fsys["20990101T0001Z_contract.sql"].Data = []byte("-- quivr:contract" + ending + "DROP TABLE probe")
+		for _, include := range []bool{false, true} {
+			names, err := Plan(fsys, include)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"20990101T0000Z_expand.sql", "20990101T0002Z_expand.sql"}
+			if include {
+				want = []string{"20990101T0000Z_expand.sql", "20990101T0001Z_contract.sql", "20990101T0002Z_expand.sql"}
+			}
+			if !slices.Equal(names, want) {
+				t.Fatalf("include=%v: got %v, want %v", include, names, want)
+			}
+		}
 	}
 }

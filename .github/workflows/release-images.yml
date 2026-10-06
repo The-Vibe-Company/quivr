@@ -19,11 +19,11 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       revision: ${{ steps.release.outputs.revision }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - run: pip install -r contracts/http/v0/checks/requirements.txt
@@ -46,17 +46,17 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.revision }}
           persist-credentials: false
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: image
         with:
           context: .
@@ -69,7 +69,7 @@ jobs:
             VERSION=${{ needs.prepare.outputs.version }}
             REVISION=${{ needs.prepare.outputs.revision }}
             PLUGIN=${{ matrix.plugin }}
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - name: Check the published runtime before signing
@@ -100,13 +100,13 @@ jobs:
           IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
           GRYPE_CHECK_FOR_APP_UPDATE: false
         run: grype "registry:$IMAGE" --only-fixed --fail-on critical --output json > vulnerabilities.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: vulnerabilities-${{ matrix.plugin || 'engine' }}
           path: vulnerabilities.json
           if-no-files-found: warn
-      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign and verify the immutable digest
         env:
           IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
@@ -126,7 +126,7 @@ jobs:
           cosign verify-attestation "$IMAGE" --type spdxjson \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/release-images.yml@refs/tags/$RELEASE_TAG"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-${{ matrix.plugin || 'engine' }}
           path: sboms/
@@ -138,7 +138,7 @@ jobs:
           mkdir -p signed-images
           image_name="${IMAGE%%@*}"
           printf '%s\n' "$IMAGE" > "signed-images/${image_name##*/}.txt"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image-${{ matrix.plugin || 'engine' }}
           path: signed-images/
@@ -150,18 +150,18 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: image-*
           merge-multiple: true
           path: signed-images
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: sbom-*
           merge-multiple: true
           path: sboms
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

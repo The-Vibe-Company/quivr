@@ -31,7 +31,7 @@ mkdir -p "$work"
 test -x "$work/venv/bin/python" || "$PYTHON" -m venv "$work/venv"
 # Pin runtime dependencies to the versions the contract checks already use.
 "$work/venv/bin/pip" install -q --disable-pip-version-check -c contracts/http/v0/checks/requirements.txt -e sdks/python
-"$work/venv/bin/python" -W error::ResourceWarning -m unittest discover -s sdks/python/tests
+"$work/venv/bin/python" -W error::ResourceWarning "$root/scripts/check.py" --unittest sdks/python/tests
 
 "$GO" build -o "$work/quivr" ./cmd/quivr
 quivr="$work/quivr"
@@ -45,7 +45,7 @@ cd demo
 export PATH="$work/venv/bin:$PATH"
 
 "$quivr" plugin inspect . > inspect.log
-python3 -m unittest discover -s tests
+python3 "$root/scripts/check.py" --unittest tests
 "$quivr" plugin dev --fixture fixtures/sample.json > response.json 2> dev.log || { cat dev.log; exit 1; }
 python3 - <<'EOF'
 import json
@@ -88,7 +88,7 @@ cd "$e2e"
 "$quivr" plugin init alerts --kind subscription > init-alerts.log
 cd alerts
 "$quivr" plugin inspect . > inspect.log
-python3 -m unittest discover -s tests
+python3 "$root/scripts/check.py" --unittest tests
 "$quivr" plugin dev --fixture fixtures/sample.json > response.json 2> dev.log || { cat dev.log; exit 1; }
 python3 - <<'EOF'
 import json
@@ -109,7 +109,7 @@ cd "$e2e"
 "$quivr" plugin init source --kind connector > init-source.log
 cd source
 "$quivr" plugin inspect . > inspect.log
-python3 -m unittest discover -s tests
+python3 "$root/scripts/check.py" --unittest tests
 "$quivr" plugin test --report "$work/connector-contract-report.json" . > contract.log 2>&1 || { cat contract.log; exit 1; }
 grep -q "^CERTIFIED" contract.log || { cat contract.log; exit 1; }
 echo "quivr plugin test certified the scaffolded connector: $work/connector-contract-report.json"
@@ -118,11 +118,11 @@ echo "quivr plugin test certified the scaffolded connector: $work/connector-cont
 cd "$e2e"
 "$quivr" plugin init push-demo --kind connector --push > init-push.log
 cd push-demo
-python3 -m unittest discover -s tests
+python3 "$root/scripts/check.py" --unittest tests
 "$quivr" plugin test --report "$work/push-scaffold-contract-report.json" . > contract.log 2>&1 || { cat contract.log; exit 1; }
 grep -q "^CERTIFIED" contract.log || { cat contract.log; exit 1; }
 cd "$root/plugins/push-source"
-python3 -m unittest discover -s tests
+python3 "$root/scripts/check.py" --unittest tests
 "$quivr" plugin test --report "$work/push-source-contract-report.json" . > "$work/push-source-contract.log" 2>&1 || { cat "$work/push-source-contract.log"; exit 1; }
 grep -q "^CERTIFIED" "$work/push-source-contract.log" || { cat "$work/push-source-contract.log"; exit 1; }
 echo "quivr plugin test certified the push scaffold and plugins/push-source"
@@ -137,7 +137,7 @@ echo "quivr plugin test certified the Python static source: $work/python-static-
 # reproducibility) and Contract Runner certification. CI uploads the report.
 cd "$root/plugins/pdf-text"
 "$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
-python3 -W error::ResourceWarning -m unittest discover -s tests
+python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 "$quivr" plugin inspect . > "$work/pdf-text-inspect.log"
 "$quivr" plugin test --report "$work/pdf-text-contract-report.json" . > "$work/pdf-text-contract.log" 2>&1 || { cat "$work/pdf-text-contract.log"; exit 1; }
 grep -q "^CERTIFIED" "$work/pdf-text-contract.log" || { cat "$work/pdf-text-contract.log"; exit 1; }
@@ -148,7 +148,7 @@ echo "quivr plugin test certified plugins/pdf-text: $work/pdf-text-contract-repo
 # fixture and Contract Runner certification of both kinds. CI uploads the report.
 cd "$root/plugins/alerts"
 "$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
-python3 -W error::ResourceWarning -m unittest discover -s tests
+python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 "$quivr" plugin inspect . > "$work/alerts-inspect.log"
 "$quivr" plugin dev --fixture fixtures/sample.json > "$work/alerts-response.json" 2> "$work/alerts-dev.log" || { cat "$work/alerts-dev.log"; exit 1; }
 grep -q "8 decisions in 1 batches (5 match, 2 no_match, 1 not_ready)" "$work/alerts-dev.log" || { cat "$work/alerts-dev.log"; exit 1; }
@@ -169,7 +169,7 @@ echo "quivr plugin test certified plugins/alerts: $work/alerts-contract-report.j
 
 cd "$root/plugins/jev-rerank"
 "$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
-python3 -W error::ResourceWarning -m unittest discover -s tests
+python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 "$quivr" plugin inspect . > "$work/jev-rerank-inspect.log"
 env -u TYPESAFE_API_KEY -u TYPESAFE_API_URL "$quivr" plugin test --report "$work/jev-rerank-contract-report.json" . > "$work/jev-rerank-contract.log" 2>&1 || { cat "$work/jev-rerank-contract.log"; exit 1; }
 grep -q "^CERTIFIED" "$work/jev-rerank-contract.log" || { cat "$work/jev-rerank-contract.log"; exit 1; }

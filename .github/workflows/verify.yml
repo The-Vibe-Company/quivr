@@ -10,16 +10,22 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
-# Required check: `verify`. It passes only when `check`, `adapter-postgres`,
-# `vulnerabilities` and every verification part pass.
+# Required check: `verify`. It passes only when `check`, `adapter-postgres` and every
+# verification part pass, so branch protection needs no change when a part is added.
 jobs:
-  # Everything that needs no Docker stack (make check): the first result, in a few minutes.
-  check:
+  # Isolated groups preserve make check while returning the complete quick result sooner.
+  check-group:
+    name: check ${{ matrix.group }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [guards, contracts, go, python, eval-1, eval-2, eval-3, sdk-python, sdk-go]
     services:
       evaluation-postgres:
-        image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        # Only eval needs SQL; an empty image disables the service in the other groups.
+        image: ${{ startsWith(matrix.group, 'eval-') && 'postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73' || '' }}
         env:
           POSTGRES_DB: evaluation_tests
           POSTGRES_USER: evaluation
@@ -27,163 +33,197 @@ jobs:
         ports:
           - 55433:5432
         options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=512m
           --health-cmd "pg_isready -U evaluation -d evaluation_tests"
           --health-interval 2s --health-timeout 2s --health-retries 20
     env:
-      EVAL_CONTROL_TEST_DSN: postgresql://evaluation@localhost:55433/evaluation_tests
+      EVAL_CONTROL_TEST_DSN: ${{ startsWith(matrix.group, 'eval-') && 'postgresql://evaluation@localhost:55433/evaluation_tests' || '' }}
+      NUMBA_CACHE_DIR: ${{ github.workspace }}/.scratch/numba
+      NUMBA_CPU_NAME: generic
+      NUMBA_NUM_THREADS: 2
+      OPENBLAS_NUM_THREADS: 1
     steps:
-      # The frozen-docs rule compares with the merge base of this checkout and main,
-      # so it needs full history (about 25 MB); the migration guard reads main's tree.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v5
+          cache-dependency-path: '**/go.sum'
+      - uses: actions/setup-python@v7
+        id: python
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: |
             contracts/http/v0/checks/requirements.txt
-            scripts/eval/requirements-news.txt
-            scripts/eval/requirements-campaign.txt
-            plugins/jev-rerank/pyproject.toml
-      # PyYAML for `make docs`, which regenerates the documentation site's bundled contract to compare it.
+            ${{ startsWith(matrix.group, 'eval-') && 'scripts/eval/requirements-news.txt' || '' }}
+            ${{ startsWith(matrix.group, 'eval-') && 'scripts/eval/requirements-campaign.txt' || '' }}
+            ${{ startsWith(matrix.group, 'eval-') && 'scripts/check-requirements.txt' || '' }}
+            ${{ startsWith(matrix.group, 'eval-') && 'plugins/jev-rerank/pyproject.toml' || '' }}
       - run: pip install -r contracts/http/v0/checks/requirements.txt
-      - run: pip install -r scripts/eval/requirements-news.txt
-      - run: pip install -r scripts/eval/requirements-campaign.txt
-      # Build the OSS runner's SDK and exercise prepared scoring on offline vectors.
-      - run: pip install modal==1.6.1 numpy==2.0.2 ranx==0.3.21
-      # The builder reuses this pinned stdlib client, without the plugin runtime dependencies.
-      - run: pip install --no-deps -e plugins/jev-rerank
-      # Private news-set owner tests exercise real encryption with disposable keys and synthetic text.
-      - run: sudo apt-get update -qq && sudo apt-get install -y age
-      - run: make check
-      # Contract Runner reports (scripts/plugin_sdk.sh), under the artifact names the plugin READMEs give.
-      - uses: actions/upload-artifact@v4
+      - if: startsWith(matrix.group, 'eval-')
+        run: |
+          pip install -r scripts/eval/requirements-news.txt -r scripts/eval/requirements-campaign.txt -r scripts/check-requirements.txt
+          pip install --no-deps -e plugins/jev-rerank
+      # ranx marks its kernels cacheable. Retain compilation, with portable CPU instructions.
+      - if: startsWith(matrix.group, 'eval-')
+        uses: actions/cache@v6
+        with:
+          path: .scratch/numba
+          key: quick-numba-${{ matrix.group }}-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('scripts/check-requirements.txt', 'scripts/eval/requirements-campaign.txt') }}
+      # Real encryption owner tests need both age and age-keygen; avoid apt's index update.
+      - if: startsWith(matrix.group, 'eval-')
+        run: |
+          curl --fail --silent --show-error --location --retry 3 https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz -o "$RUNNER_TEMP/age.tar.gz"
+          echo 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377  '"$RUNNER_TEMP/age.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/age.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/age" >> "$GITHUB_PATH"
+      # Each partition starts from its own empty disposable schema, independent of test order.
+      - if: startsWith(matrix.group, 'eval-')
+        run: docker exec -i "${{ job.services['evaluation-postgres'].id }}" psql -U evaluation -d evaluation_tests < deploy/mlflow/eval-control.sql
+      - run: make check check-group=${{ matrix.group }}
+      - if: always()
+        run: python3 scripts/check.py --summary
+      - uses: actions/upload-artifact@v7
         if: always()
+        with:
+          name: check-${{ matrix.group }}
+          path: .scratch/check/
+          include-hidden-files: true
+          if-no-files-found: warn
+      # Contract Runner reports (scripts/plugin_sdk.sh), under the artifact names the plugin READMEs give.
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-python'
         with:
           name: plugin-contract-report
           path: .scratch/plugin-sdk/contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-python'
         with:
           name: subscription-plugin-contract-report
           path: .scratch/plugin-sdk/subscription-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-python'
         with:
           name: python-connector-scaffold-contract-report
           path: .scratch/plugin-sdk/connector-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-python'
         with:
           name: push-source-contract-reports
           path: .scratch/plugin-sdk/push-*-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-python'
         with:
           name: python-connector-contract-report
           path: .scratch/plugin-sdk/python-static-source-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-python'
         with:
           name: pdf-text-contract-report
           path: .scratch/plugin-sdk/pdf-text-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-python'
         with:
           name: alerts-contract-report
           path: .scratch/plugin-sdk/alerts-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-go'
         with:
           name: go-connector-contract-report
           path: .scratch/plugin-sdk/static-source-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-go'
         with:
           name: go-ingestion-contract-report
           path: .scratch/plugin-sdk/hash-embedder-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-go'
         with:
           name: go-retrieval-contract-report
           path: .scratch/plugin-sdk/fusion-retriever-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-go'
         with:
           name: rss-contract-report
           path: .scratch/plugin-sdk/rss-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-go'
         with:
           name: x-list-contract-report
           path: .scratch/plugin-sdk/x-list-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-go'
         with:
           name: m365-mail-contract-report
           path: .scratch/plugin-sdk/m365-mail-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-go'
         with:
           name: hosted-embedding-contract-reports
           path: .scratch/plugin-sdk/hosted-embed/hosted-embed-*-contract-report.json
           include-hidden-files: true
           if-no-files-found: warn
       # The public contracts this commit checked.
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'contracts'
         with:
           name: contracts
           path: |
             contracts/http/v0/openapi.yaml
             contracts/shared/v0/manifest.schema.json
           if-no-files-found: warn
+  # Keep the public check name; a skipped or canceled group must never pass it.
+  check:
+    if: always()
+    needs: [check-group]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: test '${{ needs.check-group.result }}' = 'success'
   # Fast signal on the PostgreSQL adapters (THE-699): a bare migrated database, no other
   # dependency. It proves the suite needs no state left by acceptance scenarios.
   adapter-postgres:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: make adapter-postgres args=-v
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: adapter-postgres
@@ -205,33 +245,33 @@ jobs:
       matrix:
         part: [core, monitoring, plugins, connectors, demo]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         id: python
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: contracts/http/v0/checks/requirements.txt
       # The pinned E5 model and tokenizer; scripts/prepare_*.py check them by digest after a restore.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             .scratch/e5-model
             .scratch/tokenizer
           key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'plugins/core-ingest/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
       - if: matrix.part == 'demo'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: quivr-search/package-lock.json
       - if: matrix.part == 'demo'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('quivr-search/package-lock.json') }}
@@ -245,7 +285,7 @@ jobs:
         env:
           # A missing base (including a first push) runs lifecycle by default.
           QUIVR_VERIFY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         id: verification-artifact
         if: always()
         with:
@@ -307,14 +347,48 @@ jobs:
       # Failed tests with their error, slowest tests and step timings on the run page (THE-755).
       - if: always()
         run: python3 scripts/ci_summary.py "${{ steps.verification-artifact.outputs.artifact-url }}"
+  # Schema rollback proof, independent of release/image publication (THE-1051).
+  migration-compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        id: python
+        with:
+          python-version: '3.12'
+      - run: pip install -r contracts/http/v0/checks/requirements.txt
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .scratch/e5-model
+            .scratch/tokenizer
+          key: models-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ hashFiles('third_party/e5/model-lock.json', 'plugins/core-ingest/profile.json', 'third_party/tokenizer/requirements-linux-x86_64.txt') }}
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/julia*
+      - run: make migration-compatibility args='--base ${{ github.event.pull_request.base.sha || github.event.before }}'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: migration-compatibility
+          include-hidden-files: true
+          path: |
+            .scratch/quivr-compatibility-*/report.json
+            .scratch/quivr-compatibility-*/*.log
+          if-no-files-found: warn
   vulnerabilities:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
@@ -327,12 +401,12 @@ jobs:
   # The one check to require: green only when every job above is green.
   verify:
     if: always()
-    needs: [check, adapter-postgres, part, vulnerabilities]
+    needs: [check, adapter-postgres, part, migration-compatibility, vulnerabilities]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
         run: |
-          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, vulnerabilities: ${{ needs.vulnerabilities.result }}"
+          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, migration-compatibility: ${{ needs.migration-compatibility.result }}, vulnerabilities: ${{ needs.vulnerabilities.result }}"
           exit 1
-      - run: echo "check, adapter-postgres, vulnerabilities and every verification part passed"
+      - run: echo "check, adapter-postgres, migration-compatibility, vulnerabilities and every verification part passed"
