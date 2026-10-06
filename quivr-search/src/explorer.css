@@ -333,8 +333,14 @@
   border-radius: var(--ex-radius);
   background: var(--panel);
 }
+/* Focus lands on the column when a cleared facet leaves no value: shown
+   to the keyboard, not to the pointer. */
 .facets:focus {
   outline: none;
+}
+.facets:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .facets[data-stale] .facet {
   opacity: 0.55;
