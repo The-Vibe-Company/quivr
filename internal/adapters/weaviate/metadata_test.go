@@ -5,6 +5,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,8 @@ func TestMetadataFilterBeforeRankingInEveryMode(t *testing.T) {
 		for i := range labels {
 			labels[i] = fmt.Sprintf("label-%d", i)
 		}
+		labels[0] = ""
+		labels[1] = strings.Repeat("x", 201)
 		v := content.Version{ID: seg.VersionID, Provenance: map[string]any{"urgency": 2.0, "urgent": true, "labels": labels}, Extensions: content.Extensions{"quivr.metadata": {SchemaVersion: "1", Data: map[string]any{"language": language, "tags": []any{"sea \"weather\"", "science"}, "published_at": "2026-10-01T12:30:00Z"}}}}
 		if err := f.store.Publish(f.ctx, g, f.org, f.corpusID, "source", v, seg); err != nil {
 			t.Fatal(err)

@@ -114,24 +114,49 @@ func TestParityWithTheBuiltInConnector(t *testing.T) {
 				if err != nil {
 					t.Fatalf("step %d: %v", i, err)
 				}
-				// A legacy checkpoint may spend a page on the one-time
-				// metadata backfill, changing pagination boundaries.
-				if step.CheckpointIn == "null" && page.More != step.More {
-					t.Fatalf("step %d: more %v, built-in more %v", i, page.More, step.More)
-				}
-				compareHistoricalItems(t, name, i, page.Items, fixtures, step.Items, step.CheckpointIn)
-				// Legacy checkpoints can paginate a one-time metadata backfill
-				// differently from the frozen built-in sequence. The initial
-				// checkpoint remains a full wire assertion; cutover below asserts
-				// the legacy replay and its settled checkpoint directly.
-				gotCheckpoint := string(cp(page))
-				if step.CheckpointIn == "null" && !sameCheckpointExceptRevisions(gotCheckpoint, step.Checkpoint) {
-					t.Fatalf("step %d checkpoint:\n got %s\nwant %s", i, gotCheckpoint, step.Checkpoint)
+				expected := expectedRecordKeys(t, step.Items)
+				observed := map[string]bool{}
+				for pageNumber := 0; ; pageNumber++ {
+					// A legacy checkpoint may spend pages on the one-time
+					// metadata backfill, changing pagination boundaries. Keep
+					// following that returned checkpoint until this fixture step's
+					// literal records have all been observed.
+					if pageNumber == 0 && step.CheckpointIn == "null" && page.More != step.More {
+						t.Fatalf("step %d: more %v, built-in more %v", i, page.More, step.More)
+					}
+					for key := range compareHistoricalItems(t, name, i, page.Items, fixtures, step.Items, step.CheckpointIn) {
+						observed[key] = true
+					}
+					if missing := missingRecordKeys(expected, observed); len(missing) == 0 {
+						// Legacy checkpoints can paginate a one-time metadata
+						// backfill differently from the frozen built-in sequence.
+						// The initial checkpoint remains a full wire assertion;
+						// cutover below asserts the settled legacy checkpoint.
+						if pageNumber == 0 && step.CheckpointIn == "null" {
+							gotCheckpoint := string(cp(page))
+							if !sameCheckpointExceptRevisions(gotCheckpoint, step.Checkpoint) {
+								t.Fatalf("step %d checkpoint:\n got %s\nwant %s", i, gotCheckpoint, step.Checkpoint)
+							}
+						}
+						break
+					}
+					if !page.More {
+						t.Fatalf("step %d missing expected records after page %d: %v", i, pageNumber, missingRecordKeys(expected, observed))
+					}
+					if pageNumber+1 >= maxParityPages {
+						t.Fatalf("step %d did not cover expected records within %d pages: %v", i, maxParityPages, missingRecordKeys(expected, observed))
+					}
+					page, err = feed{}.Fetch(context.Background(), request(t, allowPrivate, cfg(srv.URL+"/feed"), "", cp(page), step.Now))
+					if err != nil {
+						t.Fatalf("step %d backfill page %d: %v", i, pageNumber+1, err)
+					}
 				}
 			}
 		})
 	}
 }
+
+const maxParityPages = maxFeedItems/itemsPerPage + 2
 
 // Cutover: an instance advanced by the built-in connector (its checkpoint
 // after the first poll) continues on the plugin. The first plugin poll
@@ -196,9 +221,9 @@ func historicalFixtureItems(t *testing.T, steps []goldenStep) map[string][]json.
 	return items
 }
 
-func compareHistoricalItems(t *testing.T, name string, step int, got []quivrplugin.Item, fixtures map[string][]json.RawMessage, expected []json.RawMessage, checkpointIn string) {
+func expectedRecordKeys(t *testing.T, expected []json.RawMessage) map[string]bool {
 	t.Helper()
-	current := map[string]bool{}
+	keys := map[string]bool{}
 	for _, raw := range expected {
 		var item struct {
 			RecordKey string `json:"record_key"`
@@ -206,12 +231,43 @@ func compareHistoricalItems(t *testing.T, name string, step int, got []quivrplug
 		if err := json.Unmarshal(raw, &item); err != nil {
 			t.Fatal(err)
 		}
-		current[item.RecordKey] = true
+		keys[item.RecordKey] = true
+	}
+	return keys
+}
+
+func missingRecordKeys(expected, observed map[string]bool) []string {
+	var missing []string
+	for key := range expected {
+		if !observed[key] {
+			missing = append(missing, key)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+func compareHistoricalItems(t *testing.T, name string, step int, got []quivrplugin.Item, fixtures map[string][]json.RawMessage, expected []json.RawMessage, checkpointIn string) map[string]bool {
+	t.Helper()
+	current := map[string][]json.RawMessage{}
+	for _, raw := range expected {
+		var item struct {
+			RecordKey string `json:"record_key"`
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			t.Fatal(err)
+		}
+		current[item.RecordKey] = append(current[item.RecordKey], raw)
 	}
 	seen := checkpointKeys(checkpointIn)
+	matchedExpected := map[string]bool{}
 	for j, item := range got {
-		if !current[item.RecordKey] && !seen[rssCheckpointKey(item.RecordKey)] {
+		currentPayloads, isExpected := current[item.RecordKey]
+		if !isExpected && !seen[rssCheckpointKey(item.RecordKey)] {
 			t.Fatalf("step %d unexpected item %q", step, item.RecordKey)
+		}
+		if isExpected {
+			matchedExpected[item.RecordKey] = true
 		}
 		if _, ok := item.Extensions[quivrplugin.CommonMetadataNamespace]; !ok {
 			t.Fatalf("step %d item %d %q has no common metadata", step, j, item.RecordKey)
@@ -224,7 +280,13 @@ func compareHistoricalItems(t *testing.T, name string, step int, got []quivrplug
 			t.Fatal(err)
 		}
 		matched := false
-		for _, wantRaw := range fixtures[item.RecordKey] {
+		candidates := fixtures[item.RecordKey]
+		if isExpected {
+			// Current-step records must match that step's literal payload;
+			// only old replay keys may use a prior fixture variant.
+			candidates = currentPayloads
+		}
+		for _, wantRaw := range candidates {
 			var gotValue, wantValue map[string]any
 			if err := json.Unmarshal(gotRaw, &gotValue); err != nil {
 				t.Fatal(err)
@@ -254,6 +316,7 @@ func compareHistoricalItems(t *testing.T, name string, step int, got []quivrplug
 			t.Fatalf("step %d item %d %q did not match any historical payload", step, j, item.RecordKey)
 		}
 	}
+	return matchedExpected
 }
 
 func rssCheckpointKey(recordKey string) string {

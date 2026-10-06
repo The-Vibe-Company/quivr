@@ -214,15 +214,19 @@ func FilterValue(v any, typ string, array bool) (any, bool) {
 		if !ok || len(items) == 0 {
 			return nil, false
 		}
-		values := make([]string, len(items))
-		for i, item := range items {
+		values := make([]string, 0, len(items))
+		for _, item := range items {
 			s, ok := item.(string)
-			if !ok || !validScalar(s) {
+			if !ok {
 				return nil, false
 			}
-			values[i] = s
+			// Values outside the predicate domain cannot match, but they
+			// must not hide other queryable members of a declared array.
+			if validScalar(s) {
+				values = append(values, s)
+			}
 		}
-		return values, true
+		return values, len(values) > 0
 	}
 	return nil, false
 }

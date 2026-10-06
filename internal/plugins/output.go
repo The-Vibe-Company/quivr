@@ -191,9 +191,11 @@ type declaredExtensions struct {
 func newDeclaredExtensions(m *Manifest) *declaredExtensions {
 	d := &declaredExtensions{schemas: map[string]map[string]*jsonschema.Schema{}, errs: map[string]error{}}
 	schema, err := contracts.CompileCommonMetadata()
-	d.schemas[content.CommonMetadataNamespace] = map[string]*jsonschema.Schema{content.CommonMetadataVersion: schema}
+	d.schemas[content.CommonMetadataNamespace] = map[string]*jsonschema.Schema{}
 	if err != nil {
 		d.errs[content.CommonMetadataNamespace+"\x00"+content.CommonMetadataVersion] = err
+	} else {
+		d.schemas[content.CommonMetadataNamespace][content.CommonMetadataVersion] = schema
 	}
 	if m == nil {
 		return d
