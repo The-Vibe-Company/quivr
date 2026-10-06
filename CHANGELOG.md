@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.0.0-alpha.4](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.3...v2.0.0-alpha.4) (2026-10-06)
+
+
+### Features
+
+* **newsml-g2:** normalize IPTC text news items ([#3778](https://github.com/The-Vibe-Company/quivr/issues/3778)) ([7f3f669](https://github.com/The-Vibe-Company/quivr/commit/7f3f6695a06ae3e06b4a8ce62bf98b7742be27f7))
+
+
+### Bug Fixes
+
+* **images:** bound signing and verify large SBOMs without log stalls ([#3783](https://github.com/The-Vibe-Company/quivr/issues/3783)) ([4e4b921](https://github.com/The-Vibe-Company/quivr/commit/4e4b92161ae58b21eede6154f6d3e59f454469ce))
+* **ops:** restore safe configuration diagnostics and UTC logs ([#3779](https://github.com/The-Vibe-Company/quivr/issues/3779)) ([daa2087](https://github.com/The-Vibe-Company/quivr/commit/daa2087f7ed8450b819693bdd659e9413229f643))
+
 ## [2.0.0-alpha.3](https://github.com/The-Vibe-Company/quivr/compare/v2.0.0-alpha.2...v2.0.0-alpha.3) (2026-10-06)
 
 
