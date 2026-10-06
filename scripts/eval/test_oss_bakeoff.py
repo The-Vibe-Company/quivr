@@ -60,8 +60,9 @@ class Campaign(unittest.TestCase):
     def test_gemma_load_checks_pinned_licence_and_disables_unused_encoders(self):
         loader = mock.Mock()
         card = mock.Mock()
+        download = mock.Mock(return_value='/cache/README.md')
         torch = types.SimpleNamespace(float32='float32', bfloat16='bfloat16')
-        with mock.patch.dict('sys.modules', {'huggingface_hub': types.SimpleNamespace(ModelCard=card),
+        with mock.patch.dict('sys.modules', {'huggingface_hub': types.SimpleNamespace(ModelCard=card, hf_hub_download=download),
                 'sentence_transformers': types.SimpleNamespace(SentenceTransformer=loader), 'torch': torch}):
             for licence in ('gemma', None, 'cc-by-4.0'):
                 card.load.return_value.data.license = licence
@@ -71,7 +72,9 @@ class Campaign(unittest.TestCase):
             for hardware, device, dtype in [('cpu', 'cpu', 'float32'), ('L4', 'cuda', 'bfloat16')]:
                 card.load.return_value.data.license = 'apache-2.0'
                 embeddinggemma_server.load_model(hardware)
-                card.load.assert_called_with('google/embeddinggemma-2', revision='914f7f89142e33e77833254d9c9b90c3cef7303b')
+                # ModelCard.load takes no revision: the pinned README is read by revision.
+                download.assert_called_with('google/embeddinggemma-2', 'README.md', revision='914f7f89142e33e77833254d9c9b90c3cef7303b')
+                card.load.assert_called_with('/cache/README.md')
                 self.assertEqual(loader.call_args.kwargs['config_kwargs'], {'vision_config': None, 'audio_config': None})
                 self.assertEqual(loader.call_args.kwargs['device'], device)
                 self.assertEqual(loader.call_args.kwargs['model_kwargs'], {'torch_dtype': dtype})
