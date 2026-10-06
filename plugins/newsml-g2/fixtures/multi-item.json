@@ -1,0 +1,7 @@
+{
+  "description": "Synthetic message with multiple items and multiple headlines.",
+  "input": {
+    "path": "multi-item.xml",
+    "media_type": "application/vnd.iptc.g2.newsmessage+xml"
+  }
+}

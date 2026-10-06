@@ -1,5 +1,5 @@
 id: newsml-g2
-version: 0.1.0
+version: 0.1.1
 description: Normalizes IPTC NewsML-G2 text news items and preserves their metadata.
 compatibility:
   engine: ">=0.1.0 <0.3.0"
@@ -45,6 +45,7 @@ extensions:
       type: object
       additionalProperties: false
       properties:
+        truncated: {type: boolean}
         guid: {type: string}
         version: {type: string}
         language: {type: string}
@@ -65,21 +66,24 @@ extensions:
       additionalProperties: false
       required: [root]
       properties:
+        truncated: {type: boolean}
         root:
           type: object
-          description: Complete element tree with expanded names, attributes, text, tail and ordered children. The source Blob also retains the original XML bytes.
+          description: Element tree with expanded names, attributes, text, tail and ordered children; empty when truncated is true. The source Blob retains the original XML bytes.
   newsml-g2.headers:
     "1":
       type: object
       additionalProperties: false
       required: [paths]
       properties:
+        truncated: {type: boolean}
         paths: {type: object, additionalProperties: {type: array, items: {type: object}}}
   newsml-g2.text:
     "1":
       type: object
       additionalProperties: false
       properties:
+        truncated: {type: boolean}
         language: {type: string}
         dir: {type: string}
 run:

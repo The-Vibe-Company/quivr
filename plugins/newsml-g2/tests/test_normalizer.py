@@ -71,9 +71,9 @@ class Normalizer(unittest.TestCase):
                 })
                 self.assertEqual(response.extensions['newsml-g2.document'].data['first_created'], first)
 
-    def test_common_metadata_bounds_keep_original_values(self):
+    def test_common_metadata_bounds_keep_small_source_values(self):
         # The shared schema cannot accept the unbounded source strings/arrays;
-        # the invocation boundary owns bounding while retaining source detail.
+        # the invocation boundary owns bounding with marked source metadata loss.
         name = 'é' * 201
         keywords = ''.join(f'<keyword>{i:02d}-{name}</keyword>' for i in range(51))
         xml = f'<newsItem xmlns="{NAR}"><itemMeta><provider uri=" " qcode="{name}"/></itemMeta><contentMeta><creator><name>{name}</name></creator><creator><name>{name}extra</name></creator><creator uri=" " qcode="author:1"/><creator>Writer<name/></creator><keyword> </keyword>{keywords}<subject uri=" " qcode=" "><name/><name>Topic</name></subject><subject/><located qcode="place:1"><name> </name></located><located/></contentMeta></newsItem>'
@@ -85,7 +85,8 @@ class Normalizer(unittest.TestCase):
             'tags': [f'{i:02d}-' + 'é' * 197 for i in range(50)],
         })
         self.assertEqual(response.extensions['newsml-g2.document'].data['provider'][0]['qcode'], name)
-        self.assertEqual(len(response.extensions['newsml-g2.document'].data['keywords']), 52)
+        self.assertTrue(response.extensions['newsml-g2.document'].data['truncated'])
+        self.assertNotIn('keywords', response.extensions['newsml-g2.document'].data)
 
     def test_single_item_message_keeps_wrapper_and_selected_headers(self):
         xml = f'<newsMessage xmlns="{NAR}" xmlns:x="urn:example:wire"><header><x:delivery id="a">first</x:delivery><x:delivery id="b">second</x:delivery></header><itemSet><newsItem guid="urn:example:1" version="2" xml:lang="ar"><contentMeta><headline>خبر</headline></contentMeta></newsItem></itemSet></newsMessage>'
@@ -109,7 +110,7 @@ class Normalizer(unittest.TestCase):
             ('<!DOCTYPE newsItem><newsItem/>', 'unsafe_xml'),
             ('<newsItem/>', 'unsupported_document'),
             (f'<newsMessage xmlns="{NAR}"><itemSet/></newsMessage>', 'item_count'),
-            (f'<newsMessage xmlns="{NAR}"><itemSet><newsItem/><newsItem/></itemSet></newsMessage>', 'item_count'),
+            (f'<newsMessage xmlns="{NAR}"><itemSet><newsItem/><packageItem/></itemSet></newsMessage>', 'item_count'),
         ]
         for xml, code in cases:
             with self.subTest(code=code, xml=xml):
@@ -122,7 +123,6 @@ class Normalizer(unittest.TestCase):
             (f'<newsItem xmlns="{NAR}">' + '<x>' * 65 + '</x>' * 65 + '</newsItem>', {}, 'xml_too_complex'),
             (f'<newsItem xmlns="{NAR}">' + '<x/>' * 10000 + '</newsItem>', {}, 'xml_too_complex'),
             (f'<newsItem xmlns="{NAR}"><contentSet><inlineXML><p xmlns="">' + 'ع' * 600 + '</p></inlineXML></contentSet></newsItem>', {'max_text_bytes': 1024}, 'text_too_large'),
-            (f'<newsItem xmlns="{NAR}"><itemMeta><x a="' + '\\' * 700000 + '"/></itemMeta></newsItem>', {'header_paths': ['itemMeta/x']}, 'manifest_too_large'),
         ]:
             with self.subTest(code=code):
                 reply = self.invoke(xml, config)

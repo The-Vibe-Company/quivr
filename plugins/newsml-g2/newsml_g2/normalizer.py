@@ -1,4 +1,4 @@
-"""Map one NewsML-G2 item without changing the submitted record identity."""
+"""Map NewsML-G2 items without changing the submitted record identity."""
 from __future__ import annotations
 
 import io
@@ -20,6 +20,11 @@ XML_LANG = '{http://www.w3.org/XML/1998/namespace}lang'
 MAX_NODES = 10000
 MAX_DEPTH = 64
 MAX_TEXT_PARTS = 64
+MAX_EXTENSIONS_BYTES = 65536
+# Three owned namespaces plus shared metadata fit below the engine budget.
+MAX_NAMESPACE_BYTES = 12 * 1024
+MAX_COMMON_BYTES = 24 * 1024
+MAX_CONTEXT_BYTES = 256
 plugin = Plugin(Path(__file__).resolve().parent.parent / 'quivr-plugin.yaml')
 
 
@@ -174,6 +179,29 @@ def _extension(data):
     return ExtensionEntry(schema_version='1', data=data)
 
 
+def _json_bytes(value):
+    """Match Go encoding/json's UTF-8 size, including its default HTML escapes."""
+    encoded = json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    for char in ('&', '<', '>', '\u2028', '\u2029'):
+        encoded = encoded.replace(char, f'\\u{ord(char):04x}')
+    return len(encoded.encode('utf-8'))
+
+
+def _bound_fields(data, budget, *, marker=False):
+    """Keep a deterministic prefix of fields; source_type is required metadata."""
+    if _json_bytes(data) <= budget:
+        return False
+    keys = list(data)
+    if marker:
+        data['truncated'] = True
+    for key in reversed(keys):
+        if _json_bytes(data) <= budget:
+            break
+        if key != 'source_type':
+            del data[key]
+    return True
+
+
 @plugin.normalizer
 def normalize(invocation: Invocation) -> NormalizerResponse:
     source = invocation.request.input
@@ -181,12 +209,11 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
         raise TerminalError('input_too_large', 'XML exceeds max_input_bytes; submit a smaller item')
     root = _parse(invocation.read_input())
     if root.tag == _tag('newsItem'):
-        item = root
+        items = [root]
     elif root.tag == _tag('newsMessage'):
         items = root.findall('itemSet/newsItem', {'': NAR})
-        if len(items) != 1 or len(root.findall('itemSet/*', {'': NAR})) != 1:
-            raise TerminalError('item_count', 'Submit exactly one newsItem per Blob; split multi-item messages before submission')
-        item = items[0]
+        if not items or len(items) != len(root.findall('itemSet/*', {'': NAR})):
+            raise TerminalError('item_count', 'A message must contain one or more newsItems and no other item types')
     else:
         raise TerminalError('unsupported_document', 'Expected a NewsML-G2 namespaced newsItem or newsMessage')
 
@@ -204,28 +231,44 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
     visit(root, {})
 
     candidates = []
-    for name, role in [('headline', 'title'), ('slugline', 'body')]:
-        for n, node in enumerate(item.findall(f'contentMeta/{name}', {'': NAR}), 1):
+    languages = []
+    title_found = False
+    for index, item in enumerate(items, 1):
+        item_candidates = []
+        # Keep bare/single-item keys stable; prefix multi-item keys by position.
+        prefix = f'item-{index}-' if len(items) > 1 else ''
+        names = {_tag(name): name for name in ('headline', 'slugline')}
+        counts = dict.fromkeys(names.values(), 0)
+        for node in item.findall('contentMeta/*', {'': NAR}):
+            if node.tag not in names:
+                continue
+            name = names[node.tag]
+            counts[name] += 1
             if text := _text(node):
-                candidates.append((f'{name}-{n}', role, text, contexts[node]))
-    number = 0
-    for inline in item.findall('contentSet/inlineXML', {'': NAR}):
-        for node in inline.iter():
-            if node.tag in {'p', '{http://www.w3.org/1999/xhtml}p',
-                            '{http://iptc.org/std/NITF/2006-10-18/}p'} and (text := _text(node)):
-                number += 1
-                candidates.append((f'paragraph-{number}', 'body', text, contexts[node]))
-    language = contexts[item].get('language')
-    if not language:
-        language_node = item.find('contentMeta/language', {'': NAR})
-        language = language_node.attrib.get('tag') if language_node is not None else None
-    if not language:
-        language = next((context.get('language') for _, _, _, context in candidates
-                         if context.get('language')), None)
-    # A declared content language is also the fallback for untagged text Parts.
-    if language:
-        for _, _, _, context in candidates:
-            context.setdefault('language', language)
+                role = 'title' if name == 'headline' and not title_found else 'body'
+                title_found = title_found or role == 'title'
+                item_candidates.append((f'{prefix}{name}-{counts[name]}', role, text, contexts[node]))
+        number = 0
+        for inline in item.findall('contentSet/inlineXML', {'': NAR}):
+            for node in inline.iter():
+                if node.tag in {'p', '{http://www.w3.org/1999/xhtml}p',
+                                '{http://iptc.org/std/NITF/2006-10-18/}p'} and (text := _text(node)):
+                    number += 1
+                    item_candidates.append((f'{prefix}paragraph-{number}', 'body', text, contexts[node]))
+        language = contexts[item].get('language')
+        if not language:
+            language_node = item.find('contentMeta/language', {'': NAR})
+            language = language_node.attrib.get('tag') if language_node is not None else None
+        if not language:
+            language = next((context.get('language') for _, _, _, context in item_candidates
+                             if context.get('language')), None)
+        if language:
+            for _, _, _, context in item_candidates:
+                context.setdefault('language', language)
+        languages.append(language)
+        candidates.extend(item_candidates)
+    # The Version's advisory metadata describes its first item.
+    item, language = items[0], languages[0]
 
     # Merge only adjacent bodies with the same language/direction. Never mix title
     # semantics or languages just to fit the engine's indexing limit.
@@ -248,7 +291,10 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
             key, role, _, context = run[keep - 1]
             candidates.append((key, role, '\n\n'.join(entry[2] for entry in run[keep - 1:]), context))
     if sum(len(text.encode('utf-8')) for _, _, text, _ in candidates) > invocation.configuration.get('max_text_bytes', 262144):
-        raise TerminalError('text_too_large', 'Text exceeds max_text_bytes; source metadata was not truncated')
+        raise TerminalError('text_too_large', 'Text exceeds max_text_bytes; submit a smaller item')
+    context_truncated = False
+    for _, _, _, context in candidates:
+        context_truncated = _bound_fields(context, MAX_CONTEXT_BYTES, marker=True) or context_truncated
     parts = [Part(key=key, role=role, content=TextContent(text=text),
                   extensions={'newsml-g2.text': _extension(context)} if context else None)
              for key, role, text, context in candidates]
@@ -261,6 +307,24 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
     if paths := invocation.configuration.get('header_paths'):
         extensions['newsml-g2.headers'] = _extension(_selected_headers(root, paths))
     warnings = []
+    if _json_bytes({key: value.to_dict() for key, value in extensions.items()}) > MAX_EXTENSIONS_BYTES:
+        # Omit oversize trees as a whole, keeping required schema fields and a
+        # marker. Small trees and metadata remain unchanged. The raw Blob is
+        # always the complete source, independent of these advisory views.
+        for namespace, entry in extensions.items():
+            budget = MAX_COMMON_BYTES if namespace == 'quivr.metadata' else MAX_NAMESPACE_BYTES
+            if _json_bytes(entry.to_dict()) <= budget:
+                continue
+            if namespace == 'newsml-g2.xml':
+                entry.data = {'root': {}, 'truncated': True}
+            elif namespace == 'newsml-g2.headers':
+                entry.data = {'paths': {}, 'truncated': True}
+            else:
+                _bound_fields(entry.data, budget - 128,
+                              marker=namespace != 'quivr.metadata')
+        context_truncated = True
+    if context_truncated:
+        warnings.append(ResponseWarning(code='extensions_truncated', message='Oversize advisory metadata was omitted within the extension JSON budget; the source Blob retains the complete XML'))
     if merged:
         warnings.append(ResponseWarning(code='paragraphs_grouped', message='Adjacent body Parts were grouped within 64 text Parts'))
     if not candidates:
@@ -269,5 +333,5 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
                                   language=language or None,
                                   warnings=warnings or None)
     if len(json.dumps(response.to_dict(), ensure_ascii=False, separators=(',', ':')).encode()) > invocation.manifest.max_response_bytes:
-        raise TerminalError('manifest_too_large', 'Normalized output exceeds the declared response byte limit; source metadata was not truncated')
+        raise TerminalError('manifest_too_large', 'Normalized output exceeds the declared response byte limit')
     return response
