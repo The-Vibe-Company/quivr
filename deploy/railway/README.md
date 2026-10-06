@@ -82,6 +82,18 @@ rebuild each earlier Corpus once with the operator key (later ones start on core
 Until then search works in every mode and new articles are searchable by keyword at once;
 their vectors attach at the rebuild, which re-embeds with the same model, so results hold.
 
+## EmbeddingGemma 2 on Modal (selected demo default)
+
+The coordinator deploys a pinned text-only `google/embeddinggemma-2` service on
+Modal L4 and selects it with `QUIVR_DEMO_EMBEDDING=gemma` on api and worker.
+`EMBED_URL` is the deployed HTTPS origin; `EMBED_API_KEY` is its bearer secret.
+`hosted.embed` uses 768 dimensions and Gemma's search/document prefixes.
+Follow the [Modal rollout guide](../modal/README.md) to create the secret,
+run `modal deploy`, rebuild every Corpus, check coverage/search and roll back
+with `QUIVR_DEMO_EMBEDDING=cohere` and retained Foundry endpoint/key variables.
+Model changes need a maintenance window while old generations rebuild. Real GPU latency/throughput remain for coordinator
+validation; this change's measurements use fake inference only.
+
 ## Hosted Azure embeddings for every source (optional)
 
 Set `QUIVR_DEMO_HOSTED_EMBED=1`, `AZURE_FOUNDRY_ENDPOINT` (Foundry resource root)
