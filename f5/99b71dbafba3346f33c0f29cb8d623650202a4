@@ -1,0 +1,41 @@
+docs-site/plugins/write-a-connector.mdx
+  s_54b80c92daa9cb::t_0d0a79fcaaa67d 11
+docs-site/plugins/write-a-retrieval-plugin.mdx
+  s_54b80c92daa9cb::t_66cb19b1e532f2 11
+docs-site/plugins/write-an-ingestion-plugin.mdx
+  s_54b80c92daa9cb::t_2e4f740a5c2f40 11
+plugins/hosted-embed/go.mod
+  s_54b80c92daa9cb::t_d5e0cdb33d8d13 20
+plugins/hosted-embed/go.sum
+  s_54b80c92daa9cb::t_a4bcacb864d68e 34-35
+plugins/x-list/go.mod
+  s_bbcd7c924a5187::t_fb06ced68cfe41 20
+plugins/x-list/go.sum
+  s_bbcd7c924a5187::t_f12b67e78a590f 34-35
+sdks/go/README.md
+  s_54b80c92daa9cb::t_0a92bf83744f55 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f599b71dbafba3346f33c0f29cb8d623650202a4",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    },
+    "s_bbcd7c924a5187": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a11030-cc9b-7993-895e-fab683832ebf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
