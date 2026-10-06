@@ -123,7 +123,7 @@ excluded = [
 
 # Maximum number of lines per page, in path order.
 [budgets]
-"deploy/modal/README.md" = 120
+"deploy/modal/README.md" = 100
 "conformance/README.md" = 125
 "docs/eval-private-working.md" = 90
 "docs/search-campaigns.md" = 172

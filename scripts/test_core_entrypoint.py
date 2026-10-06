@@ -183,7 +183,7 @@ class CoreEntrypointTest(unittest.TestCase):
         # Deployment mapping owns model identity, prompt bytes and opt-in selection.
         env = {**ENV, 'QUIVR_DEMO_EMBEDDING': 'gemma',
                'EMBED_URL': 'https://example--embeddings.modal.run/', 'EMBED_API_KEY': 'fixture-modal-token',
-               'QUIVR_DEMO_HOSTED_EMBED': '1', 'AZURE_FOUNDRY_KEY': 'unused-placeholder-key'}
+               'AZURE_FOUNDRY_KEY': 'unused-placeholder-key'}
         config = core_entrypoint.build_config(env)
         pin = next(p for p in config['plugins'] if p['manifest'] == '/tmp/hosted-embed/quivr-plugin.yaml')
         self.assertEqual(config['ingestion'], {'default': 'hosted.embed'})
@@ -206,13 +206,17 @@ class CoreEntrypointTest(unittest.TestCase):
         for selection, endpoint in [('typo', env['EMBED_URL']), ('gemma', ''),
                                     ('gemma', 'http://example--embeddings.modal.run'),
                                     ('gemma', 'https://user:pass@example--embeddings.modal.run'),
-                                    ('gemma', 'https://example--embeddings.modal.run/v1?key=value')]:
+                                    ('gemma', 'https://example--embeddings.modal.run/v1?key=value'),
+                                    ('gemma', 'https://bad host.modal.run'),
+                                    ('gemma', 'https://host.modal.run:not-a-port'),
+                                    ('gemma', 'https://host.modal.run:65536')]:
             with self.subTest(selection=selection, endpoint=endpoint):
                 with self.assertRaises(ValueError):
                     core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_EMBEDDING': selection,
                                                 'EMBED_URL': endpoint, 'EMBED_API_KEY': 'fixture-modal-token'})
-        with self.assertRaisesRegex(ValueError, 'EMBED_API_KEY'):
-            core_entrypoint.build_config({**env, 'EMBED_API_KEY': ' '})
+        for key in ('', ' ', 'has space', 'has\nnewline', 'non-ascii-é'):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'EMBED_API_KEY'):
+                core_entrypoint.build_config({**env, 'EMBED_API_KEY': key})
 
     def test_credential_key_is_passed_when_set(self):
         config = core_entrypoint.build_config({**ENV, 'QUIVR_CREDENTIAL_KEY': 'placeholder-credential-key'})

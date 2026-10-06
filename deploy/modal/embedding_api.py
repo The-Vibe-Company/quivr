@@ -117,13 +117,14 @@ def create_app(token, embed):
                 message = await receive()
                 if message['type'] == 'http.disconnect':
                     return
-                raw.extend(message.get('body', b''))
-                if len(raw) > MAX_BODY:
+                chunk = message.get('body', b'')
+                if len(raw) + len(chunk) > MAX_BODY:
                     raise InvalidRequest(None)
+                raw.extend(chunk)
                 if not message.get('more_body', False):
                     break
             texts = request_texts(json.loads(raw, object_pairs_hook=unique_members))
-        except (ValueError, UnicodeError) as exc:
+        except (ValueError, UnicodeError, RecursionError) as exc:
             await error(400, 'invalid_request', getattr(exc, 'param', None))
             return
         try:

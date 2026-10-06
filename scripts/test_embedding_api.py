@@ -59,7 +59,7 @@ class EmbeddingAPITest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(body['error']['param'], param)
                 inference.assert_not_called()
         for raw in (b'[]', b'null', b'{', b'{"model":"other","model":"google/embeddinggemma-2","input":"a"}',
-                    b'x' * (512 * 1024 + 1)):
+                    b'x' * (512 * 1024 + 1), b'[' * 10000 + b'0' + b']' * 10000):
             status, _, inference, _ = await self.request(raw=raw)
             self.assertEqual(status, 400)
             inference.assert_not_called()

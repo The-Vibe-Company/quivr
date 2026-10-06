@@ -90,8 +90,8 @@ Modal L4 and selects it with `QUIVR_DEMO_EMBEDDING=gemma` on api and worker.
 `hosted.embed` uses 768 dimensions and Gemma's search/document prefixes.
 Follow the [Modal rollout guide](../modal/README.md) to create the secret,
 run `modal deploy`, rebuild every Corpus, check coverage/search and roll back
-with `QUIVR_DEMO_EMBEDDING=cohere`. Model changes need a maintenance window while
-old generations rebuild. Real GPU latency/throughput remain for coordinator
+with `QUIVR_DEMO_EMBEDDING=cohere` and retained Foundry endpoint/key variables.
+Model changes need a maintenance window while old generations rebuild. Real GPU latency/throughput remain for coordinator
 validation; this change's measurements use fake inference only.
 
 ## Hosted Azure embeddings for every source (optional)

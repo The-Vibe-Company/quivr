@@ -1,6 +1,6 @@
 """Coordinator-deployed L4 embedding service. Importing this file never launches compute.
 
-Local SDK: modal==1.6.1. Deploy from the repository root; see deploy/railway/README.md.
+Local SDK: modal==1.6.1. Deploy from the repository root; see deploy/modal/README.md.
 EMBED_MIN_CONTAINERS=0 scales the GPU to zero; set a positive count for warm queries.
 """
 import os

@@ -112,13 +112,20 @@ def selected_hosted_configuration(env):
 
 def gemma_configuration(env):
     endpoint = env.get('EMBED_URL', '').strip().rstrip('/')
-    url = urlsplit(endpoint)
+    try:
+        url = urlsplit(endpoint)
+        port = url.port
+    except ValueError:
+        raise ValueError('EMBED_URL must be a valid HTTPS endpoint origin') from None
     if (url.scheme != 'https' or not url.hostname
+            or any(char.isspace() or ord(char) < 32 for char in endpoint)
+            or port == 0 or url.netloc.endswith(':')
             or url.username is not None or url.password is not None
             or url.path or url.query or url.fragment):
         raise ValueError('EMBED_URL must be an HTTPS endpoint origin without credentials, path, query or fragment')
-    if not env.get('EMBED_API_KEY', '').strip():
-        raise ValueError('Missing runtime variable: EMBED_API_KEY')
+    key = env.get('EMBED_API_KEY', '')
+    if not key or not key.isascii() or any(char.isspace() for char in key):
+        raise ValueError('EMBED_API_KEY must be a nonempty ASCII bearer token without whitespace')
     return {'format': 'openai', 'base_url': endpoint + '/v1', 'auth': 'bearer',
             'model': 'google/embeddinggemma-2', 'dimensions': 768,
             # The plugin revision field is bounded to 32 bytes; the image pins the full SHA.
