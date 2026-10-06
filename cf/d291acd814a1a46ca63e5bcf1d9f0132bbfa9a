@@ -1,0 +1,23 @@
+quivr-search/feeds.mjs
+  s_c21c70c5aa40f0::t_1131e5fd96c4ee 622
+  s_c21c70c5aa40f0::t_deecab78965433 617-621,623
+  s_c21c70c5aa40f0::t_5cd619bfccafab 576-583,596-601,605-607,609-616,624-625
+quivr-search/tests/feeds.test.mjs
+  s_c21c70c5aa40f0::t_342df4588b1a4f 260-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cfd291acd814a1a46ca63e5bcf1d9f0132bbfa9a",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}
