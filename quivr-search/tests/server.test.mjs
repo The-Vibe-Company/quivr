@@ -450,7 +450,7 @@ test("sources: suggestions, guarded discovery and creation, renaming, removal hi
 });
 
 test("source logos: an RSS source of the demo corpus only, raster images served from this origin", async (t) => {
-  const png = Buffer.from("89504e470d0a1a0a0000000d494844520000001000000010", "hex");
+  const png = Buffer.from("89504e470d0a1a0a0000000d494844520000004000000040", "hex");
   const hits = [];
   const site = http.createServer((req, res) => {
     hits.push(req.url);
@@ -503,6 +503,7 @@ test("source logos: an RSS source of the demo corpus only, raster images served 
   assert.equal(logo.status, 200);
   assert.equal(logo.headers.get("content-type"), "image/png");
   assert.equal(logo.headers.get("x-content-type-options"), "nosniff");
+  assert.match(logo.headers.get("content-security-policy"), /default-src 'none'.*sandbox.*frame-ancestors 'none'/);
   assert.match(logo.headers.get("cache-control"), /^private/);
   assert.deepEqual(Buffer.from(await logo.arrayBuffer()), png);
   // A second request is served from the cache, without fetching the site again.
