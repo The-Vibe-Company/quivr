@@ -95,6 +95,9 @@ def aggregate(report, sets):
         status = 'failed'
     output = {'status': status, 'verdict': report.get('verdict') if report.get('verdict') in ('better', 'cheaper', 'rejected') else None,
               'gates': {}, 'aggregate_sets': {}, 'evidence': []}
+    if status == 'failed':
+        output['verdict'] = None
+        output['reason'] = modal_search.INCOMPLETE_MEASUREMENT
     for name in ('quality', 'no_loss', 'latency', 'price'):
         gate = report.get('gates', {}).get(name, {})
         output['gates'][name] = {'passed': gate.get('passed') is True}
@@ -160,15 +163,23 @@ class Loop:
 
     def perform(self, trial, value):
         self.store.renew_owner(self.name, self.owner)
+        result = None
+        def publish(report):
+            nonlocal result
+            saved = {**value, 'report': aggregate(report, self.spec['policy']['sets'])}
+            self.store.trial(self.name, self.owner, trial.number, saved)
+            result = saved
         try:
-            report = aggregate(self.measure(value['config']), self.spec['policy']['sets'])
+            report = self.measure(value['config'], on_report=publish)
+            if result is None:
+                publish(report)  # No app was admitted, or an external transport returned directly.
         except (control_store.LeaseLost, control_store.Unavailable, control_store.Contention,
                 campaign_store.CleanupPending, network_recovery.Outage):
             raise
         except Exception:
-            report = aggregate({'status': 'failed'}, self.spec['policy']['sets'])
-        result = {**value, 'report': report}
-        self.store.trial(self.name, self.owner, trial.number, result)
+            if result is not None:
+                raise  # Cleanup cannot overwrite an already published measured report.
+            publish({'status': 'failed'})
         return trial, result
 
     def tick(self, limit=None):
@@ -227,6 +238,8 @@ class Loop:
                     self.complete(trial, value)
         result = self.store.availability(self.name)
         result['waiting'] = any(value['report']['status'] == 'leased' for _, value in [f.result() for f in futures])
+        result['cleanup_pending'] = any(r['status'] != 'closed'
+                                       for r in self.store.snapshot(self.name)['resources'].values())
         return result
 
 
@@ -570,6 +583,8 @@ def _supervise(store, name, study, outbox, *, once=False, poll_seconds=15, stop_
                 advance_confirmations(store, name, owner, study, confirmation_adapter, compute=compute)
                 while True:
                     result = loop.tick()
+                    if result.get('cleanup_pending'):
+                        break  # Drain exploration compute before confirmation or another trial.
                     import campaign_promotion
                     advance_confirmations(store, name, owner, study, confirmation_adapter, compute=compute)
                     import campaign_reporting

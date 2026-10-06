@@ -1,5 +1,6 @@
 """Tracked Modal adapter. Creation intents survive lost app-ID acknowledgements."""
 import json
+import logging
 import pathlib
 import subprocess
 import sys
@@ -8,6 +9,8 @@ import time
 import campaign_store
 import modal_search
 import network_recovery
+
+log = logging.getLogger(__name__)
 
 
 def unreachable(error):
@@ -59,6 +62,17 @@ class ModalCompute:
                 capture_output=True, timeout=30, check=True), unreachable)
         except network_recovery.Outage:
             raise
+        except subprocess.CalledProcessError as error:
+            message = error.stderr or b''
+            if isinstance(message, bytes):
+                message = message.decode('utf-8', errors='replace')
+            _, summary = modal_search.failure_summary(RuntimeError(message))
+            log.warning('Modal stop failed: %s', summary)
+            # Detached apps can finish between the first listing and stop.
+            # A failed command is acknowledged only by a fresh terminal listing.
+            if not self.running(app_id):
+                return
+            raise campaign_store.CleanupPending('Modal stop acknowledgement unavailable') from None
         except Exception:
             raise campaign_store.CleanupPending('Modal stop acknowledgement unavailable') from None
         deadline = time.monotonic() + 30
@@ -74,10 +88,10 @@ class Measurement:
         self.outbox = pathlib.Path(outbox)
         self.compute = compute or ModalCompute()
 
-    def __call__(self, config):
+    def __call__(self, config, *, on_report=lambda report: None):
         self.store.renew_owner(self.name, self.owner)
         state = self.store.snapshot(self.name)
-        resource, attempted = None, False
+        resource, attempted, report = None, False, None
         def app_name(slot):
             # Allocate an intent only after the campaign measurement slot admits us.
             nonlocal resource
@@ -89,10 +103,12 @@ class Measurement:
             # does not prove its absence. Preserve uncertain SDK attempts.
             attempted = True
         try:
-            return modal_search.launch(state['spec']['policy'], config, self.name, self.outbox, True,
+            report = modal_search.launch(state['spec']['policy'], config, self.name, self.outbox, True,
                 app_name=app_name, on_launch=on_launch,
+                on_report=on_report,
                 on_app=lambda app: self.store.bind(self.name, self.owner, resource['id'], app),
                 check=lambda: self.store.renew_owner(self.name, self.owner), parallelism=state['spec']['parallelism'])
+            return report
         except network_recovery.Outage:
             raise
         except Exception as error:
@@ -105,12 +121,21 @@ class Measurement:
             # Do not spend another outage window on release/cleanup here.
             # Unknown creation/bind remains pending for the watchdog; local
             # failure before AppCreate can safely abandon its own intent.
+            failure = sys.exc_info()[1]
             current = (self.store.snapshot(self.name)['resources'][resource['id']]
-                       if resource and not isinstance(sys.exc_info()[1], network_recovery.Outage) else None)
-            if resource and not attempted and not isinstance(sys.exc_info()[1], network_recovery.Outage):
+                       if resource and not isinstance(failure, network_recovery.Outage) else None)
+            if resource and not attempted and not isinstance(failure, network_recovery.Outage):
                 self.store.abandon_intent(self.name, self.owner, resource['id'])
             elif current and current['app_id']:
-                self.compute.stop(current['app_id'])
-                if self.compute.running(current['app_id']):
-                    raise campaign_store.CleanupPending('Modal termination is still pending')
-                self.store.closed(self.name, resource['id'], owner=self.owner)
+                try:
+                    self.compute.stop(current['app_id'])
+                    if self.compute.running(current['app_id']):
+                        raise campaign_store.CleanupPending('Modal termination is still pending')
+                    self.store.closed(self.name, resource['id'], owner=self.owner)
+                except (campaign_store.CleanupPending, network_recovery.Outage):
+                    # Canonical measurements are already durable. Let Loop persist
+                    # the aggregate verdict before the supervisor drains compute.
+                    # Also preserve an original measurement failure for its caller.
+                    if report is None and failure is None:
+                        raise
+                    log.warning('Modal cleanup pending; resource retained for watchdog')

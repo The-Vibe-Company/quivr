@@ -25,6 +25,7 @@ import ci_guard
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 COMPUTE_NOTICE = ('The compute cap covers compute reserved by this runner, not the full Modal invoice; '
                   'builds, storage and other account charges need separate operator budgeting.')
+INCOMPLETE_MEASUREMENT = 'measurement failed or incomplete; no quality verdict is available'
 DIAGNOSTIC = {'mldr-fr': 'joint baseline saturation above 80%',
               'webfaq-fr': 'joint baseline saturation above 80%',
               'trec-covid': 'small query sample', 'mkqa-fr': 'short-answer proxy'}
@@ -349,7 +350,8 @@ def invoke(remote, request, check):
 
 
 def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quivr-search-measurement',
-           on_app=lambda identity: None, on_launch=lambda: None, check=lambda: None, parallelism=1):
+           on_app=lambda identity: None, on_launch=lambda: None, on_report=lambda report: None,
+           check=lambda: None, parallelism=1):
     import modal
     if subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=ROOT).returncode:
         raise ValueError('measurement code must be committed before live dispatch')
@@ -427,16 +429,22 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
                     pair['candidate'] = {**row, 'per_query': {key.replace('_at_', '@'): values for key, values in row['per_query'].items()},
                                   'metrics': {key.replace('_at_', '@'): value for key, value in row['metrics'].items()}}
                 elif outcome['status'] in ('capped', 'leased'):
+                    report = {'status': outcome['status'], 'reason': outcome['reason'], 'work': work,
+                              'ledger': store.summary(campaign), 'compute_cap_notice': COMPUTE_NOTICE}
+                    on_report(report)
                     completed = True
-                    return {'status': outcome['status'], 'reason': outcome['reason'], 'work': work,
-                            'ledger': store.summary(campaign), 'compute_cap_notice': COMPUTE_NOTICE}
+                    return report
                 if len(pair) == 2:
                     pairs[name] = pair
         aggregate_sets = {name: {side: {key: row.get('metrics', {}).get(key.replace('_at_', '@'), row.get('metrics', {}).get(key))
                                 for key in ('ndcg_at_10', 'latency_p95_ms', 'cost_per_search_usd', 'cost_per_1000_documents_usd')}
                                 for side, row in pair.items()} for name, pair in pairs.items()}
-        verdict = {**gates.evaluate(pairs, policy), 'work': work, 'aggregate_sets': aggregate_sets, 'ledger': store.summary(campaign),
+        decision = (gates.evaluate(pairs, policy) if set(pairs) == set(policy['sets']) else
+                    {'status': 'failed', 'reason': INCOMPLETE_MEASUREMENT})
+        verdict = {**decision, 'work': work, 'aggregate_sets': aggregate_sets, 'ledger': store.summary(campaign),
                    'agent_token_usage': policy['agent_token_usage'], 'compute_cap_notice': COMPUTE_NOTICE}
+        # Durable campaign publication precedes every slot/app cleanup finalizer.
+        on_report(verdict)
         completed = True
         return verdict
 

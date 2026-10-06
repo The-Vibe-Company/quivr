@@ -215,6 +215,37 @@ class FailureLogging(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN'), 'requires disposable PostgreSQL')
 class Dispatch(unittest.TestCase):
+    def test_failed_dataset_dispatch_is_not_an_empty_quality_rejection_on_replay(self):
+        # Own failed dataset aggregation at launch, including a subsequent
+        # attempt after the first app exited. Existing dispatch tests own SQL
+        # evidence replay; a failed transport must never reach quality gates.
+        store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
+        campaign = uuid.uuid4().hex
+        policy = modal_search.policy({'experiment': 'public/example', 'sets': {'scifact': {'split': 'dev'}},
+            'price_revision': 'fixture-v1', 'max_seconds': 30, 'startup_seconds': 10})
+        app, remote = mock.MagicMock(), mock.Mock()
+        app.function.return_value = lambda _: remote
+        with tempfile.TemporaryDirectory() as temp, \
+             mock.patch.dict(os.environ, EVAL_CONTROL_DATABASE_URL=store.dsn, MLFLOW_TRACKING_URI=''), \
+             mock.patch('modal.App', return_value=app), mock.patch('modal.Image'), \
+             mock.patch('modal.Secret'), mock.patch('modal.Volume'), mock.patch('modal_search.shipped_trial'), \
+             mock.patch('modal_search.invoke', side_effect=RuntimeError('interrupted secret measurement')) as invoke, \
+             mock.patch('modal_search.subprocess.run', return_value=subprocess.CompletedProcess([], 0)), \
+             mock.patch('modal_search.subprocess.check_output', side_effect=lambda args, **kw: b'' if 'ls-files' in args else 'a' * 40):
+            for attempt in range(2):
+                with self.subTest(attempt=attempt):
+                    report = modal_search.launch(policy, search_trial.configuration({}), campaign, temp, True)
+                    self.assertEqual(report['status'], 'failed')
+                    self.assertIsNone(report.get('verdict'))
+                    self.assertIn('incomplete', report['reason'])
+                    self.assertNotIn('secret', json.dumps(report))
+                    import search_campaign
+                    exported = search_campaign.aggregate(report, policy['sets'])
+                    self.assertEqual(exported['status'], 'failed')
+                    self.assertIsNone(exported['verdict'])
+                    self.assertIn('incomplete', exported['reason'])
+            self.assertEqual(invoke.call_count, 2, 'failed dataset work remains retryable')
+
     def test_public_trial_pairs_fresh_samples_and_replays_both_records(self):
         # Own public pairing at the dispatch/remote/publication boundary. Real
         # SQL, cache, ranking and scorer; fake only mounts, dataset and provider I/O.
