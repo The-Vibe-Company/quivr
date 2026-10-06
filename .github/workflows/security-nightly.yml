@@ -1,0 +1,73 @@
+name: Release vulnerability scan
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: security-nightly
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.images.outputs.matrix }}
+      release: ${{ steps.images.outputs.release }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - id: images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" | jq 'add // []' > releases.json
+          release=$(python3 scripts/release_scan.py release < releases.json)
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          if [ -z "$release" ]; then
+            echo 'No completed alpha image release to scan yet.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh release download "$release" --repo "$GITHUB_REPOSITORY" --pattern images.txt
+          echo "matrix=$(python3 scripts/release_scan.py matrix --repository "$GITHUB_REPOSITORY" < images.txt)" >> "$GITHUB_OUTPUT"
+          echo "Scanning every immutable image from $release." >> "$GITHUB_STEP_SUMMARY"
+  scan:
+    needs: prepare
+    if: needs.prepare.outputs.release != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install checksum-verified scanner
+        env:
+          TOOLS_DIR: ${{ runner.temp }}/security-tools
+        run: |
+          bash scripts/security_tools.sh grype "$TOOLS_DIR"
+          echo "$TOOLS_DIR" >> "$GITHUB_PATH"
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reject critical vulnerabilities with an available fix
+        env:
+          IMAGE: ${{ matrix.image }}
+          GRYPE_CHECK_FOR_APP_UPDATE: false
+        run: grype "registry:$IMAGE" --only-fixed --fail-on critical --output json > vulnerabilities.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: vulnerabilities-${{ matrix.name }}
+          path: vulnerabilities.json
+          if-no-files-found: warn

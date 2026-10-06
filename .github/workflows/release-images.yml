@@ -37,7 +37,7 @@ jobs:
   build:
     needs: prepare
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -80,6 +80,32 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           REVISION: ${{ needs.prepare.outputs.revision }}
         run: python3 scripts/image_smoke.py "$IMAGE" --plugin "$PLUGIN" --plugin-id "$PLUGIN_ID" --version "$VERSION" --revision "$REVISION"
+      - name: Install checksum-verified inventory and scan tools
+        env:
+          TOOLS_DIR: ${{ runner.temp }}/security-tools
+        run: |
+          bash scripts/security_tools.sh syft "$TOOLS_DIR"
+          bash scripts/security_tools.sh grype "$TOOLS_DIR"
+          echo "$TOOLS_DIR" >> "$GITHUB_PATH"
+      - name: Inventory the immutable image
+        env:
+          IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
+          SBOM: sboms/${{ matrix.plugin_id && format('quivr-plugin-{0}', matrix.plugin_id) || 'quivr' }}.spdx.json
+          SYFT_CHECK_FOR_APP_UPDATE: false
+        run: |
+          mkdir -p sboms
+          syft "registry:$IMAGE" --output "spdx-json=$SBOM"
+      - name: Reject critical vulnerabilities with an available fix
+        env:
+          IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
+          GRYPE_CHECK_FOR_APP_UPDATE: false
+        run: grype "registry:$IMAGE" --only-fixed --fail-on critical --output json > vulnerabilities.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: vulnerabilities-${{ matrix.plugin || 'engine' }}
+          path: vulnerabilities.json
+          if-no-files-found: warn
       - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: Sign and verify the immutable digest
         env:
@@ -90,6 +116,21 @@ jobs:
           cosign verify "$IMAGE" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/release-images.yml@refs/tags/$RELEASE_TAG"
+      - name: Attest and verify the image inventory
+        env:
+          IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          SBOM: sboms/${{ matrix.plugin_id && format('quivr-plugin-{0}', matrix.plugin_id) || 'quivr' }}.spdx.json
+        run: |
+          cosign attest --yes --type spdxjson --predicate "$SBOM" "$IMAGE"
+          cosign verify-attestation "$IMAGE" --type spdxjson \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/release-images.yml@refs/tags/$RELEASE_TAG"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom-${{ matrix.plugin || 'engine' }}
+          path: sboms/
+          if-no-files-found: error
       - name: Record the signed image
         env:
           IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
@@ -114,6 +155,11 @@ jobs:
           pattern: image-*
           merge-multiple: true
           path: signed-images
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: sbom-*
+          merge-multiple: true
+          path: sboms
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -132,6 +178,7 @@ jobs:
           published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
             --jq '.[] | select(any(.assets[]; .name == "images.txt")) | .tag_name' \
             | sort -V | tail -n 1)
+          gh release upload "$RELEASE_TAG" sboms/*.spdx.json --repo "$GITHUB_REPOSITORY" --clobber
           gh release upload "$RELEASE_TAG" images.txt --repo "$GITHUB_REPOSITORY" --clobber
           gh api "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$RELEASE_TAG" --jq .content | base64 --decode > CHANGELOG.md
           gh release upload "$RELEASE_TAG" CHANGELOG.md --repo "$GITHUB_REPOSITORY" --clobber

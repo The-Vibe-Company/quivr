@@ -1,0 +1,72 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - "/"
+      - "/contracts/http/v0/checks"
+      - "/plugins/core-ingest"
+      - "/plugins/core-retrieve"
+      - "/plugins/hosted-embed"
+      - "/plugins/m365-mail"
+      - "/plugins/rss"
+      - "/plugins/x-list"
+      - "/sdks/go"
+      - "/tests/fakes"
+      - "/tests/fakes/load-plugin"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+    open-pull-requests-limit: 3
+    groups:
+      dependencies:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: pip
+    directories:
+      - "/contracts/http/v0/checks"
+      - "/plugins/alerts"
+      - "/plugins/jev-rerank"
+      - "/plugins/pdf-text"
+      - "/plugins/push-source"
+      - "/scripts/eval"
+      - "/sdks/python"
+      - "/sdks/python/examples/static-source"
+      - "/third_party/tokenizer"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+    open-pull-requests-limit: 3
+    groups:
+      dependencies:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: npm
+    directories:
+      - "/quivr-search"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+    open-pull-requests-limit: 3
+    groups:
+      dependencies:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+    open-pull-requests-limit: 3
+    groups:
+      dependencies:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"

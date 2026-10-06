@@ -42,10 +42,11 @@ from the checked-out manifest and `version.txt`. It:
 2. Builds `linux/amd64` images and pushes only their immutable digests.
 3. Checks the real images as UID/GID 10001 with a read-only root and `/tmp` tmpfs.
    Plugin discovery uses an ephemeral signing key injected only at runtime.
-4. Signs and verifies each digest with cosign and GitHub OIDC.
-5. Attaches `images.txt` (signed digests) and release-please's `CHANGELOG.md` to
+4. Generates a Syft SPDX SBOM and rejects Grype critical findings with an available fix.
+5. Signs and verifies each digest and its SBOM attestation with cosign/GitHub OIDC.
+6. Attaches per-image `*.spdx.json` SBOMs, `images.txt` (signed digests) and release-please's `CHANGELOG.md` to
    the existing release. Its release notes already contain the changelog.
-6. Creates version/full `sha-<commit>` tags and advances `latest-alpha` without
+7. Creates version/full `sha-<commit>` tags and advances `latest-alpha` without
    changing the signed digests. Older reruns do not move that alias backwards.
 
 Rolling aliases update separately for each package; registries cannot promote
@@ -66,5 +67,5 @@ The runtime smoke script also serves as a local check for a built image.
 
 Operator pulling, configuration and signature commands live in
 [Deploy and configure Quivr](https://docs.quivr.thevibecompany.co/run-quivr/deploy).
-The Railway demo's image switch is a separate deployment change. SBOM and
-vulnerability scanning are separate release-pipeline work.
+[Release security](https://docs.quivr.thevibecompany.co/run-quivr/security) covers SBOM verification,
+nightly scans and private reporting. The Railway image switch is separate.
