@@ -503,7 +503,7 @@ function Dashboard({
           </span>
           {TITLES[view]}
           {/* A page's own figures beside its title: its count, what needs a look. */}
-          <span className="bar-meta" ref={setBarMeta} />
+          <span className="bar-meta" ref={setBarMeta} data-stale={view !== page || undefined} />
         </span>
         <form
           role="search"
@@ -557,8 +557,9 @@ function Dashboard({
             </kbd>
           )}
         </form>
-        {/* A page's main action, at the top right. */}
-        <div className="bar-actions" ref={setBarActions} />
+        {/* A page's main action, at the top right. Until the page asked for
+            is drawn (`page` follows `view`), the previous page's stay hidden. */}
+        <div className="bar-actions" ref={setBarActions} data-stale={view !== page || undefined} />
       </header>
       <TabBoundary key={page}>
         <Suspense fallback={<LoadingState label="Chargement…" rows={4} />}>

@@ -402,6 +402,10 @@ mark {
 .bar-actions:empty {
   display: none;
 }
+.bar-meta[data-stale],
+.bar-actions[data-stale] {
+  visibility: hidden;
+}
 /* As tall as the search beside it. */
 .bar-actions .button {
   min-height: 0;
