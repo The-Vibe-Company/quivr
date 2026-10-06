@@ -46,17 +46,6 @@ test("un texte ajouté est chronométré à chaque étape, et le plugin d’inge
   );
   expect(added.status, JSON.stringify(added.data)).toBeLessThan(300);
   const receipt = added.data.receipt_id;
-  await expect
-    .poll(
-      async () =>
-        (
-          await (
-            await page.request.get(`/v0/ingestion-receipts/${receipt}`)
-          ).json()
-        ).availability?.searchable,
-    )
-    .toBe(true);
-
   await page.setViewportSize({ width: 1440, height: 1000 });
   // Force the first stats read ahead of publication. Subsequent reads use
   // the real facade and worker rollups, including their cache.
@@ -67,46 +56,65 @@ test("un texte ajouté est chronométré à chaque étape, et le plugin d’inge
       await route.fulfill({ json: { items: [] } });
     } else await route.continue();
   });
-  await expect
-    .poll(
-      () =>
-        page.evaluate(async () => {
-          const read = async <T>(kind: string): Promise<StatsList<T>> => {
-            const response = await fetch(`/demo/admin/stats/${kind}?window=1h`);
-            if (!response.ok)
-              throw new Error(`${kind}: HTTP ${response.status}`);
-            return response.json();
-          };
-          const [steps, plugins] = await Promise.all([
-            read<StepStats>("steps"),
-            read<PluginCallStats>("plugins"),
-          ]);
-          return {
-            timed: ["materialized", "segmented", "retrieval_ready"].filter(
-              (name) =>
-                steps.items.some(
-                  (s) =>
-                    s.step === name &&
-                    s.summary.count > 0 &&
-                    s.summary.p50_ms !== undefined,
-                ),
-            ),
-            ingestion: plugins.items.some(
-              (p) =>
-                p.plugin_id === "core.ingest" &&
-                p.operation === "segment_and_embed" &&
-                p.summary.count > 0,
-            ),
-          };
-        }),
-      // A just-cached empty rollup lasts 10 s. Leave room to observe its
-      // replacement while keeping the whole spec within the 15 s budget.
-      { timeout: 12000, message: "Published step timings and ingestion calls" },
-    )
-    .toEqual({
-      timed: ["materialized", "segmented", "retrieval_ready"],
-      ingestion: true,
-    });
+  // Publication and search readiness proceed independently. Wait for both
+  // together so ingestion time and a cache expiry do not add up.
+  await Promise.all([
+    expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const read = async <T>(kind: string): Promise<StatsList<T>> => {
+              const response = await fetch(
+                `/demo/admin/stats/${kind}?window=1h`,
+              );
+              if (!response.ok)
+                throw new Error(`${kind}: HTTP ${response.status}`);
+              return response.json();
+            };
+            const [steps, plugins] = await Promise.all([
+              read<StepStats>("steps"),
+              read<PluginCallStats>("plugins"),
+            ]);
+            return {
+              timed: ["materialized", "segmented", "retrieval_ready"].filter(
+                (name) =>
+                  steps.items.some(
+                    (s) =>
+                      s.step === name &&
+                      s.summary.count > 0 &&
+                      s.summary.p50_ms !== undefined,
+                  ),
+              ),
+              ingestion: plugins.items.some(
+                (p) =>
+                  p.plugin_id === "core.ingest" &&
+                  p.operation === "segment_and_embed" &&
+                  p.summary.count > 0,
+              ),
+            };
+          }),
+        // A just-cached empty rollup lasts 10 s. Leave room to observe its
+        // replacement while keeping the whole spec within the 15 s budget.
+        {
+          timeout: 12000,
+          message: "Published step timings and ingestion calls",
+        },
+      )
+      .toEqual({
+        timed: ["materialized", "segmented", "retrieval_ready"],
+        ingestion: true,
+      }),
+    expect
+      .poll(
+        async () =>
+          (
+            await (
+              await page.request.get(`/v0/ingestion-receipts/${receipt}`)
+            ).json()
+          ).availability?.searchable,
+      )
+      .toBe(true),
+  ]);
   await page.goto("/?view=admin");
   const necks = page.getByRole("region", { name: "Goulots par étape" });
   // Each step's card gives its p50 first.
