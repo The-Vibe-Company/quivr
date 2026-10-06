@@ -56,6 +56,6 @@ extra_args = ["-c", "check_for_update_on_startup=false", "-c", "service_tier=\"d
 
 [herdr.profiles.claude]
 harness = "claude"
-model = "opus"
+model = "claude-opus-5-5" # explicit id: Conductor ids such as opus-5-5-1m are unknown to the local CLI
 effort = "high"
 permissions = "full"
