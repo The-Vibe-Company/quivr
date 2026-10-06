@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
-# Required check: `verify`. It passes only when `check`, `adapter-postgres` and every
-# verification part pass, so branch protection needs no change when a part is added.
+# Required check: `verify`. It passes only when `check`, `adapter-postgres`,
+# `vulnerabilities` and every verification part pass.
 jobs:
   # Isolated groups preserve make check while returning the complete quick result sooner.
   check-group:
@@ -409,15 +409,32 @@ jobs:
       # Failed tests with their error, slowest tests and step timings on the run page (THE-755).
       - if: always()
         run: python3 scripts/ci_summary.py "${{ steps.verification-artifact.outputs.artifact-url }}"
+  vulnerabilities:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      - name: Check every Go module for reachable vulnerabilities
+        run: |
+          while IFS= read -r module; do
+            echo "Scanning $module"
+            (cd "$(dirname "$module")" && govulncheck ./...)
+          done < <(git ls-files '**/go.mod' 'go.mod')
   # The one check to require: green only when every job above is green.
   verify:
     if: always()
-    needs: [check, adapter-postgres, part]
+    needs: [check, adapter-postgres, part, vulnerabilities]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
         run: |
-          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}"
+          echo "check: ${{ needs.check.result }}, adapter-postgres: ${{ needs.adapter-postgres.result }}, parts: ${{ needs.part.result }}, vulnerabilities: ${{ needs.vulnerabilities.result }}"
           exit 1
-      - run: echo "check, adapter-postgres and every verification part passed"
+      - run: echo "check, adapter-postgres, vulnerabilities and every verification part passed"
