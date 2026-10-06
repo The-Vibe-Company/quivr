@@ -1590,7 +1590,7 @@ The Record Versions stuck in quarantine, in Version id order, with the step each
 
 Operation `reprocessQuarantine`. Requires `plugins:admin`.
 
-Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
+Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. Set from_stage to normalization to normalize its stored source Blob again before ingestion; omit it to retry the failed step. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and Corpus, the answer is 409 dry_run_required. The same key with another filter scope or restart stage is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
 
 **Request body** (required): `application/json` [`QuarantineReprocessRequest`](#quarantinereprocessrequest)
 
@@ -5355,6 +5355,7 @@ required:
 | `code` | string |  | Only Versions quarantined with this reason code. Minimum length `1`. |
 | `quarantined_after` | string (date-time) |  | Only Versions quarantined at or after this time. |
 | `quarantined_before` | string (date-time) |  | Only Versions quarantined before this time. |
+| `from_stage` | string |  | Restart from the stored source Blob through normalization, then ingestion. Omit to retry the step that failed. Inputs that cannot be republished stay quarantined and are skipped. One of `normalization`. |
 | `dry_run` | boolean | yes | true reports the count and records it; false starts the reprocess a dry run with the same key and scope preceded. |
 
 <details>
@@ -5387,6 +5388,11 @@ properties:
     type: string
     format: date-time
     description: Only Versions quarantined before this time.
+  from_stage:
+    type: string
+    enum: [normalization]
+    x-enum-varnames: [QuarantineReprocessRequestFromStageNormalization]
+    description: Restart from the stored source Blob through normalization, then ingestion. Omit to retry the step that failed. Inputs that cannot be republished stay quarantined and are skipped.
   dry_run:
     type: boolean
     description: true reports the count and records it; false starts the reprocess a dry run with the same key and scope preceded.
@@ -5457,6 +5463,7 @@ What a quarantine reprocess covers, the plan it runs with and the dry run it fol
 | `code` | string |  | Minimum length `1`. |
 | `quarantined_after` | string (date-time) |  |  |
 | `quarantined_before` | string (date-time) |  |  |
+| `from_stage` | string |  | The requested restart stage; omitted when retrying the failed step. One of `normalization`. |
 | `plan_id` | string | yes | The Pipeline Plan it runs with, the one active when it was accepted. Minimum length `1`. |
 | `estimate` | [`QuarantineReprocessEstimate`](#quarantinereprocessestimate) | yes |  |
 
@@ -5480,6 +5487,11 @@ properties:
   quarantined_before:
     type: string
     format: date-time
+  from_stage:
+    type: string
+    enum: [normalization]
+    x-enum-varnames: [OperationQuarantineReprocessFromStageNormalization]
+    description: The requested restart stage; omitted when retrying the failed step.
   plan_id:
     type: string
     minLength: 1
