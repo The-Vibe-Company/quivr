@@ -171,3 +171,45 @@ func TestSchemaReadyRequiresEveryEmbeddedMigration(t *testing.T) {
 		t.Fatalf("newer schema with nothing pending not ready: %v", err)
 	}
 }
+
+// The real database owns the opt-in contract guarantee: default migrations
+// leave old writers usable, and a failed contract rolls back its bookkeeping.
+func TestContractMigrationRequiresExplicitOperator(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	fsys := fstest.MapFS{
+		"20990101T0000Z_expand.sql":   &fstest.MapFile{Data: []byte("CREATE TABLE old_writer(id int PRIMARY KEY, old_value text)")},
+		"20990101T0001Z_contract.sql": &fstest.MapFile{Data: []byte("-- quivr:contract\nALTER TABLE old_writer DROP COLUMN old_value;")},
+		"20990101T0002Z_expand.sql":   &fstest.MapFile{Data: []byte("CREATE TABLE future_writer(id int PRIMARY KEY)")},
+	}
+	if err := postgres.MigrateFS(ctx, pool, fsys); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO old_writer VALUES (1, 'still usable'); INSERT INTO future_writer VALUES (1)"); err != nil {
+		t.Fatalf("expand must preserve old writers and apply later independent expansions: %v", err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("default applied %d migrations, want 2: %v", count, err)
+	}
+	if err := postgres.MigrateContractsFS(ctx, pool, fsys); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO old_writer(id, old_value) VALUES (2, 'gone')"); err == nil {
+		t.Fatal("explicit contract did not remove the old column")
+	}
+	if err := postgres.MigrateContractsFS(ctx, pool, fsys); err != nil {
+		t.Fatalf("contract rerun: %v", err)
+	}
+	fsys["20990101T0003Z_bad_contract.sql"] = &fstest.MapFile{Data: []byte("-- quivr:contract\nDROP TABLE future_writer; SELECT 1/0;")}
+	if err := postgres.MigrateContractsFS(ctx, pool, fsys); err == nil {
+		t.Fatal("invalid contract must fail")
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO future_writer VALUES (2)"); err != nil {
+		t.Fatalf("failed contract must roll back SQL: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 3 {
+		t.Fatalf("failed contract bookkeeping: %d, %v", count, err)
+	}
+}

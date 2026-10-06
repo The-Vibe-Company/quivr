@@ -20,6 +20,7 @@ How this repository is organised, tested and changed, for people and coding agen
 - [Measure search quality](../agents/evaluation.md): measure how well search ranks results on public and private evaluation sets
 - [Agent fleet workflow](../agents/fleet-workflow.md): how parallel agents claim, plan and ship tickets
 - [Issue tracker: Linear](../agents/issue-tracker.md): how specs and tickets are written and tracked
+- [Add a migration that preserves application rollback](../agents/migrations.md): add compatible expansions and defer destructive contracts
 - [Build a private French news search set](../agents/news-set.md): build an encrypted French news search set and validate its human review
 - [Measure open-source embeddings](../agents/oss-embeddings.md): preview and measure open-source embedding models on ephemeral CPU and GPU jobs
 - [Testing standard](../agents/testing.md): what a good test looks like here
