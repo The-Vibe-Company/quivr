@@ -573,7 +573,14 @@ export function imageType(bytes, declared = "") {
   if (!bytes || bytes.length < 12) return null;
   if (declared.includes("image/svg+xml")) {
     const text = bytes.toString("utf8");
-    const active = /<script|<foreignObject|\bon[a-z]+\s*=|javascript:/i.test(text);
+    // Character references and blanks could hide a tag or a scheme: read past them.
+    const plain = text.replace(/&#(?:x([0-9a-f]{1,6})|(\d{1,7}));?/gi, (_, hex, decimal) => {
+      const code = parseInt(hex || decimal, hex ? 16 : 10);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    });
+    const active =
+      /<script|<foreignObject|\bon[a-z]+\s*=/i.test(plain) ||
+      /javascript:/i.test(plain.replace(/[\x00-\x20]+/g, ""));
     return svgRoot(text.slice(0, 4096)) && !active ? "image/svg+xml" : null;
   }
   const at = (offset, ...values) => values.every((v, i) => bytes[offset + i] === v);
@@ -586,30 +593,36 @@ export function imageType(bytes, declared = "") {
 }
 
 /**
- * Whether a document's root element is <svg>, past an XML declaration, a
- * few comments and a doctype. A scan rather than a pattern: a regular
- * expression over repeated comments can backtrack for hours on a crafted
- * file, and this runs on the server's single thread.
+ * Whether a document's root element is <svg>, past what may precede it:
+ * processing instructions (the XML declaration, a stylesheet), comments and
+ * a doctype, an internal subset included. A scan rather than a pattern: a
+ * regular expression over repeated comments can backtrack for hours on a
+ * crafted file, and this runs on the server's single thread. Each step
+ * moves forward, so it reads the text once.
  */
 function svgRoot(text) {
   let at = text.charCodeAt(0) === 0xfeff ? 1 : 0;
-  const blank = () => {
+  const after = (close, from) => {
+    const end = text.indexOf(close, from);
+    return end < 0 ? -1 : end + close.length;
+  };
+  for (;;) {
     while (at < text.length && /\s/.test(text[at])) at++;
-  };
-  const past = (open, close) => {
-    if (!text.startsWith(open, at)) return true;
-    const end = text.indexOf(close, at + open.length);
-    if (end < 0) return false;
-    at = end + close.length;
-    blank();
-    return true;
-  };
-  blank();
-  if (!past("<?xml", "?>")) return false;
-  for (let comments = 0; comments < 20 && text.startsWith("<!--", at); comments++)
-    if (!past("<!--", "-->")) return false;
-  if (text.slice(at, at + 9).toUpperCase() === "<!DOCTYPE" && !past(text.slice(at, at + 9), ">")) return false;
-  return /^<svg[\s>]/i.test(text.slice(at, at + 5));
+    let next;
+    if (text.startsWith("<?", at)) next = after("?>", at + 2);
+    else if (text.startsWith("<!--", at)) next = after("-->", at + 4);
+    else if (text.slice(at, at + 9).toUpperCase() === "<!DOCTYPE") {
+      const close = text.indexOf(">", at);
+      const subset = text.indexOf("[", at);
+      if (subset < 0 || (close >= 0 && close < subset)) next = after(">", at);
+      else {
+        const end = after("]", subset);
+        next = end < 0 ? -1 : after(">", end);
+      }
+    } else return /^<svg[\s/>]/i.test(text.slice(at, at + 5));
+    if (next <= at) return false;
+    at = next;
+  }
 }
 
 /** Parses DEMO_FEED_SUGGESTIONS: a JSON array of {title, url}. */

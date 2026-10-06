@@ -257,6 +257,14 @@ test("a feed names its site and image, and a page its icons, best first", () => 
   assert.equal(imageType(PNG, "image/svg+xml"), null);
   // Many comments ahead of a non-SVG root: read at once, not backtracked over.
   assert.equal(imageType(Buffer.from("<!--a-->".repeat(40) + "<html>"), "image/svg+xml"), null);
+  // A stylesheet instruction and an internal subset may precede the root;
+  // an unclosed subset ends the scan.
+  const svg = (text) => imageType(Buffer.from(text), "image/svg+xml");
+  assert.equal(svg('<?xml version="1.0"?><?xml-stylesheet href="a.css"?><!DOCTYPE svg [ <!ENTITY a "b"> ]><svg/>'), "image/svg+xml");
+  assert.equal(svg("<?x?><!DOCTYPE svg [ <svg/>"), null);
+  // A link scheme hidden behind character references or blanks still counts.
+  assert.equal(svg('<svg><a href="&#106;avascript:x()"/></svg>'), null);
+  assert.equal(svg('<svg><a href="java\tscript:x()"/></svg>'), null);
   assert.equal(imageType(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg' onload='x()'/>"), "image/svg+xml"), null);
   assert.equal(imageType(Buffer.from("<svg><script>x()</script></svg>"), "image/svg+xml"), null);
   assert.equal(imageType(Buffer.from("<html>not an image</html>"), "image/svg+xml"), null);
