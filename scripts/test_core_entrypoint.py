@@ -118,14 +118,16 @@ class CoreEntrypointTest(unittest.TestCase):
                 else:
                     self.assertEqual(config, core_entrypoint.build_config(ENV))
 
-    def test_hosted_embedding_is_evaluation_only_and_has_its_own_secret(self):
+    def test_hosted_embedding_is_default_for_all_sources_and_has_its_own_secret(self):
         # Owns runtime selection and inheritance; a shared-key or served-owner
         # regression is not visible to the hosted plugin's provider tests.
-        for switch in ('', '0', 'true', '1'):
+        for switch in (None, '', '0', 'true', '1'):
             with self.subTest(switch=switch):
                 env = {**ENV, 'QUIVR_DEMO_HOSTED_EMBED': switch,
                        'AZURE_FOUNDRY_ENDPOINT': 'https://resource.example.org/',
                        'AZURE_FOUNDRY_KEY': 'fixture-foundry-key'}
+                if switch is None:
+                    del env['QUIVR_DEMO_HOSTED_EMBED']
                 config = core_entrypoint.build_config(env)
                 pins = {pathlib.PurePosixPath(p['manifest']).parent.name: p for p in config['plugins']}
                 enabled = switch == '1'
@@ -134,9 +136,9 @@ class CoreEntrypointTest(unittest.TestCase):
                                  if p['manifest'] == pins['core-ingest']['manifest']))
                 self.assertNotIn('fixture-foundry-key', json.dumps(config))
                 if enabled:
-                    self.assertEqual(config['ingestion']['default'], 'core.ingest')
-                    self.assertEqual(config['ingestion']['evaluation'], {
-                        media: ['hosted.embed'] for media in ('text/plain', 'text/html', 'application/pdf')})
+                    # A default without routes covers every normalized source,
+                    # including XML and future media types; no E5 evaluation.
+                    self.assertEqual(config['ingestion'], {'default': 'hosted.embed'})
                     hosted = pins['hosted-embed']['configuration']
                     self.assertEqual(hosted['base_url'], 'https://resource.example.org/providers/cohere/v2')
                     self.assertEqual((hosted['model'], hosted['dimensions']), ('Cohere-Embed-V5-Pro', 1024))

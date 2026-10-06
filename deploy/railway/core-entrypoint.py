@@ -57,7 +57,6 @@ CONNECTORS = [
 HOSTED_MANIFEST = '/tmp/hosted-embed/quivr-plugin.yaml'
 HOSTED_EMBED = {'id': 'hosted-embed', 'port': 9980, 'api': True,
                 'manifest': HOSTED_MANIFEST, 'secrets': ['AZURE_FOUNDRY_KEY']}
-HOSTED_MEDIA_TYPES = ('text/plain', 'text/html', 'application/pdf')
 # The demo Organization's webhook destination. The web facade reads Matches
 # through the API, so nothing needs the webhook: the reserved .invalid name never
 # resolves and every delivery attempt fails without leaving the container. The
@@ -81,7 +80,7 @@ def described_enabled(env):
 
 
 def runtime_connectors(env):
-    """Keep core.ingest and optionally add evaluation embeddings and Jev."""
+    """Keep core.ingest reachable and optionally select hosted embeddings and Jev."""
     connectors = CONNECTORS
     if env.get('QUIVR_DEMO_HOSTED_EMBED') == '1':
         connectors = connectors + [{**HOSTED_EMBED, 'configuration': hosted_configuration(env)}]
@@ -192,8 +191,9 @@ def build_config(env):
         config['plugins'] = connector_pins(env)
     config['plugins'] = config.get('plugins', []) + plugin_pins(env)
     if env.get('QUIVR_DEMO_HOSTED_EMBED') == '1':
-        config['ingestion'] = {'default': 'core.ingest',
-                               'evaluation': {media: ['hosted.embed'] for media in HOSTED_MEDIA_TYPES}}
+        # The default covers every source format after normalization. Keeping
+        # core.ingest pinned serves historical generations, not E5 evaluation.
+        config['ingestion'] = {'default': 'hosted.embed'}
     if env.get('QUIVR_DEMO_JEV_RERANK') == '1':
         config['retrieval'] = {'profiles': {'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'}}
     if plugins_enabled(env):
