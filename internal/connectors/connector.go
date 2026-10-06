@@ -166,9 +166,12 @@ type FetchRequest struct {
 // Page is a fetched page and the checkpoint that resumes after it. More asks
 // for another page in the same run.
 type Page struct {
-	Items      []Item
-	Checkpoint json.RawMessage
-	More       bool
+	// SubmissionConcurrency bounds concurrent item submissions (at most 32).
+	// Zero or one keeps the serial default.
+	SubmissionConcurrency int
+	Items                 []Item
+	Checkpoint            json.RawMessage
+	More                  bool
 	// Reads counts the source resources this page read (for sources that bill
 	// or rate-limit per resource). It feeds the per-UTC-day usage counters.
 	Reads int64

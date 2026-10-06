@@ -192,6 +192,8 @@ func TestContractRunnerJudgesConnectors(t *testing.T) {
 		"connector-wrong-error-class":       {Check: "invoke", Code: "wrong_error_class"},
 		"connector-blob-part":               {Check: "invoke", Code: "blob_part_not_allowed"},
 		"connector-too-many-items":          {Check: "invoke", Code: "too_many_items"},
+		"connector-invalid-concurrency":     {Check: "invoke", Code: "schema_violation"},
+		"connector-unsupported-concurrency": {Check: "invoke", Code: "submission_concurrency_unsupported"},
 		"connector-attachment-mismatch":     {Check: "attachments", Code: "attachment_mismatch"},
 		"connector-receive-invalid-verdict": {Check: "receive", Code: "invalid_verdict"},
 		"accept-invalid":                    {Check: "invalid_request", Code: "accepted_invalid_request"},

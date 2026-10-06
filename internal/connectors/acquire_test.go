@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -426,4 +427,256 @@ func (c *checkingConnector) Descriptor() Descriptor {
 	d.ExtensionOwner = "acme.source"
 	d.Credentials = c
 	return d
+}
+
+// These calls block at the ingestion boundary, so the test can observe the
+// Acquirer's concurrency without relying on machine speed or wall-clock waits.
+type heldSubmission struct {
+	command content.Command
+	release chan struct{}
+}
+
+type heldIngest struct {
+	active  atomic.Int32
+	maximum atomic.Int32
+	calls   chan heldSubmission
+	failKey string
+	failure error
+}
+
+func (f *heldIngest) TrustedAccept(ctx context.Context, _, _ string, command content.Command) (content.Receipt, error) {
+	active := f.active.Add(1)
+	defer f.active.Add(-1)
+	for previous := f.maximum.Load(); active > previous; previous = f.maximum.Load() {
+		if f.maximum.CompareAndSwap(previous, active) {
+			break
+		}
+	}
+	call := heldSubmission{command: command, release: make(chan struct{})}
+	select {
+	case f.calls <- call:
+	case <-ctx.Done():
+		return content.Receipt{}, ctx.Err()
+	}
+	select {
+	case <-call.release:
+	case <-ctx.Done():
+		return content.Receipt{}, ctx.Err()
+	}
+	if command.Source.RecordKey == f.failKey {
+		return content.Receipt{}, f.failure
+	}
+	return content.Receipt{NewRevision: true}, nil
+}
+
+func (*heldIngest) TrustedWithdraw(context.Context, string, string, content.Withdrawal) (content.Receipt, error) {
+	panic("the test page has no withdrawals")
+}
+
+type observedRuns struct {
+	*fakeRuns
+	ingest    *heldIngest
+	premature bool
+}
+
+func (f *observedRuns) CommitCheckpoint(ctx context.Context, org, id string, run int64, progress Progress) (bool, error) {
+	f.premature = f.premature || f.ingest.active.Load() != 0
+	return f.fakeRuns.CommitCheckpoint(ctx, org, id, run, progress)
+}
+
+func (f *observedRuns) FinishRun(ctx context.Context, org, id string, run int64, failure *RunError) error {
+	f.premature = f.premature || f.ingest.active.Load() != 0
+	return f.fakeRuns.FinishRun(ctx, org, id, run, failure)
+}
+
+func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		hint, simultaneous int
+		duplicate          bool
+		failure            error
+	}{
+		{name: "default serial", simultaneous: 1},
+		{name: "explicit serial", hint: 1, simultaneous: 1},
+		{name: "parallel", hint: 2, simultaneous: 2},
+		{name: "engine cap", hint: 100, simultaneous: 32},
+		{name: "repeated key remains ordered", hint: 2, simultaneous: 1, duplicate: true},
+		{name: "transient page replay", hint: 2, simultaneous: 2, failure: errors.New("ingestion unavailable")},
+		{name: "permanent item rejected", hint: 2, simultaneous: 2, failure: content.ErrInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			items := make([]Item, 36)
+			for index := range items {
+				items[index] = Item{RecordKey: fmt.Sprintf("record-%d", index), Revision: fmt.Sprintf("revision-%d", index), Content: content.Text{Kind: "text", Text: "body"}}
+			}
+			if tc.duplicate {
+				items[1].RecordKey = items[0].RecordKey
+			}
+			page := Page{Items: items, Checkpoint: json.RawMessage(`{"member":36}`), SubmissionConcurrency: tc.hint}
+			stub := &stubConnector{pages: []Page{page}}
+			a, runs := stubAcquirer(t, stub, 0)
+			ingest := &heldIngest{calls: make(chan heldSubmission, len(items)), failKey: items[0].RecordKey, failure: tc.failure}
+			a.Ingest = ingest
+			observed := &observedRuns{fakeRuns: runs, ingest: ingest}
+			a.Store = observed
+			done := make(chan error, 1)
+			go func() { done <- a.Run(ctx, "org_a", "connector_1", 1) }()
+			first := make([]heldSubmission, tc.simultaneous)
+			for index := range first {
+				select {
+				case first[index] = <-ingest.calls:
+				case <-ctx.Done():
+					t.Fatalf("expected %d simultaneous submissions, got %d", tc.simultaneous, index)
+				}
+			}
+			select {
+			case call := <-ingest.calls:
+				t.Fatalf("started %q beyond concurrency limit %d", call.command.Source.RecordKey, tc.simultaneous)
+			case err := <-done:
+				t.Fatalf("run finished before submissions completed: %v", err)
+			default:
+			}
+			before := map[string]string{}
+			for _, call := range first {
+				before[call.command.Source.RecordKey] = call.command.Key
+				close(call.release)
+			}
+			count := len(first)
+			await := func() {
+				for {
+					select {
+					case call := <-ingest.calls:
+						before[call.command.Source.RecordKey] = call.command.Key
+						count++
+						close(call.release)
+					case err := <-done:
+						if err != nil {
+							t.Fatal(err)
+						}
+						return
+					case <-ctx.Done():
+						t.Fatal("acquisition did not complete after releasing ingestion")
+					}
+				}
+			}
+			await()
+			if observed.premature || int(ingest.maximum.Load()) != tc.simultaneous {
+				t.Fatalf("maximum concurrent submissions=%d, want %d; checkpoint/finish with inflight work=%v", ingest.maximum.Load(), tc.simultaneous, observed.premature)
+			}
+			if tc.failure != nil && !errors.Is(tc.failure, content.ErrInvalid) {
+				if len(runs.checkpoints) != 0 || len(runs.finished) != 1 || runs.finished[0] == nil || runs.finished[0].Code != "ingestion_unavailable" {
+					t.Fatalf("failed page advanced or did not report failure: checkpoints=%v finished=%v", runs.checkpoints, runs.finished)
+				}
+				// A restart fetches the same checkpoint; every resubmitted item
+				// must keep the original ingestion idempotency key.
+				ingest.failure = nil
+				stub.pages = []Page{page}
+				stub.requests = nil
+				replayed := 0
+				go func() { done <- a.Run(ctx, "org_a", "connector_1", 1) }()
+				for {
+					select {
+					case call := <-ingest.calls:
+						replayed++
+						if key, exists := before[call.command.Source.RecordKey]; exists && call.command.Key != key {
+							t.Fatalf("replay changed key for %q: %q to %q", call.command.Source.RecordKey, key, call.command.Key)
+						}
+						close(call.release)
+					case err := <-done:
+						if err != nil {
+							t.Fatal(err)
+						}
+						if len(runs.checkpoints) != 1 || replayed != len(items) {
+							t.Fatalf("replayed %d/%d items; checkpoints %v", replayed, len(items), runs.checkpoints)
+						}
+						return
+					case <-ctx.Done():
+						t.Fatal("replay did not complete")
+					}
+				}
+			}
+			if count != len(items) || len(runs.checkpoints) != 1 || !runs.items[0] {
+				t.Fatalf("submitted=%d checkpoints=%v activity=%v", count, runs.checkpoints, runs.items)
+			}
+			if tc.failure != nil && (runs.finished[0] == nil || runs.finished[0].Code != "item_rejected") {
+				t.Fatalf("permanent item failure did not report rejection: %v", runs.finished)
+			}
+		})
+	}
+}
+
+// Attachment-only content is raw input for normalization, not an already
+// normalized Manifest. The ingestion command is the owning boundary for this
+// routing decision; explicit text+attachment Manifests are covered in
+// TestAttachmentBytesReachStorageOnlyThroughVerifiedGrants.
+func TestAttachmentOnlyInputSubmitsAVerifiedSourceBlob(t *testing.T) {
+	const sourceBytes = "<document>Hello</document>"
+	for _, tc := range []struct {
+		name         string
+		change       func(*Item)
+		reject, skip bool
+	}{
+		{name: "source blob"},
+		{name: "multiple sources", reject: true, change: func(item *Item) {
+			at := item.Attachments[0]
+			at.Key = "other"
+			item.Attachments = append(item.Attachments, at)
+		}},
+		{name: "source key is canonical", reject: true, change: func(item *Item) { item.Attachments[0].Key = "attachment" }},
+		{name: "source role is canonical", reject: true, change: func(item *Item) { item.Attachments[0].Role = "attachment" }},
+		{name: "relations cannot be lost", reject: true, change: func(item *Item) {
+			item.Manifest.Relations = []content.Relation{{Type: "derived_from", Target: content.Source{RecordKey: "related"}}}
+		}},
+		{name: "parent cannot be lost", reject: true, change: func(item *Item) {
+			item.Attachments[0].ParentKey = "parent"
+		}},
+		{name: "part extensions cannot be lost", reject: true, change: func(item *Item) {
+			item.Attachments[0].Extensions = content.Extensions{"record.fixture": {SchemaVersion: "1", Data: map[string]any{"label": "source"}}}
+		}},
+		{name: "skipped source cannot publish empty manifest", skip: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			size := int64(len(sourceBytes))
+			item := Item{RecordKey: "document.xml", Revision: "revision-1", Position: "3",
+				Manifest:    &content.Manifest{Kind: "manifest"},
+				Extensions:  content.Extensions{"record.fixture": {SchemaVersion: "1", Data: map[string]any{"label": "document"}}},
+				Attachments: []Attachment{{Key: "source", Role: "source", MediaType: "application/xml", Ref: "raw:member", SizeBytes: &size, SHA256: content.Hash([]byte(sourceBytes))}}}
+			if tc.change != nil {
+				tc.change(&item)
+			}
+			a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{item} })
+			src.bytes["raw:member"] = sourceBytes
+			if tc.skip {
+				src.skip = &AttachmentDescription{Skip: "source_not_available"}
+				item.Attachments[0].SHA256 = ""
+			}
+			if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+				t.Fatal(err)
+			}
+			if tc.reject || tc.skip {
+				if len(ingest.accepted) != 0 || len(runs.checkpoints) != 1 || runs.finished[0] == nil || runs.finished[0].Code != "item_rejected" {
+					t.Fatalf("raw input was accepted or did not report rejection: commands=%v checkpoints=%v finished=%v", ingest.accepted, runs.checkpoints, runs.finished)
+				}
+				if src.uploads != 0 || len(src.storage.sessions) != 0 || len(src.storage.blobs) != 0 {
+					t.Fatalf("rejected input spent uploads: uploads=%d grants=%d verified blobs=%d", src.uploads, len(src.storage.sessions), len(src.storage.blobs))
+				}
+				return
+			}
+			if len(ingest.accepted) != 1 || len(runs.checkpoints) != 1 || runs.finished[0] != nil {
+				t.Fatalf("accepted=%v checkpoints=%v finished=%v", ingest.accepted, runs.checkpoints, runs.finished)
+			}
+			command := ingest.accepted[0]
+			if command.Content.Kind != "blob" || command.Content.MediaType != "application/xml" || command.Manifest != nil || src.storage.blobs[command.Content.BlobID] != sourceBytes {
+				t.Fatalf("normalizer did not receive the verified source Blob: command=%+v verified bytes=%v", command, src.storage.blobs)
+			}
+			if command.Source != (content.Source{CorpusID: "corpus_1", Namespace: "wire", RecordKey: "document.xml"}) || command.Revision != "revision-1" || command.Position != "3" || !IsConnectorKey(command.Key) {
+				t.Fatalf("source identity lost: %+v", command)
+			}
+			if command.Provenance["producer"] != "connector_1" || command.Provenance["producer_version"] != "fixture/v1" || command.Extensions["record.fixture"].Data["label"] != "document" {
+				t.Fatalf("producer or record extensions lost: provenance=%v extensions=%v", command.Provenance, command.Extensions)
+			}
+		})
+	}
 }

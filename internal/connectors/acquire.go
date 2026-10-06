@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -28,6 +29,9 @@ const ConnectorVersion = "v1"
 
 // DefaultMaxPages bounds the pages one run may fetch.
 const DefaultMaxPages = 10
+
+// MaxSubmissionConcurrency bounds concurrent item submissions per page.
+const MaxSubmissionConcurrency = 32
 
 // MaxAttachmentBytes bounds one attachment stored as a Blob Part.
 const MaxAttachmentBytes int64 = 25 << 20
@@ -233,8 +237,16 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		// Only an item that reserves a new Version counts as source activity;
 		// a replayed Receipt (re-fetched unchanged item) does not.
 		fresh := false
-		for _, item := range page.Items {
-			size, receipt, err := a.submit(ctx, org, rc, item)
+		concurrent := a.submitConcurrentPage(ctx, org, rc, page)
+		for index, item := range page.Items {
+			var size int64
+			var receipt content.Receipt
+			var err error
+			if concurrent == nil {
+				size, receipt, err = a.submit(ctx, org, rc, item)
+			} else {
+				size, receipt, err = concurrent[index].size, concurrent[index].receipt, concurrent[index].err
+			}
 			if err != nil {
 				var typed *Error
 				switch {
@@ -286,6 +298,70 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	return a.Store.FinishRun(ctx, org, id, run, nil)
 }
 
+type submissionResult struct {
+	size    int64
+	receipt content.Receipt
+	err     error
+}
+
+// submitConcurrentPage drains in-flight submissions before Run records a
+// failure or commits a checkpoint. A failed page is replayed with the same
+// idempotency keys. Repeated Record Keys retain serial ordering even for an
+// internal connector; plugin pages already reject duplicates at admission.
+func (a Acquirer) submitConcurrentPage(ctx context.Context, org string, rc runContext, page Page) []submissionResult {
+	workers := min(page.SubmissionConcurrency, MaxSubmissionConcurrency, len(page.Items))
+	if workers <= 1 {
+		return nil
+	}
+	seen := make(map[string]bool, len(page.Items))
+	for _, item := range page.Items {
+		if seen[item.RecordKey] {
+			return nil
+		}
+		seen[item.RecordKey] = true
+	}
+	results := make([]submissionResult, len(page.Items))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	next, stopped := 0, false
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				mu.Lock()
+				if stopped || next == len(page.Items) {
+					mu.Unlock()
+					return
+				}
+				index := next
+				next++
+				mu.Unlock()
+				size, receipt, err := a.submit(ctx, org, rc, page.Items[index])
+				results[index] = submissionResult{size: size, receipt: receipt, err: err}
+				if submissionStopsPage(err) {
+					mu.Lock()
+					stopped = true
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	return results
+}
+
+func submissionStopsPage(err error) bool {
+	if err == nil || errors.Is(err, errSkipped) {
+		return false
+	}
+	var typed *Error
+	if errors.As(err, &typed) {
+		return true
+	}
+	return !errors.Is(err, content.ErrConflict) && !errors.Is(err, content.ErrInvalid) && !errors.Is(err, content.ErrUnsupported) && !errors.Is(err, content.ErrUnverifiedBlob)
+}
+
 // errSkipped marks an item whose revision was already accepted.
 var errSkipped = errors.New("already accepted")
 
@@ -320,6 +396,16 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 		receipt, err := a.Ingest.TrustedWithdraw(ctx, org, inst.CorpusID, content.Withdrawal{Key: KeyPrefix + content.StableID("withdraw", inst.ID, item.RecordKey, revision), Source: source, Reason: "source_withdrawn"})
 		receipt.NewRevision = false
 		return 0, receipt, err
+	}
+	// An attachment-only item is raw input for the normalizer, rather than
+	// a pre-normalized Manifest. Its canonical source descriptor carries no
+	// Part metadata that would be lost when converted to a Blob command.
+	rawInput := len(item.Attachments) > 0 && (item.Manifest == nil || len(item.Manifest.Parts) == 0)
+	if rawInput {
+		at := item.Attachments[0]
+		if len(item.Attachments) != 1 || item.Manifest != nil && len(item.Manifest.Relations) != 0 || at.Key != "source" || at.Role != "source" || at.ParentKey != "" || len(at.Extensions) != 0 {
+			return 0, content.Receipt{}, fmt.Errorf("%w: attachment-only input requires one source attachment without relations, a parent or Part extensions", content.ErrUnsupported)
+		}
 	}
 	if item.Manifest != nil && len(item.Manifest.Relations) > 0 {
 		// Unbound relation targets refer to Records of the same Source Namespace.
@@ -364,6 +450,9 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 				return 0, content.Receipt{}, err
 			}
 			if skip != nil {
+				if rawInput {
+					return 0, content.Receipt{}, errAttachmentInvalid
+				}
 				if skip.ItemExtensions != nil {
 					item.Extensions = skip.ItemExtensions
 				}
@@ -372,7 +461,13 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 			stored += size
 			m.Parts = append(m.Parts, content.Part{Key: at.Key, ParentKey: at.ParentKey, Role: at.Role, Content: content.Text{Kind: "blob", BlobID: blobID, MediaType: at.MediaType}, Extensions: at.Extensions})
 		}
-		manifest = &m
+		if rawInput {
+			// Submit the verified source Blob through the existing normalizer
+			// path; accepting it as a Manifest would bypass normalization.
+			item.Content, manifest = m.Parts[0].Content, nil
+		} else {
+			manifest = &m
+		}
 	}
 	c := content.Command{Key: key, Source: source, Revision: revision, Position: item.Position, Content: item.Content, Manifest: manifest, Extensions: item.Extensions, Provenance: map[string]any{"producer": inst.ID, "producer_version": inst.Kind + "/" + ConnectorVersion}}
 	if c.Manifest != nil {

@@ -84,6 +84,7 @@ func TestReceiveClassifiesErrorsAndRefusesIncoherentDeliveries(t *testing.T) {
 		"refused with a 2xx":  {delivery: &Delivery{Verdict: VerdictRefused, Status: 200}},
 		"too many items":      {delivery: Accept(item, item, item)},
 		"attachments":         {delivery: Accept(Item{RecordKey: "a", Content: NewManifest(TextPart("b", "body", "x")), Attachments: []Attachment{{Key: "f", Role: "attachment", MediaType: "text/plain", Ref: "r"}}})},
+		"empty manifest":      {delivery: Accept(Item{RecordKey: "a", Content: NewManifest()})},
 		"no delivery":         {},
 		"handler error":       {err: errors.New("source unavailable")},
 	} {

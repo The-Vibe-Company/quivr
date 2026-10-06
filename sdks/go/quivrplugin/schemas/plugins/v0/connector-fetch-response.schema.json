@@ -47,6 +47,13 @@
     },
     "push": {
       "$ref": "#/$defs/PushStatus"
+    },
+    "submission_concurrency": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 32,
+      "default": 1,
+      "description": "Since Plugin API 0.15.0: maximum concurrent item submissions within this page (1 to 32). Omitted submits items serially. Record Keys remain unique; the checkpoint advances only after every submission completes successfully or is permanently rejected."
     }
   },
   "$defs": {
@@ -82,10 +89,10 @@
               "$ref": "../../shared/v0/manifest.schema.json#/$defs/TextContent"
             },
             {
-              "$ref": "../../shared/v0/manifest.schema.json#/$defs/ManifestContent"
+              "$ref": "#/$defs/ConnectorManifestContent"
             }
           ],
-          "description": "Text or a Manifest. A connector Manifest carries no Blob Parts: binary Parts are attachments."
+          "description": "Text or a Manifest. A connector Manifest carries no Blob Parts: binary Parts are attachments. Since Plugin API 0.15, absent or empty text parts submit the verified Blob for normalization only with exactly one attachment whose key and role are source, no parent_key or Part extensions, and no relations."
         },
         "extensions": {
           "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
@@ -197,6 +204,34 @@
           "description": "Only with state active: while deliveries arrive, the core runs pull at most this often (the greater of this and the instance's interval), as a safety net. It returns to the instance's interval as soon as push degrades."
         }
       }
+    },
+    "ConnectorManifestContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "manifest"
+          ]
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "../../shared/v0/manifest.schema.json#/$defs/Part"
+          }
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "$ref": "../../shared/v0/manifest.schema.json#/$defs/RelationInput"
+          }
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "description": "Connector Manifest content. Since Plugin API 0.15, text parts may be absent or empty for raw Blob input: exactly one attachment with key and role source, no parent_key or Part extensions, and no relations. The engine submits the verified Blob for normalization. With text parts, attachments supply ordinary binary Manifest Parts."
     }
   }
 }

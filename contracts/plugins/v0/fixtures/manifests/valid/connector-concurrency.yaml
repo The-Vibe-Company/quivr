@@ -1,0 +1,47 @@
+# A source collector plugin (Plugin API 0.3): one connector kind that pages
+# through a feed with a bearer token, and an extension namespace it owns.
+id: example-feeds
+version: 1.0.0
+description: Collects articles from a feed service.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.15.0 <0.16.0"
+contributions:
+  connector:
+    kinds:
+      feed:
+        description: Articles of one feed, newest first.
+        config_schema:
+          type: object
+          additionalProperties: false
+          required: [feed_url]
+          properties:
+            feed_url: {type: string, format: uri}
+        credential_schema:
+          type: object
+          additionalProperties: false
+          required: [token]
+          properties:
+            token: {type: string, minLength: 8}
+        default_interval_seconds: 900
+        modes: [pull]
+      public_feed:
+        config_schema:
+          type: object
+          required: [feed_url]
+          properties:
+            feed_url: {type: string}
+        default_interval_seconds: 3600
+    attachments: {max_bytes: 1048576}
+    timeout_ms: 20000
+    limits:
+      max_response_bytes: 2097152
+      max_items: 50
+extensions:
+  example-feeds:
+    "1":
+      type: object
+      properties:
+        author: {type: string}
+run:
+  command: [./example-feeds]

@@ -119,7 +119,9 @@ func (c Connector) configuration() json.RawMessage {
 func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connectors.Page, error) {
 	started := time.Now()
 	checkpoint := orNull(r.Checkpoint)
+	var servedAPI string
 	result, err := call.Invoke(ctx, c.Pin, call.ConnectorFetch, func(ctx context.Context, served string) ([]byte, error) {
+		servedAPI = served
 		scoped := c.ref(r.InstanceID, r.Config)
 		if plugins.ResolveAPI(served).Speaks(plugins.FeatureInstanceScope) {
 			scoped.CorpusID, scoped.SourceNamespace = r.CorpusID, r.Namespace
@@ -129,7 +131,7 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 		}
 		return plugins.BuildConnectorFetchRequest(plugins.ConnectorFetchRequest{InvocationID: plugins.InvocationID(), Contribution: "connector", OrganizationID: r.Organization, Configuration: c.configuration(), Connector: scoped, Credential: orNull(r.Credential), Checkpoint: checkpoint, Now: r.Now.UTC().Format(time.RFC3339), PageInRun: r.PageInRun, ReadsToday: r.ReadsToday})
 	}, func(ctx context.Context, body []byte) []plugins.Issue {
-		return plugins.CheckConnectorOutput(ctx, body, checkpoint, &c.Pin.Manifest)
+		return plugins.CheckConnectorOutput(ctx, body, checkpoint, &c.Pin.Manifest, servedAPI)
 	}, plugins.CredentialSecrets(r.Credential))
 	observe(c.Pin, r.Organization, OpConnectorFetch, started, result, err)
 	if err != nil {
@@ -142,7 +144,7 @@ func (c Connector) Fetch(ctx context.Context, r connectors.FetchRequest) (connec
 	if page.NotDue {
 		return connectors.Page{}, connectors.ErrNotDue
 	}
-	out := connectors.Page{Checkpoint: page.Checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice}
+	out := connectors.Page{SubmissionConcurrency: page.SubmissionConcurrency, Checkpoint: page.Checkpoint, More: page.More, Reads: page.Reads, Diagnostics: page.Diagnostics, Notice: page.Notice}
 	if p := page.Push; p != nil && plugins.KindPushes(&c.Pin.Manifest, c.Name) {
 		out.Push = &connectors.PushStatus{State: p.State, Class: connectors.ErrorClass(p.ErrorClass), Code: p.Code, PollInterval: time.Duration(p.PollIntervalSeconds) * time.Second}
 	}

@@ -9,7 +9,7 @@ The HTTP routes a plugin serves, with every field of their JSON bodies, the erro
 
 ## Plugin API versions
 
-Latest Plugin API: `0.14.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`.
+Latest Plugin API: `0.15.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`.
 
 | Feature | Since |
 | --- | --- |
@@ -30,6 +30,8 @@ Latest Plugin API: `0.14.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Profile candidates, declared retrieval dependencies and shared search budgets | `0.12.0` |
 | Optional search mode override for profile candidates | `0.13.0` |
 | Signed engine requests with per-plugin audience and body digest | `0.14.0` |
+| Bounded concurrent connector item submissions | `0.15.0` |
+| Raw connector Blob input through a source attachment | `0.15.0` |
 
 ## Trace context
 
@@ -338,7 +340,7 @@ Since Plugin API 0.3. Fetch one page of new or changed source items after the ch
 | `items[].record_key` | string | yes | Stable source identity within the Source Namespace. 1 to 1024 characters. |
 | `items[].revision` | string | no | Identifies the item content; absent derives it from the content. Set it when the item has attachments, so an unchanged item is recognised before anything is downloaded. 1 to 256 characters. |
 | `items[].source_position` | string | no | Optional monotonic Source Position. 1 to 256 characters. |
-| `items[].content` | `TextContent` (shared Manifest schema) or `ManifestContent` (shared Manifest schema) | no | Text or a Manifest. A connector Manifest carries no Blob Parts: binary Parts are attachments. |
+| `items[].content` | `TextContent` (shared Manifest schema) or object | no | Text or a Manifest. A connector Manifest carries no Blob Parts: binary Parts are attachments. Since Plugin API 0.15, absent or empty text parts submit the verified Blob for normalization only with exactly one attachment whose key and role are source, no parent_key or Part extensions, and no relations. |
 | `items[].extensions` | `Extensions` (shared Manifest schema) | no | Record Version extensions, in namespaces the plugin declares or the reserved quivr.metadata namespace (schema version 1). |
 | `items[].withdraw` | boolean | no | true asks for a Tombstone instead of a new version, for example a post deleted at the source. |
 | `items[].attachments` | array of object | no | At most 64 items. |
@@ -361,6 +363,7 @@ Since Plugin API 0.3. Fetch one page of new or changed source items after the ch
 | `push.error_class` | `access`, `transient`, `source` | no | Required when state is failed, absent otherwise. |
 | `push.code` | string | no | Required when state is failed; an optional reason when pending; absent when active. At most 64 characters. |
 | `push.poll_interval_seconds` | integer | no | Only with state active: while deliveries arrive, the core runs pull at most this often (the greater of this and the instance's interval), as a safety net. It returns to the instance's interval as soon as push degrades. 60 to 86400. |
+| `submission_concurrency` | integer | no | Since Plugin API 0.15.0: maximum concurrent item submissions within this page (1 to 32). Omitted submits items serially. Record Keys remain unique; the checkpoint advances only after every submission completes successfully or is permanently rejected. 1 to 32. Default `1`. |
 
 ### `POST /v0/contributions/connector/receive`
 

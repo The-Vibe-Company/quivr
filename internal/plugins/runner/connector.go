@@ -95,8 +95,15 @@ func (r *run) callFetch(ctx context.Context, body []byte) (*devhost.Result, *plu
 		Checkpoint json.RawMessage `json:"checkpoint"`
 	}
 	_ = json.Unmarshal(body, &request)
+	// A failed discovery can leave the served version unknown. Its failed
+	// check already prevents certification; still validate the page's shape
+	// without inventing an unsupported-version complaint for that missing fact.
+	outputAPI := r.pluginAPI
+	if outputAPI == "" {
+		outputAPI = plugins.PluginAPIVersion
+	}
 	result, err := devhost.InvokeConnectorFetch(callCtx, r.baseURL, body, plugins.ConnectorMaxResponseBytes(r.m), func(b []byte) []plugins.Issue {
-		return plugins.CheckConnectorOutput(ctx, b, request.Checkpoint, r.m)
+		return plugins.CheckConnectorOutput(ctx, b, request.Checkpoint, r.m, outputAPI)
 	})
 	return r.connectorResult(ctx, callCtx, result, err)
 }

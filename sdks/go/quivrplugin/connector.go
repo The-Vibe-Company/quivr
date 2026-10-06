@@ -107,7 +107,10 @@ type CredentialStatus struct {
 
 // Page is one fetched page.
 type Page struct {
-	Items []Item
+	// SubmissionConcurrency requests 1..32 parallel submissions (Plugin API 0.15).
+	// Zero omits the hint and keeps serial submission.
+	SubmissionConcurrency int
+	Items                 []Item
 	// Checkpoint resumes after this page (any JSON-encodable value, at most
 	// limits.max_checkpoint_bytes encoded, 64 KiB by default). Return the request's checkpoint when nothing moved.
 	Checkpoint any
@@ -177,14 +180,15 @@ type Item struct {
 type Content struct {
 	Kind      string     `json:"kind"`
 	Text      string     `json:"text,omitempty"`
-	Parts     []Part     `json:"parts,omitempty"`
+	Parts     []Part     `json:"parts,omitzero"`
 	Relations []Relation `json:"relations,omitempty"`
 }
 
 // Text is plain text content.
 func Text(text string) *Content { return &Content{Kind: "text", Text: text} }
 
-// NewManifest is structured content made of text Parts.
+// NewManifest describes the text Parts of structured content. On Plugin API
+// 0.15, attachments may provide all Parts, so no text Parts are required.
 func NewManifest(parts ...Part) *Content { return &Content{Kind: "manifest", Parts: parts} }
 
 // Part is one text Part of a Manifest. Binary Parts are attachments.
@@ -245,14 +249,15 @@ type Attachment struct {
 }
 
 type pageJSON struct {
-	Items       []Item          `json:"items"`
-	Checkpoint  json.RawMessage `json:"checkpoint"`
-	More        bool            `json:"more"`
-	Reads       int64           `json:"reads,omitempty"`
-	Diagnostics map[string]any  `json:"diagnostics,omitempty"`
-	Notice      string          `json:"notice,omitempty"`
-	NotDue      bool            `json:"not_due,omitempty"`
-	Push        *PushStatus     `json:"push,omitempty"`
+	SubmissionConcurrency int             `json:"submission_concurrency,omitempty"`
+	Items                 []Item          `json:"items"`
+	Checkpoint            json.RawMessage `json:"checkpoint"`
+	More                  bool            `json:"more"`
+	Reads                 int64           `json:"reads,omitempty"`
+	Diagnostics           map[string]any  `json:"diagnostics,omitempty"`
+	Notice                string          `json:"notice,omitempty"`
+	NotDue                bool            `json:"not_due,omitempty"`
+	Push                  *PushStatus     `json:"push,omitempty"`
 }
 
 type credentialJSON struct {

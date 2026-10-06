@@ -29,6 +29,8 @@ func TestPluginAPIFeatureIntroductions(t *testing.T) {
 		{plugins.FeatureInstanceToken, "0.11.0", "0.12.0"},
 		{plugins.FeatureProfileCandidates, "0.11.0", "0.12.0"},
 		{plugins.FeatureProfileCandidateMode, "0.12.0", "0.13.0"},
+		{plugins.FeatureConnectorSubmissionConcurrency, "0.14.0", "0.15.0"},
+		{plugins.FeatureConnectorAttachmentOnly, "0.14.0", "0.15.0"},
 	} {
 		t.Run(string(tc.feature), func(t *testing.T) {
 			if got := plugins.FeatureSince(tc.feature); got != tc.since {

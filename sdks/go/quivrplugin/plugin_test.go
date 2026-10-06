@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -124,13 +125,15 @@ func TestErrorsMapToClassifiedEnvelopes(t *testing.T) {
 		retryAfter float64
 		code       string
 	}{
-		"access":          {AccessError("token_rejected", "refused "+secret), 403, "access", false, 0, "token_rejected"},
-		"transient":       {TransientError("rate_limited", "wait").WithRetryAfter(90 * time.Second), 503, "transient", true, 90, "rate_limited"},
-		"source":          {fmt.Errorf("wrapped: %w", SourceError("bad_feed", "unparsable")), 422, "source", false, 0, "bad_feed"},
-		"unclassified":    {errors.New("dial tcp: " + secret), 503, "transient", true, 0, "unexpected_error"},
-		"panic":           {nil, 500, "source", false, 0, "internal_error"},
-		"invalid page":    {nil, 500, "source", false, 0, "invalid_response"},
-		"huge checkpoint": {nil, 500, "source", false, 0, "invalid_response"},
+		"access":                  {AccessError("token_rejected", "refused "+secret), 403, "access", false, 0, "token_rejected"},
+		"transient":               {TransientError("rate_limited", "wait").WithRetryAfter(90 * time.Second), 503, "transient", true, 90, "rate_limited"},
+		"source":                  {fmt.Errorf("wrapped: %w", SourceError("bad_feed", "unparsable")), 422, "source", false, 0, "bad_feed"},
+		"unclassified":            {errors.New("dial tcp: " + secret), 503, "transient", true, 0, "unexpected_error"},
+		"panic":                   {nil, 500, "source", false, 0, "internal_error"},
+		"invalid page":            {nil, 500, "source", false, 0, "invalid_response"},
+		"huge checkpoint":         {nil, 500, "source", false, 0, "invalid_response"},
+		"unsupported concurrency": {nil, 500, "source", false, 0, "invalid_response"},
+		"empty manifest":          {nil, 500, "source", false, 0, "invalid_response"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, logs := newTestPlugin(t, func(r *FetchRequest) (*Page, error) {
@@ -139,6 +142,10 @@ func TestErrorsMapToClassifiedEnvelopes(t *testing.T) {
 					panic("boom with " + secret)
 				case "invalid page":
 					return &Page{Items: []Item{{RecordKey: "a", Content: Text("a")}, {RecordKey: "b", Content: Text("b")}, {RecordKey: "c", Content: Text("c")}}}, nil
+				case "empty manifest":
+					return &Page{Items: []Item{{RecordKey: "a", Content: NewManifest()}}}, nil
+				case "unsupported concurrency":
+					return &Page{SubmissionConcurrency: 2}, nil
 				case "huge checkpoint":
 					return &Page{Checkpoint: strings.Repeat("x", MaxCheckpointBytes)}, nil
 				}
@@ -189,6 +196,65 @@ func TestNotDueEchoesTheRequestCheckpoint(t *testing.T) {
 	status, out, raw := call(h, "/v0/contributions/connector/fetch", fetchBody(nil))
 	if status != 200 || out["not_due"] != true || fmt.Sprint(out["checkpoint"]) != "map[offset:4]" || out["more"] != false {
 		t.Fatalf("HTTP %d %s", status, raw)
+	}
+}
+
+// Page is the public handler result, distinct from the internal wire model
+// exercised by normative fixture round trips: encoding must carry its hint.
+func TestTypedPageCarriesNewConnectorFieldsOnSupportedAPI(t *testing.T) {
+	raw, err := os.ReadFile("testdata/quivr-plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = bytes.Replace(raw, []byte(`plugin_api: ">=0.1.0 <0.14.0"`), []byte(`plugin_api: ">=0.15.0 <0.16.0"`), 1)
+	raw = bytes.Replace(raw, []byte("    limits:"), []byte("    attachments: {max_bytes: 1048576}\n    limits:"), 1)
+	path := filepath.Join(t.TempDir(), "quivr-plugin.yaml")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	plugin, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, problem := plugin.encodePage(&Page{SubmissionConcurrency: 32, Items: []Item{{RecordKey: "member.xml", Content: NewManifest(), Attachments: []Attachment{{Key: "source", Role: "source", MediaType: "application/xml", Ref: "member:1"}}}}})
+	if problem != "" {
+		t.Fatal(problem)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(body, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire["submission_concurrency"] != float64(32) {
+		t.Fatalf("encoded handler page lost its submission hint: %s", body)
+	}
+	for _, concurrency := range []int{-1, 33} {
+		_, problem := plugin.encodePage(&Page{SubmissionConcurrency: concurrency})
+		if !strings.Contains(problem, "1 to 32") {
+			t.Fatalf("submission_concurrency %d has no actionable bounds diagnostic: %q", concurrency, problem)
+		}
+	}
+	invalid, err := filepath.Glob(filepath.Join(fixtures, "responses/connector/attachment-only-invalid-*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invalid) == 0 {
+		t.Fatal("no attachment-only invalid fixtures found; the SDK semantic guard would be untested")
+	}
+	for _, path := range invalid {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var page pageJSON
+			if err := json.Unmarshal(raw, &page); err != nil {
+				t.Fatal(err)
+			}
+			_, problem := plugin.encodePage(&Page{Items: page.Items, Checkpoint: page.Checkpoint, More: page.More})
+			if !strings.Contains(problem, "attachment-only input") {
+				t.Fatalf("SDK failed to reject ambiguous raw input at its semantic guard: %q", problem)
+			}
+		})
 	}
 }
 
