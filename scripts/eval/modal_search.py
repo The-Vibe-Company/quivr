@@ -20,6 +20,8 @@ import search_trial
 import private_working
 import network_recovery
 
+import ci_guard
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 COMPUTE_NOTICE = ('The compute cap covers compute reserved by this runner, not the full Modal invoice; '
                   'builds, storage and other account charges need separate operator budgeting.')
@@ -444,7 +446,7 @@ def main(argv=None):
             'provider_estimator': 'shared UTF-8 byte + eight special tokens per input',
             'confirmation_available': False, 'compute_cap_notice': COMPUTE_NOTICE}))
         return 0
-    if any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
+    if ci_guard.in_ci():
         parser.error('CI measurements are refused')
     if not args.allow_paid or not args.campaign or not re.fullmatch(r'[A-Za-z0-9_.-]+', args.campaign):
         parser.error('live dispatch requires --allow-paid and a plain campaign identifier')

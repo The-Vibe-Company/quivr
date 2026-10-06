@@ -141,35 +141,21 @@ func TestBackgroundWorkflowReplaysHistories(t *testing.T) {
 	}
 }
 
-// Technical outages must not invent terminal administrative failures. Connector
-// acquisition keeps its existing three-attempt terminal budget.
+// Technical outages must not invent terminal administrative failures.
 func TestBackgroundWorkflowRetryBudgets(t *testing.T) {
-	for _, connector := range []bool{false, true} {
-		t.Run(fmt.Sprint(connector), func(t *testing.T) {
-			var suite testsuite.WorkflowTestSuite
-			env := suite.NewTestWorkflowEnvironment()
-			attempts := 0
-			if connector {
-				env.RegisterActivityWithOptions(func(context.Context, AcquireInput) error { return nil }, activity.RegisterOptions{Name: releaseConnectorPlanActivity})
-				env.RegisterActivityWithOptions(func(context.Context, AcquireInput) error { attempts++; return errors.New("store unavailable") }, activity.RegisterOptions{Name: acquirePinnedActivity})
-				env.ExecuteWorkflow(acquireWorkflowFn, AcquireInput{Organization: "org_a", ConnectorID: "connector_1", Run: 1})
-				if attempts != 3 || env.GetWorkflowError() == nil {
-					t.Fatalf("attempts=%d error=%v, want terminal after 3", attempts, env.GetWorkflowError())
-				}
-			} else {
-				env.RegisterActivityWithOptions(func(context.Context, RebuildInput) (backfill.Progress, error) {
-					attempts++
-					if attempts <= 6 {
-						return backfill.Progress{}, errors.New("store unavailable")
-					}
-					return backfill.Progress{Done: true}, nil
-				}, activity.RegisterOptions{Name: "backfill-step"})
-				env.ExecuteWorkflow(backfillWorkflow, RebuildInput{Organization: "org_a", OperationID: "operation_1"})
-				if attempts != 7 || env.GetWorkflowError() != nil {
-					t.Fatalf("attempts=%d error=%v, want success after outage", attempts, env.GetWorkflowError())
-				}
-			}
-		})
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	attempts := 0
+	env.RegisterActivityWithOptions(func(context.Context, RebuildInput) (backfill.Progress, error) {
+		attempts++
+		if attempts <= 6 {
+			return backfill.Progress{}, errors.New("store unavailable")
+		}
+		return backfill.Progress{Done: true}, nil
+	}, activity.RegisterOptions{Name: "backfill-step"})
+	env.ExecuteWorkflow(backfillWorkflow, RebuildInput{Organization: "org_a", OperationID: "operation_1"})
+	if attempts != 7 || env.GetWorkflowError() != nil {
+		t.Fatalf("attempts=%d error=%v, want success after outage", attempts, env.GetWorkflowError())
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -286,25 +287,31 @@ func TestResumeCacheIsolatesOrganizationsAndQueryMode(t *testing.T) {
 }
 
 func TestConfigAndContentRefusals(t *testing.T) {
-	for _, raw := range []string{
-		`{"format":"openai","base_url":"https://key@example.org","auth":"bearer","model":"m","dimensions":8}`,
-		`{"format":"openai","base_url":"http://example.org","auth":"bearer","model":"m","dimensions":8,"api_key":"secret"}`,
-		`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"overlap":512}`,
-		`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"model_revision":"has spaces"}`,
+	for _, tc := range []struct{ raw, reason string }{
+		{`{"format":"openai","base_url":"https://key@example.org","auth":"bearer","model":"m","dimensions":8}`, "base_url must be an HTTP(S) base without credentials"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"bearer","model":"m","dimensions":8,"api_key":"secret"}`, "configuration must contain only declared fields"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"overlap":512}`, "invalid segment, overlap or batch limits"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"model_revision":"has spaces"}`, "model and model_revision must be nonempty and bounded"},
 	} {
-		if _, err := parseConfiguration([]byte(raw)); err == nil {
-			t.Fatal("accepted invalid configuration")
+		if _, err := parseConfiguration([]byte(tc.raw)); err == nil || !strings.Contains(err.Error(), tc.reason) {
+			t.Errorf("configuration %s: got %v, want reason %q", tc.raw, err, tc.reason)
 		}
 	}
 	c := testConfig("openai", "http://127.0.0.1:9")
 	i := newIngester(c, "", slog.Default())
-	for _, text := range []string{"", "invalid\x00text", strings.Repeat("a", (256<<10)+1)} {
-		if _, err := i.SegmentAndEmbed(context.Background(), ingestRequest(c, text, false)); err == nil {
-			t.Fatal("accepted invalid content")
+	for _, tc := range []struct{ text, code string }{
+		{"", "no_indexable_text"}, {"invalid\x00text", "invalid_text"}, {strings.Repeat("a", (256<<10)+1), "segmentation_limit"},
+	} {
+		_, err := i.SegmentAndEmbed(context.Background(), ingestRequest(c, tc.text, false))
+		var refusal *quivrplugin.IngestError
+		if !errors.As(err, &refusal) || refusal.Code != tc.code || refusal.Retryable {
+			t.Errorf("content: got %v, want terminal %s", err, tc.code)
 		}
 	}
-	if _, err := i.EmbedQuery(context.Background(), queryRequest(c, strings.Repeat("q", c.MaxTokens))); err == nil {
-		t.Fatal("oversize query accepted")
+	_, err := i.EmbedQuery(context.Background(), queryRequest(c, strings.Repeat("q", c.MaxTokens)))
+	var refusal *quivrplugin.IngestError
+	if !errors.As(err, &refusal) || refusal.Code != "query_limit" || refusal.Retryable {
+		t.Errorf("oversize query: got %v, want terminal query_limit", err)
 	}
 }
 

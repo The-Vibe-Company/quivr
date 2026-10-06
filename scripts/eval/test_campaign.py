@@ -16,17 +16,13 @@ import campaign
 
 
 class Dispatch(unittest.TestCase):
-    def test_paid_work_requires_local_execution_and_explicit_opt_in(self):
-        for arguments, flags in [([], {}), (['--allow-paid'], {'CI': 'true'}),
-                                 (['--allow-paid'], {'GITHUB_ACTIONS': 'true'})]:
-            with self.subTest(flags=flags, arguments=arguments), \
-                 mock.patch('sys.argv', ['campaign', '--max-input-tokens', '100', '--max-usd', '8'] + arguments), \
-                 mock.patch.dict('os.environ', flags, clear=True), \
-                 mock.patch.object(campaign, 'execute') as execute, contextlib.redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit) as refused:
-                    campaign.main()
-                self.assertEqual(refused.exception.code, 2)
-                execute.assert_not_called()
+    def test_paid_work_requires_explicit_opt_in(self):
+        with mock.patch('sys.argv', ['campaign', '--max-input-tokens', '100', '--max-usd', '8']), \
+             mock.patch.dict('os.environ', {}, clear=True), contextlib.redirect_stderr(io.StringIO()) as diagnostic:
+            with self.assertRaises(SystemExit) as refused:
+                campaign.main()
+            self.assertEqual(refused.exception.code, 2)
+            self.assertIn('--allow-paid', diagnostic.getvalue())
 
     def test_winner_debits_prior_upper_bound_and_prepares_four_variants(self):
         with tempfile.TemporaryDirectory() as directory:

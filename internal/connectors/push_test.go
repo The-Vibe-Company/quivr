@@ -259,7 +259,7 @@ func TestAPIChallengeRecordsReadsBeforeAnswering(t *testing.T) {
 			if storageFailure {
 				store.recordError = errors.New("storage unavailable")
 			}
-			answer, err := relay.DeliverAPI(context.Background(), corpus.Scope{Organization: "org_a", Actions: []string{corpus.ActionConnectorPush}, Corpora: []string{"corpus_1"}}, "connector_1", "challenge", Relayed{Method: "GET"})
+			answer, err := relay.DeliverAPIWithAuth(context.Background(), APIAuth{Scope: &corpus.Scope{Organization: "org_a", Actions: []string{corpus.ActionConnectorPush}, Corpora: []string{"corpus_1"}}}, "connector_1", "challenge", Relayed{Method: "GET"})
 			if err != nil || len(store.outcomes) != 1 || len(ingest.accepted) != 0 {
 				t.Fatalf("answer %+v err %v outcomes %+v ingested %+v", answer, err, store.outcomes, ingest.accepted)
 			}

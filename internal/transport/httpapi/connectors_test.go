@@ -225,6 +225,8 @@ func TestConnectorCreationValidatesAndNeverEchoesTheSecret(t *testing.T) {
 		{"malformed kind", connectorKey, func(b map[string]any) { b["kind"] = "FTP feed" }, 422, "invalid_schema"},
 		{"config fails the kind schema", connectorKey, func(b map[string]any) { b["config"] = map[string]any{"script": "x"} }, 422, "invalid_config"},
 		{"secret fails the kind schema", connectorKey, func(b map[string]any) { b["credential"] = map[string]any{"secret": map[string]any{"password": "x"}} }, 422, "invalid_credential"},
+		{"namespace already in use", connectorKey, func(b map[string]any) { b["idempotency_key"] = "c2" }, 409, "source_namespace_in_use"},
+		{"invalid command key", connectorKey, func(b map[string]any) { b["idempotency_key"] = "c\x00" }, 422, "invalid_input"},
 		{"interval below the floor", connectorKey, func(b map[string]any) { b["schedule"] = map[string]any{"interval_seconds": 29} }, 422, "invalid_interval"},
 	}
 	for _, c := range cases {
