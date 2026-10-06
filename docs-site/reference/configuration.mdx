@@ -53,6 +53,18 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 
 Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup. Remove the former `connector_fixtures` and `monitoring_fixture_evaluator` settings; the acceptance harness now pins its fixture plugin through `plugins`.
 
+## Configuration refusals
+
+Engine configuration refusals exit with status `1` and log `event: quivr.failed`, an `error_code`, a `field`, and a safe `problem` explanation. The field names a setting, such as `log_level` or `cursor_key`, or a settings group, such as `tls.weaviate`. Missing or unreadable configuration files, malformed JSON and unknown keys use `QUIVR_CONFIG`; JSON type errors name the declared field when one is identifiable; a type error at the JSON root uses `QUIVR_CONFIG`. Diagnostic fields omit supplied values, file paths and raw causes, including secret values.
+
+| Error code | Meaning |
+| --- | --- |
+| `config_missing` | A required setting is absent, or a required group is empty. |
+| `config_invalid` | A setting has the wrong type, format or range, or cannot be loaded. |
+| `config_conflict` | Settings contradict each other, such as a TLS switch with the wrong endpoint scheme or an initial retry delay above its maximum. |
+
+Plugin-pin validation also exits with status `1` but keeps its existing plugin issue codes without `field` or `problem`. Other process failures use `process_failed`.
+
 ## Audit trail
 
 Quivr records sensitive HTTP commands in PostgreSQL and emits a `quivr.audit` JSON log event after each audit entry commits. The API key identifier matches `api_key_id` in the access log; bearer tokens, issued token secrets, credential values and request bodies are excluded. Audit targets retain resolved Record IDs even when a write-only command response omits them; reading those entries still requires `audit:read` and organization-wide Corpus scope. Each entry records the time, organization, action, target, accepted or refused outcome, request ID and bounded status details. Plugin activation and rollback also record the resulting plan ID. Connector creation includes any credential deposit in the same transaction; credential deposits and replacements record the credential version.
@@ -67,7 +79,7 @@ Successful command changes and their entry commit together. If the audit write f
 
 ## Logs and shutdown
 
-Engine processes write one JSON event per line to stdout. Every event includes `ts`, `level`, `msg`, `service`, `version`, `instance`, `environment`, `trace_id` and `span_id` (empty outside a trace); events within an HTTP request also include `request_id`. `service` distinguishes `quivr.api`, `quivr.worker` and `quivr.migrate`. `version` reports the distribution release, independent of API `v0` and plugin engine compatibility `0.2.0`. The startup event also includes the commit as `revision`, `api_version` and `plugin_engine_version`; [Check that it is ready](/run-quivr/deploy#check-that-it-is-ready) lists the HTTP and metric version checks. Debug events are hidden at the default `info` level. Nonempty environment overrides take precedence over the JSON file; unknown levels, malformed durations and nonpositive grace periods refuse startup.
+Engine processes write one JSON event per line to stdout. `ts` is an RFC 3339 timestamp in UTC, ending in `Z`, regardless of the host timezone. Every event includes `ts`, `level`, `msg`, `service`, `version`, `instance`, `environment`, `trace_id` and `span_id` (empty outside a trace); events within an HTTP request also include `request_id`. `service` distinguishes `quivr.api`, `quivr.worker` and `quivr.migrate`. `version` reports the distribution release, independent of API `v0` and plugin engine compatibility `0.2.0`. The startup event also includes the commit as `revision`, `api_version` and `plugin_engine_version`; [Check that it is ready](/run-quivr/deploy#check-that-it-is-ready) lists the HTTP and metric version checks. Debug events are hidden at the default `info` level. Nonempty environment overrides take precedence over the JSON file; unknown levels, malformed durations and nonpositive grace periods refuse startup.
 
 Each completed public or probe HTTP request writes an access event with `route`, `method`, `status`, `duration_ms`, `response_size` (bytes written), `client_ip`, `api_key_id`, `error_code` and `request_id`. Routes are registered templates, with `unmatched` for unknown paths. For public requests, client IP follows the trusted proxy policy in `connector_push.trusted_proxy_cidrs`; otherwise it is the socket peer. Probe requests use the socket peer. The key ID is a 128-bit SHA-256 fingerprint of a bearer token present in the configured `keys`; it is empty for instance tokens and requests without a configured API key. No bearer token, request body, query string or arbitrary request path is logged.
 

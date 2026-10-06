@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/url"
@@ -30,14 +29,14 @@ func (cfg Config) processSettings() (string, time.Duration, error) {
 	switch level {
 	case "debug", "info", "warn", "error":
 	default:
-		return "", 0, errors.New("log_level must be debug, info, warn or error")
+		return "", 0, badConfig(configInvalid, "log_level", "log_level must be debug, info, warn or error")
 	}
 	grace := time.Minute
 	if value := override("QUIVR_SHUTDOWN_GRACE", cfg.ShutdownGrace); value != "" {
 		var err error
 		grace, err = time.ParseDuration(value)
 		if err != nil || grace <= 0 {
-			return "", 0, errors.New("shutdown_grace must be a positive Go duration")
+			return "", 0, badConfig(configInvalid, "shutdown_grace", "shutdown_grace must be a positive Go duration")
 		}
 	}
 	return level, grace, nil
@@ -60,7 +59,7 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 	var output io.Writer = os.Stdout
 	if cfg.LogDirectory != "" {
 		if err := os.MkdirAll(cfg.LogDirectory, 0o700); err != nil {
-			return 0, errors.New("create log_directory failed")
+			return 0, badConfig(configInvalid, "log_directory", "create log_directory failed")
 		}
 		output = io.MultiWriter(os.Stdout, &rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")})
 	}
