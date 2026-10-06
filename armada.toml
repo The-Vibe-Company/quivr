@@ -42,3 +42,20 @@ effort = "high"
 [[conductor.routing]]
 labels = ["Frontend"]
 profile = "opus"
+
+# How `armada launch --runtime herdr` starts workers on this machine (local fallback when Conductor is unavailable).
+[herdr]
+default_profile = "codex"
+
+[herdr.profiles.codex]
+harness = "codex"
+model = "gpt-6.1-sol"
+effort = "high"
+permissions = "full"
+extra_args = ["-c", "check_for_update_on_startup=false"]
+
+[herdr.profiles.claude]
+harness = "claude"
+model = "opus"
+effort = "high"
+permissions = "full"
