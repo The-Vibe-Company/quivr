@@ -72,7 +72,7 @@ ticket = "THE-1207"
 [[deploy.target]]
 name = "railway-api"
 branch = "main"
-live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && railway deployment list --service api --limit 5 --json | jq -r '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
+live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && set -o pipefail && railway deployment list --service api --limit 20 --json | jq -er '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
 paths = ["go.mod", "go.sum", "cmd/**", "internal/**", "client/**", "migrations/**", "contracts/**", "scripts/prepare_tokenizer.py", "scripts/token_offsets.py", "third_party/tokenizer/**", "sdks/**", "plugins/**", "deploy/railway/core.Dockerfile", "deploy/railway/core-entrypoint.py"]
 timeout_minutes = 30
 pause_on_failure = true
@@ -80,7 +80,7 @@ pause_on_failure = true
 [[deploy.target]]
 name = "railway-worker"
 branch = "main"
-live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && railway deployment list --service worker --limit 5 --json | jq -r '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
+live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && set -o pipefail && railway deployment list --service worker --limit 20 --json | jq -er '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
 paths = ["go.mod", "go.sum", "cmd/**", "internal/**", "client/**", "migrations/**", "contracts/**", "scripts/prepare_tokenizer.py", "scripts/token_offsets.py", "third_party/tokenizer/**", "sdks/**", "plugins/**", "deploy/railway/core.Dockerfile", "deploy/railway/core-entrypoint.py"]
 timeout_minutes = 30
 pause_on_failure = true
@@ -88,7 +88,7 @@ pause_on_failure = true
 [[deploy.target]]
 name = "railway-web"
 branch = "main"
-live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && railway deployment list --service web --limit 5 --json | jq -r '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
+live_sha_command = "cd \"${RAILWAY_LINK_DIR:?set RAILWAY_LINK_DIR}\" && set -o pipefail && railway deployment list --service web --limit 20 --json | jq -er '[.[]|select(.status==\"SUCCESS\")][0].meta.commitHash'"
 paths = ["quivr-search/**", "deploy/railway/web.Dockerfile"]
 timeout_minutes = 20
 pause_on_failure = true
