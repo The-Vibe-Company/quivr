@@ -1,0 +1,100 @@
+id: newsml-g2
+version: 0.1.0
+description: Normalizes IPTC NewsML-G2 text news items and preserves their metadata.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+contributions:
+  normalizer:
+    media_types:
+      - application/vnd.iptc.g2.newsitem+xml
+      - application/vnd.iptc.g2.newsmessage+xml
+    timeout_ms: 30000
+    retry:
+      max_attempts: 3
+    limits:
+      max_parts: 65
+      max_response_bytes: 2097151
+configuration:
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      max_input_bytes:
+        type: integer
+        minimum: 1024
+        maximum: 1048576
+        description: XML bytes allowed before downloading (default 1048576).
+      max_text_bytes:
+        type: integer
+        minimum: 1024
+        maximum: 262144
+        description: UTF-8 bytes of title and body text allowed (default 262144); excess is refused.
+      header_paths:
+        type: array
+        maxItems: 32
+        uniqueItems: true
+        items:
+          type: string
+          maxLength: 512
+          pattern: '^(\{[^{}]+\})?[A-Za-z_][A-Za-z0-9_.-]*(/(\{[^{}]+\})?[A-Za-z_][A-Za-z0-9_.-]*)*$'
+        description: Literal child element paths from the XML root, using {namespace-uri}name for foreign elements; unqualified names use the NewsML namespace.
+extensions:
+  newsml-g2.metadata:
+    "1":
+      type: object
+      additionalProperties: false
+      properties:
+        language: {type: string}
+        published_at: {type: string, format: date-time}
+        source_type: {type: string}
+        source: {type: string}
+        author: {type: array, items: {type: string}}
+        subjects: {type: array, items: {type: string}}
+        tags: {type: array, items: {type: string}}
+        country: {type: array, items: {type: string}}
+        place: {type: array, items: {type: string}}
+  newsml-g2.document:
+    "1":
+      type: object
+      additionalProperties: false
+      properties:
+        guid: {type: string}
+        version: {type: string}
+        language: {type: string}
+        first_created: {type: string}
+        version_created: {type: string}
+        urgency: {type: string}
+        provider: {type: array, items: {type: object}}
+        signals: {type: array, items: {type: object}}
+        genres: {type: array, items: {type: object}}
+        subjects: {type: array, items: {type: object}}
+        located: {type: array, items: {type: object}}
+        creators: {type: array, items: {type: object}}
+        keywords: {type: array, items: {type: string}}
+        roles: {type: array, items: {type: string}}
+  newsml-g2.xml:
+    "1":
+      type: object
+      additionalProperties: false
+      required: [root]
+      properties:
+        root:
+          type: object
+          description: Complete element tree with expanded names, attributes, text, tail and ordered children. The source Blob also retains the original XML bytes.
+  newsml-g2.headers:
+    "1":
+      type: object
+      additionalProperties: false
+      required: [paths]
+      properties:
+        paths: {type: object, additionalProperties: {type: array, items: {type: object}}}
+  newsml-g2.text:
+    "1":
+      type: object
+      additionalProperties: false
+      properties:
+        language: {type: string}
+        dir: {type: string}
+run:
+  command: [python3, -m, newsml_g2]

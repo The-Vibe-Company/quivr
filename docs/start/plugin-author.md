@@ -16,6 +16,7 @@ How to extend Quivr with your own plugins, for example a new file format or a ne
 
 ## Guides
 
+- [Read NewsML-G2 text items](../../plugins/newsml-g2/README.md): normalize NewsML-G2 text items and preserve their source metadata
 - [pdf-text](../../plugins/pdf-text/README.md): the reference PDF normalizer, one Part per page
 - [push-source](../../plugins/push-source/README.md): an offline instance-token push source and its certification
 - [RSS and Atom connector plugin](../../plugins/rss/README.md): the first-party RSS and Atom connector plugin

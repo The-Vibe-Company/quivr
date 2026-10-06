@@ -1,0 +1,5 @@
+{
+  "description": "Synthetic multilingual text item with a correction, metadata and foreign extensions.",
+  "input": {"path": "sample.xml", "media_type": "application/vnd.iptc.g2.newsitem+xml"},
+  "configuration": {"header_paths": ["itemMeta/{urn:example:wire}header"]}
+}

@@ -139,6 +139,13 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always() && matrix.group == 'sdk-python'
         with:
+          name: newsml-g2-contract-report
+          path: .scratch/plugin-sdk/newsml-g2-contract-report.json
+          include-hidden-files: true
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.group == 'sdk-python'
+        with:
           name: alerts-contract-report
           path: .scratch/plugin-sdk/alerts-contract-report.json
           include-hidden-files: true

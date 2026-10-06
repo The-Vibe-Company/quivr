@@ -279,6 +279,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   output with the engine's own validation: Manifest rules, response size, input-Blob-only
   Blob Parts and declared namespaces. It writes a JSON report with `--report`, and CI
   publishes one for the `quivr plugin init` template.
+- **Searchable NewsML-G2 text** through [`plugins/newsml-g2`](plugins/newsml-g2/README.md):
+  headlines, sluglines and paragraphs retain their language and direction, editorial
+  metadata stays namespaced, and the raw XML remains available as the source Blob.
+  Both item and single-item message media types are supported.
 - **Searchable PDFs** through the reference plugin [`plugins/pdf-text`](plugins/pdf-text/README.md)
   (pypdf, BSD-3-Clause). An `application/pdf` Blob becomes one `body` Part per page with
   text, and a phrase is found on its page's Part. Blank or scanned pages give warnings;

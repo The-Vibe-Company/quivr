@@ -1,0 +1,419 @@
+{
+  "manifest": {
+    "kind": "manifest",
+    "parts": [
+      {
+        "key": "headline-1",
+        "role": "title",
+        "content": {
+          "kind": "text",
+          "text": "افتتاح الميناء"
+        },
+        "extensions": {
+          "newsml-g2.text": {
+            "schema_version": "1",
+            "data": {
+              "language": "ar",
+              "dir": "rtl"
+            }
+          }
+        }
+      },
+      {
+        "key": "headline-2",
+        "role": "title",
+        "content": {
+          "kind": "text",
+          "text": "Ouverture du port"
+        },
+        "extensions": {
+          "newsml-g2.text": {
+            "schema_version": "1",
+            "data": {
+              "language": "fr",
+              "dir": "ltr"
+            }
+          }
+        }
+      },
+      {
+        "key": "slugline-1",
+        "role": "body",
+        "content": {
+          "kind": "text",
+          "text": "الميناء-نقل"
+        },
+        "extensions": {
+          "newsml-g2.text": {
+            "schema_version": "1",
+            "data": {
+              "language": "ar",
+              "dir": "rtl"
+            }
+          }
+        }
+      },
+      {
+        "key": "paragraph-1",
+        "role": "body",
+        "content": {
+          "kind": "text",
+          "text": "أعيد فتح الميناء اليوم."
+        },
+        "extensions": {
+          "newsml-g2.text": {
+            "schema_version": "1",
+            "data": {
+              "language": "ar",
+              "dir": "rtl"
+            }
+          }
+        }
+      },
+      {
+        "key": "paragraph-2",
+        "role": "body",
+        "content": {
+          "kind": "text",
+          "text": "The ferry resumes tomorrow."
+        },
+        "extensions": {
+          "newsml-g2.text": {
+            "schema_version": "1",
+            "data": {
+              "language": "en",
+              "dir": "ltr"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "language": "ar",
+  "extensions": {
+    "newsml-g2.document": {
+      "schema_version": "1",
+      "data": {
+        "guid": "urn:example:news:harbour",
+        "version": "3",
+        "language": "ar",
+        "first_created": "2026-01-02T12:00:00Z",
+        "version_created": "2026-01-02T12:30:00Z",
+        "urgency": "3",
+        "provider": [
+          {
+            "uri": "https://example.com/news",
+            "names": [
+              "Example News"
+            ]
+          }
+        ],
+        "signals": [
+          {
+            "qcode": "sig:correction"
+          }
+        ],
+        "genres": [
+          {
+            "qcode": "genre:news",
+            "role": "main"
+          }
+        ],
+        "subjects": [
+          {
+            "qcode": "medtop:20000902",
+            "type": "cpnat:abstract",
+            "names": [
+              "Transport"
+            ]
+          }
+        ],
+        "located": [
+          {
+            "type": "cpnat:geoArea",
+            "uri": "urn:example:place:harbour",
+            "names": [
+              "الميناء"
+            ]
+          }
+        ],
+        "creators": [
+          {
+            "uri": "urn:example:author:1",
+            "names": [
+              "Example Author"
+            ]
+          }
+        ],
+        "keywords": [
+          "ferry"
+        ],
+        "roles": [
+          "editing",
+          "main"
+        ]
+      }
+    },
+    "newsml-g2.xml": {
+      "schema_version": "1",
+      "data": {
+        "root": {
+          "name": "{http://iptc.org/std/nar/2006-10-01/}newsItem",
+          "attributes": {
+            "guid": "urn:example:news:harbour",
+            "version": "3",
+            "standard": "NewsML-G2",
+            "standardversion": "2.34",
+            "{http://www.w3.org/XML/1998/namespace}lang": "ar",
+            "dir": "rtl"
+          },
+          "children": [
+            {
+              "name": "{http://iptc.org/std/nar/2006-10-01/}itemMeta",
+              "children": [
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}provider",
+                  "attributes": {
+                    "uri": "https://example.com/news"
+                  },
+                  "children": [
+                    {
+                      "name": "{http://iptc.org/std/nar/2006-10-01/}name",
+                      "text": "Example News"
+                    }
+                  ]
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}versionCreated",
+                  "text": "2026-01-02T12:30:00Z"
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}firstCreated",
+                  "text": "2026-01-02T12:00:00Z"
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}signal",
+                  "attributes": {
+                    "qcode": "sig:correction"
+                  }
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}pubStatus",
+                  "attributes": {
+                    "qcode": "stat:usable"
+                  }
+                },
+                {
+                  "name": "{urn:example:wire}header",
+                  "children": [
+                    {
+                      "name": "{urn:example:wire}desk",
+                      "attributes": {
+                        "role": "editing"
+                      },
+                      "text": "world"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "{http://iptc.org/std/nar/2006-10-01/}contentMeta",
+              "children": [
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}headline",
+                  "text": "افتتاح الميناء"
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}slugline",
+                  "text": "الميناء-نقل"
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}headline",
+                  "attributes": {
+                    "{http://www.w3.org/XML/1998/namespace}lang": "fr",
+                    "dir": "ltr"
+                  },
+                  "text": "Ouverture du port"
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}language",
+                  "attributes": {
+                    "tag": "ar"
+                  }
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}urgency",
+                  "text": "3"
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}genre",
+                  "attributes": {
+                    "qcode": "genre:news",
+                    "role": "main"
+                  }
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}subject",
+                  "attributes": {
+                    "qcode": "medtop:20000902",
+                    "type": "cpnat:abstract"
+                  },
+                  "children": [
+                    {
+                      "name": "{http://iptc.org/std/nar/2006-10-01/}name",
+                      "text": "Transport"
+                    }
+                  ]
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}located",
+                  "attributes": {
+                    "type": "cpnat:geoArea",
+                    "uri": "urn:example:place:harbour"
+                  },
+                  "children": [
+                    {
+                      "name": "{http://iptc.org/std/nar/2006-10-01/}name",
+                      "text": "الميناء"
+                    },
+                    {
+                      "name": "{http://iptc.org/std/nar/2006-10-01/}broader",
+                      "attributes": {
+                        "qcode": "iso3166-1a2:MA"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}creator",
+                  "attributes": {
+                    "uri": "urn:example:author:1"
+                  },
+                  "children": [
+                    {
+                      "name": "{http://iptc.org/std/nar/2006-10-01/}name",
+                      "text": "Example Author"
+                    }
+                  ]
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}keyword",
+                  "text": "ferry"
+                }
+              ]
+            },
+            {
+              "name": "{http://iptc.org/std/nar/2006-10-01/}contentSet",
+              "children": [
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}inlineXML",
+                  "attributes": {
+                    "contenttype": "application/xhtml+xml"
+                  },
+                  "children": [
+                    {
+                      "name": "{http://www.w3.org/1999/xhtml}html",
+                      "children": [
+                        {
+                          "name": "{http://www.w3.org/1999/xhtml}body",
+                          "children": [
+                            {
+                              "name": "{http://www.w3.org/1999/xhtml}p",
+                              "text": "أعيد فتح ",
+                              "children": [
+                                {
+                                  "name": "{http://www.w3.org/1999/xhtml}strong",
+                                  "text": "الميناء",
+                                  "tail": " اليوم."
+                                }
+                              ]
+                            },
+                            {
+                              "name": "{http://www.w3.org/1999/xhtml}p",
+                              "attributes": {
+                                "{http://www.w3.org/XML/1998/namespace}lang": "en",
+                                "dir": "ltr"
+                              },
+                              "text": "The ferry resumes tomorrow."
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "{http://iptc.org/std/nar/2006-10-01/}remoteContent",
+                  "attributes": {
+                    "href": "https://example.com/photo.jpg",
+                    "contenttype": "image/jpeg"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "{urn:example:wire}extra",
+              "attributes": {
+                "rank": "1"
+              },
+              "text": "kept",
+              "children": [
+                {
+                  "name": "{urn:example:wire}value",
+                  "text": "mixed",
+                  "tail": " tail"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "newsml-g2.headers": {
+      "schema_version": "1",
+      "data": {
+        "paths": {
+          "itemMeta/{urn:example:wire}header": [
+            {
+              "name": "{urn:example:wire}header",
+              "children": [
+                {
+                  "name": "{urn:example:wire}desk",
+                  "attributes": {
+                    "role": "editing"
+                  },
+                  "text": "world"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "newsml-g2.metadata": {
+      "schema_version": "1",
+      "data": {
+        "language": "ar",
+        "published_at": "2026-01-02T12:00:00Z",
+        "source_type": "newswire",
+        "source": "https://example.com/news",
+        "author": [
+          "urn:example:author:1"
+        ],
+        "subjects": [
+          "medtop:20000902"
+        ],
+        "tags": [
+          "ferry"
+        ],
+        "country": [
+          "MA"
+        ],
+        "place": [
+          "الميناء"
+        ]
+      }
+    }
+  }
+}
