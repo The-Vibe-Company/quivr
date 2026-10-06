@@ -14,11 +14,13 @@ These requests are operator examples, not run against a paid deployment. The coo
 
 ## Enable hosted ingestion
 
+If an earlier hosted promotion added E5 evaluation, restore its saved pre-promotion plan before deploying: startup preserves operator-created routes. After redeploy, inspect `GET /v0/admin/plugins/plan`: require `ingestion-default` on `hosted.embed`, no `ingestion-evaluation:*:core.ingest` roles and no source routes to E5. Use the [plan rollback procedure](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-a-plugin#roll-back) with the saved plan id; resolve coverage or reachability refusals before proceeding.
+
 Set `QUIVR_DEMO_HOSTED_EMBED=1` identically on api and worker, then redeploy both. Newly arriving documents then incur hosted embedding calls. Without exactly `1`, no hosted pin or sidecar is added. An enabled service refuses startup if its endpoint or key is empty.
 
 The entrypoint generates a model-locked manifest in `/tmp/hosted-embed/quivr-plugin.yaml` without calling Foundry. The endpoint becomes `base_url` with `/providers/cohere/v2` appended; the plugin appends `/embed`. Only the hosted sidecar receives the key. Both services run it on loopback port 9980.
 
-The plan selects `hosted.embed` as the default for every source format, including NewsML-G2 XML, after normalization. It has no E5 evaluation routes, saving CPU for new hosted Versions. Existing Corpora keep their served generation until rebuilt, so they can still need E5 while transitioning. Keep core.ingest and TEI running.
+The generated config selects `hosted.embed` as the default for every source format, including NewsML-G2 XML, after normalization. It has no E5 evaluation routes, saving CPU for new hosted Versions. Existing Corpora keep their served generation until rebuilt, so they can still need E5 while transitioning. Keep core.ingest and TEI running.
 
 The plugin requests `search_document` for documents and `search_query` for queries, with `output_dimension: 1024`. Segments use a conservative 6144-byte token bound and 192-byte overlap, rather than an exact provider tokenizer. The manifest declares $0.12 per million input tokens for the cost estimate. Recheck the rate before a paid run.
 
@@ -79,9 +81,7 @@ curl -fsS -X POST "$QUIVR_API_URL/v0/corpora/$CORPUS_ID/rebuilds" \
   -d '{"idempotency_key":"<a unique rebuild key>"}' | jq
 ```
 
-Poll `GET /v0/operations/{operation_id}` until `succeeded`. Inspect
-`GET /v0/corpora/{corpus_id}/vector-spaces` again and repeat ordinary searches without
-evaluation fields: hits must name the hosted space. Keep both sidecars running for
+Poll `GET /v0/operations/{operation_id}` until `succeeded`. Inspect `GET /v0/corpora/{corpus_id}/vector-spaces` again and repeat ordinary searches without evaluation fields: hits must name the hosted space. Keep both sidecars running for
 old work; new hosted generations have no E5 evaluation route. Do not use space
 promotion to change owners: it only switches models within one owner.
 
@@ -95,8 +95,7 @@ Earlier plans still name their exact build. Work already started never moves to 
 
 New hosted Versions have no E5 vectors. Saved-plan rollback can refuse missing E5 coverage with `409 plugin_conflict` or a replaced build with `409 plugin_unreachable`. Selecting E5 in a backfill does not convert hosted-only Versions: the source-scope restriction applies.
 
-For a complete return to E5, keep both plugins reachable while changing the startup default to `core.ingest`, then rebuild every Corpus with the procedure above and verify E5 coverage and ordinary searches. For example, not run: stage a deployment
-configuration that retains the hosted pin and sidecar but sets
+For a complete return to E5, keep both plugins reachable while changing the startup default to `core.ingest`, then rebuild every Corpus with the procedure above and verify E5 coverage and ordinary searches. For example, not run: this requires a custom core image or entrypoint; the shipped toggle cannot create this staged state. Configure it to retain the hosted pin and sidecar but set
 `ingestion: {default: core.ingest}` without evaluation routes. The current switch
 alone removes hosted reachability when disabled, so do not disable it on a Corpus
 that still searches the hosted generation or has hosted pinned work. Once E5

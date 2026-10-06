@@ -85,21 +85,23 @@ their vectors attach at the rebuild, which re-embeds with the same model, so res
 ## Hosted Azure embeddings for every source (optional)
 
 Set `QUIVR_DEMO_HOSTED_EMBED=1`, `AZURE_FOUNDRY_ENDPOINT` (Foundry resource root)
-and the secret `AZURE_FOUNDRY_KEY` identically on api and worker, then redeploy both.
-The default ingestion is `hosted.embed`: Cohere-Embed-V5-Pro, 1024 dimensions,
-for every source format after normalization, including NewsML-G2 XML.
+and the secret `AZURE_FOUNDRY_KEY` identically on api and worker. For existing Corpora,
+complete step 1 below before redeploying both.
+The default ingestion is `hosted.embed`: Cohere-Embed-V5-Pro, 1024 dimensions, for every source format after normalization, including NewsML-G2 XML.
 PDFs still need `QUIVR_DEMO_PLUGINS=1` for `pdf-text`. Other switch values keep E5.
-New hosted generations have no E5 evaluation route, saving CPU. Keep core.ingest
-and TEI reachable for historical generations and already-pinned work.
+The generated config has no E5 evaluation route, saving CPU after plan verification. Keep core.ingest and TEI reachable for historical generations and already-pinned work.
 
 Existing Corpora keep their old search generation after redeploy and can still
 require E5 until rebuilt. Use the operator key inside api (port 8080), with
 `plugins:admin`, `corpora:read`, `projections:rebuild`, `operations:read` and
 `operations:write`. These are operator examples, not run against the paid provider:
 
-1. Save `GET /v0/admin/plugins/plan` before redeploy for rollback. Afterwards,
-   inspect the active hosted registration at `GET /v0/admin/plugins` and list
-   every Corpus with `GET /v0/corpora`, following pagination.
+1. Save `GET /v0/admin/plugins/plan` before redeploy for rollback. If earlier hosted
+   promotions added E5 evaluation, restore the saved pre-promotion plan first:
+   startup preserves operator-created routes. After redeploy, verify the active
+   plan has `ingestion-default` on `hosted.embed`, no `ingestion-evaluation:*:core.ingest`
+   and no source routes to E5. Inspect `GET /v0/admin/plugins` and list every Corpus
+   with `GET /v0/corpora`, following pagination.
 2. Inspect `GET /v0/corpora/{corpus_id}/vector-spaces`. Re-index each existing
    Corpus with `POST /v0/corpora/{corpus_id}/rebuilds` and a fresh `idempotency_key`.
    The rebuild re-runs segmentation and embedding of existing Versions with the
