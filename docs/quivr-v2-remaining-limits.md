@@ -51,8 +51,8 @@ stay visible. The Spec 1 obligation map is in
 - Expiry uses both the pruned watermark and the age rule, so a cursor can
   get 410 while its next events are still stored (the prune lags or dispatch
   holds it back). It never resumes over a gap.
-- Migrations may break in-flight work. Restarts are reported, not avoided, and
-  there is no expand/contract or compatibility matrix.
+- Legacy-risk migrations may break in-flight work. New migrations use
+  expand/contract; there is no full released-version compatibility matrix yet.
 
 **Ingestion**
 
@@ -155,3 +155,13 @@ stay visible. The Spec 1 obligation map is in
 - The E5 model's MIT declaration and training-data provenance are as published
   upstream; see [third_party/README.md](../third_party/README.md).
 - The denylist does not scan the `multimodal-rag` submodule.
+
+**Application upgrades**
+
+- Expand/contract migration lint and a merge-base binary compatibility job cover
+  inline ingestion, authorization and lexical search. There is no full release
+  compatibility matrix yet; the previous artifact is a commit until release
+  images are integrated. Historical migrations flagged in `migrations/legacy.json`
+  retain their original risks. Additive DDL can briefly delay writes while locks
+  are held. Contract execution closes the application rollback window; there are
+  no down migrations. See the [upgrade guide](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-quivr).

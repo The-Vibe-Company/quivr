@@ -285,6 +285,11 @@ class Dispatch(unittest.TestCase):
         # budgets and SQL. Fake only provider I/O, mounts, inputs and time.
         import threading
         from concurrent.futures import ThreadPoolExecutor
+        import scoring
+        # Compile the real scorer before the bounded concurrent phases. A cold
+        # JIT cache must not make this owner depend on earlier scoring tests.
+        # THE-1147 tracks shortening this real scorer/SQL owner beyond its budget.
+        scoring.score({'q': {'a': 1}}, {'q': ['a', 'b']})
         store = control_store.Store(os.environ['EVAL_CONTROL_TEST_DSN'])
         cfg = search_trial.configuration({'model': 'Cohere-Embed-V5-Fast', 'revision': 'fixture-v1',
                                           'dimensions': 2, 'dense_weight': .5})

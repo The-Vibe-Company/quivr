@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -70,4 +71,28 @@ func orderingKey(name string) (string, error) {
 		return m[1], nil
 	}
 	return "", fmt.Errorf("migration %s: name must be <UTC YYYYMMDDTHHMMZ>_<slug>.sql with a lowercase [a-z0-9_] slug", name)
+}
+
+// Plan selects migrations in filename order. Contract migrations are optional
+// until an operator explicitly closes the rollback window. Their first line
+// is exactly "-- quivr:contract"; the lint validates all policy tags.
+func Plan(fsys fs.FS, includeContract bool) ([]string, error) {
+	names, err := NamesIn(fsys)
+	if err != nil {
+		return nil, err
+	}
+	selected := make([]string, 0, len(names))
+	for _, name := range names {
+		data, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return nil, err
+		}
+		first, _, _ := strings.Cut(string(data), "\n")
+		first = strings.TrimSuffix(first, "\r")
+		if !includeContract && first == "-- quivr:contract" {
+			continue
+		}
+		selected = append(selected, name)
+	}
+	return selected, nil
 }

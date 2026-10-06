@@ -190,7 +190,11 @@ func isCommand(name string) bool {
 	return false
 }
 
-func Run(command string) error {
+func Run(command string, args ...string) error {
+	contract := command == "migrate" && len(args) == 1 && args[0] == "--contract"
+	if len(args) != 0 && !contract {
+		return errors.New(engineUsage())
+	}
 	if !isCommand(command) {
 		return errors.New(engineUsage())
 	}
@@ -470,6 +474,11 @@ func Run(command string) error {
 	if command == "migrate" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
+		if contract {
+			if err = postgres.MigrateContracts(ctx, pool); err != nil {
+				return errors.New("contract migration failed; check database connectivity and schema")
+			}
+		}
 		// The PostgreSQL part runs first and alone needs no other dependency;
 		// rerunning migrate completes the S3 and Weaviate steps.
 		if err = BootstrapDatabase(ctx, pool, DeploymentSpaces(cfg.migrationPins())); err != nil {
