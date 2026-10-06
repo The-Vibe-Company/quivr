@@ -54,7 +54,7 @@ import {
 import { MoreMenu } from "../MoreMenu";
 import { AlertForm } from "./AlertForm";
 import { CaughtItem } from "./CaughtItem";
-import { EmptyState, LiveBadge, LoadingState, Notice } from "../ui";
+import { EmptyState, InBar, LoadingState, Notice, type Bar } from "../ui";
 
 type Status = "loading" | "ready" | "unavailable" | "error";
 
@@ -103,6 +103,19 @@ function SourceLogos({
 }
 
 /**
+ * The page as last shown. Coming back to it, it shows at once (no loading
+ * flash between two pages), then reads its alerts again.
+ */
+let visited: {
+  corpus: string;
+  alerts: Alert[];
+  matched: Record<string, string[]>;
+  dated: AlertList["dated"];
+  described: boolean;
+  detail: Detail | null;
+} | null = null;
+
+/**
  * The Alertes page: every alert in a table (what it caught, the last seven
  * days, when it was created, its state), and under it the selected alert:
  * its analytics on the left (growth, frequency, trend, sources, hours) and
@@ -112,6 +125,7 @@ function SourceLogos({
  */
 export function AlertsView({
   corpus,
+  bar,
   selected,
   onSelect,
   doc,
@@ -127,6 +141,8 @@ export function AlertsView({
   onUnauthorized,
 }: {
   corpus: string;
+  /** The top bar’s places this page fills. */
+  bar: Bar;
   selected: string | null;
   onSelect: (id: string | null) => void;
   /** The article open in the reader over the page. */
@@ -143,25 +159,36 @@ export function AlertsView({
   notify: (text: string) => void;
   onUnauthorized: () => void;
 }) {
-  const [status, setStatus] = useState<Status>("loading");
+  const last = visited?.corpus === corpus ? visited : null;
+  const [status, setStatus] = useState<Status>(last ? "ready" : "loading");
   const [error, setError] = useState("");
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [described, setDescribed] = useState(false);
-  const [detail, setDetail] = useState<Detail | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>(last?.alerts ?? []);
+  const [described, setDescribed] = useState(last?.described ?? false);
+  const [detail, setDetail] = useState<Detail | null>(last?.detail ?? null);
   const [detailError, setDetailError] = useState("");
-  const [live, setLive] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [grown, setGrown] = useState<Set<string>>(new Set());
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Alert | null>(null);
   // The form panel: closed, writing a new alert, or editing `editing`.
   const [composing, setComposing] = useState(false);
-  const [matched, setMatched] = useState<Record<string, string[]>>({});
-  const [dated, setDated] = useState<AlertList["dated"]>();
+  const [matched, setMatched] = useState<Record<string, string[]>>(last?.matched ?? {});
+  const [dated, setDated] = useState<AlertList["dated"]>(last?.dated);
   const [now, setNow] = useState(() => Date.now());
   const counts = useRef(new Map<string, number>());
   const seen = useRef<{ id: string; matches: Set<string> } | null>(null);
-  const listHeading = useRef<HTMLHeadingElement>(null);
+  // After a removal, the focus lands on the list, or on "Nouvelle alerte"
+  // once no alert is left (see `removals`).
+  const alertTable = useRef<HTMLTableElement>(null);
+  const newAlert = useRef<HTMLButtonElement>(null);
+  const [removals, setRemovals] = useState(0);
+  useEffect(() => {
+    if (removals) (alertTable.current ?? newAlert.current)?.focus();
+  }, [removals]);
+
+  useEffect(() => {
+    if (status === "ready") visited = { corpus, alerts, matched, dated, described, detail };
+  });
 
   // The alert shown under the table: the one picked, else the first.
   const current = alerts.find((a) => a.alert_id === selected) || alerts[0] || null;
@@ -172,7 +199,9 @@ export function AlertsView({
       if (e instanceof APIError && e.status === 401) onUnauthorized();
       else {
         setError(alertMessage(e));
-        setStatus("error");
+        // A list on screen (a return visit) stays, with a notice above it;
+        // without one, the page is the error.
+        setStatus((s) => (s === "ready" ? s : "error"));
       }
     },
     [onUnauthorized],
@@ -196,6 +225,7 @@ export function AlertsView({
     setDated(list.dated);
     setNow(Date.now());
     setDescribed(list.described === true);
+    setError("");
     setStatus("ready");
   }, []);
 
@@ -223,7 +253,8 @@ export function AlertsView({
 
   useEffect(() => {
     const controller = new AbortController();
-    setStatus("loading");
+    // Coming back, the last list stays on screen while it is read again.
+    setStatus((s) => (s === "ready" ? s : "loading"));
     reload(controller.signal).catch((e) => {
       if (!controller.signal.aborted) failed(e);
     });
@@ -245,7 +276,6 @@ export function AlertsView({
         await reload(signal);
         if (currentID) await reloadDetail(currentID, signal);
       },
-      onLive: setLive,
       onUnauthorized,
     });
   }, [status, currentID, reload, reloadDetail, onUnauthorized]);
@@ -274,7 +304,7 @@ export function AlertsView({
     if (selected === alert.alert_id) onSelect(null);
     notify(`Alerte « ${alert.name} » supprimée.`);
     onChanged();
-    listHeading.current?.focus();
+    setRemovals((n) => n + 1);
   };
 
   // What each alert caught, newest first, dated by the facade's index.
@@ -404,22 +434,29 @@ export function AlertsView({
     <main className="board board-single alerts-board">
       <h1 className="visually-hidden">Alertes</h1>
       <section className="alerts-page" aria-labelledby="alerts-list-title">
-        <div className="alerts-head">
-          <h2 id="alerts-list-title" ref={listHeading} tabIndex={-1}>
-            Vos alertes
-          </h2>
+        {/* The count and "Nouvelle alerte" sit in the top bar. */}
+        <h2 id="alerts-list-title" className="visually-hidden">
+          Vos alertes
+        </h2>
+        <InBar to={bar.meta}>
           {alerts.length > 0 && (
             <span className="head-count">
               {alerts.length}
               <span className="visually-hidden"> alerte{alerts.length > 1 ? "s" : ""}</span>
             </span>
           )}
-          <LiveBadge live={live} />
-          <button type="button" className="button alerts-new" onClick={() => compose(null)}>
+        </InBar>
+        <InBar to={bar.actions}>
+          <button type="button" className="button alerts-new" ref={newAlert} onClick={() => compose(null)}>
             <PlusIcon size={16} />
-            Nouvelle alerte
+            <span className="bar-action-label">Nouvelle alerte</span>
           </button>
-        </div>
+        </InBar>
+        {error && (
+          <Notice title="Les alertes n’ont pas pu être relues." onRetry={() => setAttempt((n) => n + 1)}>
+            {error} Les alertes affichées sont celles de la dernière lecture.
+          </Notice>
+        )}
         {alerts.length === 0 || !current || !stats ? (
           <div className="alerts-empty">
             <span className="kind-tile" aria-hidden="true">
@@ -438,7 +475,7 @@ export function AlertsView({
         ) : (
           <>
             <div className="alerts-table-wrap">
-              <table className="alerts-table" aria-label="Alertes">
+              <table className="alerts-table" aria-label="Alertes" ref={alertTable} tabIndex={-1}>
                 <thead>
                   <tr>
                     <th scope="col">Alerte</th>

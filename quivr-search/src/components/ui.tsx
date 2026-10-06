@@ -1,9 +1,10 @@
 // Shared building blocks of the demo's pages, so every tab has the same
-// header, live indicator and loading, empty and error states.
+// header, top-bar places and loading, empty and error states.
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { ArrowClockwise, Info, WarningCircle } from "@phosphor-icons/react";
 
-/** A page's title, one-line purpose and an optional aside (a live badge). */
+/** A page's title, one-line purpose and an optional aside. */
 export function PageHeader({
   title,
   description,
@@ -24,20 +25,15 @@ export function PageHeader({
   );
 }
 
-/** Whether a page follows its data live; colour is never the only cue. */
-export function LiveBadge({
-  live,
-  offLabel = "Actualisé régulièrement",
-}: {
-  live: boolean;
-  offLabel?: string;
-}) {
-  return (
-    <span className="live-badge" data-live={live}>
-      <span className="live-dot" aria-hidden="true" />
-      {live ? "En direct" : offLabel}
-    </span>
-  );
+/** The top bar's two places a page fills: beside its title, and at the right. */
+export interface Bar {
+  meta: Element | null;
+  actions: Element | null;
+}
+
+/** What a page shows in the top bar (its figures, its main action). */
+export function InBar({ to, children }: { to: Element | null; children: ReactNode }) {
+  return to ? createPortal(children, to) : null;
 }
 
 /** A skeleton list; the label is announced once, the shapes are not. */

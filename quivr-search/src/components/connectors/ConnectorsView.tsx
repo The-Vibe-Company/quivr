@@ -24,7 +24,7 @@ import { Dialog } from "../Dialog";
 import { AddSource } from "./AddSource";
 import { NO_ARTICLES, SourceList, groupSources, nameOf, type SourceStats } from "./SourceList";
 import { PlusIcon } from "../RailIcons";
-import { LiveBadge, LoadingState, Notice } from "../ui";
+import { InBar, LoadingState, Notice, type Bar } from "../ui";
 import type { FeedItem } from "../../lib/feed";
 import { needsCheck } from "../../lib/format";
 import { displayState } from "./HealthBadge";
@@ -37,8 +37,22 @@ const RETRY_POLL = 2000;
 
 type Status = "loading" | "ready" | "unavailable" | "error";
 
+/**
+ * The page as last shown. Coming back to it, it shows at once (no loading
+ * flash between two pages), then reads its sources again.
+ */
+let visited: {
+  corpus: string;
+  catalog: KindCatalog;
+  connectors: Connector[];
+  suggestions: FeedChoice[];
+  /** Each source's numbers, for the week they were counted over. */
+  numbers?: { key: string; value: Awaited<ReturnType<typeof fetchSourceStats>> };
+} | null = null;
+
 export function ConnectorsView({
   corpus,
+  bar,
   feedItems,
   initialSelected,
   onChanged,
@@ -47,6 +61,8 @@ export function ConnectorsView({
   onUnauthorized,
 }: {
   corpus: string;
+  /** The top bar’s places this page fills. */
+  bar: Bar;
   /** The feed's latest articles: their arrival counts again. */
   feedItems: FeedItem[];
   /** A source to open on arrival (from the feed's "Renouveler"). */
@@ -56,28 +72,30 @@ export function ConnectorsView({
   notify: (text: string) => void;
   onUnauthorized: () => void;
 }) {
-  const [status, setStatus] = useState<Status>("loading");
+  const seen = visited?.corpus === corpus ? visited : null;
+  const [status, setStatus] = useState<Status>(seen ? "ready" : "loading");
   const [error, setError] = useState("");
-  const [catalog, setCatalog] = useState<KindCatalog | null>(null);
-  const [connectors, setConnectors] = useState<Connector[]>([]);
+  const [catalog, setCatalog] = useState<KindCatalog | null>(seen?.catalog ?? null);
+  const [connectors, setConnectors] = useState<Connector[]>(seen?.connectors ?? []);
   const [selected, setSelected] = useState<string | null>(initialSelected);
   const [creating, setCreating] = useState(false);
-  const [live, setLive] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [now, setNow] = useState(Date.now());
   const [attempt, setAttempt] = useState(0);
-  const [suggestions, setSuggestions] = useState<FeedChoice[]>([]);
+  const [suggestions, setSuggestions] = useState<FeedChoice[]>(seen?.suggestions ?? []);
   const [highlight, setHighlight] = useState<string | null>(null);
   // Adding a source happens in a dialog, from the header's button or the "+" card.
   const [adding, setAdding] = useState(false);
   const openAdd = () => setAdding(true);
   const states = useRef(new Map<string, string>());
-  const listHeading = useRef<HTMLHeadingElement>(null);
-  // The row is gone: keyboard focus lands on the list heading, once the
-  // settings it was removed from have closed and handed the focus back.
+  const sourcesPage = useRef<HTMLElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  // The card is gone: keyboard focus lands on the list (or on "Ajouter une
+  // source" without one), once the settings it was removed from have closed
+  // and handed the focus back.
   const [removals, setRemovals] = useState(0);
   useEffect(() => {
-    if (removals) listHeading.current?.focus();
+    if (removals) (sourcesPage.current?.querySelector<HTMLElement>(".source-cards") ?? addButton.current)?.focus();
   }, [removals]);
 
   const failed = useCallback(
@@ -87,7 +105,9 @@ export function ConnectorsView({
         setStatus("unavailable");
       else {
         setError(connectorMessage(e));
-        setStatus("error");
+        // Sources on screen (a return visit) stay, with a notice above them;
+        // without them, the page is the error.
+        setStatus((s) => (s === "ready" ? s : "error"));
       }
     },
     [onUnauthorized],
@@ -108,8 +128,11 @@ export function ConnectorsView({
   const reload = useCallback(
     async (signal?: AbortSignal) => {
       const list = await fetchConnectors(signal);
+      // An attempt that failed meanwhile keeps its error and its list.
+      if (signal?.aborted) return;
       track(list);
       setConnectors(list);
+      setError("");
     },
     [track],
   );
@@ -134,7 +157,8 @@ export function ConnectorsView({
 
   useEffect(() => {
     const controller = new AbortController();
-    setStatus("loading");
+    // Coming back, the last sources stay on screen while they are read again.
+    setStatus((s) => (s === "ready" ? s : "loading"));
     Promise.all([
       fetchKinds(controller.signal),
       reload(controller.signal),
@@ -144,10 +168,15 @@ export function ConnectorsView({
       .then(([kinds, , offered]) => {
         setCatalog(kinds);
         setSuggestions(offered.items);
+        setError("");
         setStatus("ready");
       })
       .catch((e) => {
-        if (!controller.signal.aborted) failed(e);
+        if (controller.signal.aborted) return;
+        failed(e);
+        // The other reads of this attempt stop: a late answer must not undo
+        // the failure (the list's read clears the error).
+        controller.abort();
       });
     return () => controller.abort();
   }, [reload, failed, attempt]);
@@ -201,7 +230,6 @@ export function ConnectorsView({
                   },
                 );
               cursor = page.next_cursor;
-              setLive(true);
               if (!page.has_more) break;
             }
             if (arrivals || Date.now() - refreshed > LIVE_INTERVAL * 3) {
@@ -215,7 +243,6 @@ export function ConnectorsView({
             cursor = null;
           } else if (e instanceof APIError && e.status === 403) {
             feed = false;
-            setLive(false);
           } else if (e instanceof APIError && e.status === 401) {
             onUnauthorized();
             return;
@@ -321,7 +348,15 @@ export function ConnectorsView({
     (signal) => fetchSourceStats(week, signal),
     onUnauthorized,
     feedItems,
+    undefined,
+    seen?.numbers,
   );
+  // Remembered for the next visit, with the numbers of this week.
+  useEffect(() => {
+    if (status !== "ready" || !catalog) return;
+    const numbers = counted?.current ? { key: week.join(","), value: counted.value } : seen?.numbers;
+    visited = { corpus, catalog, connectors, suggestions, numbers };
+  });
   // Only numbers for this week; while the facade still indexes, a source it
   // has not reached yet stays uncounted rather than zero.
   const stats = counted?.current
@@ -368,11 +403,12 @@ export function ConnectorsView({
         </section>
       )}
       {status === "ready" && catalog && (
-        <section className="sources-page" aria-labelledby="sources-title">
-          <div className="alerts-head">
-            <h2 id="sources-title" ref={listHeading} tabIndex={-1}>
-              Vos sources
-            </h2>
+        <section className="sources-page" aria-labelledby="sources-title" ref={sourcesPage}>
+          {/* The counts and "Ajouter une source" sit in the top bar. */}
+          <h2 id="sources-title" className="visually-hidden">
+            Vos sources
+          </h2>
+          <InBar to={bar.meta}>
             {sources.length > 0 && (
               <span className="head-count">
                 {sources.length}
@@ -384,14 +420,20 @@ export function ConnectorsView({
                 {toCheck} à vérifier
               </span>
             )}
-            <LiveBadge live={live} />
+          </InBar>
+          <InBar to={bar.actions}>
             {catalog.items.length > 0 && (
-              <button type="button" className="button alerts-new" onClick={openAdd}>
+              <button type="button" className="button alerts-new" ref={addButton} onClick={openAdd}>
                 <PlusIcon size={16} />
-                Ajouter une source
+                <span className="bar-action-label">Ajouter une source</span>
               </button>
             )}
-          </div>
+          </InBar>
+          {error && (
+            <Notice title="Les sources n’ont pas pu être relues." onRetry={() => setAttempt((n) => n + 1)}>
+              {error} Les sources affichées sont celles de la dernière lecture.
+            </Notice>
+          )}
           {sources.length === 0 && !catalog.items.length ? (
             <p className="list-empty">Aucun type de source n’est disponible sur ce déploiement.</p>
           ) : (
