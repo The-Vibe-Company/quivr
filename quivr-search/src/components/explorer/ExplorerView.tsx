@@ -141,6 +141,7 @@ export function ExplorerView({
   const reads = useRef<AbortController | null>(null);
   // The list's own scroll, on a desktop.
   const scroller = useRef<HTMLDivElement>(null);
+  const listBox = useRef<HTMLElement>(null);
   // The row the preview shows by default, for the list it was drawn for.
   const lead = useRef<{ key: string; id: string } | null>(null);
   // The corpora the facets were read for: others picked, their fields go at once.
@@ -161,8 +162,11 @@ export function ExplorerView({
       .then((data) => {
         setPage(data);
         setStatus("ready");
-        // Another list starts from its top.
+        // Another list starts from its top: the list's own scroll on a
+        // desktop, else the page brought back to the list when past it.
         scroller.current?.scrollTo({ top: 0 });
+        if (listBox.current && listBox.current.getBoundingClientRect().top < 0)
+          listBox.current.scrollIntoView({ block: "start" });
       })
       .catch((e) => {
         if (controller.signal.aborted) return;
@@ -474,7 +478,7 @@ export function ExplorerView({
           ) : (
             facetColumn
           )}
-          <section className="explorer-list" aria-label="Documents trouvés">
+          <section className="explorer-list" aria-label="Documents trouvés" ref={listBox}>
             {state.q && (
               <label className="explorer-sort">
                 <span className="visually-hidden">Trier</span>

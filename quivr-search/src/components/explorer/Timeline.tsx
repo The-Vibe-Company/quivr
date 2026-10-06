@@ -38,7 +38,7 @@ export function ticksOf(periods: string[], interval: Interval, width: number) {
   const room = Math.max(2, Math.floor(width / LABEL_PX));
   if (periods.length <= room) return periods.map((_, i) => i);
   const every = periods.length / room;
-  const steps = interval === "day" ? [2, 7, 14] : interval === "month" ? [3, 6, 12] : [2, 5, 10, 20, 50];
+  const steps = interval === "day" ? [2, 7, 14] : interval === "month" ? [3, 6, 12, 24, 60, 120] : [2, 5, 10, 20, 50];
   const step = steps.find((s) => s >= every) || Math.ceil(every);
   const instant = (p: string) => Date.parse(`${p}T00:00:00Z`);
   // Weeks start on Monday; every other week counts weeks since 1970.
@@ -48,7 +48,9 @@ export function ticksOf(periods: string[], interval: Interval, width: number) {
         ? (Number(p.slice(8)) - 1) % step === 0
         : new Date(instant(p)).getUTCDay() === 1 && Math.floor((instant(p) + 3 * 864e5) / 6048e5) % (step / 7) === 0
       : interval === "month"
-        ? (Number(p.slice(5, 7)) - 1) % step === 0
+        ? step < 12
+          ? (Number(p.slice(5, 7)) - 1) % step === 0
+          : p.endsWith("-01") && Number(p.slice(0, 4)) % (step / 12) === 0
         : Number(p) % step === 0;
   const out = periods.flatMap((p, i) => (on(p) ? [i] : []));
   return out.length >= 2 ? out : periods.flatMap((_, i) => (i % Math.ceil(every) === 0 ? [i] : []));

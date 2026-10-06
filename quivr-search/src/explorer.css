@@ -111,10 +111,11 @@
 }
 .timeline-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  height: 20px;
+  gap: 2px 12px;
+  min-height: 20px;
   margin-bottom: 4px;
 }
 .timeline-caption {
@@ -123,6 +124,7 @@
   gap: 8px;
   min-width: 0;
   margin: 0;
+  overflow: hidden;
   font-size: 12px;
   color: var(--ink-soft);
   white-space: nowrap;
@@ -1152,6 +1154,10 @@
   }
   .explorer-list {
     border-radius: var(--ex-radius);
+  }
+  /* A new list brought back into view clears the sticky top bar. */
+  .explorer-list {
+    scroll-margin-top: 110px;
   }
   .facets-drawer {
     padding: 9px 12px;

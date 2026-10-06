@@ -210,7 +210,7 @@ export function Preview({
           type="button"
           className="preview-source-toggle"
           aria-expanded={source}
-          aria-controls="preview-source"
+          aria-controls={source ? "preview-source" : undefined}
           onClick={() => setSource((open) => !open)}
         >
           {xml ? "Source XML" : "Source brute"}
