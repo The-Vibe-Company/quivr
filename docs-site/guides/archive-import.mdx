@@ -147,5 +147,29 @@ with its stack name, as described in the plugin's
 [package README](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/object-storage-archive/README.md).
 The measurement seeds synthetic source objects and reports accepted members
 per second against the 50 members/second acquisition target. It also reports
-searchable unique Records per second and any processing delay after acceptance.
+searchable and enriched unique Records per second, stage rollups, worker service
+durations and hardware metadata. It waits for enrichment before finishing.
+Organization-wide rollups need an otherwise idle Organization; document timeline
+intervals include queue waits. Synthetic text uses built-in normalization.
 It is outside CI.
+
+To measure hosted embedding without calling a paid provider, use the loopback
+fake on the same local stack:
+
+```bash
+python3 scripts/measure_archive_hosted.py --stack demo --items 5000 \
+  --batch-size 500 --concurrency 32 --provider-latency-ms 500
+```
+
+The helper temporarily pins `hosted.embed`, then restores the stack configuration
+and processes. It records provider batch sizes and latency alongside the archive
+measurement under `.scratch/demo/`. Compare with `--batch-wait-ms 0` to disable
+cross-Version batching, keeping hardware, source settings and fake latency equal.
+The default 25 ms collection window groups document inputs from the same
+Organization within provider item and token limits; query embedding bypasses it.
+The ingestion worker admits four processing batch activities with up to 16
+receipts each, or 64 receipts per process. Each receipt keeps its pinned plan,
+stage deadlines and replay guards. Provider concurrency remains separately
+bounded by `max_concurrent_requests`. Add worker replicas only within your
+database and provider capacity.
+See [hosted embedding settings](/run-quivr/switch-a-vector-model).

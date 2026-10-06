@@ -15,12 +15,13 @@ import (
 )
 
 type ingester struct {
-	config   configuration
-	provider provider
-	mu       sync.Mutex
-	cache    map[[32]byte]*list.Element
-	order    *list.List
-	bytes    int
+	config    configuration
+	provider  provider
+	documents *documentBatcher
+	mu        sync.Mutex
+	cache     map[[32]byte]*list.Element
+	order     *list.List
+	bytes     int
 }
 type cachedVector struct {
 	key    [32]byte
@@ -28,7 +29,9 @@ type cachedVector struct {
 }
 
 func newIngester(c configuration, key string, log *slog.Logger) *ingester {
-	return &ingester{config: c, provider: provider{config: c, key: key, log: log, gate: &providerGate{slots: make(chan struct{}, c.MaxConcurrentRequests)}}, cache: map[[32]byte]*list.Element{}, order: list.New()}
+	i := &ingester{config: c, provider: provider{config: c, key: key, log: log, gate: &providerGate{slots: make(chan struct{}, c.MaxConcurrentRequests)}}, cache: map[[32]byte]*list.Element{}, order: list.New()}
+	i.documents = &documentBatcher{provider: i.provider, slots: make(chan struct{}, min(256, c.MaxConcurrentRequests*c.BatchSize)), pending: map[string]*documentBatch{}}
+	return i
 }
 func (i *ingester) get(key [32]byte) []float32 {
 	i.mu.Lock()
@@ -92,11 +95,20 @@ func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestR
 			batch = append(batch, input)
 			end++
 		}
-		v, err := i.provider.embed(ctx, batch, "document", req.InvocationID)
+		var v [][]float32
+		var err error
+		if c.BatchWaitMS == 0 {
+			v, err = i.provider.embed(ctx, batch, "document", req.InvocationID)
+		} else {
+			v, err = i.documents.embed(ctx, req.OrganizationID, batch, req.InvocationID)
+		}
 		if err != nil {
 			var e *quivrplugin.IngestError
-			if errors.As(err, &e) && e.Retryable {
-				return nil, quivrplugin.RetryableIngestError("embedding_incomplete", "document embedding is incomplete; completed batches are kept for retry")
+			if errors.As(err, &e) {
+				if e.Retryable {
+					return nil, quivrplugin.RetryableIngestError("embedding_incomplete", "document embedding is incomplete; completed batches are kept for retry")
+				}
+				return nil, e
 			}
 			return nil, err
 		}

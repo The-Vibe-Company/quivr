@@ -22,9 +22,25 @@ type provider struct {
 	gate   *providerGate
 }
 
-func (p provider) embed(ctx context.Context, inputs []string, mode, invocation string) ([][]float32, error) {
+// inputRefusal retains the failure class internally while preserving the
+// public ingestion error. Authentication and endpoint failures affect the whole
+// request; only input validation/size statuses can justify isolating members.
+type inputRefusal struct {
+	*quivrplugin.IngestError
+}
+
+func (e *inputRefusal) Unwrap() error { return e.IngestError }
+
+func (p provider) embed(ctx context.Context, inputs []string, mode string, invocation ...string) ([][]float32, error) {
+	return p.request(ctx, inputs, mode, invocation, false)
+}
+
+func (p provider) request(ctx context.Context, inputs []string, mode string, invocations []string, admitted bool) ([][]float32, error) {
 	c := p.config
 	if c.Auth != "none" && p.key == "" {
+		if admitted {
+			p.gate.release()
+		}
 		return nil, quivrplugin.TerminalIngestError("provider_credentials", "AZURE_FOUNDRY_KEY is required")
 	}
 	body := map[string]any{"model": c.Model}
@@ -54,9 +70,12 @@ func (p provider) embed(ctx context.Context, inputs []string, mode, invocation s
 	}
 	client := &http.Client{Timeout: time.Duration(c.RequestTimeoutMS) * time.Millisecond, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for attempt := 0; attempt <= c.MaxRetries; attempt++ {
-		if err := p.gate.acquire(ctx); err != nil {
-			return nil, quivrplugin.RetryableIngestError("provider_unavailable", "provider admission cancelled")
+		if !admitted {
+			if err := p.gate.acquire(ctx); err != nil {
+				return nil, quivrplugin.RetryableIngestError("provider_unavailable", "provider admission cancelled")
+			}
 		}
+		admitted = false
 		req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(c.BaseURL, "/")+path, bytes.NewReader(encoded))
 		if err != nil {
 			p.gate.release()
@@ -71,7 +90,7 @@ func (p provider) embed(ctx context.Context, inputs []string, mode, invocation s
 		res, err := client.Do(req)
 		if err != nil {
 			p.gate.release()
-			p.usage(invocation, mode, attempt, 0, estimate, true)
+			p.usage(invocations, len(inputs), mode, attempt, 0, estimate, true)
 			return nil, quivrplugin.RetryableIngestError("provider_unavailable", "provider request failed or timed out")
 		}
 		data, readErr := io.ReadAll(io.LimitReader(res.Body, 16<<20+1))
@@ -89,16 +108,20 @@ func (p provider) embed(ctx context.Context, inputs []string, mode, invocation s
 			if !known {
 				tokens = estimate
 			}
-			p.usage(invocation, mode, attempt, res.StatusCode, tokens, !known)
+			p.usage(invocations, len(inputs), mode, attempt, res.StatusCode, tokens, !known)
 			return vectors, err
 		}
-		p.usage(invocation, mode, attempt, res.StatusCode, estimate, true)
+		p.usage(invocations, len(inputs), mode, attempt, res.StatusCode, estimate, true)
 		if res.StatusCode == 200 {
 			return nil, quivrplugin.RetryableIngestError("invalid_provider_response", "provider response is unreadable or too large")
 		}
 		retry := res.StatusCode == 429 || (res.StatusCode >= 500 && res.StatusCode <= 599)
 		if !retry {
-			return nil, quivrplugin.TerminalIngestError("inference_refused", "provider refused the request (HTTP "+strconv.Itoa(res.StatusCode)+")")
+			refusal := quivrplugin.TerminalIngestError("inference_refused", "provider refused the request (HTTP "+strconv.Itoa(res.StatusCode)+")")
+			if mode == "document" && (res.StatusCode == http.StatusBadRequest || res.StatusCode == http.StatusRequestEntityTooLarge || res.StatusCode == http.StatusUnprocessableEntity) {
+				return nil, &inputRefusal{refusal}
+			}
+			return nil, refusal
 		}
 		if attempt == c.MaxRetries {
 			break
@@ -118,8 +141,14 @@ func (p provider) embed(ctx context.Context, inputs []string, mode, invocation s
 	}
 	return nil, quivrplugin.RetryableIngestError("provider_unavailable", "provider exhausted bounded retries")
 }
-func (p provider) usage(invocation, mode string, attempt, status, tokens int, estimated bool) {
-	p.log.Info("embedding_usage", "event", "hosted_embedding_usage", "invocation_id", invocation, "space", p.config.spaceID(), "mode", mode, "attempt", attempt+1, "status", status, "input_tokens", tokens, "estimated", estimated)
+func (p provider) usage(invocations []string, items int, mode string, attempt, status, tokens int, estimated bool) {
+	attrs := []any{"event", "hosted_embedding_usage", "space", p.config.spaceID(), "mode", mode, "attempt", attempt + 1, "status", status, "input_tokens", tokens, "input_count", items, "estimated", estimated}
+	if len(invocations) == 1 {
+		attrs = append(attrs, "invocation_id", invocations[0])
+	} else {
+		attrs = append(attrs, "invocation_ids", invocations)
+	}
+	p.log.Info("embedding_usage", attrs...)
 }
 func retryAfter(value string, now time.Time) (time.Duration, bool) {
 	if seconds, err := strconv.ParseUint(strings.TrimSpace(value), 10, 32); err == nil {

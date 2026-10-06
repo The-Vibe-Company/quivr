@@ -35,18 +35,18 @@ func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) 
 	}
 	finished := make(chan struct{})
 	go func() { defer close(finished); env.ExecuteWorkflow(ingestionBatchWorkflow, in) }()
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 16; i++ {
 		select {
 		case <-steps.started:
 		case <-time.After(time.Second):
 			close(steps.release)
 			<-finished
-			t.Fatalf("only %d of eight receipt slots ran", i)
+			t.Fatalf("only %d of sixteen receipt slots ran", i)
 		}
 	}
 	select {
 	case <-steps.started:
-		t.Error("more than eight receipts ran while slots were occupied")
+		t.Error("more than sixteen receipts ran while slots were occupied")
 	default:
 	}
 	close(steps.release)
@@ -58,8 +58,8 @@ func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) 
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatal(err)
 	}
-	if peak := steps.peak.Load(); peak != 8 {
-		t.Fatalf("peak receipt concurrency %d, want 8", peak)
+	if peak := steps.peak.Load(); peak != 16 {
+		t.Fatalf("peak receipt concurrency %d, want 16", peak)
 	}
 	for i := 0; i < 32; i++ {
 		if got := steps.parents[fmt.Sprint(i)]; got != fmt.Sprint(i) {

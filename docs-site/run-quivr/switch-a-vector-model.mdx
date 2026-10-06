@@ -65,6 +65,15 @@ EOF
 
 For Cohere’s own API, use `"base_url":"https://api.cohere.com/v2"` and `"auth":"bearer"` in both configuration copies instead.
 
+For archive imports, `hosted.embed` combines concurrent document inputs from
+the same Organization. It collects for `batch_wait_ms` (default 25, range
+0–100 ms) and respects `batch_size`, `max_batch_tokens` and the shared
+`max_concurrent_requests` cap. Set `batch_wait_ms: 0` to disable collection.
+Queries bypass the collection window. See the plugin's
+[limits and defaults](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#limits-and-defaults)
+for cancellation, refusal isolation and batch usage logs.
+
+
 The generated manifest binds the model and settings to a distinct vector space, the coordinate system for its numeric vectors. Use that exact configuration when pinning or registering it. Copy the space name from `contributions.ingestion.spaces`; its API id is that name followed by `@` and the declared space `version`.
 
 Certify with a fixture carrying the same configuration. Inject `AZURE_FOUNDRY_KEY` into the certification command's environment so its plugin subprocess receives it. This step calls your provider:
