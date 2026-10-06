@@ -1,0 +1,30 @@
+quivr-search/src/components/feed/SourceLogo.tsx
+  s_c21c70c5aa40f0::t_f37ba27e53f663 45,110-111
+quivr-search/tests/server.test.mjs
+  s_c21c70c5aa40f0::t_f4cd32ed75b2d6 453
+quivr-search/README.md
+  s_c21c70c5aa40f0::t_4199689b38472b 19
+quivr-search/tests/feeds.test.mjs
+  s_c21c70c5aa40f0::t_f4cd32ed75b2d6 14,216-223,259-263,299-303,324
+quivr-search/feeds.mjs
+  s_c21c70c5aa40f0::t_eb23a14e2bc88b 590-592
+  s_c21c70c5aa40f0::t_fce7040c05807d 573-576,583,589
+  s_c21c70c5aa40f0::t_51f3785c2315a8 19-21,308-310,637-678
+  s_c21c70c5aa40f0::t_65ee92f7c75e62 679-680
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f5ce4df8173fa33554a40378fb001ef829432542",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}
