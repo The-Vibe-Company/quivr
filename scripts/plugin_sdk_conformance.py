@@ -39,7 +39,7 @@ def certify(language: str, quivr: str, executable: str) -> None:
         attachment_fixture = work / "attachment.json"
         attachment_fixture.write_text(json.dumps({"connector": {"kind": "files", "config": {}}, "expect": {"pages": [{"record_keys": ["file-1"], "more": False}]}}))
         fixtures = [FIXTURES / "connectors/push.json", attachment_fixture]
-    manifest["compatibility"]["plugin_api"] = ">=0.13.0 <0.14.0"
+    manifest["compatibility"]["plugin_api"] = ">=0.14.0 <0.15.0"
     path = work / "quivr-plugin.yaml"
     path.write_text(yaml.safe_dump(manifest, sort_keys=False))
     report = work / "contract-report.json"
@@ -52,6 +52,13 @@ def certify(language: str, quivr: str, executable: str) -> None:
         raise RuntimeError(result.stdout + result.stderr)
     document = json.loads(report.read_text())
     checks = document["checks"]
+    authentication = [c for c in checks if c["id"] == "authentication"]
+    cases = json.loads((FIXTURES / "authentication/cases.json").read_text())["cases"]
+    expected_authentication = {f"contracts:authentication/cases.json#{case['name']}" for case in cases}
+    if (len(authentication) != len(expected_authentication)
+            or {c.get("fixture") for c in authentication} != expected_authentication
+            or any(c["status"] != "pass" for c in authentication)):
+        raise RuntimeError("SDK authentication probes did not all pass")
     expected = {"normalizer", "subscription"} if language == "go" else {"connector", "ingestion"}
     exercised = {c.get("contribution") for c in checks if c["id"] == "invoke" and c["status"] == "pass"}
     if not expected <= exercised:

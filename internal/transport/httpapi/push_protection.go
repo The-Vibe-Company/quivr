@@ -3,8 +3,6 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net"
@@ -15,6 +13,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
@@ -69,10 +68,13 @@ func (a *API) pushClientIP(r *http.Request) netip.Addr {
 // pushResponse keeps the bounded connector answer until its audit event and
 // counters commit. Other APIs, including streaming, bypass this buffer.
 type pushResponse struct {
-	header http.Header
-	body   bytes.Buffer
-	status int
+	header    http.Header
+	body      bytes.Buffer
+	status    int
+	errorCode string
 }
+
+func (w *pushResponse) SetErrorCode(code string) { w.errorCode = code }
 
 func (w *pushResponse) Header() http.Header { return w.header }
 func (w *pushResponse) WriteHeader(status int) {
@@ -109,9 +111,6 @@ func (a *API) servePushAudited(w http.ResponseWriter, r *http.Request) {
 			target, err := a.Relay.Store.LoadDelivery(lookupCtx, aliasID)
 			cancel()
 			if err != nil && !errors.Is(err, corpus.ErrNotFound) {
-				var requestID [16]byte
-				_, _ = rand.Read(requestID[:])
-				w.Header().Set("X-Request-ID", hex.EncodeToString(requestID[:]))
 				w.Header().Set("Retry-After", "30")
 				writeError(w, publicerr.ConnectorsUnavailable, nil)
 				return
@@ -133,11 +132,14 @@ func (a *API) servePushAudited(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buffered := &pushResponse{header: make(http.Header)}
+	for _, key := range []string{"X-Request-ID", "X-Trace-ID", "X-Span-ID"} {
+		buffered.header.Set(key, w.Header().Get(key))
+	}
 	a.serve(buffered, r)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
+	ctx, cancel := lifecycle.CleanupContext(r.Context(), 2*time.Second)
 	defer cancel()
 	if err := a.Relay.Protection.RecordPush(ctx, id, buffered.status >= 200 && buffered.status < 300); err != nil && !errors.Is(err, corpus.ErrNotFound) {
-		slog.Warn("connector push audit unavailable", "connector_id", id)
+		slog.WarnContext(r.Context(), "connector push audit unavailable", "connector_id", id)
 		w.Header().Set("X-Request-ID", buffered.header.Get("X-Request-ID"))
 		w.Header().Set("Retry-After", "30")
 		writeError(w, publicerr.ConnectorsUnavailable, nil)
@@ -145,6 +147,9 @@ func (a *API) servePushAudited(w http.ResponseWriter, r *http.Request) {
 	}
 	for key, values := range buffered.header {
 		w.Header()[key] = values
+	}
+	if coded, ok := w.(interface{ SetErrorCode(string) }); ok {
+		coded.SetErrorCode(buffered.errorCode)
 	}
 	w.WriteHeader(buffered.status)
 	_, _ = w.Write(buffered.body.Bytes())

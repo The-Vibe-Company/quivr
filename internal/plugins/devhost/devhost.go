@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
 // Issue codes added by the local host, beside the codes of package plugins.
@@ -104,7 +105,13 @@ func Start(opts Options) (*Process, error) {
 	}
 	cmd := exec.Command(opts.Command[0], opts.Command[1:]...)
 	cmd.Dir = opts.Dir
-	cmd.Env = append(os.Environ(), opts.Env...)
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(name, plugins.EnvSigningKeys) && !strings.EqualFold(name, plugins.EnvPluginSigningKeys) {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	cmd.Env = append(cmd.Env, opts.Env...)
 	cmd.Env = append(cmd.Env, EnvHost+"="+host, EnvPort+"="+strconv.Itoa(port), EnvManifest+"="+manifest)
 	out := opts.Output
 	if out == nil {
@@ -168,6 +175,10 @@ func get(ctx context.Context, url string, timeout time.Duration) (int, []byte, e
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
+		return 0, nil, err
+	}
+	telemetry.Inject(ctx, req.Header)
+	if err := plugins.SignHTTPRequest(req, nil); err != nil {
 		return 0, nil, err
 	}
 	resp, err := httpClient().Do(req)
@@ -285,6 +296,9 @@ func Discover(ctx context.Context, baseURL string, report plugins.Report) (strin
 		} else if !slices.Contains(plugins.SupportedPluginAPIVersions, doc.PluginAPI) {
 			mismatch("/plugin_api", "discovery implements Plugin API %s; this engine serves %v", doc.PluginAPI, plugins.SupportedPluginAPIVersions)
 		} else {
+			if negotiated, ok := plugins.NegotiatePluginAPI(r); ok && plugins.ResolveAPI(negotiated).Speaks(plugins.FeatureSignedCalls) && !plugins.ResolveAPI(doc.PluginAPI).Speaks(plugins.FeatureSignedCalls) {
+				mismatch("/plugin_api", "the manifest admits signed engine calls, but discovery serves an older unsigned Plugin API; upgrade the SDK or restrict the manifest range")
+			}
 			if len(m.Requires) > 0 && !plugins.ResolveAPI(doc.PluginAPI).Speaks(plugins.FeatureProfileCandidates) {
 				mismatch("/plugin_api", "discovery implements Plugin API %s, but declared profile dependencies need %s or later", doc.PluginAPI, plugins.FeatureSince(plugins.FeatureProfileCandidates))
 			}
@@ -476,6 +490,10 @@ func invoke(ctx context.Context, baseURL, route string, request []byte, maxRespo
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	telemetry.Inject(ctx, req.Header)
+	if err := plugins.SignHTTPRequest(req, request); err != nil {
+		return nil, err
+	}
 	resp, err := httpClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("POST %s: %w", route, err)

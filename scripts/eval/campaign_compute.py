@@ -77,12 +77,22 @@ class Measurement:
     def __call__(self, config):
         self.store.renew_owner(self.name, self.owner)
         state = self.store.snapshot(self.name)
-        resource = self.store.intent(self.name, self.owner)
+        resource, attempted = None, False
+        def app_name(slot):
+            # Allocate an intent only after the campaign measurement slot admits us.
+            nonlocal resource
+            resource = self.store.intent(self.name, self.owner, lease=slot)
+            return resource['label']
+        def on_launch():
+            nonlocal attempted
+            # Entering SDK startup may already send AppCreate; failed entry
+            # does not prove its absence. Preserve uncertain SDK attempts.
+            attempted = True
         try:
             return modal_search.launch(state['spec']['policy'], config, self.name, self.outbox, True,
-                app_name=resource['label'],
+                app_name=app_name, on_launch=on_launch,
                 on_app=lambda app: self.store.bind(self.name, self.owner, resource['id'], app),
-                check=lambda: self.store.renew_owner(self.name, self.owner))
+                check=lambda: self.store.renew_owner(self.name, self.owner), parallelism=state['spec']['parallelism'])
         except network_recovery.Outage:
             raise
         except Exception as error:
@@ -93,11 +103,13 @@ class Measurement:
             # A bounded outage leaves detached compute and uncertain admissions
             # intact. The independent watchdog reconciles after ownership grace.
             # Do not spend another outage window on release/cleanup here.
-            # A failed creation/bind remains pending for the watchdog. Live
-            # ownership can close only resources whose exact ID is acknowledged.
+            # Unknown creation/bind remains pending for the watchdog; local
+            # failure before AppCreate can safely abandon its own intent.
             current = (self.store.snapshot(self.name)['resources'][resource['id']]
-                       if not isinstance(sys.exc_info()[1], network_recovery.Outage) else None)
-            if current and current['app_id']:
+                       if resource and not isinstance(sys.exc_info()[1], network_recovery.Outage) else None)
+            if resource and not attempted and not isinstance(sys.exc_info()[1], network_recovery.Outage):
+                self.store.abandon_intent(self.name, self.owner, resource['id'])
+            elif current and current['app_id']:
                 self.compute.stop(current['app_id'])
                 if self.compute.running(current['app_id']):
                     raise campaign_store.CleanupPending('Modal termination is still pending')

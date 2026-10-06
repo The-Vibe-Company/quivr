@@ -23,6 +23,8 @@ import embeddings
 import report as render
 import run
 
+import ci_guard
+
 PRICES = {
     'Cohere-Embed-V5-Pro': {'usd_per_million_tokens': .12, 'date': '2026-10-03',
                           'source': 'https://cohere.com/blog/embed-5'},
@@ -68,6 +70,7 @@ def hosted(binary, directory, candidate, gate):
     """Generate the dependency's manifest offline and run it without a provider key."""
     sys.path.insert(0, str(run.ROOT / 'scripts'))
     import ingestion_plugin
+    import plugin_environment
     import ports
     directory.mkdir(parents=True, exist_ok=True)
     directory.chmod(0o700)
@@ -87,7 +90,7 @@ def hosted(binary, directory, candidate, gate):
     space = next(iter(spaces))
     gate.plugin = declared['id']
     port = ports.allocate()
-    env = {k: v for k, v in os.environ.items() if k not in ('AZURE_FOUNDRY_KEY', 'AZURE_FOUNDRY_ENDPOINT', 'TYPESAFE_API_KEY')}
+    env = {k: v for k, v in plugin_environment.inherited().items() if k not in ('AZURE_FOUNDRY_KEY', 'AZURE_FOUNDRY_ENDPOINT', 'TYPESAFE_API_KEY')}
     env.update(QUIVR_PLUGIN_HOST='127.0.0.1', QUIVR_PLUGIN_PORT=str(port), QUIVR_PLUGIN_MANIFEST=str(manifest))
     log = directory / 'hosted-embedding.log'
     with log.open('ab') as output:
@@ -224,8 +227,7 @@ def main():
     if options.dry_run:
         print(json.dumps(campaign, indent=2))
         return
-    if not options.allow_paid or any(os.environ.get(key, '').lower() not in ('', '0', 'false')
-                                     for key in ('CI', 'GITHUB_ACTIONS')):
+    if not options.allow_paid or ci_guard.in_ci():
         parser.error('paid campaign requires --allow-paid locally; CI execution is refused')
     endpoint = os.environ.pop('AZURE_FOUNDRY_ENDPOINT', '')
     key = os.environ.pop('AZURE_FOUNDRY_KEY', '')

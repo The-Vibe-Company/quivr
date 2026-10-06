@@ -261,12 +261,18 @@ const CONNECTORS_INTERVAL = 30000;
 export function useConnectorList(onUnauthorized: () => void) {
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [available, setAvailable] = useState(true);
+  // Reads can overlap (the timer, a menu opening): only the latest one counts.
+  const latest = useRef(0);
   const reload = useCallback(
     async (signal?: AbortSignal) => {
+      const read = ++latest.current;
       try {
-        setConnectors(await fetchConnectors(signal));
+        const list = await fetchConnectors(signal);
+        if (read !== latest.current) return;
+        setConnectors(list);
         setAvailable(true);
       } catch (e) {
+        if (read !== latest.current) return;
         if (e instanceof APIError && e.status === 401) onUnauthorized();
         else if (e instanceof APIError && e.status === 403) setAvailable(false);
       }

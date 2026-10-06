@@ -665,9 +665,16 @@ mark {
 .mark-read svg {
   color: var(--accent);
 }
-.mark-read:hover {
+.mark-read:hover:not(:disabled) {
   background: var(--hover);
   color: var(--ink);
+}
+/* Waiting for the list to show the filter picked: dimmed only when that
+   takes long enough to be seen. */
+.mark-read:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transition: opacity 120ms 200ms;
 }
 /* Fixed widths, so that counts and picks never shift the bar. */
 /* Counts read like a moment's: a small pill, wide enough for three
@@ -1030,6 +1037,13 @@ mark {
   list-style: none;
   margin: 0;
   padding: 2px 0 32px;
+  transition: opacity 120ms;
+}
+/* Rows still showing the previous filter while the new ones render: dimmed
+   only when that takes long enough to be seen. */
+.feed-rows[data-pending] {
+  opacity: 0.6;
+  transition-delay: 200ms;
 }
 .feed-more {
   display: flex;
@@ -1372,8 +1386,24 @@ button.moment-pill:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.row-tags button svg {
+/* The alerts icon (RailIcons' AlertsIcon) drawn by CSS: a feed of
+   300 rows with several tags each would otherwise hold thousands of SVG
+   nodes (THE-1056). In forced-colors mode it takes the system's text colour
+   (forced colours would otherwise paint its background over it). */
+.row-tags button::before {
+  content: "";
   flex: none;
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0'/%3E%3Cpath d='M15.51 15.56a5 5 0 1 0 -3.51 1.44'/%3E%3Cpath d='M18.832 17.86a9 9 0 1 0 -6.832 3.14'/%3E%3Cpath d='M12 12v9'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0'/%3E%3Cpath d='M15.51 15.56a5 5 0 1 0 -3.51 1.44'/%3E%3Cpath d='M18.832 17.86a9 9 0 1 0 -6.832 3.14'/%3E%3Cpath d='M12 12v9'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+@media (forced-colors: active) {
+  .row-tags button::before {
+    forced-color-adjust: none;
+    background: ButtonText;
+  }
 }
 .row-tag-name {
   min-width: 0;
@@ -2511,6 +2541,11 @@ button.moment-pill:hover {
 @media (prefers-reduced-motion: reduce) {
   .bar-live[data-state="live"] .bar-live-dot::after {
     animation: none;
+  }
+  /* No fade, but still no flash: the dim keeps its delay. */
+  .feed-rows,
+  .mark-read:disabled {
+    transition-duration: 0s;
   }
   .peek,
   .toast {

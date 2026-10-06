@@ -20,6 +20,8 @@ import search_trial
 import private_working
 import network_recovery
 
+import ci_guard
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 COMPUTE_NOTICE = ('The compute cap covers compute reserved by this runner, not the full Modal invoice; '
                   'builds, storage and other account charges need separate operator budgeting.')
@@ -152,13 +154,13 @@ def policy(value):
     return cfg
 
 
-def frozen_policy(policy, sha, scorer_digest, fresh_latency=True):
+def frozen_policy(policy, sha, scorer_digest, fresh_latency=True, parallelism=1):
     return {**policy, 'git_sha': sha, 'scorer_digest': scorer_digest,
-            'registry_digest': search_trial.digest(public_sets.SETS), 'fresh_latency': fresh_latency}
+            'registry_digest': search_trial.digest(public_sets.SETS), 'fresh_latency': fresh_latency, 'trial_parallelism': parallelism}
 
 
-def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, outbox, fresh_latency):
-    frozen = frozen_policy(policy, sha, scorer_digest, fresh_latency)
+def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, outbox, fresh_latency, *, measurement_slot=None, parallelism=1):
+    frozen = frozen_policy(policy, sha, scorer_digest, fresh_latency, parallelism)
     store.campaign(campaign, frozen)
     key = search_trial.digest({'config': cfg, 'dataset': name, 'registry': policy['sets'][name].get('input', public_sets.SETS.get(name)),
                               'tier': 'direct', 'sha': sha, 'scorer': scorer_digest, 'fresh_latency': fresh_latency})
@@ -177,7 +179,8 @@ def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, out
     try:
         reservation = store.reserve(campaign, 'modal',
             (policy['max_seconds'] + policy['startup_seconds']) * control_store.money(policy['modal_usd_per_second']),
-            {'measurement_key': key, 'max_seconds': policy['max_seconds'], 'startup_seconds': policy['startup_seconds']}, (key, owner))
+            {'measurement_key': key, 'max_seconds': policy['max_seconds'], 'startup_seconds': policy['startup_seconds']}, (key, owner),
+            extra_leases=[measurement_slot] if measurement_slot else [])
         started = time.monotonic()
         row = invoke(request)
         elapsed = time.monotonic() - started
@@ -192,7 +195,7 @@ def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, out
         return completed(store, campaign, key, row, tracking, 'complete')
     except embeddings.BudgetExceeded:
         status, reason = 'capped', 'daily reservation cap reached or usage bound exceeded'
-    except network_recovery.Outage:
+    except (network_recovery.Outage, control_store.LeaseLost, control_store.Unavailable, control_store.Contention):
         # The same invocation may still be running. Keep its reservation and
         # measurement lease until the watchdog acknowledges app termination.
         raise
@@ -207,8 +210,9 @@ def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, out
 
 def completed(store, campaign, key, row, tracking, status):
     output = {'status': status, 'record': row, 'receipt': tracking.log(row)}
-    if row['dataset']['private']:
-        baseline_key = row['provenance']['private_pair']['baseline_lease_key']
+    if row['dataset']['private'] or 'public_pair' in row.get('provenance', {}):
+        kind = 'private_pair' if row['dataset']['private'] else 'public_pair'
+        baseline_key = row['provenance'][kind]['baseline_lease_key']
         baseline = store.evidence(campaign, [baseline_key])[baseline_key]
         output.update(baseline_record=baseline, baseline_receipt=tracking.log(baseline))
     return output
@@ -231,6 +235,7 @@ def remote_trial(request):
     import results
     import search_trial
     import trec
+    import network_recovery
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     log = logging.getLogger(__name__)
     log.info('trial started')
@@ -242,7 +247,7 @@ def remote_trial(request):
     store.campaign(request['campaign'], policy)
     lease = request['lease_key'], request['owner']
     store.renew(request['campaign'], *lease, ttl=policy['max_seconds'])
-    budget = control_store.Budget(store, request['campaign'], lease)
+    budget = control_store.Budget(store, request['campaign'], lease, ttl=policy['max_seconds'])
     volume = modal.Volume.from_name('quivr-eval-embeddings-cache')
     volume.reload()
     # Replay committed evidence even when its originating container has exited.
@@ -261,28 +266,41 @@ def remote_trial(request):
                  len(data['corpus']), len(data['qrels']), time.monotonic() - started)
         dataset = {'name': name, 'version': search_trial.digest(public_sets.SETS[name]),
                    'split': 'dev', 'fingerprint': trec.fingerprint(directory), 'private': False}
-        hosted = None
-        if cfg['model'] != direct_bakeoff.E5_MODEL:
-            hosted = direct_bakeoff.Hosted(os.environ['AZURE_FOUNDRY_ENDPOINT'], os.environ['AZURE_FOUNDRY_KEY'],
-                                          budget, name, policy['prices'])
-        measured = search_trial.measure(cfg, data, dataset, '/eval-cache/embeddings', budget, hosted,
-                        policy['prices'], float(policy['modal_usd_per_second']), request['fresh_latency'],
-                        os.environ.get('TYPESAFE_API_KEY', ''), volume.commit, quality_concurrency=policy['quality_concurrency'])
-        measured['duration_seconds'] = time.monotonic() - started
-        measured['cost'].update(modal_seconds=measured['duration_seconds'], resource_class=search_trial.resource_class(policy),
-                                agent_token_usage=policy['agent_token_usage'], compute_cap_notice=COMPUTE_NOTICE)
-        row = search_trial.record(measured, {**cfg, 'profile': policy['profile'],
-                    'campaign': request['campaign'], 'campaign_policy_hash': search_trial.digest(policy),
-                    'prices_usd_per_million': policy['prices'],
-                    'modal_usd_per_second': policy['modal_usd_per_second'],
-                    'resource_class': search_trial.resource_class(policy), 'quality_concurrency': policy['quality_concurrency'],
-                    'price_revision': policy['price_revision'], 'fresh_latency': request['fresh_latency']},
-                    policy['experiment'], request['git_sha'], request['scorer_digest'])
+        configs = {'baseline': policy['baseline'], 'candidate': cfg}
+        budgets, clients = {}, {}
+        for side, config in configs.items():
+            budgets[side] = control_store.Budget(store, request['campaign'], lease, ttl=policy['max_seconds'])
+            clients[side] = None if config['model'] == direct_bakeoff.E5_MODEL else direct_bakeoff.Hosted(
+                os.environ['AZURE_FOUNDRY_ENDPOINT'], os.environ['AZURE_FOUNDRY_KEY'],
+                budgets[side], name, policy['prices'])
+            if clients[side] is not None:
+                clients[side].provider_gate = control_store.ProviderAdmission(budgets[side])
+        measurements = search_trial.measure_pair(configs, data, dataset, '/eval-cache/embeddings', budgets, clients,
+            policy['prices'], float(policy['modal_usd_per_second']), request['fresh_latency'],
+            os.environ.get('TYPESAFE_API_KEY', ''), quality_concurrency=policy['quality_concurrency'], flush=volume.commit, refresh=volume.reload,
+            latency_scope=lambda: store.latency_window(request['campaign'], lease, policy['max_seconds']))
+        rows = {}
+        for side, config in configs.items():
+            measured = measurements[side]
+            measured['duration_seconds'] = time.monotonic() - started
+            measured['cost'].update(modal_seconds=measured['duration_seconds'], resource_class=search_trial.resource_class(policy),
+                                    agent_token_usage=policy['agent_token_usage'], compute_cap_notice=COMPUTE_NOTICE)
+            rows[side] = search_trial.record(measured, {**config, 'paired_side': side, 'profile': policy['profile'],
+                'paired_candidate_hash': search_trial.digest(cfg),
+                'campaign': request['campaign'], 'campaign_policy_hash': search_trial.digest(policy),
+                'prices_usd_per_million': policy['prices'], 'modal_usd_per_second': policy['modal_usd_per_second'],
+                'resource_class': search_trial.resource_class(policy), 'quality_concurrency': policy['quality_concurrency'],
+                'price_revision': policy['price_revision'], 'fresh_latency': request['fresh_latency']},
+                policy['experiment'], request['git_sha'], request['scorer_digest'])
+        rows['candidate']['provenance'] = {'public_pair': {
+            'baseline_lease_key': request['lease_key'] + '/' + request['owner'] + '/baseline'}}
+        row = search_trial.publish_pair(store, request, rows)
         log.info('measurement complete elapsed_seconds=%.3f', measured['duration_seconds'])
-        store.publish(request['campaign'], *lease, row)
         results.Results(directory='/eval-cache/results').log(row)
         volume.commit()
         return row
+    except network_recovery.Outage:
+        raise  # Skip compensating writes after the bounded recovery window.
     except embeddings.BudgetExceeded:
         log.info('trial capped elapsed_seconds=%.3f', time.monotonic() - started)
         store.abandon(request['campaign'], *lease, 'capped')
@@ -331,7 +349,7 @@ def invoke(remote, request, check):
 
 
 def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quivr-search-measurement',
-           on_app=lambda identity: None, check=lambda: None):
+           on_app=lambda identity: None, on_launch=lambda: None, check=lambda: None, parallelism=1):
     import modal
     if subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=ROOT).returncode:
         raise ValueError('measurement code must be committed before live dispatch')
@@ -340,56 +358,91 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
         path = pathlib.Path(path)
         relative = str(path.relative_to(ROOT)) if path.is_absolute() else str(path)
         return relative not in tracked and not any(name.startswith(relative.rstrip('/') + '/') for name in tracked)
-    image = (modal.Image.debian_slim(python_version='3.12')
-             .apt_install('age')
-             .pip_install_from_requirements(str(ROOT / 'scripts/eval/requirements-modal.txt'))
-             .add_local_dir(ROOT, '/repo', ignore=ignored))
-    app = modal.App(app_name)
-    secrets = [modal.Secret.from_name('quivr-eval-results'), modal.Secret.from_name('quivr-eval-embeddings')]
-    if any(c['reranker'] == 'jev' for c in (candidate, policy['baseline'])):
-        secrets.append(modal.Secret.from_name('quivr-eval-rerank'))
-    private_volumes, private_secrets = private_working.mounts(policy)
-    secrets.extend(modal.Secret.from_name(name) for name in private_secrets)
-    remote = app.function(image=image, cpu=(policy['modal_cpu'], policy['modal_cpu']),
-        memory=(policy['modal_memory_mib'], policy['modal_memory_mib']),
-        timeout=policy['max_seconds'], startup_timeout=policy['startup_seconds'],
-        retries=0, max_containers=4, scaledown_window=2, single_use_containers=True,
-        include_source=False, serialized=True, secrets=secrets,
-        volumes={'/eval-cache': modal.Volume.from_name('quivr-eval-embeddings-cache', create_if_missing=True),
-                 **{mount: modal.Volume.from_name(name) for mount, name in private_volumes.items()}})(shipped_trial())
     store = control_store.Store(os.environ['EVAL_CONTROL_DATABASE_URL'])
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     scorer_digest = 'sha256:' + search_trial.digest({name: (ROOT / 'scripts/eval' / name).read_text()
         for name in ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py', 'private_working.py', 'protected_inputs.py')})
-    pairs, work = {}, {}
-    check()
-    with app.run(detach=True):
-        on_app(app.app_id)
-        for name in policy['sets']:
-            pair = {}
-            sides = (('candidate', candidate),) if 'input' in policy['sets'][name] else (('baseline', policy['baseline']), ('candidate', candidate))
-            for side, cfg in sides:
-                check()
-                outcome = dispatch(store, campaign, policy, cfg, name, sha, scorer_digest,
-                                   lambda request: invoke(remote, request, check), outbox, fresh_latency)
-                work[name + '/' + side] = {k: v for k, v in outcome.items() if k not in ('record', 'baseline_record', 'baseline_receipt')}
+    if type(parallelism) is not int or not 1 <= parallelism <= 16:
+        raise ValueError('trial parallelism must be 1..16')
+    store.campaign(campaign, frozen_policy(policy, sha, scorer_digest, fresh_latency, parallelism))
+    ttl = policy['max_seconds'] + policy['startup_seconds']
+    # Retain one slot per admitted app until acknowledged termination. Latency
+    # has its own remote window; indexing and quality may overlap across slots.
+    gate = network_recovery.admission(campaign)
+    while True:
+        try:
+            slot_identity = store.claim_slot(campaign, 'campaign-measurement-slot', parallelism, ttl, gate=gate)
+            break
+        except network_recovery.AdmissionPaused:
+            gate.wait()  # Rollback precedes waiting; no unused trial slot remains.
+    if slot_identity is None:
+        return {'status': 'leased', 'reason': 'all campaign trial slots are busy', 'work': {}}
+    slot_key, slot_owner = slot_identity
+    slot = {'owner': slot_owner}
+    def slot_check():
+        check()
+        store.renew(campaign, slot_key, slot['owner'], ttl)
+    # Ambiguous detached calls retain the slot until their bounded lifetime expires.
+    completed, launch_attempted = False, False
+    try:
+        image = (modal.Image.debian_slim(python_version='3.12')
+                 .apt_install('age')
+                 .pip_install_from_requirements(str(ROOT / 'scripts/eval/requirements-modal.txt'))
+                 .add_local_dir(ROOT, '/repo', ignore=ignored))
+        slot_check()
+        app = modal.App(app_name((slot_key, slot['owner'])) if callable(app_name) else app_name)
+        secrets = [modal.Secret.from_name('quivr-eval-results'), modal.Secret.from_name('quivr-eval-embeddings')]
+        if any(c['reranker'] == 'jev' for c in (candidate, policy['baseline'])):
+            secrets.append(modal.Secret.from_name('quivr-eval-rerank'))
+        private_volumes, private_secrets = private_working.mounts(policy)
+        secrets.extend(modal.Secret.from_name(name) for name in private_secrets)
+        remote = app.function(image=image, cpu=(policy['modal_cpu'], policy['modal_cpu']),
+            memory=(policy['modal_memory_mib'], policy['modal_memory_mib']),
+            timeout=policy['max_seconds'], startup_timeout=policy['startup_seconds'],
+            retries=0, max_containers=4, scaledown_window=2, single_use_containers=True,
+            include_source=False, serialized=True, secrets=secrets,
+            volumes={'/eval-cache': modal.Volume.from_name('quivr-eval-embeddings-cache', create_if_missing=True),
+                     **{mount: modal.Volume.from_name(name) for mount, name in private_volumes.items()}})(shipped_trial())
+        pairs, work = {}, {}
+        slot_check()
+        on_launch()
+        launch_attempted = True
+        with app.run(detach=True):
+            on_app(app.app_id)
+            for name in policy['sets']:
+                pair = {}
+                slot_check()
+                outcome = dispatch(store, campaign, policy, candidate, name, sha, scorer_digest,
+                                   lambda request: invoke(remote, request, slot_check), outbox, fresh_latency,
+                                   measurement_slot=(slot_key, slot['owner']), parallelism=parallelism)
+                work[name + '/candidate'] = {k: v for k, v in outcome.items() if k not in ('record', 'baseline_record', 'baseline_receipt')}
                 if outcome['status'] in ('complete', 'reused'):
                     row = outcome['record']
                     if 'baseline_record' in outcome:
-                        pair['baseline'] = outcome['baseline_record']
+                        baseline = outcome['baseline_record']
+                        pair['baseline'] = {**baseline,
+                            'per_query': {key.replace('_at_', '@'): values for key, values in baseline['per_query'].items()},
+                            'metrics': {key.replace('_at_', '@'): value for key, value in baseline['metrics'].items()}}
                         work[name + '/baseline'] = {'receipt': outcome['baseline_receipt']}
-                    pair[side] = {**row, 'per_query': {key.replace('_at_', '@'): values for key, values in row['per_query'].items()},
+                    pair['candidate'] = {**row, 'per_query': {key.replace('_at_', '@'): values for key, values in row['per_query'].items()},
                                   'metrics': {key.replace('_at_', '@'): value for key, value in row['metrics'].items()}}
                 elif outcome['status'] in ('capped', 'leased'):
+                    completed = True
                     return {'status': outcome['status'], 'reason': outcome['reason'], 'work': work,
                             'ledger': store.summary(campaign), 'compute_cap_notice': COMPUTE_NOTICE}
-            if len(pair) == 2:
-                pairs[name] = pair
-    aggregate_sets = {name: {side: {key: row.get('metrics', {}).get(key.replace('_at_', '@'), row.get('metrics', {}).get(key))
-                            for key in ('ndcg_at_10', 'latency_p95_ms', 'cost_per_search_usd', 'cost_per_1000_documents_usd')}
-                            for side, row in pair.items()} for name, pair in pairs.items()}
-    return {**gates.evaluate(pairs, policy), 'work': work, 'aggregate_sets': aggregate_sets, 'ledger': store.summary(campaign),
-            'agent_token_usage': policy['agent_token_usage'], 'compute_cap_notice': COMPUTE_NOTICE}
+                if len(pair) == 2:
+                    pairs[name] = pair
+        aggregate_sets = {name: {side: {key: row.get('metrics', {}).get(key.replace('_at_', '@'), row.get('metrics', {}).get(key))
+                                for key in ('ndcg_at_10', 'latency_p95_ms', 'cost_per_search_usd', 'cost_per_1000_documents_usd')}
+                                for side, row in pair.items()} for name, pair in pairs.items()}
+        verdict = {**gates.evaluate(pairs, policy), 'work': work, 'aggregate_sets': aggregate_sets, 'ledger': store.summary(campaign),
+                   'agent_token_usage': policy['agent_token_usage'], 'compute_cap_notice': COMPUTE_NOTICE}
+        completed = True
+        return verdict
+
+    finally:
+        if completed or (not launch_attempted and not isinstance(sys.exc_info()[1], network_recovery.Outage)):
+            store.release_slot(campaign, (slot_key, slot['owner']))
 
 
 def main(argv=None):
@@ -410,7 +463,7 @@ def main(argv=None):
             'provider_estimator': 'shared UTF-8 byte + eight special tokens per input',
             'confirmation_available': False, 'compute_cap_notice': COMPUTE_NOTICE}))
         return 0
-    if any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
+    if ci_guard.in_ci():
         parser.error('CI measurements are refused')
     if not args.allow_paid or not args.campaign or not re.fullmatch(r'[A-Za-z0-9_.-]+', args.campaign):
         parser.error('live dispatch requires --allow-paid and a plain campaign identifier')

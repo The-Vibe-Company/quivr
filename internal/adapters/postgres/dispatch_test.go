@@ -3,6 +3,10 @@ package postgres_test
 import (
 	"context"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -25,37 +29,45 @@ func TestIngestionBacklogLeavesInArrivalOrder(t *testing.T) {
 	}
 	store := contentStores(pool)
 	expected := acceptDispatchBacklog(t, ctx, store, 512)
-	for offset := 0; offset < len(expected); offset += 32 {
-		got, err := store.Claim(ctx, 32)
-		if err != nil || len(got) != 32 {
-			t.Fatalf("batch at %d: got %d receipts (%v), want 32", offset, len(got), err)
-		}
-		for i, d := range got {
-			if d != expected[offset+i] {
-				t.Fatalf("arrival %d: got %+v, want %+v", offset+i, d, expected[offset+i])
-			}
-			if err = store.Dispatched(ctx, d); err != nil {
-				t.Fatal(err)
-			}
-		}
+	first, err := store.ClaimIngestionBatches(ctx, 1)
+	if err != nil || len(first) != 1 || len(first[0].Receipts) != 32 || !reflect.DeepEqual(first[0].Receipts, expected[:32]) {
+		t.Fatalf("first bounded arrival batch: %+v (%v), want first 32 receipts", first, err)
 	}
-	// A newly connected worker cannot redispatch any acknowledged receipt.
-	// Reconnect to the isolated database, rather than the shared suite database.
-	nextPool, err := pgxpool.NewWithConfig(ctx, pool.Config())
+	// Reconnect and advance the durable lease clock: no wall-clock wait.
+	otherPool, err := pgxpool.NewWithConfig(ctx, pool.Config())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer nextPool.Close()
-	restarted := contentStores(nextPool)
-	if got, err := restarted.Claim(ctx, 32); err != nil || len(got) != 0 {
-		t.Fatalf("after restart got %+v (%v), want drained queue", got, err)
-	}
-	var intents, receipts, events int
-	if err = pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM ingestion_outbox),(SELECT count(*) FROM ingestion_receipts),(SELECT count(*) FROM change_events WHERE event_type='receipt.pending')").Scan(&intents, &receipts, &events); err != nil {
+	defer otherPool.Close()
+	other := postgres.MaterializationStore{Pool: otherPool}
+	if _, err = pool.Exec(ctx, "UPDATE ingestion_batches SET lease_until='-infinity'"); err != nil {
 		t.Fatal(err)
 	}
-	if intents != 0 || receipts != 512 || events != 512 {
-		t.Fatalf("after acknowledgement: %d intents, %d receipts, %d audit events", intents, receipts, events)
+	recovered, err := other.ClaimIngestionBatches(ctx, 1)
+	if err != nil || !reflect.DeepEqual(recovered, first) {
+		t.Fatalf("lost acknowledgement regrouped work: got %+v (%v), want %+v", recovered, err, first)
+	}
+	if err = other.IngestionBatchDispatched(ctx, recovered[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	rest, err := other.ClaimIngestionBatches(ctx, 32)
+	if err != nil || len(rest) != 15 {
+		t.Fatalf("remaining arrivals: %+v (%v), want fifteen remaining batches", rest, err)
+	}
+	for i, b := range rest {
+		if len(b.Receipts) != 32 || !reflect.DeepEqual(b.Receipts, expected[(i+1)*32:(i+2)*32]) {
+			t.Fatalf("batch %d lost arrival order: %+v", i+1, b)
+		}
+		if err = other.IngestionBatchDispatched(ctx, b.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := store.ClaimIngestionBatches(ctx, 8); err != nil || len(got) != 0 {
+		t.Fatalf("acknowledged work returned: %+v (%v)", got, err)
+	}
+	var pending, receipts int
+	if err = pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM ingestion_outbox)+(SELECT count(*) FROM ingestion_batches),(SELECT count(*) FROM ingestion_receipts)").Scan(&pending, &receipts); err != nil || pending != 0 || receipts != 512 {
+		t.Fatalf("transfer lost audit or left work: %d pending, %d receipts (%v)", pending, receipts, err)
 	}
 }
 
@@ -75,14 +87,14 @@ func acceptDispatchBacklog(t *testing.T, ctx context.Context, store fixtureConte
 		if err != nil {
 			t.Fatal(err)
 		}
-		expected = append(expected, content.Dispatch{Organization: org, ReceiptID: receipt.ID})
+		expected = append(expected, content.Dispatch{Organization: org, ReceiptID: receipt.ID, TraceContext: telemetry.Encode(ctx)})
 	}
 	return expected
 }
 
 // Row locks are skipped immediately, and a second connection cannot take a
 // live lease. Expiring a dead worker's lease makes precisely that work recoverable.
-func TestIngestionClaimsSkipLocksAndRecoverAbandonedLeases(t *testing.T) {
+func TestIngestionClaimsSkipLockedReceiptsAndLiveBatchLeases(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
@@ -99,45 +111,41 @@ func TestIngestionClaimsSkipLocksAndRecoverAbandonedLeases(t *testing.T) {
 	if _, err = tx.Exec(ctx, "SELECT 1 FROM ingestion_outbox WHERE organization=$1 AND receipt_id=$2 FOR UPDATE", expected[0].Organization, expected[0].ReceiptID); err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.Claim(ctx, 1)
-	if err != nil || len(got) != 1 || got[0] != expected[1] {
-		t.Fatalf("locked oldest: got %+v (%v), want %+v", got, err, expected[1])
+	first, err := store.ClaimIngestionBatches(ctx, 1)
+	if err != nil || len(first) != 1 || !reflect.DeepEqual(first[0].Receipts, expected[1:]) {
+		t.Fatalf("locked oldest: got %+v (%v), want two unlocked arrivals", first, err)
 	}
 	otherPool, err := pgxpool.NewWithConfig(ctx, pool.Config())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer otherPool.Close()
-	other := contentStores(otherPool)
-	got, err = other.Claim(ctx, 32)
-	if err != nil || len(got) != 1 || got[0] != expected[2] {
-		t.Fatalf("live lease: got %+v (%v), want %+v", got, err, expected[2])
+	other := postgres.MaterializationStore{Pool: otherPool}
+	// An older locked receipt cannot hold up a recoverable batch. Advancing
+	// the durable lease directly avoids any wall-clock wait.
+	if _, err = pool.Exec(ctx, "UPDATE ingestion_batches SET lease_until='-infinity'"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := other.ClaimIngestionBatches(ctx, 1); err != nil || !reflect.DeepEqual(got, first) {
+		t.Fatalf("locked older receipt blocked batch recovery: %+v (%v), want %+v", got, err, first)
+	}
+	if got, err := other.ClaimIngestionBatches(ctx, 8); err != nil || len(got) != 0 {
+		t.Fatalf("locked receipt and live batch lease returned %+v (%v)", got, err)
 	}
 	if err = tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	got, err = other.Claim(ctx, 32)
-	if err != nil || len(got) != 1 || got[0] != expected[0] {
-		t.Fatalf("unlocked oldest: got %+v (%v), want %+v", got, err, expected[0])
+	last, err := other.ClaimIngestionBatches(ctx, 8)
+	if err != nil || len(last) != 1 || !reflect.DeepEqual(last[0].Receipts, expected[:1]) {
+		t.Fatalf("unlocked oldest: got %+v (%v), want %+v", last, err, expected[0])
 	}
-	for _, d := range []content.Dispatch{expected[0], expected[1]} {
-		if err = store.Dispatched(ctx, d); err != nil {
+	for _, b := range append(first, last...) {
+		if err = other.IngestionBatchDispatched(ctx, b.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// Advance the durable lease clock directly, without a wall-clock wait.
-	if _, err = pool.Exec(ctx, "UPDATE ingestion_outbox SET lease_until='-infinity'"); err != nil {
-		t.Fatal(err)
-	}
-	got, err = other.Claim(ctx, 32)
-	if err != nil || len(got) != 1 || got[0] != expected[2] {
-		t.Fatalf("expired lease: got %+v (%v), want %+v", got, err, expected[2])
-	}
-	if err = other.Dispatched(ctx, got[0]); err != nil {
-		t.Fatal(err)
-	}
-	if got, err = store.Claim(ctx, 32); err != nil || len(got) != 0 {
-		t.Fatalf("drained queue: got %+v (%v)", got, err)
+	if got, err := store.ClaimIngestionBatches(ctx, 8); err != nil || len(got) != 0 {
+		t.Fatalf("drained queue: %+v (%v)", got, err)
 	}
 }
 
@@ -149,7 +157,7 @@ func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
 	pool := scratchDatabase(t, ctx)
 	prior := embedded(t, regexp.MustCompile(".*"))
 	for name := range prior {
-		if strings.HasSuffix(name, "_ingestion_dispatch_batches.sql") {
+		if strings.HasSuffix(name, "_ingestion_dispatch_batches.sql") || strings.HasSuffix(name, "_ingestion_workflow_batches.sql") {
 			delete(prior, name)
 		}
 	}
@@ -157,7 +165,30 @@ func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := contentStores(pool)
-	expected := acceptDispatchBacklog(t, ctx, store, 3)
+	// Seed the previous schema's durable queue directly: its API did not
+	// know the new dispatch topology. Acceptance itself has its own owner.
+	seedLegacy := func(i int) content.Dispatch {
+		org, id := fmt.Sprintf("upgrade-%d", i%2), fmt.Sprintf("receipt-%d", i)
+		scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write"}, Corpora: []string{"*"}}
+		c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "queue", Name: "Queue"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, `INSERT INTO records(organization,id,corpus_id,namespace,record_key) VALUES($1,$2,$3,'tests',$2)`, org, id, c.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest) VALUES($1,$2,$2,'{}','{}',$3,$2,1,'text','reserved')`, org, id, c.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, `INSERT INTO ingestion_outbox(organization,receipt_id) VALUES($1,$2)`, org, id); err != nil {
+			t.Fatal(err)
+		}
+		return content.Dispatch{Organization: org, ReceiptID: id}
+	}
+	var expected []content.Dispatch
+	for i := range 3 {
+		expected = append(expected, seedLegacy(i))
+	}
 	first := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
 	for i, d := range expected {
 		if _, err := pool.Exec(ctx, "UPDATE ingestion_receipts SET accepted_at=$3 WHERE organization=$1 AND id=$2", d.Organization, d.ReceiptID, first.Add(time.Duration(i)*time.Second)); err != nil {
@@ -187,8 +218,56 @@ func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
 	if !enqueued.Equal(first.Add(time.Second)) {
 		t.Fatalf("backfilled arrival %v, want %v", enqueued, first.Add(time.Second))
 	}
-	got, err := store.Claim(ctx, 32)
-	if err != nil || len(got) != 1 || got[0] != expected[1] {
+	got, err := store.ClaimIngestionBatches(ctx, 1)
+	if err != nil || len(got) != 1 || len(got[0].Receipts) != 1 || got[0].Receipts[0] != expected[1] || !got[0].Legacy || got[0].ID != content.StableID("ingestion-e5-v4", expected[1].Organization, expected[1].ReceiptID) {
 		t.Fatalf("upgrade claim: got %+v (%v), want %+v", got, err, expected[1])
+	}
+
+	// A lost post-upgrade acknowledgement recovers that same legacy intent.
+	if _, err = pool.Exec(ctx, "UPDATE ingestion_batches SET lease_until='-infinity'"); err != nil {
+		t.Fatal(err)
+	}
+	if recovered, err := store.ClaimIngestionBatches(ctx, 1); err != nil || !reflect.DeepEqual(recovered, got) {
+		t.Fatalf("legacy recovery: %+v %v, want %+v", recovered, err, got)
+	}
+	if err = store.IngestionBatchDispatched(ctx, got[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	// An older API can still accept during rollout. Its default stays legacy,
+	// while new API intents are invisible to old lease-only dispatch queries.
+	oldAPI := seedLegacy(3)
+	newAPI := acceptDispatchBacklog(t, ctx, store, 2)
+	var oldVisible int
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM ingestion_outbox WHERE NOT dispatched AND lease_until<now()").Scan(&oldVisible); err != nil || oldVisible != 1 {
+		t.Fatalf("old dispatcher sees %d intents: %v, want only the old API's intent", oldVisible, err)
+	}
+	mixed, err := store.ClaimIngestionBatches(ctx, 8)
+	if err != nil || len(mixed) != 2 || !mixed[0].Legacy || mixed[0].ID != content.StableID("ingestion-e5-v4", oldAPI.Organization, oldAPI.ReceiptID) || !reflect.DeepEqual(mixed[0].Receipts, []content.Dispatch{oldAPI}) || mixed[1].Legacy || !reflect.DeepEqual(mixed[1].Receipts, newAPI) {
+		t.Fatalf("rolling upgrade dispatch: %+v %v", mixed, err)
+	}
+}
+
+// Owns the durable API-to-dispatch handoff: a new pool must recover the original
+// W3C parent and caller ID. Temporal tests cannot detect missing persisted data.
+func TestAcceptancePersistsTraceAcrossDispatcherRestart(t *testing.T) {
+	ctx := telemetry.Extract(context.Background(), http.Header{"Traceparent": []string{"00-11111111111111111111111111111111-2222222222222222-01"}})
+	ctx = logging.WithRequestID(ctx, "caller-request-123")
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	expected := acceptDispatchBacklog(t, ctx, contentStores(pool), 1)
+	next, err := pgxpool.NewWithConfig(ctx, pool.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer next.Close()
+	claimed, err := contentStores(next).ClaimIngestionBatches(context.Background(), 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim: %v (%v)", claimed, err)
+	}
+	restored := telemetry.Capture(telemetry.Restore(context.Background(), claimed[0].Receipts[0].TraceContext))
+	if restored.Traceparent != "00-11111111111111111111111111111111-2222222222222222-01" || restored.RequestID != "caller-request-123" || claimed[0].Receipts[0].ReceiptID != expected[0].ReceiptID {
+		t.Fatalf("durable trace lost: %+v", restored)
 	}
 }

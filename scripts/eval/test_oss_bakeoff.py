@@ -33,6 +33,13 @@ class Campaign(unittest.TestCase):
             self.assertFalse(plan['include_restricted'])
             with self.assertRaises(FileExistsError):
                 oss_bakeoff.main(['plan', '--out', str(out)])
+            with mock.patch.dict(os.environ, {'CI': 'false', 'GITHUB_ACTIONS': ''}, clear=True), \
+                 mock.patch.object(oss_bakeoff.subprocess, 'run', side_effect=AssertionError('work reached without consent')), \
+                 contextlib.redirect_stderr(io.StringIO()) as diagnostic:
+                with self.assertRaises(SystemExit) as refusal:
+                    oss_bakeoff.main(['run', '--out', str(pathlib.Path(directory) / 'unapproved')])
+            self.assertEqual(refusal.exception.code, 2)
+            self.assertIn('--acknowledge-cost', diagnostic.getvalue())
 
     def test_parallel_jobs_isolate_failures_and_reuse_reference_artifacts(self):
         # CLI owns scheduling and evidence; fake only the paid transport.
@@ -120,11 +127,6 @@ class Campaign(unittest.TestCase):
                     self.assertIn('backend initialization failed', output['campaign']['reason']['stderr_tail'])
                 process.terminate.assert_called_once()
                 process.wait.assert_called_once()
-
-    def test_ci_cannot_dispatch_even_with_acknowledgment(self):
-        with mock.patch.dict('os.environ', {'CI': 'true'}):
-            with self.assertRaisesRegex(SystemExit, 'CI'):
-                oss_bakeoff.main(['run', '--out', 'unused', '--acknowledge-cost'])
 
 
 if __name__ == '__main__':

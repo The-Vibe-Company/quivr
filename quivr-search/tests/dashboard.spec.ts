@@ -665,7 +665,7 @@ test("l’aperçu explique les pannes et ne confond pas un délai avec aucun art
   }
 });
 
-test("Sources : l’adresse d’un site trouve son fil, une adresse privée est refusée", async ({
+test("Sources : l’adresse d’un site trouve son fil, une suggestion s’ajoute en un clic", async ({
   page,
 }) => {
   await page.goto("/?view=sources");
@@ -698,11 +698,6 @@ test("Sources : l’adresse d’un site trouve son fil, une adresse privée est 
 
   await page.getByRole("button", { name: /^Ajouter une source Un site/ }).click();
   await expect(address).toBeFocused();
-  await address.fill("http://10.0.0.1/feed.xml");
-  await address.press("Enter");
-  await expect(page.getByRole("alert")).toContainText("réseau privé ou local");
-  await expect(page.getByRole("alert")).toBeFocused();
-  await expect(page.getByRole("button", { name: "Commencer la collecte" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Ajouter Fil exemple — International" }).click();
   await expect(adding).toHaveCount(0);
@@ -871,6 +866,19 @@ test("le tableau de bord tient sur un téléphone, en clair et en sombre", async
         path: info.outputPath(`${name}-${tab.toLowerCase()}.png`),
         fullPage: name === "mobile",
       });
+      if (tab !== "Alertes") continue;
+      // The new-alert form, filled, fits its panel, which floats over the
+      // page and so scrolls on its own.
+      await page.getByRole("button", { name: "Nouvelle alerte" }).click();
+      await page.getByLabel("Cette phrase exacte").fill("marché aux fleurs");
+      const form = page.getByRole("complementary", { name: "Formulaire d’alerte" }).locator(".reader-scroll");
+      for (const scheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        expect(await form.evaluate((el) => el.scrollWidth <= el.clientWidth), `${name} new alert ${scheme}`).toBe(true);
+      }
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.screenshot({ path: info.outputPath(`${name}-new-alert.png`), fullPage: name === "mobile" });
+      await page.getByRole("button", { name: "Fermer", exact: true }).click();
     }
   }
 });

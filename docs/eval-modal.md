@@ -114,31 +114,31 @@ MLDR-fr, WebFAQ-fr, TREC-COVID and MKQA-fr are diagnostic because of saturation,
 small samples or proxy questions; restricted-licence sets are also diagnostic.
 Their scores remain reported. Diagnostics cannot supply the qualifying gain.
 
-Quality covers every query with relevance judgments using batched, cached embeddings. Fresh latency
-uses up to 50 serial queries, ordered by SHA-256 of the ID (ID breaks ties), after
-warming up the lexicographically first judged ID, which may also be timed.
-Both configurations use the same sample and resource class.
-Private comparisons prepare both indexes, then alternate baseline/candidate
-warmups and each sampled query (A/B/A/B). Public standalone runs remain serial.
-For public sets, `cost.latency_sample` records timed IDs, warmup ID and policy;
-`gates.latency.samples` echoes both and rejects missing or mismatched evidence.
-Private samples stay inside the runner; only
-the verified comparability boolean is published.
-P95 includes query embedding, retrieval and reranking; its limit is 1.2 times baseline.
-Serving price uses the fresh sample; warmup charges stay outside per-search metrics.
-`--cached-exploration` reuses query vectors and cannot pass the unmeasured latency gate.
+Quality uses every judged query with batched, cached embeddings. Fresh latency samples
+up to 50 queries in SHA-256 ID order, after warming up the first judged ID (also eligible).
+Public/private pairs prepare both indexes in one container with the same resources,
+then alternate baseline/candidate warmups and samples (A/B/A/B).
+Each candidate gets its own paired baseline; completed pairs replay without provider calls.
+Up to the spec’s `parallelism` trials index and score concurrently. Only paired fresh warmups/samples
+wait for an exclusive campaign window; other trials continue quality. Window waits stay outside timing. Busy trial slots return `leased` before paid dispatch; detached calls retain their bounded trial slots.
+Failed sample loops release the window; control outages retain its bounded fence until expiry.
+Public `cost.latency_sample` records sample/warmup IDs and policy; `gates.latency.samples`
+rejects missing/mismatched evidence. Private samples remain internal; comparability is published.
+P95 includes local embedding/retrieval/reranking and successful provider round trips;
+its limit is 1.2 times baseline. Retry HTTP, backoff, admission and ledger waits are excluded.
+`cost.search_timing_ms` reports their p50/p95, embedding/retrieval/rerank/wall time and
+`retried_samples`. Wall time includes lease renewal; the service timer starts after renewal.
+Warmup charges stay outside fresh serving price; `--cached-exploration` cannot pass latency.
 
 Price limits are $0.0005/search for `default`, $0.05/search for `deep`, and
 $10/1,000 original documents. Override `min_gain`, `latency_ratio`, `search_usd` or
 `index_usd` in `gates`. Serving includes query embedding, reranking and compute.
-Indexing covers all document windows, excluding quality-query preparation. Cached
-usage is repriced by input bounds and local compute time; campaign usage stays exact.
-Serving compute excludes provider HTTP, retry and ledger waits. Actual invocation
-spend remains in the Modal ledger. `cost.search_provider_usd` and
-`cost.search_compute_usd` split the average search price; `cost.search_timing_ms`
-reports provider and local p50/p95 alongside the end-to-end latency metric.
-Timing-versioned cache entries prevent reuse of earlier wall-time attributions.
-
+Indexing covers document windows, excluding quality-query preparation. Cached usage is
+repriced by input bounds and local compute time; campaign usage stays exact.
+Serving compute excludes provider HTTP, retry and ledger waits; actual invocation spend
+remains in the Modal ledger. `cost.search_provider_usd` and `cost.search_compute_usd`
+split the average search price; `cost.search_timing_ms` splits provider and local time.
+Timing-versioned caches prevent reuse of wall-time attributions.
 Admission and planning share the UTF-8 byte-plus-eight-token bound at frozen prices.
 Confirmed responses release unused reservations. This Azure hosted adapter settles
 429 rejections at zero; other failed/unknown attempts stay reserved. Successful
@@ -164,12 +164,12 @@ The [trusted full-engine confirmation runner](eval-engine-confirmation.md) owns 
 
 The Volume `quivr-eval-embeddings-cache` holds immutable vectors and the outbox.
 Hosted document fills overlap at most four 128-entry cache chunks; each provider
-attempt reserves and settles independently. Hosted admission halves after 429s
-and recovers one slot after 16 times the current slot count in clean requests;
+attempt reserves and settles independently. Campaign Azure/Cohere requests share SQL admission: at most four requests across containers,
+halved after 429s with a bounded Retry-After cooldown. It recovers one slot after 16 times the current slot count in clean requests;
 requests already in flight drain at the old limit. Local e5 and quality-query
 embedding fills stay serial and batched. The policy field `quality_concurrency` bounds re-ranking waves (1–32, default 8), preserving rankings, scores and per-search prices. Fresh warmup and latency stay serial.
 Attempts reserve independently; failed waves drain and retain uncertain charges. `cost.phase_usage` reports process CPU and elapsed seconds for indexing, quality, scoring and fresh latency, including warmup, excluding paired idle time. CPU/elapsed estimates average cores used, separately from serving cost.
-Claims precede paid work; commits and fenced publication stay serial.
+Trials wait for shared in-flight cache fills and reload committed Volume files before reuse; claims precede paid work and commits/publication stay serial.
 Chunks commit before publication; lost ownership rolls it back. Logs exclude texts.
 Reruns recover evidence and tracking writes. Keep the Volume and schema until
 results sync and campaign archival; never delete unknown reservations.

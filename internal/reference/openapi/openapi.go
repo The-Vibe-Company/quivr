@@ -210,6 +210,11 @@ func (r *renderer) endpoints() {
 	var rows [][]string
 	for _, o := range ops {
 		g := group(o.path)
+		// A singular resource can also name a component (for example
+		// /v0/version and Version); keep their heading anchors distinct.
+		if get(r.schemas, g) != nil {
+			g += " endpoints"
+		}
 		if groups[g] == nil {
 			order = append(order, g)
 		}

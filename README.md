@@ -86,6 +86,14 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What works today
 
+- Rolling application upgrades use additive schema expansions; destructive cleanup
+  runs only with `quivr migrate --contract`. CI checks the merge-base binary against
+  expansions. See [Upgrade Quivr](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-quivr).
+
+- **Release images and build identity.** Release-please manages alpha release PRs, versions and changelogs. Publishing a release builds signed engine and first-party plugin images on GHCR, with signed SPDX inventories and vulnerability scans. `quivr --version`, `GET /v0/version`, startup logs and process metrics report the build. See [Deploy and configure Quivr](https://docs.quivr.thevibecompany.co/run-quivr/deploy) and [release security](https://docs.quivr.thevibecompany.co/run-quivr/security).
+- **Declarative conformance cases**: contribute generic requirements and measure them locally with
+  `make conformance`; [case format and reports](conformance/README.md). CI never executes cases.
+
 - **Outgoing TLS** for Temporal, Weaviate, PostgreSQL, S3 and plugins, with verified
   certificates and configurable trust. Incoming HTTPS terminates at your platform;
   see [Run Quivr behind TLS](https://docs.quivr.thevibecompany.co/run-quivr/tls).
@@ -190,8 +198,14 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   - worker: processing outcomes, time from acceptance to searchable, and delivery
     attempts and durations.
 
-  JSON logs link request, Receipt, Record and Version IDs
-  ([harness](docs/quivr-v2-local-harness.md)).
+  JSON logs link caller request IDs, trace/span IDs, Receipts, Records and Versions.
+  Opt-in OpenTelemetry exports traces and metrics to an OTLP collector, carrying
+  one trace through durable ingestion, Temporal, plugin calls and webhooks
+  ([configuration](docs-site/reference/configuration.mdx#opentelemetry)).
+- **Local load measurement** (`make load`) with deterministic free providers,
+  versioned scenarios, ingestion bursts and replica failure. Reports include
+  latency, errors, throughput and delays until documents are searchable and alerted;
+  see [Run local load tests](docs-site/run-quivr/run-local-load-tests.mdx).
 - **Retrieval measurement** with a frozen workload (`make measure`), and **search
   quality** on public French and English evaluation sets or a private set, nightly
   (`make eval`, [guide](docs/agents/evaluation.md)).
@@ -208,6 +222,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - **Plugin Protocol v0 contract** (`contracts/plugins/v0/`) and `quivr plugin inspect`,
   which validates a `quivr-plugin.yaml` and reports its compatibility, Contributions,
   schemas, secrets and limits.
+- **Signed engine calls** (Plugin API 0.14): per-plugin HS256 tokens bind the operation and body, expire within 60 seconds, and support overlapping key rotation. Both SDKs reject invalid calls before dispatch. Older declared APIs remain unsigned with a startup warning. [Protocol reference](https://docs.quivr.thevibecompany.co/reference/plugin-protocol#signed-engine-requests).
 - **Plugin registry and activation without restart**: the plugins pinned at startup are
   recorded in the database, with the active Pipeline Plan saying which plugin serves each role
   (a media type, an alert rule, a connector kind, ingestion, retrieval). An operator key with
@@ -348,7 +363,7 @@ contracts/plugins/v0/ Plugin Protocol v0 schemas and normative fixtures
 sdks/go/            Go Plugin SDK for every Contribution
 sdks/python/        Python Plugin SDK
 plugins/pdf-text/   reference normalizer: PDF text, one Part per page
-migrations/         ordered PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)
+migrations/         expand/contract PostgreSQL migrations (UTC-stamped; legacy 0xx_ first)
 scripts/            local stack, verification and measurement tooling
 quivr-search/       demo web UI
 deploy/             Docker Compose and Railway deployment

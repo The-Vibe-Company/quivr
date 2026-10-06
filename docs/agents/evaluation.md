@@ -1,9 +1,7 @@
 # Measure search quality
 
 `make eval` scores search on evaluation sets, including [private news sets](news-set.md).
-For each set it ingests the documents into a new Corpus through the
-public API, waits until every Record has its vectors, runs every query in each search mode
-(`lexical`, `semantic`, `hybrid`) and each profile the API serves, and reports nDCG@10,
+For each set it ingests the documents into a new Corpus through the public API, waits until every Record has its vectors, runs every query in each search mode (`lexical`, `semantic`, `hybrid`) and each profile the API serves, and reports nDCG@10,
 Recall@10, MRR@10, latency and paid calls per query. Only harness or dependency errors fail a run.
 
 ## Run it
@@ -109,9 +107,11 @@ query calls. It reports score and latency changes. Ingestion runs twice, so star
 
 ## Measurement machines and CI
 
-Measurements run on your machine or the coordinator's compute, never GitHub Actions.
-The `Search quality` manual workflow checks tiny fixtures and prints the default registry;
-it downloads no benchmark data and makes no model/provider calls. Measurement commands refuse CI execution.
+Measurements run on your machine or the coordinator's compute. Commands refuse `CI` or `GITHUB_ACTIONS` unless empty, `0` or case-insensitive `false`. Existing `--dry-run`, `--list-sets` and news `--fake` modes remain available. The `Search quality` workflow only checks tiny fixtures and prints the registry, without benchmark downloads or model/provider calls.
+Offline tests require the dependencies and PostgreSQL service in [verify.yml](../../.github/workflows/verify.yml), with `EVAL_CONTROL_TEST_DSN` set and zero skips. Never call paid providers or live Modal from tests.
+Keep one owner per behaviour: [retry schedules and admission](../../scripts/eval/test_network_recovery.py), [CI values and CLI wiring](../../scripts/eval/test_ci_guard.py), and `test_search_trial.PreparedSearch` for prepared scoring. Callers retain their distinct error classification and no-respawn contracts.
+Before retiring copied scheduler tests, retain `test_private_working.Runner` checks for no vector files during provider I/O and each side's confirmed/reserved usage. Assert output and bounded real I/O, rather than internal helper calls or SQL statement counts.
+Prove each transferred contract with a deliberate production mutation that makes its keeper fail, then restore the source byte for byte.
 
 ## Compare embeddings directly on your machine
 
@@ -119,7 +119,7 @@ Use `scripts/eval/direct_bakeoff.py` to compare dense embeddings without an engi
 with e5-small as the paired baseline. Long documents use the
 reference windows: 1,800 characters for e5 and 6,000 for hosted models, with 200-character overlap. A document's best piece wins. The local encoder can truncate at its token limit.
 
-Use Python 3.11+ and a virtual environment. The first run downloads a pinned `intfloat/multilingual-e5-small` revision.
+Use Python 3.12+ and a virtual environment. The first run downloads a pinned `intfloat/multilingual-e5-small` revision.
 Hosted runs need Azure AI Foundry serving the requested deployments, with its endpoint and key in environment
 variables `AZURE_FOUNDRY_ENDPOINT` and `AZURE_FOUNDRY_KEY`. Keep keys out of Git. Paid measurements run locally; this command refuses CI execution.
 

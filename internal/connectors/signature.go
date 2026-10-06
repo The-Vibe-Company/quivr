@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
+
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
 
@@ -122,7 +124,8 @@ func (r Relay) deliverRoute(ctx context.Context, target Target, connector Connec
 	if err != nil || answer.Receipts == nil {
 		// Client cancellation may detach cleanup, but the original delivery
 		// deadline still bounds it. Unreleased reservations expire safely.
-		cleanup := context.WithoutCancel(ctx)
+		cleanup, cancel := lifecycle.CleanupContext(ctx, 5*time.Second)
+		defer cancel()
 		if deadline, ok := ctx.Deadline(); ok {
 			if !deadline.After(time.Now()) {
 				return RelayAnswer{}, ErrReplayUnavailable
@@ -131,8 +134,6 @@ func (r Relay) deliverRoute(ctx context.Context, target Target, connector Connec
 			cleanup, cancel = context.WithDeadline(cleanup, deadline)
 			defer cancel()
 		}
-		cleanup, cancel := context.WithTimeout(cleanup, 5*time.Second)
-		defer cancel()
 		if releaseErr := r.Replays.ReleaseReplay(cleanup, target.Organization, target.ID, token); releaseErr != nil {
 			return RelayAnswer{}, ErrReplayUnavailable
 		}

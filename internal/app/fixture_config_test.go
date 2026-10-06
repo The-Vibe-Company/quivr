@@ -43,11 +43,24 @@ func TestOperatorAllowancesWarnAtStartup(t *testing.T) {
 				t.Cleanup(func() { slog.SetDefault(earlier) })
 				cfg := Config{DatabaseURL: "postgres://127.0.0.1:1/unused", CursorKey: strings.Repeat("c", 32), CredentialKey: strings.Repeat("s", 32),
 					Keys: map[string]corpus.Scope{strings.Repeat("k", 32): {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}}}, ProjectionPurgeGrace: "invalid"}
-				cfg.Delivery.AllowPrivateDestinations = enabled
+				cfg.LogDirectory = t.TempDir()
 				cfg.ChangePrune.AllowShortRetention = enabled
 				cfg.ChangePrune.Organizations = []string{"org_a"}
 				path := filepath.Join(t.TempDir(), "config.json")
 				raw, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Literal operator input also protects the public key and omitted default.
+				var input map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &input); err != nil {
+					t.Fatal(err)
+				}
+				input["delivery"] = json.RawMessage(`{}`)
+				if enabled {
+					input["delivery"] = json.RawMessage(`{"allow_private_destinations":true}`)
+				}
+				raw, err = json.Marshal(input)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -58,6 +71,11 @@ func TestOperatorAllowancesWarnAtStartup(t *testing.T) {
 				if err := Run(command); err == nil || !strings.Contains(err.Error(), "projection_purge_grace") {
 					t.Fatalf("did not reach later config validation: %v", err)
 				}
+				logged, readErr := os.ReadFile(filepath.Join(cfg.LogDirectory, command+".log"))
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				logs.Write(logged)
 				for _, message := range []string{"delivery.allow_private_destinations", "SSRF", "change_prune.allow_short_retention", "data loss"} {
 					if strings.Contains(logs.String(), message) != enabled {
 						t.Fatalf("enabled=%t, expected warning %q: %s", enabled, message, logs.String())

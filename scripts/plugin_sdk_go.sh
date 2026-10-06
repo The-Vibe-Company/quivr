@@ -21,15 +21,15 @@ GO=${GO:-go}
 work="$PWD/.scratch/plugin-sdk"
 mkdir -p "$work"
 
-test -x "$work/venv/bin/python" || python3 -m venv "$work/venv"
-"$work/venv/bin/pip" install -q --disable-pip-version-check -c contracts/http/v0/checks/requirements.txt PyYAML
+test -x "$work/venv-go/bin/python" || python3 -m venv "$work/venv-go"
+"$work/venv-go/bin/pip" install -q --disable-pip-version-check -c contracts/http/v0/checks/requirements.txt PyYAML
 python3 sdks/go/scripts/sync_schemas.py --check
-(cd sdks/go && "$GO" vet ./... && "$GO" test ./...)
+(cd sdks/go && "$GO" vet ./... && GO="$GO" python3 "$root/scripts/check.py" --go "$PWD")
 
-"$GO" build -o "$work/quivr" ./cmd/quivr
-quivr="$work/quivr"
+"$GO" build -o "$work/quivr-go" ./cmd/quivr
+quivr="$work/quivr-go"
 (cd "$root/sdks/go" && "$GO" build -o "$work/go-conformance-peer" ./quivrplugin/testdata/conformance)
-"$work/venv/bin/python" "$root/scripts/plugin_sdk_conformance.py" go "$quivr" "$work/go-conformance-peer"
+"$work/venv-go/bin/python" "$root/scripts/plugin_sdk_conformance.py" go "$quivr" "$work/go-conformance-peer"
 cd "$root/sdks/go/examples/static-source"
 # Compile once so the runner's startup wait covers only the start.
 "$GO" build -o /dev/null .
@@ -65,7 +65,7 @@ for mod in "$root"/plugins/*/go.mod; do
   [ -e "$mod" ] || continue
   dir=$(dirname "$mod"); id=$(basename "$dir")
   cd "$dir"
-  "$GO" vet ./... && "$GO" test ./...
+  "$GO" vet ./... && GO="$GO" python3 "$root/scripts/check.py" --go "$PWD"
   "$GO" build -o /dev/null .
   if [ "$id" = hosted-embed ]; then
     python3 "$root/scripts/hosted_embed_plugin.py" --quivr "$quivr" --out "$work/hosted-embed"

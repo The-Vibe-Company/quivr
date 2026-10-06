@@ -37,6 +37,33 @@ class Retrieval(unittest.TestCase):
 
 
 class Providers(unittest.TestCase):
+    def test_concurrent_reads_count_only_their_own_http_time(self):
+        # Own the HTTP timing boundary: overlapping reads must not subtract
+        # another request's duration from excluded admission time.
+        client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(100, 1), 'tiny')
+        local, started, first_done = threading.local(), threading.Barrier(2), threading.Event()
+        class Response(io.BytesIO):
+            def read(response, *args):
+                started.wait(5)
+                if local.duration == 2:
+                    self.assertTrue(first_done.wait(5))
+                local.clock = local.duration
+                return super().read(*args)
+        def run(duration):
+            local.clock, local.duration = 0., duration
+            try:
+                return client.read(None, 'query')
+            finally:
+                if duration == 1:
+                    first_done.set()
+        with mock.patch('time.monotonic', side_effect=lambda: local.clock), \
+                mock.patch.object(client.opener, 'open', side_effect=lambda *a, **k: Response(b'body')), \
+                concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(run, duration) for duration in (1, 2)]
+            self.assertEqual([future.result(5) for future in futures], [b'body', b'body'])
+        self.assertEqual(client.http_seconds, 3)
+        self.assertEqual(client.admission_seconds, 0)
+
     def test_hosted_success_requires_exact_nonnegative_usage(self):
         # Own successful-response admission; unknown failed attempts are a
         # separate trial contract. Only provider HTTP is replaced.
@@ -143,42 +170,66 @@ class Providers(unittest.TestCase):
         self.assertEqual(client.budget.summary()['reserved_input_tokens'], 11)
         client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(100, 1), 'scifact')
         error.code = 401
-        with mock.patch.object(client.opener, 'open', side_effect=error):
+        with mock.patch.object(client.opener, 'open', side_effect=error), mock.patch.object(bakeoff.time, 'sleep'):
             with self.assertRaisesRegex(RuntimeError, '^provider HTTP 401$'):
                 client.embed('Cohere-Embed-V5-Pro', ['abc'], 'document')
+        self.assertEqual(client.budget.summary()['admitted_calls'], 1)
+        self.assertEqual(client.budget.summary()['reserved_input_tokens'], 11)
 
     def test_retry_after_jitter_and_exhaustion_use_bounded_safe_errors(self):
-        for code, header, expected in (
-            (429, '3', 3.5), (503, email.utils.formatdate(1_000_004, usegmt=True), 4.5),
-            (429, 'invalid', 1.5), (429, '-3', 1.5), (429, '9' * 400, 60),
-        ):
-            with self.subTest(code=code, header=header):
+        # Both opening and reading the response can fail. Keep private bytes
+        # inside the fake transport while real retry/admission owns accounting.
+        def transport(boundary, failure, recover):
+            attempts = 0
+            class FailedRead(io.BytesIO):
+                def read(self, *args):
+                    raise failure
+            def open_response(*args, **kwargs):
+                nonlocal attempts
+                attempts += 1
+                if recover and attempts > 1:
+                    return io.BytesIO(b'{"embeddings":{"float":[[1,0]]},"meta":{"billed_units":{"input_tokens":1}}}')
+                if boundary == 'read':
+                    return FailedRead()
+                raise failure
+            return open_response
+
+        cases = [
+            ('open', 429, '3', 3.5, True, 0),
+            ('open', 503, email.utils.formatdate(1_000_004, usegmt=True), 4.5, True, 9),
+            ('open', 429, 'invalid', 1.5, True, 0),
+            ('open', 429, '-3', 1.5, True, 0),
+            ('open', 429, '9' * 400, 60, True, 0),
+            ('open', 429, '', None, False, 0),
+            ('open', 503, '', None, False, 72),
+            ('open', urllib.error.URLError('private transport details'), '', None, False, 72),
+        ]
+        for error in (http.client.IncompleteRead(b'private body', 10), ConnectionResetError('private details')):
+            cases.extend(('read', error, '', None, recover, 9 if recover else 72) for recover in (False, True))
+        for boundary, error, header, delay, recover, reserved in cases:
+            with self.subTest(boundary=boundary, error=error if type(error) is int else type(error).__name__,
+                              header=header, recover=recover):
                 client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(1000, 1), 'tiny')
-                failure = urllib.error.HTTPError('https://example.com', code, 'private text',
-                                                {'Retry-After': header}, io.BytesIO(b'private body'))
-                success = io.BytesIO(b'{"embeddings":{"float":[[1,0]]},"meta":{"billed_units":{"input_tokens":1}}}')
-                with mock.patch.object(client.opener, 'open', side_effect=[failure, success]), \
+                failure = (urllib.error.HTTPError('https://example.com', error, 'private text',
+                           {'Retry-After': header}, io.BytesIO(b'private body')) if type(error) is int else error)
+                with mock.patch.object(client.opener, 'open', side_effect=transport(boundary, failure, recover)) as network, \
                         mock.patch.object(bakeoff.time, 'sleep') as sleep, \
                         mock.patch.object(bakeoff.time, 'time', return_value=1_000_000), \
-                        mock.patch('random.uniform', return_value=.5):
-                    self.assertEqual(client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2), [[1, 0]])
-                sleep.assert_called_once_with(expected)
-                self.assertEqual(client.budget.summary()['reserved_input_tokens'], 0 if code == 429 else 9)
-                self.assertEqual(client.budget.summary()['confirmed_input_tokens'], 1)
-        for code in (429, 503, None):
-            client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(1000, 1), 'tiny')
-            def fail(*args, **kwargs):
-                if code is None:
-                    raise urllib.error.URLError('private transport details')
-                raise urllib.error.HTTPError('https://example.com', code, 'private text', {}, io.BytesIO(b'private body'))
-            with mock.patch.object(client.opener, 'open', side_effect=fail) as network, \
-                    mock.patch.object(bakeoff.time, 'sleep') as sleep:
-                with self.assertRaisesRegex(RuntimeError, '^' + (f'provider HTTP {code}' if code else
-                                                    'provider transport failed after 8 attempts') + '$'):
-                    client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2)
-            self.assertEqual(network.call_count, 8)
-            self.assertEqual(sleep.call_count, 7)
-            self.assertEqual(client.budget.summary()['reserved_input_tokens'], 0 if code == 429 else 72)
+                        mock.patch.object(bakeoff.random, 'uniform', return_value=.5):
+                    if recover:
+                        self.assertEqual(client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2), [[1, 0]])
+                    else:
+                        message = f'provider HTTP {error}' if type(error) is int else 'provider transport failed after 8 attempts'
+                        with self.assertRaisesRegex(RuntimeError, '^' + message + '$'):
+                            client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2)
+                self.assertEqual(network.call_count, 2 if recover else 8)
+                self.assertEqual(sleep.call_count, 1 if recover else 7)
+                if delay is not None:
+                    sleep.assert_called_once_with(delay)
+                usage = client.budget.summary()
+                self.assertEqual(usage['admitted_calls'], 2 if recover else 8)
+                self.assertEqual(usage['reserved_input_tokens'], reserved)
+                self.assertEqual(usage['confirmed_input_tokens'], 1 if recover else 0)
 
     def test_document_admission_reduces_after_429_and_recovers_slowly(self):
         # Own request-level pacing at the transport boundary. Blocking fake
@@ -242,30 +293,6 @@ class Providers(unittest.TestCase):
             for future in futures:
                 future.result()
 
-    def test_response_read_failures_retry_without_confirming_partial_usage(self):
-        # Request setup failures are covered above; a truncated/reset body
-        # fails after opening the response and can include private bytes.
-        for error in (http.client.IncompleteRead(b'private body', 10), ConnectionResetError('private details')):
-            for recover in (False, True):
-                with self.subTest(error=type(error).__name__, recover=recover):
-                    class FailedRead(io.BytesIO):
-                        def read(self, *args):
-                            raise error
-                    client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(1000, 1), 'tiny')
-                    success = io.BytesIO(b'{"embeddings":{"float":[[1,0]]},"meta":{"billed_units":{"input_tokens":1}}}')
-                    transport = [FailedRead(), success] if recover else lambda *a, **k: FailedRead()
-                    with mock.patch.object(client.opener, 'open', side_effect=transport) as network, \
-                            mock.patch.object(bakeoff.time, 'sleep') as sleep:
-                        if recover:
-                            self.assertEqual(client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2), [[1, 0]])
-                        else:
-                            with self.assertRaisesRegex(RuntimeError, '^provider transport failed after 8 attempts$'):
-                                client.embed('Cohere-Embed-V5-Pro', ['a'], 'document', dimensions=2)
-                    self.assertEqual(network.call_count, 2 if recover else 8)
-                    self.assertEqual(sleep.call_count, 1 if recover else 7)
-                    self.assertEqual(client.budget.summary()['reserved_input_tokens'], 9 if recover else 72)
-                    self.assertEqual(client.budget.summary()['confirmed_input_tokens'], 1 if recover else 0)
-
     def test_e5_applies_query_and_passage_prefixes_without_download(self):
         encoder = mock.Mock()
         with mock.patch.dict('sys.modules', {'sentence_transformers': types.SimpleNamespace(SentenceTransformer=mock.Mock(return_value=encoder))}):
@@ -274,13 +301,6 @@ class Providers(unittest.TestCase):
             local.embed(['article'], 'document')
         self.assertEqual(encoder.encode.call_args_list[0].args[0], ['query: question'])
         self.assertEqual(encoder.encode.call_args_list[1].args[0], ['passage: article'])
-
-    def test_ci_refuses_before_any_download_or_provider(self):
-        for flags in ({'CI': 'true', 'GITHUB_ACTIONS': ''}, {'CI': '', 'GITHUB_ACTIONS': 'true'}):
-            with self.subTest(flags=flags), mock.patch.dict(os.environ, flags), mock.patch.object(bakeoff.public_sets, 'prepare') as prepare:
-                with self.assertRaisesRegex(SystemExit, 'local'):
-                    bakeoff.main(['--set', 'scifact', '--max-input-tokens', '100', '--max-usd', '1', '--out', 'unused.json'])
-            prepare.assert_not_called()
 
 
 @unittest.skipUnless(HAS_NUMPY and HAS_RANX, 'local comparison needs numpy and ranx')

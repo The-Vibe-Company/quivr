@@ -1,0 +1,6 @@
+# Offline eval owner tests: preserve the real SDK, scorer and JIT compilation.
+modal==1.6.1
+numpy==2.5.3
+ranx==0.3.21
+numba==0.68.0
+llvmlite==0.50.0

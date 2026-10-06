@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -121,7 +120,7 @@ func RetryableIngestError(code, message string) *IngestError {
 // readIngestion reads and validates a request against a protocol schema and
 // the configuration schema; it answers the refusal itself and returns false.
 func (p *Plugin) readIngestion(w http.ResponseWriter, r *http.Request, schema string, into any) bool {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
+	body, err := requestBody(r)
 	if err != nil || len(body) > maxRequestBytes {
 		refuse(w, 400, "invalid_request", "the request body is unreadable or larger than 16 MiB", Credential{})
 		return false
@@ -183,7 +182,7 @@ func (p *Plugin) serveSegmentAndEmbed(w http.ResponseWriter, r *http.Request) {
 	if !p.readIngestion(w, r, "plugins/v0/ingestion-segment-and-embed-request.schema.json", &req) || p.undeclared(w, req.Spaces...) {
 		return
 	}
-	req.logger = p.logger.With("invocation_id", req.InvocationID)
+	req.logger = p.requestLogger(r.Context(), Credential{}, req.InvocationID)
 	defer p.ingestPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(p.m.Ingestion.TimeoutMS)*time.Millisecond)
 	defer cancel()
@@ -278,7 +277,7 @@ func (p *Plugin) serveEmbedQuery(w http.ResponseWriter, r *http.Request) {
 	if !p.readIngestion(w, r, "plugins/v0/ingestion-embed-query-request.schema.json", &req) || p.undeclared(w, req.Space) {
 		return
 	}
-	req.logger = p.logger.With("invocation_id", req.InvocationID)
+	req.logger = p.requestLogger(r.Context(), Credential{}, req.InvocationID)
 	defer p.ingestPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(p.m.Ingestion.QueryTimeoutMS)*time.Millisecond)
 	defer cancel()

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 
 // Feeds come from the local test site started by scripts/demo.py
 // (scripts/fake_feeds.py); the browser tests never reach the internet.
@@ -8,8 +8,6 @@ const run = Date.now().toString(36);
 test.skip(!FEEDS, "needs the local test feeds (make verify-demo)");
 
 test.beforeEach(async ({ page }) => {
-  // Several steps wait for real polls (up to 60 s each).
-  test.setTimeout(180000);
   await page.request.post("/demo/login", {
     data: { password: process.env.QUIVR_DEMO_PASSWORD || "local-browser-demo" },
   });
@@ -44,14 +42,12 @@ const row = (page: Page, name: string) =>
     .getByRole("listitem")
     .filter({ has: page.getByRole("button", { name, exact: true }) });
 
-const hits = async (page: Page, feed: string) =>
-  (
-    await (
-      await page.request.get(
-        `${FEEDS}/_hits?path=/feeds/ticker.xml&run=${encodeURIComponent(feed)}`,
-      )
-    ).json()
-  ).hits as number;
+/** A source's Connector Instance as the core reports it, through the facade. */
+const instance = async (page: Page, id: string) => {
+  const answer = await page.request.get(`/v0/connectors/${id}`);
+  return answer.ok() ? await answer.json() : answer.status();
+};
+const shown = (source: Locator) => source.getAttribute("data-connector") as Promise<string>;
 
 test("coller l’adresse d’un site trouve son flux, dont les articles deviennent cherchables", async ({
   page,
@@ -77,9 +73,7 @@ test("coller l’adresse d’un site trouve son flux, dont les articles devienne
   // Added: the dialog closes on the new card.
   await expect(addForm(page)).toHaveCount(0);
   // Health follows the first run live: active, with the last article time.
-  await expect(source.locator('[data-state="active"]')).toBeVisible({
-    timeout: 60000,
-  });
+  await expect(source.locator('[data-state="active"]')).toBeVisible();
   await expect(source.getByText("Dernier article")).toBeVisible();
   await expect(source.getByText("Aucun article pour l’instant")).toHaveCount(0);
   await page.screenshot({
@@ -87,13 +81,13 @@ test("coller l’adresse d’un site trouve son flux, dont les articles devienne
     fullPage: true,
   });
 
-  // The articles are searchable within a minute.
+  // The articles soon become searchable.
   await expect(async () => {
     await page.goto("/?q=gardiens%20phare%20ocre&mode=lexical");
     await expect(page.locator(".row").first()).toContainText("teinte ocre", {
       timeout: 3000,
     });
-  }).toPass({ timeout: 60000 });
+  }).toPass({ timeout: 10000 });
 });
 
 test("un site qui annonce plusieurs flux laisse choisir lequel suivre", async ({
@@ -114,27 +108,7 @@ test("un site qui annonce plusieurs flux laisse choisir lequel suivre", async ({
     "title",
     /\/feeds\/tech\.atom/,
   );
-  await expect(source.locator('[data-state="active"]')).toBeVisible({
-    timeout: 60000,
-  });
-});
-
-test("une suggestion s’ajoute en un clic", async ({ page }, info) => {
-  await openSources(page);
-  const chip = page.getByRole("button", { name: "Ajouter Fil continu exemple" });
-  await expect(chip).toBeVisible();
-  await page.screenshot({ path: info.outputPath("sources-suggestions.png") });
-  await chip.click();
-  const source = row(page, "Fil continu exemple");
-  await expect(source).toBeVisible();
-  await page.getByRole("button", { name: "Ajouter une source", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Fil continu exemple (déjà suivie)" }),
-  ).toBeDisabled();
-  await page.keyboard.press("Escape");
-  await expect(source.locator('[data-state="active"]')).toBeVisible({
-    timeout: 60000,
-  });
+  await expect(source.locator('[data-state="active"]')).toBeVisible();
 });
 
 test("une adresse privée, cassée ou sans flux reçoit une erreur claire", async ({
@@ -159,6 +133,9 @@ test("une adresse privée, cassée ou sans flux reçoit une erreur claire", asyn
   ).toBeDisabled();
 });
 
+// That a disabled instance is never polled again is the core's
+// (internal/connectors/acquire_test.go); this checks that the buttons drive
+// it, as the core reports it.
 test("la pause arrête la collecte, la reprise la relance, le retrait masque la source", async ({
   page,
 }, info) => {
@@ -172,28 +149,31 @@ test("la pause arrête la collecte, la reprise la relance, le retrait masque la 
   await intervals(page).getByRole("button").first().click();
   await confirm.getByRole("button", { name: "Commencer la collecte" }).click();
   const source = row(page, name);
-  await expect.poll(() => hits(page, feed), { timeout: 60000 }).toBeGreaterThan(2);
+  const first = await shown(source);
+  await expect.poll(async () => (await instance(page, first)).health?.last_success_at).toBeTruthy();
 
   await source.getByRole("button", { name: `Mettre en pause ${name}` }).click();
   await expect(source.locator('[data-state="paused"]')).toBeVisible();
   await expect(
     source.getByRole("button", { name: `Reprendre ${name}` }),
   ).toBeFocused();
-  // A run already in flight may still finish; after that, nothing is fetched.
-  await page.waitForTimeout(2000);
-  const paused = await hits(page, feed);
-  await page.waitForTimeout(6000);
-  expect(await hits(page, feed)).toBe(paused);
+  expect(await instance(page, first)).toMatchObject({
+    enabled: false,
+    health: { state: "disabled" },
+  });
   await page.screenshot({
     path: info.outputPath("sources-paused.png"),
     fullPage: true,
   });
 
-  // Resuming is the same row, collecting again.
+  // Resuming is the same row, collecting again: a new instance that polls.
   await source.getByRole("button", { name: `Reprendre ${name}` }).click();
   await expect(source.locator('[data-state="paused"]')).toHaveCount(0);
-  await expect.poll(() => hits(page, feed), { timeout: 60000 }).toBeGreaterThan(paused);
   await expect(page.getByRole("button", { name, exact: true })).toHaveCount(1);
+  const resumed = await shown(source);
+  expect(resumed).not.toBe(first);
+  await expect.poll(async () => (await instance(page, resumed)).health?.last_success_at).toBeTruthy();
+  expect(await instance(page, resumed)).toMatchObject({ enabled: true });
 
   // Removing asks first, stops collection and survives a reload.
   await source.getByRole("button", { name: `Plus d’actions pour ${name}` }).click();
@@ -204,16 +184,15 @@ test("la pause arrête la collecte, la reprise la relance, le retrait masque la 
     .click();
   await expect(row(page, name)).toHaveCount(0);
   await expect(page.getByRole("list", { name: "Sources" })).toBeFocused();
-  await page.waitForTimeout(2000);
-  const removed = await hits(page, feed);
+  // Every instance of the source is hidden, the one collecting included.
+  expect(await instance(page, resumed)).toBe(404);
+  expect(await instance(page, first)).toBe(404);
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "Sources", level: 1 }),
   ).toBeVisible();
   await expect(page.getByRole("list", { name: "Sources" })).toBeVisible();
   await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
-  await page.waitForTimeout(3000);
-  expect(await hits(page, feed)).toBe(removed);
 });
 
 test("mobile sombre : ajout et liste lisibles", async ({ page }, info) => {

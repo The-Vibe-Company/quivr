@@ -184,7 +184,7 @@ type BackfillEstimate struct {
 }
 
 // Dispatch is committed intent to start an Operation's durable execution.
-type Dispatch struct{ Organization, OperationID, Kind string }
+type Dispatch struct{ Organization, OperationID, Kind, TraceContext string }
 
 type Store interface {
 	// AcceptRebuild commits a queued rebuild Operation, its target generation,

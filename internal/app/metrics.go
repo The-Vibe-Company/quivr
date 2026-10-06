@@ -7,10 +7,22 @@ import (
 	"slices"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/observability"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
+
+// buildMetrics adds process identity to either process's metrics, including
+// scrapes where a dependency read omits its backlog gauges.
+func buildMetrics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		buildinfo.WriteMetric(w)
+		next.ServeHTTP(w, r)
+	})
+}
 
 // processingObserver feeds the worker's processing metrics (THE-662) and
 // the step rollups (THE-795, THE-797).
@@ -67,7 +79,7 @@ func (o processingObserver) Enriched(ctx context.Context, org, receiptID string,
 }
 
 func (o processingObserver) read(ctx context.Context, org, receiptID string) (content.Steps, time.Duration, bool) {
-	read, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	read, cancel := lifecycle.CleanupContext(ctx, 2*time.Second)
 	defer cancel()
 	steps, age, err := o.store.ReceiptSteps(read, org, receiptID)
 	return steps, age, err == nil
@@ -87,6 +99,12 @@ func (o processingObserver) record(org string, steps content.Steps, names ...str
 // apiMetrics serves accepted-command counters and the ingestion backlog gauges.
 // A backlog read failure omits the gauges rather than reporting zero.
 func apiMetrics(commands telemetry.Commands, backlog func(context.Context) (int64, time.Duration, error), extra func(io.Writer)) http.Handler {
+	gauges := []telemetry.GaugeDefinition{{Name: "quivr_ingestion_pending", Help: "Receipts accepted but not yet materialized."}, {Name: "quivr_ingestion_oldest_pending_age_seconds", Help: "Age of the oldest Receipt accepted but not yet materialized."}}
+	telemetry.RegisterGauges(gauges, func(ctx context.Context) ([]float64, error) {
+		pending, age, err := backlog(ctx)
+		return []float64{float64(pending), age.Seconds()}, err
+	})
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		commands.Write(w)
@@ -97,7 +115,7 @@ func apiMetrics(commands telemetry.Commands, backlog func(context.Context) (int6
 		if err != nil {
 			return
 		}
-		telemetry.Gauge(w, "quivr_ingestion_pending", "Receipts accepted but not yet materialized.", float64(pending))
-		telemetry.Gauge(w, "quivr_ingestion_oldest_pending_age_seconds", "Age of the oldest Receipt accepted but not yet materialized.", age.Seconds())
+		telemetry.Gauge(w, gauges[0].Name, gauges[0].Help, float64(pending))
+		telemetry.Gauge(w, gauges[1].Name, gauges[1].Help, age.Seconds())
 	})
 }

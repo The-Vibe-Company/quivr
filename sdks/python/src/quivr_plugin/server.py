@@ -24,6 +24,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from .tracing import request_context
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,8 @@ from .manifest import LoadedManifest, load_manifest
 from .models import Discovery, Health, NormalizerRequest, NormalizerResponse, PluginIdentity, SearchRequest, SearchResponse, SubscriptionRequest
 from .schema import protocol_errors
 from .subscription import SubscriptionInvocation, as_response, response_problems
+from .signing import verify
+from .api_versions import FEATURE_SINCE
 
 DISCOVERY_PATH = "/v0/discovery"
 HEALTH_PATH = "/v0/health"
@@ -485,8 +488,24 @@ class Plugin:
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
             server_version = _server_version()
+            # Headers and small JSON bodies are written separately. Send
+            # each promptly instead of waiting for the client's delayed ACK.
+            disable_nagle_algorithm = True
+
+            def handle(self) -> None:
+                try:
+                    super().handle()
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    # The engine may give up at its invocation deadline. A
+                    # disconnected peer is not a plugin failure or traceback.
+                    self.close_connection = True
+                    log.debug("plugin caller disconnected")
 
             def _serve(self, method: str) -> None:
+                with request_context(self.headers):
+                    self._serve_traced(method)
+
+            def _serve_traced(self, method: str) -> None:
                 raw_length = self.headers.get("Content-Length") or "0"
                 try:
                     length = int(raw_length)
@@ -501,7 +520,15 @@ class Plugin:
                 else:
                     body = self.rfile.read(length) if length else b""
                     try:
-                        reply = plugin.handle(method, self.path, body)
+                        signed = tuple(map(int, plugin.manifest.plugin_api.split("."))) >= tuple(map(int, FEATURE_SINCE["signed_calls"].split(".")))
+                        health = method == "GET" and self.path.split("?", 1)[0] == HEALTH_PATH
+                        if signed and not health and (len(self.headers.get_all("Authorization", [])) != 1 or not verify(
+                            self.headers.get("Authorization", ""), plugin.manifest.model.id,
+                            method, self.path, body,
+                        )):
+                            reply = _error(401, "invalid_engine_token", "engine request authentication failed")
+                        else:
+                            reply = plugin.handle(method, HEALTH_PATH if health else self.path, body)
                     except Exception:  # last resort: every answer carries the envelope
                         log.exception("unexpected error while handling %s %s", method, self.path)
                         reply = _error(500, "internal_error", "the plugin failed to handle the request; see the plugin logs")

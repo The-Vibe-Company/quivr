@@ -218,7 +218,7 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 		}
 		answer, issues := session.Judge(body)
 		if len(issues) > 0 {
-			slog.Warn("retrieval plugin answer refused", "component", "search", "plugin", m.ID, "round", session.Round(), "code", issues[0].Code, "path", issues[0].Path, "detail", issues[0].Message)
+			slog.WarnContext(ctx, "retrieval plugin answer refused", "component", "search", "plugin", m.ID, "round", session.Round(), "code", issues[0].Code, "path", issues[0].Path, "detail", issues[0].Message)
 			return out, fmt.Errorf("%w: %s %s", ErrPluginInvalid, issues[0].Code, issues[0].Message)
 		}
 		spend.usage.Rounds = session.Round()
@@ -237,11 +237,11 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 				out.Usage.Profiles = append(out.Usage.Profiles, f.usage)
 			}
 			if out.Usage.OverObjective = out.Usage.Elapsed > profile.Objective(); out.Usage.OverObjective {
-				slog.Warn("search over its latency objective", append([]any{"component", "search", "plugin", m.ID, "profile", q.Profile, "mode", q.Mode,
+				slog.WarnContext(ctx, "search over its latency objective", append([]any{"component", "search", "plugin", m.ID, "profile", q.Profile, "mode", q.Mode,
 					"elapsed_ms", out.Usage.Elapsed.Milliseconds(), "objective_ms", profile.MaxLatencyMS}, timing.attrs()...)...)
 			}
 			if issue := session.Budget(); issue != nil {
-				slog.Warn("retrieval plugin over budget", "component", "search", "plugin", m.ID, "profile", q.Profile, "detail", issue.Message)
+				slog.WarnContext(ctx, "retrieval plugin over budget", "component", "search", "plugin", m.ID, "profile", q.Profile, "detail", issue.Message)
 			}
 			return out, nil
 		}
@@ -259,7 +259,7 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 // hard bound into ErrDeadline: the plugin outran it.
 func (s Service) deadline(ctx context.Context, plugin string, err error, timing *Phases) error {
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
-		slog.Warn("retrieval plugin outran the profile's hard bound", append([]any{"component", "search", "plugin", plugin}, timing.attrs()...)...)
+		slog.WarnContext(ctx, "retrieval plugin outran the profile's hard bound", append([]any{"component", "search", "plugin", plugin}, timing.attrs()...)...)
 		return ErrDeadline
 	}
 	return err
@@ -272,7 +272,7 @@ func (s Service) deadline(ctx context.Context, plugin string, err error, timing 
 // the search is unavailable (retryable), not a plugin that outran its bound.
 func (s Service) unserved(ctx context.Context, plugin string, err error, timing *Phases) error {
 	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
-		slog.Warn("search candidates not served within the profile's hard bound", append([]any{"component", "search", "plugin", plugin, "error", err.Error()}, timing.attrs()...)...)
+		slog.WarnContext(ctx, "search candidates not served within the profile's hard bound", append([]any{"component", "search", "plugin", plugin, "error", err.Error()}, timing.attrs()...)...)
 	}
 	return err
 }

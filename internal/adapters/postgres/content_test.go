@@ -3,8 +3,8 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -52,6 +52,101 @@ func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 	receipt, err := service.Accept(ctx, scope, cmd)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Acceptance and its journal facts commit together, including a batch that
+	// returns its row before the protocol's final transaction result is read.
+	durable := func() [6]int64 {
+		t.Helper()
+		var counts [6]int64
+		err := pool.QueryRow(ctx, `SELECT
+ (SELECT count(*) FROM records WHERE organization=$1),
+ (SELECT count(*) FROM accepted_revisions WHERE organization=$1),
+ (SELECT count(*) FROM ingestion_receipts WHERE organization=$1),
+ (SELECT count(*) FROM ingestion_outbox WHERE organization=$1),
+ (SELECT count(*) FROM change_events WHERE organization=$1),
+ (SELECT last_sequence FROM organization_journals WHERE organization=$1)`, scope.Organization).
+			Scan(&counts[0], &counts[1], &counts[2], &counts[3], &counts[4], &counts[5])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return counts
+	}
+	beforeReplay := durable()
+	replay, err := service.Accept(ctx, scope, cmd)
+	if err != nil || replay.ID != receipt.ID || replay.NewRevision {
+		t.Fatalf("first acceptance replay = %+v, err %v", replay, err)
+	}
+	changed := cmd
+	changed.Source.RecordKey = "conflicting-record"
+	if _, err = service.Accept(ctx, scope, changed); !errors.Is(err, content.ErrConflict) {
+		t.Fatalf("changed request key should conflict without creating a Record: %v", err)
+	}
+	missing := cmd
+	missing.Key = "missing-corpus"
+	missing.Source.CorpusID = "absent-corpus"
+	if _, err = service.Accept(ctx, scope, missing); !errors.Is(err, corpus.ErrNotFound) {
+		t.Fatalf("missing Corpus acceptance = %v", err)
+	}
+	if got := durable(); got != beforeReplay {
+		t.Fatalf("replay/refusal changed durable facts: before %v, after %v", beforeReplay, got)
+	}
+	interrupted := cmd
+	interrupted.Key = "event-rollback"
+	interrupted.Source.RecordKey = "event-rollback"
+	_, err = pool.Exec(ctx, `CREATE FUNCTION fail_fixture_acceptance_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF NEW.organization='adapter-transactions' AND NEW.event_type='record.accepted'
+ THEN RAISE EXCEPTION 'synthetic second acceptance event interruption'; END IF; RETURN NEW; END $$;
+ CREATE TRIGGER fail_fixture_acceptance_event BEFORE INSERT ON change_events FOR EACH ROW EXECUTE FUNCTION fail_fixture_acceptance_event()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Exec(context.Background(), "DROP TRIGGER IF EXISTS fail_fixture_acceptance_event ON change_events; DROP FUNCTION IF EXISTS fail_fixture_acceptance_event()")
+	if _, err = service.Accept(ctx, scope, interrupted); err == nil {
+		t.Fatal("second acceptance event failure was not injected")
+	}
+	if got := durable(); got != beforeReplay {
+		t.Fatalf("failed acceptance leaked facts/journal head: before %v, after %v", beforeReplay, got)
+	}
+	if _, err = pool.Exec(ctx, "DROP TRIGGER fail_fixture_acceptance_event ON change_events; DROP FUNCTION fail_fixture_acceptance_event()"); err != nil {
+		t.Fatal(err)
+	}
+	if retried, err := service.Accept(ctx, scope, interrupted); err != nil || !retried.NewRevision {
+		t.Fatalf("rolled-back acceptance was not retryable: %+v, %v", retried, err)
+	}
+	// Simultaneous requests see the preceding journal holder's committed receipt.
+	concurrent := cmd
+	concurrent.Key = "concurrent-request"
+	concurrent.Source.RecordKey = "concurrent-record"
+	beforeConcurrent := durable()
+	start := make(chan struct{})
+	type acceptanceResult struct {
+		receipt content.Receipt
+		err     error
+	}
+	results := make(chan acceptanceResult, 2)
+	for range 2 {
+		go func() {
+			<-start
+			r, err := service.Accept(ctx, scope, concurrent)
+			results <- acceptanceResult{r, err}
+		}()
+	}
+	close(start)
+	left, right := <-results, <-results
+	if left.err != nil || right.err != nil || left.receipt.ID != right.receipt.ID || left.receipt.NewRevision == right.receipt.NewRevision {
+		t.Fatalf("concurrent same-key acceptance did not converge: %+v / %+v", left, right)
+	}
+	wantConcurrent := beforeConcurrent
+	for i, increment := range [6]int64{1, 1, 1, 1, 2, 2} {
+		wantConcurrent[i] += increment
+	}
+	if got := durable(); got != wantConcurrent {
+		t.Fatalf("concurrent acceptance duplicated/lost facts: got %v, want %v", got, wantConcurrent)
+	}
+	var routed bool
+	if err = pool.QueryRow(ctx, `SELECT NOT legacy_workflow AND lease_until='infinity'::timestamptz
+ FROM ingestion_outbox WHERE organization=$1 AND receipt_id=$2`, scope.Organization, left.receipt.ID).Scan(&routed); err != nil || !routed {
+		t.Fatalf("new acceptance lost batch/API dispatch fence: %v, %v", routed, err)
 	}
 	work, _, err := repository.Work(ctx, scope.Organization, receipt.ID)
 	if err != nil {
@@ -115,21 +210,35 @@ func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	var started sync.WaitGroup
-	started.Add(1)
+	contenderConfig := pool.Config()
+	contenderConfig.MaxConns = 1
+	contenderConfig.ConnConfig.RuntimeParams["application_name"] = "adapter-journal-contender"
+	contender, err := pgxpool.NewWithConfig(ctx, contenderConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer contender.Close()
 	go func() {
 		next := cmd
 		next.Key = "ordered"
 		next.Source.RecordKey = "ordered"
-		started.Done()
-		_, err := service.Accept(ctx, scope, next)
+		_, err := (postgres.SubmissionStore{Pool: contender}).Accept(ctx, scope, next)
 		done <- err
 	}()
-	started.Wait()
-	select {
-	case err := <-done:
-		t.Fatalf("writer escaped uncommitted journal boundary: %v", err)
-	case <-time.After(100 * time.Millisecond):
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("writer escaped uncommitted journal boundary: %v", err)
+		default:
+		}
+		var blocked bool
+		if err = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+ WHERE application_name='adapter-journal-contender' AND wait_event_type='Lock')`).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
 	}
 	if err = tx.Rollback(ctx); err != nil {
 		t.Fatal(err)

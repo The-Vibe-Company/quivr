@@ -31,6 +31,7 @@ Finally (THE-785) TestQuarantineReprocessIngestion reprocesses the Record
 TestRollback stopped. The stack's configuration and processes are restored
 afterwards, even on failure.
 """
+import plugin_environment
 import json, os, pathlib, signal, subprocess, time, urllib.error, urllib.request, uuid
 
 import ports
@@ -51,7 +52,7 @@ def healthy(port):
 
 def start_plugin(directory, binary, port, manifest, log_name):
     """Run the sample plugin binary at a port, serving the given manifest's digest in discovery."""
-    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest)}
+    env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest)}
     with (directory / log_name).open('a') as log:
         return subprocess.Popen([str(binary)], cwd=SAMPLE, env=env, stdout=log, stderr=log, start_new_session=True)
 
@@ -171,7 +172,7 @@ def verify_routes(stack):
     manifest = directory / 'quivr-plugin.yaml'
     manifest.write_text((SAMPLE / 'quivr-plugin.yaml').read_text().replace('example.hash_embedder', 'example.fixture_ingest'))
     port = ports.allocate()
-    env = {**os.environ, 'QUIVR_FAKE_PLUGIN': '1', 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest)}
+    env = {**plugin_environment.inherited(), 'QUIVR_FAKE_PLUGIN': '1', 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(manifest)}
     with (directory / 'plugin.log').open('a') as log:
         plugin = subprocess.Popen([str(binary)], cwd=directory, env=env, stdout=log, stderr=log, start_new_session=True)
     configs = {name: (stack.directory / name).read_text() for name in ['config.json', 'worker.json']}

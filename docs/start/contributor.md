@@ -13,11 +13,14 @@ How this repository is organised, tested and changed, for people and coding agen
 ## Guides
 
 - [Repository instructions](../../AGENTS.md): rules every contributor and coding agent follows in this repository
+- [Prove requirements with conformance cases](../../conformance/README.md): contribute declarative requirements and run local conformance reports
+- [Release images](../../deploy/images/README.md): configure release-please and publish signed engine and first-party plugin images
 - [Documentation conventions](../agents/documentation.md): living and dated documents, the inventory, budgets and when docs may change
 - [Domain documentation](../agents/domain.md): how the domain documentation is laid out
 - [Measure search quality](../agents/evaluation.md): measure how well search ranks results on public and private evaluation sets
 - [Agent fleet workflow](../agents/fleet-workflow.md): how parallel agents claim, plan and ship tickets
 - [Issue tracker: Linear](../agents/issue-tracker.md): how specs and tickets are written and tracked
+- [Add a migration that preserves application rollback](../agents/migrations.md): add compatible expansions and defer destructive contracts
 - [Build a private French news search set](../agents/news-set.md): build an encrypted French news search set and validate its human review
 - [Measure open-source embeddings](../agents/oss-embeddings.md): preview and measure open-source embedding models on ephemeral CPU and GPU jobs
 - [Testing standard](../agents/testing.md): what a good test looks like here
@@ -30,6 +33,7 @@ How this repository is organised, tested and changed, for people and coding agen
 - [Runnable guide blocks](../runnable-guides.md): write guide blocks that `make verify` replays
 - [Report and review campaign candidates](../search-campaign-reporting.md): report exact usage, propose bounded candidates and review campaign promotion
 - [Run a bounded search campaign](../search-campaigns.md): start, resume and stop a bounded configuration search campaign
+- [SDK test ownership](../../sdks/AGENTS.md): keep each SDK test contract at its owning boundary
 - [Public acceptance suite](../../tests/acceptance/README.md): the public acceptance suite and how to run it
 - [Shared provider fakes](../../tests/fakes/README.md): run shared provider fakes for Go and Python tests
 

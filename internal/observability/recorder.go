@@ -3,12 +3,14 @@ package observability
 import (
 	"cmp"
 	"context"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"io"
 	"log/slog"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 )
 
 // Store persists rollup rows.
@@ -118,9 +120,8 @@ type Recorder struct {
 	// maxPendingKeys and one Organization never uses up another's.
 	keys map[[2]string]map[string]struct{}
 
-	metrics  *metrics
-	dropped  atomic.Int64
-	failures atomic.Int64
+	metrics           *metrics
+	dropped, failures *telemetry.Counter
 }
 
 // NewRecorder builds a process's recorder. prune is true in the one process
@@ -130,7 +131,7 @@ func NewRecorder(store Store, cfg Config, prune bool) *Recorder {
 	if !ok {
 		interval = DefaultFlushInterval
 	}
-	return &Recorder{store: store, interval: interval, recordQueryText: cfg.RecordQueryText, prune: prune, pending: map[ID]*Row{}, keys: map[[2]string]map[string]struct{}{}, metrics: newMetrics()}
+	return &Recorder{store: store, interval: interval, recordQueryText: cfg.RecordQueryText, prune: prune, pending: map[ID]*Row{}, keys: map[[2]string]map[string]struct{}{}, metrics: newMetrics(), dropped: telemetry.NewCounter("quivr_observability_dropped_events_total", "Events dropped because the rollup buffer was full.", nil, nil), failures: telemetry.NewCounter("quivr_observability_flush_failures_total", "Rollup flushes that failed and were retried.", nil, nil)}
 }
 
 // RecordsQueryText reports whether query text is recorded.
@@ -263,7 +264,7 @@ func (r *Recorder) Flush(ctx context.Context) error {
 				copied := row
 				r.pending[row.ID()] = &copied
 			} else {
-				r.dropped.Add(row.Count)
+				r.dropped.Add(int(row.Count))
 			}
 		}
 		r.mu.Unlock()
@@ -297,7 +298,7 @@ func (r *Recorder) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			final, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			final, cancel := lifecycle.CleanupContext(ctx, 2*time.Second)
 			if err := r.Flush(final); err != nil {
 				slog.Warn("observability flush failed at shutdown", "component", "observability", "error", err.Error())
 			}
@@ -326,6 +327,6 @@ func (r *Recorder) WriteMetrics(w io.Writer) {
 		return
 	}
 	r.metrics.write(w)
-	writeCounter(w, "quivr_observability_flush_failures_total", "Rollup flushes that failed and were retried.", r.failures.Load())
-	writeCounter(w, "quivr_observability_dropped_events_total", "Events dropped because the rollup buffer was full.", r.dropped.Load())
+	r.failures.Write(w)
+	r.dropped.Write(w)
 }

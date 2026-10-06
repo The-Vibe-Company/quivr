@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"go.opentelemetry.io/otel/trace"
 	"log/slog"
 	"net"
 	"net/http"
@@ -263,7 +263,7 @@ func (p *Plugin) Handler() (http.Handler, error) {
 		mux.HandleFunc("POST /v0/contributions/retrieval/search", p.serveSearch)
 	}
 	if p.m.Connector == nil {
-		return mux, nil
+		return p.protocolHandler(mux), nil
 	}
 	mux.HandleFunc("POST /v0/contributions/connector/fetch", p.serveFetch)
 	mux.HandleFunc("POST /v0/contributions/connector/check_credential", p.serveCheckCredential)
@@ -274,7 +274,14 @@ func (p *Plugin) Handler() (http.Handler, error) {
 		mux.HandleFunc("POST /v0/contributions/connector/describe_attachment", p.serveDescribeAttachment)
 		mux.HandleFunc("POST /v0/contributions/connector/upload_attachment", p.serveUploadAttachment)
 	}
-	return mux, nil
+	return p.protocolHandler(mux), nil
+}
+
+func (p *Plugin) protocolHandler(mux http.Handler) http.Handler {
+	if resolveAPIFeatures(p.m.pluginAPI).speaks("signed_calls") {
+		return continueTrace(p.authenticate(mux))
+	}
+	return continueTrace(mux)
 }
 
 // contributions lists the declared Contributions for discovery.
@@ -363,7 +370,7 @@ type common struct {
 // decode reads, schema-checks and semantically checks a request. It answers
 // the refusal itself and returns nil when the request is invalid.
 func (p *Plugin) decode(w http.ResponseWriter, r *http.Request, schema string, into any) (*kind, Credential) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
+	body, err := requestBody(r)
 	if err != nil || len(body) > maxRequestBytes {
 		refuse(w, 400, "invalid_request", "the request body is unreadable or larger than 16 MiB", Credential{})
 		return nil, Credential{}
@@ -433,8 +440,14 @@ func (p *Plugin) recoverPanic(w http.ResponseWriter, log *slog.Logger) {
 	}
 }
 
-func (p *Plugin) requestLogger(credential Credential, invocation string) *slog.Logger {
-	return slog.New(redactingHandler{next: p.logger.Handler(), credential: credential}).With("invocation_id", invocation)
+func (p *Plugin) requestLogger(ctx context.Context, credential Credential, invocation string) *slog.Logger {
+	sc := trace.SpanContextFromContext(ctx)
+	id, _ := ctx.Value(requestIDKey{}).(string)
+	traceID, spanID := "", ""
+	if sc.IsValid() {
+		traceID, spanID = sc.TraceID().String(), sc.SpanID().String()
+	}
+	return slog.New(redactingHandler{next: p.logger.Handler(), credential: credential}).With("invocation_id", invocation, "trace_id", traceID, "span_id", spanID, "request_id", id)
 }
 
 func (p *Plugin) serveFetch(w http.ResponseWriter, r *http.Request) {
@@ -443,7 +456,7 @@ func (p *Plugin) serveFetch(w http.ResponseWriter, r *http.Request) {
 	if k == nil {
 		return
 	}
-	req.logger = p.requestLogger(credential, req.InvocationID)
+	req.logger = p.requestLogger(r.Context(), credential, req.InvocationID)
 	defer p.recoverPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), p.m.timeoutDur)
 	defer cancel()
@@ -517,7 +530,7 @@ func (p *Plugin) serveCheckCredential(w http.ResponseWriter, r *http.Request) {
 	if k == nil {
 		return
 	}
-	req.logger = p.requestLogger(credential, req.InvocationID)
+	req.logger = p.requestLogger(r.Context(), credential, req.InvocationID)
 	defer p.recoverPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), p.m.timeoutDur)
 	defer cancel()

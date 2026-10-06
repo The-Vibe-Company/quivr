@@ -60,6 +60,8 @@
             "pages": [
               "run-quivr/overview",
               "run-quivr/deploy",
+              "run-quivr/upgrade-quivr",
+              "run-quivr/security",
               "run-quivr/tls",
               {
                 "group": "Plugins",
@@ -98,6 +100,7 @@
                 "group": "Measure search",
                 "pages": [
                   "run-quivr/record-search-measurements",
+                  "run-quivr/run-local-load-tests",
                   "run-quivr/run-search-campaign"
                 ]
               }

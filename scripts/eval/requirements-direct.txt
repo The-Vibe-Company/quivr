@@ -1,4 +1,4 @@
 # Developer-local comparison only; never install the local encoder in CI.
 -r requirements.txt
-numpy==2.0.2          # BSD-3-Clause; exact cosine retrieval (Python 3.9+)
-sentence-transformers==3.4.1  # Apache-2.0; local multilingual-e5-small baseline
+numpy==2.5.3          # BSD-3-Clause; exact cosine retrieval (Python 3.12+)
+sentence-transformers==6.1.0  # Apache-2.0; local multilingual-e5-small baseline

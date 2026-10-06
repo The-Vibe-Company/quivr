@@ -234,8 +234,19 @@ func (s *devSession) start(ctx context.Context) (*devhost.Process, bool) {
 			return nil, false
 		}
 	}
+	var env []string
+	if (&plugins.Pin{Manifest: *m}).Speaks(plugins.FeatureSignedCalls) {
+		ring, err := plugins.NewSigningKeys()
+		if err != nil {
+			s.status("%v", err)
+			return nil, false
+		}
+		raw, _ := json.Marshal(ring)
+		env = []string{plugins.EnvPluginSigningKeys + "=" + string(raw)}
+		ctx = plugins.WithRequestSigning(ctx, m.ID, ring)
+	}
 	proc, err := devhost.Start(devhost.Options{
-		Dir: s.dir, Command: m.Run.Command, Manifest: report.Path, Port: s.port, Output: s.stderr,
+		Dir: s.dir, Command: m.Run.Command, Manifest: report.Path, Port: s.port, Output: s.stderr, Env: env,
 	})
 	if err != nil {
 		s.status("%v", err)

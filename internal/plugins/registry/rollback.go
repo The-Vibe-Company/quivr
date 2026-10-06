@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
@@ -171,7 +172,7 @@ func (s Service) Rollback(ctx context.Context, scope corpus.Scope, req RollbackR
 		return a, nil
 	})
 	if err == nil && s.Activated != nil {
-		s.Activated(ctx)
+		audit.AfterCommit(ctx, s.Activated)
 	}
 	return plan, err
 }
@@ -180,6 +181,10 @@ func (s Service) Rollback(ctx context.Context, scope corpus.Scope, req RollbackR
 // discovery as the build of its manifest.
 func Discover(ctx context.Context, r Registration) error {
 	pin, err := r.Pin()
+	if err != nil {
+		return err
+	}
+	ctx, err = plugins.SigningContext(ctx, pin)
 	if err != nil {
 		return err
 	}

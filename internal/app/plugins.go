@@ -44,6 +44,7 @@ func applyPluginConfiguration(ctx context.Context, service registry.Service, pin
 		slog.Error("the active pipeline plan cannot be resolved; serving the configured plugins until it changes", "plan", plan, "error", err)
 		return plan, pins, nil
 	}
+	plugins.WarnUnsignedPins(set)
 	return plan, set, nil
 }
 
@@ -211,11 +212,11 @@ func (f *planFollower) Refresh(ctx context.Context) {
 	}
 	if err != nil {
 		f.failed = id
-		slog.Error("the active pipeline plan cannot be resolved; keeping the current plugins", "plan", id, "current", f.live.Plan(), "error", err)
+		slog.ErrorContext(ctx, "the active pipeline plan cannot be resolved; keeping the current plugins", "plan", id, "current", f.live.Plan(), "error", err)
 		return
 	}
 	if plan == id {
-		slog.Info("following pipeline plan", "plan", plan, "plugins", set.Describe())
+		slog.InfoContext(ctx, "following pipeline plan", "plan", plan, "plugins", set.Describe())
 		if f.followed != nil {
 			f.followed(ctx, set)
 		}

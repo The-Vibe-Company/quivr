@@ -96,17 +96,19 @@ func (knownCorpora) List(_ context.Context, _ corpus.Scope, after string, limit 
 }
 
 const (
-	feedReader = "feed-reader-token-0123456789abcdef0123456789"
-	otherScope = "feed-scoped-token-0123456789abcdef0123456789"
-	noFeed     = "feed-denied-token-0123456789abcdef0123456789"
+	feedReader  = "feed-reader-token-0123456789abcdef0123456789"
+	otherScope  = "feed-scoped-token-0123456789abcdef0123456789"
+	foreignFeed = "feed-foreign-token-0123456789abcdef0123456"
+	noFeed      = "feed-denied-token-0123456789abcdef0123456789"
 )
 
 func changeServer(t *testing.T, journal *memoryJournal, stores ...corpus.Store) *httptest.Server {
 	t.Helper()
 	keys := map[string]corpus.Scope{
-		feedReader: {Organization: "org_a", Actions: []string{"changes:read"}, Corpora: []string{"*"}},
-		otherScope: {Organization: "org_a", Actions: []string{"changes:read"}, Corpora: []string{"corpus_a"}},
-		noFeed:     {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}},
+		feedReader:  {Organization: "org_a", Actions: []string{"changes:read"}, Corpora: []string{"*"}},
+		otherScope:  {Organization: "org_a", Actions: []string{"changes:read"}, Corpora: []string{"corpus_a"}},
+		foreignFeed: {Organization: "org_b", Actions: []string{"changes:read"}, Corpora: []string{"*"}},
+		noFeed:      {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}},
 	}
 	key := []byte("cursor-key-0123456789abcdef0123456789")
 	feed := changes.Service{Journal: journal, Key: key, Retention: time.Second}
@@ -242,6 +244,7 @@ func TestPollingRejectsForeignCursorsAndScopes(t *testing.T) {
 	}{
 		{"/v0/changes?corpus_id=corpus_a", noFeed, 403, "forbidden"},
 		{"/v0/changes?corpus_id=corpus_b", otherScope, 404, "not_found"},
+		{"/v0/changes?corpus_id=corpus_a", foreignFeed, 404, "not_found"},
 		{"/v0/changes?corpus_id=missing", feedReader, 404, "not_found"},
 		{"/v0/changes", feedReader, 422, "invalid_query"},
 		{"/v0/changes?corpus_id=corpus_a&cursor=", feedReader, 422, "invalid_cursor"},

@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
+	"go.opentelemetry.io/otel/trace"
 	"io"
 	"net/http"
 	"strings"
@@ -76,6 +79,18 @@ func errorResponse(err error, fallback *publicerr.Error, corpusID ...string) (in
 // A route supplies only its unavailable fallback and optional resync Corpus.
 func writeError(w http.ResponseWriter, err error, fallback *publicerr.Error, corpusID ...string) {
 	status, body := errorResponse(err, fallback, corpusID...)
+	if id := w.Header().Get("X-Request-ID"); id != "" {
+		body.RequestId = &id
+	}
+	if id := w.Header().Get("X-Trace-ID"); id != "" {
+		body.TraceId = &id
+	}
+	if id := w.Header().Get("X-Span-ID"); id != "" {
+		body.SpanId = &id
+	}
+	if coded, ok := w.(interface{ SetErrorCode(string) }); ok {
+		coded.SetErrorCode(body.Code)
+	}
 	var plain *plainError
 	if errors.As(err, &plain) {
 		w.Header().Set("Content-Type", plain.contentType)
@@ -95,3 +110,15 @@ type plainError struct {
 
 func (e *plainError) Error() string { return e.err.Error() }
 func (e *plainError) Unwrap() error { return e.err }
+
+func correlateError(ctx context.Context, body *transport.Error) {
+	if id := logging.RequestID(ctx); id != "" {
+		body.RequestId = &id
+	}
+	sc := trace.SpanContextFromContext(ctx)
+	if sc.IsValid() {
+		tid, sid := sc.TraceID().String(), sc.SpanID().String()
+		body.TraceId = &tid
+		body.SpanId = &sid
+	}
+}

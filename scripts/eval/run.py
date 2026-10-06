@@ -40,6 +40,8 @@ import embeddings  # noqa: E402
 import trec  # noqa: E402
 from measure_metrics import percentile  # noqa: E402
 
+import ci_guard
+
 MODES = ['lexical', 'semantic', 'hybrid']
 BASELINE_SYSTEM = 'hybrid/default'  # the API's default mode and profile
 LIMIT = 50  # the API maximum; hits are deduplicated by Record before scoring
@@ -659,7 +661,7 @@ def main():
     if options.list_sets:
         print(json.dumps({name: public_sets.SETS[name] for name in public_sets.names(options.include_restricted)}, indent=2))
         return
-    if any(os.environ.get(key, '').lower() not in ('', '0', 'false') for key in ('CI', 'GITHUB_ACTIONS')):
+    if ci_guard.in_ci():
         parser.error('measurements run locally only; use --list-sets for offline CI preview')
     if options.sets is None:
         options.sets = ','.join(public_sets.names(options.include_restricted))

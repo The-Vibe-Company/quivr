@@ -2,10 +2,12 @@ package registry
 
 import (
 	"context"
+
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"log/slog"
 	"os"
 	"path"
@@ -126,15 +128,19 @@ func (s Service) RunChecks(ctx context.Context, interval, lease time.Duration) {
 		check = RunCheck
 	}
 	for ctx.Err() == nil {
-		r, ok, err := s.Store.ClaimCheck(ctx, lease)
+		work, admitted := lifecycle.Admit(ctx)
+		if !admitted {
+			return
+		}
+		r, ok, err := s.Store.ClaimCheck(work, lease)
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("plugin check claim failed", "error", err)
 		}
 		if ok {
-			runCtx, cancel := context.WithTimeout(ctx, lease)
+			runCtx, cancel := context.WithTimeout(lifecycle.WorkContext(ctx), lease)
 			report := check(runCtx, r)
 			cancel()
-			if err := s.Store.RecordCheck(ctx, r.ID, report); err != nil {
+			if err := s.Store.RecordCheck(lifecycle.WorkContext(ctx), r.ID, report); err != nil {
 				slog.Warn("plugin check not recorded; it runs again when its lease expires", "registration", r.ID, "error", err)
 			} else {
 				slog.Info("plugin checked", "registration", r.ID, "plugin", r.PluginID+"@"+r.Version, "certified", report.Certified, "passed", report.Passed, "failed", report.Failed)

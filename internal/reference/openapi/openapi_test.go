@@ -9,6 +9,35 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/reference/openapi"
 )
 
+// A version discovery resource and a Record Version component must both be
+// documented, with different anchors and working response-schema links.
+func TestRenderResourceNamedLikeASchema(t *testing.T) {
+	contract := `openapi: 3.1.0
+info: {title: Example, version: '1'}
+paths:
+  /v0/version:
+    get:
+      responses:
+        '200':
+          description: Build identity
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Version'}
+components:
+  schemas:
+    Version: {type: string}
+`
+	got, err := openapi.Render(openapi.Source{FS: fstest.MapFS{"api.yaml": {Data: []byte(contract)}}, Contract: "api.yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"### Version endpoints", "### `Version`", "[`Version`](#version)"} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("missing %q in %s", want, got)
+		}
+	}
+}
+
 // The fixture exercises what an integrator reads: grouped endpoints with
 // parameters, bodies, headers and error descriptions, a receiver webhook, a
 // schema inlined from a shared file, nested properties, conditional rules and

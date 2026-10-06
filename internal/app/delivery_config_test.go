@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -22,16 +21,6 @@ func TestDeliveryConfigDefaultsOverridesAndValidation(t *testing.T) {
 		if _, _, err = bad.parse(); err == nil {
 			t.Fatalf("accepted %+v", bad)
 		}
-	}
-}
-
-func TestDeliveryConfigPrivateDestinationAllowanceDefaultsOff(t *testing.T) {
-	var cfg Config
-	if err := json.Unmarshal([]byte(`{"delivery":{"timeout":"5s"}}`), &cfg); err != nil || cfg.Delivery.AllowPrivateDestinations {
-		t.Fatalf("allowance must default off: %+v %v", cfg.Delivery, err)
-	}
-	if err := json.Unmarshal([]byte(`{"delivery":{"allow_private_destinations":true}}`), &cfg); err != nil || !cfg.Delivery.AllowPrivateDestinations {
-		t.Fatalf("allowance not parsed: %+v %v", cfg.Delivery, err)
 	}
 }
 

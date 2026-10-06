@@ -7,6 +7,7 @@ import contextlib
 import decimal
 import datetime
 import functools
+import email.utils
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ import re
 import tempfile
 import time
 import uuid
+import urllib.error
 
 import embeddings
 import network_recovery
@@ -163,6 +165,120 @@ class Store:
         if not row or row[0] != owner or not row[1] or row[2] is not None:
             raise LeaseLost('lease expired, completed or held by another worker')
 
+    @retry_contention
+    def claim_slot(self, name, prefix, count, ttl, *, lease=None, gate=None):
+        """Admit one bounded slot under the campaign lock, fenced by its caller."""
+        keys = lease_batch([prefix + (f'/{i}' if count > 1 else '') for i in range(count)], ttl)
+        with contextlib.ExitStack() as admission_fence, self.transaction() as db:
+            policy, stopped = self.lock(db, name)
+            if self.terminal(db, name, policy, stopped):
+                raise LeaseLost('campaign stopped or ended')
+            if lease:
+                self.fence(db, name, *lease)
+            occupied = {row[0] for row in db.execute(
+                'SELECT key FROM eval_control.leases WHERE campaign=%s AND key=ANY(%s) AND (expires_at>clock_timestamp() OR payload IS NOT NULL)',
+                (name, keys)).fetchall()}
+            for key in keys:
+                if key not in occupied:
+                    if gate is not None:
+                        admission_fence.enter_context(gate.commit())
+                    owner = uuid.uuid4().hex
+                    # Recheck parent ownership at the write after SQL round trips.
+                    predicate, parameters = '', ()
+                    if lease:
+                        predicate = ' WHERE EXISTS (SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL)'
+                        parameters = (name, *lease)
+                    row = db.execute("INSERT INTO eval_control.leases(campaign,key,owner,expires_at) SELECT %s,%s,%s,clock_timestamp()+%s*interval '1 second'" + predicate +
+                        ' ON CONFLICT (campaign,key) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at RETURNING key',
+                        (name, key, owner, ttl) + parameters).fetchone()
+                    if not row:
+                        raise LeaseLost('invocation expired before slot admission')
+                    return key, owner
+        return None
+
+    @retry_contention
+    def provider_slot(self, name, lease, extra_leases=()):
+        """All hosted models in one campaign share adaptive request admission."""
+        with self.transaction() as db:
+            policy, stopped = self.lock(db, name)
+            if self.terminal(db, name, policy, stopped):
+                raise LeaseLost('campaign stopped or ended')
+            for fence in (lease, *extra_leases):
+                self.fence(db, name, *fence)
+            db.execute("INSERT INTO eval_control.leases(campaign,key,owner,expires_at,payload) VALUES (%s,'provider-admission','control',clock_timestamp(),%s::jsonb) ON CONFLICT DO NOTHING",
+                (name, json.dumps({'limit': 4, 'clean': 0, 'generation': 0})))
+            state, cooling = db.execute("SELECT payload,expires_at>clock_timestamp() FROM eval_control.leases WHERE campaign=%s AND key='provider-admission'", (name,)).fetchone()
+            active = {row[0] for row in db.execute("SELECT key FROM eval_control.leases WHERE campaign=%s AND key LIKE 'provider-request/%%' AND expires_at>clock_timestamp()", (name,)).fetchall()}
+            if cooling or len(active) >= state['limit']:
+                return None
+            key = next('provider-request/' + str(i) for i in range(4) if 'provider-request/' + str(i) not in active)
+            owner = uuid.uuid4().hex
+            # Only the bounded Modal callers install ProviderAdmission. Socket
+            # timeouts do not bound a streaming response: retain the permit for
+            # a full invocation lifetime, beyond its hard container deadline.
+            ttl = policy.get('max_seconds', 3600) + policy.get('startup_seconds', 0)
+            lease_batch([], ttl)
+            predicates = ['EXISTS (SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL)' for _ in (lease, *extra_leases)]
+            parameters = tuple(value for fence in (lease, *extra_leases) for value in (name, *fence))
+            row = db.execute("INSERT INTO eval_control.leases(campaign,key,owner,expires_at) SELECT %s,%s,%s,clock_timestamp()+%s*interval '1 second' WHERE " + ' AND '.join(predicates) +
+                ' ON CONFLICT (campaign,key) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at RETURNING key', (name, key, owner, ttl) + parameters).fetchone()
+            if not row:
+                raise LeaseLost('invocation or latency window expired before provider admission')
+            return key, owner, state['generation']
+
+    @retry_contention
+    def release_slot(self, name, slot):
+        """Expire our unpublished slot using the documented UPDATE grant."""
+        with self.transaction() as db:
+            self.lock(db, name)
+            db.execute('UPDATE eval_control.leases SET expires_at=clock_timestamp() WHERE campaign=%s AND key=%s AND owner=%s AND payload IS NULL', (name, *slot))
+
+    @retry_contention
+    def provider_feedback(self, name, permit, error):
+        with self.transaction() as db:
+            self.lock(db, name)
+            key, owner, generation = permit
+            row = db.execute('UPDATE eval_control.leases SET expires_at=clock_timestamp() WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL RETURNING key', (name, key, owner)).fetchone()
+            if not row:
+                return  # A replacement permit owns feedback now.
+            state = db.execute("SELECT payload FROM eval_control.leases WHERE campaign=%s AND key='provider-admission'", (name,)).fetchone()[0]
+            delay = 0
+            if isinstance(error, urllib.error.HTTPError) and error.code == 429:
+                state.update(limit=max(1, state['limit'] // 2), clean=0, generation=state['generation'] + 1)
+                try:
+                    retry_after = error.headers.get('Retry-After', '1')
+                    delay = (float(retry_after) if retry_after.isdigit() else
+                             email.utils.parsedate_to_datetime(retry_after).timestamp() - time.time())
+                except (AttributeError, TypeError, ValueError, OverflowError):
+                    delay = 1
+                delay = max(1, min(60, delay))
+            elif error is not None:
+                state['clean'] = 0
+            elif generation == state['generation']:
+                state['clean'] += 1
+                if state['clean'] >= 16 * state['limit'] and state['limit'] < 4:
+                    state.update(limit=state['limit'] + 1, clean=0)
+            db.execute("UPDATE eval_control.leases SET payload=%s::jsonb,expires_at=GREATEST(expires_at,clock_timestamp()+%s*interval '1 second') WHERE campaign=%s AND key='provider-admission'",
+                (json.dumps(state), delay, name))
+
+    @contextlib.contextmanager
+    def latency_window(self, name, lease, ttl):
+        """Wait outside timing, then hold the fresh paired serving window only."""
+        slot = None
+        try:
+            while slot is None:
+                self.renew(name, *lease, ttl=ttl)
+                slot = self.claim_slot(name, 'campaign-latency-slot', 1, ttl, lease=lease)
+                if slot is None:
+                    time.sleep(1)
+            yield slot
+        finally:
+            # An outage can leave an in-flight call behind. Retain its bounded
+            # fence; never spend another outage window on compensating writes.
+            import sys
+            if slot and not isinstance(sys.exc_info()[1], network_recovery.Outage):
+                self.release_slot(name, slot)
+
     def claim(self, name, key, ttl=3600):
         return self.claim_many(name, [key], ttl)[key]
 
@@ -311,24 +427,25 @@ class Store:
                 'confirmation_reads_left': policy.get('confirmation_limit', 10) - reads}
 
     @retry_contention
-    def reserve(self, name, kind, usd, metadata=None, lease=None):
+    def reserve(self, name, kind, usd, metadata=None, lease=None, *, extra_leases=()):
         gate = network_recovery.admission(name)
         while True:
             gate.wait()
             try:
-                return self._reserve(name, kind, usd, metadata, lease, gate)
+                return self._reserve(name, kind, usd, metadata, lease, gate, extra_leases)
             except network_recovery.AdmissionPaused:
                 continue
 
-    def _reserve(self, name, kind, usd, metadata, lease, gate):
+    def _reserve(self, name, kind, usd, metadata, lease, gate, extra_leases):
         amount, refused = money(usd), False
         if kind not in ('provider', 'modal'):
             raise ValueError('unsupported ledger kind')
         rid = uuid.uuid4().hex
+        leases = ([lease] if lease else []) + list(extra_leases)
         with contextlib.ExitStack() as admission_fence, self.transaction() as db:
             policy, stopped = self.lock(db, name)
-            if lease:
-                self.fence(db, name, *lease)
+            for fence in leases:
+                self.fence(db, name, *fence)
             stopped = self.terminal(db, name, policy, stopped)
             day = db.execute("SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date").fetchone()[0]
             db.execute('INSERT INTO eval_control.days(campaign,day,kind) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING', (name, day, kind))
@@ -348,9 +465,9 @@ class Store:
                 # and network latency, just like the measurement lease fence.
                 predicate = ' WHERE (%s::timestamptz IS NULL OR clock_timestamp()<%s::timestamptz)'
                 parameters = (policy.get('end_at'), policy.get('end_at'))
-                if lease:
+                for fence in leases:
                     predicate += ' AND EXISTS (SELECT 1 FROM eval_control.leases WHERE campaign=%s AND key=%s AND owner=%s AND expires_at>clock_timestamp() AND payload IS NULL)'
-                    parameters += (name, *lease)
+                    parameters += (name, *fence)
                 row = db.execute('INSERT INTO eval_control.reservations(id,campaign,day,kind,reserved_usd,charged_usd,metadata) SELECT %s,%s,%s,%s,%s,%s,%s::jsonb' + predicate + ' RETURNING id', values + parameters).fetchone()
                 if row is None:
                     if self.terminal(db, name, policy, stopped):
@@ -505,19 +622,48 @@ class Store:
         return {kind: {'charged_usd': float(total), 'unknown_usd': float(unknown)} for kind, total, unknown in rows}
 
 
+class ProviderAdmission:
+    """Cross-container Hosted request context; SQL waits stay outside HTTP timing."""
+    def __init__(self, budget):
+        self.budget = budget
+        self.store, self.campaign, self.lease = budget.store, budget.campaign, budget.lease
+
+    @contextlib.contextmanager
+    def request(self):
+        permit, error = None, None
+        try:
+            while permit is None:
+                self.store.renew_many(self.campaign, dict([self.lease, *self.budget.extra_leases]), ttl=self.budget.ttl)
+                permit = self.store.provider_slot(self.campaign, self.lease, self.budget.extra_leases)
+                if permit is None:
+                    time.sleep(1)
+            yield
+        except BaseException as caught:
+            error = caught
+            raise
+        finally:
+            if permit and not isinstance(error, network_recovery.Outage):
+                self.store.provider_feedback(self.campaign, permit, error)
+
+
 class Budget:
     """Hosted's admission protocol backed by a shared campaign ledger."""
-    def __init__(self, store, campaign, lease):
+    def __init__(self, store, campaign, lease, ttl=3600):
         self.store, self.campaign, self.lease = store, campaign, lease
+        self.ttl = ttl
         self.calls = []
+        self.extra_leases = []
 
     def reserve(self, model, set_name, phase, tokens, price):
         if type(tokens) is not int or tokens <= 0:
             raise ValueError('invalid input-token reservation')
         rate = money(price) / 1_000_000
-        self.store.renew(self.campaign, *self.lease)
+        if self.extra_leases:
+            self.store.renew_many(self.campaign, dict([self.lease, *self.extra_leases]), ttl=self.ttl)
+        else:
+            self.store.renew(self.campaign, *self.lease, ttl=self.ttl)
         rid = self.store.reserve(self.campaign, 'provider', tokens * rate,
-                                 {'model': model, 'set': set_name, 'phase': phase, 'reserved_tokens': tokens}, self.lease)
+                                 {'model': model, 'set': set_name, 'phase': phase, 'reserved_tokens': tokens}, self.lease, extra_leases=self.extra_leases)
         call = {'id': rid, 'model': model, 'phase': phase, 'reserved': tokens,
                 'charged': tokens, 'confirmed': None, 'rate': rate}
         self.calls.append(call)

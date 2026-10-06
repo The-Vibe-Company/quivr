@@ -41,7 +41,7 @@ func insertInstanceToken(ctx context.Context, tx pgx.Tx, org, id string, n conne
 }
 
 func (s ConnectorStore) CreateInstanceToken(ctx context.Context, org, id string, n connectors.TokenDeposit) (connectors.TokenInfo, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.TokenInfo{}, err
 	}
@@ -57,7 +57,7 @@ func (s ConnectorStore) CreateInstanceToken(ctx context.Context, org, id string,
 }
 
 func (s ConnectorStore) ListInstanceTokens(ctx context.Context, org, id, after string, limit int) ([]connectors.TokenInfo, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT `+tokenColumns+` FROM connector_instance_tokens WHERE organization=$1 AND connector_id=$2 AND id>$3 ORDER BY id LIMIT $4`, org, id, after, limit)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT `+tokenColumns+` FROM connector_instance_tokens WHERE organization=$1 AND connector_id=$2 AND id>$3 ORDER BY id LIMIT $4`, org, id, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (s ConnectorStore) ListInstanceTokens(ctx context.Context, org, id, after s
 }
 
 func (s ConnectorStore) RotateInstanceToken(ctx context.Context, org, id, tokenID string, n connectors.TokenDeposit) (connectors.TokenInfo, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.TokenInfo{}, err
 	}
@@ -101,12 +101,12 @@ func (s ConnectorStore) RotateInstanceToken(ctx context.Context, org, id, tokenI
 }
 
 func (s ConnectorStore) RevokeInstanceToken(ctx context.Context, org, id, tokenID string) (connectors.TokenInfo, error) {
-	return scanInstanceToken(s.Pool.QueryRow(ctx, `UPDATE connector_instance_tokens SET revoked_at=COALESCE(revoked_at,clock_timestamp()) WHERE organization=$1 AND connector_id=$2 AND id=$3 RETURNING `+tokenColumns, org, id, tokenID))
+	return scanInstanceToken(database(ctx, s.Pool).QueryRow(ctx, `UPDATE connector_instance_tokens SET revoked_at=COALESCE(revoked_at,clock_timestamp()) WHERE organization=$1 AND connector_id=$2 AND id=$3 RETURNING `+tokenColumns, org, id, tokenID))
 }
 
 func (s ConnectorStore) LoadInstanceTokenHash(ctx context.Context, org, id, tokenID string) ([]byte, error) {
 	var hash []byte
-	err := s.Pool.QueryRow(ctx, `SELECT t.hash FROM connector_instance_tokens t JOIN connector_instances c ON c.organization=t.organization AND c.id=t.connector_id WHERE t.organization=$1 AND t.connector_id=$2 AND t.id=$3 AND c.enabled AND t.revoked_at IS NULL AND (t.valid_until IS NULL OR t.valid_until>clock_timestamp())`, org, id, tokenID).Scan(&hash)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT t.hash FROM connector_instance_tokens t JOIN connector_instances c ON c.organization=t.organization AND c.id=t.connector_id WHERE t.organization=$1 AND t.connector_id=$2 AND t.id=$3 AND c.enabled AND t.revoked_at IS NULL AND (t.valid_until IS NULL OR t.valid_until>clock_timestamp())`, org, id, tokenID).Scan(&hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = corpus.ErrNotFound
 	}

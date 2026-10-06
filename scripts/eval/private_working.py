@@ -79,13 +79,16 @@ def trial(request, store):
         budgets, clients = {}, {}
         for side, cfg in configs.items():
             store.renew(request['campaign'], *lease, ttl=policy['max_seconds'])
-            budgets[side] = control_store.Budget(store, request['campaign'], lease)
+            budgets[side] = control_store.Budget(store, request['campaign'], lease, ttl=policy['max_seconds'])
             clients[side] = None if cfg['model'] == direct_bakeoff.E5_MODEL else direct_bakeoff.Hosted(
                 os.environ['AZURE_FOUNDRY_ENDPOINT'], os.environ['AZURE_FOUNDRY_KEY'], budgets[side], name, policy['prices'])
+            if clients[side] is not None:
+                clients[side].provider_gate = control_store.ProviderAdmission(budgets[side])
         started = time.monotonic()
         measurements = search_trial.measure_pair(configs, data, dataset, root / 'vectors', budgets, clients,
             policy['prices'], float(policy['modal_usd_per_second']), request['fresh_latency'],
-            os.environ.get('TYPESAFE_API_KEY', ''), private_vectors=private_vectors, quality_concurrency=policy['quality_concurrency'])
+            os.environ.get('TYPESAFE_API_KEY', ''), private_vectors=private_vectors, quality_concurrency=policy['quality_concurrency'],
+            latency_scope=lambda: store.latency_window(request['campaign'], lease, policy['max_seconds']))
         for side, cfg in configs.items():
             measured = measurements[side]
             measured['duration_seconds'] = time.monotonic() - started
@@ -125,9 +128,4 @@ def trial(request, store):
             'latency_comparable': verdict['gates']['latency']['details'][name]['comparable'] is True}}
         # Both canonical rows are aggregate-only. The candidate lease fences
         # the invocation; a separate baseline row preserves confirmation APIs.
-        claim = store.claim(request['campaign'], baseline_key, policy['max_seconds'])
-        if claim['status'] != 'claimed':
-            raise RuntimeError('private baseline evidence unavailable')
-        store.publish_many(request['campaign'], {baseline_key: (claim['owner'], rows['baseline']),
-                                                 lease[0]: (lease[1], rows['candidate'])})
-        return rows['candidate']
+        return search_trial.publish_pair(store, request, rows)

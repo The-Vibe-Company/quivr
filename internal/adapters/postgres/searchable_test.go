@@ -71,6 +71,25 @@ func TestBaselinePromotionRollbackAndHydrationFences(t *testing.T) {
 	if err = service.SaveSegmentation(ctx, scope.Organization, v, seg); err != nil {
 		t.Fatal("retry changed segmentation", err)
 	}
+	// Immutable artifact writes do not wait for unrelated journal commits.
+	// The real row lock controls the slow path; a deadline bounds observation.
+	journal, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Rollback(ctx)
+	if _, err = journal.Exec(ctx, "SELECT 1 FROM organization_journals WHERE organization=$1 FOR UPDATE", scope.Organization); err != nil {
+		t.Fatal(err)
+	}
+	attempt, release := context.WithTimeout(ctx, time.Second)
+	err = service.SaveSegmentation(attempt, scope.Organization, v, seg)
+	release()
+	if err != nil {
+		t.Fatal("artifact replay waited for the organization journal", err)
+	}
+	if err = journal.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
 	divergent := seg
 	divergent.Recipe = "other" // Engine rejects inconsistent derivation identities.
 	if err = service.SaveSegmentation(ctx, scope.Organization, v, divergent); err == nil {

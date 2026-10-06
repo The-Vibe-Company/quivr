@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import math
+import network_recovery
 import pathlib
 import re
 import socket
@@ -137,6 +138,7 @@ def rerank(query, passages, budget, key, price, timing=None):
     started = time.monotonic()
     call = budget.reserve(jev.MODEL, 'rerank', 'query', jev.MAX_TOKENS, price)
     timing['blocked'] = time.monotonic() - started
+    timing['ledger'] = timing['blocked']
     request = urllib.request.Request(jev.URL, data=raw, headers={'Content-Type': 'application/json',
                                      'Authorization': 'Bearer ' + key}, method='POST')
     try:
@@ -151,20 +153,23 @@ def rerank(query, passages, budget, key, price, timing=None):
         tokens = body['usage']['input_tokens']
         started = time.monotonic()
         budget.settle(call, tokens)
-        timing['blocked'] += time.monotonic() - started
+        ledger = time.monotonic() - started
+        timing['ledger'] += ledger
+        timing['blocked'] += ledger
         scores = {name: item['noul'] for name, item in body['answers'].items()}
         if (type(tokens) is not int or not 0 <= tokens <= jev.MAX_TOKENS or body['model'] != jev.MODEL
                 or set(scores) != set(passages) or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in scores.values())):
             raise ValueError()
         return sorted(scores, key=lambda name: (-scores[name], name))
-    except embeddings.BudgetExceeded:
+    except (embeddings.BudgetExceeded, network_recovery.Outage, control_store.LeaseLost,
+            control_store.Unavailable, control_store.Contention):
         raise
     except Exception:
         raise RuntimeError('reranker attempt failed; uncertain charge retained') from None
 
 
 def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
-            fresh_latency=True, rerank_key='', flush=lambda: None, private_vectors=None, quality_concurrency=8):
+            fresh_latency=True, rerank_key='', flush=lambda: None, private_vectors=None, quality_concurrency=8, refresh=lambda: None):
     if dataset['split'] != 'dev':
         raise PermissionError('tier 1 accepts campaign-dev data only')
     cfg = configuration(cfg)
@@ -181,6 +186,7 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     indexing_phase = phase_start()
     LOG.info('indexing started')
     indexing_started = time.monotonic()
+    cache_wait_deadline = indexing_started + budget.ttl
     doc_ids, query_ids = sorted(data['corpus']), sorted(data['qrels'])
     docs = [(data['corpus'][d].get('title', '') + '\n' if data['corpus'][d].get('title') else '')
             + data['corpus'][d]['text'] for d in doc_ids]
@@ -195,11 +201,11 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         if cfg['model'] == direct.E5_MODEL:
             vectors = direct.normalize(local.embed(texts, mode)).tolist()
             return vectors, time.monotonic() - started, 0
-        blocked, http = client.blocked_seconds, client.http_seconds
+        blocked, service = client.blocked_seconds, client.service_seconds
         vectors = client.embed(cfg['model'], texts, mode, dimensions=cfg['dimensions'])
         vectors = direct.normalize(vectors).tolist()
         return (vectors, max(0, time.monotonic() - started - (client.blocked_seconds - blocked)),
-                client.http_seconds - http)
+                client.service_seconds - service)
 
     identity = {k: cfg[k] for k in ('model', 'revision', 'dimensions', 'window_chars', 'overlap_chars')}
     identity['timing'] = 'local-compute-v2'
@@ -222,54 +228,65 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         concurrency = CACHE_CONCURRENCY if mode == 'document' and cfg['model'] != direct.E5_MODEL else 1
         wave_size = concurrency * control_store.LEASE_BATCH_SIZE
         for wave_start in range(0, len(unique), wave_size):
-            wave = []
-            with contextlib.ExitStack() as validation:
-                for start in range(wave_start, min(wave_start + wave_size, len(unique)), control_store.LEASE_BATCH_SIZE):
-                    chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
-                    if dataset['private']:
-                        pending = []
-                        for text in chunk:
-                            if (mode, text) in entries:
-                                cache_hits += 1
-                                continue
-                            pieces = (direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0]
-                                      if mode == 'document' else [text])
-                            pending.append((text, pieces, None, None))
-                    else:
-                        keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
-                                 'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
-                        started = time.monotonic()
-                        pending = []
-                        try:
-                            # Claims commit before volume I/O; validation failure
-                            # releases claims across the unstarted wave.
-                            claims = validation.enter_context(budget.store.claim_batch(
-                                budget.campaign, keyed, ttl=control_store.VALIDATION_LEASE_TTL, require_available=True))
-                            for cache_key, text in keyed.items():
-                                claim = claims[cache_key]
-                                if claim['status'] == 'done':
-                                    meta = claim['payload']
-                                    path = cache / meta['filename']
-                                    if not path.exists():
-                                        raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
-                                    entry = json.loads(path.read_text())
-                                    if digest(entry) != meta['digest']:
-                                        raise RuntimeError('embedding cache digest mismatch')
-                                    entries[(mode, text)] = entry
-                                    cache_hits += 1
-                                else:
-                                    pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
-                                    pending.append((text, pieces, cache_key, claim['owner']))
-                        except control_store.LeaseBusy:
-                            raise RuntimeError('embedding cache fill already leased; retry after completion') from None
-                        LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
-                    if pending:
-                        if not dataset['private']:
-                            budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=control_store.VALIDATION_LEASE_TTL)
-                        budget.store.renew(budget.campaign, *budget.lease)
-                        wave.append(pending)
+            hits_before = cache_hits
+            while True:
+                try:
+                    wave = []
+                    with contextlib.ExitStack() as validation:
+                        for start in range(wave_start, min(wave_start + wave_size, len(unique)), control_store.LEASE_BATCH_SIZE):
+                            chunk = unique[start:start + control_store.LEASE_BATCH_SIZE]
+                            if dataset['private']:
+                                pending = []
+                                for text in chunk:
+                                    if (mode, text) in entries:
+                                        cache_hits += 1
+                                        continue
+                                    pieces = (direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0]
+                                              if mode == 'document' else [text])
+                                    pending.append((text, pieces, None, None))
+                            else:
+                                keyed = {'embedding/' + digest({'config': identity, 'mode': mode,
+                                         'text_hash': hashlib.sha256(text.encode()).hexdigest()}): text for text in chunk}
+                                started = time.monotonic()
+                                pending = []
+                                # Claims commit before volume I/O; validation failure
+                                # releases claims across the unstarted wave.
+                                claims = validation.enter_context(budget.store.claim_batch(
+                                    budget.campaign, keyed, ttl=control_store.VALIDATION_LEASE_TTL, require_available=True))
+                                for cache_key, text in keyed.items():
+                                    claim = claims[cache_key]
+                                    if claim['status'] == 'done':
+                                        meta = claim['payload']
+                                        path = cache / meta['filename']
+                                        if not path.exists():
+                                            refresh()  # Import another container's committed Volume files.
+                                        if not path.exists():
+                                            raise RuntimeError('committed embedding cache unavailable; refusing duplicate work')
+                                        entry = json.loads(path.read_text())
+                                        if digest(entry) != meta['digest']:
+                                            raise RuntimeError('embedding cache digest mismatch')
+                                        entries[(mode, text)] = entry
+                                        cache_hits += 1
+                                    else:
+                                        pieces = direct.split_documents([text], cfg['window_chars'], cfg['overlap_chars'])[0] if mode == 'document' else [text]
+                                        pending.append((text, pieces, cache_key, claim['owner']))
+                                LOG.info('cache claims entries=%d elapsed_seconds=%.3f', len(keyed), time.monotonic() - started)
+                            if pending:
+                                if not dataset['private']:
+                                    budget.store.renew_many(budget.campaign, {k: o for _, _, k, o in pending}, ttl=control_store.VALIDATION_LEASE_TTL)
+                                budget.store.renew(budget.campaign, *budget.lease)
+                                wave.append(pending)
+                    break
+                except control_store.LeaseBusy:
+                    cache_hits = hits_before
+                    remaining = cache_wait_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise RuntimeError('cache wait exceeded invocation bound; retry after fill expiry') from None
+                    budget.store.renew(budget.campaign, *budget.lease, ttl=budget.ttl)
+                    LOG.info('cache fill busy; waiting for committed evidence')
+                    time.sleep(min(1, remaining))
             if wave:
-                task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease) for _ in wave]
+                task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease, ttl=budget.ttl) for _ in wave]
                 def fill(item):
                     pending, task_budget = item
                     if not dataset['private']:
@@ -343,16 +360,24 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
     phase_end('indexing', indexing_phase)
     LOG.info('indexing complete documents=%d queries=%d', len(docs), len(query_ids))
     ranking, latencies, provider_latencies, local_latencies = {}, [], [], []
+    timing_samples = collections.defaultdict(list)
+    retried_samples = 0
     provider_prices, compute_prices = [], []
     provider_rate = prices.get(cfg['model'], 0) / 1_000_000
 
     def search(qid, fresh, dense=None, batch_seconds=0, search_budget=budget):
+        renewal_started = time.monotonic()
         if fresh:
             budget.store.renew(budget.campaign, *budget.lease)
+        renewal = time.monotonic() - renewal_started
         query = data['queries'][qid]
         before = search_budget.summary()['cost_upper_bound_usd']
         started = time.monotonic()
         provider_seconds = 0
+        phases = {'ledger': renewal, 'retry_http': 0., 'backoff': 0., 'admission': 0., 'retries': 0}
+        if fresh and semantic and hosted is not None:
+            counters = {key: getattr(hosted, key) for key in (
+                'ledger_seconds', 'backoff_seconds', 'admission_seconds', 'http_seconds', 'service_seconds', 'retry_attempts')}
         if not semantic:
             vector, query_tokens, embedding_seconds, local_embedding = None, 0, 0, 0
         elif fresh:
@@ -364,22 +389,34 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             vector = entry['vectors'][0]
             query_tokens, embedding_seconds = entry['tokens'], entry['embedding_seconds']
             local_embedding = 0
+        if fresh and semantic and hosted is not None:
+            delta = {key: getattr(hosted, key) - value for key, value in counters.items()}
+            phases.update(ledger=phases['ledger'] + delta['ledger_seconds'],
+                          backoff=delta['backoff_seconds'], admission=delta['admission_seconds'],
+                          retry_http=max(0, delta['http_seconds'] - delta['service_seconds']),
+                          retries=delta['retry_attempts'])
+        phases['embedding'] = local_embedding + provider_seconds
         local_started = time.monotonic()
         selected = index.rank(query, vector, dense)
+        phases['retrieval'] = time.monotonic() - local_started
+        rerank_started = time.monotonic()
         if cfg['reranker'] == 'jev':
             if not rerank_key:
                 raise ValueError('reranker secret is absent')
             timing = {}
             selected = rerank(query, {d: docs[doc_ids.index(d)] for d in selected}, search_budget, rerank_key, prices['jev-1.13.0'], timing)
             provider_seconds += timing['provider']
+            phases['ledger'] += timing['ledger']
         else:
             timing = {'blocked': 0}
         local_seconds = local_embedding + max(0, time.monotonic() - local_started - timing['blocked'])
-        elapsed = time.monotonic() - started
+        phases['rerank'] = max(0, time.monotonic() - rerank_started - (timing['blocked'] - timing.get('provider', 0)))
+        phases['wall'] = time.monotonic() - started + renewal
+        elapsed = local_seconds + provider_seconds
         spend = search_budget.summary()['cost_upper_bound_usd'] - before
         return (selected[:10], elapsed, spend + query_tokens * provider_rate,
                 (local_seconds + embedding_seconds + batch_seconds) * compute_rate,
-                provider_seconds, local_seconds)
+                provider_seconds, local_seconds, phases)
 
     # Bound temporary piece-score memory while batching quality-only work.
     # Fresh serving below always computes its own per-query dense scores.
@@ -400,7 +437,7 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
             wave_dense = dense_batch[offset:offset + concurrency]
             # Independent views prevent overlapping paid attempts from inflating
             # a search's price. SQL still owns campaign-wide admission.
-            task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease) for _ in wave_ids]
+            task_budgets = [control_store.Budget(budget.store, budget.campaign, budget.lease, ttl=budget.ttl) for _ in wave_ids]
             try:
                 if concurrency == 1:
                     searched = [search(wave_ids[0], False, wave_dense[0], batch_seconds, task_budgets[0])]
@@ -415,7 +452,7 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                 for task_budget in task_budgets:
                     budget.calls.extend(task_budget.calls)
             for position, (qid, found) in enumerate(zip(wave_ids, searched), start + offset + 1):
-                selected, _, provider_price, compute_price, _, _ = found
+                selected, _, provider_price, compute_price, _, _, _ = found
                 ranking[qid] = selected
                 if not fresh_latency:
                     provider_prices.append(provider_price)
@@ -442,8 +479,11 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
         yield
         for position, qid in enumerate(timed_ids, 1):
             latency_phase = phase_start()
-            _, elapsed, provider_price, compute_price, provider_seconds, local_seconds = search(qid, True)
+            _, elapsed, provider_price, compute_price, provider_seconds, local_seconds, phases = search(qid, True)
             phase_end('latency', latency_phase)
+            retried_samples += int(phases.pop('retries') > 0)
+            for phase, seconds in phases.items():
+                timing_samples[phase].append(1000 * seconds)
             latencies.append(1000 * elapsed)
             provider_latencies.append(1000 * provider_seconds)
             local_latencies.append(1000 * local_seconds)
@@ -463,11 +503,13 @@ def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,
                 'cost_per_1000_documents_usd': (index_tokens * provider_rate + index_seconds * compute_rate) * 1000 / len(docs)},
             'per_query': scores['per_query'], 'cost': {'provider': budget.summary(),
                 'search_provider_usd': provider_price, 'search_compute_usd': compute_price,
-                'search_timing_ms': {'samples': len(latencies),
+                'search_timing_ms': {'samples': len(latencies), 'retried_samples': retried_samples,
+                    **{phase + suffix: percentile(values, fraction) for phase, values in timing_samples.items()
+                       for suffix, fraction in (('_p50', .5), ('_p95', .95))},
                     'provider_p50': percentile(provider_latencies, .5), 'provider_p95': percentile(provider_latencies, .95),
                     'local_p50': percentile(local_latencies, .5), 'local_p95': percentile(local_latencies, .95)},
                 'index_tokens_attributed': index_tokens, 'index_embedding_seconds_attributed': index_seconds,
-                'cache_hits': cache_hits, 'phase_usage': phase_usage, 'quality_concurrency': quality_concurrency, 'latency_sample': sample, 'latency_method': 'serial fresh query embedding+retrieval+rerank; fixed hash sample up to 50; one fixed first-query warmup' if fresh_latency else 'cached exploration; p95 unavailable',
+                'cache_hits': cache_hits, 'phase_usage': phase_usage, 'quality_concurrency': quality_concurrency, 'latency_sample': sample, 'latency_method': 'serial fresh service embedding+retrieval+rerank; excludes retry/admission/ledger; fixed hash sample up to 50; one fixed first-query warmup' if fresh_latency else 'cached exploration; p95 unavailable',
                 'price_basis': 'frozen rates, provider usage upper bound plus local compute; excludes HTTP, retry and ledger waits; local-compute-v2'},
             'machine': socket.gethostname()}
 
@@ -483,28 +525,44 @@ def measure(*args, **kwargs):
 
 
 def measure_pair(configs, data, dataset, cache, budgets, clients, prices, compute_rate,
-                 fresh_latency=True, rerank_key='', private_vectors=None, quality_concurrency=8):
+                 fresh_latency=True, rerank_key='', private_vectors=None, quality_concurrency=8, flush=lambda: None, latency_scope=contextlib.nullcontext, refresh=lambda: None):
     """Prepare both sides, then alternate warmups and identical query samples."""
     runs = {side: _measure(cfg, data, dataset, cache, budgets[side], clients[side], prices,
-                          compute_rate, fresh_latency, rerank_key, private_vectors=private_vectors, quality_concurrency=quality_concurrency)
+                          compute_rate, fresh_latency, rerank_key, flush=flush, private_vectors=private_vectors, quality_concurrency=quality_concurrency, refresh=refresh)
             for side, cfg in configs.items()}
     measured = {}
     try:
         for run in runs.values():
             next(run)  # Complete preparation before either timed serving path.
-        while runs:
-            for side, run in list(runs.items()):
-                try:
-                    next(run)
-                except StopIteration as done:
-                    measured[side] = done.value
-                    del runs[side]
+        waiting = time.monotonic(), time.process_time()
+        with latency_scope() if fresh_latency else contextlib.nullcontext() as slot:
+            window_wait = {'elapsed_seconds': max(0, time.monotonic() - waiting[0]),
+                           'cpu_seconds': max(0, time.process_time() - waiting[1])}
+            if slot:
+                for budget in budgets.values():
+                    budget.extra_leases.append(slot)
+            try:
+                while runs:
+                    for side, run in list(runs.items()):
+                        if slot:
+                            budget = budgets[side]
+                            budget.store.renew_many(budget.campaign, dict([budget.lease, slot]), ttl=budget.ttl)
+                        try:
+                            next(run)
+                        except StopIteration as done:
+                            measured[side] = done.value
+                            del runs[side]
+            finally:
+                if slot:
+                    for budget in budgets.values():
+                        budget.extra_leases.remove(slot)
     finally:
         for run in runs.values():
             run.close()
     if fresh_latency:
         for row in measured.values():
-            row['cost']['latency_method'] = 'paired A/B fresh query embedding+retrieval+rerank; fixed hash sample up to 50; one fixed first-query warmup per side'
+            row['cost']['phase_usage']['latency_wait'] = window_wait
+            row['cost']['latency_method'] = 'paired A/B fresh service embedding+retrieval+rerank; excludes retry/admission/ledger; fixed hash sample up to 50; one fixed first-query warmup per side'
     return measured
 
 
@@ -514,3 +572,14 @@ def record(measured, cfg, experiment, sha, scorer_digest):
             'machine': measured['machine'], 'duration_seconds': measured.get('duration_seconds'),
             'dataset': measured['dataset'], 'metrics': measured['metrics'],
             'per_query': measured['per_query'], 'cost': measured['cost']}
+
+
+def publish_pair(store, request, rows):
+    """Fence both records with this invocation; each trial has its own baseline."""
+    baseline_key = request['lease_key'] + '/' + request['owner'] + '/baseline'
+    claim = store.claim(request['campaign'], baseline_key, request['policy']['max_seconds'])
+    if claim['status'] != 'claimed':
+        raise RuntimeError('paired baseline evidence unavailable')
+    store.publish_many(request['campaign'], {baseline_key: (claim['owner'], rows['baseline']),
+        request['lease_key']: (request['owner'], rows['candidate'])})
+    return rows['candidate']

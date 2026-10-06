@@ -39,6 +39,101 @@ The file holds the database URL, storage credentials and API keys, so keep it re
 
 A change to this file takes effect when the processes restart. Plugin changes made through the API, such as activating a new version, apply while Quivr runs; see [Upgrade or switch a plugin](/run-quivr/upgrade-a-plugin).
 
+## Pull and verify a release image
+
+Release images use `2.0.0-alpha.N` versions and run on `linux/amd64`. The [GitHub releases](https://github.com/The-Vibe-Company/quivr/releases) contain release-please's changelog and an `images.txt` file listing signed image digests. A digest identifies the exact image bytes; copy the engine entry beginning `ghcr.io/the-vibe-company/quivr@`. Docker and [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) must be installed.
+
+For example, not run; replace both placeholders with values from the same release:
+
+```sh
+set -e
+export VERSION='<release version, without v>'
+export IMAGE='ghcr.io/the-vibe-company/quivr@sha256:<digest from images.txt>'
+export WORKFLOW='https://github.com/The-Vibe-Company/quivr/.github/workflows/release-images.yml'
+cosign verify "$IMAGE" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "$WORKFLOW@refs/tags/v$VERSION"
+docker pull "$IMAGE"
+docker run --rm --read-only --tmpfs /tmp "$IMAGE" --version
+```
+
+Verification checks the digest, GitHub's OIDC issuer and the exact release workflow identity. A failed verification stops deployment. The version command prints the release version and full commit. `latest-alpha` is a moving tag; use a verified digest to keep a deployment fixed. Every image also has `<version>` and `sha-<full commit>` tags.
+
+See [Security of Quivr releases](/run-quivr/security) for the signed component inventory and vulnerability checks.
+
+## Run the image
+
+Put the configuration in `config.json`, readable by UID/GID `10001`, the image's non-root user. Set `listen` to `0.0.0.0:8080` and `probe_listen` to `0.0.0.0:8081` so container ports can reach them. Put the four services and plugins on a Docker network named `quivr`; their hostnames in the file must resolve on that network. Keep probes reachable only by your operator tools.
+
+On a Linux host, `sudo chown 10001:10001 config.json` and `sudo chmod 600 config.json` give that user sole access. Create the network with `docker network create quivr` if it does not exist, then attach your services to it.
+
+`QUIVR_CONFIG` selects the mounted file by environment variable. It does not map arbitrary environment variables to JSON fields. To supply secrets from your platform, render a protected configuration file before starting the containers. Leave `log_directory` unset to keep logs on the process output stream. The root filesystem can be read-only; `/tmp` is the declared writable temporary directory. A configured file-log directory needs its own writable mount.
+
+Plugins negotiating Plugin API `0.14.0` require [signed engine requests](/reference/plugin-protocol#signed-engine-requests). Older manifest ranges keep working unsigned, with an engine startup warning. Provision a separate key ring for each plugin using that reference's format. Put the complete plugin-id-to-ring map in `QUIVR_ENGINE_PLUGIN_KEYS` for both API and worker; give each plugin only its own ring in `QUIVR_PLUGIN_SIGNING_KEYS`. These are dedicated environment secrets, separate from the JSON configuration and cosign image signatures.
+
+The examples below use Docker environment files: `engine-signing.env` contains the engine variable, and `push-source-signing.env` contains only that plugin's variable with the matching ring. Create an equivalent file for each other plugin negotiating signed calls. Protect these host files with `chmod 600`, or inject the variables with your platform's secret manager. Never send the engine's complete map to a plugin or bake keys into an image.
+
+For example, not run; this needs your services and configuration. Run migration first, then use the same image and file for separate API and worker containers:
+
+```sh
+docker run --rm --read-only --tmpfs /tmp --network quivr \
+  -e QUIVR_CONFIG=/etc/quivr/config.json \
+  --mount type=bind,src="$PWD/config.json",dst=/etc/quivr/config.json,readonly \
+  "$IMAGE" migrate
+docker run -d --name quivr-api --read-only --tmpfs /tmp --network quivr \
+  --env-file engine-signing.env \
+  -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 \
+  -e QUIVR_CONFIG=/etc/quivr/config.json \
+  --mount type=bind,src="$PWD/config.json",dst=/etc/quivr/config.json,readonly \
+  "$IMAGE" api
+docker run -d --name quivr-worker --read-only --tmpfs /tmp --network quivr \
+  --env-file engine-signing.env \
+  -p 127.0.0.1:8082:8081 -e QUIVR_CONFIG=/etc/quivr/config.json \
+  --mount type=bind,src="$PWD/config.json",dst=/etc/quivr/config.json,readonly \
+  "$IMAGE" worker
+```
+
+Stop these processes with `docker stop --time 60 quivr-api quivr-worker`, allowing the default shutdown budget. Increase that timeout if you configure a longer `shutdown_grace`. Then remove their containers with `docker rm quivr-api quivr-worker`. This leaves the external services and their data in place.
+
+### Run first-party plugin images
+
+Each plugin image is `ghcr.io/the-vibe-company/quivr-plugin-<id>`, where `<id>` is its exact manifest id: for example `core.ingest`, `core.retrieve`, `alerts`, `pdf-text` or `connector.rss`. Plugin images share the engine release tags and signing identity. Verify each digest from `images.txt` with the same cosign command.
+
+The bundled `core.ingest` manifest negotiates an older API and its calls remain unsigned. Supplying a signing key does not change that negotiated API. For example, not run; substitute a verified release digest:
+
+```sh
+docker run -d --name core-ingest --read-only --tmpfs /tmp --network quivr \
+  'ghcr.io/the-vibe-company/quivr-plugin-core.ingest@sha256:<digest>'
+```
+
+The bundled `push-source` manifest admits signed calls and needs its matching ring. For example, not run; substitute its verified digest:
+
+```sh
+docker run -d --name push-source --read-only --tmpfs /tmp --network quivr \
+  --env-file push-source-signing.env \
+  'ghcr.io/the-vibe-company/quivr-plugin-push-source@sha256:<digest>'
+```
+
+Plugins listen on port `8080`, bind to `0.0.0.0`, and serve their exact manifest from `/app/quivr-plugin.yaml`. The engine image includes matching manifests under `/usr/share/quivr/plugins/<directory>/quivr-plugin.yaml`; for `core.ingest`, use the directory `core-ingest`. Pin its endpoint as `http://core-ingest:8080`. Its tokenizer configuration uses `python: /app/.scratch/tokenizer/venv/bin/python` and `model: /app/.scratch/tokenizer/tokenizer.json`, paths inside the plugin container. Configure its `tei_url` to reach your inference server. [First-party plugins](/run-quivr/catalog) lists the other plugin ids and their dependencies.
+
+For example, not run; this is one entry in the file's `plugins` list, alongside a retrieval plugin:
+
+```json
+{
+  "manifest": "/usr/share/quivr/plugins/core-ingest/quivr-plugin.yaml",
+  "endpoint": "http://core-ingest:8080",
+  "configuration": {
+    "tei_url": "http://tei:80",
+    "tokenizer": {
+      "python": "/app/.scratch/tokenizer/venv/bin/python",
+      "model": "/app/.scratch/tokenizer/tokenizer.json"
+    }
+  }
+}
+```
+
+The `hosted.embed` image requires a manifest generated for your model configuration. Run its `configure` command with the configuration mounted read-only and save its stdout as `quivr-plugin.yaml`. Mount that file at `/app/quivr-plugin.yaml` in the serving container and pin those same bytes in the engine; see [Hosted embeddings](/run-quivr/catalog#hosted-embed). Provider keys go in the plugin's environment, as its manifest declares. Stop and remove plugin containers when you remove the deployment.
+
 ## Start order
 
 For example, not run:
@@ -51,10 +146,10 @@ quivr worker    # in its own process
 ```
 
 1. `quivr migrate` updates the database schema, creates the storage bucket when it is missing, and prepares the search index. It gives up after 30 seconds when storage or the search index does not answer; run it again once they do.
-2. `quivr api` refuses to start while migrations are pending, with `database/schema unavailable; run migrate`.
-3. `quivr worker` started before the migrations waits for them for up to `migration_wait` (5 minutes by default), then exits.
+2. `quivr api` refuses to start while required expansions are pending; run `quivr migrate` first. Deferred contracts do not block startup.
+3. `quivr worker` started before the expansions waits for them for up to `migration_wait` (5 minutes by default), then exits.
 
-To deploy a new `quivr` binary, run its `quivr migrate` first, then restart `api` and `worker` on it. A binary older than the database schema refuses to start, with `database schema is newer than this binary`. The [CLI reference](/reference/cli#engine-commands) lists the commands' exit codes.
+To deploy a new `quivr` binary, run its `quivr migrate` first, then roll `api` and `worker` on it. Missing required expansions prevent startup; older binaries can start on compatible expanded schemas. Applying contracts ends rollback support. See [Upgrade Quivr](/run-quivr/upgrade-quivr) for the upgrade order and rollback window. The [CLI reference](/reference/cli#engine-commands) lists the commands' exit codes.
 
 ## Check that it is ready
 
@@ -66,7 +161,21 @@ Each `api` and `worker` serves three probes on its `probe_listen` address, `127.
 | `GET /readyz` | `204` once the process can serve, `503` otherwise |
 | `GET /metrics` | Counters in Prometheus text format |
 
+`GET /v0/version` accepts any valid bearer API key and reports the running release, commit, API version and plugin engine compatibility version. Both process startup logs include these fields; `/metrics` includes `quivr_build_info{version="…",revision="…"} 1`. The distribution release is independent of the API (`v0`) and plugin engine compatibility (`0.2.0`) versions.
+
 The `api` becomes ready once its schema check passes and its ingestion plugin has answered a first query, or after 5 seconds; the first searches are then only slower. The `worker` also checks that Temporal, object storage and the search index answer. A plugin that is down does not stop either process. Background work that needs it waits and retries; a search that needs it fails with `503 search_unavailable`.
+
+## Route logs and stop a process
+
+Engine logs are JSON lines on stdout. Set `log_level` or `QUIVR_LOG_LEVEL` to `debug`, `info`, `warn` or `error`; the default is `info`. Set `instance` and `environment`, or their `QUIVR_INSTANCE` and `QUIVR_ENVIRONMENT` overrides, to identify the process in your log tooling. [Logs and shutdown](/reference/configuration#logs-and-shutdown) lists the event fields and redaction behavior. `log_directory` optionally keeps rotating local copies.
+
+Stop a process with SIGTERM or SIGINT. Its `/readyz` becomes `503` first, then it drains admitted requests and background work. `shutdown_grace` defaults to `60s`; set your platform's termination timeout long enough to allow that budget. The stable lifecycle events are `quivr.start`, `quivr.ready`, `quivr.draining` and `quivr.stop`. A readiness event means the process passed its readiness criteria, including the API’s query warm-up timeout described above; a start event alone does not.
+
+## Follow a request across services
+
+Set `telemetry.endpoint` to your OpenTelemetry collector in the API and worker configuration, then restart both. The [OpenTelemetry reference](/reference/configuration#opentelemetry) lists HTTP/gRPC, authentication headers and sampling settings. Search your collector by the response’s `X-Trace-ID`, or the `trace_id` in a JSON error or log line. The trace continues through durable background work and outgoing plugin and webhook requests.
+
+Keep `/metrics` scraping as it is: metric names and buckets remain unchanged. Each plugin process needs its own exporter configuration to send its internal spans to the collector.
 
 ## Example deployments
 
@@ -79,3 +188,6 @@ The `api` becomes ready once its schema check passes and its ingestion plugin ha
 
 - [Pin a plugin](/run-quivr/pin) to add plugins to your deployment.
 - [Operate a Quivr deployment](/run-quivr/overview) for the other operator tasks.
+
+For a rolling application upgrade and the database rollback window, follow
+[Upgrade Quivr](/run-quivr/upgrade-quivr).

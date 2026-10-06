@@ -26,6 +26,7 @@ built with ``go build`` into the stack directory whenever the stack starts
 them. The Railway image pins the same plugins (deploy/railway/core-entrypoint.py
 ``CONNECTORS``).
 """
+import plugin_environment
 import json, os, pathlib, signal, subprocess, time, urllib.request
 
 import ports
@@ -137,7 +138,7 @@ def start_first_party(stack, only=None):
         log = stack.directory / f"{row['id']}-plugin.log"
         subprocess.run([GO, 'build', '-o', str(binary), '.'], cwd=directory, check=True)
         port = first_party_port(stack, row)
-        env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
+        env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port), 'QUIVR_PLUGIN_MANIFEST': str(first_party_manifest(stack, row))}
         with log.open('a') as out:
             p = subprocess.Popen([str(binary)], cwd=directory, env=env, stdout=out, stderr=out, start_new_session=True)
         stack.state[f"{row['id']}_plugin_pid"] = p.pid
@@ -197,7 +198,7 @@ def start(stack):
     stop(stack)
     if not binary(stack).exists():
         subprocess.run([GO, 'build', '-o', str(binary(stack)), './examples/static-source'], cwd=ROOT / 'sdks' / 'go', check=True)
-    env = {**os.environ, 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state['connector_plugin_port']), 'QUIVR_PLUGIN_MANIFEST': str(MANIFEST)}
+    env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(stack.state['connector_plugin_port']), 'QUIVR_PLUGIN_MANIFEST': str(MANIFEST)}
     with (stack.directory / 'connector-plugin.log').open('a') as log:
         p = subprocess.Popen([str(binary(stack))], cwd=SAMPLE, env=env, stdout=log, stderr=log, start_new_session=True)
     stack.state['connector_plugin_pid'] = p.pid

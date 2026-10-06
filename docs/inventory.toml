@@ -49,6 +49,7 @@ dated = [
 
 # Markdown that is not Quivr documentation.
 excluded = [
+    "CHANGELOG.md",                                        # maintained by release-please
     ".agents/skills/*",                                    # vendored coding-agent skills
     "internal/plugins/scaffold/templates/*",               # files copied into new plugins
     "contracts/plugins/v0/fixtures/*",                     # protocol test fixtures
@@ -62,8 +63,11 @@ excluded = [
 "AGENTS.md" = { audience = "contributor", kind = "guide", summary = "rules every contributor and coding agent follows in this repository" }
 "CONTEXT.md" = { audience = "contributor", kind = "concept", summary = "the domain language: Corpus, Record, Version, Manifest and the other terms" }
 "README.md" = { audience = "functional", kind = "index", summary = "the project overview: why Quivr, architecture, quickstart and what works today" }
+"SECURITY.md" = { audience = "functional", kind = "concept", summary = "report vulnerabilities privately and verify release inventories" }
+"conformance/README.md" = { audience = "contributor", kind = "guide", summary = "contribute declarative requirements and run local conformance reports" }
 "contracts/http/v0/README.md" = { audience = "functional", kind = "concept", summary = "how the HTTP API contract is organised and checked" }
 "contracts/plugins/v0/README.md" = { audience = "plugin-author", kind = "concept", summary = "the plugin manifest, routes, schemas and fixtures" }
+"deploy/images/README.md" = { audience = "contributor", kind = "guide", summary = "configure release-please and publish signed engine and first-party plugin images" }
 "deploy/mlflow/README.md" = { audience = "functional", kind = "guide", summary = "deploy an authenticated shared search measurement store" }
 "deploy/railway/README.md" = { audience = "functional", kind = "guide", summary = "run a hosted single-node evaluation demo" }
 "deploy/railway/hosted-embeddings.md" = { audience = "functional", kind = "guide", summary = "evaluate, fill and switch hosted text embeddings with rollback" }
@@ -73,6 +77,7 @@ excluded = [
 "docs/agents/oss-embeddings.md" = { audience = "contributor", kind = "guide", summary = "preview and measure open-source embedding models on ephemeral CPU and GPU jobs" }
 "docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide", summary = "how parallel agents claim, plan and ship tickets" }
 "docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide", summary = "how specs and tickets are written and tracked" }
+"docs/agents/migrations.md" = { audience = "contributor", kind = "guide", summary = "add compatible expansions and defer destructive contracts" }
 "docs/agents/news-set.md" = { audience = "contributor", kind = "guide", summary = "build an encrypted French news search set and validate its human review" }
 "docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
 "docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide", summary = "the five triage labels" }
@@ -104,6 +109,7 @@ excluded = [
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
 "plugins/x-list/README.md" = { audience = "plugin-author", kind = "concept", summary = "the first-party X list connector plugin and its parity tests" }
 "quivr-search/README.md" = { audience = "functional", kind = "guide", summary = "the demo web app: search, sources, live feed and the admin view" }
+"sdks/AGENTS.md" = { audience = "contributor", kind = "guide", summary = "keep each SDK test contract at its owning boundary" }
 "sdks/go/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and certify every kind of plugin in Go" }
 "sdks/python/README.md" = { audience = "plugin-author", kind = "guide", summary = "write, test and run Python plugins" }
 "tests/acceptance/README.md" = { audience = "contributor", kind = "guide", summary = "the public acceptance suite and how to run it" }
@@ -114,6 +120,7 @@ excluded = [
 
 # Maximum number of lines per page, in path order.
 [budgets]
+"conformance/README.md" = 125
 "docs/eval-private-working.md" = 90
 "docs/search-campaigns.md" = 172
 "docs/search-campaign-reporting.md" = 138
@@ -124,6 +131,7 @@ excluded = [
 "docs/eval-modal.md" = 195
 "AGENTS.md" = 45
 "CONTEXT.md" = 327
+"deploy/images/README.md" = 76
 "deploy/railway/README.md" = 250
 "deploy/railway/hosted-embeddings.md" = 107
 "docs/agents/documentation.md" = 55
@@ -142,9 +150,12 @@ excluded = [
 "plugins/rss/README.md" = 60
 "plugins/x-list/README.md" = 60
 "quivr-search/README.md" = 117
+"sdks/AGENTS.md" = 8
 "sdks/go/README.md" = 212
 "sdks/python/README.md" = 166
 "tests/acceptance/README.md" = 50
 "tests/fakes/README.md" = 60
 
 "docs/agents/oss-embeddings.md" = 85
+
+"docs/agents/migrations.md" = 78

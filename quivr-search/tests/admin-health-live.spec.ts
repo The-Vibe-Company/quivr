@@ -3,9 +3,8 @@ import { test, expect } from "@playwright/test";
 // The Goulots and Plugins sections against the real core (make verify-demo,
 // THE-797): a text added through the facade is timed at each step by the
 // worker's rollups, and the ingestion plugin that cut it shows as healthy
-// with its calls. Over the 15 s budget only when the facade's 10 s cache and
-// the section's 15 s refresh both just missed the text: the waits are
-// bounded conditions, never sleeps. Synthetic content only.
+// with its calls. It opens the Admin tab only once the text is searchable, so
+// the section's first read already holds its timings. Synthetic content only.
 const run = Date.now().toString(36);
 
 test.beforeEach(async ({ page }) => {
@@ -49,7 +48,6 @@ test("un texte ajouté est chronométré à chaque étape, et le plugin d’inge
             await page.request.get(`/v0/ingestion-receipts/${receipt}`)
           ).json()
         ).availability?.searchable,
-      { timeout: 30000 },
     )
     .toBe(true);
 
@@ -65,7 +63,7 @@ test("un texte ajouté est chronométré à chaque étape, et le plugin d’inge
         .getByRole("definition")
         .first(),
       name,
-    ).toHaveText(/\d\s?(ms|s|min)$/, { timeout: 30000 });
+    ).toHaveText(/\d\s?(ms|s|min)$/);
   await expect(necks.getByRole("status")).not.toBeEmpty();
 
   await page.getByRole("tab", { name: "Plugins" }).click();
@@ -73,9 +71,7 @@ test("un texte ajouté est chronométré à chaque étape, et le plugin d’inge
     .getByRole("region", { name: "Plugins" })
     .getByRole("listitem")
     .filter({ hasText: "core.ingest" });
-  await expect(ingest.getByRole("button")).toContainText("Opérationnel", {
-    timeout: 30000,
-  });
+  await expect(ingest.getByRole("button")).toContainText("Opérationnel");
   await expect(ingest.getByRole("button")).toContainText(
     "Découpage et vecteurs",
   );

@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/backfill"
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/normalization"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
@@ -128,10 +130,12 @@ func (unpinned) Pin(ctx context.Context, _, _, _ string) (context.Context, error
 func (unpinned) Release(context.Context, string, string, string) error            { return nil }
 
 type Runtime struct {
-	EvaluationWorker worker.Worker
-	Evaluation       *processing.Evaluator
-	Client           client.Client
-	Worker           worker.Worker
+	dispatchDone         <-chan struct{}
+	IngestionBatchWorker worker.Worker
+	EvaluationWorker     worker.Worker
+	Evaluation           *processing.Evaluator
+	Client               client.Client
+	Worker               worker.Worker
 	// BackfillWorker serves backfills on their own task queue, one activity
 	// at a time, below live content processing.
 	BackfillWorker worker.Worker
@@ -148,7 +152,11 @@ type Runtime struct {
 // queue. pins pins the processing of each receipt, each Operation and each
 // connector run to the plan it started on; nil leaves them on the active
 // plan.
-func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, backfiller *backfill.Backfiller, reprocessor *quarantine.Reprocessor, pins Pinner, evaluationConcurrency int, tlsConfig *tls.Config) (*Runtime, error) {
+func Start(ctx context.Context, address string, service processing.Service, rebuilder retrieval.Rebuilder, store DispatchStore, conns *Connectors, backfiller *backfill.Backfiller, reprocessor *quarantine.Reprocessor, pins Pinner, evaluationConcurrency int, tlsConfig *tls.Config, options ...RuntimeOptions) (*Runtime, error) {
+	grace := time.Minute
+	if len(options) > 0 && options[0].ShutdownGrace > 0 {
+		grace = options[0].ShutdownGrace
+	}
 	if evaluationConcurrency == 0 {
 		evaluationConcurrency = 4
 	}
@@ -165,13 +173,13 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	if err != nil {
 		return nil, err
 	}
-	w := worker.New(c, taskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4})
+	w := worker.New(c, taskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
 	w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-e5-v3"})
 	registerIngestion(w, service, pins)
 	registerRebuild(w, rebuilder, pins)
 	var cw worker.Worker
 	if conns != nil {
-		cw = worker.New(c, connectorTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4})
+		cw = worker.New(c, connectorTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
 		registerConnectors(cw, conns, pins)
 		if err = cw.Start(); err != nil {
 			c.Close()
@@ -180,7 +188,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	}
 	var bw worker.Worker
 	if backfiller != nil || reprocessor != nil {
-		bw = worker.New(c, backfillTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 1})
+		bw = worker.New(c, backfillTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 1, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
 		if backfiller != nil {
 			registerBackfill(bw, *backfiller, pins)
 		}
@@ -200,7 +208,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		if service.Evaluation.Serving != nil {
 			registerServingProjection(w, *service.Evaluation, pins)
 		}
-		ew = worker.New(c, ingestionEvaluationQueue, worker.Options{MaxConcurrentActivityExecutionSize: evaluationConcurrency})
+		ew = worker.New(c, ingestionEvaluationQueue, worker.Options{MaxConcurrentActivityExecutionSize: evaluationConcurrency, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
 		registerIngestionEvaluation(ew, *service.Evaluation, pins)
 		if err = ew.Start(); err != nil {
 			if cw != nil {
@@ -227,8 +235,26 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		c.Close()
 		return nil, err
 	}
-	runtime := &Runtime{EvaluationWorker: ew, Evaluation: service.Evaluation, Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
-	go runtime.dispatch(ctx)
+	batchWorker := worker.New(c, ingestionBatchQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
+	registerIngestionBatches(batchWorker, service, pins)
+	if err = batchWorker.Start(); err != nil {
+		w.Stop()
+		if ew != nil {
+			ew.Stop()
+		}
+		if cw != nil {
+			cw.Stop()
+		}
+		if bw != nil {
+			bw.Stop()
+		}
+		c.Close()
+		return nil, err
+	}
+	runtime := &Runtime{IngestionBatchWorker: batchWorker, EvaluationWorker: ew, Evaluation: service.Evaluation, Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
+	done := make(chan struct{})
+	runtime.dispatchDone = done
+	go func() { defer close(done); runtime.dispatch(ctx) }()
 	return runtime, nil
 }
 
@@ -312,24 +338,39 @@ func heartbeating(ctx context.Context, interval time.Duration, run func() error)
 	return run()
 }
 
-func (r *Runtime) Close() {
-	if r.EvaluationWorker != nil {
-		r.EvaluationWorker.Stop()
+// RuntimeOptions carries the process grace budget to all activity workers.
+type RuntimeOptions struct{ ShutdownGrace time.Duration }
+
+// Close joins workers and dispatcher while the process budget allows it. At
+// expiry, closing the client aborts remaining RPCs and durable leases recover.
+func (r *Runtime) Close(ctx context.Context) {
+	defer r.Client.Close()
+	var wg sync.WaitGroup
+	for _, w := range []worker.Worker{r.IngestionBatchWorker, r.EvaluationWorker, r.Worker, r.ConnectorWorker, r.BackfillWorker} {
+		if w != nil {
+			wg.Add(1)
+			go func() { defer wg.Done(); w.Stop() }()
+		}
 	}
-	r.Worker.Stop()
-	if r.ConnectorWorker != nil {
-		r.ConnectorWorker.Stop()
+	stopped := make(chan struct{})
+	go func() { wg.Wait(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-ctx.Done():
+		return
 	}
-	if r.BackfillWorker != nil {
-		r.BackfillWorker.Stop()
+	if r.dispatchDone != nil {
+		select {
+		case <-r.dispatchDone:
+		case <-ctx.Done():
+		}
 	}
-	r.Client.Close()
 }
 
 // ReceiptDispatchStore owns receipt dispatch and failed-start progress.
 type ReceiptDispatchStore interface {
-	Claim(context.Context, int) ([]content.Dispatch, error)
-	Dispatched(context.Context, content.Dispatch) error
+	ClaimIngestionBatches(context.Context, int) ([]content.DispatchBatch, error)
+	IngestionBatchDispatched(context.Context, string) error
 	Progress(context.Context, string, string, string, string) error
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -15,14 +16,37 @@ import (
 type MaterializationStore struct{ Pool *pgxpool.Pool }
 
 func lockJournal(ctx context.Context, tx pgx.Tx, org string) error {
-	if err := lockProjectionRouting(ctx, tx); err != nil {
+	// Keep the routing-before-journal lock order, sending its statements in
+	// one round trip. This avoids extending every writer's critical section
+	// with network waits and does not create no-op journal row versions.
+	return tx.SendBatch(ctx, journalBatch(org)).Close()
+}
+
+func journalBatch(org string) *pgx.Batch {
+	batch := &pgx.Batch{}
+	batch.Queue("SELECT pg_advisory_xact_lock_shared($1)", projectionRoutingLock)
+	batch.Queue("INSERT INTO organization_journals(organization) VALUES($1) ON CONFLICT DO NOTHING", org)
+	batch.Queue("SELECT last_sequence FROM organization_journals WHERE organization=$1 FOR UPDATE", org)
+	return batch
+}
+
+// readJournal sends the fence and its first guarded read together. They are
+// separate statements: the read gets a fresh snapshot after the lock has been
+// acquired, including the preceding writer's commit under READ COMMITTED.
+func readJournal(ctx context.Context, tx pgx.Tx, org, query string, args []any, destinations ...any) error {
+	batch := journalBatch(org)
+	batch.Queue(query, args...)
+	results := tx.SendBatch(ctx, batch)
+	defer results.Close()
+	for range batch.Len() - 1 {
+		if _, err := results.Exec(); err != nil {
+			return err
+		}
+	}
+	if err := results.QueryRow().Scan(destinations...); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, "INSERT INTO organization_journals(organization) VALUES($1) ON CONFLICT DO NOTHING", org); err != nil {
-		return err
-	}
-	var seq int64
-	return tx.QueryRow(ctx, "SELECT last_sequence FROM organization_journals WHERE organization=$1 FOR UPDATE", org).Scan(&seq)
+	return results.Close()
 }
 
 // eventInput is one public journal fact. VersionID is internal: it names the
@@ -45,13 +69,23 @@ func appendEvent(ctx context.Context, tx pgx.Tx, event eventInput) error {
 
 // appendEventAt appends one event and returns its journal position. Callers
 // hold the Organization journal lock, so positions commit in order.
+const appendEventSQL = `WITH position AS (
+UPDATE organization_journals SET last_sequence=last_sequence+1 WHERE organization=$1 RETURNING last_sequence
+) INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id,trace_context)
+SELECT $1,last_sequence,$2,$3,$4,$5,$6,NULLIF($7,''),$8 FROM position RETURNING sequence`
+
+func eventArguments(ctx context.Context, event eventInput) []any {
+	return []any{event.Organization, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID, telemetry.Encode(ctx)}
+}
+
 func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, error) {
 	var sequence int64
-	if err := tx.QueryRow(ctx, "UPDATE organization_journals SET last_sequence=last_sequence+1 WHERE organization=$1 RETURNING last_sequence", event.Organization).Scan(&sequence); err != nil {
-		return 0, err
-	}
-	_, err := tx.Exec(ctx, `INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''))`, event.Organization, sequence, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID)
+	err := tx.QueryRow(ctx, appendEventSQL, eventArguments(ctx, event)...).Scan(&sequence)
 	return sequence, err
+}
+
+func queueEvent(ctx context.Context, batch *pgx.Batch, event eventInput) {
+	batch.Queue(appendEventSQL, eventArguments(ctx, event)...)
 }
 
 func notFound(err error) error {
@@ -82,36 +116,35 @@ func (s MaterializationStore) Publish(ctx context.Context, w content.Work, publi
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, w.Organization); err != nil {
-		return err
-	}
 	var state string
-	if err = tx.QueryRow(ctx, "SELECT state FROM ingestion_receipts WHERE organization=$1 AND id=$2 FOR UPDATE", w.Organization, w.ReceiptID).Scan(&state); err != nil {
+	var reserved *string
+	var withdrawn, exists bool
+	err = readJournal(ctx, tx, w.Organization, `SELECT rc.state,
+ (SELECT a.digest FROM accepted_revisions a WHERE a.organization=$1 AND a.record_id=$3 AND a.slot=$4),
+ coalesce((SELECT r.withdrawn FROM records r WHERE r.organization=$1 AND r.id=$3),false),
+ EXISTS(SELECT 1 FROM record_versions WHERE organization=$1 AND id=$5)
+ FROM ingestion_receipts rc WHERE rc.organization=$1 AND rc.id=$2 FOR UPDATE OF rc`,
+		[]any{w.Organization, w.ReceiptID, w.RecordID, w.Slot, w.VersionID}, &state, &reserved, &withdrawn, &exists)
+	if err != nil {
 		return err
 	}
 	if state == "resolved" {
 		return tx.Commit(ctx)
 	}
-	var reserved string
-	var withdrawn bool
-	err = tx.QueryRow(ctx, `SELECT a.digest,r.withdrawn FROM accepted_revisions a JOIN records r ON (r.organization,r.id)=(a.organization,a.record_id) WHERE a.organization=$1 AND a.record_id=$2 AND a.slot=$3`, w.Organization, w.RecordID, w.Slot).Scan(&reserved, &withdrawn)
-	if err != nil {
-		return err
+	if reserved == nil {
+		return pgx.ErrNoRows
 	}
+	writes := &pgx.Batch{}
 	outcome := "created"
 	versionID := w.VersionID
 	code := ""
 	processing := "idle"
-	if reserved != w.Digest || withdrawn {
+	if *reserved != w.Digest || withdrawn {
 		outcome = "conflict"
 		versionID = ""
 		code = "source_revision_conflict"
 		processing = "blocked"
 	} else {
-		var exists bool
-		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM record_versions WHERE organization=$1 AND id=$2)", w.Organization, w.VersionID).Scan(&exists); err != nil {
-			return err
-		}
 		if exists {
 			outcome = "duplicate"
 		} else {
@@ -121,10 +154,7 @@ func (s MaterializationStore) Publish(ctx context.Context, w content.Work, publi
 				blobs = append(blobs, part.Blob)
 			}
 			for _, b := range blobs {
-				_, err = tx.Exec(ctx, "INSERT INTO content_blobs VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", w.Organization, content.StableID("blob", w.Organization, b.SHA256), b.Key, b.SHA256, b.Size)
-				if err != nil {
-					return err
-				}
+				writes.Queue("INSERT INTO content_blobs VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", w.Organization, content.StableID("blob", w.Organization, b.SHA256), b.Key, b.SHA256, b.Size)
 			}
 			provenance, err := json.Marshal(w.Command.Provenance)
 			if err != nil {
@@ -148,31 +178,20 @@ func (s MaterializationStore) Publish(ctx context.Context, w content.Work, publi
 				}
 				processing, code = "blocked", q.Code
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,predecessor_id,text_blob_id,manifest_blob_id,provenance,extensions,quarantined,processing,error_code,quarantine,materialized_at,quarantined_at,quarantine_stage) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11,$12,$13,$14,$15,$16,clock_timestamp(),CASE WHEN $13 THEN clock_timestamp() END,CASE WHEN $13 THEN 'normalization' END)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, publication.Normalized.SHA256), content.StableID("blob", w.Organization, publication.Manifest.SHA256), provenance, extensionsJSON, publication.Quarantine != nil, processing, code, quarantine)
-			if err != nil {
-				return err
-			}
+			writes.Queue(`INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,predecessor_id,text_blob_id,manifest_blob_id,provenance,extensions,quarantined,processing,error_code,quarantine,materialized_at,quarantined_at,quarantine_stage) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11,$12,$13,$14,$15,$16,clock_timestamp(),CASE WHEN $13 THEN clock_timestamp() END,CASE WHEN $13 THEN 'normalization' END)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, publication.Normalized.SHA256), content.StableID("blob", w.Organization, publication.Manifest.SHA256), provenance, extensionsJSON, publication.Quarantine != nil, processing, code, quarantine)
 			for _, part := range publication.Parts {
-				if _, err = tx.Exec(ctx, "INSERT INTO version_parts VALUES($1,$2,$3,$4,$5)", w.Organization, w.VersionID, part.Key, part.Role, content.StableID("blob", w.Organization, part.Blob.SHA256)); err != nil {
-					return err
-				}
+				writes.Queue("INSERT INTO version_parts VALUES($1,$2,$3,$4,$5)", w.Organization, w.VersionID, part.Key, part.Role, content.StableID("blob", w.Organization, part.Blob.SHA256))
 			}
-			if err = appendEvent(ctx, tx, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.materialized", Resource: "record", ResourceID: w.RecordID, MutationID: w.VersionID}); err != nil {
-				return err
-			}
+			queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.materialized", Resource: "record", ResourceID: w.RecordID, MutationID: w.VersionID})
 			if q := publication.Quarantine; q != nil {
-				if err = appendEvent(ctx, tx, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.quarantined", Resource: "record", ResourceID: w.RecordID, MutationID: content.StableID("quarantine", w.VersionID, q.Code)}); err != nil {
-					return err
-				}
+				queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.quarantined", Resource: "record", ResourceID: w.RecordID, MutationID: content.StableID("quarantine", w.VersionID, q.Code)})
 			}
 
 		}
 	}
-	_, err = tx.Exec(ctx, "UPDATE ingestion_receipts SET state='resolved',outcome=$3,version_id=nullif($4,''),processing=$5,error_code=$6 WHERE organization=$1 AND id=$2", w.Organization, w.ReceiptID, outcome, versionID, processing, code)
-	if err != nil {
-		return err
-	}
-	if err = appendEvent(ctx, tx, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "receipt.resolved", Resource: "receipt", ResourceID: w.ReceiptID}); err != nil {
+	writes.Queue("UPDATE ingestion_receipts SET state='resolved',outcome=$3,version_id=nullif($4,''),processing=$5,error_code=$6 WHERE organization=$1 AND id=$2", w.Organization, w.ReceiptID, outcome, versionID, processing, code)
+	queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "receipt.resolved", Resource: "receipt", ResourceID: w.ReceiptID})
+	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return err
 	}
 	if versionID != "" {
@@ -187,39 +206,4 @@ func (s MaterializationStore) Publish(ctx context.Context, w content.Work, publi
 		}
 	}
 	return tx.Commit(ctx)
-}
-
-// Claim leases a bounded batch in queue arrival order. A lease survives process
-// restarts; a lost acknowledgement may retry the same durable workflow identity.
-func (s MaterializationStore) Claim(ctx context.Context, limit int) ([]content.Dispatch, error) {
-	rows, err := s.Pool.Query(ctx, `WITH pending AS (
- SELECT organization,receipt_id FROM ingestion_outbox
- WHERE NOT dispatched AND lease_until<now()
- ORDER BY enqueued_at,organization,receipt_id
- FOR UPDATE SKIP LOCKED LIMIT $1
- ), claimed AS (
- UPDATE ingestion_outbox o SET lease_until=now()+interval '5 seconds'
- FROM pending p WHERE (o.organization,o.receipt_id)=(p.organization,p.receipt_id)
- RETURNING o.organization,o.receipt_id,o.enqueued_at
- ) SELECT organization,receipt_id FROM claimed ORDER BY enqueued_at,organization,receipt_id`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var batch []content.Dispatch
-	for rows.Next() {
-		var d content.Dispatch
-		if err := rows.Scan(&d.Organization, &d.ReceiptID); err != nil {
-			return nil, err
-		}
-		batch = append(batch, d)
-	}
-	return batch, rows.Err()
-}
-
-func (s MaterializationStore) Dispatched(ctx context.Context, d content.Dispatch) error {
-	// Receipts and the change journal hold audit facts; delivery intents can go
-	// once Temporal has durably accepted their stable workflow identity.
-	_, err := s.Pool.Exec(ctx, "DELETE FROM ingestion_outbox WHERE organization=$1 AND receipt_id=$2", d.Organization, d.ReceiptID)
-	return err
 }

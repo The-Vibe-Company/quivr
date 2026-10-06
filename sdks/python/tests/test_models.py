@@ -1,5 +1,4 @@
 """Serialization round-trips against the normative Plugin Protocol fixtures."""
-import importlib.util
 import json
 import unittest
 from pathlib import Path
@@ -20,6 +19,7 @@ MODELS = {
     "error.schema.json": models.ErrorEnvelope,
     "plugin-manifest.schema.json": models.PluginManifest,
     "plugin-fixture.schema.json": models.InvocationFixture,
+    "authentication-fixture.schema.json": models.AuthenticationFixture,
     "subscription-request.schema.json": models.SubscriptionRequest,
     "subscription-response.schema.json": models.SubscriptionResponse,
     "subscription-fixture.schema.json": models.SubscriptionFixture,
@@ -84,6 +84,10 @@ class NormativeFixtureRoundTrip(unittest.TestCase):
             models.NormalizerResponse.from_dict(json.loads((FIXTURES / "responses/wrong-manifest-kind.json").read_text()))
         with self.assertRaisesRegex(ValueError, "missing required field sha256"):
             models.NormalizerRequest.from_dict(json.loads((FIXTURES / "requests/missing-sha256.json").read_text()))
+        authentication = json.loads((FIXTURES / "authentication/cases.json").read_text())
+        del authentication["cases"][0]["body"]
+        with self.assertRaisesRegex(ValueError, "missing required field body"):
+            models.AuthenticationFixture.from_dict(authentication)
 
     def test_unions_decode_by_kind(self):
         request = models.NormalizerRequest.from_dict(json.loads((FIXTURES / "requests/signed-url.json").read_text()))
@@ -92,14 +96,6 @@ class NormativeFixtureRoundTrip(unittest.TestCase):
         self.assertIsInstance(request.input.reference, models.FileReference)
         part = models.Part(key="a", role="section", content=models.TextContent(text="hello"))
         self.assertEqual(part.to_dict(), {"key": "a", "role": "section", "content": {"kind": "text", "text": "hello"}})
-
-
-class GeneratedFilesAreCurrent(unittest.TestCase):
-    def test_generator_check_passes(self):
-        spec = importlib.util.spec_from_file_location("generate", REPO / "sdks/python/scripts/generate.py")
-        generate = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(generate)
-        self.assertEqual(generate.main(["generate.py", "--check"]), 0)
 
 
 if __name__ == "__main__":

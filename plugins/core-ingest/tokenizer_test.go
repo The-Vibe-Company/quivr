@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -17,13 +19,17 @@ import (
 // response reports the text length as its token count. Directives embedded in the
 // text drive failure scenarios.
 const fakeServer = `
-import json, sys, time
+import json, socket, sys
 sys.stdout.write('ready\n'); sys.stdout.flush()
 for line in sys.stdin:
     request = json.loads(line)
     text = request[0]['text'] if request else ''
     if text == 'crash': sys.exit(3)
-    if text.startswith('sleep:'): time.sleep(float(text[6:]))
+    if text == 'block':
+        host, port = sys.argv[1].rsplit(':', 1)
+        with socket.create_connection((host, int(port))) as gate:
+            gate.sendall(b'R')
+            gate.recv(1)
     if text == 'reject': sys.stdout.write('null\n'); sys.stdout.flush(); continue
     if text == 'huge': sys.stdout.write('[' + '0' * 4096 + ']\n'); sys.stdout.flush(); continue
     if text == 'short': sys.stdout.write('[]\n'); sys.stdout.flush(); continue
@@ -43,6 +49,37 @@ func fake(t *testing.T, source string) *Server {
 
 func encodeText(s *Server, ctx context.Context, text string) ([]Encoding, error) {
 	return s.Encode(ctx, []TokenInput{{Text: text}})
+}
+
+func listenForTokenizer(t *testing.T, s *Server) *net.TCPListener {
+	t.Helper()
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	if err := listener.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	s.Config.Model = listener.Addr().String()
+	return listener
+}
+
+func acceptTokenizerGate(t *testing.T, listener *net.TCPListener) net.Conn {
+	t.Helper()
+	gate, err := listener.Accept()
+	if err != nil {
+		t.Fatal("tokenizer did not receive the request:", err)
+	}
+	t.Cleanup(func() { _ = gate.Close() })
+	if err := gate.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	ready := make([]byte, 1)
+	if _, err := io.ReadFull(gate, ready); err != nil || ready[0] != 'R' {
+		t.Fatalf("tokenizer did not block at the gate: %q, %v", ready, err)
+	}
+	return gate
 }
 
 func TestServerRoundTripsBatchesOnOneProcess(t *testing.T) {
@@ -74,17 +111,39 @@ func TestServerRejectedRequestKeepsProcess(t *testing.T) {
 }
 
 func TestServerRespawnsAfterFailures(t *testing.T) {
-	for _, text := range []string{"crash", "sleep:5", "huge", "short"} {
+	for _, text := range []string{"crash", "hang", "huge", "short"} {
 		t.Run(text, func(t *testing.T) {
 			s := fake(t, fakeServer)
-			s.timeout = 300 * time.Millisecond
-			start := time.Now()
-			if _, err := encodeText(s, context.Background(), text); err == nil {
+			var listener *net.TCPListener
+			if text == "hang" {
+				listener = listenForTokenizer(t, s)
+			}
+			if _, err := encodeText(s, context.Background(), "warm"); err != nil {
+				t.Fatal(err)
+			}
+			process := s.proc.cmd.Process
+			t.Cleanup(func() { _ = process.Kill() })
+			if text == "hang" {
+				// Hold the child at a fixture-controlled read before arming the timer.
+				// Encode must time out even when the peer cannot consume its request.
+				if _, err := fmt.Fprintln(s.proc.stdin, `[{"text":"block"}]`); err != nil {
+					t.Fatal(err)
+				}
+				acceptTokenizerGate(t, listener)
+				s.timeout = -1
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, err := encodeText(s, ctx, text)
+			if ctx.Err() != nil {
+				t.Fatal("failure remained blocked until the caller watchdog")
+			}
+			if err == nil {
 				t.Fatal("failure not reported")
+			} else if text == "hang" && !errors.Is(err, errUnavailable) {
+				t.Fatalf("hard timeout: got %v, want tokenizer unavailable", err)
 			}
-			if time.Since(start) > 2*time.Second {
-				t.Fatal("hard timeout not enforced")
-			}
+			s.timeout = 2 * time.Second
 			if got, err := encodeText(s, context.Background(), "ok"); err != nil || got[0].Tokens != 2 || s.spawns != 2 {
 				t.Fatal("expected a fresh process after failure", err, s.spawns)
 			}
@@ -94,17 +153,32 @@ func TestServerRespawnsAfterFailures(t *testing.T) {
 
 func TestServerCallerCancellationDoesNotKillProcess(t *testing.T) {
 	s := fake(t, fakeServer)
+	listener := listenForTokenizer(t, s)
 	if _, err := encodeText(s, context.Background(), "warm"); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	process := s.proc.cmd.Process
+	t.Cleanup(func() { _ = process.Kill() })
+	s.timeout = 30 * time.Second // watchdog; the socket gate controls completion
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	start := time.Now()
-	if _, err := encodeText(s, ctx, "sleep:0.4"); err == nil {
-		t.Fatal("cancelled call must fail")
+	done := make(chan error, 1)
+	go func() {
+		_, err := encodeText(s, ctx, "block")
+		done <- err
+	}()
+	gate := acceptTokenizerGate(t, listener)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errUnavailable) {
+			t.Fatalf("cancelled call: got %v, want tokenizer unavailable", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled caller stayed blocked behind the tokenizer")
 	}
-	if time.Since(start) > 300*time.Millisecond {
-		t.Fatal("cancelled caller waited for the tokenizer")
+	if _, err := gate.Write([]byte{'G'}); err != nil {
+		t.Fatal("tokenizer was killed before release:", err)
 	}
 	if _, err := encodeText(s, context.Background(), "ok"); err != nil || s.spawns != 1 {
 		t.Fatal("cancellation should not respawn the tokenizer", err, s.spawns)

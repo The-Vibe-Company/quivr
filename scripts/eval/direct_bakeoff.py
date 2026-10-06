@@ -29,6 +29,8 @@ import public_sets
 import scoring
 import trec
 
+import ci_guard
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = 'multilingual-e5-small (current)'
 E5_MODEL = 'intfloat/multilingual-e5-small'
@@ -175,31 +177,47 @@ class Hosted:
         self.opener = urllib.request.build_opener(embeddings.NoRedirect())
         # Shallow task copies retain this limiter across all document batches.
         self.documents = DocumentAdmission()
-        self.blocked_seconds = self.http_seconds = 0.
+        self.provider_gate = None
+        self.blocked_seconds = self.http_seconds = self.service_seconds = 0.
+        self.ledger_seconds = self.backoff_seconds = self.admission_seconds = 0.
+        self.retry_attempts = 0
 
     @contextlib.contextmanager
-    def blocked(self):
+    def blocked(self, phase=None):
         started = time.monotonic()
         try:
             yield
         finally:
-            self.blocked_seconds += time.monotonic() - started
+            elapsed = time.monotonic() - started
+            self.blocked_seconds += elapsed
+            if phase:
+                setattr(self, phase + '_seconds', getattr(self, phase + '_seconds') + elapsed)
 
     def read(self, request, mode):
-        admission = self.documents.request() if mode == 'document' else contextlib.nullcontext()
-        with self.blocked(), admission:
-            started = time.monotonic()
+        admission = (self.provider_gate.request() if self.provider_gate else
+                     self.documents.request() if mode == 'document' else contextlib.nullcontext())
+        with self.blocked():
+            admitted, http_elapsed = time.monotonic(), 0.
             try:
-                with self.opener.open(request, timeout=120) as response:
-                    return response.read(embeddings.MAX_RESPONSE_BYTES + 1)
+                with admission:
+                    started = time.monotonic()
+                    try:
+                        with self.opener.open(request, timeout=120) as response:
+                            raw = response.read(embeddings.MAX_RESPONSE_BYTES + 1)
+                        self.service_seconds += time.monotonic() - started
+                        return raw
+                    finally:
+                        http_elapsed = time.monotonic() - started
+                        self.http_seconds += http_elapsed
             finally:
-                self.http_seconds += time.monotonic() - started
+                self.admission_seconds += time.monotonic() - admitted - http_elapsed
 
     def post(self, path, body, texts, label, model, mode):
         # The shared gate's supported byte/subword bound, including special tokens.
         tokens = embeddings.estimate_tokens(texts)
         for attempt in range(8):
-            with self.blocked():
+            self.retry_attempts += int(attempt > 0)
+            with self.blocked('ledger'):
                 call = self.budget.reserve(label, self.set_name, mode, tokens, self.prices[model])
             request = urllib.request.Request(self.endpoint + path, data=json.dumps(body).encode(),
                                              headers={'Content-Type': 'application/json', 'api-key': self.key}, method='POST')
@@ -215,7 +233,7 @@ class Hosted:
                     raise RuntimeError('invalid provider response') from None
                 if type(used) is not int or used < 0:
                     raise RuntimeError('provider omitted confirmed usage; measurement rejected')
-                with self.blocked():
+                with self.blocked('ledger'):
                     self.budget.settle(call, used)
                 return result
             except urllib.error.HTTPError as error:
@@ -225,7 +243,7 @@ class Hosted:
                 # This hosted adapter's rate-limit rejection is unbilled.
                 # Do not infer the billing outcome of other error statuses.
                 if code == 429:
-                    with self.blocked():
+                    with self.blocked('ledger'):
                         self.budget.settle(call, 0)
                 if code not in (429, 500, 502, 503, 504) or attempt == 7:
                     raise RuntimeError(f'provider HTTP {code}') from None
@@ -239,7 +257,7 @@ class Hosted:
                     raise RuntimeError('provider transport failed after 8 attempts') from None
                 delay = 0
             # Unknown attempts stay reserved; retries must reserve again.
-            with self.blocked():
+            with self.blocked('backoff'):
                 time.sleep(min(60, max(2 ** attempt, delay) + random.uniform(0, 1)))
         raise RuntimeError('provider attempts exhausted')
 
@@ -354,7 +372,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.out.exists():
         raise FileExistsError('output exists; choose a new evidence filename')
-    if any(os.environ.get(name, '').lower() not in ('', '0', 'false') for name in ('CI', 'GITHUB_ACTIONS')):
+    if ci_guard.in_ci():
         raise SystemExit('direct comparison runs locally only; CI execution is refused')
     budget = embeddings.Budget(args.max_input_tokens, args.max_usd)
     prices = dict(PRICES)

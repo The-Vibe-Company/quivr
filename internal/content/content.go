@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
@@ -437,6 +438,9 @@ func (s Service) withdraw(ctx context.Context, scope corpus.Scope, w Withdrawal,
 		return Receipt{}, ErrInvalid
 	}
 	result, err := s.Submissions.Withdraw(ctx, scope, w)
+	if err == nil {
+		audit.RecordTarget(ctx, "record", result.RecordID)
+	}
 	if !reveal {
 		result.RecordID = ""
 		result.VersionID = ""
@@ -922,7 +926,17 @@ func (s Service) Republication(ctx context.Context, org, receiptID string) (Work
 }
 
 // Dispatch names one accepted command that still needs a durable workflow start.
-type Dispatch struct{ Organization, ReceiptID string }
+type Dispatch struct{ Organization, ReceiptID, TraceContext string }
+
+// DispatchBatch is an immutable, durable group of receipt intents. Its ID
+// survives a lost workflow-start acknowledgement and worker restarts.
+type DispatchBatch struct {
+	ID       string
+	Receipts []Dispatch
+	// Legacy preserves an old receipt's workflow identity after a lost start
+	// acknowledgement, including receipts accepted by an older API process.
+	Legacy bool
+}
 
 var ErrNoDispatch = errors.New("no_pending_dispatch")
 

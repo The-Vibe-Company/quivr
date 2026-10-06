@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/online"
 	plugincli "github.com/The-Vibe-Company/quivr/internal/plugins/cli"
 	"github.com/The-Vibe-Company/quivr/internal/reference/commands"
@@ -20,28 +21,33 @@ func cliSource() (commands.Source, error) {
 	engine := commands.Group{
 		Title: "Engine commands",
 		Needs: "a configuration file (`" + app.ConfigEnv + "`)",
-		Intro: "Engine commands run Quivr itself. Each reads the JSON configuration file named by `" + app.ConfigEnv + "` and connects to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. They take no flags.",
+		Intro: "Engine commands run Quivr itself. Each reads the JSON configuration file named by `" + app.ConfigEnv + "` and connects to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. `migrate --contract` also applies deferred contract migrations and closes the application rollback window. `api` and `worker` take no flags.",
 		Env:   []commands.EnvVar{{Name: app.ConfigEnv, Meaning: "path of the JSON configuration file"}},
 		ExitCodes: []commands.ExitCode{
 			{Code: 0, Meaning: "stopped cleanly, or migrate finished"},
 			{Code: 1, Meaning: "the process failed, or the command is unknown; the reason is logged as JSON on stderr"},
-			{Code: 2, Meaning: "no command, or more than one argument"},
+			{Code: 2, Meaning: "invalid command arguments"},
 		},
 	}
 	for _, c := range app.Commands {
-		engine.Commands = append(engine.Commands, commands.Command{Name: "quivr " + c.Name, Usage: "quivr " + c.Name, Summary: c.Summary})
+		usage := "quivr " + c.Name
+		if c.Name == "migrate" {
+			usage += " [--contract]"
+		}
+		engine.Commands = append(engine.Commands, commands.Command{Name: "quivr " + c.Name, Usage: usage, Summary: c.Summary})
 	}
 
 	offline := commands.Group{
 		Title: "Offline commands",
 		Needs: "nothing: works offline",
-		Intro: "`quivr plugin` commands help write and certify a plugin. They need no configuration file and no running server. Run `quivr plugin` alone to list them.",
+		Intro: "`quivr --version` prints the distribution release, revision, API version and plugin engine compatibility version. `quivr plugin` commands help write and certify a plugin. They need no configuration file and no running server. Run `quivr plugin` alone to list them.",
 		ExitCodes: []commands.ExitCode{
 			{Code: plugincli.ExitOK, Meaning: "success; for `test`, the plugin is certified"},
-			{Code: plugincli.ExitInvalid, Meaning: "the command failed: an invalid plugin or manifest, a target directory `init` cannot write, a plugin `dev` cannot start; for `test`, the plugin is not certified"},
+			{Code: plugincli.ExitInvalid, Meaning: "for plugin commands only: an invalid plugin or manifest, a target directory `init` cannot write, a plugin `dev` cannot start; for `test`, the plugin is not certified"},
 			{Code: plugincli.ExitUsage, Meaning: "invalid flags or arguments"},
 		},
 	}
+	offline.Commands = append(offline.Commands, commands.Command{Name: "quivr " + buildinfo.VersionFlag, Usage: "quivr " + buildinfo.VersionFlag, Summary: "Print build identity without configuration or a running server."})
 	for _, c := range plugincli.Commands() {
 		offline.Commands = append(offline.Commands, commands.Command{Name: "quivr plugin " + c.Name, Usage: c.Usage, Summary: c.Summary})
 	}

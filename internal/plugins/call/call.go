@@ -56,6 +56,10 @@ func discover(ctx context.Context, pin *plugins.Pin) (string, error) {
 	if err := guard(ctx, pin); err != nil {
 		return "", err
 	}
+	ctx, err := plugins.SigningContext(ctx, pin)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", plugins.ErrUnavailable, err)
+	}
 	served, issues, err := devhost.Discover(ctx, pin.Endpoint, pin.Report())
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", plugins.ErrUnavailable, err)
@@ -104,6 +108,10 @@ func Invoke(ctx context.Context, pin *plugins.Pin, operation string, build Build
 		return nil, err
 	}
 	if err = guard(invoke, pin); err != nil {
+		return nil, invocationFailure(ctx, invoke, operation, err)
+	}
+	invoke, err = plugins.SigningContext(invoke, pin)
+	if err != nil {
 		return nil, invocationFailure(ctx, invoke, operation, err)
 	}
 	validate := func(b []byte) []plugins.Issue {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 )
 
 // The p50 and p95 the admin reads report come from the fixed buckets; the
@@ -45,6 +47,44 @@ func TestQuantileInterpolatesInsideTheBucket(t *testing.T) {
 type memoryStore struct {
 	rows []Row
 	fail int
+}
+
+type finalFlushStore struct {
+	memoryStore
+	started chan context.Context
+	finish  chan struct{}
+}
+
+func (s *finalFlushStore) UpsertRollups(ctx context.Context, _ []Row) error {
+	s.started <- ctx
+	<-s.finish
+	return ctx.Err()
+}
+
+// Owns the recorder's final database call: canceling its loop must permit a
+// final flush during grace, and that flush must stop with the process budget.
+func TestRecorderFinalFlushSharesTheProcessBudget(t *testing.T) {
+	group := lifecycle.New()
+	defer group.Close()
+	store := &finalFlushStore{started: make(chan context.Context, 1), finish: make(chan struct{})}
+	r := NewRecorder(store, Config{}, false)
+	r.Received("org_a", "example")
+	ctx, stop := context.WithCancel(lifecycle.WorkContext(group.Context()))
+	done := make(chan struct{})
+	go func() { defer close(done); r.Run(ctx) }()
+	stop()
+	flush := <-store.started
+	if flush.Err() != nil {
+		t.Error("final flush canceled before the process grace period ended")
+	}
+	deadline, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
+	_ = group.Wait(deadline)
+	if flush.Err() == nil {
+		t.Error("final database flush escaped the process budget")
+	}
+	close(store.finish)
+	<-done
 }
 
 func (s *memoryStore) UpsertRollups(_ context.Context, rows []Row) error {

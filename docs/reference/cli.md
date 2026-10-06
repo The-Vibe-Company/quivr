@@ -13,6 +13,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 | [`quivr api`](#quivr-api) | a configuration file (`QUIVR_CONFIG`) | Serve the public HTTP API until interrupted. |
 | [`quivr worker`](#quivr-worker) | a configuration file (`QUIVR_CONFIG`) | Run the background work that processes content, pulls connectors and delivers events, until interrupted. |
 | [`quivr migrate`](#quivr-migrate) | a configuration file (`QUIVR_CONFIG`) | Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready. |
+| [`quivr --version`](#quivr---version) | nothing: works offline | Print build identity without configuration or a running server. |
 | [`quivr plugin dev`](#quivr-plugin-dev) | nothing: works offline | Run a plugin locally, check its discovery against the manifest and replay a fixture; restarts it on change with `--watch`. |
 | [`quivr plugin init`](#quivr-plugin-init) | nothing: works offline | Write a new Python plugin from a template: a normalizer, an alert rule (`--kind subscription`) or a source collector (`--kind connector`; add `--push` for an instance-token push source). |
 | [`quivr plugin inspect`](#quivr-plugin-inspect) | nothing: works offline | Validate a plugin manifest and print what the plugin declares. |
@@ -23,7 +24,7 @@ Every command of the `quivr` binary, from the tables the binary itself dispatche
 
 ## Engine commands
 
-Engine commands run Quivr itself. Each reads the JSON configuration file named by `QUIVR_CONFIG` and connects to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. They take no flags.
+Engine commands run Quivr itself. Each reads the JSON configuration file named by `QUIVR_CONFIG` and connects to PostgreSQL, Temporal, object storage and Weaviate. `api` and `worker` run until interrupted; `migrate` exits when done. `migrate --contract` also applies deferred contract migrations and closes the application rollback window. `api` and `worker` take no flags.
 
 | Environment variable | Meaning |
 | --- | --- |
@@ -33,7 +34,7 @@ Engine commands run Quivr itself. Each reads the JSON configuration file named b
 | --- | --- |
 | 0 | stopped cleanly, or migrate finished |
 | 1 | the process failed, or the command is unknown; the reason is logged as JSON on stderr |
-| 2 | no command, or more than one argument |
+| 2 | invalid command arguments |
 
 ### quivr api
 
@@ -56,18 +57,26 @@ quivr worker
 Prepare PostgreSQL, object storage and the search projections, then exit. Rerun it to finish a step whose dependency was not ready.
 
 ```text
-quivr migrate
+quivr migrate [--contract]
 ```
 
 ## Offline commands
 
-`quivr plugin` commands help write and certify a plugin. They need no configuration file and no running server. Run `quivr plugin` alone to list them.
+`quivr --version` prints the distribution release, revision, API version and plugin engine compatibility version. `quivr plugin` commands help write and certify a plugin. They need no configuration file and no running server. Run `quivr plugin` alone to list them.
 
 | Exit code | Meaning |
 | --- | --- |
 | 0 | success; for `test`, the plugin is certified |
-| 1 | the command failed: an invalid plugin or manifest, a target directory `init` cannot write, a plugin `dev` cannot start; for `test`, the plugin is not certified |
+| 1 | for plugin commands only: an invalid plugin or manifest, a target directory `init` cannot write, a plugin `dev` cannot start; for `test`, the plugin is not certified |
 | 2 | invalid flags or arguments |
+
+### quivr --version
+
+Print build identity without configuration or a running server.
+
+```text
+quivr --version
+```
 
 ### quivr plugin dev
 

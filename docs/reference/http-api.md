@@ -21,6 +21,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 
 | Endpoint | Operation | Permissions |
 | --- | --- | --- |
+| [`GET /v0/version`](#get-v0version) | `getBuildVersion` |  |
 | [`POST /v0/records`](#post-v0records) | `ingestRecord` | `content:write` |
 | [`GET /v0/records`](#get-v0records) | `listRecords` | `content:read` |
 | [`GET /v0/records/count`](#get-v0recordscount) | `countRecords` | `content:read` |
@@ -82,6 +83,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/connector-webhooks/{connector_id}`](#get-v0connector-webhooksconnector_id) | `relayConnectorChallenge` |  |
 | [`POST /v0/connector-webhooks/{connector_id}`](#post-v0connector-webhooksconnector_id) | `relayConnectorDelivery` |  |
 | [`GET /v0/connector-kinds`](#get-v0connector-kinds) | `listConnectorKinds` | `connectors:read` |
+| [`GET /v0/admin/audit`](#get-v0adminaudit) | `listAuditEvents` | `audit:read` |
 | [`GET /v0/admin/plugins`](#get-v0adminplugins) | `listPluginRegistrations` | `plugins:admin` |
 | [`POST /v0/admin/plugins`](#post-v0adminplugins) | `registerPlugin` | `plugins:admin` |
 | [`GET /v0/admin/plugins/{registration_id}`](#get-v0adminpluginsregistration_id) | `getPluginRegistration` | `plugins:admin` |
@@ -110,6 +112,23 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/stats/top-queries`](#get-v0adminstatstop-queries) | `getTopQueries` | `observability:read` |
 | [`POST /v0/search`](#post-v0search) | `searchRecords` | `content:read`, `search:query` |
 | [`GET /v0/search/profiles`](#get-v0searchprofiles) | `listSearchProfiles` | `search:query` |
+
+### Version endpoints
+
+#### `GET /v0/version`
+
+Operation `getBuildVersion`.
+
+Read the running Quivr build
+
+Reports the distribution release, source revision and API and plugin engine compatibility versions. Any valid API key can read it; no database access is needed.
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`BuildVersion`](#buildversion) | The running build identity. |
+| `default` | `application/json` [`Error`](#error) | Structured error. 401 unauthenticated. |
 
 ### Records
 
@@ -1355,6 +1374,32 @@ Connector kinds enabled in this deployment, with the JSON Schemas that validate 
 
 ### Admin
 
+#### `GET /v0/admin/audit`
+
+Operation `listAuditEvents`. Requires `audit:read`.
+
+List immutable sensitive-action entries for the API key's organization, newest first. Requires audit:read and organization-wide Corpus scope. Time filters are RFC3339 instants; since is inclusive and until exclusive. Cursors bind organization, permissions and filters including limit; reuse the same filters on later pages. Reads and searches are not audited.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `since` | query | string (date-time) |  | Inclusive RFC3339 timestamp. |
+| `until` | query | string (date-time) |  | Exclusive RFC3339 timestamp. |
+| `actor` | query | string |  | Exact API key identifier; no substring matching. |
+| `action` | query | string |  | Exact audit action name; no substring matching. |
+| `target_type` | query | string |  | Exact target type; no substring matching. |
+| `target_id` | query | string |  | Exact target identifier; no substring matching. |
+| `limit` | query | integer |  | Default `50`. Minimum `1`. Maximum `200`. |
+| `page_cursor` | query | string |  |  |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`AuditEventPage`](#auditeventpage) | An organization-scoped page of audit entries. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 invalid API key, 403 without audit:read or with restricted Corpus scope, 422 invalid_cursor, 422 invalid_schema or invalid_limit, 503 storage_unavailable. |
+
 #### `GET /v0/admin/plugins`
 
 Operation `listPluginRegistrations`. Requires `plugins:admin`.
@@ -1831,7 +1876,7 @@ The most frequent search queries of the key's Organization over the window, norm
 
 Operation `searchRecords`. Requires `content:read`, `search:query`.
 
-Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated.
+Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
 
 **Request body** (required): `application/json` [`SearchRequest`](#searchrequest)
 
@@ -1840,7 +1885,7 @@ Resolve the requested profile, compile mandatory Corpus/Organization prefilters 
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`SearchResponse`](#searchresponse) | Successful response |
-| `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 dependency unavailable, 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms; a dependency that does not answer in time is 503). |
+| `default` | `application/json` [`Error`](#error)<br><br>Header `Retry-After`: integer. Present when search capacity is full; minimum delay in seconds before retrying. | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 dependency unavailable, 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms; a dependency that does not answer in time is 503). At search capacity, 503 search_unavailable includes Retry-After; retry only after that delay. |
 
 #### `GET /v0/search/profiles`
 
@@ -1883,6 +1928,112 @@ Receiver endpoint, not a Quivr API route. Verify Standard Webhooks v1 HMAC-SHA25
 | `default` |  | Transport retry policy applies; do not create another Match. |
 
 ## Schemas
+
+### `BuildVersion`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `version` | string | yes | Distribution release version, or dev for an unversioned build. |
+| `revision` | string | yes | Full source commit, or unknown for an unversioned build. |
+| `api_version` | string | yes | One of `v0`. |
+| `plugin_engine_version` | string | yes | Engine compatibility version checked against plugin manifests, independent of the distribution release. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [version, revision, api_version, plugin_engine_version]
+properties:
+  version:
+    type: string
+    description: Distribution release version, or dev for an unversioned build.
+  revision:
+    type: string
+    description: Full source commit, or unknown for an unversioned build.
+  api_version:
+    type: string
+    enum: [v0]
+  plugin_engine_version:
+    type: string
+    description: Engine compatibility version checked against plugin manifests, independent of the distribution release.
+```
+
+</details>
+
+### `AuditEvent`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | Decimal audit identifier, represented as text to preserve bigint precision. Pattern `^[1-9][0-9]*$`. |
+| `time` | string (date-time) | yes |  |
+| `actor` | string | yes | SHA-256-derived API key identifier; empty for unauthenticated attempts. |
+| `action` | string | yes |  |
+| `target_type` | string | yes |  |
+| `target_id` | string | yes | Target identifier; empty if refusal occurred before the target could be resolved. |
+| `organization` | string | yes |  |
+| `outcome` | string | yes | One of `accepted`, `refused`. |
+| `request_id` | string | yes |  |
+| `detail` | object | yes |  |
+| `detail.status` | integer | yes | Minimum `100`. Maximum `599`. |
+| `detail.error_code` | string |  |  |
+| `detail.plan_id` | string |  |  |
+| `detail.credential_version` | integer |  | Minimum `1`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [id, time, actor, action, target_type, target_id, organization, outcome, request_id, detail]
+properties:
+  id: {type: string, pattern: '^[1-9][0-9]*$', description: 'Decimal audit identifier, represented as text to preserve bigint precision.'}
+  time: {type: string, format: date-time}
+  actor: {type: string, description: SHA-256-derived API key identifier; empty for unauthenticated attempts.}
+  action: {type: string}
+  target_type: {type: string}
+  target_id: {type: string, description: Target identifier; empty if refusal occurred before the target could be resolved.}
+  organization: {type: string}
+  outcome: {type: string, enum: [accepted, refused]}
+  request_id: {type: string}
+  detail:
+    type: object
+    additionalProperties: false
+    required: [status]
+    properties:
+      status: {type: integer, minimum: 100, maximum: 599}
+      error_code: {type: string}
+      plan_id: {type: string}
+      credential_version: {type: integer, minimum: 1}
+```
+
+</details>
+
+### `AuditEventPage`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `items` | array of [`AuditEvent`](#auditevent) | yes |  |
+| `next_page_cursor` | string |  |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+required: [items]
+properties:
+  items:
+    type: array
+    items:
+      $ref: '#/components/schemas/AuditEvent'
+  next_page_cursor: {type: string}
+```
+
+</details>
 
 ### `ConnectorToken`
 
@@ -2065,6 +2216,9 @@ required:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| `request_id` | string |  | Bounded caller X-Request-ID, or an engine-generated correlation ID. |
+| `trace_id` | string |  | W3C trace ID when a trace context is present. |
+| `span_id` | string |  | W3C span ID of the API handler when a trace context is present. |
 | `code` | string | yes | Minimum length `1`. |
 | `message` | string | yes | Minimum length `1`. |
 | `retryable` | boolean | yes |  |
@@ -2078,6 +2232,15 @@ required:
 type: object
 additionalProperties: false
 properties:
+  request_id:
+    type: string
+    description: Bounded caller X-Request-ID, or an engine-generated correlation ID.
+  trace_id:
+    type: string
+    description: W3C trace ID when a trace context is present.
+  span_id:
+    type: string
+    description: W3C span ID of the API handler when a trace context is present.
   code:
     type: string
     minLength: 1
