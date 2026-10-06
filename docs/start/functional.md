@@ -5,6 +5,7 @@ What Quivr does, how to run it, and how to send it content to search and monitor
 
 ## Understand how it works
 
+- [Security policy](../../SECURITY.md): report vulnerabilities privately and verify release inventories
 - [Public HTTP transport contract](../../contracts/http/v0/README.md): how the HTTP API contract is organised and checked
 - [Quivr V2 — Remaining limits](../quivr-v2-remaining-limits.md): known limits and what is not claimed
 
