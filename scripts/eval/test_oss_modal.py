@@ -25,7 +25,13 @@ class ModalTransport(unittest.TestCase):
 
         import oss_modal
         mounts = []
+        wheels = []
         add_dir, add_file = modal.Image.add_local_dir, modal.Image.add_local_file
+        install = modal.Image.pip_install
+
+        def pip_install(image, *packages, **kwargs):
+            wheels.append((packages, kwargs.get('index_url')))
+            return install(image, *packages, **kwargs)
 
         def directory(image, local, remote, **kwargs):
             mounts.append((pathlib.Path(local), remote, kwargs.get('ignore', [])))
@@ -39,9 +45,16 @@ class ModalTransport(unittest.TestCase):
         # definition and validates its arguments before reaching this boundary.
         with mock.patch.object(modal.Image, 'add_local_dir', directory), \
              mock.patch.object(modal.Image, 'add_local_file', file), \
+             mock.patch.object(modal.Image, 'pip_install', pip_install), \
              mock.patch.object(modal.App, 'run', side_effect=RuntimeError('offline')):
             with self.assertRaises(oss_modal.JobFailed):
                 oss_modal.dispatch('granite-r2', 'cpu', ['scifact'], 'a' * 40, 1000, 30, False)
+            with self.assertRaises(oss_modal.JobFailed):
+                oss_modal.dispatch('embeddinggemma-2', 'L4', ['scifact'], 'a' * 40, 1000, 30, False)
+        self.assertIn((('torch==2.6.0',), 'https://download.pytorch.org/whl/cu124'), wheels)
+        self.assertIn((('transformers==5.19.0', 'sentence-transformers==6.1.0'), None), wheels)
+        # Both image variants mount the same files.
+        mounts = list({(str(local), remote): (local, remote, ignored) for local, remote, ignored in mounts}.values())
 
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

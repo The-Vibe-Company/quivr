@@ -31,13 +31,17 @@ def remote_measure(label, hardware, sets, git_sha, max_tokens, timeout, restrict
 
 def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, reference=None):
     from oss_bakeoff import image_for, report_campaign
+    from embeddinggemma_server import LABELS
     # Only the local dispatcher needs the checkout. Modal imports this module
     # from /root/oss_modal.py, which has no repository-relative parent layout.
     root = pathlib.Path(__file__).resolve().parents[2]
     app = modal.App('quivr-embedding-measurement')
-    image = (modal.Image.from_registry(image_for(hardware), add_python='3.12')
-             .entrypoint([])
-             .pip_install('torch==2.6.0', index_url='https://download.pytorch.org/whl/cpu')
+    gemma = label in LABELS
+    base = (modal.Image.debian_slim(python_version='3.12') if gemma else
+            modal.Image.from_registry(image_for(hardware), add_python='3.12').entrypoint([]))
+    wheel = 'cu124' if gemma and hardware == 'L4' else 'cpu'
+    image = (base
+             .pip_install('torch==2.6.0', index_url='https://download.pytorch.org/whl/' + wheel)
              .env({'OMP_NUM_THREADS': '4', 'RAYON_NUM_THREADS': '4', 'TOKENIZERS_PARALLELISM': 'false',
                    'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1'})
              .add_local_dir(root / 'scripts/eval', '/workspace/scripts/eval', copy=True,
@@ -47,6 +51,8 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
              # Modal's requirements helper copies only the top-level file;
              # install here so relative -r requirements.txt resolves correctly.
              .run_commands('python -m pip install -r /workspace/scripts/eval/requirements-direct.txt'))
+    if gemma:
+        image = image.pip_install('transformers==5.19.0', 'sentence-transformers==6.1.0')
     worker = app.function(image=image, gpu=None if hardware == 'cpu' else 'L4',
                           cpu=(4, 4), memory=(8192, 8192), timeout=timeout,
                           startup_timeout=STARTUP_TIMEOUT,

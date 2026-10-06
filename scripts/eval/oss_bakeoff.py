@@ -22,6 +22,7 @@ import direct_bakeoff
 import public_sets
 
 import ci_guard
+import embeddinggemma_server
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TEI = 'ghcr.io/huggingface/text-embeddings-inference:'
@@ -30,13 +31,17 @@ CANDIDATES = {
     'qwen3': ('qwen3', '97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3'),
     'granite-r2': ('granite-r2', '44399559930365213510b1ee2eb15ded83374f0e'),
     'arctic-v2': ('arctic-v2', 'ac6544c8a46e00af67e330e85a9028c66b8cfd9a'),
+    'embeddinggemma-2': (None, embeddinggemma_server.REVISION),
+    'embeddinggemma-2-256': (None, embeddinggemma_server.REVISION),
 }
 # Modal function (not Sandbox) list rates checked 2026-10-03.
 RATES = {'cpu_core_second': .0000131, 'gib_second': .00000222, 'L4_second': .000222}
 CPU_CORES, MEMORY_GIB = 4, 8
 
 
-def image_for(hardware):
+def image_for(hardware, label=None):
+    if label in embeddinggemma_server.LABELS:
+        return 'sentence-transformers==6.1.0; transformers==5.19.0; torch==2.6.0'
     return TEI + ('cpu-1.9.3' if hardware == 'cpu' else '1.9.3')
 
 
@@ -46,6 +51,12 @@ def hourly_rate(hardware):
 
 
 def configuration(label):
+    if label in embeddinggemma_server.LABELS:
+        return {'format': 'openai', 'base_url': 'http://127.0.0.1:8080/v1', 'auth': 'none',
+                'model': embeddinggemma_server.MODEL, 'dimensions': embeddinggemma_server.LABELS[label],
+                'model_revision': embeddinggemma_server.REVISION[:16],
+                'query_prefix': 'task: search result | query: ', 'document_prefix': 'title: none | text: ',
+                'max_tokens_per_segment': 8192, 'overlap': 200, 'batch_size': 16}
     filename, revision = CANDIDATES[label]
     config = json.loads((ROOT / 'plugins/hosted-embed/examples' / (filename + '.json')).read_text())
     # The plugin uses a bounded logical version; TEI uses the full HF commit.
@@ -180,6 +191,9 @@ def measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted, ref
             command = ['text-embeddings-router', '--model-id', config['model'], '--revision', revision,
                        '--hostname', '127.0.0.1', '--port', '8080', '--auto-truncate', '--max-client-batch-size', '32',
                        '--dtype', 'float32' if hardware == 'cpu' else 'float16']
+            gemma = label in embeddinggemma_server.LABELS
+            if gemma:
+                command = [sys.executable, str(ROOT / 'scripts/eval/embeddinggemma_server.py'), hardware]
             process = None
             # File-backed stderr avoids a pipe deadlock. Only its bounded tail
             # is returned in private job evidence, never in progress output.
@@ -212,14 +226,20 @@ def measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted, ref
                     tokens = usage['confirmed_input_tokens'] if not usage['reserved_input_tokens'] else None
                     seconds = result['duration_seconds']
                     estimated = seconds * hourly_rate(hardware) / 3600
-                    result['serving'] = {'hardware': hardware, 'image': image_for(hardware),
+                    result['serving'] = {'hardware': hardware, 'image': image_for(hardware, label),
                                          'model_revision': revision, 'cpu_cores': CPU_CORES, 'memory_gib': MEMORY_GIB,
-                                         'dtype': 'float32' if hardware == 'cpu' else 'float16',
+                                         'dtype': 'float32' if hardware == 'cpu' else 'bfloat16' if gemma else 'float16',
                                          'hourly_usd': hourly_rate(hardware), 'seconds': seconds,
                                          'estimated_usd': estimated, 'input_tokens': tokens,
                                          'usd_per_million_tokens': estimated * 1e6 / tokens if tokens else None,
                                          'cold_start_seconds': cold, 'estimate_only': True,
                                          'scope': 'candidate encoding and scoring; excludes baseline and preparation'}
+                    # Document throughput includes splitting, transport and normalization,
+                    # matching the existing indexing timer rather than scoring duration.
+                    index_seconds = result['index_s']
+                    count = report['documents']
+                    result['serving']['documents_per_second'] = count / index_seconds if index_seconds > 0 else None
+                    result['serving']['document_pieces_per_second'] = result['pieces'] / index_seconds if index_seconds > 0 else None
     campaign = campaign_record(label, hardware, sets, reports, time.monotonic() - started, reason)
     for report in reports:
         report['serving_campaign'] = report_campaign(campaign)
@@ -283,7 +303,7 @@ def main(argv=None):
         parser.error('restricted diagnostic sets require --include-restricted')
     if args.max_input_tokens < len(sets):
         parser.error('token allowance must provide at least one token per set')
-    jobs = [{'set': name, 'max_input_tokens': args.max_input_tokens // len(sets), 'model': label, 'hardware': hardware, 'image': image_for(hardware),
+    jobs = [{'set': name, 'max_input_tokens': args.max_input_tokens // len(sets), 'model': label, 'hardware': hardware, 'image': image_for(hardware, label),
              'configuration': configuration(label), 'model_revision': CANDIDATES[label][1],
              'hourly_usd': hourly_rate(hardware), 'timeout_seconds': args.timeout,
              'estimated_compute_usd': hourly_rate(hardware) * args.timeout / 3600}
