@@ -178,7 +178,7 @@ Immutable invocation context plus a reference to the input Blob; bodies are neve
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `manifest` | `ManifestContent` (shared Manifest schema) | yes | — |
-| `extensions` | `Extensions` (shared Manifest schema) | no | Record Version extensions, only in namespaces the plugin declares. |
+| `extensions` | `Extensions` (shared Manifest schema) | no | Record Version extensions, in namespaces the plugin declares or the reserved quivr.metadata namespace (schema version 1). |
 | `language` | string | no | BCP 47 language tag of the normalized content. |
 | `warnings` | array of object | no | At most 32 items. |
 | `warnings[].code` | string | yes | At most 64 characters. |
@@ -303,7 +303,7 @@ Since Plugin API 0.4. The core asks for the exact size and SHA-256 of one attach
 | `size_bytes` | integer | no | Exact size, at most attachments.max_bytes. |
 | `sha256` | string | no | Lowercase hex SHA-256 of the exact bytes. |
 | `skip` | string | no | Why the attachment is left out, for example too_large when the bytes exceed attachments.max_bytes. At most 64 characters. |
-| `item_extensions` | `Extensions` (shared Manifest schema) | no | Replaces the item's extensions, for example to record the skipped attachment; only in namespaces the plugin declares. |
+| `item_extensions` | `Extensions` (shared Manifest schema) | no | Replaces the item's extensions, for example to record the skipped attachment; in namespaces the plugin declares or the reserved quivr.metadata namespace (schema version 1). |
 
 ### `POST /v0/contributions/connector/fetch`
 
@@ -339,7 +339,7 @@ Since Plugin API 0.3. Fetch one page of new or changed source items after the ch
 | `items[].revision` | string | no | Identifies the item content; absent derives it from the content. Set it when the item has attachments, so an unchanged item is recognised before anything is downloaded. 1 to 256 characters. |
 | `items[].source_position` | string | no | Optional monotonic Source Position. 1 to 256 characters. |
 | `items[].content` | `TextContent` (shared Manifest schema) or `ManifestContent` (shared Manifest schema) | no | Text or a Manifest. A connector Manifest carries no Blob Parts: binary Parts are attachments. |
-| `items[].extensions` | `Extensions` (shared Manifest schema) | no | Record Version extensions, only in namespaces the plugin declares. |
+| `items[].extensions` | `Extensions` (shared Manifest schema) | no | Record Version extensions, in namespaces the plugin declares or the reserved quivr.metadata namespace (schema version 1). |
 | `items[].withdraw` | boolean | no | true asks for a Tombstone instead of a new version, for example a post deleted at the source. |
 | `items[].attachments` | array of object | no | At most 64 items. |
 | `items[].attachments[].key` | string | yes | 1 to 256 characters. |

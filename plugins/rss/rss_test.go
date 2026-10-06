@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -187,6 +188,14 @@ func TestMapsRSS2ItemsToStructuredManifests(t *testing.T) {
 	}
 	if fmt.Sprint(item["enclosures"]) != "[map[length:1234 type:audio/mpeg url:https://news.example.org/audio.mp3]]" {
 		t.Fatalf("enclosures %v", item["enclosures"])
+	}
+	common, ok := second.Extensions[quivrplugin.CommonMetadataNamespace]
+	if !ok || common.SchemaVersion != quivrplugin.CommonMetadataVersion {
+		t.Fatalf("common metadata extension missing: %+v", second.Extensions)
+	}
+	wantCommon := map[string]any{"language": "fr", "published_at": "2026-09-01T10:00:00Z", "source_type": "rss", "source": "https://news.example.org/", "author": []string{"Jane Reporter"}, "tags": []string{"Economy", "Europe"}}
+	if !reflect.DeepEqual(common.Data, wantCommon) {
+		t.Fatalf("common metadata %v, want %v", common.Data, wantCommon)
 	}
 	if feedMeta["format"] != "rss" || feedMeta["version"] != "2.0" || feedMeta["title"] != "Example Newsroom" || feedMeta["language"] != "fr" {
 		t.Fatalf("feed metadata %v", feedMeta)

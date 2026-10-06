@@ -23,7 +23,7 @@
     },
     "item_extensions": {
       "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
-      "description": "Replaces the item's extensions, for example to record the skipped attachment; only in namespaces the plugin declares."
+      "description": "Replaces the item's extensions, for example to record the skipped attachment; in namespaces the plugin declares or the reserved quivr.metadata namespace (schema version 1)."
     }
   },
   "oneOf": [

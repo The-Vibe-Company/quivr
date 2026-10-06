@@ -1,10 +1,16 @@
 package httpapi
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -24,6 +30,7 @@ type recordPage struct {
 	AcceptedAfter   *time.Time          `json:"lo,omitempty"`
 	AcceptedBefore  *time.Time          `json:"hi,omitempty"`
 	AfterAcceptedAt *time.Time          `json:"at,omitempty"`
+	FilterScope     string              `json:"f,omitempty"`
 }
 
 var errPageScope = errors.New("cursor_scope_changed")
@@ -39,34 +46,81 @@ func sameTime(a, b *time.Time) bool {
 
 func (a *API) decodeRecordPage(token, corpusID string, s corpus.Scope, q content.RecordQuery) (content.RecordQuery, error) {
 	var p recordPage
-	if a.decodePage(recordPageDomain, token, &p) != nil || (p.Version != 1 && p.Version != 2) || p.After == "" {
+	if a.decodePage(recordPageDomain, token, &p) != nil || (p.Version != 1 && p.Version != 2 && p.Version != 3) || p.After == "" {
 		return q, errors.New("invalid_cursor")
 	}
 	order := p.Order
 	if order == "" {
 		order = content.RecordIDOrder
 	}
-	if p.Corpus != corpusID || p.Scope != scopeDigest(s) || order != q.Order || !sameTime(p.AcceptedAfter, q.AcceptedAfter) || !sameTime(p.AcceptedBefore, q.AcceptedBefore) {
+	if p.Corpus != corpusID || p.Scope != scopeDigest(s) || order != q.Order || !sameTime(p.AcceptedAfter, q.AcceptedAfter) || !sameTime(p.AcceptedBefore, q.AcceptedBefore) || p.FilterScope != catalogFilterScope(q) {
 		return q, errPageScope
 	}
 	q.AfterID, q.AfterAcceptedAt = p.After, p.AfterAcceptedAt
 	return q, nil
 }
 
-func recordQuery(w http.ResponseWriter, r *http.Request, count bool) (string, content.RecordQuery, bool) {
+func (a *API) recordQuery(w http.ResponseWriter, r *http.Request, count bool) (string, content.RecordQuery, bool) {
 	values := r.URL.Query()
 	q := content.RecordQuery{Order: content.RecordIDOrder}
 	for k, v := range values {
-		allowed := k == "corpus_id" || k == "accepted_after" || k == "accepted_before" || (!count && (k == "order" || k == "page_cursor" || k == "limit"))
+		allowed := k == "corpus_id" || k == "accepted_after" || k == "accepted_before" || (!count && (k == "order" || k == "page_cursor" || k == "limit" || k == "corpus_ids" || k == "metadata"))
 		if !allowed || len(v) != 1 {
 			writeError(w, publicerr.InvalidQuery, nil)
 			return "", q, false
 		}
 	}
 	corpusID := values.Get("corpus_id")
+	if !count && values.Has("corpus_ids") {
+		if values.Has("corpus_id") {
+			writeError(w, publicerr.InvalidQuery, nil)
+			return "", q, false
+		}
+		q.CorpusIDs = strings.Split(values.Get("corpus_ids"), ",")
+		if len(q.CorpusIDs) > 16 {
+			writeError(w, publicerr.InvalidQuery, nil)
+			return "", q, false
+		}
+		sort.Strings(q.CorpusIDs)
+		for i, id := range q.CorpusIDs {
+			if id == "" || (i > 0 && id == q.CorpusIDs[i-1]) {
+				writeError(w, publicerr.InvalidQuery, nil)
+				return "", q, false
+			}
+		}
+		corpusID = strings.Join(q.CorpusIDs, ",")
+	}
 	if corpusID == "" {
 		writeError(w, publicerr.InvalidQuery, nil)
 		return "", q, false
+	}
+	if len(q.CorpusIDs) == 0 {
+		q.CorpusIDs = []string{corpusID}
+	}
+	if !count && values.Has("metadata") {
+		raw := values.Get("metadata")
+		decoder := json.NewDecoder(bytes.NewBufferString(raw))
+		decoder.DisallowUnknownFields()
+		if len(raw) > 262144 || decoder.Decode(&q.Metadata) != nil || len(q.Metadata) == 0 || corpus.ValidateFilters(q.Metadata) != nil {
+			writeError(w, publicerr.InvalidQuery, nil)
+			return "", q, false
+		}
+		var predicates []any
+		if json.Unmarshal([]byte(raw), &predicates) != nil {
+			writeError(w, publicerr.InvalidQuery, nil)
+			return "", q, false
+		}
+		for _, predicate := range predicates {
+			if a.schemas["MetadataFilter"].Validate(predicate) != nil {
+				writeError(w, publicerr.InvalidQuery, nil)
+				return "", q, false
+			}
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			writeError(w, publicerr.InvalidQuery, nil)
+			return "", q, false
+		}
 	}
 	if values.Has("order") {
 		q.Order = content.RecordOrder(values.Get("order"))
@@ -113,7 +167,7 @@ func recordTime(w http.ResponseWriter, values url.Values, key string) (*time.Tim
 // listRecords serves independent authorized catalog pages. The default ID
 // order is the resynchronization entry point; withdrawn Records are included.
 func (a *API) listRecords(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
-	corpusID, query, ok := recordQuery(w, r, false)
+	corpusID, query, ok := a.recordQuery(w, r, false)
 	if !ok {
 		return
 	}
@@ -127,13 +181,19 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request, s corpus.Scope
 		return
 	}
 	query.Limit = limit + 1
-	records, err := a.Content.Records(r.Context(), s, corpusID, query, func() (content.RecordQuery, error) {
+	var exclusions []corpus.CorpusExclusion
+	records, err := a.Content.RecordsAcross(r.Context(), s, query.CorpusIDs, query, func() (content.RecordQuery, error) {
+		var filterErr error
+		query, exclusions, filterErr = a.catalogFilters(r.Context(), s, query)
+		if filterErr != nil {
+			return query, filterErr
+		}
 		if !values.Has("page_cursor") {
 			return query, nil
 		}
 		decoded, err := a.decodeRecordPage(values.Get("page_cursor"), corpusID, s, query)
 		if errors.Is(err, errPageScope) {
-			writeError(w, publicerr.CursorScopeChanged, nil, corpusID)
+			writeCatalogScopeError(w, query.CorpusIDs)
 			return query, errResponseWritten
 		}
 		if err != nil {
@@ -149,11 +209,11 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request, s corpus.Scope
 		writeError(w, err, publicerr.ContentUnavailable)
 		return
 	}
-	page := transport.RecordPage{Items: make([]transport.Record, 0, min(len(records), limit))}
+	page := transport.RecordPage{ExcludedCorpora: exclusionsToTransport(exclusions), Items: make([]transport.Record, 0, min(len(records), limit))}
 	for i, record := range records {
 		if i == limit {
 			last := records[limit-1]
-			p := recordPage{Version: 2, Corpus: corpusID, Scope: scopeDigest(s), After: last.ID, Order: query.Order, AcceptedAfter: query.AcceptedAfter, AcceptedBefore: query.AcceptedBefore}
+			p := recordPage{Version: 3, FilterScope: catalogFilterScope(query), Corpus: corpusID, Scope: scopeDigest(s), After: last.ID, Order: query.Order, AcceptedAfter: query.AcceptedAfter, AcceptedBefore: query.AcceptedBefore}
 			if query.Order == content.AcceptedAtDesc {
 				p.AfterAcceptedAt = last.CurrentAcceptedAt
 			}
@@ -167,7 +227,7 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request, s corpus.Scope
 }
 
 func (a *API) countRecords(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
-	corpusID, query, ok := recordQuery(w, r, true)
+	corpusID, query, ok := a.recordQuery(w, r, true)
 	if !ok {
 		return
 	}
@@ -177,4 +237,64 @@ func (a *API) countRecords(w http.ResponseWriter, r *http.Request, s corpus.Scop
 		return
 	}
 	send(w, 200, transport.RecordCount{Count: count})
+}
+
+func catalogFilterScope(q content.RecordQuery) string {
+	if len(q.Metadata) == 0 {
+		return ""
+	}
+	raw, _ := json.Marshal(struct {
+		Metadata []corpus.MetadataFilter
+		Routes   []content.CatalogFilterRoute
+	}{q.Metadata, q.FilterRoutes})
+	return content.Hash(raw)
+}
+func (a *API) catalogFilters(ctx context.Context, s corpus.Scope, q content.RecordQuery) (content.RecordQuery, []corpus.CorpusExclusion, error) {
+	if len(q.Metadata) == 0 {
+		return q, nil, nil
+	}
+	var excluded []corpus.CorpusExclusion
+	for _, id := range q.CorpusIDs {
+		g, err := a.Retrieval.Routing.Generation(ctx, s.Organization, id)
+		if err != nil {
+			return q, nil, publicerr.ContentUnavailable
+		}
+		filters, missing, err := corpus.ResolveFilters(q.Metadata, g.Fields)
+		if err != nil {
+			return q, nil, err
+		}
+		if len(missing) > 0 {
+			excluded = append(excluded, corpus.CorpusExclusion{CorpusID: id, Fields: missing})
+			continue
+		}
+		if !g.MetadataProjected {
+			return q, nil, publicerr.MetadataFilterUnavailable
+		}
+		q.FilterRoutes = append(q.FilterRoutes, content.CatalogFilterRoute{CorpusID: id, GenerationID: g.ID, Filters: filters})
+	}
+	return q, excluded, nil
+}
+func exclusionsToTransport(excluded []corpus.CorpusExclusion) *[]transport.CorpusExclusion {
+	if len(excluded) == 0 {
+		return nil
+	}
+	out := make([]transport.CorpusExclusion, len(excluded))
+	for i, e := range excluded {
+		out[i] = transport.CorpusExclusion{CorpusId: e.CorpusID, Fields: e.Fields}
+	}
+	return &out
+}
+
+func writeCatalogScopeError(w http.ResponseWriter, ids []string) {
+	status, body := errorResponse(publicerr.CursorScopeChanged, nil)
+	values := url.Values{}
+	if len(ids) == 1 {
+		values.Set("corpus_id", ids[0])
+	} else {
+		values.Set("corpus_ids", strings.Join(ids, ","))
+	}
+	resync := "/v0/records?" + values.Encode()
+	body.ResyncUrl = &resync
+	body.Message += "; resynchronize"
+	send(w, status, body)
 }

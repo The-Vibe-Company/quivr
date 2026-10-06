@@ -17,6 +17,15 @@ On each instance's schedule, the Quivr worker calls `fetch` with the instance's 
 
 The plugin keeps no state. Anything it must remember between runs, such as a cursor or the revisions it already returned, goes in the checkpoint, up to 64 KiB.
 
+## Common document metadata
+
+Your connector can emit the reserved `quivr.metadata` extension with
+`schema_version: "1"`. Fill the fields you know and omit unknown values.
+Do not declare ownership of this namespace in your plugin manifest.
+The engine validates its shared schema; your plugin still owns its other
+extension namespaces. [Metadata filters](/guides/search#filter-by-document-metadata)
+lists the fields and explains how clients query them across sources.
+
 ## Steps
 
 <Steps>

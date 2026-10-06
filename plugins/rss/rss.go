@@ -591,8 +591,28 @@ func mapItem(it *gofeed.Item, meta feedFields) (candidate, bool) {
 		}
 		itemData = map[string]any{}
 	}
+	commonAuthors := make([]string, 0, len(f.Authors))
+	for _, author := range f.Authors {
+		name := strings.TrimSpace(author.Name)
+		if name == "" {
+			name = strings.TrimSpace(author.Email)
+		}
+		if name != "" {
+			commonAuthors = append(commonAuthors, name)
+		}
+	}
+	publishedAt := f.Published
+	if publishedAt == "" {
+		publishedAt = f.Updated
+	}
 	item := quivrplugin.Item{RecordKey: key, Revision: revision, Content: quivrplugin.NewManifest(parts...),
-		Extensions: map[string]quivrplugin.Extension{Extension: {SchemaVersion: "1", Data: map[string]any{"item": itemData, "feed": metaData}}}}
+		Extensions: map[string]quivrplugin.Extension{
+			Extension: {SchemaVersion: "1", Data: map[string]any{"item": itemData, "feed": metaData}},
+			quivrplugin.CommonMetadataNamespace: quivrplugin.CommonMetadataExtension(quivrplugin.CommonMetadata{
+				Language: meta.Language, PublishedAt: publishedAt, SourceType: "rss", Source: meta.Link,
+				Author: commonAuthors, Tags: append([]string(nil), f.Categories...),
+			}),
+		}}
 	sum := sha256.Sum256([]byte(key))
 	var when *time.Time
 	if it.PublishedParsed != nil {

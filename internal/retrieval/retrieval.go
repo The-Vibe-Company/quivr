@@ -48,6 +48,8 @@ var ErrUnavailable = publicerr.SearchUnavailable
 
 // ErrSourceFilterUnavailable reports a source filter on a Corpus whose routed
 // generation predates projected Source Namespaces; a rebuild enables it.
+var ErrMetadataFilterUnavailable = publicerr.MetadataFilterUnavailable
+
 var ErrSourceFilterUnavailable = publicerr.SourceFilterUnavailable
 
 // ErrRouteChanged reports that routing moved to a generation of other spaces
@@ -76,6 +78,7 @@ type Request struct {
 	// SourceNamespaces, when set, keeps only Records from these Source
 	// Namespaces. The projection applies it before ranking.
 	SourceNamespaces []string
+	Metadata         []corpus.MetadataFilter
 	Mode, Profile    string
 	Limit            int
 	Vector           []float32
@@ -114,7 +117,8 @@ type Hit struct {
 }
 
 type Result struct {
-	Hits []Hit
+	Hits            []Hit
+	ExcludedCorpora []corpus.CorpusExclusion
 	// Profile is the resolved profile name.
 	Profile string
 	// ProfileVersion identifies what ranked: the retrieval plugin, its
@@ -249,6 +253,9 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		namespaces[ns] = true
 	}
+	if err := corpus.ValidateFilters(q.Metadata); err != nil {
+		return out, err
+	}
 	started := time.Now()
 	if err := s.Routing.Authorize(ctx, scope, q.CorpusIDs); err != nil {
 		return out, err
@@ -263,6 +270,19 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		if g.ProfileVersion != ProfileVersion {
 			return out, ErrUnsupported
 		}
+		if len(q.Metadata) > 0 {
+			_, missing, resolveErr := corpus.ResolveFilters(q.Metadata, g.Fields)
+			if resolveErr != nil {
+				return out, resolveErr
+			}
+			if len(missing) > 0 {
+				out.ExcludedCorpora = append(out.ExcludedCorpora, corpus.CorpusExclusion{CorpusID: id, Fields: missing})
+				continue
+			}
+			if !g.MetadataProjected {
+				return out, publicerr.MetadataFilterUnavailable
+			}
+		}
 		// Objects of an older generation carry no Source Namespace, so a
 		// filter would silently drop them: refuse instead.
 		if len(q.SourceNamespaces) > 0 && !g.SourceNamespaceProjected {
@@ -274,6 +294,18 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		served = g.SpaceID
 		routes = append(routes, Route{CorpusID: id, Generation: g})
+	}
+	q.CorpusIDs = nil
+	for _, route := range routes {
+		q.CorpusIDs = append(q.CorpusIDs, route.CorpusID)
+	}
+	if len(routes) == 0 {
+		if _, err := normalizeQuery(q.Query); err != nil {
+			return out, ErrUnsupported
+		}
+		m := s.Ranker.Manifest()
+		out.ProfileVersion = "plugin:" + m.ID + "@" + m.Version + "/" + q.Profile
+		return out, nil
 	}
 	return s.rank(ctx, scope, q, routes, out, started)
 }

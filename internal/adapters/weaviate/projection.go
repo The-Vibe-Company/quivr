@@ -36,7 +36,9 @@ type Store struct {
 	// after them stay searchable in one query.
 	LegacySpace string
 	// vectors remembers the named vectors known to exist, by collection.
-	vectors *sync.Map
+	vectors            *sync.Map
+	metadataMu         sync.Mutex
+	metadataProperties map[string]bool
 }
 
 // legacyVector is the named vector of the built-in space and of every
@@ -271,7 +273,18 @@ func (s *Store) object(ctx context.Context, collection, id string) (storedObject
 
 func sameProperties(stored, want map[string]any) bool {
 	for key, value := range want {
-		if stored[key] != value {
+		if !sameMetadata(stored[key], value) {
+			if strings.HasPrefix(key, "m_") {
+				a, aok := stored[key].(string)
+				b, bok := value.(string)
+				if aok && bok {
+					na, aok := corpus.FilterDate(a)
+					nb, bok := corpus.FilterDate(b)
+					if aok && bok && na == nb {
+						continue
+					}
+				}
+			}
 			return false
 		}
 	}
@@ -305,10 +318,25 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid projection route")
 	}
+	if err := s.ensureMetadata(ctx, g); err != nil {
+		return err
+	}
+	metadata := map[string]any{}
+	if g.MetadataProjected {
+		values := content.ProjectionMetadata(v, g.Fields)
+		for _, f := range corpus.FilterFields(g.Fields) {
+			if value, ok := values[f.Name]; ok {
+				metadata[metadataProperty(f)] = metadataValue(value, f.Type)
+			}
+		}
+	}
 	texts, _ := content.ProjectionText(v, seg, g.Fields)
 	for i, p := range seg.Segments {
 		id := objectID(org, g.ID, p.ID)
 		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, sourceNamespaceProperty: namespace, "body": texts[i].Body, "title": texts[i].Title}
+		for key, value := range metadata {
+			properties[key] = value
+		}
 		if pluginID := content.PluginOfRecipe(seg.Recipe); pluginID != "" {
 			mediaType := v.SourceMediaType
 			if mediaType == "" {
@@ -449,7 +477,24 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 		if r.Generation.Collection != collection || !className.MatchString(collection) || r.Generation.ID == "" {
 			return nil, errors.New("invalid projection route")
 		}
-		filters = append(filters, and(equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID), projectionOwnerFilter(r.Generation, q.EvaluationPlugin)))
+		routeFilters := []string{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID), projectionOwnerFilter(r.Generation, q.EvaluationPlugin)}
+		typed, missing, err := corpus.ResolveFilters(q.Metadata, r.Generation.Fields)
+		if err != nil {
+			return nil, err
+		}
+		if len(missing) > 0 {
+			continue
+		}
+		if len(typed) > 0 && !r.Generation.MetadataProjected {
+			return nil, retrieval.ErrMetadataFilterUnavailable
+		}
+		for _, f := range typed {
+			routeFilters = append(routeFilters, metadataCondition(f))
+		}
+		filters = append(filters, and(routeFilters...))
+	}
+	if len(filters) == 0 {
+		return []content.Candidate{}, nil
 	}
 	operands := []string{equal("organization", scope.Organization), "{operator:Or,operands:[" + strings.Join(filters, ",") + "]}"}
 	// The source filter is part of the candidate query, so ranking and the
@@ -618,6 +663,11 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 					lexical[key] = value
 				}
 			}
+			for key, value := range anchor.Properties {
+				if strings.HasPrefix(key, "m_") {
+					lexical[key] = value
+				}
+			}
 			// Create-only: an object already written by a concurrent attachment is
 			// never re-indexed. A rejected or lost create is reconciled by the read below.
 			_, _ = s.call(ctx, "POST", "/v1/objects", map[string]any{"class": g.Collection, "id": id, "properties": lexical, "vectors": named}, nil)
@@ -711,8 +761,9 @@ func (s *Store) deleteWhere(ctx context.Context, client *http.Client, collection
 			Failed     int `json:"failed"`
 		} `json:"results"`
 	}
-	scoped := *s
-	scoped.Client = client
+	// The purge only needs the HTTP configuration; do not copy the schema
+	// cache's mutex when using its longer request timeout.
+	scoped := Store{Endpoint: s.Endpoint, Client: client}
 	if _, err := scoped.call(ctx, "DELETE", "/v1/batch/objects", map[string]any{"match": map[string]any{"class": collection, "where": where}, "output": "minimal"}, &response); err != nil {
 		return retrieval.PurgeResult{}, err
 	}

@@ -104,7 +104,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   extensions and relations.
 - **Corrections and withdrawals** with immutable Versions and fenced withdrawn Records.
 - **Search**: lexical, semantic and hybrid, with canonical rehydration and access
-  rechecks on every hit, optionally within chosen Source Namespaces (filtered before
+  rechecks on every hit, with common metadata and typed Corpus filters across sources,
+  optionally within chosen Source Namespaces (filtered before
   ranking).
 - **Change feed** through polling and resumable SSE, plus **catalog resync** after
   cursor expiry. List a Corpus's Records newest first by current-Version acceptance
@@ -333,7 +334,6 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What comes next
 
-- Filtering on typed field mappings (filter roles are validated and stored today).
 
 ## Documentation
 

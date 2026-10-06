@@ -221,7 +221,28 @@ func (s session) mapMessage(m message, list []attachment) quivrplugin.Item {
 			Extensions: map[string]quivrplugin.Extension{AttachmentExtension: {SchemaVersion: "1", Data: map[string]any{"name": clean(a.Name), "size": a.Size, "is_inline": a.IsInline, "attachment_type": attachmentType}}},
 			Ref:        encodeRef(attachmentRef, ref{Message: m.ID, Attachment: a.ID})})
 	}
-	item.Extensions = map[string]quivrplugin.Extension{MailExtension: {SchemaVersion: "1", Data: data}}
+	author := ""
+	for _, candidate := range []*address{m.Sender, m.From} {
+		if candidate == nil {
+			continue
+		}
+		if name := clean(strings.TrimSpace(candidate.EmailAddress.Name)); name != "" {
+			author = name
+			break
+		}
+		if address := clean(strings.TrimSpace(candidate.EmailAddress.Address)); address != "" {
+			author = address
+			break
+		}
+	}
+	item.Extensions = map[string]quivrplugin.Extension{
+		MailExtension: {SchemaVersion: "1", Data: data},
+		quivrplugin.CommonMetadataNamespace: quivrplugin.CommonMetadataExtension(quivrplugin.CommonMetadata{
+			PublishedAt: clean(m.SentDateTime), SourceType: "mail",
+			Source: clean(strings.TrimSpace(s.cfg.Mailbox + "/" + s.cfg.Folder)),
+			Author: []string{author},
+		}),
+	}
 	return item
 }
 

@@ -87,6 +87,42 @@ func TestCompilerResolvesSharedReferences(t *testing.T) {
 	}
 }
 
+// TestCommonMetadataSchema keeps the reserved source metadata contract
+// executable at its owner boundary. The inputs use literal wire keys so a
+// renamed Go field cannot make the test pass by serializing the same type.
+func TestCommonMetadataSchema(t *testing.T) {
+	compiler, err := contracts.NewCompiler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := compiler.Compile(contracts.CommonMetadataSchema())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string]string{
+		"all fields":         `{"language":"en","published_at":"2026-09-28T10:00:00Z","source_type":"rss","source":"https://example.org/feed","author":["Ada"],"subjects":["science"],"tags":["news"],"country":["FR"],"place":["Paris"]}`,
+		"all fields omitted": `{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := schema.Validate(decode(t, raw)); err != nil {
+				t.Fatalf("valid common metadata rejected: %v", err)
+			}
+		})
+	}
+	for name, raw := range map[string]string{
+		"unknown key":   `{"unknown":"value"}`,
+		"invalid date":  `{"published_at":"not-a-date"}`,
+		"long string":   `{"source":"` + strings.Repeat("x", 201) + `"}`,
+		"too many tags": `{"tags":["x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := schema.Validate(decode(t, raw)); err == nil {
+				t.Fatal("invalid common metadata accepted")
+			}
+		})
+	}
+}
+
 func sharedDefs(t *testing.T) map[string]any {
 	t.Helper()
 	var shared struct {

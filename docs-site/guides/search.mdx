@@ -88,6 +88,66 @@ EOF
 ["The harbour festival returns with boat races and music."]
 ```
 
+## Filter by document metadata
+
+Sources can fill the common `quivr.metadata` extension, schema version `"1"`.
+Use `filter.metadata` to compare these values across Corpora before ranking.
+Common filter names start with `metadata.`:
+
+| Fields | Value type |
+| --- | --- |
+| `language`, `source_type`, `source` | String |
+| `published_at` | RFC3339 datetime |
+| `author`, `subjects`, `tags`, `country`, `place` | Array of strings |
+
+Unknown source values are omitted. For example, a document without a language
+never matches a language filter. Sources retain their original metadata in their
+own extensions alongside these common fields.
+
+Each predicate names a `field` and an `any_of` array. One value means equality;
+several mean any-of equality. Array fields match any element. You can also set
+inclusive `gte` and `lte` datetime bounds. All predicates and all conditions
+inside one predicate must hold. Datetimes use UTC millisecond precision;
+submillisecond digits are truncated. Strings compare exactly, including case
+and whitespace. A request has at most 16 predicates, 50 values per predicate,
+and 200 characters per string value. Each field appears once.
+
+For example, not run, this filter combines language and publication date:
+
+```json
+{"metadata": [
+  {"field": "metadata.language", "any_of": ["en", "fr"]},
+  {"field": "metadata.published_at", "gte": "2026-01-01T00:00:00Z"}
+]}
+```
+
+Put this object in the search request's `filter`. The same conditions work in
+lexical, semantic and hybrid modes, including profiles that call other profiles.
+
+For a Corpus-specific field, declare a typed retrieval mapping with the
+`filter` role through [configureRetrieval](https://docs.quivr.thevibecompany.co/api-reference/corpora/configure-retrieval).
+The mapping becomes usable when its rebuild succeeds. Common fields are
+always declared. A requested field without the filter role excludes that
+Corpus; `excluded_corpora` lists its `corpus_id` and the missing `fields`.
+Eligible Corpora still contribute their matching documents. When every Corpus
+is excluded, the response contains an empty `items` array.
+Incompatible filter values return `422 invalid_query`.
+
+`GET /v0/records` accepts the same predicate array as JSON in the URL-encoded
+`metadata` parameter. Select one Corpus with `corpus_id`, or up to 16 with the
+comma-separated `corpus_ids` parameter, and use `order=accepted_at_desc` for
+current acceptance date order. Filtering happens before pagination. The catalog
+matches current Versions projected in the routed generation. A withdrawn
+Record can disappear from filtered pages after its projection is purged or
+rebuilt. Use the unfiltered catalog for complete resynchronization, including
+withdrawn Records. Repeat the same selection and
+predicates on every page, passing the response's `next_page_cursor` as the next
+request's `page_cursor`. Stop when `next_page_cursor` is absent.
+Changing the order, a filter, scope or routed generation returns
+`409 cursor_scope_changed`; restart the listing. Search and listing filters on
+older indexes return `422 metadata_filter_unavailable`; rebuild those Corpora
+with [rebuildCorpusProjection](https://docs.quivr.thevibecompany.co/api-reference/corpora/rebuild-corpus-projection) first.
+
 ## Cite a result
 
 Each hit carries what a citation needs:

@@ -52,7 +52,7 @@ func records(ctx context.Context, env Env, args []string) int {
 	if *corpusID == "" || len(positional) > 0 {
 		return report(env, usageError("records needs --corpus and no positional arguments"))
 	}
-	params := client.ListRecordsParams{CorpusId: *corpusID}
+	params := client.ListRecordsParams{CorpusId: corpusID}
 	invalid := false
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {

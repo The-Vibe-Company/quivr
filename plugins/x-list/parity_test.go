@@ -167,6 +167,13 @@ func compareRun(t *testing.T, step int, want builtinRun, got []page, f *fakeX) {
 	for i, w := range want.Pages {
 		g := pages[i]
 		wantRequests = append(wantRequests, w.XRequests...)
+		for _, item := range g.Items {
+			if extensions, ok := item["extensions"].(map[string]any); ok {
+				// Historical built-in fixtures predate the shared common
+				// metadata namespace.
+				delete(extensions, "quivr.metadata")
+			}
+		}
 		if !reflect.DeepEqual(plain(t, g.Items), plain(t, w.Items)) {
 			t.Fatalf("step %d page %d items:\ngot  %v\nwant %v", step, i, plain(t, g.Items), plain(t, w.Items))
 		}

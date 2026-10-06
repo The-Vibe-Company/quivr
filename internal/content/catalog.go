@@ -17,7 +17,16 @@ const (
 // RecordQuery selects current-Version acceptance times. Undated Records remain
 // in unbounded catalogs, after dated Records in acceptance order. AfterID and
 // AfterAcceptedAt form the exclusive keyset position; nil means an undated key.
+type CatalogFilterRoute struct {
+	CorpusID     string
+	GenerationID string
+	Filters      []corpus.TypedFilter
+}
+
 type RecordQuery struct {
+	CorpusIDs       []string
+	Metadata        []corpus.MetadataFilter
+	FilterRoutes    []CatalogFilterRoute
 	Order           RecordOrder
 	AcceptedAfter   *time.Time
 	AcceptedBefore  *time.Time
@@ -63,4 +72,31 @@ func (s Service) CountRecords(ctx context.Context, scope corpus.Scope, corpusID 
 		return 0, err
 	}
 	return s.Catalog.CountRecords(ctx, scope.Organization, corpusID, q)
+}
+
+// RecordsAcross authorizes every requested Corpus, including those whose
+// mappings exclude it, before evaluating query/cursor details.
+func (s Service) RecordsAcross(ctx context.Context, scope corpus.Scope, ids []string, q RecordQuery, prepare func() (RecordQuery, error)) ([]Record, error) {
+	if len(ids) == 0 || len(ids) > 16 {
+		return nil, ErrInvalid
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			return nil, ErrInvalid
+		}
+		seen[id] = true
+		if err := s.authorizeCatalog(ctx, scope, id); err != nil {
+			return nil, err
+		}
+	}
+	var err error
+	if prepare != nil {
+		q, err = prepare()
+		if err != nil {
+			return nil, err
+		}
+	}
+	q.CorpusIDs = ids
+	return s.Catalog.Records(ctx, scope.Organization, ids[0], q)
 }

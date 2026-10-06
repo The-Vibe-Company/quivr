@@ -112,6 +112,10 @@ func TestParityWithTheBuiltInConnector(t *testing.T) {
 					t.Fatalf("step %d: more %v items %d, built-in more %v items %d", i, page.More, len(page.Items), step.More, len(step.Items))
 				}
 				for j, item := range page.Items {
+					// Historical fixtures predate the shared common metadata
+					// namespace; keep this parity assertion focused on the
+					// connector-owned wire shape.
+					delete(item.Extensions, quivrplugin.CommonMetadataNamespace)
 					if name == "large.json" {
 						// The large feed's golden keeps identities only.
 						item.Content, item.Extensions = nil, nil
