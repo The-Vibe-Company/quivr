@@ -77,6 +77,10 @@ export function ExplorerView({
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [more, setMore] = useState<"idle" | "loading" | "error">("idle");
+  // With nothing selected, the preview shows the list's first row as first
+  // drawn, by date and by rank: a later page putting a newer row on top
+  // does not move it.
+  const [lead, setLead] = useState<{ key: string; byDate?: string; byRank?: string } | null>(null);
   // The counts, with the corpora and filters they were read for.
   const [facets, setFacets] = useState<(Facets & { key: string }) | null>(null);
   const [facetsError, setFacetsError] = useState("");
@@ -142,8 +146,6 @@ export function ExplorerView({
   // The list's own scroll, on a desktop.
   const scroller = useRef<HTMLDivElement>(null);
   const listBox = useRef<HTMLElement>(null);
-  // The row the preview shows by default, for the list it was drawn for.
-  const lead = useRef<{ key: string; id: string } | null>(null);
   // The corpora the facets were read for: others picked, their fields go at once.
   const facetsFor = useRef("");
 
@@ -161,6 +163,7 @@ export function ExplorerView({
     fetchExplore(picked, predicates, { q: state.q }, controller.signal)
       .then((data) => {
         setPage(data);
+        setLead({ key: listKey, byDate: byDate(data.items)[0]?.record_id, byRank: data.items[0]?.record_id });
         setStatus("ready");
         // Another list starts from its top: the list's own scroll on a
         // desktop, else the page brought back to the list when past it.
@@ -304,13 +307,8 @@ export function ExplorerView({
   // A search keeps its rank on request; otherwise rows go by date.
   const byDay = !state.q || state.sort !== "relevance";
   const items = useMemo(() => (byDay ? byDate(page?.items || []) : page?.items || []), [page, byDay]);
-  // With nothing selected, the preview shows the list's first row as first
-  // drawn: a later page putting a newer row on top does not move it.
-  const leadKey = `${listKey}:${byDay}`;
-  if (status === "ready" && items.length && lead.current?.key !== leadKey)
-    lead.current = { key: leadKey, id: items[0].record_id };
-  const previewed =
-    state.selected || (lead.current?.key === leadKey ? lead.current.id : items[0]?.record_id) || null;
+  const first = lead?.key === listKey ? (byDay ? lead.byDate : lead.byRank) : undefined;
+  const previewed = state.selected || first || items[0]?.record_id || null;
   const count = state.q
     ? status === "ready" && page
       ? page.bounded
