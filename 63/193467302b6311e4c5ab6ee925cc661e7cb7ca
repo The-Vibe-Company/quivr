@@ -1,0 +1,866 @@
+internal/transport/httpapi/errors.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4,7-8,82-93,113-124
+internal/orchestration/temporal/operation_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 144,146-158
+quivr-search/README.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 76
+scripts/eval/campaign_store.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 27,119,138-144,160,162,173-181
+  s_c21c70c5aa40f0::t_9388102d7c0321 182
+contracts/plugins/v0/authentication-fixture.schema.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-576
+internal/adapters/postgres/content_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,56-150,213-220,225,228-241
+scripts/eval/oss_bakeoff.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 24-25,307
+scripts/eval/test_ci_guard.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-111
+internal/lifecycle/lifecycle_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-98
+internal/transport/httpapi/changes_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 99-102,108-111,247
+scripts/eval/requirements-campaign.txt
+  s_c21c70c5aa40f0::t_f7b92cf5411514 2-3,7-8
+tests/fakes/go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3-18
+docs-site/plugins/write-an-ingestion-plugin.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 11
+internal/adapters/postgres/quarantine.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 8,51,77,83,107,122,132,207,253,322,413,493,536,591,608
+internal/telemetry/instruments.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-176
+internal/audit/audit.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-88
+migrations/20261006T0039Z_audit_events.sql
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-59
+scripts/subscription_plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 22,155,181,275
+internal/app/process_events.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-94
+internal/transport/httpapi/push_protection.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16,71-74,77-78,135-137,139,142,151-153
+internal/transport/httpapi/uploads_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 13,35,41-57
+tests/acceptance/monitoring_plugin_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 93-94,139,145-146,162,170-197
+sdks/go/quivrplugin/schemas/plugins/v0/authentication-fixture.schema.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-576
+internal/adapters/postgres/embeddings.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 29,132,135-141,151-154,156-157,159,205,217,219,226,229-231
+sdks/python/src/quivr_plugin/logs.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16,48-49
+internal/observability/observability_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 12-13,52-88
+  s_c21c70c5aa40f0::t_1365bcfc6b0acf 89
+internal/corpus/actions.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7,106
+scripts/plugin_sdk_conformance.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 42,55-61
+internal/normalization/normalization.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 177
+scripts/load.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-486
+sdks/go/README.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,9,13-16,24-26
+  s_c21c70c5aa40f0::t_fb4eccbd270350 27
+sdks/go/quivrplugin/tracing.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-41
+quivr-search/perf/measure.mjs
+  s_c21c70c5aa40f0::t_f7b92cf5411514 112-113,120-121,123,126-132,143,146,153,285-288,300
+internal/transport/httpapi/connectors_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 228-229
+CHANGELOG.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-34
+quivr-search/tests/alertStats.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 2,23-25,27-32,36,49,62,64,76,78,83,87
+internal/adapters/weaviate/projection.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 22,131
+scripts/connector_plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 29,141,201
+internal/adapters/postgres/audit_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-185
+scripts/eval/test_network_recovery.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-143
+sdks/go/quivrplugin/attachment_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 51,114-119
+conformance/requirements.txt
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1
+scripts/load_report.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-62
+internal/transport/httpapi/plugins.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 136
+.github/workflows/docs-site.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 22-23
+internal/transport/httpapi/access.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-161
+sdks/go/quivrplugin/plugin_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 85
+internal/connectors/push.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 255,285,287
+.github/workflows/release-please.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-25
+internal/adapters/postgres/spaces.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 25,120,124,127-131,187,219
+internal/plugins/signing.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-211
+quivr-search/tests/demo.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7-8,10-13,35,44-47,53
+scripts/check.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-203
+scripts/tracing.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-25
+internal/plugins/runner/authentication.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-144
+sdks/go/quivrplugin/testdata/quivr-plugin.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6
+.github/workflows/release-images.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-193
+quivr-search/tests/usage-stack.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 42,52
+scripts/test_ci_output.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,9,160-237,243-244
+docs-site/run-quivr/security.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-55
+sdks/go/quivrplugin/attachment.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 225
+docs/reference/cli.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16,27,37,60,65,70,73-79
+  s_c21c70c5aa40f0::t_4ab99078c59feb 80
+sdks/go/quivrplugin/signing_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-212
+internal/app/metrics.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 10,12,17-26,82,102-107,118-119
+sdks/python/src/quivr_plugin/signing.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-87
+scripts/eval/requirements-engine.txt
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3
+internal/operations/operations.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 187
+plugins/hosted-embed/go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3,11-20
+scripts/plugin_sdk_go.sh
+  s_c21c70c5aa40f0::t_f7b92cf5411514 24-25,27,29-30,32,68
+internal/transport/httpapi/changes.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 138-139,156
+docs/inventory.toml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 52,66-67,70,80,112,123,134,153,160-161
+scripts/eval/private_working.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 82,85-86,90-91,131
+version.txt
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1
+scripts/image_context.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 34,95,111-116,292-293
+conformance/suites/example/openapi.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-5
+scripts/eval/modal_engine.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 20-21,312
+SECURITY.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-27
+internal/app/shutdown.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-77
+internal/adapters/postgres/records.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 25,80,99,115
+sdks/python/README.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,12,16-19,25
+  s_c21c70c5aa40f0::t_adc4d5e2193da5 26
+sdks/go/quivrplugin/tracing_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-49
+quivr-search/src/dashboard.css
+  s_c21c70c5aa40f0::t_f7b92cf5411514 668,672-678,1040-1046,1389-1394,1396-1406,2545-2549
+docs/agents/migrations.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-77
+scripts/eval/quality_reports.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 23-24,443
+quivr-search/package.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 22,25-27
+sdks/go/quivrplugin/normalizer.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 85,175
+sdks/python/tests/test_models.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 22,87-90
+tests/acceptance/delivery_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 207,209-213,261-262
+  s_c21c70c5aa40f0::t_5ea7c7ea74b019 263
+sdks/python/src/quivr_plugin/schemas/plugins/v0/authentication-fixture.schema.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-576
+.github/workflows/measure-backfill.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 23-24,27,31
+contracts/http/v0/checks/requirements.txt
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4
+.github/workflows/measure-embeddings.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 22-23,33
+contracts/http/v0/openapi.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 370-388,2522-2575,3580-3581,3602-3609,3729-3778,3820-3828
+docs-site/guides/search.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 155-158,183
+internal/monitoring/engine.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 46,82-93
+  s_c21c70c5aa40f0::t_7dd4e84db22a0d 94
+internal/adapters/postgres/connector_tokens.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 44,60,77,104,109
+internal/plugins/signing_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-30
+migrations/migrations.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 9,75-97
+  s_c21c70c5aa40f0::t_2d53a1c219ffce 98
+scripts/eval/test_modal_engine.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 22
+internal/adapters/postgres/evaluation_batch.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 30,37
+internal/app/shutdown_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-71
+internal/plugins/call/signing_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-82
+quivr-search/tests/sources.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1,45-50,76,84,90,111,136-138,152-153,160-163,169,173-176,187-189
+docs/agents/oss-embeddings.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4
+internal/retrieval/plugin.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 221,240,244,262,275
+docs/eval-modal.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 117-131,136-141,167-168,172
+internal/plugins/pins.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5,64-68,276-283
+  s_c21c70c5aa40f0::t_e62d3ef3c50ce1 284
+scripts/image_smoke.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-130
+internal/adapters/postgres/corpora.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 32,57,67
+docs-site/reference/configuration.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 9-10,19,25-29,41,54-100,156
+quivr-search/src/components/feed/Reader.tsx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 250-251,253-254
+conformance/suites/example/image.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-7
+internal/adapters/postgres/connectors_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 158-160
+scripts/hosted_embed_plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 2,83,137
+internal/adapters/postgres/searchable_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 74-92
+internal/adapters/postgres/backfill.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 8,192,205,220,231,304,316,358,392,468,496,534,592,686,703,730
+scripts/fake_feeds.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 63-64
+scripts/migration_compatibility.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-106
+sdks/AGENTS.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-6
+internal/orchestration/temporal/dispatch_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,8-11,27,37,41-45,47,53-57,80-116,131,137,140,193,199,218,223,225,245,259-354
+sdks/python/src/quivr_plugin/models.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 441-470,1260-1262
+tests/load/scenarios/03-double-60-kill.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-32
+scripts/load_stack.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-186
+scripts/eval/direct_bakeoff.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 32-33,180-183,186,191-194,197-200,202-211,213,219-220,236,246,260,375
+internal/adapters/postgres/receipts.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 20,28
+Makefile
+  s_c21c70c5aa40f0::t_f7b92cf5411514 2,19-20,29-30,32-40,42,58-60,89,95-97,104-111
+scripts/eval/test_search_campaign.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 84-144,163,171,173
+scripts/load_scenarios.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-76
+internal/transport/httpapi/audit_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-315
+internal/reference/openapi/openapi_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 12-40
+internal/app/audit_config.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-15
+internal/telemetry/telemetry_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 82-92
+plugins/m365-mail/go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 12-20
+README.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 89-96,201-208,225,366
+scripts/migration_policy.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-181
+sdks/python/src/quivr_plugin/api_versions.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3-4,22
+conformance/suites/example/health.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-8
+.github/workflows/measure-upgrade.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 37-38,41,45
+contracts/plugins/v0/fixtures/authentication/cases.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-121
+conformance/runner.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-309
+conformance/suites/example/config.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-7
+internal/adapters/postgres/migrate_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 111-112,114,117-118,121,125,174-214
+  s_c21c70c5aa40f0::t_47f6fabe3ce969 215
+internal/transport/httpapi/profiles_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5-6,9,11,37-76
+scripts/eval/search_campaign.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 25-26,629,631,633,645
+deploy/images/plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-5
+internal/app/process_events_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-108
+conformance/suites/example/metrics.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-6
+docs/start/contributor.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16-17,23,36
+tests/load/scenarios/01-single-30.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-31
+scripts/eval/run.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 43-44,664
+internal/telemetry/tracing_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-242
+internal/app/plugins.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 47,215,219
+internal/plugins/call/call_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 42,136,185,194
+internal/observability/recorder.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,12-13,123-124,134,267,301,330-331
+sdks/python/src/quivr_plugin/tracing.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-47
+.github/workflows/security-nightly.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-73
+.github/dependabot.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-72
+scripts/eval/test_private_working.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 149-150,154-160,164-165,173,175-190,193-194,255-263,290
+tests/load/smoke.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-31
+deploy/images/README.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-71
+internal/adapters/postgres/delivery_batch.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-324
+.dockerignore
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5-10
+internal/transport/httpapi/search_capacity_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-104
+internal/adapters/postgres/evaluation.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7,61-62,66-75,78-79,105-106,108,172,274,276,368-372,655
+internal/adapters/postgres/submissions.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 8,51-70,75-83,86,93,112-115,139,152-158,171
+docs-site/reference/cli.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 17,28,38,61,66,71,74-80
+  s_c21c70c5aa40f0::t_56344c6051a6fb 81
+plugins/x-list/go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3,11-20
+quivr-search/tests/health.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4,160-164
+.github/workflows/verify-nightly.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16-17,20,24,33
+scripts/eval/test_direct_bakeoff.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 40-66,173,176-177,180-211,213-215,218-232
+internal/logging/logger_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-209
+internal/transport/httpapi/version_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-49
+go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6-9,12-29,35-45,47-48,54,66-68,70,72-73,75-76
+scripts/migrations.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 132-133,145
+scripts/plugin_environment.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-8
+internal/transport/httpapi/tracing_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-118
+internal/app/run.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 27,32,51-52,55-70,193-197,217-248,253,329-332,389-412,421-430,477-481,510,522-524,616,642,650,657-658,660-662,665,667,708,711,714-715,734,739,741,745,748,770,773,776,778,781-783,786,788-789,794,798,808,818-835
+internal/telemetry/tracing.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-241
+internal/transport/httpapi/audit.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-275
+internal/transport/httpapi/version.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-16
+plugins/pdf-text/pyproject.toml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 14
+internal/adapters/postgres/connectors.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 156,235,240,258,286,325,340,386,406,412,423,453,458,489,512,552
+internal/monitoring/tracing_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-130
+quivr-search/src/App.tsx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 8,307-310,314-315,384-388,563,565,583,599,624
+internal/adapters/weaviate/tls.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5,16
+deploy/images/quivr.Dockerfile
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-36
+internal/app/fixture_config_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 46,54-66,74-78
+quivr-search/tests/admin-health-live.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6-7,66,74
+quivr-search/tests/dashboard.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 668,869-881
+internal/logging/logger.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-378
+internal/normalization/normalization_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 81-85,246-248,510,514-516,531-536
+internal/processing/enrichment.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 37,54,57,59,66
+quivr-search/tests/connectors.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 39-49,64,81-83,85,96-97,115-116
+scripts/ingestion_plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 34,55,175
+scripts/release_scan.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-43
+scripts/retrieval_plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 9,43
+internal/orchestration/temporal/client.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7-9,11-13,18-26
+internal/app/process_config.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-159
+tests/acceptance/connectors_config_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4,8,10-11,13,15-18,21-22
+tests/fakes/load-plugin/quivr-plugin.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-56
+scripts/test_migration_policy.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-137
+.github/workflows/measure-adapters.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 27-28,31
+scripts/test_release_images.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-33
+quivr-search/tests/feed.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 34,60,62,75-76,82,91-93,97-98,104,141-143,145-153,159,162,165-166
+internal/adapters/postgres/evaluation_dispatch.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-100
+internal/connectors/signature.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 15-16,127-128
+tests/acceptance/matches_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 65-82,143,167,191-193,195-196,206,283-285,288-292
+tests/fakes/cmd/otlp/main.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-141
+internal/adapters/s3/read_pool_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-80
+scripts/eval/engine_measurement.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 151,174
+sdks/go/quivrplugin/normalizer_subscription_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 31-35
+tests/fakes/load-plugin/go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-21
+internal/plugins/call/call.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 59-62,113-114,116
+  s_c21c70c5aa40f0::t_777d728a9fd6e7 115
+cmd/quivr-reference/sources.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 10,24,29,33-37,43,46,50
+docs-site/run-quivr/run-search-campaign.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 78-89
+internal/lifecycle/lifecycle.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-140
+release-please-config.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-15
+conformance/suites/example/errors.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-9
+internal/adapters/postgres/plugins.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 143,239,244,254,273,301,312,316,326,343,364,372,383,389,407,453,476,484,537,547,561,657,669,677
+migrations/embed.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6-7
+internal/changes/prune.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5-6,29-37,44-49,51-62
+scripts/eval/control_store.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 10,18,168-281,430,435,439,444,447-448,468,470,625-648,651,653,655,661-664,666
+docs/reference/http-api.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 24,86,116-132,1377-1402,1879,1888,1932-2037,2219-2221,2235-2243
+scripts/eval/search_trial.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 14,141,156-158,164-165,172,189,204,208,231-287,289,363-364,369,372,377-380,392-398,401-402,409,413-415,419,440,455,482,484-486,506-508,512,528,531,537-558,564-565,575-585
+scripts/test_plugin_environment.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-26
+internal/adapters/postgres/promote.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 37
+internal/adapters/postgres/migrate.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 13,18,23-37,46-50,83,137
+internal/content/content.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16,441-443,929-939
+plugins/core-ingest/go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3,8-16
+sdks/python/scripts/generate.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 36
+sdks/python/tests/test_server.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7-9,168-255
+.github/workflows/verify.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16-18,20-24,27-28,36,40-44,46,50,53-55,61-64,66-89,91-98,104-105,111-112,118-119,125-126,132-133,139-140,146-147,153-154,160-161,167-168,174-175,181-182,188-189,196-197,204-211,218-219,222,226,248,251,254,261,268,274,288,350-400,404,410,412
+tests/fakes/load-plugin/main.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-189
+sdks/go/quivrplugin/receive.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 250
+tests/acceptance/keyword_alerts_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 58-59,62-63,105,111
+conformance/README.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-118
+internal/adapters/postgres/tls.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7,22-23
+  s_c21c70c5aa40f0::t_5ffef27fdb382f 24
+deploy/images/plugin.Dockerfile
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-87
+plugins/hosted-embed/ingestion_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7,290-294,296-297,302-308,311-314
+internal/plugins/registry/rollback.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7,175,187
+  s_c21c70c5aa40f0::t_898d6f269b602e 188-190
+internal/adapters/postgres/dispatch_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6-9,32-34,36-37,41-48,50,53-70,90,97,114-116,123-126,129-130,132-133,135,138-140,142-145,147-148,160,168-191,221-222,225-272
+quivr-search/src/lib/health.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 335
+internal/orchestration/temporal/shutdown_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-64
+scripts/eval/requirements-modal.txt
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4-5,7
+scripts/eval/ci_guard.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-7
+internal/app/audit_config_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-15
+sdks/python/tests/test_ingestion.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 9,69,71-74,77-80,83-91,93-94
+internal/adapters/postgres/content.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7,19-44,46,49,72-80,83,87-90,120-128,134-135,137,142,157,181,183,185,187,192-194
+internal/adapters/s3/blobs.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16,36-39,41-43
+internal/corpus/actions_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16
+internal/plugins/cli/dev.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 237-247,249
+.release-please-manifest.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-3
+conformance/schema/case.schema.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-403
+internal/processing/processing.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 119,127,166,174,178
+contracts/contracts.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 22
+internal/orchestration/temporal/tracing.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-77
+migrations/20261005T1833Z_trace_context.sql
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-7
+plugins/core-retrieve/go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3,8-16
+sdks/go/quivrplugin/subscription.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 153
+sdks/python/src/quivr_plugin/server.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 27,51-52,491-502,505-508,523-531
+.github/workflows/measure.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 19-20,23,27
+scripts/check-requirements.txt
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-6
+quivr-search/src/lib/workspace.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 264-265,268,270-272,275
+scripts/eval/test_campaign.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 19-25
+scripts/failure_drill.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 71,87,106
+scripts/normalizer_plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 21,159,204-205,295
+internal/orchestration/temporal/logger.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-61
+internal/transport/httpapi/search.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 14-17,53-61
+internal/observability/metrics.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4,21,26-30,33,35,37-39,42
+internal/changes/prune_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 26,33-35,52,55,61-64
+docs-site/run-quivr/upgrade-quivr.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-42
+internal/plugins/runner/runner.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 188-189,240-251,271-273,428-433
+scripts/eval/jev.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 80,85
+quivr-search/src/vite-env.d.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1
+scripts/eval/requirements-direct.txt
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3-4
+tests/acceptance/tracing_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-175
+internal/adapters/s3/uploads_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 39
+sdks/python/pyproject.toml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 12,14
+internal/transport/routing/mux.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 71-99
+internal/orchestration/temporal/correlation.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-51
+internal/app/failure.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-36
+scripts/eval/test_engine_confirmation.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 36-40,68
+docs-site/openapi.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1229-1250,3544-3613,4665-4666,4686-4693,4823-4914,4996-5004
+docs-site/plugins/write-a-retrieval-plugin.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 11
+internal/telemetry/telemetry.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-2,17,19-20,24-28,34,36-37,43-44,48-49,52-55,58-59,62-64,68-69,79-80,160-163,165-170,172-174,179-180,184-188
+internal/app/process_config_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-103
+docs/quivr-v2-remaining-limits.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 54-55,158-167
+internal/adapters/postgres/delivery_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,15,28,170-315
+  s_c21c70c5aa40f0::t_dedb8fd8fce96b 316
+plugins/core-retrieve/main_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 20,22-29,31-32
+scripts/eval/campaign_compute.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 80-90,93,95,106-107,109-112
+internal/plugins/registry/check.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5,10,131-135,140,143
+quivr-search/playwright.config.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6
+migrations/legacy.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-469
+sdks/go/go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3,6-8,12-21
+internal/adapters/postgres/evaluation_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,17-19,31,358,361-364,369-619
+internal/transport/generated/transport.gen.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 51-68,129-143,1287-1320,1420-1436,1889-1893,1896-1901,3262-3284,3813-3815,4079-4081,4104-4114,5139-5149,5201,5261,5344-5392,9224-9227,9230,9241-9243,9940-9987,9994-9996,10260-10262,10331-10358,12813-12833,12838-12839
+  s_c21c70c5aa40f0::t_c6762c9a2e9872 12834-12837
+internal/telemetry/gauges.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-48
+quivr-search/tests/server.test.mjs
+  s_c21c70c5aa40f0::t_f7b92cf5411514 8-10,35,41,55,1152-1153,1156,1169-1172,1180-1185,1188,1217-1219,1250-1254,1258,1260-1261
+scripts/eval/test_run.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 28,216-217
+scripts/push_plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 2,4-6,42-53,66-73
+  s_c21c70c5aa40f0::t_2e4ab693800c8e 74-75
+sdks/go/quivrplugin/plugin.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 12,266,277-284,373,443-450,459,533
+cmd/quivr/main.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4,10-11,13,18-21,32-34,38-41,46-68,71
+internal/adapters/weaviate/tls_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 32-40
+quivr-search/src/components/feed/FeedPage.tsx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,105,131-132,353-356,362,364,366,373,375,384,474-476,480,646,843,904-906,1015,1272-1275
+scripts/fixture_plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 2,33
+scripts/test_release_scan.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-29
+scripts/eval/modal_search.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 23-24,157,159,162-163,182-183,198,213-215,238,250,269-297,302-303,352,365-418,422-425,427,430,433-445,466
+internal/adapters/postgres/ingestion_promotion.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 24-34,214
+internal/plugins/devhost/transport.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5-6,16
+scripts/eval/test_oss_bakeoff.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 36-42
+sdks/go/quivrplugin/retrieval.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 213
+client/client.gen.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 51-68,129-143,1287-1320,1420-1436,1889-1893,1896-1901,3262-3284,3886-3890,4466,4472,4600-4606,4624-4638,6214,6230,6589-6605,6633-6770,10967-10993,11045-11051,11771,11779,11935-11943,11994-12041,15602-15606,15614-15615,16329-16376,16390-16402,17722,17736,18031-18045,18079-18111,20664-20676,21141-21161,21165-21167,21170,21173
+  s_c21c70c5aa40f0::t_e06a855e577ea5 21162-21164,21168-21169,21171-21172
+conformance/test_runner.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-288
+internal/plugins/features.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 25,54
+tests/load/scenarios/02-double-60.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-31
+internal/adapters/postgres/audit.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-111
+internal/adapters/postgres/match_batch.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-260
+internal/plugins/plugins_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 135-173
+internal/retrieval/purge.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5,7,110-115
+scripts/eval/requirements-news.txt
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3
+docs-site/docs.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 63-64,103
+migrations/migrations_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 7,58-80
+  s_c21c70c5aa40f0::t_7b54694ee32542 81
+internal/connectors/push_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 262
+internal/adapters/postgres/first_revision.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-65
+cmd/quivr/main_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-49
+scripts/local.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 204,283,543,575
+internal/orchestration/temporal/ingestion_batches.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-188
+docs-site/run-quivr/overview.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 54
+contracts/plugins/v0/fixtures/index.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 2306-2313
+docs/adr/0007-sign-engine-plugin-calls-with-hs256.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-23
+tests/acceptance/plugin_registry_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 11
+internal/adapters/postgres/operations.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 8,66,186,198,236,266,334,343,347-348,356,365,386
+sdks/python/tests/test_connector.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 105-110,116-117,301-310,312-314
+internal/plugins/registry/plan.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 11,355
+scripts/security_tools.sh
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-28
+conformance/checks/__init__.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-267
+docs/start/functional.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 8
+docs-site/run-quivr/deploy.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 42-136,149-150,152,164-165,168-179,191-193
+docs/agents/evaluation.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4,110-114,122
+internal/adapters/postgres/searchable.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 21,49,99,108,114,129,134,172,179,223,268,273,276-284,301-302,304,307-310,312-313,315,324-326,328,331,333-336,379
+internal/monitoring/batch.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5-7,11,88-92,139,147-149,155,172,177,201,203,375-433,448,465-469,473,501-508
+internal/orchestration/temporal/dispatch.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6-7,25,37,44-46,54-55,63,65,67-68,70,73,75,81,88-89,100-103,109-114,116-147,153,158-167,169-172,174-179,202,228
+scripts/eval/engine_confirmation.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 16,100,514,580
+sdks/python/src/quivr_plugin/blob.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 10,57-59
+sdks/python/tests/test_signing.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-235
+scripts/mintlify_site.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 558-563
+internal/adapters/postgres/delivery.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 26-30,36,73-77,152,172-175
+plugins/core-ingest/tokenizer_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 8-9,22,28-32,54-84,114,117-119,121-122,124-146,156,160-163,165-178,180-181
+quivr-search/src/lib/readState.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5,50-55,65
+scripts/eval/test_search_trial.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 123-133,146,212,262,264-270,273-278,294-298,307-316,333,379,393,410-417,419,478,501-508,510,512-514,533-536,539-540,549-550,553,563,614
+scripts/release_images.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-58
+internal/orchestration/temporal/connectors.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 9,104-106
+sdks/go/quivrplugin/api.gen.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5,8,28
+quivr-search/tests/admin.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4-5,23,34,42-43,73-74
+internal/adapters/postgres/ingestion_batches.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-132
+docs-site/reference/plugin-protocol.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 12,32-119,601-619
+  s_c21c70c5aa40f0::t_68d43eb55fd6bb 620
+docs-site/run-quivr/run-local-load-tests.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-113
+AGENTS.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6
+internal/adapters/postgres/monitoring.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 45,119,137,202,382,392,603,627,651
+internal/plugins/devhost/devhost.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 31,108-114,180-183,299-301,493-496
+internal/transport/httpapi/evaluator_migrations.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 40
+migrations/20261006T0048Z_ingestion_workflow_batches.sql
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-15
+internal/monitoring/delivery.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,9,19,33,44,101-112,153,199-203,207,227-229,237-239,246,256,260,269-364,367,408,419
+scripts/eval/test_embeddings.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 113-117
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 259
+internal/transport/httpapi/api.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 21,43-46,48,97,115-116
+sdks/go/quivrplugin/ingestion.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 123,185,280
+sdks/go/quivrplugin/receive_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 76,78-88,91,94-98
+scripts/plugin_sdk.sh
+  s_c21c70c5aa40f0::t_f7b92cf5411514 34,48,91,112,121,125,140,151,172
+docs-site/plugins/write-a-connector.mdx
+  s_c21c70c5aa40f0::t_f7b92cf5411514 11
+scripts/eval/test_modal_search.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1,19-21,28,97,103,218-376,387-392,409-413,421-423,434,437,440,442,447-568
+internal/buildinfo/buildinfo.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-21
+internal/monitoring/delivery_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 12,254-372
+  s_c21c70c5aa40f0::t_ec3e9d21412c7e 373
+internal/adapters/postgres/monitoring_owner_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 6,47-52
+.github/workflows/measure-search.yml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 12-13
+internal/monitoring/metrics.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 30,39,57-58,64-69,72-73,84-85
+internal/retrieval/plugin_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 9,218-231,233-241,243-244,246
+internal/transport/httpapi/access_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-251
+quivr-search/tests/alerts.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 126,282
+scripts/test_load.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-118
+armada.toml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 45-61
+contracts/plugins/v0/reports/contract-report.schema.json
+  s_c21c70c5aa40f0::t_f7b92cf5411514 152
+plugins/rss/go.mod
+  s_c21c70c5aa40f0::t_f7b92cf5411514 3,8,12-14,16-22
+internal/orchestration/temporal/ingestion.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 8,13,133-138,155-159,176,182,191,211,238-257,341-353,355-360,362-366,372-373
+quivr-search/tests/states.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 13,17,98,117,119
+scripts/eval/test_control_store.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 37,44-45,189-199,310-422,427,430,437
+contracts/plugins/v0/README.md
+  s_c21c70c5aa40f0::t_f7b92cf5411514 13,33,70-159
+  s_c21c70c5aa40f0::t_6789a0d58fefc8 160
+internal/app/metrics_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 19-30
+internal/transport/httpapi/content.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 67,89,137,177
+quivr-search/tests/queryBuilder.spec.ts
+  s_c21c70c5aa40f0::t_f7b92cf5411514 4,84-89
+internal/adapters/postgres/connector_push.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 14,57
+internal/adapters/postgres/normalization_failures_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 5,10,52,114,180-183,189-198,242-259
+  s_c21c70c5aa40f0::t_b166deb2e55fc1 260
+scripts/eval/campaign.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 26-27,73,93,230
+internal/adapters/postgres/tracing.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-33
+internal/adapters/postgres/evaluation_retirement.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 17,59,143
+conformance/suites/example/logs.yaml
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-6
+tests/acceptance/journey_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 283-286
+internal/reference/openapi/openapi.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 213-217
+sdks/go/quivrplugin/signing.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-200
+scripts/eval/news_set.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 36-37,1168
+scripts/test_push_plugin.py
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-34
+internal/orchestration/temporal/ingestion_batches_test.go
+  s_c21c70c5aa40f0::t_f7b92cf5411514 1-217
+go.sum
+  s_c21c70c5aa40f0::t_c5e80d31e57bc9 4-27,29-30,38-40,59-60,65-66,91-92,112-145,159-160,167-168,175-176,180-181,189-190,197-204
+plugins/core-ingest/go.sum
+  s_c21c70c5aa40f0::t_bb37bf8156d2de 1-2,5-33,37-38
+plugins/core-retrieve/go.sum
+  s_c21c70c5aa40f0::t_c659b5dc4b3d57 1-2,5-33,37-38
+plugins/hosted-embed/go.sum
+  s_c21c70c5aa40f0::t_851901ce48cd33 1-2,5-35,37-38
+plugins/m365-mail/go.sum
+  s_c21c70c5aa40f0::t_3d14799ac46fbd 1-2,5-33,39-40
+plugins/rss/go.sum
+  s_c21c70c5aa40f0::t_44460505a39d32 1-2,5-15,20-23,26-35,38-41,43-44
+plugins/x-list/go.sum
+  s_c21c70c5aa40f0::t_50701498c9c24b 1-2,5-35,37-38
+quivr-search/package-lock.json
+  s_c21c70c5aa40f0::t_0b4e863b66b791 17,20-22,25-28,32,35-38,41,44-45,48-51,53,55,58,61,64-67,69,75,78,81-84,86,95,98-101,109,112,115-118,126,129,132-135,137,143,146,149-152,154,160,163,166-169,174-176,180,183,186-189,191,194-196,200,203,206-209,211,214-216,223,226-229,231,234-236,243,246-249,251,254-256,263,266-269,271,274-276,283,286-289,291,297,300,303-306,308,314,317,320-323,325,331,334,337-347,350-371,374-377,379,382,385,388,391-394,399,402,405,408-411,416,419,422,425-428,433,436,439,442-445,450,453,456,459-462,464,467,470,473,476-479,481,484,487,490,493-496,498,501,504,507,510-513,515,518,521,524,527-530,532,535,538,541,544-547,549,552,558,561-564,566,569,572,574-576,578-581,586,591-593,595-598,603,606,608-610,612-615,617,620,623,625-627,629-632,634,637,640,642-644,646-649,654,657,659-661,663-666,671,674,676-678,680-683,688,691-695,697-703,705-712,714-717,721,724-730,733-739,744-747,749,751-754,756,758,794-797,799-857,859-863,866-872,874-885,887-893,895-901,903-920,922-926,929-935,937-946,948-968,970-974,977-983,985-998,1001-1007,1009-1065,1185-1188,1192-1193,1196,1199,1202-1216,1253-1255,1259,1262-1284,1288-1290,1295-1297,1301-1305,1321-1322,1337,1340-1343,1346
+sdks/go/go.sum
+  s_c21c70c5aa40f0::t_8b205c75f19e94 1-3,6-34,38-39
+tests/fakes/go.sum
+  s_c21c70c5aa40f0::t_19b9c8e9b713e6 1-24
+tests/fakes/load-plugin/go.sum
+  s_c21c70c5aa40f0::t_d0fe9e8725e48f 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "63193467302b6311e4c5ab6ee925cc661e7cb7ca",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}
