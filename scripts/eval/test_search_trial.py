@@ -407,8 +407,16 @@ class Trial(unittest.TestCase):
             busy_key = 'embedding/' + search_trial.digest({'config': identity, 'mode': 'document',
                 'text_hash': hashlib.sha256('passage 1'.encode()).hexdigest()})
             store.claim(campaign, busy_key, ttl=86400)
-            with self.assertRaisesRegex(RuntimeError, 'embedding cache fill already leased'):
+            clock = [0.]
+            budget.ttl = 2
+            def advance(seconds):
+                clock[0] += seconds
+                self.assertLessEqual(clock[0], 2, 'cache contention must not keep paid compute waiting indefinitely')
+            with mock.patch('time.monotonic', side_effect=lambda: clock[0]), \
+                    mock.patch('time.sleep', side_effect=advance), \
+                    self.assertRaisesRegex(RuntimeError, 'cache wait exceeded invocation bound'):
                 run(mock.Mock())
+            budget.ttl = 3600
             network.assert_not_called()
             with psycopg.connect(store.dsn) as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM eval_control.leases WHERE campaign=%s AND key LIKE 'embedding/%%'", (campaign,)).fetchone()[0], 1)

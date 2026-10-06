@@ -37,6 +37,33 @@ class Retrieval(unittest.TestCase):
 
 
 class Providers(unittest.TestCase):
+    def test_concurrent_reads_count_only_their_own_http_time(self):
+        # Own the HTTP timing boundary: overlapping reads must not subtract
+        # another request's duration from excluded admission time.
+        client = bakeoff.Hosted('https://example.com', 'fixture-key', embeddings.Budget(100, 1), 'tiny')
+        local, started, first_done = threading.local(), threading.Barrier(2), threading.Event()
+        class Response(io.BytesIO):
+            def read(response, *args):
+                started.wait(5)
+                if local.duration == 2:
+                    self.assertTrue(first_done.wait(5))
+                local.clock = local.duration
+                return super().read(*args)
+        def run(duration):
+            local.clock, local.duration = 0., duration
+            try:
+                return client.read(None, 'query')
+            finally:
+                if duration == 1:
+                    first_done.set()
+        with mock.patch('time.monotonic', side_effect=lambda: local.clock), \
+                mock.patch.object(client.opener, 'open', side_effect=lambda *a, **k: Response(b'body')), \
+                concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(run, duration) for duration in (1, 2)]
+            self.assertEqual([future.result(5) for future in futures], [b'body', b'body'])
+        self.assertEqual(client.http_seconds, 3)
+        self.assertEqual(client.admission_seconds, 0)
+
     def test_hosted_success_requires_exact_nonnegative_usage(self):
         # Own successful-response admission; unknown failed attempts are a
         # separate trial contract. Only provider HTTP is replaced.
