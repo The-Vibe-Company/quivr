@@ -1608,5 +1608,99 @@
       "valid_until": "2026-10-02T10:05:00Z",
       "revoked_at": "2026-10-02T10:02:00Z"
     }
+  },
+  {
+    "name": "metadata_facets_request",
+    "schema": "FacetRequest",
+    "value": {
+      "corpus_ids": [
+        "corpus_a",
+        "corpus_b"
+      ],
+      "fields": [
+        {
+          "field": "metadata.language",
+          "limit": 10
+        },
+        {
+          "field": "metadata.published_at",
+          "interval": "month",
+          "limit": 20
+        }
+      ],
+      "filter": {
+        "metadata": [
+          {
+            "field": "metadata.tags",
+            "any_of": [
+              "harbour"
+            ]
+          }
+        ],
+        "source_namespaces": [
+          "source"
+        ]
+      }
+    }
+  },
+  {
+    "name": "typed_metadata_facets",
+    "schema": "FacetResponse",
+    "value": {
+      "items": [
+        {
+          "field": "metadata.language",
+          "buckets": [
+            {
+              "value": "en",
+              "count": 2
+            }
+          ]
+        },
+        {
+          "field": "rating",
+          "buckets": [
+            {
+              "value": 2.5,
+              "count": 1
+            },
+            {
+              "value": 16777217,
+              "count": 1
+            }
+          ]
+        },
+        {
+          "field": "flag",
+          "buckets": [
+            {
+              "value": false,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "field": "metadata.published_at",
+          "buckets": [
+            {
+              "value": "2026-10-01T00:00:00Z",
+              "count": 2
+            }
+          ]
+        },
+        {
+          "field": "metadata.tags",
+          "buckets": []
+        }
+      ],
+      "excluded_corpora": [
+        {
+          "corpus_id": "corpus_b",
+          "fields": [
+            "rating"
+          ]
+        }
+      ]
+    }
   }
 ]

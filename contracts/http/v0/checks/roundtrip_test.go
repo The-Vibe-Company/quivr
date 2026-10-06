@@ -24,6 +24,10 @@ func TestContractRoundTrips(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			var target any
 			switch c.Schema {
+			case "FacetRequest":
+				target = &FacetRequest{}
+			case "FacetResponse":
+				target = &FacetResponse{}
 			case "SearchRequest":
 				target = &SearchRequest{}
 			case "SearchResponse":
@@ -107,6 +111,26 @@ func TestContractRoundTrips(t *testing.T) {
 			}
 			if err := json.Unmarshal(c.Value, target); err != nil {
 				t.Fatal(err)
+			}
+			if facets, ok := target.(*FacetResponse); ok {
+				var wire struct {
+					Items []struct {
+						Buckets []struct{ Value any }
+					}
+				}
+				if err := json.Unmarshal(c.Value, &wire); err != nil {
+					t.Fatal(err)
+				}
+				for i, facet := range facets.Items {
+					for j, bucket := range facet.Buckets {
+						if want, numeric := wire.Items[i].Buckets[j].Value.(float64); numeric {
+							got, err := bucket.Value.AsFacetBucketValue1()
+							if err != nil || float64(got) != want {
+								t.Fatalf("numeric bucket changed: got %v, want %v, error %v", got, want, err)
+							}
+						}
+					}
+				}
 			}
 			encoded, err := json.Marshal(target)
 			if err != nil {
