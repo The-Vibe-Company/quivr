@@ -55,7 +55,8 @@ export function corporaPicker({ readable, demo }) {
 export function createViews({ feedFor, indexFor, upstream }) {
   const clients = new Set();
   const keepalive = setInterval(() => {
-    for (const res of clients) res.write(": keepalive\n\n");
+    // A stream still waiting for its first scans has sent no headers yet.
+    for (const res of clients) if (res.headersSent) res.write(": keepalive\n\n");
   }, KEEPALIVE_MS);
   keepalive.unref();
 

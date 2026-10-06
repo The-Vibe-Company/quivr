@@ -109,6 +109,7 @@ export function predicatesOf(raw) {
 }
 
 const monthOf = (value) => {
+  if (!RFC3339.test(String(value))) return undefined;
   const at = Date.parse(String(value));
   return Number.isNaN(at) ? undefined : new Date(at).toISOString().slice(0, 7);
 };
@@ -160,8 +161,10 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
     if (known && Date.now() - known.at < CORPUS_TTL_MS) return known.value;
     const response = await upstream(`/v0/corpora/${encodeURIComponent(id)}`);
     if (response.status >= 500) throw failure(503, "Le moteur est momentanément indisponible. Réessayez.");
-    // A corpus the key cannot read, or that is gone, is not offered.
-    if (response.status !== 200) throw failure(404, "Corpus introuvable.");
+    // A corpus the key cannot read, or that is gone, is not offered; any
+    // other answer is passing, and the corpus is described again later.
+    if (response.status === 403 || response.status === 404) throw failure(404, "Corpus introuvable.");
+    if (response.status !== 200) throw failure(503, "Le moteur est momentanément indisponible. Réessayez.");
     const data = response.data;
     const value = {
       corpus_id: id,
