@@ -15,6 +15,7 @@ import { ArrowRight, LockKey } from "@phosphor-icons/react";
 import {
   AdminIcon,
   AlertsIcon,
+  ExplorerIcon,
   FeedIcon,
   MoonIcon,
   PlusIcon,
@@ -36,6 +37,7 @@ import { displayState } from "./components/connectors/HealthBadge";
 import { needsCheck } from "./lib/format";
 import { currentTheme, onSystemTheme, saveTheme, type Theme } from "./lib/theme";
 import { ChartTip } from "./components/ChartTip";
+import { fetchCorpora, scopeOf, type Corpus } from "./lib/corpora";
 
 // The Fil ships with the page; the other tabs and the text form load on first
 // use, and are fetched while the browser is idle so a click does not wait.
@@ -43,6 +45,7 @@ const loaders = {
   alerts: () => import("./components/alerts/AlertsView"),
   sources: () => import("./components/connectors/ConnectorsView"),
   admin: () => import("./components/admin/AdminView"),
+  explorer: () => import("./components/explorer/ExplorerView"),
   addText: () => import("./components/AddText"),
 };
 const AlertsView = lazy(() => loaders.alerts().then((m) => ({ default: m.AlertsView })));
@@ -50,6 +53,9 @@ const ConnectorsView = lazy(() =>
   loaders.sources().then((m) => ({ default: m.ConnectorsView })),
 );
 const AdminView = lazy(() => loaders.admin().then((m) => ({ default: m.AdminView })));
+const ExplorerView = lazy(() =>
+  loaders.explorer().then((m) => ({ default: m.ExplorerView })),
+);
 const AddText = lazy(() => loaders.addText().then((m) => ({ default: m.AddText })));
 function prefetchTabs() {
   const load = () => Object.values(loaders).forEach((load) => void load().catch(() => {}));
@@ -62,24 +68,28 @@ function prefetchTabs() {
 }
 
 type Auth = "loading" | "login" | "ready" | "error";
-type View = "feed" | "alerts" | "sources" | "admin";
+type View = "feed" | "explorer" | "alerts" | "sources" | "admin";
 export type Doc = { record: string; version: string };
 
-// Fil, Alertes, Sources and the read-only Admin; search lives in the top bar.
+// Fil, Explorer, Alertes, Sources and the read-only Admin; search lives in
+// the top bar.
 const TABS: { view: View; label: string; href: string }[] = [
   { view: "feed", label: "Fil", href: "/" },
+  { view: "explorer", label: "Explorer", href: "/?view=explorer" },
   { view: "alerts", label: "Alertes", href: "/?view=alerts" },
   { view: "sources", label: "Sources", href: "/?view=sources" },
   { view: "admin", label: "Admin", href: "/?view=admin" },
 ];
 const TAB_ICONS: Record<View, ComponentType<{ size?: number }>> = {
   feed: FeedIcon,
+  explorer: ExplorerIcon,
   alerts: AlertsIcon,
   sources: SourcesIcon,
   admin: AdminIcon,
 };
 const TITLES: Record<View, string> = {
   feed: "Fil",
+  explorer: "Explorer",
   alerts: "Alertes",
   sources: "Sources",
   admin: "Admin",
@@ -89,7 +99,7 @@ function urlState() {
   const p = new URLSearchParams(location.search);
   const view = p.get("view") || "";
   return {
-    view: (view === "alerts" || view === "admin"
+    view: (view === "alerts" || view === "admin" || view === "explorer"
       ? view
       : ["sources", "connectors"].includes(view)
         ? "sources"
@@ -104,6 +114,10 @@ function urlState() {
       p.get("record") && p.get("doc")
         ? { record: p.get("record")!, version: p.get("doc")! }
         : null,
+    // The corpora the feed or the Explorer spans, the demo corpus by default.
+    corpora: (p.get("corpora") || "").split(",").filter(Boolean),
+    // A document open in the Explorer.
+    explored: view === "explorer" ? p.get("record") : null,
   };
 }
 
@@ -264,6 +278,16 @@ function Dashboard({
     null,
   );
   const [openSource, setOpenSource] = useState<string | null>(null);
+  // Every corpus the demo reads; the feed and the Explorer each span some.
+  const [allCorpora, setAllCorpora] = useState<Corpus[]>([]);
+  const [feedCorpora, setFeedCorpora] = useState<string[]>(() =>
+    initial.view === "feed" && initial.corpora.length ? initial.corpora : [corpus],
+  );
+  const [explored, setExplored] = useState<string[]>(() =>
+    initial.view === "explorer" && initial.corpora.length ? initial.corpora : [corpus],
+  );
+  const [record, setRecord] = useState<string | null>(initial.explored);
+  const scope = scopeOf(feedCorpora, corpus);
   const searchRef = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const query = input.trim();
@@ -271,7 +295,7 @@ function Dashboard({
   // New articles go straight into the timeline, marked unread, unless
   // arrivals are paused from the rail.
   const hold = () => paused;
-  const feed = useFeedStream(hold, onUnauthorized);
+  const feed = useFeedStream(hold, onUnauthorized, scope);
   const alerts = useAlertList(onUnauthorized);
   const sources = useConnectorList(onUnauthorized);
   // Before any child renders: every label of a source reads these names.
@@ -283,6 +307,25 @@ function Dashboard({
   );
 
   useEffect(prefetchTabs, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchCorpora(controller.signal)
+      .then((list) => {
+        setAllCorpora(list.items);
+        // A corpus the address names that the demo no longer reads is dropped.
+        const known = new Set(list.items.map((c) => c.corpus_id));
+        const keep = (ids: string[]) => {
+          const kept = ids.filter((id) => known.has(id));
+          return kept.length === ids.length ? ids : kept.length ? kept : [corpus];
+        };
+        setFeedCorpora(keep);
+        setExplored(keep);
+      })
+      .catch((error) => {
+        if (error instanceof APIError && error.status === 401) onUnauthorized();
+      });
+    return () => controller.abort();
+  }, [corpus, onUnauthorized]);
   useEffect(() => {
     const controller = new AbortController();
     searchProfiles(controller.signal)
@@ -320,6 +363,9 @@ function Dashboard({
     if (view === "admin" && version) p.set("version", version);
     if (view === "feed" && query) p.set("q", query);
     if (view === "feed" && query && !near) p.set("near", "0");
+    if (view === "feed" && scope) p.set("corpora", scope);
+    if (view === "explorer" && scopeOf(explored, corpus)) p.set("corpora", explored.join(","));
+    if (view === "explorer" && record) p.set("record", record);
     if (view === "feed" && doc) {
       p.set("record", doc.record);
       p.set("doc", doc.version);
@@ -333,7 +379,7 @@ function Dashboard({
       view === "feed" && query
         ? `${query} — Quivr Veille`
         : `${TITLES[view]} — Quivr Veille`;
-  }, [view, alert, version, query, near, doc]);
+  }, [view, alert, version, query, near, doc, scope, explored, record, corpus]);
 
   // "/" or Ctrl/Cmd+K puts the cursor in the search box, from any page.
   useEffect(() => {
@@ -366,12 +412,14 @@ function Dashboard({
   ).length;
   const badges: Record<View, string> = {
     feed: "",
+    explorer: "",
     alerts: alertCount ? String(alertCount) : "",
     sources: toCheck ? String(toCheck) : "",
     admin: "",
   };
   const badgeLabels: Record<View, string> = {
     feed: "",
+    explorer: "",
     admin: "",
     alerts: `${alertCount} article${alertCount > 1 ? "s" : ""} non lu${alertCount > 1 ? "s" : ""} attrapé${alertCount > 1 ? "s" : ""} par vos alertes`,
     sources: `${toCheck} source${toCheck > 1 ? "s" : ""} à vérifier`,
@@ -417,6 +465,8 @@ function Dashboard({
               onClick={(event) => {
                 event.preventDefault();
                 if (target === "alerts") setAlert(null);
+                // The Explorer's tab, clicked on a document, goes back to the list.
+                if (target === "explorer") setRecord(null);
                 if (target !== view) setDoc(null);
                 setView(target);
               }}
@@ -557,6 +607,10 @@ function Dashboard({
           {page === "feed" ? (
             <FeedPage
               corpus={corpus}
+              corpora={feedCorpora}
+              scope={scope}
+              allCorpora={allCorpora}
+              onCorpora={setFeedCorpora}
               query={query}
               near={near}
               onNear={setNear}
@@ -610,6 +664,19 @@ function Dashboard({
               onMarkAllRead={reading.markAllRead}
               onChanged={() => void alerts.reload()}
               notify={notify}
+              onUnauthorized={onUnauthorized}
+            />
+          ) : page === "explorer" ? (
+            <ExplorerView
+              corpora={allCorpora}
+              picked={explored}
+              onPicked={setExplored}
+              record={record}
+              onRecord={(id) => {
+                setRecord(id);
+                scroller.current?.scrollTo?.(0, 0);
+                window.scrollTo(0, 0);
+              }}
               onUnauthorized={onUnauthorized}
             />
           ) : page === "admin" ? (

@@ -35,6 +35,7 @@ import {
   EyeIcon,
   EyeOffIcon,
   ChecksIcon,
+  CorpusIcon,
   SourcesIcon,
 } from "../RailIcons";
 import { EmptyState, LoadingState, Notice } from "../ui";
@@ -45,6 +46,7 @@ import { SourceLogo, logoIds } from "./SourceLogo";
 import { FilterMenu, MenuOption } from "./FilterMenu";
 import { onDay, useDayCounts, useDayItems, useLiveSince } from "./days";
 import { useNumbers } from "../../lib/numbers";
+import { exclusionNotice, type Corpus, type Exclusion } from "../../lib/corpora";
 
 /**
  * What the feed shows: every article or the unread ones; then, when any are
@@ -87,6 +89,10 @@ const rowTime = (value: string, now: number) =>
 
 export function FeedPage({
   corpus,
+  corpora,
+  scope,
+  allCorpora,
+  onCorpora,
   query,
   near,
   onNear,
@@ -112,6 +118,13 @@ export function FeedPage({
   onUnauthorized,
 }: {
   corpus: string;
+  /** The corpora the feed and the search span, the demo corpus by default. */
+  corpora: string[];
+  /** Those corpora as the facade's ?corpora=, "" for the demo corpus alone. */
+  scope: string;
+  /** Every corpus the demo reads. */
+  allCorpora: Corpus[];
+  onCorpora: (ids: string[]) => void;
   query: string;
   near: boolean;
   onNear: (near: boolean) => void;
@@ -145,6 +158,8 @@ export function FeedPage({
   const [capped, setCapped] = useState(false);
   // The sources the engine ranked the hits within, or none for every source.
   const [searchedSources, setSearchedSources] = useState<string[]>([]);
+  // Corpora the engine left out of the search, and why.
+  const [excluded, setExcluded] = useState<Exclusion[]>([]);
   const [searching, setSearching] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [searchError, setSearchError] = useState("");
   // The shown results come from a deep search, with what it spent if said.
@@ -161,9 +176,9 @@ export function FeedPage({
   const terms = useMemo(() => tokenize(query), [query]);
   // The feed holds the latest articles; every day's count, and the articles
   // of a day picked in the Date menu, come from Quivr.
-  const { counts, refresh: refreshCounts } = useDayCounts(dayOf(now), onUnauthorized);
+  const { counts, refresh: refreshCounts } = useDayCounts(dayOf(now), scope, onUnauthorized);
   const liveSince = useLiveSince(feed.items);
-  const dayFeed = useDayItems(query ? "" : day, onUnauthorized);
+  const dayFeed = useDayItems(query ? "" : day, scope, onUnauthorized);
   // Out of a search, every number of the filter bar and of the side column
   // is counted by the facade over every article, not over the loaded ones.
   const week = weekBounds(now);
@@ -182,8 +197,8 @@ export function FeedPage({
   };
   const readKey = `${reading.readIds.length}:${reading.readIds.at(-1)}`;
   const counted = useNumbers(
-    query ? null : JSON.stringify({ ...statsQuery, read_ids: readKey }),
-    (signal) => fetchFeedStats(statsQuery, signal),
+    query ? null : JSON.stringify({ ...statsQuery, read_ids: readKey, scope }),
+    (signal) => fetchFeedStats(statsQuery, scope, signal),
     onUnauthorized,
     // Counted in memory by the facade: arrivals show in the counts at once.
     feed.items,
@@ -197,8 +212,8 @@ export function FeedPage({
     alerts: filter.alerts,
   };
   const topics = useNumbers(
-    JSON.stringify(topicsQuery),
-    (signal) => fetchTopics(topicsQuery, signal),
+    JSON.stringify({ ...topicsQuery, scope }),
+    (signal) => fetchTopics(topicsQuery, scope, signal),
     onUnauthorized,
     feed.items,
   );
@@ -217,6 +232,7 @@ export function FeedPage({
   // approfondie") always fetches hybrid candidates, then the plugin re-ranks
   // them; it is never remembered beyond this page's life.
   const sourcesKey = filter.sources.join("\n");
+  const corporaKey = corpora.join(",");
   const deepOn = deepOffered && deep;
   const meaning = near || deepOn;
   useEffect(() => {
@@ -235,7 +251,7 @@ export function FeedPage({
         search(
           query,
           mode,
-          corpus,
+          corporaKey.split(","),
           controller.signal,
           SEARCH_LIMIT,
           within,
@@ -268,6 +284,7 @@ export function FeedPage({
           setDeepShown(deepOn ? { usage: data.usage } : null);
           setCapped(data.items.length >= SEARCH_LIMIT);
           setSearchedSources(within);
+          setExcluded(data.excluded_corpora || []);
           setSearching("ready");
         })
         .catch((error) => {
@@ -288,7 +305,7 @@ export function FeedPage({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, near, meaning, deepOn, corpus, sourcesKey, attempt, onUnauthorized]);
+  }, [query, near, meaning, deepOn, corporaKey, sourcesKey, attempt, onUnauthorized]);
 
   const byId = useMemo(() => {
     const map = new Map<string, FeedItem>();
@@ -312,6 +329,10 @@ export function FeedPage({
 
   // The connector whose site gives each source its logo.
   const logoOf = useMemo(() => logoIds(connectors), [connectors]);
+  const corpusNameOf = useMemo(
+    () => new Map(allCorpora.map((c) => [c.corpus_id, c.name])),
+    [allCorpora],
+  );
 
   const base: Row[] = useMemo(() => {
     if (!query && day) {
@@ -639,6 +660,11 @@ export function FeedPage({
       now={now}
       logo={logoOf.get(item.namespace)}
       source={item.namespace && sourceName(item.namespace)}
+      corpusName={
+        corpora.length > 1 && item.corpus_id && item.corpus_id !== corpus
+          ? corpusNameOf.get(item.corpus_id)
+          : undefined
+      }
       unread={reading.isUnread(item)}
       selected={doc?.record === item.record_id}
       fresh={feed.fresh.has(item.record_id)}
@@ -771,6 +797,32 @@ export function FeedPage({
                 </button>
               ))}
             </span>
+            {allCorpora.length > 1 && (
+              <FilterMenu
+                title="Corpus"
+                icon={<CorpusIcon size={15} />}
+                summary={
+                  scope
+                    ? named(corpora, (id) => corpusNameOf.get(id) || id, "corpus")
+                    : undefined
+                }
+                placeholder={corpusNameOf.get(corpus)}
+              >
+                {allCorpora.map((c) => (
+                  <MenuOption
+                    key={c.corpus_id}
+                    pressed={corpora.includes(c.corpus_id)}
+                    onClick={() => {
+                      const next = pick(corpora, c.corpus_id);
+                      // The feed always follows at least one corpus.
+                      if (next.length) onCorpora(next);
+                    }}
+                  >
+                    {c.name}
+                  </MenuOption>
+                ))}
+              </FilterMenu>
+            )}
             <FilterMenu
               title="Date"
               icon={<CalendarIcon />}
@@ -1005,6 +1057,11 @@ export function FeedPage({
               )}
             </div>
           )}
+          {query && searching === "ready" && excluded.length > 0 && (
+            <p className="exclusion-note" role="note">
+              {exclusionNotice(excluded, allCorpora)}
+            </p>
+          )}
           {empty && (
             <div className="feed-none">
               <h3>{empty.title}</h3>
@@ -1074,7 +1131,7 @@ export function FeedPage({
             key={doc.record + doc.version}
             doc={doc}
             item={selected}
-            corpus={corpus}
+            corpus={corpora}
             terms={terms}
             caught={caughtBy(doc.record)}
             feedById={byId}
@@ -1133,6 +1190,8 @@ type RowProps = {
   logo?: string;
   /** The source's name as shown, so a renamed source renders again. */
   source: string;
+  /** Its corpus's name, when the feed spans several and it is not the demo corpus. */
+  corpusName?: string;
   unread: boolean;
   selected: boolean;
   fresh: boolean;
@@ -1163,6 +1222,7 @@ function FeedRowView({
   now,
   logo,
   source,
+  corpusName,
   unread,
   selected,
   fresh,
@@ -1222,6 +1282,7 @@ function FeedRowView({
         )}
         <div className="row-meta">
           {unread && <span className="visually-hidden">Non lu.</span>}
+          {corpusName && <span className="row-corpus">{corpusName}</span>}
           {source && <span className="row-source">{source}</span>}
           {at ? (
             <time

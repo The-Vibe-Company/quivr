@@ -3,7 +3,7 @@
 // sources. Each hook reads through the facade only.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { APIError } from "./search";
-import { FEED_STREAM, fetchFeed, newestFirst, type FeedItem } from "./feed";
+import { feedStream, fetchFeed, newestFirst, type FeedItem } from "./feed";
 import { fetchAlerts, followMonitoring, type AlertList } from "./alerts";
 import { fetchConnectors, type Connector } from "./connectors";
 
@@ -21,6 +21,8 @@ const ARRIVALS_MS = 250;
 export function useFeedStream(
   hold: () => boolean,
   onUnauthorized: () => void,
+  /** The corpora followed, joined by commas; "" for the demo corpus. */
+  scope = "",
 ) {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [pending, setPending] = useState<FeedItem[]>([]);
@@ -34,6 +36,7 @@ export function useFeedStream(
   holdRef.current = hold;
   const pendingRef = useRef<FeedItem[]>([]);
   const itemsRef = useRef<FeedItem[]>([]);
+  const scopeRef = useRef(scope);
 
   const flash = useCallback((ids: string[]) => {
     if (!ids.length) return;
@@ -60,6 +63,11 @@ export function useFeedStream(
   );
 
   useEffect(() => {
+    // Other corpora picked: what waited belongs to the ones left.
+    if (scopeRef.current !== scope) {
+      scopeRef.current = scope;
+      commit(itemsRef.current, []);
+    }
     const controller = new AbortController();
     let retry: ReturnType<typeof setTimeout>;
     let loads = 0;
@@ -126,7 +134,7 @@ export function useFeedStream(
     const load = () => {
       const ticket = ++loads;
       replay = new Map();
-      return fetchFeed(controller.signal)
+      return fetchFeed(scope, controller.signal)
         .then((data) => {
           if (ticket !== loads) return; // A newer snapshot is on its way.
           const waiting = new Set(pendingRef.current.map((i) => i.record_id));
@@ -153,7 +161,7 @@ export function useFeedStream(
     };
     // The snapshot shows at once; every (re)connection of the stream rereads
     // it, so nothing that arrived while the stream was down is missed.
-    const source = new EventSource(FEED_STREAM);
+    const source = new EventSource(feedStream(scope));
     void load();
     source.onopen = () => void load();
     source.onerror = () => {
@@ -184,7 +192,7 @@ export function useFeedStream(
       clearTimeout(retry);
       clearTimeout(batch);
     };
-  }, [attempt, onUnauthorized, commit, flash]);
+  }, [attempt, onUnauthorized, commit, flash, scope]);
 
   const showPending = useCallback(() => {
     const waiting = pendingRef.current;

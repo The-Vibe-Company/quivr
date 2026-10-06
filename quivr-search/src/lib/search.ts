@@ -76,7 +76,7 @@ export const login = (password: string) => request("/demo/login", { password });
 export const search = (
   query: string,
   mode: Mode,
-  corpus: string,
+  corpora: string | string[],
   signal?: AbortSignal,
   limit = 10,
   sources: string[] = [],
@@ -89,7 +89,7 @@ export const search = (
       mode,
       profile,
       limit,
-      corpus_ids: [corpus],
+      corpus_ids: typeof corpora === "string" ? [corpora] : corpora,
       // The engine ranks within these sources, before the limit.
       ...(sources.length ? { filter: { source_namespaces: sources } } : {}),
     },
