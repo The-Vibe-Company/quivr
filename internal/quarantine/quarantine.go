@@ -1,8 +1,9 @@
 // Package quarantine lists the Record Versions stuck in quarantine and
-// reprocesses them (Spec 5). A reprocess reruns the step a Version failed at,
+// reprocesses them (Spec 5). By default it reruns the step a Version failed at,
 // its normalization or its ingestion, with the Pipeline Plan active when the
-// reprocess is accepted. A Version that succeeds then goes through the normal
-// publication path, as for a first success: it becomes current and
+// reprocess is accepted. An explicit normalization restart reruns the stored
+// source through normalization before ingestion. A Version that succeeds then
+// goes through the normal publication path, as for a first success: it becomes current and
 // searchable, its alerts are evaluated and the change feed announces it. One
 // that fails again stays quarantined with its new reason.
 //
@@ -79,7 +80,7 @@ type Store interface {
 	// request; another canonical request under the key is
 	// operations.ErrConflict, and a Corpus another reprocess has not
 	// finished is ErrInProgress.
-	AcceptReprocess(ctx context.Context, org, key string, canonical []byte, f Filter, e operations.ReprocessEstimate) (operations.Operation, error)
+	AcceptReprocess(ctx context.Context, org, key string, canonical []byte, f Filter, fromStage string, e operations.ReprocessEstimate) (operations.Operation, error)
 }
 
 // Service lists quarantined Versions and accepts reprocess requests. Both
@@ -93,6 +94,8 @@ type Request struct {
 	Key    string
 	Filter Filter
 	DryRun bool
+	// FromStage optionally restarts at normalization instead of the failed step.
+	FromStage string
 }
 
 // MaxPage bounds one page of the listing.
@@ -152,8 +155,11 @@ func (s Service) Request(ctx context.Context, scope corpus.Scope, r Request, pre
 	if err := checkWindow(f); err != nil {
 		return none, operations.Operation{}, err
 	}
+	if r.FromStage != "" && r.FromStage != content.QuarantineNormalization {
+		return none, operations.Operation{}, fmt.Errorf("%w: from_stage must be normalization when set", ErrInvalid)
+	}
 	f.After, f.Before = utc(f.After), utc(f.Before)
-	canonical, err := canonicalRequest(r.Key, f)
+	canonical, err := canonicalRequest(r.Key, f, r.FromStage)
 	if err != nil {
 		return none, operations.Operation{}, err
 	}
@@ -179,7 +185,7 @@ func (s Service) Request(ctx context.Context, scope corpus.Scope, r Request, pre
 	if string(recorded) != string(canonical) {
 		return none, operations.Operation{}, operations.ErrConflict
 	}
-	op, err := s.Store.AcceptReprocess(ctx, scope.Organization, r.Key, canonical, f, e)
+	op, err := s.Store.AcceptReprocess(ctx, scope.Organization, r.Key, canonical, f, r.FromStage, e)
 	if err == nil && op.Reprocess != nil {
 		e = op.Reprocess.Estimate
 	}
@@ -202,8 +208,8 @@ func utc(t *time.Time) *time.Time {
 }
 
 // canonicalRequest is what idempotent replay compares: the key and the
-// scope, never dry_run.
-func canonicalRequest(key string, f Filter) ([]byte, error) {
+// scope and optional restart stage, never dry_run.
+func canonicalRequest(key string, f Filter, fromStage string) ([]byte, error) {
 	format := func(t *time.Time) string {
 		if t == nil {
 			return ""
@@ -211,11 +217,12 @@ func canonicalRequest(key string, f Filter) ([]byte, error) {
 		return t.Format(time.RFC3339Nano)
 	}
 	return json.Marshal(struct {
-		Key    string `json:"idempotency_key"`
-		Corpus string `json:"corpus_id"`
-		Plugin string `json:"plugin"`
-		Code   string `json:"code"`
-		After  string `json:"quarantined_after"`
-		Before string `json:"quarantined_before"`
-	}{key, f.CorpusID, f.Plugin, f.Code, format(f.After), format(f.Before)})
+		Key       string `json:"idempotency_key"`
+		Corpus    string `json:"corpus_id"`
+		Plugin    string `json:"plugin"`
+		Code      string `json:"code"`
+		After     string `json:"quarantined_after"`
+		Before    string `json:"quarantined_before"`
+		FromStage string `json:"from_stage,omitempty"`
+	}{key, f.CorpusID, f.Plugin, f.Code, format(f.After), format(f.Before), fromStage})
 }

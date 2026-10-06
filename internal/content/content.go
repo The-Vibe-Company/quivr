@@ -899,7 +899,7 @@ func (s Service) objects(ctx context.Context, org string, manifest Manifest) (Pu
 var ErrRepublicationWithdrawn = errors.New("record withdrawn")
 
 // Republication decides again what a Version published quarantined at
-// normalization publishes, from its normalization outcome recorded since:
+// either stage publishes, from its normalization outcome recorded since:
 // the objects of the normalized (or fallback) Manifest with the Work carrying
 // its provenance and extensions, or, when normalization failed again or the
 // Version can no longer be normalized, the reason it stays quarantined. It
