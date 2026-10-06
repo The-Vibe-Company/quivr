@@ -237,12 +237,17 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
         item_candidates = []
         # Keep bare/single-item keys stable; prefix multi-item keys by position.
         prefix = f'item-{index}-' if len(items) > 1 else ''
-        for name in ('headline', 'slugline'):
-            for n, node in enumerate(item.findall(f'contentMeta/{name}', {'': NAR}), 1):
-                if text := _text(node):
-                    role = 'title' if name == 'headline' and not title_found else 'body'
-                    title_found = title_found or role == 'title'
-                    item_candidates.append((f'{prefix}{name}-{n}', role, text, contexts[node]))
+        names = {_tag(name): name for name in ('headline', 'slugline')}
+        counts = dict.fromkeys(names.values(), 0)
+        for node in item.findall('contentMeta/*', {'': NAR}):
+            if node.tag not in names:
+                continue
+            name = names[node.tag]
+            counts[name] += 1
+            if text := _text(node):
+                role = 'title' if name == 'headline' and not title_found else 'body'
+                title_found = title_found or role == 'title'
+                item_candidates.append((f'{prefix}{name}-{counts[name]}', role, text, contexts[node]))
         number = 0
         for inline in item.findall('contentSet/inlineXML', {'': NAR}):
             for node in inline.iter():

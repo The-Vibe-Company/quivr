@@ -18,12 +18,14 @@ func TestNewsMLMessagesFitIngestion(t *testing.T) {
 	if python == "" {
 		t.Skip("run through scripts/plugin_sdk.sh with the NewsML-G2 environment")
 	}
+	// Bodies are deliberately short and trimmed: one window each with words.
+	// Long-window splitting is owned by the ingestion recipe/parity tests.
 	for _, tc := range []struct {
 		fixture string
 		title   string
 		bodies  []string
 	}{
-		{"multi-item", "Harbour reopened", []string{"Ferry service restored", "The morning ferry leaves at nine.", "Le port accueille les voyageurs", "Transport maritime", "Le prochain départ est prévu à midi."}},
+		{"multi-item", "Harbour reopened", []string{"Morning transport", "Ferry service restored", "The morning ferry leaves at nine.", "Le port accueille les voyageurs", "Transport maritime", "Le prochain départ est prévu à midi."}},
 		{"oversized-header", "Harbour weather update", []string{"A calm afternoon is forecast for the harbour."}},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {

@@ -1,7 +1,7 @@
 <newsMessage xmlns="http://iptc.org/std/nar/2006-10-01/" xml:lang="en">
   <itemSet>
     <newsItem guid="urn:example:first" version="1">
-      <contentMeta><headline>Harbour reopened</headline><headline>Ferry service restored</headline></contentMeta>
+      <contentMeta><slugline>Morning transport</slugline><headline>Harbour reopened</headline><headline>Ferry service restored</headline></contentMeta>
       <contentSet><inlineXML><p xmlns="">The morning ferry leaves at nine.</p></inlineXML></contentSet>
     </newsItem>
     <newsItem guid="urn:example:second" version="2" xml:lang="fr">
