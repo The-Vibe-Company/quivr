@@ -70,7 +70,7 @@ export function FacetColumn({
       />
     );
   return (
-    <aside className="facets" aria-label="Filtres" aria-busy={stale || undefined} data-stale={stale || undefined}>
+    <aside className="facets" aria-label="Filtres" tabIndex={-1} aria-busy={stale || undefined} data-stale={stale || undefined}>
       {excluded.length > 0 && (
         <p className="facets-warning" role="note">
           <WarningCircle size={16} aria-hidden="true" />
@@ -134,9 +134,13 @@ function FacetBox({
             type="button"
             className="facet-clear"
             onClick={() => {
+              const column = box.current?.closest<HTMLElement>(".facets");
               picked.forEach(onToggle);
-              // The button goes with the picks: the focus moves to the values.
-              box.current?.querySelector<HTMLElement>(".facet-value")?.focus();
+              // The button goes with the picks: once drawn again, the focus
+              // moves to the values left, else to the filters column.
+              requestAnimationFrame(() =>
+                (box.current?.querySelector<HTMLElement>(".facet-value") || column)?.focus(),
+              );
             }}
           >
             Effacer<span className="visually-hidden"> {label}</span>

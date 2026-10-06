@@ -225,16 +225,22 @@ export function ExplorerView({
       });
   };
 
-  // The corpora that do not fit scroll sideways, the edge faded to say so.
+  // The corpora that do not fit scroll sideways, the edge faded while some
+  // remain hidden past it.
   const switchRef = useRef<HTMLDivElement>(null);
   const [switchOverflow, setSwitchOverflow] = useState(false);
   useEffect(() => {
     const element = switchRef.current;
     if (!element) return;
-    const measure = () => setSwitchOverflow(element.scrollWidth > element.clientWidth + 1);
+    const measure = () =>
+      setSwitchOverflow(element.scrollLeft + element.clientWidth < element.scrollWidth - 1);
     const observer = new ResizeObserver(measure);
     observer.observe(element);
-    return () => observer.disconnect();
+    element.addEventListener("scroll", measure, { passive: true });
+    return () => {
+      observer.disconnect();
+      element.removeEventListener("scroll", measure);
+    };
   }, [narrow, corpora, bar.actions]);
 
   // The next page loads as the end of the list comes near, the button

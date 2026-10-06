@@ -333,6 +333,9 @@
   border-radius: var(--ex-radius);
   background: var(--panel);
 }
+.facets:focus {
+  outline: none;
+}
 .facets[data-stale] .facet {
   opacity: 0.55;
 }
