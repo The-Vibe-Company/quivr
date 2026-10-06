@@ -36,7 +36,7 @@ export CORPUS_ID=<the corpus_id above>
 </Step>
 <Step title="Count them">
 
-A dry run is required. It counts the documents the reprocess would take, by stage and by code:
+A dry run is required. It counts the documents the reprocess would take, by the stage that failed and by code:
 
 ```bash
 curl -s -X POST "$QUIVR_API_URL/v0/admin/quarantine/reprocess" -H "Authorization: Bearer $QUIVR_OPERATOR_KEY" \
@@ -50,6 +50,10 @@ EOF
 ```
 
 Leave out `code` to take every stuck document of the Corpus, or narrow with `plugin`, `quarantined_after` and `quarantined_before`.
+
+By default, reprocessing starts at the step that failed. If a fixed normalizer must replace output that ingestion refused, add `"from_stage": "normalization"` to both the dry run and the start request. Quivr reads the stored source Blob, normalizes it with the accepted plan, publishes its new Manifest, then runs ingestion. The Version keeps its identity. The dry run still groups documents by their original failed stage.
+
+Only source Blobs whose Manifest has not yet been divided into search segments can be published again. Other inputs stay quarantined and count as `skipped_not_republishable`. Use a fresh idempotency key when changing the restart stage.
 
 </Step>
 <Step title="Start it">
@@ -67,7 +71,7 @@ EOF
 {"operation_id": "operation_…", "state": "queued"}
 ```
 
-The answer is an Operation, Quivr's record of a long-running administrative task. It takes the documents in scope at this moment and runs them with the plan active now. The same key and body return the same Operation. Keep its id:
+The answer is an Operation, Quivr's record of a long-running administrative task. It takes the documents in scope at this moment and runs them with the plan active now. The same key, filters and restart stage return the same Operation. Keep its id:
 
 ```bash
 export OPERATION_ID=<the operation_id above>
@@ -94,7 +98,7 @@ curl -s "$QUIVR_API_URL/v0/operations/$OPERATION_ID" -H "Authorization: Bearer $
 | `not_republishable` | Its normalizer succeeded, but it could not be published again; it stays quarantined |
 | `not_settled` | Its processing ended neither searchable nor quarantined; it gets back its previous reason |
 
-Pause, resume or cancel it with `POST /v0/operations/{id}/pause`, `/resume` or `/cancel`, each with an `idempotency_key` body. `POST /v0/operations/{id}/rerun` on a finished reprocess takes what is still stuck in the same scope, with the plan active then.
+Pause, resume or cancel it with `POST /v0/operations/{id}/pause`, `/resume` or `/cancel`. Use `/rerun` on a finished reprocess to take what is still stuck in the same scope and preserve the restart stage, with the plan active then. Each request takes an `idempotency_key` body.
 
 </Step>
 </Steps>
@@ -110,7 +114,7 @@ curl -s "$QUIVR_API_URL/v0/admin/quarantine?corpus_id=$CORPUS_ID" -H "Authorizat
 
 ## What a reprocess does
 
-- **Normalization stage.** The normalizer of the active plan runs again. When it answers, the document is published with the normalized content, as it would have been the first time, and processed. The change feed announces it with `record.materialized`.
+- **Normalization stage, or `from_stage: normalization`.** The normalizer of the active plan runs again. When it answers, the document is published with the normalized content, as it would have been the first time, and processed. The change feed announces it with `record.materialized`.
 - **Ingestion stage.** The ingestion plugin of the active plan segments and embeds the document again.
 - **As a first success.** A recovered document becomes its Record's current Version if the Record still wants it, is searchable, is evaluated by the alerts of its Corpus, and appears in the change feed with `record.retrieval_ready` and `record.enrichment_available`.
 - **Pace.** It runs on the backfill queue, at most `backfill.rate` Versions per second (see [Configuration](/reference/configuration#backfill)), so live ingestion keeps its capacity. One reprocess of a Corpus runs at a time.
@@ -122,7 +126,7 @@ curl -s "$QUIVR_API_URL/v0/admin/quarantine?corpus_id=$CORPUS_ID" -H "Authorizat
 | Answer | Cause | Fix |
 | --- | --- | --- |
 | `409 dry_run_required` | No dry run with this key and body | Send it with `"dry_run": true` first |
-| `409 idempotency_conflict` | The key was used with another scope | Use a new key |
+| `409 idempotency_conflict` | The key was used with another scope or restart stage | Use a new key |
 | `409 reprocess_in_progress` | Another reprocess of the Corpus has not finished | Wait for it, or cancel it |
 | `422 invalid_reprocess` | `quarantined_after` is not before `quarantined_before` | Fix the window |
-| Every document fails again with the same code | The active plan still runs the plugin that refused them | Activate the fixed version, then reprocess with a new key |
+| Every document fails again with the same code | The plugin still fails, or ingestion reuses bad normalizer output | Activate the fix; for bad normalizer output, use `from_stage: normalization` in both requests with a new key |

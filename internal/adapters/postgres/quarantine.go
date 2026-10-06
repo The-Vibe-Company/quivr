@@ -128,7 +128,7 @@ func (s QuarantineStore) ReprocessEstimate(ctx context.Context, org, corpusID, k
 
 // AcceptReprocess commits a queued reprocess with the Versions it takes,
 // pinned to the active plan, or replays the one accepted under the key.
-func (s QuarantineStore) AcceptReprocess(ctx context.Context, org, key string, canonical []byte, f quarantine.Filter, e operations.ReprocessEstimate) (operations.Operation, error) {
+func (s QuarantineStore) AcceptReprocess(ctx context.Context, org, key string, canonical []byte, f quarantine.Filter, fromStage string, e operations.ReprocessEstimate) (operations.Operation, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -153,7 +153,7 @@ func (s QuarantineStore) AcceptReprocess(ctx context.Context, org, key string, c
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return operations.Operation{}, err
 	}
-	op, err := insertReprocess(ctx, tx, org, content.StableID("operation", org, operations.KindQuarantineReprocess, f.CorpusID, key), key, canonical, "", f, e)
+	op, err := insertReprocess(ctx, tx, org, content.StableID("operation", org, operations.KindQuarantineReprocess, f.CorpusID, key), key, canonical, "", f, fromStage, e)
 	if err != nil {
 		return op, err
 	}
@@ -163,7 +163,7 @@ func (s QuarantineStore) AcceptReprocess(ctx context.Context, org, key string, c
 // insertReprocess commits a queued reprocess Operation, optionally a rerun of
 // previous: it takes the Versions f keeps now, pins them to the active plan
 // and records its dispatch intent. The caller holds the journal lock.
-func insertReprocess(ctx context.Context, tx pgx.Tx, org, id, key string, canonical []byte, previous string, f quarantine.Filter, e operations.ReprocessEstimate) (operations.Operation, error) {
+func insertReprocess(ctx context.Context, tx pgx.Tx, org, id, key string, canonical []byte, previous string, f quarantine.Filter, fromStage string, e operations.ReprocessEstimate) (operations.Operation, error) {
 	var generation string
 	if err := tx.QueryRow(ctx, `SELECT `+routedGenerationSQL("$1", "$2")+` FROM corpora WHERE organization=$1 AND id=$2`, org, f.CorpusID).Scan(&generation); err != nil {
 		return operations.Operation{}, notFound(err)
@@ -189,7 +189,7 @@ func insertReprocess(ctx context.Context, tx pgx.Tx, org, id, key string, canoni
 	if err != nil {
 		return operations.Operation{}, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO quarantine_reprocesses(organization,operation_id,plugin,code,quarantined_after,quarantined_before,plan_id,estimate) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, org, id, f.Plugin, f.Code, f.After, f.Before, plan, estimate); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO quarantine_reprocesses(organization,operation_id,plugin,code,quarantined_after,quarantined_before,plan_id,estimate,from_stage) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''))`, org, id, f.Plugin, f.Code, f.After, f.Before, plan, estimate, fromStage); err != nil {
 		return operations.Operation{}, err
 	}
 	args := append(stuckArgs(org, nil, f), id)
@@ -223,13 +223,14 @@ func reprocessOf(raw []byte) (*operations.Reprocess, error) {
 		Code              string                       `json:"code"`
 		QuarantinedAfter  *time.Time                   `json:"quarantined_after"`
 		QuarantinedBefore *time.Time                   `json:"quarantined_before"`
+		FromStage         string                       `json:"from_stage"`
 		Plan              string                       `json:"plan_id"`
 		Estimate          operations.ReprocessEstimate `json:"estimate"`
 	}
 	if err := json.Unmarshal(raw, &row); err != nil {
 		return nil, err
 	}
-	return &operations.Reprocess{Plugin: row.Plugin, Code: row.Code, QuarantinedAfter: row.QuarantinedAfter, QuarantinedBefore: row.QuarantinedBefore, PlanID: row.Plan, Estimate: row.Estimate}, nil
+	return &operations.Reprocess{Plugin: row.Plugin, Code: row.Code, QuarantinedAfter: row.QuarantinedAfter, QuarantinedBefore: row.QuarantinedBefore, PlanID: row.Plan, FromStage: row.FromStage, Estimate: row.Estimate}, nil
 }
 
 // reprocessFilter is the scope a reprocess Operation was accepted for.
@@ -359,11 +360,26 @@ func (s QuarantineStore) StartReprocessItem(ctx context.Context, org, id string)
 		return it, commitAfter(ctx, tx, settle(ctx, tx, org, id, it.VersionID, quarantine.PhaseSkipped, skip))
 	}
 	it.Stage, it.Phase = v.stage, quarantine.PhaseReleased
-	if v.stage == content.QuarantineNormalization {
-		// The failed normalization is moved aside, with its retry budget:
+	if op.Reprocess.FromStage != "" {
+		it.Stage = op.Reprocess.FromStage
+	}
+	if it.Stage == content.QuarantineNormalization {
+		// Do not invalidate a stored outcome that cannot be republished.
+		var republishable bool
+		if err = tx.QueryRow(ctx, `SELECT a.command->'content'->>'kind'='blob'
+ AND NOT EXISTS(SELECT 1 FROM segmentations WHERE organization=$1 AND version_id=$2)
+ FROM accepted_revisions a JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.slot)=(a.organization,a.record_id,a.slot)
+ WHERE rc.organization=$1 AND rc.id=$3`, org, it.VersionID, it.ReceiptID).Scan(&republishable); err != nil {
+			return nil, err
+		}
+		if !republishable {
+			it.Phase = quarantine.PhaseSkipped
+			return it, commitAfter(ctx, tx, settle(ctx, tx, org, id, it.VersionID, quarantine.PhaseSkipped, quarantine.SkipNotRepublishable))
+		}
+		// The previous normalization is moved aside, with its retry budget:
 		// the normalizer runs again and its outcome is recorded as for a
 		// first normalization. The item keeps the reason it replaces.
-		if _, err = tx.Exec(ctx, `DELETE FROM normalizations WHERE organization=$1 AND version_id=$2 AND outcome='failed'`, org, it.VersionID); err != nil {
+		if _, err = tx.Exec(ctx, `DELETE FROM normalizations WHERE organization=$1 AND version_id=$2`, org, it.VersionID); err != nil {
 			return nil, err
 		}
 		if _, err = tx.Exec(ctx, `DELETE FROM normalization_attempts WHERE organization=$1 AND version_id=$2`, org, it.VersionID); err != nil {
@@ -426,7 +442,7 @@ func (s QuarantineStore) republish(ctx context.Context, org, id string, item qua
 	if err != nil {
 		return err
 	}
-	if !v.quarantined || v.stage != content.QuarantineNormalization {
+	if !v.quarantined {
 		return commitAfter(ctx, tx, settle(ctx, tx, org, id, item.VersionID, quarantine.PhaseSkipped, quarantine.SkipNotQuarantined))
 	}
 	var segmented bool

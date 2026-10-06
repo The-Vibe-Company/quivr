@@ -280,6 +280,13 @@ func serve() error {
 			write(w, 200, map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{
 				map[string]any{"key": "a", "role": "section", "content": map[string]any{"kind": "text", "text": string(text)}},
 			}}})
+		case "two-titles":
+			// Schema-valid normalization that the ingestion recipe cannot segment.
+			write(w, 200, map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{
+				map[string]any{"key": "title-a", "role": "title", "content": map[string]any{"kind": "text", "text": "Harbour notes"}},
+				map[string]any{"key": "title-b", "role": "title", "content": map[string]any{"kind": "text", "text": "Tide tables"}},
+				map[string]any{"key": "body", "role": "body", "content": map[string]any{"kind": "text", "text": text}},
+			}}})
 		case "body":
 			// The ok answer with its text as the body role, which ingestion indexes.
 			write(w, 200, map[string]any{"manifest": map[string]any{"kind": "manifest", "parts": []any{

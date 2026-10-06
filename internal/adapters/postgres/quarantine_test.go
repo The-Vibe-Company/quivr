@@ -425,3 +425,98 @@ func TestReprocessResumesAStartedVersionThroughAPause(t *testing.T) {
 		t.Fatalf("resumed %+v after %d baselines", done, w.baseline.runs)
 	}
 }
+
+// A normalization restart keeps an ingestion quarantine while preparing a new
+// outcome, survives pause/cancel/rerun, and never discards an outcome of content
+// whose Manifest is already used by segmentation.
+func TestNormalizationRestartLifecycle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	w := newReprocessWorld(t, ctx, "normalization-restart")
+	w.start("body")
+	receipt := w.accept("body.restart", "text/markdown", "")
+	if err := w.service.Normalize(ctx, w.org, receipt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.contents.Materialize(ctx, w.org, receipt.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, original := w.version(receipt.ID)
+	reason := content.Diagnostic{Code: "ingestion_refused", Message: "refused"}
+	if err := w.store.QuarantineVersion(ctx, w.org, original.ID, reason); err != nil {
+		t.Fatal(err)
+	}
+	r := quarantine.Request{Key: "restart", Filter: quarantine.Filter{CorpusID: w.corpusID}, FromStage: content.QuarantineNormalization, DryRun: true}
+	if _, _, err := w.reprocesses.Request(ctx, w.admin, r); err != nil {
+		t.Fatal(err)
+	}
+	r.DryRun = false
+	_, op, err := w.reprocesses.Request(ctx, w.admin, r)
+	if err != nil || op.Reprocess.FromStage != content.QuarantineNormalization {
+		t.Fatalf("restart accepted %+v %v", op, err)
+	}
+	if _, _, err = w.store.BeginReprocess(ctx, w.org, op.ID); err != nil {
+		t.Fatal(err)
+	}
+	item, err := w.store.StartReprocessItem(ctx, w.org, op.ID)
+	if err != nil || item == nil || item.Phase != quarantine.PhaseRenormalizing || item.Stage != content.QuarantineNormalization {
+		t.Fatalf("prepared restart %+v %v", item, err)
+	}
+	if _, found, err := w.store.Normalized(ctx, w.org, original.ID); err != nil || found {
+		t.Fatalf("stale successful normalization retained: found=%v err=%v", found, err)
+	}
+	if v := w.read(original.ID); v.Availability.State != "quarantined" || v.Diagnostics[0] != reason || v.Manifest.Parts[0].Content.Text != original.Manifest.Parts[0].Content.Text {
+		t.Fatalf("preparation changed the published quarantine: %+v", v)
+	}
+	// Cancel before the new normalization: the quarantine remains recoverable.
+	if _, err = w.store.PauseOperation(ctx, w.org, op.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = w.store.CancelOperation(ctx, w.org, op.ID); err != nil {
+		t.Fatal(err)
+	}
+	if done := w.run(op.ID); done.State != operations.StateCanceled || done.Counters["skipped_canceled"] != 1 {
+		t.Fatalf("canceled normalization restart %+v", done)
+	}
+	rerun, err := w.store.AcceptRerun(ctx, w.org, op.ID, "rerun", []byte(`{"rerun":true}`))
+	if err != nil || rerun.Reprocess.FromStage != content.QuarantineNormalization {
+		t.Fatalf("rerun lost restart stage: %+v %v", rerun, err)
+	}
+	if done := w.run(rerun.ID); done.Counters["versions_recovered"] != 1 || w.events("record.materialized", item.RecordID) != 2 {
+		t.Fatalf("rerun did not republish the ingestion quarantine: %+v", done)
+	}
+	// Once segments refer to it, renormalization cannot replace that Manifest.
+	segmented := w.accept("body.segmented", "text/markdown", "")
+	if err := w.service.Normalize(ctx, w.org, segmented.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.contents.Materialize(ctx, w.org, segmented.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, v := w.version(segmented.ID)
+	if err := w.store.SaveSegmentation(ctx, w.org, wholeBodySegmentation(w.org, v)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.store.QuarantineVersion(ctx, w.org, v.ID, reason); err != nil {
+		t.Fatal(err)
+	}
+	inline := w.text("inline", "Harbour notes")
+	if err := w.store.QuarantineVersion(ctx, w.org, inline, reason); err != nil {
+		t.Fatal(err)
+	}
+	r.Key, r.DryRun = "segmented", true
+	if _, _, err := w.reprocesses.Request(ctx, w.admin, r); err != nil {
+		t.Fatal(err)
+	}
+	r.DryRun = false
+	_, op, err = w.reprocesses.Request(ctx, w.admin, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done := w.run(op.ID); done.Counters["skipped_not_republishable"] != 2 {
+		t.Fatalf("segmented input was renormalized: %+v", done)
+	}
+	if _, found, err := w.store.Normalized(ctx, w.org, v.ID); err != nil || !found {
+		t.Fatalf("segmented input lost its stored outcome: found=%v err=%v", found, err)
+	}
+}

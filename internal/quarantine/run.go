@@ -15,7 +15,7 @@ import (
 const (
 	// PhasePending: not started.
 	PhasePending = "pending"
-	// PhaseRenormalizing: the failed normalization was moved aside; the
+	// PhaseRenormalizing: the previous normalization was moved aside; the
 	// Version stays quarantined until its normalization is recorded again.
 	PhaseRenormalizing = "renormalizing"
 	// PhaseReleased: the quarantine was lifted; the Version goes through
@@ -50,7 +50,7 @@ const (
 // Item is one Version a reprocess took.
 type Item struct {
 	VersionID, RecordID, ReceiptID string
-	// Stage is the step it failed at.
+	// Stage is the restart step, defaulting to the step it failed at.
 	Stage string
 	Phase string
 }

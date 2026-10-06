@@ -148,6 +148,7 @@ type reprocessRequest struct {
 	Code              string     `json:"code"`
 	QuarantinedAfter  *time.Time `json:"quarantined_after"`
 	QuarantinedBefore *time.Time `json:"quarantined_before"`
+	FromStage         string     `json:"from_stage"`
 	DryRun            bool       `json:"dry_run"`
 }
 
@@ -163,7 +164,7 @@ func (a *API) requestReprocess(w http.ResponseWriter, r *http.Request, scope cor
 		}
 		f := quarantine.Filter{CorpusID: in.CorpusID, Plugin: in.Plugin, Code: in.Code, After: in.QuarantinedAfter, Before: in.QuarantinedBefore}
 
-		return quarantine.Request{Key: in.IdempotencyKey, Filter: f, DryRun: in.DryRun}, nil
+		return quarantine.Request{Key: in.IdempotencyKey, Filter: f, DryRun: in.DryRun, FromStage: in.FromStage}, nil
 	})
 	if errors.Is(err, errResponseWritten) {
 		return
@@ -194,5 +195,13 @@ func reprocessToTransport(r *operations.Reprocess) *transport.OperationQuarantin
 		return nil
 	}
 	return &transport.OperationQuarantineReprocess{Plugin: optionalString(r.Plugin), Code: optionalString(r.Code), QuarantinedAfter: r.QuarantinedAfter, QuarantinedBefore: r.QuarantinedBefore,
-		PlanId: r.PlanID, Estimate: reprocessEstimateToTransport(r.Estimate)}
+		FromStage: reprocessFromStage(r.FromStage), PlanId: r.PlanID, Estimate: reprocessEstimateToTransport(r.Estimate)}
+}
+
+func reprocessFromStage(stage string) *transport.OperationQuarantineReprocessFromStage {
+	if stage == "" {
+		return nil
+	}
+	v := transport.OperationQuarantineReprocessFromStage(stage)
+	return &v
 }

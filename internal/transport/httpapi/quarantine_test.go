@@ -43,12 +43,12 @@ func (s quarantineStore) ReprocessEstimate(_ context.Context, _, _, key string) 
 	}
 	return canonical, operations.ReprocessEstimate{Versions: 3}, nil
 }
-func (quarantineStore) AcceptReprocess(_ context.Context, org, key string, _ []byte, f quarantine.Filter, e operations.ReprocessEstimate) (operations.Operation, error) {
+func (quarantineStore) AcceptReprocess(_ context.Context, org, key string, _ []byte, f quarantine.Filter, fromStage string, e operations.ReprocessEstimate) (operations.Operation, error) {
 	if key == "busy" {
 		return operations.Operation{}, quarantine.ErrInProgress
 	}
 	return operations.Operation{ID: "operation_reprocess", Organization: org, Kind: operations.KindQuarantineReprocess, CorpusID: f.CorpusID, State: operations.StateQueued,
-		Reprocess: &operations.Reprocess{Code: f.Code, PlanID: "plan", Estimate: e}}, nil
+		Reprocess: &operations.Reprocess{Code: f.Code, FromStage: fromStage, PlanID: "plan", Estimate: e}}, nil
 }
 
 // The listing pages with a cursor bound to its filters, and each reprocess
@@ -90,6 +90,14 @@ func TestQuarantineRoutes(t *testing.T) {
 	if res.StatusCode != 202 || op["kind"] != "quarantine_reprocess" || res.Header.Get("Location") != "/v0/operations/operation_reprocess" || op["quarantine_reprocess"].(map[string]any)["plan_id"] != "plan" {
 		t.Fatalf("accepted %d %v", res.StatusCode, op)
 	}
+	const restartDry = `{"idempotency_key":"restart","corpus_id":"corpus_a","from_stage":"normalization","dry_run":true}`
+	if res, estimate := operationCall(t, server, "POST", "/v0/admin/quarantine/reprocess", operator, "application/json", restartDry); res.StatusCode != 200 || estimate["versions"] != float64(3) {
+		t.Fatalf("normalization restart dry run %d %v", res.StatusCode, estimate)
+	}
+	res, restarted := operationCall(t, server, "POST", "/v0/admin/quarantine/reprocess", operator, "application/json", `{"idempotency_key":"restart","corpus_id":"corpus_a","from_stage":"normalization","dry_run":false}`)
+	if res.StatusCode != 202 || restarted["quarantine_reprocess"].(map[string]any)["from_stage"] != "normalization" {
+		t.Fatalf("normalization restart accepted %d %v", res.StatusCode, restarted)
+	}
 	if res, _ := operationCall(t, server, "POST", "/v0/admin/quarantine/reprocess", operator, "application/json", `{"idempotency_key":"busy","corpus_id":"corpus_a","dry_run":true}`); res.StatusCode != 200 {
 		t.Fatalf("dry run %d", res.StatusCode)
 	}
@@ -108,6 +116,8 @@ func TestQuarantineRoutes(t *testing.T) {
 		{"another scope under the key", "POST", "/v0/admin/quarantine/reprocess", operator, `{"idempotency_key":"k","corpus_id":"corpus_a","dry_run":false}`, 409, "idempotency_conflict"},
 		{"another reprocess of the Corpus", "POST", "/v0/admin/quarantine/reprocess", operator, `{"idempotency_key":"busy","corpus_id":"corpus_a","dry_run":false}`, 409, "reprocess_in_progress"},
 		{"an empty reprocess window", "POST", "/v0/admin/quarantine/reprocess", operator, `{"idempotency_key":"w","corpus_id":"corpus_a","dry_run":true,"quarantined_after":"2026-01-02T00:00:00Z","quarantined_before":"2026-01-01T00:00:00Z"}`, 422, "invalid_reprocess"},
+		{"restart differs from dry run", "POST", "/v0/admin/quarantine/reprocess", operator, `{"idempotency_key":"restart","corpus_id":"corpus_a","dry_run":false}`, 409, "idempotency_conflict"},
+		{"unknown restart stage", "POST", "/v0/admin/quarantine/reprocess", operator, `{"idempotency_key":"invalid","corpus_id":"corpus_a","from_stage":"ingestion","dry_run":true}`, 422, "invalid_schema"},
 		{"dry_run missing", "POST", "/v0/admin/quarantine/reprocess", operator, `{"idempotency_key":"k","corpus_id":"corpus_a"}`, 422, "invalid_schema"},
 		{"POST on the listing", "POST", "/v0/admin/quarantine", operator, dry, 405, "method_not_allowed"},
 	} {

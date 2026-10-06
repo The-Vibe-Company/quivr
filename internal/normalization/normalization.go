@@ -136,7 +136,7 @@ func (s Service) Normalize(ctx context.Context, org, receiptID string) error {
 }
 
 // Renormalize is Normalize for a Version already published quarantined, whose
-// failed outcome a quarantine reprocess moved aside: it records a new outcome
+// previous outcome a quarantine reprocess moved aside: it records a new outcome
 // for it, with the normalizer the plan of ctx routes its media type to.
 func (s Service) Renormalize(ctx context.Context, org, receiptID string) error {
 	return s.normalize(ctx, org, receiptID, true)
