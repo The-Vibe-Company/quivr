@@ -120,16 +120,19 @@ export function predicatesOf(raw) {
 
 const PERIOD = { year: 4, month: 7, day: 10 };
 
+// An instant in UTC; Date.UTC would read the years 0–99 as 1900–1999.
+const utc = (year, month, day) => new Date(0).setUTCFullYear(year, month, day);
+
 /** The UTC instants that bound a period: "2026", "2026-10" or "2026-10-05". */
 export function periodBounds(period) {
   const [year, month = 1, day = 1] = period.split("-").map(Number);
-  const start = Date.UTC(year, month - 1, day);
+  const start = utc(year, month - 1, day);
   const next =
     period.length === PERIOD.year
-      ? Date.UTC(year + 1, 0, 1)
+      ? utc(year + 1, 0, 1)
       : period.length === PERIOD.month
-        ? Date.UTC(year, month, 1)
-        : Date.UTC(year, month - 1, day + 1);
+        ? utc(year, month, 1)
+        : utc(year, month - 1, day + 1);
   return { gte: new Date(start).toISOString(), lte: new Date(next - 1).toISOString() };
 }
 
@@ -213,13 +216,21 @@ export async function countFacets({ count, ids, fields, predicates }) {
     ),
     ...alone.map(({ field, kept }) => () => ask([field], kept)),
   ];
+  // A failed count stops the others from starting; those running end first.
   const answers = [];
   let next = 0;
-  await Promise.all(
+  let failed = false;
+  const workers = await Promise.allSettled(
     Array.from({ length: Math.min(FACET_CONCURRENCY, tasks.length) }, async () => {
-      for (let i; (i = next++) < tasks.length; ) answers[i] = await tasks[i]();
+      for (let i; !failed && (i = next++) < tasks.length; )
+        answers[i] = await tasks[i]().catch((error) => {
+          failed = true;
+          throw error;
+        });
     }),
   );
+  const rejected = workers.find((w) => w.status === "rejected");
+  if (rejected) throw rejected.reason;
   const [all, ...others] = answers;
   const buckets = new Map();
   for (const item of [...(common.length ? all.items : []), ...others.flatMap((o) => o.items)])

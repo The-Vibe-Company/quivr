@@ -97,9 +97,11 @@
 .facet .link-button {
   margin: 4px 0 0 6px;
 }
+.facets .facet {
+  transition: opacity var(--duration) var(--ease);
+}
 .facets[data-stale] .facet {
   opacity: 0.6;
-  transition: opacity var(--duration) var(--ease);
 }
 /* A date: documents per period, the feed's bars, a period picked in accent. */
 .facet-histogram {

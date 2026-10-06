@@ -1433,15 +1433,19 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
   const both = await get(`/demo/explore/facets?corpora=demo,wires&${filtered}`);
   assert.deepEqual(both.data.excluded_corpora, [{ corpus_id: "demo", fields: ["desk"] }]);
   const alone = await get(`/demo/explore/facets?corpora=wires&${filtered}`);
+  // The counts of one view run concurrently: compared in any order.
+  const asked = (b) => JSON.stringify([b.corpus_ids, b.filter?.metadata, b.fields.map((f) => f.field).filter((f) => !f.startsWith("metadata."))]);
   assert.deepEqual(
-    counts.map((b) => [b.corpus_ids, b.filter?.metadata, b.fields.map((f) => f.field).filter((f) => !f.startsWith("metadata."))]),
+    counts.map(asked).sort(),
     [
       [["demo", "wires"], predicates, []],
       [["wires"], predicates, []],
       [["wires"], undefined, ["desk"]],
-    ],
+    ]
+      .map((x) => JSON.stringify(x))
+      .sort(),
   );
-  assert.deepEqual(counts[0].fields.find((f) => f.field === "metadata.published_at"), {
+  assert.deepEqual(counts.find((b) => b.corpus_ids.length === 2).fields.find((f) => f.field === "metadata.published_at"), {
     field: "metadata.published_at",
     limit: 100,
     interval: "month",

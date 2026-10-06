@@ -169,6 +169,15 @@ export function ExplorerView({
       return out;
     });
 
+  // An active filter's chip removes it, a date's period included.
+  const remove = (field: string, value: Scalar) =>
+    setSelection((current) => {
+      const next = (current[field] || []).filter((v) => v !== value);
+      const out = { ...current, [field]: next };
+      if (!next.length) delete out[field];
+      return out;
+    });
+
   const nameOf = (id?: string) => corpora.find((c) => c.corpus_id === id)?.name || id || "";
   const single = picked.length === 1 ? corpora.find((c) => c.corpus_id === picked[0]) : undefined;
   const facetList = facets?.fields || [];
@@ -278,7 +287,7 @@ export function ExplorerView({
                       key={`${field}:${value}`}
                       type="button"
                       className="pick-chip"
-                      onClick={() => toggle(field, value)}
+                      onClick={() => remove(field, value)}
                     >
                       {fieldLabel(field)} : {valueLabel(value, types.get(field), field)}
                       <X size={13} aria-hidden="true" />
@@ -417,20 +426,26 @@ function mergeExclusions(list: Exclusion[]) {
   return [...out].map(([corpus_id, fields]) => ({ corpus_id, fields: [...fields] }));
 }
 
-/** The periods between two, both included, at one step: "2026-09", "2026-10"… */
+// Beyond this many periods, the bars are those counted, without the gaps.
+const MAX_BARS = 400;
+
+/**
+ * The periods between two, both included, at one step: "2026-09",
+ * "2026-10"…; undefined when there would be more than MAX_BARS.
+ */
 function periodsBetween(first: string, last: string, interval: Interval) {
   const out: string[] = [];
   const at = new Date(`${first.padEnd(10, "-01").slice(0, 10)}T00:00:00Z`);
   const length = first.length;
-  for (let i = 0; i < 400; i++) {
+  for (;;) {
     const period = at.toISOString().slice(0, length);
     out.push(period);
-    if (period >= last) break;
+    if (period >= last) return out;
+    if (out.length >= MAX_BARS) return undefined;
     if (interval === "year") at.setUTCFullYear(at.getUTCFullYear() + 1);
     else if (interval === "month") at.setUTCMonth(at.getUTCMonth() + 1);
     else at.setUTCDate(at.getUTCDate() + 1);
   }
-  return out;
 }
 
 const STEP: Record<Interval, string> = {
@@ -474,7 +489,8 @@ function DateFacet({
   const interval = facet.interval!;
   const counts = new Map(facet.values.map(({ value, count }) => [String(value), count]));
   const periods = facet.values.length
-    ? periodsBetween(String(facet.values[0].value), String(facet.values.at(-1)!.value), interval)
+    ? periodsBetween(String(facet.values[0].value), String(facet.values.at(-1)!.value), interval) ||
+      facet.values.map(({ value }) => String(value))
     : [];
   const most = Math.max(1, ...counts.values());
   const label = fieldLabel(facet.field);

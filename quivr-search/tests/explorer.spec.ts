@@ -55,16 +55,17 @@ test("l’Explorer parcourt un corpus par facettes, garde un champ propre et dit
   await expect(counts(page, "Desk")).toHaveText(["economy2", "politics1", "sport1"]);
   await expect(counts(page, "Langue")).toHaveText(["anglais2", "français2"]);
 
-  // A date is a histogram: a day's bar narrows the list and the counts; the
-  // other days stay offered, and the path widens back to every date.
+  // A date is a histogram: a day's bar narrows the list and the counts, and
+  // its active filter's chip removes it.
   const dates = facet(page, "Date de publication");
   next = listed(page);
   await dates.getByRole("button", { name: /: 2 documents$/ }).click();
   expect(JSON.parse((await next).get("metadata")!)[0]).toMatchObject({ field: "metadata.published_at" });
   await expect(documents(page)).toHaveText(["Récolte de blé : les prix reculent", "Cup final moved to Sunday"]);
   await expect(counts(page, "Langue")).toHaveText(["anglais1", "français1"]);
-  await expect(dates.getByRole("button", { name: /: 1 document$/ })).toHaveCount(2);
-  await dates.getByRole("button", { name: "Toutes les dates" }).click();
+  await expect(dates.getByRole("button", { name: /: 2 documents$/ })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("group", { name: "Filtres actifs" }).getByRole("button", { name: /^Date de publication/ }).click();
+  await expect(dates.getByRole("list", { name: "Période choisie" })).toHaveCount(0);
   await expect(documents(page)).toHaveCount(3);
 
   // A common facet narrows the list with the engine's predicate; the other

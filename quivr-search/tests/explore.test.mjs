@@ -27,14 +27,15 @@ async function counted(predicates, buckets) {
     b.fields.find((f) => f.field === date.name)?.interval,
     (b.filter?.metadata || []).map((p) => `${p.field.slice(9)} ${p.gte || ""}`.trim()),
   ]);
-  return { interval: histogram.interval, values: histogram.values.map((v) => v.value), asked };
+  return { interval: histogram.interval, values: histogram.values.map((v) => `${v.value} ${v.count}`), asked };
 }
 
 const at = (value, count = 1) => ({ value, count });
+// n months from January of a year, the i-th counting i + 1 documents.
 const months = (first, n) =>
   Array.from({ length: n }, (_, i) => {
     const d = new Date(Date.UTC(first, i, 1));
-    return at(d.toISOString().replace(".000", ""));
+    return at(d.toISOString().replace(".000", ""), i + 1);
   });
 const picked = (period) => ({ field: date.name, ...periodBounds(period) });
 const en = { field: language.name, any_of: ["en"] };
@@ -45,25 +46,25 @@ test("a date's histogram steps by the period picked, or by the span of its docum
       name: "unpicked, within two months: counted again by day",
       predicates: [],
       buckets: { month: months(2026, 2), day: [at("2026-01-03T00:00:00Z"), at("2026-02-09T00:00:00Z")] },
-      want: { interval: "day", values: ["2026-01-03", "2026-02-09"], asked: [["month", []], ["day", []]] },
+      want: { interval: "day", values: ["2026-01-03 1", "2026-02-09 1"], asked: [["month", []], ["day", []]] },
     },
     {
       name: "unpicked, a few years: by month",
       predicates: [],
       buckets: { month: months(2024, 30) },
-      want: { interval: "month", values: months(2024, 30).map((b) => b.value.slice(0, 7)), asked: [["month", []]] },
+      want: { interval: "month", values: months(2024, 30).map((b) => `${b.value.slice(0, 7)} ${b.count}`), asked: [["month", []]] },
     },
     {
       name: "unpicked, over three years: the months summed by year",
       predicates: [],
       buckets: { month: months(2020, 60) },
-      want: { interval: "year", values: ["2020", "2021", "2022", "2023", "2024"], asked: [["month", []]] },
+      want: { interval: "year", values: ["2020 78", "2021 222", "2022 366", "2023 510", "2024 654"], asked: [["month", []]] },
     },
     {
       name: "unpicked, months cut at the engine's bound: counted again by year",
       predicates: [],
       buckets: { month: months(2000, 100), year: [at("2000-01-01T00:00:00Z"), at("2008-01-01T00:00:00Z")] },
-      want: { interval: "year", values: ["2000", "2008"], asked: [["month", []], ["year", []]] },
+      want: { interval: "year", values: ["2000 1", "2008 1"], asked: [["month", []], ["year", []]] },
     },
     {
       name: "a year picked: its months, under its own filter",
@@ -71,7 +72,7 @@ test("a date's histogram steps by the period picked, or by the span of its docum
       buckets: { month: [at("2026-03-01T00:00:00Z")] },
       want: {
         interval: "month",
-        values: ["2026-03"],
+        values: ["2026-03 1"],
         asked: [
           ["month", ["language", "published_at 2026-01-01T00:00:00.000Z"]],
           [undefined, ["published_at 2026-01-01T00:00:00.000Z"]],
@@ -84,7 +85,7 @@ test("a date's histogram steps by the period picked, or by the span of its docum
       buckets: { day: [at("2026-10-05T00:00:00Z"), at("2026-10-20T00:00:00Z")] },
       want: {
         interval: "day",
-        values: ["2026-10-05", "2026-10-20"],
+        values: ["2026-10-05 1", "2026-10-20 1"],
         asked: [
           [undefined, ["published_at 2026-10-05T00:00:00.000Z"]],
           ["day", ["published_at 2026-10-01T00:00:00.000Z"]],

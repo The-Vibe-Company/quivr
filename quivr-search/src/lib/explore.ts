@@ -97,14 +97,16 @@ export const PERIOD = /^\d{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?)?$/;
 /** A period as the instants that bound it, in UTC. */
 export function periodBounds(period: string) {
   const [year, month = 1, day = 1] = period.split("-").map(Number);
+  // Date.UTC would read the years 0–99 as 1900–1999.
+  const utc = (y: number, m: number, d: number) => new Date(0).setUTCFullYear(y, m, d);
   const next =
     period.length === 4
-      ? Date.UTC(year + 1, 0, 1)
+      ? utc(year + 1, 0, 1)
       : period.length === 7
-        ? Date.UTC(year, month, 1)
-        : Date.UTC(year, month - 1, day + 1);
+        ? utc(year, month, 1)
+        : utc(year, month - 1, day + 1);
   return {
-    gte: new Date(Date.UTC(year, month - 1, day)).toISOString(),
+    gte: new Date(utc(year, month - 1, day)).toISOString(),
     lte: new Date(next - 1).toISOString(),
   };
 }
