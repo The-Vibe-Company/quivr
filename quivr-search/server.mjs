@@ -229,11 +229,11 @@ async function jsonBody(req) {
 // What the request being answered waited on in the core, for its
 // Server-Timing header: calls made and time spent in them.
 const coreTime = new AsyncLocalStorage();
-async function upstream(path, method = "GET", body, timeout = 8000) {
+async function upstream(path, method = "GET", body, timeout = 8000, signal) {
   const spent = coreTime.getStore();
   const started = performance.now();
   try {
-    return await upstreamCall(path, method, body, timeout);
+    return await upstreamCall(path, method, body, timeout, signal);
   } finally {
     if (spent) {
       spent.calls++;
@@ -241,7 +241,7 @@ async function upstream(path, method = "GET", body, timeout = 8000) {
     }
   }
 }
-async function upstreamCall(path, method, body, timeout) {
+async function upstreamCall(path, method, body, timeout, signal) {
   const response = await fetch(core + path, {
     method,
     headers: {
@@ -249,7 +249,7 @@ async function upstreamCall(path, method, body, timeout) {
       "Content-Type": "application/json",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(timeout),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
     redirect: "error",
   });
   const chunks = [];
@@ -635,7 +635,10 @@ async function handle(req, res) {
         return;
       }
       if (path === "/demo/explore/facets" && req.method === "GET") {
-        await send(res, 200, await explorer.facets(url.searchParams));
+        // A browser that leaves stops the engine's counts: it admits few at once.
+        const left = new AbortController();
+        res.on("close", () => left.abort());
+        await send(res, 200, await explorer.facets(url.searchParams, left.signal));
         return;
       }
       const explored = path.match(/^\/demo\/explore\/records\/([\w-]+)$/);

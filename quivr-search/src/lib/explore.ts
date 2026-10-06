@@ -142,8 +142,9 @@ export const fetchExplore = (
     signal,
   );
 
+// The engine may take 25 s per count, and the facade chains a few.
 export const fetchFacets = (corpora: string[], predicates: MetadataFilter[], signal?: AbortSignal) =>
-  request<Facets>(`/demo/explore/facets?${query(corpora, predicates)}`, undefined, signal);
+  request<Facets>(`/demo/explore/facets?${query(corpora, predicates)}`, undefined, signal, "GET", 90000);
 
 export const fetchRecordDetail = (id: string, signal?: AbortSignal) =>
   request<RecordDetail>(`/demo/explore/records/${encodeURIComponent(id)}`, undefined, signal);

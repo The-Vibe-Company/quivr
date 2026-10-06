@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { APIError } from "../../lib/search";
 import {
   corpusNames,
@@ -245,19 +245,24 @@ export function ExplorerView({
           <aside
             className="facets"
             aria-label="Filtres"
-            aria-busy={(facets !== null && facets.key !== key && !facetsError) || undefined}
+            aria-busy={(facets?.key !== key && !facetsError) || undefined}
+            data-stale={(facets !== null && facets.key !== key) || undefined}
           >
+            {facetsError && (
+              <p className="facets-note" role="status">
+                {facetsError}{" "}
+                <button type="button" className="link-button" onClick={() => setAttempt((n) => n + 1)}>
+                  Réessayer
+                </button>
+              </p>
+            )}
+            {!facets && !facetsError && <LoadingState label="Comptage des valeurs…" rows={4} />}
             {common.map(facetBox)}
             {single && own.length > 0 && (
               <>
                 <h2 className="facets-corpus">Champs de {single.name}</h2>
                 {own.map(facetBox)}
               </>
-            )}
-            {facetsError && (
-              <p className="facets-note" role="status">
-                {facetsError}
-              </p>
             )}
           </aside>
           <section className="panel explorer-list" aria-labelledby="explorer-title">
@@ -450,6 +455,22 @@ function DateFacet({
   onPick: (period: string | undefined) => void;
   onToggle: (value: Scalar) => void;
 }) {
+  const [focused, setFocused] = useState<string>();
+  // A pick from here zooms the bars once the new counts arrive: focus, if it
+  // fell to the page meanwhile, goes to the new tab stop or to the period
+  // picked. Focus taken elsewhere cancels it.
+  const section = useRef<HTMLElement>(null);
+  const refocus = useRef(false);
+  useEffect(() => {
+    const here = section.current;
+    if (!refocus.current || !here) return;
+    refocus.current = false;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    (
+      here.querySelector<HTMLElement>('.facet-histogram button[tabindex="0"]') ||
+      here.querySelector<HTMLElement>("[aria-current]")
+    )?.focus();
+  }, [facet]);
   const interval = facet.interval!;
   const counts = new Map(facet.values.map(({ value, count }) => [String(value), count]));
   const periods = facet.values.length
@@ -460,23 +481,68 @@ function DateFacet({
   const period = typeof picked === "string" ? picked : undefined;
   // The path to the period picked: every date, its year, its month.
   const path = period ? [4, 7, 10].filter((n) => n <= period.length).map((n) => period.slice(0, n)) : [];
+  // One stop in the tab order: the bar last focused, else the period picked
+  // or the latest; ← → Début Fin move along the bars that have documents.
+  const focusable = periods.filter((p) => counts.get(p));
+  const current =
+    focused && focusable.includes(focused)
+      ? focused
+      : period && focusable.includes(period)
+        ? period
+        : focusable.at(-1);
+  const move = (event: KeyboardEvent<HTMLDivElement>) => {
+    const bars = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+    const at = bars.indexOf(document.activeElement as HTMLButtonElement);
+    const to =
+      event.key === "ArrowLeft" ? at - 1
+      : event.key === "ArrowRight" ? at + 1
+      : event.key === "Home" ? 0
+      : event.key === "End" ? bars.length - 1
+      : undefined;
+    if (to === undefined || at < 0) return;
+    event.preventDefault();
+    bars[Math.max(0, Math.min(bars.length - 1, to))]?.focus();
+  };
   if (!periods.length && !period) return null;
   return (
-    <section className="facet facet-dates" aria-label={label}>
+    <section
+      className="facet facet-dates"
+      aria-label={label}
+      ref={section}
+      onBlur={(event) => {
+        if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) refocus.current = false;
+      }}
+    >
       <h3>{label}</h3>
       {period && (
         <ol className="facet-path" aria-label="Période choisie">
           <li>
-            <button type="button" className="link-button" onClick={() => onPick(undefined)}>
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => {
+                refocus.current = true;
+                onPick(undefined);
+              }}
+            >
               Toutes les dates
             </button>
           </li>
           {path.map((p) => (
             <li key={p}>
               {p === period ? (
-                <span aria-current="true">{periodLabel(p)}</span>
+                <span aria-current="true" tabIndex={-1}>
+                  {periodLabel(p)}
+                </span>
               ) : (
-                <button type="button" className="link-button" onClick={() => onPick(p)}>
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => {
+                    refocus.current = true;
+                    onPick(p);
+                  }}
+                >
                   {periodLabel(p)}
                 </button>
               )}
@@ -486,7 +552,13 @@ function DateFacet({
       )}
       {periods.length > 0 ? (
         <>
-          <div className="pulse facet-histogram" role="group" data-tips aria-label={STEP[interval]}>
+          <div
+            className="pulse facet-histogram"
+            role="group"
+            data-tips
+            aria-label={STEP[interval]}
+            onKeyDown={move}
+          >
             {periods.map((p) => {
               const count = counts.get(p) || 0;
               const documents = `${countLabel(count)} ${count > 1 ? "documents" : "document"}`;
@@ -496,10 +568,15 @@ function DateFacet({
                   type="button"
                   className="pulse-column"
                   aria-pressed={p === period}
+                  tabIndex={p === current ? 0 : -1}
+                  onFocus={() => setFocused(p)}
                   aria-label={`${periodLabel(p)} : ${documents}`}
                   data-tip={`${periodLabel(p)} · ${documents}`}
                   disabled={count === 0}
-                  onClick={() => onToggle(p)}
+                  onClick={() => {
+                    refocus.current = true;
+                    onToggle(p);
+                  }}
                 >
                   <span
                     className="pulse-bar"

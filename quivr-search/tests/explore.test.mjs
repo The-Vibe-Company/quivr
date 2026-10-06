@@ -94,3 +94,25 @@ test("a date's histogram steps by the period picked, or by the span of its docum
   ];
   for (const c of cases) assert.deepEqual(await counted(c.predicates, c.buckets), c.want, c.name);
 });
+
+test("a corpus's own fields are counted apart, 16 at a time, and only the common count names exclusions", async () => {
+  const own = Array.from({ length: 20 }, (_, i) => ({ name: `f${i}`, type: "string" }));
+  const sent = [];
+  const out = await countFacets({
+    ids: ["c1"],
+    fields: [language, ...own],
+    predicates: [],
+    count: async (body) => {
+      sent.push(body.fields.map((f) => f.field));
+      // A field the corpus's index does not serve yet excludes it.
+      const missing = body.fields.some((f) => f.field === "f19");
+      return {
+        items: body.fields.map((f) => ({ field: f.field, buckets: missing ? [] : [at("x", 3)] })),
+        ...(missing ? { excluded_corpora: [{ corpus_id: "c1", fields: ["f19"] }] } : {}),
+      };
+    },
+  });
+  assert.deepEqual(sent.map((names) => names.length), [1, 16, 4]);
+  assert.equal(out.excluded_corpora, undefined);
+  assert.deepEqual(out.fields[0].values, [{ value: "x", count: 3 }]);
+});

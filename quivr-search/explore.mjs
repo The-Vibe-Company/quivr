@@ -35,9 +35,11 @@ const PAGE = 25;
 // The engine returns at most this many values per field, the most frequent.
 const FACET_VALUES = 100;
 // Counting may take the engine up to 25 s, and it admits eight counts at
-// once per instance: one Explorer view sends at most four.
+// once per instance: one Explorer view sends at most three.
 const FACET_TIMEOUT_MS = 30000;
-const FACET_CONCURRENCY = 4;
+const FACET_CONCURRENCY = 3;
+// The engine counts at most this many fields per request.
+const FACET_FIELDS = 16;
 // Unpicked dates: months, or days when they span at most this many months,
 // or years when they span more than this many.
 const DAYS_UP_TO_MONTHS = 2;
@@ -168,8 +170,10 @@ const monthIndex = (value) => Number(value.slice(0, 4)) * 12 + Number(value.slic
  * field's are periods in time order ("2026", "2026-10", "2026-10-05"). A
  * field's own predicate is left out of its count, so its other values stay
  * offered; a date keeps the period it zooms in. `count` posts one
- * `POST /v0/facets` body and returns the engine's answer. The corpora a field
- * excluded are those of the count under every predicate, as the list's.
+ * `POST /v0/facets` body and returns the engine's answer. The corpora
+ * excluded are those of the common fields' count under every predicate, as
+ * the list's: a corpus's own fields, counted apart, 16 at a time, exclude
+ * nothing the page would announce.
  */
 export async function countFacets({ count, ids, fields, predicates }) {
   const own = new Map(predicates.map((p) => [p.field, p]));
@@ -198,9 +202,15 @@ export async function countFacets({ count, ids, fields, predicates }) {
         kept: [...predicates.filter((x) => x !== p), ...(histogram?.scope ? [histogram.scope] : [])],
       });
   }
-  // The count under every predicate also names the corpora they exclude.
+  // The common fields' count under every predicate also names the corpora
+  // the predicates exclude.
+  const common = shared.filter((name) => name.startsWith("metadata."));
+  const ownShared = shared.filter((name) => !name.startsWith("metadata."));
   const tasks = [
-    () => ask(shared.length ? shared : [fields[0].name], predicates),
+    () => ask(common.length ? common : [fields[0].name], predicates),
+    ...Array.from({ length: Math.ceil(ownShared.length / FACET_FIELDS) }, (_, i) => () =>
+      ask(ownShared.slice(i * FACET_FIELDS, (i + 1) * FACET_FIELDS), predicates),
+    ),
     ...alone.map(({ field, kept }) => () => ask([field], kept)),
   ];
   const answers = [];
@@ -212,7 +222,7 @@ export async function countFacets({ count, ids, fields, predicates }) {
   );
   const [all, ...others] = answers;
   const buckets = new Map();
-  for (const item of [...(shared.length ? all.items : []), ...others.flatMap((o) => o.items)])
+  for (const item of [...(common.length ? all.items : []), ...others.flatMap((o) => o.items)])
     buckets.set(item.field, item.buckets);
   const intervals = new Map([...histograms].map(([name, h]) => [name, h.interval]));
 
@@ -234,14 +244,15 @@ export async function countFacets({ count, ids, fields, predicates }) {
       intervals.set(name, "year");
     }
   }
-  for (const interval of ["day", "year"]) {
-    if (!again[interval].length) continue;
-    const data = await ask(again[interval], predicates, Object.fromEntries(again[interval].map((n) => [n, interval])));
-    for (const item of data.items) {
-      buckets.set(item.field, item.buckets);
-      intervals.set(item.field, interval);
+  for (const interval of ["day", "year"])
+    for (let i = 0; i < again[interval].length; i += FACET_FIELDS) {
+      const names = again[interval].slice(i, i + FACET_FIELDS);
+      const data = await ask(names, predicates, Object.fromEntries(names.map((n) => [n, interval])));
+      for (const item of data.items) {
+        buckets.set(item.field, item.buckets);
+        intervals.set(item.field, interval);
+      }
     }
-  }
 
   return {
     fields: fields.map((field) => {
@@ -337,8 +348,8 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
   }
 
   // One count of field values, as the engine answers it.
-  async function count(body) {
-    const response = await upstream("/v0/facets", "POST", body, FACET_TIMEOUT_MS);
+  async function count(body, signal) {
+    const response = await upstream("/v0/facets", "POST", body, FACET_TIMEOUT_MS, signal);
     if (response.status === 422 && response.data?.code === "metadata_filter_unavailable")
       throw failure(
         422,
@@ -419,12 +430,12 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       return page;
     },
     /** GET /demo/explore/facets: each field's values and how many documents have them. */
-    async facets(params) {
+    async facets(params, signal) {
       const ids = await picked(params);
       const predicates = predicatesOf(params.get("metadata"));
       const infos = await Promise.all(ids.map(corpus));
       return countFacets({
-        count,
+        count: (body) => count(body, signal),
         ids,
         fields: [...COMMON_FIELDS, ...(ids.length === 1 ? infos[0].own : [])],
         predicates,

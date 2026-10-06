@@ -97,7 +97,7 @@
 .facet .link-button {
   margin: 4px 0 0 6px;
 }
-.facets[aria-busy="true"] .facet {
+.facets[data-stale] .facet {
   opacity: 0.6;
   transition: opacity var(--duration) var(--ease);
 }
@@ -106,8 +106,22 @@
   height: 64px;
   margin: 2px 6px 0;
 }
+/* No gap between columns: each is a target up to its neighbours, its bar
+   inset to draw the gap, so even a hundred bars fit the column. */
 .facet-histogram:has(.pulse-column) {
-  gap: 2px;
+  gap: 0;
+}
+.facet-histogram .pulse-column {
+  justify-content: center;
+}
+.facet-histogram .pulse-column .pulse-bar {
+  flex: none;
+  width: calc(100% - 2px);
+  min-width: 1px;
+}
+.facet-histogram .pulse-column:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .facet-histogram .pulse-column[aria-pressed="true"] .pulse-bar {
   background: var(--accent);
