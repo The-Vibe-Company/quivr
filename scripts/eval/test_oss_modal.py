@@ -26,8 +26,14 @@ class ModalTransport(unittest.TestCase):
         import oss_modal
         mounts = []
         wheels = []
+        commands = []
         add_dir, add_file = modal.Image.add_local_dir, modal.Image.add_local_file
         install = modal.Image.pip_install
+        run = modal.Image.run_commands
+
+        def run_commands(image, *args, **kwargs):
+            commands.extend(args)
+            return run(image, *args, **kwargs)
 
         def pip_install(image, *packages, **kwargs):
             wheels.append((packages, kwargs.get('index_url')))
@@ -46,15 +52,20 @@ class ModalTransport(unittest.TestCase):
         with mock.patch.object(modal.Image, 'add_local_dir', directory), \
              mock.patch.object(modal.Image, 'add_local_file', file), \
              mock.patch.object(modal.Image, 'pip_install', pip_install), \
+             mock.patch.object(modal.Image, 'run_commands', run_commands), \
              mock.patch.object(modal.App, 'run', side_effect=RuntimeError('offline')):
             with self.assertRaises(oss_modal.JobFailed):
-                oss_modal.dispatch('granite-r2', 'cpu', ['scifact'], 'a' * 40, 1000, 30, False)
+                oss_modal.dispatch('e5-small-reference', 'cpu', ['scifact'], 'a' * 40, 1000, 30, False)
             granite_mounts = list(mounts)
             mounts.clear()
             with self.assertRaises(oss_modal.JobFailed):
                 oss_modal.dispatch('embeddinggemma-2', 'L4', ['scifact'], 'a' * 40, 1000, 30, False)
         self.assertEqual(mounts, granite_mounts)
-        self.assertIn((('torch==2.6.0',), 'https://download.pytorch.org/whl/cu124'), wheels)
+        # CPU E5 and CUDA Gemma share the ST/Transformers-compatible version.
+        self.assertIn((('torch==2.8.0',), 'https://download.pytorch.org/whl/cpu'), wheels)
+        self.assertIn((('torch==2.8.0',), 'https://download.pytorch.org/whl/cu126'), wheels)
+        self.assertEqual(commands.count('python -m pip install -r /workspace/scripts/eval/requirements-oss.txt'), 2)
+        self.assertEqual(commands.count('HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python /workspace/scripts/eval/oss_image_check.py'), 2)
         self.assertIn((('transformers==5.19.0', 'sentence-transformers==6.1.0'), None), wheels)
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -123,7 +134,10 @@ assert public_sets.max_source_bytes() > 0
     def test_remote_failure_and_result_deadline_exit_with_safe_evidence(self):
         import modal
         import oss_modal
-        for startup_failure, error in ((False, RuntimeError('private remote input')),
+        missing = ModuleNotFoundError('private remote input', name='sentencepiece')
+        wrapped = ModuleNotFoundError("Could not import module 'PreTrainedModel'. private remote input")
+        wrapped.__cause__ = RuntimeError('private remote input')
+        for startup_failure, error in ((False, missing), (False, wrapped), (False, RuntimeError('private remote input')),
                                       (False, TimeoutError('private remote input')),
                                       (False, modal.exception.FunctionTimeoutError('private remote input')),
                                       (True, RuntimeError('private remote input')),
@@ -144,6 +158,11 @@ assert public_sets.max_source_bytes() > 0
                 evidence = raised.exception.reason
                 self.assertEqual(evidence['error_type'], type(error).__name__)
                 self.assertEqual(evidence['kind'], 'timeout' if isinstance(error, (TimeoutError, modal.exception.FunctionTimeoutError)) else 'provider_error')
+                if error is missing:
+                    self.assertEqual(evidence['missing_module'], 'sentencepiece')
+                if error is wrapped:
+                    self.assertEqual(evidence['import_target'], 'PreTrainedModel')
+                    self.assertEqual(evidence['cause_error_type'], 'RuntimeError')
                 self.assertNotIn('private remote input', str(raised.exception) + json.dumps(evidence))
                 self.assertLessEqual(started.get.call_args.kwargs['timeout'], 60)
                 self.assertEqual(call.get.call_args.kwargs['timeout'], 0 if startup_failure else 30)

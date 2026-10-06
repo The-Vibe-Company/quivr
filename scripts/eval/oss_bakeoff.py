@@ -38,14 +38,18 @@ CANDIDATES = {
 # Modal function (not Sandbox) list rates checked 2026-10-03.
 RATES = {'cpu_core_second': .0000131, 'gib_second': .00000222, 'L4_second': .000222}
 CPU_CORES, MEMORY_GIB = 4, 8
+# Transformers 5.19 exercises the accelerator API while importing E5 on CPU.
+# PyTorch 2.6 raises on accelerator-less hosts; 2.8 passes the offline import check.
+TORCH_PACKAGE = 'torch==2.8.0'
+TEXT_PACKAGES = ['transformers==5.19.0', 'sentence-transformers==6.1.0']
 
 
 def image_for(hardware, label=None):
     if label in embeddinggemma_server.LABELS:
-        requirements = ['requirements-direct.txt', 'requirements.txt']
-        return {'base': 'debian_slim', 'python': '3.12', 'torch': 'torch==2.6.0',
-                'torch_index_url': 'https://download.pytorch.org/whl/' + ('cpu' if hardware == 'cpu' else 'cu124'),
-                'packages': ['transformers==5.19.0', 'sentence-transformers==6.1.0'],
+        requirements = ['requirements-oss.txt', 'requirements-direct.txt', 'requirements.txt']
+        return {'base': 'debian_slim', 'python': '3.12', 'torch': TORCH_PACKAGE,
+                'torch_index_url': 'https://download.pytorch.org/whl/' + ('cpu' if hardware == 'cpu' else 'cu126'),
+                'packages': TEXT_PACKAGES,
                 'requirements': {name: hashlib.sha256((ROOT / 'scripts/eval' / name).read_bytes()).hexdigest()
                                  for name in requirements}}
     return TEI + ('cpu-1.9.3' if hardware == 'cpu' else '1.9.3')
@@ -97,7 +101,7 @@ def wait_ready(process, timeout=300, server='TEI'):
 def stop_reason(error, process=None, stderr=None, server='tei'):
     code = process.poll() if process is not None else None
     kind = ('tei_exit' if server == 'tei' else 'server_exit') if code is not None else 'timeout' if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)) else 'provider_error'
-    reason = {'kind': kind, 'error_type': type(error).__name__}
+    reason = {'kind': kind, **direct_bakeoff.embeddings.error_identity(error)}
     if code is not None:
         reason['exit_code'] = code
         reason['server'] = server

@@ -10,12 +10,14 @@ STARTUP_TIMEOUT = 60
 
 class JobFailed(Exception):
     """Sanitized failed-job identity for the local campaign artifact."""
-    def __init__(self, app_id, error_type):
+    def __init__(self, app_id, error):
         # Exception text may contain provider inputs or credentials.
+        from embeddings import error_identity
+        error_type = type(error).__name__
         super().__init__(f'Modal job failed ({error_type}); inspect operator console')
         self.app_id = app_id
         self.reason = {'kind': 'timeout' if error_type in ('TimeoutError', 'FunctionTimeoutError') else 'provider_error',
-                       'error_type': error_type}
+                       **error_identity(error)}
 
 
 def remote_measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted, started, reference=None):
@@ -30,7 +32,7 @@ def remote_measure(label, hardware, sets, git_sha, max_tokens, timeout, restrict
 
 
 def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, reference=None):
-    from oss_bakeoff import image_for, report_campaign
+    from oss_bakeoff import image_for, report_campaign, TORCH_PACKAGE, TEXT_PACKAGES
     from embeddinggemma_server import LABELS
     # Only the local dispatcher needs the checkout. Modal imports this module
     # from /root/oss_modal.py, which has no repository-relative parent layout.
@@ -40,7 +42,7 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
     spec = image_for(hardware, label)
     base = (modal.Image.debian_slim(python_version=spec['python']) if gemma else
             modal.Image.from_registry(image_for(hardware), add_python='3.12').entrypoint([]))
-    torch_package = spec['torch'] if gemma else 'torch==2.6.0'
+    torch_package = spec['torch'] if gemma else TORCH_PACKAGE
     torch_index = spec['torch_index_url'] if gemma else 'https://download.pytorch.org/whl/cpu'
     image = (base
              .pip_install(torch_package, index_url=torch_index)
@@ -52,9 +54,9 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
              .add_local_file(root / 'plugins/core-ingest/profile.json', '/workspace/plugins/core-ingest/profile.json', copy=True)
              # Modal's requirements helper copies only the top-level file;
              # install here so relative -r requirements.txt resolves correctly.
-             .run_commands('python -m pip install -r /workspace/scripts/eval/requirements-direct.txt'))
-    if gemma:
-        image = image.pip_install(*spec['packages'])
+             .run_commands('python -m pip install -r /workspace/scripts/eval/requirements-oss.txt')
+             .pip_install(*(spec['packages'] if gemma else TEXT_PACKAGES))
+             .run_commands('HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python /workspace/scripts/eval/oss_image_check.py'))
     worker = app.function(image=image, gpu=None if hardware == 'cpu' else 'L4',
                           cpu=(4, 4), memory=(8192, 8192), timeout=timeout,
                           startup_timeout=STARTUP_TIMEOUT,
@@ -86,4 +88,4 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
                 report['serving_campaign'] = report_campaign(result['campaign'])
             return result
     except Exception as error:
-        raise JobFailed(app.app_id, type(error).__name__) from None
+        raise JobFailed(app.app_id, error) from None
