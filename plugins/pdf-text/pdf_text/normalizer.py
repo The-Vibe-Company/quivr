@@ -107,6 +107,21 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
     include_source = config.get("include_source", True)
 
     reader = _open(invocation.read_input())
+    common_metadata = {"source_type": "document"}
+    submitted = (invocation.request.extensions or {}).get("quivr.metadata")
+    if submitted and submitted.data.get("source_type"):
+        common_metadata["source_type"] = submitted.data["source_type"]
+    # PDF Info is advisory: pypdf resolves it lazily and malformed metadata
+    # must not turn an otherwise readable PDF into a normalization failure.
+    try:
+        pdf_metadata = reader.metadata
+        raw_author = getattr(pdf_metadata, "author", None) if pdf_metadata is not None else None
+        if raw_author:
+            author = clean(str(raw_author))[:200]
+            if author:
+                common_metadata["author"] = [author]
+    except Exception:
+        pass
     pages: list[tuple[int, str]] = []
     empty: list[int] = []
     unreadable: list[int] = []
@@ -164,6 +179,9 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
     invocation.logger.info("normalized", extra={"pages": len(reader.pages), "parts": len(parts)})
     return NormalizerResponse(
         manifest=ManifestContent(parts=parts),
-        extensions={DOCUMENT: ExtensionEntry(schema_version="1", data=document)},
+        extensions={
+            DOCUMENT: ExtensionEntry(schema_version="1", data=document),
+            "quivr.metadata": ExtensionEntry(schema_version="1", data=common_metadata),
+        },
         warnings=warnings[:32] or None,
     )

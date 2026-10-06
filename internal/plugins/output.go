@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/The-Vibe-Company/quivr/contracts"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -184,15 +185,28 @@ type declaredExtensions struct {
 	errs    map[string]error
 }
 
-// newDeclaredExtensions compiles the manifest's declared extension schemas. A
-// nil manifest declares nothing.
+// newDeclaredExtensions compiles the manifest's declared extension schemas and
+// always installs the reserved common metadata schema. A nil manifest declares
+// no plugin-owned namespaces, but common metadata remains available.
 func newDeclaredExtensions(m *Manifest) *declaredExtensions {
 	d := &declaredExtensions{schemas: map[string]map[string]*jsonschema.Schema{}, errs: map[string]error{}}
+	schema, err := contracts.CompileCommonMetadata()
+	d.schemas[content.CommonMetadataNamespace] = map[string]*jsonschema.Schema{}
+	if err != nil {
+		d.errs[content.CommonMetadataNamespace+"\x00"+content.CommonMetadataVersion] = err
+	} else {
+		d.schemas[content.CommonMetadataNamespace][content.CommonMetadataVersion] = schema
+	}
 	if m == nil {
 		return d
 	}
 	d.plugin = m.ID
 	for namespace, versions := range m.Extensions {
+		// Common metadata is built in and authoritative. A plugin never owns
+		// this namespace, even if an old manifest happens to repeat it.
+		if namespace == content.CommonMetadataNamespace {
+			continue
+		}
 		d.schemas[namespace] = map[string]*jsonschema.Schema{}
 		for version, raw := range versions {
 			value, err := decodeInstance(raw)
@@ -261,6 +275,7 @@ func (d *declaredExtensions) Validate(_ context.Context, exts content.Extensions
 			return &Violation{Kind: content.ErrInvalid, Code: CodeInvalidExtension, Path: path + "/data",
 				Detail: fmt.Sprintf("%q data does not match its declared schema version %q: %s", ns, ext.SchemaVersion, detail)}
 		}
+
 	}
 	return nil
 }

@@ -1722,6 +1722,12 @@ type Corpus struct {
 	Name               string          `json:"name"`
 }
 
+// CorpusExclusion Authorized Corpus excluded because these logical fields are not declared with the filter role. Common metadata fields are always declared.
+type CorpusExclusion struct {
+	CorpusId string   `json:"corpus_id"`
+	Fields   []string `json:"fields"`
+}
+
 // CorpusPage defines model for CorpusPage.
 type CorpusPage struct {
 	Items          []Corpus `json:"items"`
@@ -2066,6 +2072,43 @@ type MatchStatsList struct {
 	Total  int             `json:"total"`
 	Window StatsWindowName `json:"window"`
 }
+
+// MetadataFilter Every present condition must hold. Field names are unique within a request; at most 16 predicates. Wrong types and reversed bounds return 422 invalid_query. Missing/mistyped source values do not match. Datetimes are normalized to UTC milliseconds (submillisecond digits are truncated).
+type MetadataFilter struct {
+	// AnyOf Exact equality (one value) or any-of equality. String-array fields match any element; values retain their declared type. Datetime equality uses RFC3339 strings.
+	AnyOf *[]MetadataFilter_AnyOf_Item `json:"any_of,omitempty"`
+	Field string                       `json:"field"`
+
+	// Gte Inclusive lower datetime bound. Requires a datetime field.
+	Gte *time.Time `json:"gte,omitempty"`
+
+	// Lte Inclusive upper datetime bound. Requires a datetime field.
+	Lte   *time.Time `json:"lte,omitempty"`
+	union json.RawMessage
+}
+
+// MetadataFilterAnyOf0 defines model for MetadataFilter.AnyOf.0.
+type MetadataFilterAnyOf0 = string
+
+// MetadataFilterAnyOf1 defines model for MetadataFilter.AnyOf.1.
+type MetadataFilterAnyOf1 = float64
+
+// MetadataFilterAnyOf2 defines model for MetadataFilter.AnyOf.2.
+type MetadataFilterAnyOf2 = bool
+
+// MetadataFilter_AnyOf_Item defines model for MetadataFilter.any_of.Item.
+type MetadataFilter_AnyOf_Item struct {
+	union json.RawMessage
+}
+
+// MetadataFilter0 defines model for MetadataFilter.0.
+type MetadataFilter0 = interface{}
+
+// MetadataFilter1 defines model for MetadataFilter.1.
+type MetadataFilter1 = interface{}
+
+// MetadataFilter2 defines model for MetadataFilter.2.
+type MetadataFilter2 = interface{}
 
 // MonitoringReferences owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
 type MonitoringReferences struct {
@@ -2538,8 +2581,9 @@ type RecordCount struct {
 
 // RecordPage defines model for RecordPage.
 type RecordPage struct {
-	Items          []Record `json:"items"`
-	NextPageCursor *string  `json:"next_page_cursor,omitempty"`
+	ExcludedCorpora *[]CorpusExclusion `json:"excluded_corpora,omitempty"`
+	Items           []Record           `json:"items"`
+	NextPageCursor  *string            `json:"next_page_cursor,omitempty"`
 }
 
 // RelationInput Source-provided link to an independently identified Record in the same Organization. Optional source revision preserves provenance; ordinary expansion resolves the current eligible target. Missing targets do not block readiness. Every expansion reauthorizes the target. Precise Part-target syntax remains outside this initial draft.
@@ -2660,6 +2704,9 @@ type SearchExcerptCoordinateSystem string
 
 // SearchFilter Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
 type SearchFilter struct {
+	// Metadata ANDed typed filters. Common fields use metadata.language, metadata.published_at, metadata.source_type, metadata.source, metadata.author, metadata.subjects, metadata.tags, metadata.country and metadata.place. Other names require the filter role in the Corpus's effective retrieval mapping. Corpora missing a requested filter field are excluded and reported. A metadata-capable generation is required; rebuild older Corpora first (422 metadata_filter_unavailable).
+	Metadata *[]MetadataFilter `json:"metadata,omitempty"`
+
 	// SourceNamespaces Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them.
 	SourceNamespaces *[]string `json:"source_namespaces,omitempty"`
 }
@@ -2769,7 +2816,8 @@ type SearchRequestMode string
 
 // SearchResponse Bounded top-k results after canonical rechecks. May contain fewer hits than requested; no total count, completeness promise or stable pagination snapshot. Empty results still name the resolved profile.
 type SearchResponse struct {
-	Items []SearchHit `json:"items"`
+	ExcludedCorpora *[]CorpusExclusion `json:"excluded_corpora,omitempty"`
+	Items           []SearchHit        `json:"items"`
 
 	// RetrievalProfile Resolved retrieval profile identity. Name is the requested short or full name (default when the request named none). Version identifies what ranked as plugin:<plugin id>@<version>/<profile>, naming the retrieval plugin, its version and the profile.
 	RetrievalProfile SearchProfile `json:"retrieval_profile"`
@@ -3459,7 +3507,13 @@ type ListMatchesParams struct {
 
 // ListRecordsParams defines parameters for ListRecords.
 type ListRecordsParams struct {
-	CorpusId string                  `form:"corpus_id" json:"corpus_id"`
+	CorpusId *string `form:"corpus_id,omitempty" json:"corpus_id,omitempty"`
+
+	// CorpusIds Comma-separated selection of up to 16 distinct Corpora. Supply exactly one of corpus_id or corpus_ids.
+	CorpusIds *[]string `form:"corpus_ids,omitempty" json:"corpus_ids,omitempty"`
+
+	// Metadata JSON array of MetadataFilter predicates, at most 16. Applied before ordering and pagination to current Versions projected in the routed generation. Withdrawn Records can be omitted after projection purge or rebuild; use the unfiltered catalog for full resynchronization. Repeat on later pages. Filters require a metadata-capable generation; rebuild older Corpora first.
+	Metadata *string                 `form:"metadata,omitempty" json:"metadata,omitempty"`
 	Order    *ListRecordsParamsOrder `form:"order,omitempty" json:"order,omitempty"`
 
 	// AcceptedAfter Inclusive lower bound on the current Version's acceptance time. RFC 3339 with an offset and at most 9 fractional-second digits; clients convert local days into bounds. Quivr applies no time-zone rules.
@@ -3738,6 +3792,256 @@ func (t IngestCommand_Content) MarshalJSON() ([]byte, error) {
 }
 
 func (t *IngestCommand_Content) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsMetadataFilter0 returns the union data inside the MetadataFilter as a MetadataFilter0
+func (t MetadataFilter) AsMetadataFilter0() (MetadataFilter0, error) {
+	var body MetadataFilter0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMetadataFilter0 overwrites any union data inside the MetadataFilter as the provided MetadataFilter0
+func (t *MetadataFilter) FromMetadataFilter0(v MetadataFilter0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMetadataFilter0 performs a merge with any union data inside the MetadataFilter, using the provided MetadataFilter0
+func (t *MetadataFilter) MergeMetadataFilter0(v MetadataFilter0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsMetadataFilter1 returns the union data inside the MetadataFilter as a MetadataFilter1
+func (t MetadataFilter) AsMetadataFilter1() (MetadataFilter1, error) {
+	var body MetadataFilter1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMetadataFilter1 overwrites any union data inside the MetadataFilter as the provided MetadataFilter1
+func (t *MetadataFilter) FromMetadataFilter1(v MetadataFilter1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMetadataFilter1 performs a merge with any union data inside the MetadataFilter, using the provided MetadataFilter1
+func (t *MetadataFilter) MergeMetadataFilter1(v MetadataFilter1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsMetadataFilter2 returns the union data inside the MetadataFilter as a MetadataFilter2
+func (t MetadataFilter) AsMetadataFilter2() (MetadataFilter2, error) {
+	var body MetadataFilter2
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMetadataFilter2 overwrites any union data inside the MetadataFilter as the provided MetadataFilter2
+func (t *MetadataFilter) FromMetadataFilter2(v MetadataFilter2) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMetadataFilter2 performs a merge with any union data inside the MetadataFilter, using the provided MetadataFilter2
+func (t *MetadataFilter) MergeMetadataFilter2(v MetadataFilter2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t MetadataFilter) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	object := make(map[string]json.RawMessage)
+	if t.union != nil {
+		err = json.Unmarshal(b, &object)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if t.AnyOf != nil {
+		object["any_of"], err = json.Marshal(t.AnyOf)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'any_of': %w", err)
+		}
+	}
+
+	object["field"], err = json.Marshal(t.Field)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'field': %w", err)
+	}
+
+	if t.Gte != nil {
+		object["gte"], err = json.Marshal(t.Gte)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'gte': %w", err)
+		}
+	}
+
+	if t.Lte != nil {
+		object["lte"], err = json.Marshal(t.Lte)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'lte': %w", err)
+		}
+	}
+	b, err = json.Marshal(object)
+	return b, err
+}
+
+func (t *MetadataFilter) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	if err != nil {
+		return err
+	}
+	object := make(map[string]json.RawMessage)
+	err = json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["any_of"]; found {
+		err = json.Unmarshal(raw, &t.AnyOf)
+		if err != nil {
+			return fmt.Errorf("error reading 'any_of': %w", err)
+		}
+	}
+
+	if raw, found := object["field"]; found {
+		err = json.Unmarshal(raw, &t.Field)
+		if err != nil {
+			return fmt.Errorf("error reading 'field': %w", err)
+		}
+	}
+
+	if raw, found := object["gte"]; found {
+		err = json.Unmarshal(raw, &t.Gte)
+		if err != nil {
+			return fmt.Errorf("error reading 'gte': %w", err)
+		}
+	}
+
+	if raw, found := object["lte"]; found {
+		err = json.Unmarshal(raw, &t.Lte)
+		if err != nil {
+			return fmt.Errorf("error reading 'lte': %w", err)
+		}
+	}
+
+	return err
+}
+
+// AsMetadataFilterAnyOf0 returns the union data inside the MetadataFilter_AnyOf_Item as a MetadataFilterAnyOf0
+func (t MetadataFilter_AnyOf_Item) AsMetadataFilterAnyOf0() (MetadataFilterAnyOf0, error) {
+	var body MetadataFilterAnyOf0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMetadataFilterAnyOf0 overwrites any union data inside the MetadataFilter_AnyOf_Item as the provided MetadataFilterAnyOf0
+func (t *MetadataFilter_AnyOf_Item) FromMetadataFilterAnyOf0(v MetadataFilterAnyOf0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMetadataFilterAnyOf0 performs a merge with any union data inside the MetadataFilter_AnyOf_Item, using the provided MetadataFilterAnyOf0
+func (t *MetadataFilter_AnyOf_Item) MergeMetadataFilterAnyOf0(v MetadataFilterAnyOf0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsMetadataFilterAnyOf1 returns the union data inside the MetadataFilter_AnyOf_Item as a MetadataFilterAnyOf1
+func (t MetadataFilter_AnyOf_Item) AsMetadataFilterAnyOf1() (MetadataFilterAnyOf1, error) {
+	var body MetadataFilterAnyOf1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMetadataFilterAnyOf1 overwrites any union data inside the MetadataFilter_AnyOf_Item as the provided MetadataFilterAnyOf1
+func (t *MetadataFilter_AnyOf_Item) FromMetadataFilterAnyOf1(v MetadataFilterAnyOf1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMetadataFilterAnyOf1 performs a merge with any union data inside the MetadataFilter_AnyOf_Item, using the provided MetadataFilterAnyOf1
+func (t *MetadataFilter_AnyOf_Item) MergeMetadataFilterAnyOf1(v MetadataFilterAnyOf1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsMetadataFilterAnyOf2 returns the union data inside the MetadataFilter_AnyOf_Item as a MetadataFilterAnyOf2
+func (t MetadataFilter_AnyOf_Item) AsMetadataFilterAnyOf2() (MetadataFilterAnyOf2, error) {
+	var body MetadataFilterAnyOf2
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMetadataFilterAnyOf2 overwrites any union data inside the MetadataFilter_AnyOf_Item as the provided MetadataFilterAnyOf2
+func (t *MetadataFilter_AnyOf_Item) FromMetadataFilterAnyOf2(v MetadataFilterAnyOf2) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMetadataFilterAnyOf2 performs a merge with any union data inside the MetadataFilter_AnyOf_Item, using the provided MetadataFilterAnyOf2
+func (t *MetadataFilter_AnyOf_Item) MergeMetadataFilterAnyOf2(v MetadataFilterAnyOf2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t MetadataFilter_AnyOf_Item) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *MetadataFilter_AnyOf_Item) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -4348,7 +4652,7 @@ type ClientInterface interface {
 
 	// ListRecords performs a GET /v0/records (the `ListRecords` operationId) request.
 	//
-	// List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
+	// List authorized canonical Records from one or several Corpora. Without metadata predicates the catalog includes withdrawn Records. Metadata predicates require the current Version to be projected in the routed generation; withdrawn Records can disappear from filtered pages after projection purge or rebuild. Use the unfiltered catalog and change feed for complete resynchronization. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus selection, authorization scope, order, time bounds and metadata predicates with their routed generations; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 	ListRecords(ctx context.Context, params *ListRecordsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// IngestRecordWithBody performs a POST /v0/records (the `IngestRecord` operationId) request,
@@ -5896,7 +6200,7 @@ func (c *Client) ResumeOperation(ctx context.Context, operationId string, body R
 
 // ListRecords performs a GET /v0/records (the `ListRecords` operationId) request.
 //
-// List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
+// List authorized canonical Records from one or several Corpora. Without metadata predicates the catalog includes withdrawn Records. Metadata predicates require the current Version to be projected in the routed generation; withdrawn Records can disappear from filtered pages after projection purge or rebuild. Use the unfiltered catalog and change feed for complete resynchronization. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus selection, authorization scope, order, time bounds and metadata predicates with their routed generations; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 func (c *Client) ListRecords(ctx context.Context, params *ListRecordsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListRecordsRequest(c.Server, params)
 	if err != nil {
@@ -9718,12 +10022,40 @@ func NewListRecordsRequest(server string, params *ListRecordsParams) (*http.Requ
 		// per the OpenAPI spec (e.g. "color=blue,black,brown").
 		var rawQueryFragments []string
 
-		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "corpus_id", params.CorpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-			return nil, err
-		} else {
-			for _, qp := range strings.Split(queryFrag, "&") {
-				rawQueryFragments = append(rawQueryFragments, qp)
+		if params.CorpusId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "corpus_id", *params.CorpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
 			}
+
+		}
+
+		if params.CorpusIds != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "corpus_ids", *params.CorpusIds, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Metadata != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "metadata", *params.Metadata, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
 		}
 
 		if params.Order != nil {
@@ -11627,7 +11959,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListRecordsWithResponse performs a GET /v0/records (the `ListRecords` operationId) request.
 	//
-	// List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
+	// List authorized canonical Records from one or several Corpora. Without metadata predicates the catalog includes withdrawn Records. Metadata predicates require the current Version to be projected in the routed generation; withdrawn Records can disappear from filtered pages after projection purge or rebuild. Use the unfiltered catalog and change feed for complete resynchronization. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus selection, authorization scope, order, time bounds and metadata predicates with their routed generations; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ListRecordsWithResponse(ctx context.Context, params *ListRecordsParams, reqEditors ...RequestEditorFn) (*ListRecordsResponse, error)
@@ -17458,7 +17790,7 @@ func (c *ClientWithResponses) ResumeOperationWithResponse(ctx context.Context, o
 
 // ListRecordsWithResponse performs a GET /v0/records (the `ListRecords` operationId) request.
 //
-// List one Corpus's authorized canonical Records, including withdrawn Records. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus, authorization scope, order and time bounds; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
+// List authorized canonical Records from one or several Corpora. Without metadata predicates the catalog includes withdrawn Records. Metadata predicates require the current Version to be projected in the routed generation; withdrawn Records can disappear from filtered pages after projection purge or rebuild. Use the unfiltered catalog and change feed for complete resynchronization. The default record_id order is ascending byte-wise ID order for resynchronization. accepted_at_desc orders by the current Version's acceptance time, newest first, then by Record ID descending for ties. A correction moves the Record when its replacement Version becomes current. Records without a current Version have no acceptance time; they appear last in unbounded date listings and are excluded by either time bound. Bounds also work with the default ID order. Equal bounds select an empty range; reversed bounds, malformed dates, duplicate or unknown parameters and unknown orders return 422 invalid_query. The opaque page cursor binds Corpus selection, authorization scope, order, time bounds and metadata predicates with their routed generations; changing any returns 409 cursor_scope_changed with resync_url. Repeat the same parameters for subsequent pages. Newer arrivals between pages do not shift the keyset or duplicate previously listed Records. Each page is an independent read, not a historical snapshot: concurrent corrections, withdrawals and readiness changes are reconciled through the change feed. Capture a start-now Change Cursor before scanning and consume changes as invalidations by rereading current resources. This route, relative to the API base, is the resync_url of catalog cursor errors.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) ListRecordsWithResponse(ctx context.Context, params *ListRecordsParams, reqEditors ...RequestEditorFn) (*ListRecordsResponse, error) {

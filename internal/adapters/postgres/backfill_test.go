@@ -372,14 +372,17 @@ func TestBackfillScopeCheckpointAndControl(t *testing.T) {
 		t.Fatalf("another scope under an accepted key: %v", err)
 	}
 
+	if _, err = f.pool.Exec(ctx, `UPDATE projection_generations SET metadata_projected=true,retrieval='{"fields":[{"name":"urgency","source_pointer":"/provenance/urgency","type":"number","roles":["filter"]}]}' WHERE id=$1`, f.generation.ID); err != nil {
+		t.Fatal(err)
+	}
 	// The first step runs it, pins its plan, counts its scope and makes the
 	// generation carry the target space.
 	target, err := store.BeginBackfill(ctx, f.org, op.ID, f.plan)
-	if err != nil || target.Operation.State != operations.StateRunning || target.Operation.Backfill.PlanID != f.plan || target.Generation.Carries(f.target) {
+	if err != nil || target.Operation.State != operations.StateRunning || target.Operation.Backfill.PlanID != f.plan || target.Generation.Carries(f.target) || !target.Generation.MetadataProjected || len(target.Generation.Fields) != 1 || target.Generation.Fields[0].SourcePointer != "/provenance/urgency" {
 		t.Fatalf("begin %+v %+v %v", target.Operation, target.Generation, err)
 	}
 	g, err := store.CarryBackfillSpaces(ctx, f.org, op.ID)
-	if err != nil || g.ID != f.generation.ID || g.SpaceID != f.served || !g.Carries(f.target) || len(g.Spaces) != 3 {
+	if err != nil || g.ID != f.generation.ID || g.SpaceID != f.served || !g.Carries(f.target) || len(g.Spaces) != 3 || !g.MetadataProjected || len(g.Fields) != 1 || g.Fields[0].Name != "urgency" {
 		t.Fatalf("generation %+v %v", g, err)
 	}
 	if again, err := store.CarryBackfillSpaces(ctx, f.org, op.ID); err != nil || len(again.Spaces) != 3 {

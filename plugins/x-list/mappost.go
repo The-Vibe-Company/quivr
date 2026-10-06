@@ -147,6 +147,19 @@ func MapPost(post Post, inc Includes, scope Scope) quivrplugin.Item {
 		}
 		data["media"] = media
 	}
+	author := ""
+	if expanded, ok := data["author"].(map[string]any); ok {
+		if username, _ := expanded["username"].(string); username != "" {
+			author = username
+		} else if name, _ := expanded["name"].(string); name != "" {
+			author = name
+		} else if id, _ := expanded["id"].(string); id != "" {
+			author = id
+		}
+	}
+	if author == "" {
+		author = post.AuthorID
+	}
 	// A round trip through JSON gives the extension plain JSON values.
 	raw, _ := json.Marshal(data)
 	var plain map[string]any
@@ -156,6 +169,28 @@ func MapPost(post Post, inc Includes, scope Scope) quivrplugin.Item {
 		Revision:       post.ID,
 		SourcePosition: post.ID,
 		Content:        content,
-		Extensions:     map[string]quivrplugin.Extension{ExtensionNamespace: {SchemaVersion: "1", Data: plain}},
+		Extensions: map[string]quivrplugin.Extension{
+			ExtensionNamespace: {SchemaVersion: "1", Data: plain},
+			quivrplugin.CommonMetadataNamespace: quivrplugin.CommonMetadataExtension(quivrplugin.CommonMetadata{
+				Language: post.Lang, PublishedAt: post.CreatedAt, SourceType: "social", Source: link,
+				Author: []string{author}, Tags: postTags(post.Entities),
+			}),
+		},
 	}
+}
+
+func postTags(entities map[string]any) []string {
+	values, _ := entities["hashtags"].([]any)
+	tags := make([]string, 0, len(values))
+	for _, value := range values {
+		entry, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		tag, _ := entry["tag"].(string)
+		if tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
 }

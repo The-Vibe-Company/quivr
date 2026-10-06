@@ -399,7 +399,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		}
 		text = normalized
 	}
-	pq := Request{EvaluationPlugin: q.EvaluationPlugin, Query: text, CorpusIDs: q.CorpusIDs, SourceNamespaces: q.SourceNamespaces, Space: c.Space, Field: c.EffectiveField(), K: fetch(c.K)}
+	pq := Request{EvaluationPlugin: q.EvaluationPlugin, Query: text, CorpusIDs: q.CorpusIDs, SourceNamespaces: q.SourceNamespaces, Metadata: q.Metadata, Space: c.Space, Field: c.EffectiveField(), K: fetch(c.K)}
 	if c.Filter != nil && len(c.Filter.SourceNamespaces) > 0 {
 		pq.SourceNamespaces = c.Filter.SourceNamespaces
 		for _, r := range sv.routes {

@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed http/v0/openapi.yaml shared/v0/manifest.schema.json plugins/v0/*.schema.json
+//go:embed http/v0/openapi.yaml shared/v0/*.schema.json plugins/v0/*.schema.json
 var files embed.FS
 
 //go:embed plugins/v0/fixtures/invocations plugins/v0/fixtures/requests plugins/v0/fixtures/ingestion plugins/v0/fixtures/retrieval plugins/v0/fixtures/authentication
@@ -35,10 +35,11 @@ func PluginFixtures() fs.FS {
 const (
 	// BaseURL mirrors the repository layout so relative $refs between contract
 	// files resolve exactly as they do on disk.
-	BaseURL      = "https://quivr.invalid/contracts/"
-	openAPIPath  = "http/v0/openapi.yaml"
-	sharedPath   = "shared/v0/manifest.schema.json"
-	pluginSchema = "plugins/v0"
+	BaseURL            = "https://quivr.invalid/contracts/"
+	openAPIPath        = "http/v0/openapi.yaml"
+	sharedPath         = "shared/v0/manifest.schema.json"
+	commonMetadataPath = "shared/v0/common-metadata.schema.json"
+	pluginSchema       = "plugins/v0"
 	// SharedManifestRef is how openapi.yaml and plugin schemas reference the
 	// shared Manifest schema, relative to their own directory.
 	SharedManifestRef = "../../" + sharedPath
@@ -57,6 +58,27 @@ func OpenAPI() []byte { return mustRead(openAPIPath) }
 
 // SharedManifest returns the shared Manifest JSON Schema.
 func SharedManifest() []byte { return mustRead(sharedPath) }
+
+// CommonMetadata returns the shared common metadata JSON Schema.
+func CommonMetadata() []byte { return mustRead(commonMetadataPath) }
+
+// CommonMetadataSchema is the compiler URL of the common metadata schema.
+func CommonMetadataSchema() string { return BaseURL + commonMetadataPath }
+
+// CompileCommonMetadata validates formats only for the reserved metadata contract.
+// Existing HTTP, plugin and user schemas retain their annotation semantics.
+func CompileCommonMetadata() (*jsonschema.Schema, error) {
+	compiler := jsonschema.NewCompiler()
+	compiler.AssertFormat()
+	value, err := jsonschema.UnmarshalJSON(bytes.NewReader(CommonMetadata()))
+	if err != nil {
+		return nil, err
+	}
+	if err := compiler.AddResource(CommonMetadataSchema(), value); err != nil {
+		return nil, err
+	}
+	return compiler.Compile(CommonMetadataSchema())
+}
 
 // PluginSchemas returns the Plugin Protocol v0 schemas keyed by file name.
 func PluginSchemas() map[string][]byte {
@@ -96,6 +118,9 @@ func NewCompiler() (*jsonschema.Compiler, error) {
 		return compiler.AddResource(BaseURL+name, v)
 	}
 	if err := add(sharedPath, SharedManifest()); err != nil {
+		return nil, err
+	}
+	if err := add(commonMetadataPath, CommonMetadata()); err != nil {
 		return nil, err
 	}
 	for file, raw := range PluginSchemas() {

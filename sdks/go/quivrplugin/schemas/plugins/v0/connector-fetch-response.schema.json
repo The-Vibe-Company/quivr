@@ -89,7 +89,7 @@
         },
         "extensions": {
           "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",
-          "description": "Record Version extensions, only in namespaces the plugin declares."
+          "description": "Record Version extensions, in namespaces the plugin declares or the reserved quivr.metadata namespace (schema version 1)."
         },
         "withdraw": {
           "type": "boolean",

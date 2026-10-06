@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/The-Vibe-Company/quivr/contracts"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -31,13 +32,20 @@ func CheckExtensions(ctx context.Context, validator ExtensionValidator, exts Ext
 	return validator.Validate(ctx, exts)
 }
 
-// BuiltinExtensions is the foundation's declared schema registry. It ships one
-// generic example namespace so structured source data can be exercised without a
-// plugin platform; installations install real plugin schemas later. It
-// deliberately contains no vertical vocabulary.
+// CommonMetadataNamespace is the reserved namespace for source metadata that
+// every plugin may emit without declaring ownership in its manifest.
+const CommonMetadataNamespace = "quivr.metadata"
+
+// CommonMetadataVersion is the first version of the common metadata contract.
+const CommonMetadataVersion = "1"
+
+// BuiltinExtensions is the foundation's declared schema registry.
 type BuiltinExtensions struct{}
 
 var declaredExtensionSchemas = map[string]map[string]string{
+	CommonMetadataNamespace: {
+		CommonMetadataVersion: string(contracts.CommonMetadata()),
+	},
 	"example.editorial": {
 		"1": `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -73,6 +81,15 @@ func compiledExtensionSchemas() (map[string]map[string]*jsonschema.Schema, error
 		for namespace, versions := range declaredExtensionSchemas {
 			compiled := map[string]*jsonschema.Schema{}
 			for version, raw := range versions {
+				if namespace == CommonMetadataNamespace {
+					schema, err := contracts.CompileCommonMetadata()
+					if err != nil {
+						extensionErr = err
+						return
+					}
+					compiled[version] = schema
+					continue
+				}
 				var doc any
 				if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 					extensionErr = err
