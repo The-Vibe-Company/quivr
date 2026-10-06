@@ -56,6 +56,12 @@ extra_args = ["-c", "check_for_update_on_startup=false", "-c", "service_tier=\"d
 
 [herdr.profiles.claude]
 harness = "claude"
-model = "claude-opus-5-5" # explicit id: Conductor ids such as opus-5-5-1m are unknown to the local CLI
+model = "opus" # CLI alias; Conductor ids such as opus-5-5-1m are unknown to the local CLI
 effort = "high"
 permissions = "full"
+
+# Known flaky failures: `armada ci why <pr> --rerun` reruns them once. Each needs its root-cause ticket.
+[[ci.known_failure]]
+check = "verify demo"
+pattern = "admin-health-live\\.spec\\.ts.*Reçu"
+ticket = "THE-1207"
