@@ -183,7 +183,7 @@ test("la pause arrête la collecte, la reprise la relance, le retrait masque la 
     .getByRole("button", { name: "Oui, retirer" })
     .click();
   await expect(row(page, name)).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: /^Vos sources/ })).toBeFocused();
+  await expect(page.getByRole("list", { name: "Sources" })).toBeFocused();
   // Every instance of the source is hidden, the one collecting included.
   expect(await instance(page, resumed)).toBe(404);
   expect(await instance(page, first)).toBe(404);

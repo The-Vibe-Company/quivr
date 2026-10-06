@@ -568,7 +568,10 @@ def parts():
             # order-sensitive acceptance and timed outage scenarios. The outages kill every process, so
             # the short-retention API starts after them.
             step('short_retention_api',Stack.start_short_retention_api),
-            acceptance('changes_catalog_rebuild','TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestMetadataFilters|TestFacets|TestEnrichedVersions'),
+            acceptance('changes_catalog_rebuild','TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestFacets|TestEnrichedVersions'),
+            step('newsml_normalizer_pin',normalizer_plugin.switch,'newsml-g2'),
+            acceptance('metadata_filters','^TestMetadataFiltersAcrossCorpora$'),
+            step('template_normalizer_pin',normalizer_plugin.switch,'template'),
             # The built quivr binary searches through the public API and keeps its offline plugin tools (THE-702).
             acceptance('cli','^TestCLI'),
             # Plugin calls, searches and steps counted and read back through the admin stats (THE-795).

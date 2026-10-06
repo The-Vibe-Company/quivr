@@ -169,7 +169,7 @@ export function SourceList({
   onRemove: (c: Connector) => Promise<void>;
 }) {
   return (
-    <ul className="source-cards" aria-label="Sources">
+    <ul className="source-cards" aria-label="Sources" tabIndex={-1}>
       {sources.map((c) => (
         <SourceCard
           key={c.source_namespace}

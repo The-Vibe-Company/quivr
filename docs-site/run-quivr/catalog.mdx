@@ -40,6 +40,7 @@ preserving Arabic and other scripts in logical order. Each text Part retains its
 inherited language and direction. The original XML remains a source Blob.
 The `newsml-g2.document` extension exposes identity and editorial metadata;
 `newsml-g2.xml` retains every element, attribute and mixed text with namespace URIs.
+`quivr.metadata` schema `1` supplies the common [search and document filters](/guides/search#filter-by-document-metadata), with `source_type: news_item`. Publication uses a valid `firstCreated`, falling back to `versionCreated`. Common values are bounded; original values stay in the NewsML extensions. Stored Versions keep their original metadata; new source revisions run the updated normalizer.
 
 Pin required routes for `application/vnd.iptc.g2.newsitem+xml` and
 `application/vnd.iptc.g2.newsmessage+xml`. A message must contain one item; split

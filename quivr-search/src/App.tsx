@@ -248,6 +248,10 @@ function Dashboard({
 }) {
   const [initial] = useState(urlState);
   const [view, setView] = useState<View>(initial.view);
+  // The top bar's places a page fills (see InBar), held once mounted.
+  const [barMeta, setBarMeta] = useState<HTMLElement | null>(null);
+  const [barActions, setBarActions] = useState<HTMLElement | null>(null);
+  const bar = useMemo(() => ({ meta: barMeta, actions: barActions }), [barMeta, barActions]);
   const [input, setInput] = useState(initial.query);
   const [near, setNear] = useState(initial.near);
   // "Recherche approfondie": offered when the engine serves it, off at every
@@ -498,6 +502,8 @@ function Dashboard({
             })()}
           </span>
           {TITLES[view]}
+          {/* A page's own figures beside its title: its count, what needs a look. */}
+          <span className="bar-meta" ref={setBarMeta} data-stale={view !== page || undefined} />
         </span>
         <form
           role="search"
@@ -551,6 +557,9 @@ function Dashboard({
             </kbd>
           )}
         </form>
+        {/* A page's main action, at the top right. Until the page asked for
+            is drawn (`page` follows `view`), the previous page's stay hidden. */}
+        <div className="bar-actions" ref={setBarActions} data-stale={view !== page || undefined} />
       </header>
       <TabBoundary key={page}>
         <Suspense fallback={<LoadingState label="Chargement…" rows={4} />}>
@@ -591,6 +600,7 @@ function Dashboard({
           ) : page === "alerts" ? (
             <AlertsView
               corpus={corpus}
+              bar={bar}
               selected={alert}
               onSelect={setAlert}
               doc={doc}
@@ -632,6 +642,7 @@ function Dashboard({
           ) : (
             <ConnectorsView
               corpus={corpus}
+              bar={bar}
               feedItems={feed.items}
               initialSelected={openSource}
               onChanged={() => void sources.reload()}

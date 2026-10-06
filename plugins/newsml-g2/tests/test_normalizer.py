@@ -39,11 +39,53 @@ class Normalizer(unittest.TestCase):
         self.assertEqual([p.content.text for p in response.manifest.parts[:-1]], ['שלום', 'Hello'])
         document = response.extensions['newsml-g2.document'].data
         self.assertEqual(document, {'guid': 'urn:example:minimal', 'version': '1', 'language': 'he'})
+        self.assertEqual(response.extensions['quivr.metadata'].data,
+                         {'source_type': 'news_item', 'language': 'he'})
         tree = response.extensions['newsml-g2.xml'].data['root']
         self.assertEqual(tree['children'][0]['children'][0]['name'], '{urn:example:wire}headline')
         inline = tree['children'][1]['children'][0]
         self.assertEqual((inline['children'][0]['name'], inline['children'][0]['text']),
                          ('{urn:example:wire}p', 'False body'))
+
+    def test_common_metadata_dates_and_geographic_subjects(self):
+        # Owns advisory date handling: malformed firstCreated must not hide a
+        # usable revision date or fail an otherwise valid news item.
+        for first, version, expected in [
+            ('2026-01-02T12:00:00+02:00', '2026-01-03T00:00:00Z', '2026-01-02T10:00:00Z'),
+            ('2026-02-30T12:00:00Z', '2026-01-03T00:00:00.123456789Z', '2026-01-03T00:00:00.123456789Z'),
+            ('2026-01-02', '2026-01-03T00:00:00', None),
+            ('2026-01-02T12:00:00+02:00:01', '2026-01-03T00:00:60Z', None),
+        ]:
+            with self.subTest(first=first, version=version):
+                xml = f'<newsItem xmlns="{NAR}"><itemMeta><firstCreated>{first}</firstCreated><versionCreated>{version}</versionCreated></itemMeta><contentMeta><language tag="fr"/><subject type="cpnat:geoArea" qcode="iso3166-1a2:FR"><name>France</name></subject><subject type="cpnat:geoArea" uri="urn:example:port"><name>Port</name><broader qcode="iso3166-1a2:FR"/></subject></contentMeta></newsItem>'
+                response = expect_response(self.invoke(xml))
+                self.assertEqual([part.role for part in response.manifest.parts], ['source'])
+                self.assertEqual([warning.code for warning in response.warnings or []], ['no_text_parts'])
+                common = response.extensions['quivr.metadata']
+                self.assertEqual(common.schema_version, '1')
+                self.assertEqual(common.data, {
+                    'source_type': 'news_item', 'language': 'fr',
+                    'subjects': ['iso3166-1a2:FR', 'urn:example:port'],
+                    'country': ['FR'], 'place': ['France', 'Port'],
+                    **({'published_at': expected} if expected else {}),
+                })
+                self.assertEqual(response.extensions['newsml-g2.document'].data['first_created'], first)
+
+    def test_common_metadata_bounds_keep_original_values(self):
+        # The shared schema cannot accept the unbounded source strings/arrays;
+        # the invocation boundary owns bounding while retaining source detail.
+        name = 'é' * 201
+        keywords = ''.join(f'<keyword>{i:02d}-{name}</keyword>' for i in range(51))
+        xml = f'<newsItem xmlns="{NAR}"><itemMeta><provider uri=" " qcode="{name}"/></itemMeta><contentMeta><creator><name>{name}</name></creator><creator><name>{name}extra</name></creator><creator uri=" " qcode="author:1"/><creator>Writer<name/></creator><keyword> </keyword>{keywords}<subject uri=" " qcode=" "><name/><name>Topic</name></subject><subject/><located qcode="place:1"><name> </name></located><located/></contentMeta></newsItem>'
+        response = expect_response(self.invoke(xml))
+        self.assertEqual(response.extensions['quivr.metadata'].data, {
+            'source_type': 'news_item', 'source': 'é' * 200,
+            'author': ['é' * 200, 'author:1', 'Writer'],
+            'subjects': ['Topic'], 'place': ['place:1'],
+            'tags': [f'{i:02d}-' + 'é' * 197 for i in range(50)],
+        })
+        self.assertEqual(response.extensions['newsml-g2.document'].data['provider'][0]['qcode'], name)
+        self.assertEqual(len(response.extensions['newsml-g2.document'].data['keywords']), 52)
 
     def test_single_item_message_keeps_wrapper_and_selected_headers(self):
         xml = f'<newsMessage xmlns="{NAR}" xmlns:x="urn:example:wire"><header><x:delivery id="a">first</x:delivery><x:delivery id="b">second</x:delivery></header><itemSet><newsItem guid="urn:example:1" version="2" xml:lang="ar"><contentMeta><headline>خبر</headline></contentMeta></newsItem></itemSet></newsMessage>'
@@ -104,21 +146,6 @@ class Normalizer(unittest.TestCase):
         ) + '</inlineXML></contentSet></newsItem>'
         reply = self.invoke(xml)
         self.assertEqual((reply.status, reply.body['code']), (422, 'too_many_text_parts'))
-
-    def test_common_metadata_dates_and_missing_fields(self):
-        for first, version, expected in [
-            ('2026-01-02T12:00:00+02:00', '', '2026-01-02T10:00:00Z'),
-            ('bad date', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z'),
-            ('2026-01-02T12:00:00', '', None),
-        ]:
-            with self.subTest(first=first):
-                xml = f'<newsItem xmlns="{NAR}"><itemMeta><firstCreated>{first}</firstCreated><versionCreated>{version}</versionCreated></itemMeta></newsItem>'
-                response = expect_response(self.invoke(xml))
-                self.assertEqual([part.role for part in response.manifest.parts], ['source'])
-                self.assertEqual([warning.code for warning in response.warnings or []], ['no_text_parts'])
-                common = response.extensions['newsml-g2.metadata'].data
-                self.assertEqual(common, {'source_type': 'newswire', **({'published_at': expected} if expected else {})})
-                self.assertEqual(response.extensions['newsml-g2.document'].data['first_created'], first)
 
     def test_paragraph_grouping_preserves_order_language_and_boundaries(self):
         xml = f'<newsItem xmlns="{NAR}" xml:lang="en"><contentMeta><headline>Title</headline></contentMeta><contentSet><inlineXML><p xmlns="">A <b>bold</b> tail</p>' + ''.join(f'<p xmlns="">{n}</p>' for n in range(70)) + '<p xmlns="" xml:lang="ar" dir="rtl">خبر</p></inlineXML></contentSet></newsItem>'
