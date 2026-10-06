@@ -200,19 +200,29 @@ func Run(command string, args ...string) error {
 	}
 	b, err := os.ReadFile(os.Getenv(ConfigEnv))
 	if err != nil {
-		return errors.New("read QUIVR_CONFIG file failed")
+		if os.Getenv(ConfigEnv) == "" {
+			return badConfig(configMissing, ConfigEnv, "QUIVR_CONFIG must name a configuration file")
+		}
+		return badConfig(configInvalid, ConfigEnv, "read QUIVR_CONFIG file failed")
 	}
 	var cfg Config
 	decoder := json.NewDecoder(bytes.NewReader(b))
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&cfg); err != nil {
-		return fmt.Errorf("invalid configuration JSON: %w", err)
+		field := ConfigEnv
+		// encoding/json builds Field from declared struct fields, never map
+		// keys or supplied values. Other decode errors identify the whole file.
+		var typeError *json.UnmarshalTypeError
+		if errors.As(err, &typeError) && typeError.Field != "" {
+			field = typeError.Field
+		}
+		return invalidConfig(field, "invalid configuration JSON", err)
 	}
 	if err = decoder.Decode(new(any)); err != io.EOF {
-		return errors.New("invalid configuration JSON: expected a single object")
+		return badConfig(configInvalid, ConfigEnv, "invalid configuration JSON: expected a single object")
 	}
 	if len(cfg.M365) > 0 && string(cfg.M365) != "null" {
-		return errors.New("m365 moved to the connector.m365_mail plugin's configuration; pin plugins/m365-mail with login_endpoint and graph_endpoint (https://docs.quivr.thevibecompany.co/guides/microsoft-365)")
+		return badConfig(configInvalid, "m365", "m365 moved to the connector.m365_mail plugin's configuration; pin plugins/m365-mail with login_endpoint and graph_endpoint (https://docs.quivr.thevibecompany.co/guides/microsoft-365)")
 	}
 	grace, err := cfg.configureProcess(command)
 	if err != nil {
@@ -228,7 +238,7 @@ func Run(command string, args ...string) error {
 	}
 	telemetryRuntime, err := telemetry.Init(context.Background(), cfg.Telemetry)
 	if err != nil {
-		return err
+		return invalidConfig("telemetry", "invalid telemetry settings", err)
 	}
 
 	events := newProcessEvents(slog.Default(), cfg.processSummary(grace))
@@ -263,8 +273,15 @@ func Run(command string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	if cfg.DatabaseURL == "" || len(cfg.CursorKey) < 32 || len(cfg.Keys) == 0 {
-		return errors.New("database_url, cursor_key (32+ bytes) and keys required")
+	switch {
+	case cfg.DatabaseURL == "":
+		return badConfig(configMissing, "database_url", "database_url is required")
+	case cfg.CursorKey == "":
+		return badConfig(configMissing, "cursor_key", "cursor_key is required")
+	case len(cfg.CursorKey) < 32:
+		return badConfig(configInvalid, "cursor_key", "cursor_key must have at least 32 bytes")
+	case len(cfg.Keys) == 0:
+		return badConfig(configMissing, "keys", "keys must contain at least one scoped API key")
 	}
 	logger := slog.Default()
 	if command == "migrate" {
@@ -273,17 +290,17 @@ func Run(command string, args ...string) error {
 	}
 	sealer, err := cfg.connectorSealer(logger)
 	if err != nil {
-		return err
+		return invalidConfig("credential_key", "credential_key must have at least 32 bytes", err)
 	}
 	minInterval := connectors.DefaultMinInterval
 	if cfg.ConnectorMinInterval != "" {
 		if minInterval, err = time.ParseDuration(cfg.ConnectorMinInterval); err != nil || minInterval <= 0 {
-			return errors.New("connector_min_interval must be a positive duration")
+			return badConfig(configInvalid, "connector_min_interval", "connector_min_interval must be a positive duration")
 		}
 	}
 	pushConfig, err := cfg.ConnectorPush.Resolve()
 	if err != nil {
-		return fmt.Errorf("connector_push: %w", err)
+		return invalidConfig("connector_push", "invalid connector_push settings", err)
 	}
 	// Every connector kind is supplied by a pinned plugin.
 	kindsOf := pluginhttp.Connectors
@@ -294,7 +311,7 @@ func Run(command string, args ...string) error {
 	planPoll := 2 * time.Second
 	if cfg.PluginPlanPoll != "" {
 		if planPoll, err = time.ParseDuration(cfg.PluginPlanPoll); err != nil || planPoll <= 0 {
-			return errors.New("plugin_plan_poll must be a positive duration")
+			return badConfig(configInvalid, "plugin_plan_poll", "plugin_plan_poll must be a positive duration")
 		}
 	}
 	backfillSettings, err := cfg.Backfill.settings()
@@ -302,12 +319,12 @@ func Run(command string, args ...string) error {
 		return err
 	}
 	if cfg.IngestionEvaluationConcurrency < 0 || cfg.IngestionEvaluationConcurrency > 32 {
-		return errors.New("ingestion_evaluation_concurrency must be between 1 and 32 (or 0 for the default 4)")
+		return badConfig(configInvalid, "ingestion_evaluation_concurrency", "ingestion_evaluation_concurrency must be between 1 and 32 (or 0 for the default 4)")
 	}
 	pinnedAttempts := 10
 	switch {
 	case cfg.PinnedPluginAttempts < 0:
-		return errors.New("pinned_plugin_attempts must be a positive number")
+		return badConfig(configInvalid, "pinned_plugin_attempts", "pinned_plugin_attempts must be a positive number")
 	case cfg.PinnedPluginAttempts > 0:
 		pinnedAttempts = cfg.PinnedPluginAttempts
 	}
@@ -316,7 +333,7 @@ func Run(command string, args ...string) error {
 	}
 	for token, s := range cfg.Keys {
 		if len(token) < 32 || s.Organization == "" || len(s.Actions) == 0 || len(s.Corpora) == 0 {
-			return errors.New("invalid scoped credential configuration")
+			return badConfig(configInvalid, "keys", "invalid scoped credential configuration")
 		}
 	}
 	if err := validateDestinations(cfg.Destinations, cfg.Delivery.AllowPrivateDestinations); err != nil {
@@ -333,13 +350,13 @@ func Run(command string, args ...string) error {
 	retention := changes.DefaultRetention
 	if cfg.ChangeRetention != "" {
 		if retention, err = time.ParseDuration(cfg.ChangeRetention); err != nil || retention <= 0 {
-			return errors.New("change_retention must be a positive duration")
+			return badConfig(configInvalid, "change_retention", "change_retention must be a positive duration")
 		}
 	}
 	streamPoll := httpapi.DefaultStreamPoll
 	if cfg.ChangeStreamPoll != "" {
 		if streamPoll, err = time.ParseDuration(cfg.ChangeStreamPoll); err != nil || streamPoll <= 0 {
-			return errors.New("change_stream_poll must be a positive duration")
+			return badConfig(configInvalid, "change_stream_poll", "change_stream_poll must be a positive duration")
 		}
 	}
 	prune, err := cfg.ChangePrune.parse(retention)
@@ -355,7 +372,7 @@ func Run(command string, args ...string) error {
 	purgeGrace := retrieval.DefaultPurgeGrace
 	if cfg.ProjectionPurgeGrace != "" {
 		if purgeGrace, err = time.ParseDuration(cfg.ProjectionPurgeGrace); err != nil || purgeGrace <= 0 {
-			return errors.New("projection_purge_grace must be a positive duration")
+			return badConfig(configInvalid, "projection_purge_grace", "projection_purge_grace must be a positive duration")
 		}
 	}
 	schemaStartup := schemaWait{First: 250 * time.Millisecond, Max: 5 * time.Second}
@@ -363,12 +380,12 @@ func Run(command string, args ...string) error {
 		schemaStartup.Limit = defaultMigrationWait
 		if cfg.MigrationWait != "" {
 			if schemaStartup.Limit, err = time.ParseDuration(cfg.MigrationWait); err != nil || schemaStartup.Limit < 0 {
-				return errors.New("migration_wait must be a Go duration, 0s or more")
+				return badConfig(configInvalid, "migration_wait", "migration_wait must be a Go duration, 0s or more")
 			}
 		}
 	}
 	if _, ok := cfg.Observability.Interval(); !ok {
-		return errors.New("observability.flush_interval must be a positive Go duration")
+		return badConfig(configInvalid, "observability.flush_interval", "observability.flush_interval must be a positive Go duration")
 	}
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
@@ -379,12 +396,12 @@ func Run(command string, args ...string) error {
 	// The engine segments and embeds nothing itself (THE-777): api and worker
 	// need a pinned ingestion plugin, normally the first-party core.ingest.
 	if command != "migrate" && pins.Ingestion() == nil {
-		return errors.New("no ingestion plugin pinned: pin plugins/core-ingest (core.ingest) or another ingestion plugin in `plugins` (plugins/core-ingest/README.md)")
+		return badConfig(configMissing, "plugins", "no ingestion plugin pinned: pin plugins/core-ingest (core.ingest) or another ingestion plugin in `plugins` (plugins/core-ingest/README.md)")
 	}
 	// Nor does it rank search results itself (THE-779): the api needs a
 	// pinned retrieval plugin, normally the first-party core.retrieve.
 	if command == "api" && len(pins.Retrievals()) == 0 {
-		return errors.New("no retrieval plugin pinned: pin plugins/core-retrieve (core.retrieve) or another retrieval plugin in `plugins` (plugins/core-retrieve/README.md)")
+		return badConfig(configMissing, "plugins", "no retrieval plugin pinned: pin plugins/core-retrieve (core.retrieve) or another retrieval plugin in `plugins` (plugins/core-retrieve/README.md)")
 	}
 	signals, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
@@ -412,11 +429,11 @@ func Run(command string, args ...string) error {
 	}()
 	poolConfig, err := postgres.PoolConfig(cfg.DatabaseURL, cfg.TLS.Postgres)
 	if err != nil {
-		return err
+		return invalidConfig("database_url", "invalid database_url or PostgreSQL TLS settings", err)
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
-		return errors.New("invalid database configuration")
+		return badConfig(configInvalid, "database_url", "invalid database configuration")
 	}
 	auditStore := postgres.AuditStore{Pool: pool}
 	closeResources = func(deadline context.Context) {
@@ -428,12 +445,18 @@ func Run(command string, args ...string) error {
 		}
 	}
 
-	if cfg.WeaviateURL == "" || cfg.TemporalAddress == "" || cfg.S3.Endpoint == "" || cfg.S3.Bucket == "" || cfg.S3.AccessKey == "" || cfg.S3.SecretKey == "" {
-		return errors.New("Temporal and S3 configuration required")
+	for _, required := range []struct{ field, value string }{
+		{"weaviate_url", cfg.WeaviateURL}, {"temporal_address", cfg.TemporalAddress},
+		{"s3.endpoint", cfg.S3.Endpoint}, {"s3.bucket", cfg.S3.Bucket},
+		{"s3.access_key", cfg.S3.AccessKey}, {"s3.secret_key", cfg.S3.SecretKey},
+	} {
+		if required.value == "" {
+			return badConfig(configMissing, required.field, "required setting is missing")
+		}
 	}
 	blobs, err := s3store.NewWithTLS(cfg.S3, cfg.TLS.S3)
 	if err != nil {
-		return err
+		return invalidConfig("s3", "invalid object storage settings", err)
 	}
 	devhost.SetTransport(tlsSettings.plugins)
 	materialization := postgres.MaterializationStore{Pool: pool}
@@ -851,7 +874,7 @@ func validPublicURL(raw string) error {
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
-		return errors.New("public_url must be an absolute http(s) URL without credentials, query or fragment, such as https://quivr.example.com")
+		return badConfig(configInvalid, "public_url", "public_url must be an absolute http(s) URL without credentials, query or fragment, such as https://quivr.example.com")
 	}
 	return nil
 }

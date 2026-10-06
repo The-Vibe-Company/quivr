@@ -143,6 +143,16 @@ python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
 grep -q "^CERTIFIED" "$work/pdf-text-contract.log" || { cat "$work/pdf-text-contract.log"; exit 1; }
 echo "quivr plugin test certified plugins/pdf-text: $work/pdf-text-contract-report.json"
 
+# NewsML-G2 owns field mapping/safety in its invocation tests; the Contract
+# Runner independently certifies both routed media types and deterministic replay.
+cd "$root/plugins/newsml-g2"
+"$work/venv/bin/pip" install -q --disable-pip-version-check -c "$root/contracts/http/v0/checks/requirements.txt" -e .
+python3 -W error::ResourceWarning "$root/scripts/check.py" --unittest tests
+"$quivr" plugin inspect . > "$work/newsml-g2-inspect.log"
+"$quivr" plugin test --fixture fixtures/sample.json --fixture fixtures/message.json --report "$work/newsml-g2-contract-report.json" . > "$work/newsml-g2-contract.log" 2>&1 || { cat "$work/newsml-g2-contract.log"; exit 1; }
+grep -q "^CERTIFIED" "$work/newsml-g2-contract.log" || { cat "$work/newsml-g2-contract.log"; exit 1; }
+echo "quivr plugin test certified plugins/newsml-g2: $work/newsml-g2-contract-report.json"
+
 # The first-party alerts plugin plugins/alerts: unit tests (grammar, matching,
 # evidence, described alerts against the fake System One server), a replayed
 # fixture and Contract Runner certification of both kinds. CI uploads the report.

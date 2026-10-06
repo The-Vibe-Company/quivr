@@ -105,6 +105,7 @@ excluded = [
 "plugins/hosted-embed/README.md" = { audience = "plugin-author", kind = "concept", summary = "configure hosted text embeddings in OpenAI and Cohere formats" }
 "plugins/jev-rerank/README.md" = { audience = "plugin-author", kind = "concept", summary = "optional Jev reranking, bounded pair caching and hybrid fallback" }
 "plugins/object-storage-archive/README.md" = { audience = "plugin-author", kind = "concept", summary = "stream immutable object-storage archives through upload grants" }
+"plugins/newsml-g2/README.md" = { audience = "plugin-author", kind = "guide", summary = "normalize NewsML-G2 text items and preserve their source metadata" }
 "plugins/pdf-text/README.md" = { audience = "plugin-author", kind = "guide", summary = "the reference PDF normalizer, one Part per page" }
 "plugins/push-source/README.md" = { audience = "plugin-author", kind = "guide", summary = "an offline instance-token push source and its certification" }
 "plugins/rss/README.md" = { audience = "plugin-author", kind = "guide", summary = "the first-party RSS and Atom connector plugin" }
@@ -146,6 +147,7 @@ excluded = [
 "docs/runnable-guides.md" = 85
 "plugins/core-ingest/README.md" = 60
 "plugins/core-retrieve/README.md" = 60
+"plugins/newsml-g2/README.md" = 122
 "plugins/pdf-text/README.md" = 120
 "plugins/push-source/README.md" = 21
 "plugins/rss/README.md" = 60
