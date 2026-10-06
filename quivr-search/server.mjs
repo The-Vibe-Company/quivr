@@ -13,6 +13,8 @@ import { boundsOf, createCatalog, statsQuery, topicsQuery } from "./catalog.mjs"
 import { alertRoutes } from "./alerts.mjs";
 import { createAdmin } from "./admin.mjs";
 import { activePlugins } from "./admin-plugins.mjs";
+import { corporaPicker, createViews } from "./views.mjs";
+import { createExplorer, createHistory } from "./explore.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
 const core = process.env.QUIVR_API_URL?.replace(/\/$/, "");
@@ -26,6 +28,11 @@ if (!core || !key || (!password && host !== "127.0.0.1"))
     "Configure QUIVR_API_URL, QUIVR_API_KEY and DEMO_PASSWORD for public serving",
   );
 let corpusID = process.env.QUIVR_DEMO_CORPUS_ID;
+// Other corpora the demo reads (THE-1171): searched, followed in the feed and
+// browsed in the Explorer, never written to.
+const otherCorpora = [
+  ...new Set((process.env.QUIVR_DEMO_CORPORA || "").split(",").map((id) => id.trim()).filter(Boolean)),
+];
 // Sources (THE-732): feed discovery under the private-address refusal,
 // deployment-provided suggestions, and removed sources hidden from lists.
 const feeds = feedGuard({
@@ -104,24 +111,60 @@ async function saveState() {
     console.warn("DEMO_STATE_FILE could not be written.");
   }
 }
-let feed;
 let admin;
-let catalog;
-// Every article of the demo corpus, indexed for the demo's numbers (THE-1038).
-const catalogFor = (corpus) =>
-  (catalog ||= createCatalog({
-    upstream,
-    corpus,
-    caught: () => alerts.matched(corpus),
-    ready: () => feedFor(corpus).ready(),
-  }));
-const feedFor = (corpus) =>
-  (feed ||= createFeed({ core, key, corpus, upstream, index: catalogFor(corpus) }));
+// One feed and one index per corpus read, made on first use.
+const liveFeeds = new Map();
+const catalogs = new Map();
+// The Versions the demo read of each Record, for the Explorer's history.
+const history = createHistory();
+// Every article of a corpus, indexed for the demo's numbers (THE-1038).
+// Alerts watch the demo corpus only.
+const catalogFor = (corpus) => {
+  if (!catalogs.has(corpus))
+    catalogs.set(
+      corpus,
+      createCatalog({
+        upstream,
+        corpus,
+        caught: () => (corpus === corpusID ? alerts.matched(corpus) : {}),
+        ready: () => feedFor(corpus).ready(),
+      }),
+    );
+  return catalogs.get(corpus);
+};
+const feedFor = (corpus) => {
+  if (!liveFeeds.has(corpus))
+    liveFeeds.set(
+      corpus,
+      createFeed({
+        core,
+        key,
+        corpus,
+        upstream,
+        index: catalogFor(corpus),
+        onVersion: history.note,
+      }),
+    );
+  return liveFeeds.get(corpus);
+};
 // The index, with the feed's change stream keeping it current.
 const indexFor = (corpus) => {
   feedFor(corpus).start();
   return catalogFor(corpus);
 };
+const readable = async () => [
+  await readyCorpus(),
+  ...otherCorpora.filter((id) => id !== corpusID),
+];
+const picked = corporaPicker({ readable, demo: () => corpusID });
+const views = createViews({ feedFor, indexFor, upstream });
+const explorer = createExplorer({
+  upstream: (...args) => upstream(...args),
+  readable,
+  picked,
+  demo: () => corpusID,
+  history,
+});
 // The plugins the engine runs, for the Admin tab's Plugins section (THE-797).
 const plugins = activePlugins({ upstream: (...args) => upstream(...args) });
 // The Admin tab (THE-796) follows the Fil's change stream of the demo corpus.
@@ -359,7 +402,7 @@ async function authorizeRecord(id) {
   if (record.status >= 500) return record;
   if (
     record.status !== 200 ||
-    record.data.source?.corpus_id !== (await readyCorpus())
+    !(await readable()).includes(record.data.source?.corpus_id)
   )
     throw fail(404, "Document introuvable.");
   return record;
@@ -536,6 +579,9 @@ async function handle(req, res) {
       path === "/demo/feed/days" ||
       path === "/demo/feed/stats" ||
       path === "/demo/feed/topics" ||
+      path === "/demo/corpora" ||
+      path === "/demo/explore" ||
+      path.startsWith("/demo/explore/") ||
       path === "/demo/sources/stats" ||
       path === "/demo/alerts" ||
       path.startsWith("/demo/alerts/") ||
@@ -549,31 +595,52 @@ async function handle(req, res) {
         await send(res, 200, { corpus_id: id, name: "Espace démo" });
         return;
       }
-      // The Veille page: a snapshot and a live stream of the demo corpus.
-      if (
-        (path === "/demo/feed" || path === "/demo/feed/stream") &&
-        req.method === "GET"
-      ) {
-        if (path === "/demo/feed") await send(res, 200, await feedFor(id).snapshot());
-        else await feedFor(id).subscribe(req, res);
+      // The Veille page: a snapshot and a live stream of the corpora picked
+      // (?corpora=a,b; the demo corpus by default).
+      if (path === "/demo/feed" && req.method === "GET") {
+        await send(res, 200, await views.snapshot(await picked(url.searchParams)));
+        return;
+      }
+      if (path === "/demo/feed/stream" && req.method === "GET") {
+        await views.subscribe(req, res, await picked(url.searchParams));
         return;
       }
       // Older days of the feed: one period, newest first, and day counts.
       if (path === "/demo/feed/page" && req.method === "GET") {
-        await send(res, 200, await feedFor(id).page(url.searchParams));
+        await send(res, 200, await views.page(await picked(url.searchParams), url.searchParams));
         return;
       }
       if (path === "/demo/feed/days" && req.method === "GET") {
-        await send(res, 200, await feedFor(id).days(url.searchParams));
+        await send(res, 200, await views.days(await picked(url.searchParams), url.searchParams));
         return;
       }
-      // The demo's numbers, over every article of the corpus (catalog.mjs).
+      // The demo's numbers, over every article of the corpora (catalog.mjs).
       if (path === "/demo/feed/stats" && req.method === "POST") {
-        await send(res, 200, await indexFor(id).feed(statsQuery(await jsonBody(req))));
+        const corpora = await picked(url.searchParams);
+        await send(res, 200, await views.stats(corpora, statsQuery(await jsonBody(req))));
         return;
       }
       if (path === "/demo/feed/topics" && req.method === "GET") {
-        await send(res, 200, await indexFor(id).topics(topicsQuery(url.searchParams)));
+        const corpora = await picked(url.searchParams);
+        await send(res, 200, await views.topics(corpora, topicsQuery(url.searchParams)));
+        return;
+      }
+      // The Explorer: the corpora read, a page of documents, facet values, one document.
+      if (path === "/demo/corpora" && req.method === "GET") {
+        await send(res, 200, await explorer.corpora());
+        return;
+      }
+      if (path === "/demo/explore" && req.method === "GET") {
+        await send(res, 200, await explorer.page(url.searchParams));
+        return;
+      }
+      if (path === "/demo/explore/facets" && req.method === "GET") {
+        await send(res, 200, await explorer.facets(url.searchParams));
+        return;
+      }
+      const explored = path.match(/^\/demo\/explore\/records\/([\w-]+)$/);
+      if (explored && req.method === "GET") {
+        await send(res, 200, await explorer.record(explored[1]));
         return;
       }
       if (path === "/demo/sources/stats" && req.method === "GET") {
@@ -649,10 +716,13 @@ async function handle(req, res) {
         response = await renameSource(req, id);
       else if (path === "/v0/search" && req.method === "POST") {
         const body = await jsonBody(req);
+        const allowed = await readable();
         if (
           !Array.isArray(body.corpus_ids) ||
-          body.corpus_ids.length !== 1 ||
-          body.corpus_ids[0] !== id
+          !body.corpus_ids.length ||
+          body.corpus_ids.length > 16 ||
+          new Set(body.corpus_ids).size !== body.corpus_ids.length ||
+          !body.corpus_ids.every((corpus) => allowed.includes(corpus))
         )
           throw fail(403, "Corpus non autorisé.");
         // The body goes through unchanged, profile included. A deep search
@@ -683,8 +753,12 @@ async function handle(req, res) {
         const receipt = path.match(/^\/v0\/ingestion-receipts\/([\w-]+)$/);
         if (record) {
           response = await authorizeRecord(record[1]);
-          if (record[2] && response.status === 200)
+          if (record[2] && response.status === 200) {
             response = await upstream(path);
+            // A Version read here joins the Record's history in the Explorer.
+            if (response.status === 200)
+              history.note(record[1], response.data.version_id, response.data.accepted_at);
+          }
         } else if (receipt) {
           response = await upstream(path);
           if (
