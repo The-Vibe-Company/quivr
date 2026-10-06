@@ -274,8 +274,8 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
    * the usual /apple-touch-icon.png and /favicon.ico. A home page that refuses
    * (a bot or consent wall) is replaced by the feed's first article, which
    * declares the same icons. Raster images are recognised by their first
-   * bytes; an SVG only when served as one and free of scripts. Null when none
-   * answers.
+   * bytes, and one under 32 px is passed over; an SVG only when served as one
+   * and free of scripts. Null when none answers.
    */
   async function logo(raw) {
     const started = Date.now();
@@ -589,7 +589,7 @@ export function imageType(bytes, declared = "") {
       /javascript:/i.test(plain.replace(/[\x00-\x20]+/g, "")) ||
       // An entity built from entities is how an expansion bomb starts; the
       // doctype that could declare one opens the document.
-      /<!ENTITY[^>]*&/i.test(text.slice(0, 4096));
+      /<!ENTITY\b[^>"']*(?:"[^"]*&|'[^']*&)/i.test(text.slice(0, 4096));
     return svgRoot(text.slice(0, 4096)) && !active ? "image/svg+xml" : null;
   }
   const at = (offset, ...values) => values.every((v, i) => bytes[offset + i] === v);

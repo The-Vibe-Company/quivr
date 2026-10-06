@@ -279,6 +279,8 @@ test("a feed names its site and image, and a page its icons, best first", () => 
   // A link scheme hidden behind character references or blanks still counts.
   assert.equal(svg('<svg><a href="&#106;avascript:x()"/></svg>'), null);
   assert.equal(svg('<svg><a href="java\tscript:x()"/></svg>'), null);
+  // An entity built from entities, even behind a ">" in a quoted value.
+  assert.equal(svg('<!DOCTYPE svg [<!ENTITY a "x"><!ENTITY b ">&a;&a;">]><svg/>'), null);
   assert.equal(imageType(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg' onload='x()'/>"), "image/svg+xml"), null);
   assert.equal(imageType(Buffer.from("<svg><script>x()</script></svg>"), "image/svg+xml"), null);
   assert.equal(imageType(Buffer.from("<html>not an image</html>"), "image/svg+xml"), null);
@@ -299,7 +301,7 @@ test("a source's logo comes from its site's icons, an SVG only when served as on
     // A tiny icon first: too small to show sharp, the next one is kept.
     else if (req.url === "/tiny-first") send(200, "application/rss+xml", `<rss><channel><link>${host}/tiny-home</link><item/></channel></rss>`);
     else if (req.url === "/tiny-home") send(200, "text/html", '<link rel="apple-touch-icon" href="/tiny.png"><link rel="icon" sizes="64x64" href="/big.png">');
-    else if (req.url === "/tiny.png") send(200, "image/png", png(16, 16));
+    else if (req.url === "/tiny.png") send(200, "image/png", png(64, 16));
     else if (req.url === "/big.png") send(200, "image/png", png(64, 64));
     // A home page behind a bot wall: its first article declares a manifest,
     // whose vector icon needs the manifest's own query.

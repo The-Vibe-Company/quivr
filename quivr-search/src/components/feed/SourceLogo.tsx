@@ -143,7 +143,8 @@ export function SourceLogo({
       {connectorId && logo === undefined && (
         <img
           className="logo-source"
-          src={`/demo/sources/logo/${encodeURIComponent(connectorId)}`}
+          // v=2: logos cached before the server passed over tiny icons are asked again.
+          src={`/demo/sources/logo/${encodeURIComponent(connectorId)}?v=2`}
           alt=""
           decoding="async"
           onLoad={(event) => {
