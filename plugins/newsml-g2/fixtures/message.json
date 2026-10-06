@@ -1,0 +1,4 @@
+{
+  "description": "Synthetic single-item news message with NITF paragraphs and an update signal.",
+  "input": {"path": "message.xml", "media_type": "application/vnd.iptc.g2.newsmessage+xml"}
+}
