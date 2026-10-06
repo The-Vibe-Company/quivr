@@ -28,8 +28,6 @@ import "../../explorer.css";
 // Below this width the page is one column and a row opens its document.
 const NARROW = "(max-width: 1099px)";
 const SEARCH_DELAY_MS = 300;
-// A search shows its best documents, this many at most (explore.mjs).
-const SEARCH_LIMIT = 50;
 
 const narrowQuery = () => window.matchMedia(NARROW);
 const subscribeNarrow = (change: () => void) => {
@@ -48,6 +46,7 @@ const subscribeNarrow = (change: () => void) => {
  */
 export function ExplorerView({
   corpora,
+  corporaRead,
   picked,
   onPicked,
   record,
@@ -57,6 +56,8 @@ export function ExplorerView({
   onUnauthorized,
 }: {
   corpora: Corpus[];
+  /** Whether the corpora were read, or could not be. */
+  corporaRead: boolean;
   picked: string[];
   onPicked: (ids: string[]) => void;
   record: string | null;
@@ -119,8 +120,9 @@ export function ExplorerView({
   // The corpora the facets were read for: others picked, their fields go at once.
   const facetsFor = useRef("");
 
-  // Filters restored from the address wait for the fields' types.
-  const typed = corpora.length > 0 || !Object.keys(state.selection).length;
+  // Filters restored from the address wait for the fields' types, unless
+  // the corpora could not be read.
+  const typed = corporaRead || !Object.keys(state.selection).length;
 
   useEffect(() => {
     if (record || !typed) return;
@@ -237,8 +239,8 @@ export function ExplorerView({
   const previewed = state.selected || items[0]?.record_id || null;
   const count = state.q
     ? status === "ready" && page
-      ? page.items.length >= SEARCH_LIMIT
-        ? `${countLabel(page.items.length)} premiers résultats`
+      ? page.bounded
+        ? `${countLabel(page.items.length)} premier${page.items.length > 1 ? "s" : ""} résultat${page.items.length > 1 ? "s" : ""}`
         : `${countLabel(page.items.length)} résultat${page.items.length > 1 ? "s" : ""}`
       : ""
     : !predicates.length && documents !== undefined

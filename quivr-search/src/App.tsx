@@ -288,6 +288,9 @@ function Dashboard({
   const [openSource, setOpenSource] = useState<string | null>(null);
   // Every corpus the demo reads; the feed and the Explorer each span some.
   const [allCorpora, setAllCorpora] = useState<Corpus[]>([]);
+  // Whether the corpora were read, or could not be: the Explorer types its
+  // restored filters with them, and goes on without them on a failure.
+  const [corporaRead, setCorporaRead] = useState(false);
   const [feedCorpora, setFeedCorpora] = useState<string[]>(() =>
     initial.view === "feed" && initial.corpora.length ? initial.corpora : [corpus],
   );
@@ -337,9 +340,12 @@ function Dashboard({
         };
         setFeedCorpora(keep);
         setExplored(keep);
+        setCorporaRead(true);
       })
       .catch((error) => {
-        if (error instanceof APIError && error.status === 401) onUnauthorized();
+        if (controller.signal.aborted) return;
+        if (error instanceof APIError && error.status === 401) return onUnauthorized();
+        setCorporaRead(true);
       });
     return () => controller.abort();
   }, [corpus, onUnauthorized]);
@@ -700,6 +706,7 @@ function Dashboard({
           ) : page === "explorer" ? (
             <ExplorerView
               corpora={allCorpora}
+              corporaRead={corporaRead}
               picked={explored}
               onPicked={setExplored}
               record={record}

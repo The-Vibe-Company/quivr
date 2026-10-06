@@ -21,6 +21,8 @@ export interface ExplorePage {
   items: ExploreItem[];
   next_cursor?: string;
   excluded_corpora?: Exclusion[];
+  /** A search that reached its bound: more documents may match. */
+  bounded?: boolean;
 }
 
 export type Interval = "day" | "month" | "year";

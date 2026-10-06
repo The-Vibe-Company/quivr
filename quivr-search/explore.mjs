@@ -458,7 +458,12 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
         }
       }),
     );
-    return { items: records.filter(Boolean), excluded_corpora: response.data.excluded_corpora };
+    return {
+      items: records.filter(Boolean),
+      excluded_corpora: response.data.excluded_corpora,
+      // As many passages as asked: more documents may match.
+      bounded: (response.data.items || []).length >= SEARCH_LIMIT,
+    };
   }
 
   // A Record's source identity, which never changes: read once, the latest kept.
@@ -562,6 +567,7 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       };
       if (data.next_page_cursor) page.next_cursor = data.next_page_cursor;
       if (data.excluded_corpora?.length) page.excluded_corpora = data.excluded_corpora;
+      if (data.bounded) page.bounded = true;
       return page;
     },
     /** GET /demo/explore/facets: each field's values and how many documents have them. */
