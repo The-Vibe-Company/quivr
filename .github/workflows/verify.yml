@@ -411,6 +411,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r contracts/http/v0/checks/requirements.txt
+      - uses: ./.github/actions/grype-database
       - id: images
         run: |
           matrix=$(python3 -c 'import json, os, sys; sys.path.insert(0, "scripts"); import release_images; print(json.dumps(release_images.inventory(release_images.ROOT, os.environ["GITHUB_REPOSITORY"])))')
@@ -418,7 +419,17 @@ jobs:
   image-vulnerabilities:
     needs: image-inventory
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 8
+    env:
+      GRYPE_DB_CACHE_DIR: .scratch/grype-db
+      GRYPE_DB_AUTO_UPDATE: false
+      GRYPE_DB_VALIDATE_AGE: true
+      COSIGN_PASSWORD: ''
+    services:
+      registry:
+        image: registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e
+        ports:
+          - 5000:5000
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.image-inventory.outputs.matrix) }}
@@ -442,20 +453,37 @@ jobs:
             VERSION=dev
             REVISION=${{ github.sha }}
             PLUGIN=${{ matrix.plugin }}
-      - name: Install checksum-verified scanner
+      - name: Install checksum-verified inventory and scan tools
         env:
           TOOLS_DIR: ${{ runner.temp }}/security-tools
         run: |
+          bash scripts/security_tools.sh syft "$TOOLS_DIR"
           bash scripts/security_tools.sh grype "$TOOLS_DIR"
           echo "$TOOLS_DIR" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/grype-database-restore
+      - name: Inventory the image in the local registry
+        env:
+          SYFT_CHECK_FOR_APP_UPDATE: false
+        run: |
+          docker tag quivr-scan:local localhost:5000/quivr-check:local
+          docker push localhost:5000/quivr-check:local
+          image=$(docker inspect --format '{{json .RepoDigests}}' localhost:5000/quivr-check:local | jq -r '.[] | select(startswith("localhost:5000/quivr-check@sha256:"))')
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          syft "registry:$image" --output spdx-json=sbom.spdx.json
       - name: Reject critical vulnerabilities with an available fix
-        run: bash scripts/scan_image.sh docker:quivr-scan:local
+        run: bash scripts/scan_image.sh "registry:$IMAGE"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: image-vulnerabilities-${{ matrix.plugin || 'engine' }}
           path: vulnerabilities.json
           if-no-files-found: warn
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign, attest and verify without publishing packages
+        timeout-minutes: 7
+        run: |
+          timeout --kill-after=5s 15s cosign generate-key-pair --timeout 10s --output-key-prefix "$RUNNER_TEMP/image-check"
+          bash scripts/sign_image.sh "$IMAGE" sbom.spdx.json "$RUNNER_TEMP/image-check.key" "$RUNNER_TEMP/image-check.pub"
   # The one check to require: green only when every job above is green.
   verify:
     if: always()

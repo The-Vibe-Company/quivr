@@ -27,6 +27,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r contracts/http/v0/checks/requirements.txt
+      - uses: ./.github/actions/grype-database
       - id: release
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -37,11 +38,15 @@ jobs:
   build:
     needs: prepare
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 8
     permissions:
       contents: read
       packages: write
       id-token: write
+    env:
+      GRYPE_DB_CACHE_DIR: .scratch/grype-db
+      GRYPE_DB_AUTO_UPDATE: false
+      GRYPE_DB_VALIDATE_AGE: true
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
@@ -95,6 +100,7 @@ jobs:
         run: |
           mkdir -p sboms
           syft "registry:$IMAGE" --output "spdx-json=$SBOM"
+      - uses: ./.github/actions/grype-database-restore
       - name: Reject critical vulnerabilities with an available fix
         env:
           IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
@@ -107,25 +113,15 @@ jobs:
           path: vulnerabilities.json
           if-no-files-found: warn
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      - name: Sign and verify the immutable digest
-        env:
-          IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          cosign sign --yes "$IMAGE"
-          cosign verify "$IMAGE" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/release-images.yml@refs/tags/$RELEASE_TAG"
-      - name: Attest and verify the image inventory
+      - name: Sign, attest and verify the immutable image
+        timeout-minutes: 7
         env:
           IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           SBOM: sboms/${{ matrix.plugin_id && format('quivr-plugin-{0}', matrix.plugin_id) || 'quivr' }}.spdx.json
         run: |
-          cosign attest --yes --type spdxjson --predicate "$SBOM" "$IMAGE"
-          cosign verify-attestation "$IMAGE" --type spdxjson \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/release-images.yml@refs/tags/$RELEASE_TAG"
+          export COSIGN_CERTIFICATE_IDENTITY="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/release-images.yml@refs/tags/$RELEASE_TAG"
+          bash scripts/sign_image.sh "$IMAGE" "$SBOM"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-${{ matrix.plugin || 'engine' }}
