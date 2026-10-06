@@ -1,0 +1,469 @@
+{
+  "001_corpora.sql": {
+    "sha256": "96349f98988dcbeaac00c1f3647e9e4b381e0990ec38e61261175920107cab24",
+    "classification": "additive",
+    "risks": []
+  },
+  "002_inline_ingestion.sql": {
+    "sha256": "43a02e482df8192f89f26aef35e033c116da699fe49f2b9c2a141f6b553e7fc9",
+    "classification": "legacy-risk",
+    "risks": [
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "003_lexical_search.sql": {
+    "sha256": "c1c71714d83b65a2f6522e7cae3c8377a0b9ce0560f1fbc61c7d29bb38faf286",
+    "classification": "legacy-risk",
+    "risks": [
+      "UpdateStmt",
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "004_tokenizer_segments.sql": {
+    "sha256": "b4356dcbf3e0fcd560a63e20987a67940ac1019111912eb6da45065be8affbd9",
+    "classification": "legacy-risk",
+    "risks": [
+      "UpdateStmt"
+    ]
+  },
+  "005_embeddings.sql": {
+    "sha256": "1a933af42457912a98c549f5ae30f59ee2258b99d869bd8338ed361a71ad5b26",
+    "classification": "legacy-risk",
+    "risks": [
+      "UpdateStmt",
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "006_uploads.sql": {
+    "sha256": "ed9ca7b7fe7cb5aa22b68889d5d70b0044d8750fe1402aaa6a8ff88bfd2440bd",
+    "classification": "additive",
+    "risks": []
+  },
+  "007_manifests.sql": {
+    "sha256": "312957c549d6fab77fd944ea69eb6d6942023b060d7d487517992e1e3c89756f",
+    "classification": "additive",
+    "risks": []
+  },
+  "008_withdrawal_receipts.sql": {
+    "sha256": "f04a24905b1b27f9f0d541cb3b6d344b401c5826f7e0852cdea280de6a87a92f",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropConstraint"
+    ]
+  },
+  "009_record_catalog.sql": {
+    "sha256": "65bfd529ede3351e7de3893b3d3aca1f244af5b357c07d141d557d40dd1c907b",
+    "classification": "legacy-risk",
+    "risks": [
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "010_monitoring.sql": {
+    "sha256": "734a68e5d1bb529fcbb922c9df4b13841deaf700340283e14502f2baf158f3ab",
+    "classification": "legacy-risk",
+    "risks": [
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "011_projection_rebuilds.sql": {
+    "sha256": "e3b89d4dc77d64fa0d5090833a8a5b4ff74ca057e7a2bd7dba062980fcc5950d",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_DropConstraint",
+      "UpdateStmt",
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "012_operation_control.sql": {
+    "sha256": "451340fcb152b885a082ec507cb8753051964d38053011e707027cc4d46256fe",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropConstraint",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "013_evaluation.sql": {
+    "sha256": "56c9baef762246d57559aef2080860d5efd324c7dc265fa57cefbca122d20691",
+    "classification": "legacy-risk",
+    "risks": [
+      "foreign key into an existing table can constrain previous deletes",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "014_connectors.sql": {
+    "sha256": "460d2106fdd483967f35db9023eca38d6ee75df036e0a996602dca63c2ae44f1",
+    "classification": "legacy-risk",
+    "risks": [
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "015_retrieval_configs.sql": {
+    "sha256": "d005aa5e0727ca0dab4330db7a6c015ff9ee4bdf43b8021fb14c4830c3a0eccc",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropConstraint",
+      "UpdateStmt"
+    ]
+  },
+  "016_delivery_attempts.sql": {
+    "sha256": "733fafc1f8e68fedb535dfb792f913778e500c58a6a1531d5fa2950859c55d1f",
+    "classification": "legacy-risk",
+    "risks": [
+      "CreateFunctionStmt",
+      "CreateTrigStmt",
+      "added column constrains previous writers",
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "20260928T1548Z_connector_usage.sql": {
+    "sha256": "6b71ac704aeb29bb43814434a6bf7e259efb3022f7cdc76987bfbdcbb5112433",
+    "classification": "legacy-risk",
+    "risks": [
+      "added column constrains previous writers"
+    ]
+  },
+  "20260928T1549Z_delivery_retries.sql": {
+    "sha256": "e806ee34abd45dc7d0e392f2daf09bd93641f8fa0c058388206dbcc44b905874",
+    "classification": "legacy-risk",
+    "risks": [
+      "DeleteStmt",
+      "UpdateStmt",
+      "added column constrains previous writers",
+      "added column default is not a non-null constant",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260928T1659Z_correction_notices.sql": {
+    "sha256": "a155ad13a9eec0a7c803cd0ff8476b7571b592ff66b7b23bb843532897d24866",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_SetNotNull",
+      "UpdateStmt",
+      "added column constrains previous writers",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260928T1838Z_receipt_accepted_at.sql": {
+    "sha256": "49852588164ffb71b200b4c1db18dcd10c44063900c732daccef6a6c7c175ee0",
+    "classification": "legacy-risk",
+    "risks": [
+      "added column default is not a non-null constant",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260929T0528Z_normalizations.sql": {
+    "sha256": "7622eff89124d62731d3d27e9d218fad6991133c39b8580273e072c348ba82cb",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260929T0550Z_change_journal_prunes.sql": {
+    "sha256": "67c7f5dec4406fb620a930ad075b0ff026e1bdbec7c457a9d9eb1016bc7e0b62",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260929T0551Z_projection_order_and_purge.sql": {
+    "sha256": "7e1bb103db7cf921ed4c6c3d4ac10773e8c52d86a426b5c0fa67d62db192b175",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_ColumnDefault",
+      "AT_SetNotNull",
+      "AlterSeqStmt",
+      "SelectStmt",
+      "UpdateStmt"
+    ]
+  },
+  "20260929T0559Z_normalization_extensions.sql": {
+    "sha256": "d624ac1002298ef8a94ffecbac5bc2f003ca3d425d8b0500a562ca71c544129f",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260929T0716Z_normalization_failures.sql": {
+    "sha256": "92716e401bba5229fa33dffaa428c3c33070c3cd0aa9476c1220fb7017686253",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropNotNull",
+      "added column constrains previous writers"
+    ]
+  },
+  "20260929T0747Z_subscription_enable.sql": {
+    "sha256": "febad834236495d03213fc4e78f47a2f598dd5dca83d21876ce0e3a1dce662c9",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260929T0948Z_monitoring_edit_delete.sql": {
+    "sha256": "11ad92fc870546079df8434e1eb22ed7d98f6d895bc47d875f0cfe536df378f9",
+    "classification": "legacy-risk",
+    "risks": [
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260929T1109Z_subscription_owner.sql": {
+    "sha256": "ef10bd0ff5415636fca526abc2a5d78da9965a9554fc5a9fb6e15d65bda5214f",
+    "classification": "legacy-risk",
+    "risks": [
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260929T1125Z_evaluation_intents_by_record_version.sql": {
+    "sha256": "a05a226d89bbeb203cad218e57641b6d3cc82bdea47d4f1481d257a496e36a24",
+    "classification": "legacy-risk",
+    "risks": [
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260929T1427Z_evaluation_intents_by_subscription_version.sql": {
+    "sha256": "e6f25e813e39c286c94f51b108a9391c3dc9001d8420d9f0110937aa0faef4d4",
+    "classification": "legacy-risk",
+    "risks": [
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260929T2133Z_connector_push.sql": {
+    "sha256": "8c20895e1e2c1b01d7c72ec99ea9463aa60b04a072b389b3a3e14f9559a9db29",
+    "classification": "legacy-risk",
+    "risks": [
+      "added column constrains previous writers",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260930T0443Z_connector_run_requests.sql": {
+    "sha256": "ec4ae0d16b6b83c548eeffbe617a629bb44f2702f2752a21dbe6499bffbc8f8e",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260930T0447Z_subscription_preview_recent.sql": {
+    "sha256": "ba7b8361555e66a3b9f1f8b4570c9ddce51c766c8202b183155291eadd93eba1",
+    "classification": "legacy-risk",
+    "risks": [
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260930T0508Z_source_namespace_projection.sql": {
+    "sha256": "3156813c8ca54661fb0df95555ed05c0a562b29a186007ebde6b7794d2bd7afc",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260930T1016Z_plugin_registry.sql": {
+    "sha256": "5a8e09eac819f97db7f67558d7d2b452469610d276e633e42b14e9d67a4d81f6",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260930T1043Z_vector_space_registry.sql": {
+    "sha256": "5a0d0e0f28d502cb4f8f15cf3da1050d50d06222c9a24a831eff0d2cffc5d596",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropConstraint",
+      "UpdateStmt",
+      "added column constrains previous writers"
+    ]
+  },
+  "20260930T1300Z_former_default_generations.sql": {
+    "sha256": "99fa1d996b882d8d8f287b27824799fc68dcbd7b23db91eedf82ea3703fa73e4",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260930T1310Z_plugin_activation.sql": {
+    "sha256": "8d013de5f212671b65b3035782bd70a6ea9269d08e4239927680d12100f4ea00",
+    "classification": "legacy-risk",
+    "risks": [
+      "DoStmt",
+      "added column constrains previous writers",
+      "foreign key into an existing table can constrain previous deletes",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260930T1346Z_version_step_times.sql": {
+    "sha256": "34a68c9612113076f3a973a87fcf788be1b7b3555c3e4f95aff13e820dafdfff",
+    "classification": "legacy-risk",
+    "risks": [
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260930T1348Z_observability_rollups.sql": {
+    "sha256": "cadb92e70241e91e891b6b078501902aa7da1d73c0603fbea1b565b11e897ef7",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260930T1422Z_pinned_plan_work.sql": {
+    "sha256": "742d0545ab425859677a15531e7b1e148a90ede095203b2af6ff960acd054941",
+    "classification": "legacy-risk",
+    "risks": [
+      "added column constrains previous writers",
+      "foreign key into an existing table can constrain previous deletes",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20260930T1423Z_normalization_failure_plan.sql": {
+    "sha256": "29377078ec20202d68650806345c8ecc2602b175ab226e581de0cdabe73b2852",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260930T1515Z_plan_rollback.sql": {
+    "sha256": "8fff6fb6351aff2b61828aced8d101e8d3350b8a8f0a07d59af57db0039fd525",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropConstraint",
+      "UpdateStmt",
+      "added column constrains previous writers",
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "20260930T1538Z_enrichment_timeouts.sql": {
+    "sha256": "fc6e4096b8b2e86f30484627320853091a89e47a642fce5785481eb408e226c5",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260930T1657Z_enrichment_reason.sql": {
+    "sha256": "efe84bc67d8f1a7b6089ac0cbdaf3ee5bd794887b1ae7f40481a52614db220d4",
+    "classification": "additive",
+    "risks": []
+  },
+  "20260930T1723Z_backfills.sql": {
+    "sha256": "3a244243e6117f13de057bcc8e83591ce2a6043e7359d7697ca79acebf190de9",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropConstraint",
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "20260930T1815Z_quarantine_reprocess.sql": {
+    "sha256": "b96ccceadbdf102080a9b898f7392c08e344ba252bfabc22542653b0ea7f44a7",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropConstraint",
+      "UpdateStmt",
+      "added column constrains previous writers",
+      "foreign key into an existing table can constrain previous deletes",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20261001T0855Z_observability_over_objective.sql": {
+    "sha256": "68f0d9a9a5ae1961e54ccaf115e5c558223c7c691c56e07e3abee6a8d12229b8",
+    "classification": "additive",
+    "risks": []
+  },
+  "20261001T0858Z_plugin_check_fixtures.sql": {
+    "sha256": "b49694167acd805504f550cfc0486b4b851580aef80ba0ee9c34a077427ad481",
+    "classification": "additive",
+    "risks": []
+  },
+  "20261001T1222Z_subscription_versions_by_evaluator.sql": {
+    "sha256": "1fb42a8719c96202ebbd3e0d7745d9127f519b4fcc7de13b0d8ac04030ee1071",
+    "classification": "legacy-risk",
+    "risks": [
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20261001T1528Z_saved_query_vectors.sql": {
+    "sha256": "aae4e2aa0117033fef8308677dc7a0bcbc041fda70f600e4d2c10369842b4da0",
+    "classification": "additive",
+    "risks": []
+  },
+  "20261001T1717Z_evaluation_retirements.sql": {
+    "sha256": "9f84940c42347c34c8cc2dc2fe936da82bd42c3915c6b24fe19cc680b1375b4b",
+    "classification": "additive",
+    "risks": []
+  },
+  "20261002T1559Z_ingestion_dispatch_batches.sql": {
+    "sha256": "103b4f2c705cee7efa4039a432532c4a442afecf82e38da391e991241a1fb76a",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_ColumnDefault",
+      "DeleteStmt",
+      "UpdateStmt",
+      "added column default is not a non-null constant",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20261002T1705Z_connector_instance_tokens.sql": {
+    "sha256": "6bf0ceb8391a3bddb8641141b378ed36cf883d8d6813b31485c4ee4c48fef2d6",
+    "classification": "legacy-risk",
+    "risks": [
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "20261002T1842Z_source_ingestion_routes.sql": {
+    "sha256": "f13a5d4a24f3b07e0b05dd60ea6dab6617cb92ac34f0378f5f16dc4181224891",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropColumn",
+      "UpdateStmt",
+      "added column constrains previous writers"
+    ]
+  },
+  "20261002T1902Z_connector_signature_replays.sql": {
+    "sha256": "4b4a0e2a92f779e47f362bc4f7d1687f2ae4016492e47ff1a4f7b905b43e3c58",
+    "classification": "legacy-risk",
+    "risks": [
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "20261002T1927Z_connector_push_protection.sql": {
+    "sha256": "fac71f9ec9252ab6fce72a038167758a75b6ab643c2459bb527f640277f7fc82",
+    "classification": "legacy-risk",
+    "risks": [
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "20261002T2011Z_evaluation_projections.sql": {
+    "sha256": "7fd54e8a84b802f8cf355ca69eb79faf416e2ed25ddf19d358f6b97e4ebf6cf0",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropConstraint",
+      "CreateFunctionStmt",
+      "CreateTrigStmt",
+      "UpdateStmt",
+      "added column constrains previous writers",
+      "foreign key into an existing table can constrain previous deletes",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20261002T2134Z_serving_projections.sql": {
+    "sha256": "7447452f42f2c04640531187fe7f78fd33462010931dd256fc89fd8b794e7bb9",
+    "classification": "legacy-risk",
+    "risks": [
+      "AT_AddConstraint",
+      "AT_DropConstraint",
+      "foreign key into an existing table can constrain previous deletes"
+    ]
+  },
+  "20261005T0536Z_record_catalog_acceptance_time.sql": {
+    "sha256": "6f54f915c9f424c961e4cc2d7aeb505fecd42d2fe21f76530246d1f28026ed32",
+    "classification": "legacy-risk",
+    "risks": [
+      "CreateFunctionStmt",
+      "CreateTrigStmt",
+      "UpdateStmt",
+      "index on an existing table can block writes or add uniqueness"
+    ]
+  },
+  "20261005T1833Z_trace_context.sql": {
+    "sha256": "52181e21d39a177b76c2d97e028efb682d5b8cf07f8f19f8989731abd84ec4a2",
+    "classification": "additive",
+    "risks": []
+  },
+  "20261006T0039Z_audit_events.sql": {
+    "sha256": "6e39f51665a32de4ad907ddae37878fd80e469b4d54beccb27d12ac101e65436",
+    "classification": "legacy-risk",
+    "risks": [
+      "CreateFunctionStmt",
+      "CreateTrigStmt",
+      "GrantStmt"
+    ]
+  },
+  "20261006T0048Z_ingestion_workflow_batches.sql": {
+    "sha256": "7a6f168deaae9f70b3ea9add9032f7295a0fdd312f9537ca5bee96e6b5d750ab",
+    "classification": "additive",
+    "risks": []
+  }
+}

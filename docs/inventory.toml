@@ -77,6 +77,7 @@ excluded = [
 "docs/agents/oss-embeddings.md" = { audience = "contributor", kind = "guide", summary = "preview and measure open-source embedding models on ephemeral CPU and GPU jobs" }
 "docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide", summary = "how parallel agents claim, plan and ship tickets" }
 "docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide", summary = "how specs and tickets are written and tracked" }
+"docs/agents/migrations.md" = { audience = "contributor", kind = "guide", summary = "add compatible expansions and defer destructive contracts" }
 "docs/agents/news-set.md" = { audience = "contributor", kind = "guide", summary = "build an encrypted French news search set and validate its human review" }
 "docs/agents/testing.md" = { audience = "contributor", kind = "guide", summary = "what a good test looks like here" }
 "docs/agents/triage-labels.md" = { audience = "contributor", kind = "guide", summary = "the five triage labels" }
@@ -156,3 +157,5 @@ excluded = [
 "tests/fakes/README.md" = 60
 
 "docs/agents/oss-embeddings.md" = 85
+
+"docs/agents/migrations.md" = 78

@@ -129,6 +129,8 @@ def check(root):
     for name in missing(base, head):
         print(f'migrations: note: {name} is on main but not here; rebase if you are behind main', file=sys.stderr)
     found = problems(base, head, datetime.datetime.now(datetime.timezone.utc))
+    from migration_policy import check as policy_check
+    found.extend(policy_check(root, base_ref(), set(base)))
     for problem in found:
         print(f'migrations: {problem}', file=sys.stderr)
     return 1 if found else 0
@@ -140,7 +142,7 @@ def new(root, slug):
         return 2
     [stamp] = stamps_after(latest_known(root), datetime.datetime.now(datetime.timezone.utc), 1)
     path = root / DIRECTORY / f'{stamp}_{slug}.sql'
-    path.write_text(f'-- {slug}\n')
+    path.write_text(f'-- {slug}\n-- Expand only: keep the previous binary compatible. See docs/agents/migrations.md.\n')
     print(path.relative_to(root))
     return 0
 
