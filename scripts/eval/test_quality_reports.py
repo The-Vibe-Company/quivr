@@ -130,13 +130,6 @@ class Output(unittest.TestCase):
             loaded = json.loads((pathlib.Path(temp) / 'tiny.json').read_text())
             self.assertEqual(loaded['set'], 'tiny')
 
-    def test_cli_refuses_ci_before_preparing_a_set(self):
-        with mock.patch.dict('os.environ', {'CI': 'true', 'GITHUB_ACTIONS': ''}), \
-                mock.patch.object(quality_reports.public_sets, 'prepare') as prepare:
-            with self.assertRaisesRegex(SystemExit, 'locally only'):
-                quality_reports.main(['--set', 'tiny', '--cache', 'cache', '--out', 'out'])
-        prepare.assert_not_called()
-
     def test_cli_uses_the_direct_comparison_cache_by_default(self):
         with mock.patch.dict('os.environ', {'CI': '', 'GITHUB_ACTIONS': ''}), \
                 mock.patch.object(quality_reports.public_sets, 'prepare', side_effect=RuntimeError('stop')) as prepare:

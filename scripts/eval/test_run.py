@@ -25,7 +25,7 @@ def timing(encoding, elapsed):
 
 
 class DatasetCLI(unittest.TestCase):
-    def test_ci_only_previews_the_licence_tiers_without_preparing_data(self):
+    def test_ci_previews_the_licence_tiers_without_preparing_data(self):
         # CLI admission has its own owner; prepare owns restriction and conversion.
         for restricted in (False, True):
             args = ['eval', '--list-sets'] + (['--include-restricted'] if restricted else [])
@@ -42,14 +42,6 @@ class DatasetCLI(unittest.TestCase):
                 self.assertFalse(registry['nfcorpus']['promotion_eligible'])
             else:
                 self.assertTrue(all(spec['tier'] == 'default' for spec in registry.values()))
-        with mock.patch('sys.argv', ['eval']), \
-             mock.patch.dict('os.environ', {'CI': 'true'}), \
-             mock.patch.object(run.public_sets, 'prepare') as prepare, \
-             contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit) as refusal:
-                run.main()
-            self.assertEqual(refusal.exception.code, 2)
-        prepare.assert_not_called()
 
 
 class TimeSummary(unittest.TestCase):
@@ -61,7 +53,6 @@ class TimeSummary(unittest.TestCase):
         self.assertEqual(s['client_ms'], {'p50': 62.0, 'p95': 500.0})
         self.assertEqual((s['searches'], s['failures']), (3, 2))
 
-    def test_no_phases_reported_leaves_the_share_unknown(self):
         s = run.time_summary([{'client_ms': 5.0}], failures=0)
         self.assertIsNone(s['query_encoding_share'])
         self.assertEqual(s['hydration_ms'], {'p50': None, 'p95': None})
@@ -222,6 +213,8 @@ class EvaluationSelection(unittest.TestCase):
                               'semantic/evaluation/example.embedding/model@1': {'per_query': values(.75)},
                               'hybrid/evaluation/example.embedding/model@1': {'per_query': values(.5)}}}
         run.compare_within(result)
+        self.assertEqual(set(result['against_served_mode']), {
+            'semantic/evaluation/example.embedding/model@1', 'hybrid/evaluation/example.embedding/model@1'})
         for key, comparison in result['against_served_mode'].items():
             for metric in scoring.METRICS:
                 self.assertEqual(comparison[metric]['queries'], 2)

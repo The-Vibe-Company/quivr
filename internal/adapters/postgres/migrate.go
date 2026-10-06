@@ -57,13 +57,6 @@ func MigrateFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 	return tx.Commit(ctx)
 }
 
-// PendingMigrations lists, in apply order, the migrations of fsys that are not
-// recorded in schema_migrations.
-func PendingMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) ([]string, error) {
-	pending, _, err := schemaState(ctx, pool, fsys)
-	return pending, err
-}
-
 // schemaState returns the pending migrations of fsys and, when there are
 // some, the latest recorded migration sorting after every file of fsys ("" if
 // none).

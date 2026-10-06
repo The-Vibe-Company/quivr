@@ -210,7 +210,7 @@ func (p *Plugin) serveSearch(w http.ResponseWriter, r *http.Request) {
 		refuse(w, 400, "unknown_profile", fmt.Sprintf("profile %q is not declared by %s", req.Profile, p.m.ID), Credential{})
 		return
 	}
-	req.logger = p.logger.With("invocation_id", req.InvocationID, "round", req.Round)
+	req.logger = p.requestLogger(r.Context(), Credential{}, req.InvocationID).With("round", req.Round)
 	defer p.ingestPanic(w, req.logger)
 	// max_latency_ms is the profile's latency objective, not a deadline: the
 	// engine ends the request, and so this context, at its hard bound.

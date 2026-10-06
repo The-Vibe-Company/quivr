@@ -28,6 +28,11 @@ func TestNormalizerAndSubscriptionManifestAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("vectors before API", func(t *testing.T) {
+		if _, err := New(filepath.Join(fixtures, "manifests/invalid/subscription-vectors.yaml")); err == nil || !strings.Contains(err.Error(), "subscription vectors require Plugin API") {
+			t.Fatalf("vector declaration before supported API: %v", err)
+		}
+	})
 	doc := generic(t, p.m.doc)
 	sub := doc["contributions"].(map[string]any)["subscription"].(map[string]any)
 	delete(sub, "configuration_schema")
@@ -38,7 +43,6 @@ func TestNormalizerAndSubscriptionManifestAdmission(t *testing.T) {
 		valid     bool
 	}{
 		{"optional configuration", ">=0.2.0 <0.3.0", false, true},
-		{"vectors before API", ">=0.2.0 <0.3.0", true, false},
 		{"vectors supported", ">=0.10.0 <0.11.0", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

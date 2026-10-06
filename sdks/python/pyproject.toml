@@ -9,8 +9,9 @@ description = "Write Quivr Plugin Protocol v0 plugins in Python (all five Contri
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-# Runtime dependencies stay small and permissively licensed (both MIT).
+# Runtime dependencies are permissively licensed.
 dependencies = [
+    "opentelemetry-api>=1.32,<2",
     "PyYAML>=6.0",
     "jsonschema>=4.18",
 ]

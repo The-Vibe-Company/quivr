@@ -33,6 +33,8 @@ import uuid
 import urllib.error
 from typing import Protocol
 
+import ci_guard
+
 KINDS = ('entity', 'event', 'recent', 'paraphrase', 'multi_article', 'no_answer')
 SYSTEMS = ('bm25', 'e5_small', 'cohere_pro', 'hybrid')
 POOL_DEPTH = 10
@@ -1163,7 +1165,7 @@ def main(argv=None):
         parser.error('choose exactly one --fake or --providers')
     if not args.fake and not args.articles:
         parser.error('live builds require articles')
-    if not args.fake and any(os.environ.get(k, '').lower() not in ('', '0', 'false') for k in ('CI', 'GITHUB_ACTIONS')):
+    if not args.fake and ci_guard.in_ci():
         parser.error('live builds are refused in CI')
     if args.response_cache and not args.storage_dir:
         parser.error('response cache requires a local private storage directory')

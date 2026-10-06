@@ -247,7 +247,7 @@ func (p *Plugin) serveReceive(w http.ResponseWriter, r *http.Request) {
 		}
 		receive = impl.Receive
 	}
-	req.logger = p.requestLogger(credential, req.InvocationID)
+	req.logger = p.requestLogger(r.Context(), credential, req.InvocationID)
 	defer p.recoverPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), p.m.timeoutDur)
 	defer cancel()

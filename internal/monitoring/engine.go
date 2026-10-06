@@ -43,6 +43,7 @@ const (
 // committed trigger event. An evaluation intent names the evaluated Record
 // Version; a withdrawal intent names the Record's latest matched Version.
 type Intent struct {
+	TraceContext          string
 	Kind                  string
 	Organization          string
 	SubscriptionID        string

@@ -222,7 +222,7 @@ func (p *Plugin) attachmentHandler(w http.ResponseWriter, r *http.Request, schem
 	if req.Grant != nil {
 		redact = grantRedactor(credential, req.Grant)
 	}
-	req.logger = p.requestLogger(redact, req.InvocationID)
+	req.logger = p.requestLogger(r.Context(), redact, req.InvocationID)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(p.m.Connector.Attachments.TimeoutMS)*time.Millisecond)
 	p.spool.expire(req.Now)
 	return &req, impl, redact, ctx, cancel

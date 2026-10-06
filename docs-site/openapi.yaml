@@ -4949,6 +4949,15 @@ components:
       type: object
       additionalProperties: false
       properties:
+        request_id:
+          type: string
+          description: Bounded caller X-Request-ID, or an engine-generated correlation ID.
+        trace_id:
+          type: string
+          description: W3C trace ID when a trace context is present.
+        span_id:
+          type: string
+          description: W3C span ID of the API handler when a trace context is present.
         code:
           type: string
           minLength: 1

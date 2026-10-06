@@ -79,3 +79,14 @@ func TestGauge(t *testing.T) {
 		t.Fatalf("%q", text)
 	}
 }
+
+func TestHistogramWithoutBoundariesKeepsHistogramExposition(t *testing.T) {
+	h := telemetry.NewHistogram("quivr_empty_bounds", "No finite buckets.")
+	h.ObserveValue(2)
+	text := render(func(b *strings.Builder) { h.Write(b) })
+	for _, want := range []string{"# TYPE quivr_empty_bounds histogram", "quivr_empty_bounds_bucket{le=\"+Inf\"} 1", "quivr_empty_bounds_sum 2", "quivr_empty_bounds_count 1"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in %s", want, text)
+		}
+	}
+}
