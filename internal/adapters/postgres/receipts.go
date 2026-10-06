@@ -17,7 +17,7 @@ var _ content.ReceiptReader = ReceiptStore{}
 // Organization; connectors use it to skip unchanged items before downloading.
 func (s ReceiptStore) HasReceipt(ctx context.Context, org, key string) (bool, error) {
 	var exists bool
-	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND id=$2)`, org, content.StableID("receipt", org, "ingestion", key)).Scan(&exists)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ingestion_receipts WHERE organization=$1 AND id=$2)`, org, content.StableID("receipt", org, "ingestion", key)).Scan(&exists)
 	return exists, err
 }
 
@@ -25,7 +25,7 @@ func (s ReceiptStore) Receipt(ctx context.Context, org, id string) (content.Rece
 	r := content.Receipt{Diagnostics: []content.Diagnostic{}}
 	var command []byte
 	var code string
-	err := s.Pool.QueryRow(ctx, `SELECT id,state,coalesce(outcome,''),record_id,coalesce(version_id,''),command,processing,error_code FROM ingestion_receipts WHERE organization=$1 AND id=$2`, org, id).Scan(&r.ID, &r.State, &r.Outcome, &r.RecordID, &r.VersionID, &command, &r.Processing.State, &code)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT id,state,coalesce(outcome,''),record_id,coalesce(version_id,''),command,processing,error_code FROM ingestion_receipts WHERE organization=$1 AND id=$2`, org, id).Scan(&r.ID, &r.State, &r.Outcome, &r.RecordID, &r.VersionID, &command, &r.Processing.State, &code)
 	if err != nil {
 		return r, notFound(err)
 	}

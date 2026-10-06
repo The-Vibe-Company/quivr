@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 )
@@ -437,6 +438,9 @@ func (s Service) withdraw(ctx context.Context, scope corpus.Scope, w Withdrawal,
 		return Receipt{}, ErrInvalid
 	}
 	result, err := s.Submissions.Withdraw(ctx, scope, w)
+	if err == nil {
+		audit.RecordTarget(ctx, "record", result.RecordID)
+	}
 	if !reveal {
 		result.RecordID = ""
 		result.VersionID = ""

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/The-Vibe-Company/quivr/internal/audit"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
@@ -351,7 +352,7 @@ func (s Service) Activate(ctx context.Context, scope corpus.Scope, id string) (P
 		return a, err
 	})
 	if err == nil && s.Activated != nil {
-		s.Activated(ctx)
+		audit.AfterCommit(ctx, s.Activated)
 	}
 	return plan, err
 }

@@ -140,7 +140,7 @@ func fixturesColumn(files map[string][]byte) ([]byte, error) {
 // as a new plan, under the plan lock api and worker share at startup. A
 // configuration without pins on a registry without a plan writes nothing.
 func (s PluginStore) ApplyConfiguration(ctx context.Context, seed registry.Seed) (registry.Applied, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return registry.Applied{}, err
 	}
@@ -236,12 +236,12 @@ func recordPlan(ctx context.Context, tx pgx.Tx, source, previous string, roles [
 
 // PluginRegistrations lists every registration, oldest first.
 func (s PluginStore) PluginRegistrations(ctx context.Context) ([]registry.Registration, error) {
-	return registrations(ctx, s.Pool, "")
+	return registrations(ctx, database(ctx, s.Pool), "")
 }
 
 // PluginRegistration returns one registration, or registry.ErrNotFound.
 func (s PluginStore) PluginRegistration(ctx context.Context, id string) (registry.Registration, error) {
-	r, err := scanRegistration(s.Pool.QueryRow(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations WHERE id=$1`, id))
+	r, err := scanRegistration(database(ctx, s.Pool).QueryRow(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, registry.ErrNotFound
 	}
@@ -251,7 +251,7 @@ func (s PluginStore) PluginRegistration(ctx context.Context, id string) (registr
 // ActivePlan returns the active Pipeline Plan with its roles sorted, or
 // registry.ErrNoPlan.
 func (s PluginStore) ActivePlan(ctx context.Context) (registry.Plan, error) {
-	return activePlan(ctx, s.Pool)
+	return activePlan(ctx, database(ctx, s.Pool))
 }
 
 func activePlan(ctx context.Context, q querier) (registry.Plan, error) {
@@ -270,7 +270,7 @@ func activePlan(ctx context.Context, q querier) (registry.Plan, error) {
 // activation time of a plan that is no longer active is when it was last
 // activated as far as the registry knows: its creation.
 func (s PluginStore) PipelinePlan(ctx context.Context, id string) (registry.Plan, error) {
-	return pipelinePlan(ctx, s.Pool, id)
+	return pipelinePlan(ctx, database(ctx, s.Pool), id)
 }
 
 func pipelinePlan(ctx context.Context, q querier, id string) (registry.Plan, error) {
@@ -298,7 +298,7 @@ func pipelinePlan(ctx context.Context, q querier, id string) (registry.Plan, err
 // process polls to follow plan changes.
 func (s PluginStore) ActivePlanID(ctx context.Context) (string, error) {
 	var id string
-	err := s.Pool.QueryRow(ctx, `SELECT plan_id FROM active_pipeline_plan`).Scan(&id)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT plan_id FROM active_pipeline_plan`).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -309,11 +309,11 @@ func (s PluginStore) ActivePlanID(ctx context.Context) (string, error) {
 // registry.ErrNotFound: work pinned to a plan resolves it (THE-782).
 func (s PluginStore) PlanMembers(ctx context.Context, id string) (registry.Plan, map[string]registry.Registration, error) {
 	members := map[string]registry.Registration{}
-	plan, err := pipelinePlan(ctx, s.Pool, id)
+	plan, err := pipelinePlan(ctx, database(ctx, s.Pool), id)
 	if err != nil {
 		return plan, members, err
 	}
-	list, err := registrations(ctx, s.Pool, `WHERE id IN (SELECT registration_id FROM pipeline_plan_roles WHERE plan_id=$1)`, plan.ID)
+	list, err := registrations(ctx, database(ctx, s.Pool), `WHERE id IN (SELECT registration_id FROM pipeline_plan_roles WHERE plan_id=$1)`, plan.ID)
 	for _, r := range list {
 		members[r.ID] = r
 	}
@@ -323,7 +323,7 @@ func (s PluginStore) PlanMembers(ctx context.Context, id string) (registry.Plan,
 // EvaluatorRegistrations returns every registration a plan named for an
 // alert-rule role, ordered by the latest plan naming each, oldest first.
 func (s PluginStore) EvaluatorRegistrations(ctx context.Context) ([]registry.Registration, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations
  JOIN (SELECT pr.registration_id,max(p.created_at) AS named_at FROM pipeline_plan_roles pr JOIN pipeline_plans p ON p.id=pr.plan_id
   WHERE pr.role LIKE 'subscription:%' GROUP BY pr.registration_id) named ON named.registration_id=plugin_registrations.id
  ORDER BY named.named_at,plugin_registrations.id`)
@@ -340,7 +340,7 @@ func (s PluginStore) EvaluatorRegistrations(ctx context.Context) ([]registry.Reg
 // connectorRunPinExpiry no longer counts as draining work, so a run
 // dispatched again under the same identity is pinned again, to plan.
 func (s PluginStore) PinWork(ctx context.Context, kind, org, id, plan string) (pinned string, stopped bool, err error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return "", false, err
 	}
@@ -361,7 +361,7 @@ func (s PluginStore) PinWork(ctx context.Context, kind, org, id, plan string) (p
 // ReleaseWork forgets a finished piece of work; a registration it kept
 // draining reads as inactive once no other work holds it.
 func (s PluginStore) ReleaseWork(ctx context.Context, kind, org, id string) error {
-	_, err := s.Pool.Exec(ctx, `DELETE FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3`, kind, org, id)
+	_, err := database(ctx, s.Pool).Exec(ctx, `DELETE FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3`, kind, org, id)
 	return err
 }
 
@@ -369,7 +369,7 @@ func (s PluginStore) ReleaseWork(ctx context.Context, kind, org, id string) erro
 // of its plan unreachable, and returns the work's count.
 func (s PluginStore) CountUnavailable(ctx context.Context, kind, org, id string) (int, error) {
 	var n int
-	err := s.Pool.QueryRow(ctx, `UPDATE pipeline_plan_work SET unavailable_attempts=unavailable_attempts+1 WHERE kind=$1 AND organization=$2 AND work_id=$3 RETURNING unavailable_attempts`, kind, org, id).Scan(&n)
+	err := database(ctx, s.Pool).QueryRow(ctx, `UPDATE pipeline_plan_work SET unavailable_attempts=unavailable_attempts+1 WHERE kind=$1 AND organization=$2 AND work_id=$3 RETURNING unavailable_attempts`, kind, org, id).Scan(&n)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, fmt.Errorf("%s %s is not pinned to a plan", kind, id)
 	}
@@ -380,13 +380,13 @@ func (s PluginStore) CountUnavailable(ctx context.Context, kind, org, id string)
 // (registry.PinnedWorkStop); work that is not pinned is not stopped.
 func (s PluginStore) WorkStopped(ctx context.Context, kind, org, id string) (bool, error) {
 	var stopped bool
-	err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 AND stopped_at IS NOT NULL)`, kind, org, id).Scan(&stopped)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pipeline_plan_work WHERE kind=$1 AND organization=$2 AND work_id=$3 AND stopped_at IS NOT NULL)`, kind, org, id).Scan(&stopped)
 	return stopped, err
 }
 
 // ActiveMembers returns the active plan and its registrations by id.
 func (s PluginStore) ActiveMembers(ctx context.Context) (registry.Plan, map[string]registry.Registration, error) {
-	return activeMembers(ctx, s.Pool)
+	return activeMembers(ctx, database(ctx, s.Pool))
 }
 
 func activeMembers(ctx context.Context, q querier) (registry.Plan, map[string]registry.Registration, error) {
@@ -404,7 +404,7 @@ func activeMembers(ctx context.Context, q querier) (registry.Plan, map[string]re
 
 // RegisterPlugin records a registration under an idempotency key.
 func (s PluginStore) RegisterPlugin(ctx context.Context, r registry.Registration, key string) (registry.Registration, bool, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return registry.Registration{}, false, err
 	}
@@ -450,7 +450,7 @@ func (s PluginStore) RegisterPlugin(ctx context.Context, r registry.Registration
 // fixtures.
 func (s PluginStore) ClaimCheck(ctx context.Context, lease time.Duration) (registry.Registration, bool, error) {
 	var fixtures []byte
-	r, err := scanRegistration(s.Pool.QueryRow(ctx, `UPDATE plugin_registrations SET check_lease_until=now()+$1::interval WHERE id=(
+	r, err := scanRegistration(database(ctx, s.Pool).QueryRow(ctx, `UPDATE plugin_registrations SET check_lease_until=now()+$1::interval WHERE id=(
  SELECT id FROM plugin_registrations WHERE state='registered' AND check_lease_until<now() ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED)
  RETURNING `+registrationColumns+`,check_fixtures`, fmt.Sprintf("%d milliseconds", lease.Milliseconds())), &fixtures)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -473,7 +473,7 @@ func (s PluginStore) RecordCheck(ctx context.Context, id string, report registry
 	if report.Certified {
 		state = registry.StateValidated
 	}
-	_, err = s.Pool.Exec(ctx, `UPDATE plugin_registrations SET state=$2,check_report=$3,check_lease_until='-infinity',updated_at=now() WHERE id=$1 AND state='registered'`, id, state, b)
+	_, err = database(ctx, s.Pool).Exec(ctx, `UPDATE plugin_registrations SET state=$2,check_report=$3,check_lease_until='-infinity',updated_at=now() WHERE id=$1 AND state='registered'`, id, state, b)
 	return err
 }
 
@@ -481,7 +481,7 @@ func (s PluginStore) RecordCheck(ctx context.Context, id string, report registry
 // vector spaces, under the plan lock. Activating the registration that
 // already serves every role it declares returns the active plan unchanged.
 func (s PluginStore) Activate(ctx context.Context, id string, decide func(registry.Plan, map[string]registry.Registration, registry.Registration) (registry.Activation, error)) (registry.Plan, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return registry.Plan{}, err
 	}
@@ -534,7 +534,7 @@ func (s PluginStore) Activate(ctx context.Context, id string, decide func(regist
 
 // PipelinePlans returns the latest limit plans, newest first.
 func (s PluginStore) PipelinePlans(ctx context.Context, limit int) ([]registry.Plan, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id FROM pipeline_plans ORDER BY created_at DESC,id DESC LIMIT $1`, limit)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT id FROM pipeline_plans ORDER BY created_at DESC,id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -544,7 +544,7 @@ func (s PluginStore) PipelinePlans(ctx context.Context, limit int) ([]registry.P
 	}
 	plans := make([]registry.Plan, 0, len(ids))
 	for _, id := range ids {
-		plan, err := pipelinePlan(ctx, s.Pool, id)
+		plan, err := pipelinePlan(ctx, database(ctx, s.Pool), id)
 		if err != nil {
 			return nil, err
 		}
@@ -558,7 +558,7 @@ func (s PluginStore) PipelinePlans(ctx context.Context, limit int) ([]registry.P
 // plan naming a registration that leaves the plan. The request's key replays
 // the plan it recorded.
 func (s PluginStore) Rollback(ctx context.Context, req registry.RollbackRequest, decide func(active, target registry.Plan, members map[string]registry.Registration) (registry.Activation, error)) (registry.Plan, error) {
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return registry.Plan{}, err
 	}
@@ -654,7 +654,7 @@ func (s PluginStore) BindIngestionWork(ctx context.Context, kind, org, id, regis
 	if kind != "ingestion" {
 		return nil
 	}
-	tag, err := s.Pool.Exec(ctx, `UPDATE pipeline_plan_work w SET ingestion_registration_id=$4
+	tag, err := database(ctx, s.Pool).Exec(ctx, `UPDATE pipeline_plan_work w SET ingestion_registration_id=$4
  WHERE kind=$1 AND organization=$2 AND work_id=$3 AND (ingestion_registration_id IS NULL OR ingestion_registration_id=$4)
 	 AND EXISTS(SELECT 1 FROM pipeline_plan_roles r WHERE r.plan_id=w.plan_id AND r.registration_id=$4 AND (r.role IN ('ingestion','ingestion-default') OR r.role LIKE 'ingestion:%' OR r.role LIKE 'ingestion-route:%' OR r.role LIKE 'ingestion-evaluation:%'))`, kind, org, id, registration)
 	if err == nil && tag.RowsAffected() != 1 {
@@ -666,7 +666,7 @@ func (s PluginStore) BindIngestionWork(ctx context.Context, kind, org, id, regis
 // CountPluginUnavailable counts only attempts to the failed registration.
 func (s PluginStore) CountPluginUnavailable(ctx context.Context, kind, org, id, registration string) (int, error) {
 	var n int
-	err := s.Pool.QueryRow(ctx, `UPDATE pipeline_plan_work SET plugin_unavailable_attempts=jsonb_set(plugin_unavailable_attempts,ARRAY[$4::text],to_jsonb(COALESCE((plugin_unavailable_attempts->>$4)::int,0)+1))
+	err := database(ctx, s.Pool).QueryRow(ctx, `UPDATE pipeline_plan_work SET plugin_unavailable_attempts=jsonb_set(plugin_unavailable_attempts,ARRAY[$4::text],to_jsonb(COALESCE((plugin_unavailable_attempts->>$4)::int,0)+1))
  WHERE kind=$1 AND organization=$2 AND work_id=$3 RETURNING (plugin_unavailable_attempts->>$4)::int`, kind, org, id, registration).Scan(&n)
 	return n, err
 }
@@ -674,7 +674,7 @@ func (s PluginStore) CountPluginUnavailable(ctx context.Context, kind, org, id, 
 // IngestionSpaceOwner resolves retained declared spaces through their recorded
 // owner, including a registration that has drained from the active plan.
 func (s PluginStore) IngestionSpaceOwner(ctx context.Context, space string) (*plugins.Pin, error) {
-	r, err := scanRegistration(s.Pool.QueryRow(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations WHERE plugin_id=(SELECT owner_plugin_id FROM vector_spaces WHERE id=$1) AND version=(SELECT owner_plugin_version FROM vector_spaces WHERE id=$1)
+	r, err := scanRegistration(database(ctx, s.Pool).QueryRow(ctx, `SELECT `+registrationColumns+` FROM plugin_registrations WHERE plugin_id=(SELECT owner_plugin_id FROM vector_spaces WHERE id=$1) AND version=(SELECT owner_plugin_version FROM vector_spaces WHERE id=$1)
  AND EXISTS(SELECT 1 FROM pipeline_plan_roles r WHERE r.registration_id=plugin_registrations.id AND (r.role='ingestion' OR r.role LIKE 'ingestion:%'))
  ORDER BY (state='active') DESC,(state='draining') DESC,created_at DESC,id LIMIT 1`, space))
 	if errors.Is(err, pgx.ErrNoRows) {

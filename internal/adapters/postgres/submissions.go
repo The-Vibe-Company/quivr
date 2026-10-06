@@ -55,14 +55,19 @@ func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c conte
 	if c.Revision != "" {
 		slot = "revision:" + c.Revision
 	}
-	created, err := acceptFirstRevision(ctx, s.Pool, scope.Organization, c, canonical, recordID, receiptID, slot, digest)
-	if err != nil {
-		return content.Receipt{}, err
+	db := database(ctx, s.Pool)
+	// The implicit batch owns its transaction. Audited commands must instead
+	// stay inside their request transaction, including any refusal rollback.
+	if db == s.Pool {
+		created, err := acceptFirstRevision(ctx, s.Pool, scope.Organization, c, canonical, recordID, receiptID, slot, digest)
+		if err != nil {
+			return content.Receipt{}, err
+		}
+		if created {
+			return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: c.Source, Processing: content.Processing{State: "queued", Phase: "materialization"}, Diagnostics: []content.Diagnostic{}, NewRevision: true}, nil
+		}
 	}
-	if created {
-		return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: c.Source, Processing: content.Processing{State: "queued", Phase: "materialization"}, Diagnostics: []content.Diagnostic{}, NewRevision: true}, nil
-	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := db.Begin(ctx)
 	if err != nil {
 		return content.Receipt{}, err
 	}
@@ -157,7 +162,7 @@ func (s SubmissionStore) Withdraw(ctx context.Context, scope corpus.Scope, w con
 	if err != nil {
 		return content.Receipt{}, err
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return content.Receipt{}, err
 	}
