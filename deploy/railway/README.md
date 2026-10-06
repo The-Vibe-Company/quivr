@@ -82,10 +82,42 @@ rebuild each earlier Corpus once with the operator key (later ones start on core
 Until then search works in every mode and new articles are searchable by keyword at once;
 their vectors attach at the rebuild, which re-embeds with the same model, so results hold.
 
-## Jev deep searches (optional)
+## Hosted Azure embeddings for every source (optional)
 
-For optional Cohere embeddings beside core.ingest, follow
-[Switch hosted text embeddings with rollback](hosted-embeddings.md).
+Set `QUIVR_DEMO_HOSTED_EMBED=1`, `AZURE_FOUNDRY_ENDPOINT` (Foundry resource root)
+and the secret `AZURE_FOUNDRY_KEY` identically on api and worker, then redeploy both.
+The default ingestion is `hosted.embed`: Cohere-Embed-V5-Pro, 1024 dimensions,
+for every source format after normalization, including NewsML-G2 XML.
+PDFs still need `QUIVR_DEMO_PLUGINS=1` for `pdf-text`. Other switch values keep E5.
+New hosted generations have no E5 evaluation route, saving CPU. Keep core.ingest
+and TEI reachable for historical generations and already-pinned work.
+
+Existing Corpora keep their old search generation after redeploy and can still
+require E5 until rebuilt. Use the operator key inside api (port 8080), with
+`plugins:admin`, `corpora:read`, `projections:rebuild`, `operations:read` and
+`operations:write`. These are operator examples, not run against the paid provider:
+
+1. Save `GET /v0/admin/plugins/plan` before redeploy for rollback. Afterwards,
+   inspect the active hosted registration at `GET /v0/admin/plugins` and list
+   every Corpus with `GET /v0/corpora`, following pagination.
+2. Inspect `GET /v0/corpora/{corpus_id}/vector-spaces`. Re-index each existing
+   Corpus with `POST /v0/corpora/{corpus_id}/rebuilds` and a fresh `idempotency_key`.
+   The rebuild re-runs segmentation and embedding of existing Versions with the
+   active default, `hosted.embed`, calling the paid provider. Search keeps its old
+   generation until the prepared hosted generation is ready. Poll the Operation
+   at `GET /v0/operations/{operation_id}` until `succeeded`; inspect failures.
+3. Recheck hosted `coverage.segments` against its own `coverage.total_segments`
+   and confirm `coverage.versions_covered` includes every eligible current Version.
+   Run semantic/hybrid searches with `profile: default`: hits must name the hosted
+   space without evaluation fields. The default profile uses the served vectors.
+
+Backfill cannot convert an E5-only Corpus without hosted source assignments.
+For eligible hosted gaps, use `POST /v0/admin/backfills`: `dry_run: true`, inspect
+cost, then resend with `dry_run: false` and `confirm_cost: true`. A zero estimate
+does not prove coverage. The [hosted guide](hosted-embeddings.md) gives full request
+bodies and rollback precautions: new hosted Versions have no E5 rollback vectors.
+
+## Jev deep searches (optional)
 
 The core image includes [`jev.rerank`](../../plugins/jev-rerank/README.md).
 To enable it, set `QUIVR_DEMO_JEV_RERANK=1` identically on api and worker,
