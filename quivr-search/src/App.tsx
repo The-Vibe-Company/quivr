@@ -572,6 +572,7 @@ function Dashboard({
               feed={feed}
               alerts={alerts}
               connectors={sources.connectors}
+              onSourcesOpen={() => void sources.reload()}
               reading={reading}
               scroller={scroller}
               onAdd={() => setAdding(true)}

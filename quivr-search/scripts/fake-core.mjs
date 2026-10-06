@@ -254,11 +254,6 @@ export function fakeCore({ records: given, alerts = [], latency = 0 } = {}) {
   };
   return {
     server,
-    records,
-    /** How many change streams are open. */
-    get streams() {
-      return streams.size;
-    },
     /** A new Version of a Record, accepted now, announced on the change stream. */
     correct(id, title) {
       const r = byId.get(`rec_${id}`);

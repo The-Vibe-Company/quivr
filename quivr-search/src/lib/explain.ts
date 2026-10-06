@@ -109,9 +109,3 @@ export function explain(node: KeywordNode): Piece[] {
   out.push(".");
   return out;
 }
-
-/** The sentence as plain text, keywords in French quotes. */
-export const sentence = (node: KeywordNode) =>
-  explain(node)
-    .map((p) => (typeof p === "string" ? p : `« ${p.keyword} »`))
-    .join("");

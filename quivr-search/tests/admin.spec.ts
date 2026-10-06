@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 // The Admin tab against the real core (make verify-demo): a text added by
-// hand shows up in the live flow, advances until it is searchable, opens its
-// timeline, and counts among the documents stored. Synthetic content only.
+// hand shows up in the live flow, advances until it is searchable and opens its
+// timeline; the documents stored read the engine's count. Synthetic content only.
 const run = Date.now().toString(36);
 const title = `Relevé de suivi ${run}`;
 
@@ -20,9 +20,7 @@ test("un texte ajouté passe dans le flux en direct jusqu’à trouvable, puis o
   await expect(
     page.getByRole("heading", { name: "Admin", level: 1 }),
   ).toBeVisible();
-  await expect(page.locator(".admin-live")).toHaveText("En direct", {
-    timeout: 30000,
-  });
+  await expect(page.locator(".admin-live")).toHaveText("En direct");
 
   await page
     .getByRole("button", { name: "Ajouter du texte", exact: true })
@@ -33,9 +31,7 @@ test("un texte ajouté passe dans le flux en direct jusqu’à trouvable, puis o
     .getByLabel("Votre texte")
     .fill(`${title}\nUn texte collé pour suivre ses étapes.`);
   await dialog.getByRole("button", { name: "Ajouter à la démo" }).click();
-  await expect(dialog.getByText("Texte enregistré")).toBeVisible({
-    timeout: 30000,
-  });
+  await expect(dialog.getByText("Texte enregistré")).toBeVisible();
   await page.keyboard.press("Escape");
 
   // The row arrives without a reload and fills in step by step.
@@ -43,8 +39,8 @@ test("un texte ajouté passe dans le flux en direct jusqu’à trouvable, puis o
     .getByRole("list", { name: "Derniers documents" })
     .getByRole("button")
     .filter({ hasText: title });
-  await expect(row).toBeVisible({ timeout: 30000 });
-  await expect(row).toContainText(/trouvable : en \d/, { timeout: 45000 });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText(/trouvable : en \d/);
   await expect(row).toContainText("À la main");
   await page.screenshot({
     path: info.outputPath("admin-flow.png"),
@@ -74,8 +70,8 @@ test("un texte ajouté passe dans le flux en direct jusqu’à trouvable, puis o
   await expect(panel).toBeHidden();
   await expect(row).toBeFocused();
 
-  // The engine's count puts it among the documents stored (in the total:
-  // its day may already be yesterday if midnight passed meanwhile).
+  // The documents stored read the engine's count. Other specs share the
+  // Corpus and totals are cached 30 s, so this text is not singled out.
   await page.getByRole("tab", { name: "En base" }).click();
   const stored = page.getByRole("region", { name: "Documents en base" });
   await expect(stored.locator(".usage-figure").first()).toContainText(
