@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowSquareOut } from "@phosphor-icons/react";
+import { ArrowSquareOut, CaretDown } from "@phosphor-icons/react";
 import { APIError } from "../../lib/search";
 import {
   changeSummary,
@@ -13,17 +13,19 @@ import {
   type RecordDetail,
   type VersionDetail,
 } from "../../lib/explore";
-import { LoadingState, Notice } from "../ui";
+import { Notice } from "../ui";
 import { dayLabel, timeLabel } from "./WireList";
 
 // The history shows this many Versions, the newest.
 const MAX_VERSIONS = 10;
 
 /**
- * The preview panel (THE-1204): the selected document read without leaving
- * the list. Its language, date and whether it was corrected; its headline
- * and lede; a few fields; its Versions, each with what changed from the one
- * before; and what Quivr keeps of its source, on demand.
+ * The preview panel (THE-1204, THE-1211): the selected document read
+ * without leaving the list. Its language, date and whether it was
+ * corrected; its headline and lede; a few fields; its Versions on a line,
+ * each with what changed from the one before; and what Quivr keeps of its
+ * source, on demand. The document shown stays, dimmed, until the next one
+ * is read, so the panel never collapses between two.
  */
 export function Preview({
   id,
@@ -39,11 +41,12 @@ export function Preview({
   const [attempt, setAttempt] = useState(0);
   // Every Version read so far, by id, to compare each with the one before.
   const [read, setRead] = useState<Map<string, VersionDetail>>(new Map());
+  const [source, setSource] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
-    setDetail(null);
     setError("");
+    setSource(false);
     fetchRecordDetail(id, controller.signal)
       .then((data) => {
         setDetail(data);
@@ -79,7 +82,6 @@ export function Preview({
           });
     return () => controller.abort();
   }, [id, detail, again, onUnauthorized]);
-  const versions = (detail?.versions || []).slice(0, MAX_VERSIONS);
 
   if (error)
     return (
@@ -87,12 +89,18 @@ export function Preview({
         {error}
       </Notice>
     );
-  if (!detail) return <LoadingState label="Chargement de l’aperçu…" rows={3} />;
+  if (!detail) return <PreviewSkeleton />;
 
   const { record, corpus, blobs } = detail;
+  const loading = record.record_id !== id;
   const version = detail.version;
   if (!version)
-    return <p className="facets-note">Ce document n’a plus de version lisible.</p>;
+    return (
+      <p className="facets-note" data-pending={loading || undefined}>
+        Ce document n’a plus de version lisible.
+      </p>
+    );
+  const versions = detail.versions.slice(0, MAX_VERSIONS);
   const field = (name: string) => [...corpus.common, ...corpus.own].find((f) => f.name === name);
   const values = (name: string) => {
     const f = field(name);
@@ -104,9 +112,12 @@ export function Preview({
   const language = String(values("metadata.language")[0] || "");
   const at = String(values("metadata.published_at")[0] || version.accepted_at || "");
   const corrected = detail.versions.length > 1;
+  const list = (name: string) => values(name).map((v) => valueLabel(v, undefined, name)).join(", ");
   const rows = [
-    ["Lieu", values("metadata.place").map((v) => valueLabel(v)).join(", ")],
-    ["Sujets", values("metadata.subjects").map((v) => valueLabel(v)).join(", ")],
+    ["Lieu", list("metadata.place")],
+    ["Pays", list("metadata.country")],
+    ["Sujets", list("metadata.subjects")],
+    ["Source", list("metadata.source")],
     ["Mots", countLabel(wordCount(version))],
   ].filter(([, v]) => v);
   const xml = blobs.some((b) => /xml/i.test(b.media_type));
@@ -116,33 +127,48 @@ export function Preview({
     provenance: version.provenance || {},
     ...(sourceParts.length ? { source_parts: sourceParts } : {}),
   };
+  // A Version's time, with its day when it is not the document's.
+  const when = (iso: string) => (
+    <>
+      {dayLabel(iso) !== dayLabel(at) && `${dayLabel(iso)} `}
+      <span className="preview-time">{timeLabel(iso)}</span>
+    </>
+  );
 
   return (
-    <article className="preview" aria-labelledby="preview-title">
+    <article className="preview" aria-labelledby="preview-title" aria-busy={loading || undefined} data-pending={loading || undefined}>
       <p className="preview-meta">
         {language && <span className="wire-lang">{language.slice(0, 3).toUpperCase()}</span>}
         {at && (
           <time dateTime={at}>
-            {dayLabel(at)} · {timeLabel(at)}
+            {dayLabel(at)} <span className="preview-time">{timeLabel(at)}</span>
           </time>
         )}
         {corrected && <span className="preview-corrected">corrigée</span>}
         {record.withdrawn && <span className="record-withdrawn">Retiré</span>}
       </p>
-      <h2 id="preview-title">{headline}</h2>
-      {lede && <p className="preview-lede">{lede}</p>}
+      <h2 id="preview-title" dir="auto">
+        {headline}
+      </h2>
+      {lede && (
+        <p className="preview-lede" dir="auto">
+          {lede}
+        </p>
+      )}
       {rows.length > 0 && (
         <dl className="preview-fields">
           {rows.map(([label, value]) => (
             <div key={label}>
               <dt>{label}</dt>
-              <dd>{value}</dd>
+              <dd dir="auto">{value}</dd>
             </div>
           ))}
         </dl>
       )}
       <section className="preview-versions" aria-labelledby="preview-versions-title">
-        <h3 id="preview-versions-title">Versions</h3>
+        <h3 id="preview-versions-title">
+          Versions <span className="preview-count">{detail.versions.length}</span>
+        </h3>
         <ol>
           {versions.map((v, i) => {
             const before = versions[i + 1];
@@ -152,7 +178,7 @@ export function Preview({
             return (
               <li key={v.version_id} data-current={i === 0 || undefined}>
                 <span className="preview-version-n">v{n}</span>
-                {v.accepted_at && <time dateTime={v.accepted_at}>{dayLabel(v.accepted_at)} · {timeLabel(v.accepted_at)}</time>}
+                {v.accepted_at && <time dateTime={v.accepted_at}>{when(v.accepted_at)}</time>}
                 <span className="preview-version-change">
                   {!before && n === 1 ? (
                     "première version"
@@ -177,17 +203,45 @@ export function Preview({
         </ol>
       </section>
       <div className="preview-actions">
-        <button type="button" className="button primary" onClick={onOpen}>
-          Ouvrir <ArrowSquareOut size={15} aria-hidden="true" />
+        <button type="button" className="button preview-open" onClick={onOpen}>
+          Ouvrir <ArrowSquareOut size={14} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="preview-source-toggle"
+          aria-expanded={source}
+          aria-controls={source ? "preview-source" : undefined}
+          onClick={() => setSource((open) => !open)}
+        >
+          {xml ? "Source XML" : "Source brute"}
+          <CaretDown size={12} aria-hidden="true" />
         </button>
       </div>
-      <details className="preview-source">
-        <summary>{xml ? "Source XML" : "Source brute"}</summary>
-        <p className="facets-note">
-          Ce que Quivr garde de la source : ses extensions, sa provenance et ses parties d’origine.
-        </p>
-        <pre>{JSON.stringify(raw, null, 2)}</pre>
-      </details>
+      {source && (
+        <section id="preview-source" className="preview-source" aria-label={xml ? "Source XML" : "Source brute"}>
+          <p className="facets-note">Ce que Quivr garde de la source : ses extensions, sa provenance et ses parties d’origine.</p>
+          <pre>{JSON.stringify(raw, null, 2)}</pre>
+        </section>
+      )}
     </article>
+  );
+}
+
+/** The panel's shape while the first document is read. */
+function PreviewSkeleton() {
+  return (
+    <div className="preview preview-skeleton">
+      <p role="status" className="visually-hidden">
+        Chargement de l’aperçu…
+      </p>
+      <div aria-hidden="true">
+        <span className="skeleton-bar" style={{ width: "40%" }} />
+        <span className="skeleton-bar skeleton-title" style={{ width: "92%" }} />
+        <span className="skeleton-bar skeleton-title" style={{ width: "70%" }} />
+        <span className="skeleton-bar skeleton-soft" style={{ width: "96%" }} />
+        <span className="skeleton-bar skeleton-soft" style={{ width: "88%" }} />
+        <span className="skeleton-bar skeleton-soft" style={{ width: "60%" }} />
+      </div>
+    </div>
   );
 }

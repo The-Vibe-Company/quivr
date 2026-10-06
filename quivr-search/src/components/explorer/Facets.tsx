@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { WarningCircle } from "@phosphor-icons/react";
 import { exclusionNotice, fieldLabel, type Corpus, type Exclusion } from "../../lib/corpora";
 import {
@@ -70,7 +70,7 @@ export function FacetColumn({
       />
     );
   return (
-    <aside className="facets" aria-label="Filtres" aria-busy={stale || undefined} data-stale={stale || undefined}>
+    <aside className="facets" aria-label="Filtres" tabIndex={-1} aria-busy={stale || undefined} data-stale={stale || undefined}>
       {excluded.length > 0 && (
         <p className="facets-warning" role="note">
           <WarningCircle size={16} aria-hidden="true" />
@@ -114,6 +114,7 @@ function FacetBox({
   onToggle: (value: string) => void;
 }) {
   const [limit, setLimit] = useState(SHOWN_VALUES);
+  const box = useRef<HTMLElement>(null);
   // A value picked stays offered even when no document counted has it.
   const values: { value: Scalar; count?: number }[] = [
     ...picked.filter((v) => !facet.values.some((x) => String(x.value) === v)).map((value) => ({ value })),
@@ -125,8 +126,27 @@ function FacetBox({
   const rest = values.length - shown.length;
   const label = fieldLabel(facet.field);
   return (
-    <section className="facet" aria-label={label}>
-      <h3>{label}</h3>
+    <section className="facet" aria-label={label} ref={box}>
+      <div className="facet-head">
+        <h3>{label}</h3>
+        {picked.length > 0 && (
+          <button
+            type="button"
+            className="facet-clear"
+            onClick={() => {
+              const column = box.current?.closest<HTMLElement>(".facets");
+              picked.forEach(onToggle);
+              // The button goes with the picks: once drawn again, the focus
+              // moves to the values left, else to the filters column.
+              requestAnimationFrame(() =>
+                (box.current?.querySelector<HTMLElement>(".facet-value") || column)?.focus(),
+              );
+            }}
+          >
+            Effacer<span className="visually-hidden"> {label}</span>
+          </button>
+        )}
+      </div>
       <ul>
         {shown.map(({ value, count }) => (
           <li key={String(value)}>
@@ -137,10 +157,16 @@ function FacetBox({
               onClick={() => onToggle(String(value))}
             >
               <span className="menu-check" aria-hidden="true" />
-              <span className="facet-label">{valueLabel(value, facet.type, facet.field)}</span>
+              <span className="facet-label" dir="auto">
+                {valueLabel(value, facet.type, facet.field)}
+              </span>
               {count !== undefined && <span className="menu-count">{countLabel(count)}</span>}
               {count !== undefined && (
-                <span className="facet-share" aria-hidden="true" style={{ width: `${(count / most) * 100}%` }} />
+                <span
+                  className="facet-share"
+                  aria-hidden="true"
+                  style={{ "--share": `${Math.max(2, (count / most) * 100)}%` } as CSSProperties}
+                />
               )}
             </button>
           </li>

@@ -14,10 +14,29 @@ export function dayLabel(iso: string) {
   return at.toLocaleDateString("fr-FR", { day: "numeric", month: "long", ...(sameYear(at) ? {} : { year: "numeric" }) });
 }
 
+/** "Lundi 22 décembre", for a day's header in the list. */
+function dayHeading(iso: string) {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "Sans date";
+  const label = at.toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    ...(sameYear(at) ? {} : { year: "numeric" }),
+  });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 /** "09:41", in the reader's time. */
 export const timeLabel = (iso: string) => {
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? "" : at.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+};
+
+/** "22/12", the day a row dates from when the list is not grouped by day. */
+const shortDay = (iso: string) => {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? "" : at.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 };
 
 const dayKey = (iso: string) => {
@@ -26,19 +45,41 @@ const dayKey = (iso: string) => {
 };
 
 /**
- * The wire list (THE-1204): one dense row per document under a day header
- * that stays on top while its rows scroll. A row shows its time, language,
- * version when corrected, headline and subjects. It is a listbox: a click or
- * ↑/↓ selects a row for the preview, Enter or a double click opens it.
+ * Documents newest first by when they date from. The engine lists them by
+ * arrival, so a correction that arrived later than its neighbours, or an
+ * archive read out of order, would break the day headers: what is loaded is
+ * put back in date order, undated documents last, ties kept as listed.
+ */
+export function byDate(items: ExploreItem[]) {
+  const at = (item: ExploreItem) => Date.parse(dateOf(item));
+  return items
+    .map((item, i) => ({ item, i, t: at(item) }))
+    .sort((a, b) =>
+      Number.isNaN(a.t) || Number.isNaN(b.t)
+        ? Number(Number.isNaN(a.t)) - Number(Number.isNaN(b.t)) || a.i - b.i
+        : b.t - a.t || a.i - b.i,
+    )
+    .map(({ item }) => item);
+}
+
+/**
+ * The wire list (THE-1204, THE-1211): one dense row per document under a
+ * day header that stays on top while its rows scroll, or one run of rows by
+ * relevance. A row shows its time, language, version when corrected,
+ * headline and subjects. It is a listbox: a click or ↑/↓ selects a row for
+ * the preview, Enter or a double click opens it.
  */
 export function WireList({
   items,
+  byDay,
   selected,
   corpusOf,
   onSelect,
   onOpen,
 }: {
   items: ExploreItem[];
+  /** Grouped under day headers; otherwise in the order given, each row dated. */
+  byDay: boolean;
   selected: string | null;
   corpusOf: (item: ExploreItem) => string;
   /** A row picked, by a click or by the keys. */
@@ -56,9 +97,9 @@ export function WireList({
 
   const groups: { key: string; label: string; items: ExploreItem[] }[] = [];
   for (const item of items) {
-    const at = dateOf(item);
-    const key = dayKey(at);
-    if (groups.at(-1)?.key !== key) groups.push({ key, label: dayLabel(at), items: [] });
+    const key = byDay ? dayKey(dateOf(item)) : "all";
+    if (groups.at(-1)?.key !== key)
+      groups.push({ key, label: byDay ? dayHeading(dateOf(item)) : "Les plus pertinents d’abord", items: [] });
     groups.at(-1)!.items.push(item);
   }
   // The row previewed: the one selected when loaded, else the first; a
@@ -89,16 +130,18 @@ export function WireList({
   };
 
   return (
-    <div className="wire-list" role="listbox" aria-label="Documents" ref={list} onKeyDown={keys}>
+    <div className="wire-list" role="listbox" aria-label="Documents" ref={list} onKeyDown={keys} data-by-day={byDay || undefined}>
       {groups.map((group, g) => (
-        <div key={`${group.key}-${g}`} role="group" aria-labelledby={`wire-day-${g}`}>
+        <div key={`${group.key}-${g}`} className="wire-group" role="group" aria-labelledby={`wire-day-${g}`}>
           <div className="wire-day" id={`wire-day-${g}`}>
             {group.label}
           </div>
           {group.items.map((item) => {
             const at = dateOf(item);
             const language = String(item.metadata["metadata.language"]?.[0] || "");
-            const subjects = (item.metadata["metadata.subjects"] || []).slice(0, 3).map(String);
+            const subjects = (item.metadata["metadata.subjects"] || item.metadata["metadata.tags"] || [])
+              .slice(0, 4)
+              .map(String);
             const corpus = corpusOf(item);
             const on = item.record_id === current;
             return (
@@ -113,20 +156,28 @@ export function WireList({
                 onDoubleClick={() => onOpen(item.record_id)}
               >
                 <time className="wire-time" dateTime={at}>
+                  {!byDay && <span className="wire-date">{shortDay(at)}</span>}
                   {timeLabel(at)}
                 </time>
-                <span className="wire-tags">
-                  {language && (
-                    <span className="wire-lang" title={`Langue : ${language}`}>
-                      {language.slice(0, 3).toUpperCase()}
-                    </span>
-                  )}
-                  {(item.version || 1) > 1 && <span className="wire-version">v{item.version}</span>}
+                <span className="wire-lang" title={language ? `Langue : ${language}` : undefined}>
+                  {language.slice(0, 3).toUpperCase()}
                 </span>
                 <span className="wire-text">
-                  <span className="wire-title">{item.title || "Sans titre"}</span>
+                  <span className="wire-headline">
+                    {(item.version || 1) > 1 && (
+                      <span className="wire-version" title={`Version ${item.version}`}>
+                        v{item.version}
+                      </span>
+                    )}
+                    <span className="wire-title" dir="auto">
+                      {item.title || "Sans titre"}
+                    </span>
+                  </span>
                   {(subjects.length > 0 || corpus) && (
-                    <span className="wire-subjects">{[corpus, ...subjects].filter(Boolean).join(" · ")}</span>
+                    <span className="wire-subjects">
+                      {corpus && <span className="wire-corpus">{corpus}</span>}
+                      {subjects.join(" · ")}
+                    </span>
                   )}
                 </span>
               </div>
@@ -134,6 +185,32 @@ export function WireList({
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Rows shaped like the list's while the first page loads; the label is announced once. */
+export function WireSkeleton({ rows = 12 }: { rows?: number }) {
+  return (
+    <div className="wire-skeleton">
+      <p role="status" className="visually-hidden">
+        Chargement des documents…
+      </p>
+      <div aria-hidden="true">
+        <div className="wire-day">
+          <span className="skeleton-bar" style={{ width: 120 }} />
+        </div>
+        {Array.from({ length: rows }, (_, i) => (
+          <div className="wire-row" key={i}>
+            <span className="skeleton-bar" style={{ width: 34 }} />
+            <span className="skeleton-bar" style={{ width: 18 }} />
+            <span className="wire-text">
+              <span className="skeleton-bar" style={{ width: `${55 + ((i * 37) % 40)}%` }} />
+              <span className="skeleton-bar skeleton-soft" style={{ width: `${18 + ((i * 23) % 20)}%` }} />
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
