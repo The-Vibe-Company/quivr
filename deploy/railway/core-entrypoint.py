@@ -104,7 +104,8 @@ def hosted_configuration(env):
             'auth': 'api-key', 'model': 'Cohere-Embed-V5-Pro', 'dimensions': 1024,
             'document_input_type': 'search_document', 'query_input_type': 'search_query',
             # Conservative UTF-8 byte/token bound, not an exact provider token window.
-            'max_tokens_per_segment': 6144, 'overlap': 192, 'max_batch_tokens': 98304,
+            'max_tokens_per_segment': 6144, 'overlap': 192,
+            'batch_size': 32, 'max_batch_tokens': 196608, 'max_concurrent_requests': 16,
             'usd_per_million_tokens': 0.12}
 
 
