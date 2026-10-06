@@ -21,7 +21,7 @@
       },
       {
         "key": "headline-2",
-        "role": "title",
+        "role": "body",
         "content": {
           "kind": "text",
           "text": "Ouverture du port"

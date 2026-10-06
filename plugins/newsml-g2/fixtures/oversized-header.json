@@ -1,0 +1,12 @@
+{
+  "description": "Synthetic message whose repeated header exceeds the extension JSON budget.",
+  "input": {
+    "path": "oversized-header.xml",
+    "media_type": "application/vnd.iptc.g2.newsmessage+xml"
+  },
+  "configuration": {
+    "header_paths": [
+      "header/{urn:example:wire}delivery"
+    ]
+  }
+}

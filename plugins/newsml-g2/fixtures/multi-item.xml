@@ -1,0 +1,12 @@
+<newsMessage xmlns="http://iptc.org/std/nar/2006-10-01/" xml:lang="en">
+  <itemSet>
+    <newsItem guid="urn:example:first" version="1">
+      <contentMeta><headline>Harbour reopened</headline><headline>Ferry service restored</headline></contentMeta>
+      <contentSet><inlineXML><p xmlns="">The morning ferry leaves at nine.</p></inlineXML></contentSet>
+    </newsItem>
+    <newsItem guid="urn:example:second" version="2" xml:lang="fr">
+      <contentMeta><headline>Le port accueille les voyageurs</headline><slugline>Transport maritime</slugline></contentMeta>
+      <contentSet><inlineXML><p xmlns="">Le prochain départ est prévu à midi.</p></inlineXML></contentSet>
+    </newsItem>
+  </itemSet>
+</newsMessage>
