@@ -1,10 +1,16 @@
 import { test, expect } from "@playwright/test";
+import type {
+  PluginCallStats,
+  StatsList,
+  StepStats,
+} from "../src/lib/adminStats";
 
 // The Goulots and Plugins sections against the real core (make verify-demo,
 // THE-797): a text added through the facade is timed at each step by the
 // worker's rollups, and the ingestion plugin that cut it shows as healthy
-// with its calls. It opens the Admin tab only once the text is searchable, so
-// the section's first read already holds its timings. Synthetic content only.
+// with its calls. Search readiness precedes the asynchronous stats flush;
+// wait for published rollups before Admin takes its first snapshot.
+// Synthetic content only.
 const run = Date.now().toString(36);
 
 test.beforeEach(async ({ page }) => {
@@ -40,18 +46,75 @@ test("un texte ajouté est chronométré à chaque étape, et le plugin d’inge
   );
   expect(added.status, JSON.stringify(added.data)).toBeLessThan(300);
   const receipt = added.data.receipt_id;
-  await expect
-    .poll(
-      async () =>
-        (
-          await (
-            await page.request.get(`/v0/ingestion-receipts/${receipt}`)
-          ).json()
-        ).availability?.searchable,
-    )
-    .toBe(true);
-
   await page.setViewportSize({ width: 1440, height: 1000 });
+  // Force the first stats read ahead of publication. Subsequent reads use
+  // the real facade and worker rollups, including their cache.
+  let firstStepsRead = true;
+  await page.route("**/demo/admin/stats/steps?window=1h", async (route) => {
+    if (firstStepsRead) {
+      firstStepsRead = false;
+      await route.fulfill({ json: { items: [] } });
+    } else await route.continue();
+  });
+  // Publication and search readiness proceed independently. Wait for both
+  // together so ingestion time and a cache expiry do not add up.
+  await Promise.all([
+    expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const read = async <T>(kind: string): Promise<StatsList<T>> => {
+              const response = await fetch(
+                `/demo/admin/stats/${kind}?window=1h`,
+              );
+              if (!response.ok)
+                throw new Error(`${kind}: HTTP ${response.status}`);
+              return response.json();
+            };
+            const [steps, plugins] = await Promise.all([
+              read<StepStats>("steps"),
+              read<PluginCallStats>("plugins"),
+            ]);
+            return {
+              timed: ["materialized", "segmented", "retrieval_ready"].filter(
+                (name) =>
+                  steps.items.some(
+                    (s) =>
+                      s.step === name &&
+                      s.summary.count > 0 &&
+                      s.summary.p50_ms !== undefined,
+                  ),
+              ),
+              ingestion: plugins.items.some(
+                (p) =>
+                  p.plugin_id === "core.ingest" &&
+                  p.operation === "segment_and_embed" &&
+                  p.summary.count > 0,
+              ),
+            };
+          }),
+        // A just-cached empty rollup lasts 10 s. Leave room to observe its
+        // replacement while keeping the whole spec within the 15 s budget.
+        {
+          timeout: 12000,
+          message: "Published step timings and ingestion calls",
+        },
+      )
+      .toEqual({
+        timed: ["materialized", "segmented", "retrieval_ready"],
+        ingestion: true,
+      }),
+    expect
+      .poll(
+        async () =>
+          (
+            await (
+              await page.request.get(`/v0/ingestion-receipts/${receipt}`)
+            ).json()
+          ).availability?.searchable,
+      )
+      .toBe(true),
+  ]);
   await page.goto("/?view=admin");
   const necks = page.getByRole("region", { name: "Goulots par étape" });
   // Each step's card gives its p50 first.

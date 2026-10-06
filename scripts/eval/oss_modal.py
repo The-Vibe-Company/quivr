@@ -45,7 +45,7 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
     torch_package = spec['torch'] if gemma else TORCH_PACKAGE
     torch_index = spec['torch_index_url'] if gemma else 'https://download.pytorch.org/whl/cpu'
     image = (base
-             .pip_install(torch_package, index_url=torch_index)
+             .pip_install(torch_package, *(spec['torch_extras'] if gemma else []), index_url=torch_index)
              .env({'OMP_NUM_THREADS': '4', 'RAYON_NUM_THREADS': '4', 'TOKENIZERS_PARALLELISM': 'false',
                    'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1'})
              .add_local_dir(root / 'scripts/eval', '/workspace/scripts/eval', copy=True,
@@ -56,7 +56,7 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
              # install here so relative -r requirements.txt resolves correctly.
              .run_commands('python -m pip install -r /workspace/scripts/eval/requirements-oss.txt')
              .pip_install(*(spec['packages'] if gemma else TEXT_PACKAGES))
-             .run_commands('HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python /workspace/scripts/eval/oss_image_check.py'))
+             .run_commands(('QUIVR_GEMMA_IMAGE=1 ' if gemma else '') + 'HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python /workspace/scripts/eval/oss_image_check.py'))
     worker = app.function(image=image, gpu=None if hardware == 'cpu' else 'L4',
                           cpu=(4, 4), memory=(8192, 8192), timeout=timeout,
                           startup_timeout=STARTUP_TIMEOUT,
