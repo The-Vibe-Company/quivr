@@ -7,11 +7,22 @@ import (
 	"slices"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/observability"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
+
+// buildMetrics adds process identity to either process's metrics, including
+// scrapes where a dependency read omits its backlog gauges.
+func buildMetrics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		buildinfo.WriteMetric(w)
+		next.ServeHTTP(w, r)
+	})
+}
 
 // processingObserver feeds the worker's processing metrics (THE-662) and
 // the step rollups (THE-795, THE-797).

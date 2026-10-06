@@ -6,6 +6,8 @@ keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "
 
 `quivr api`, `quivr worker` and `quivr migrate` read one JSON file, whose path is in the `QUIVR_CONFIG` environment variable. Give every process the same file, except for addresses such as `probe_listen`. `make dev` writes one for the local stack; this page lists every field. `make docs` fails when a field of the engine's configuration is missing here.
 
+In the [release image](/run-quivr/deploy#run-the-image), mount the file read-only and make it readable by UID/GID `10001`. Set `listen` and `probe_listen` to `0.0.0.0` addresses to use published container ports. `QUIVR_CONFIG` selects a file; only the dedicated environment overrides listed below override its fields. The image declares `/tmp` for temporary files; a configured `log_directory` also needs a writable mount.
+
 ## Top-level fields
 
 | Field | Required | Meaning |
@@ -65,7 +67,7 @@ Successful command changes and their entry commit together. If the audit write f
 
 ## Logs and shutdown
 
-Engine processes write one JSON event per line to stdout. Every event includes `ts`, `level`, `msg`, `service`, `version`, `instance`, `environment`, `trace_id` and `span_id` (empty outside a trace); events within an HTTP request also include `request_id`. `service` distinguishes `quivr.api`, `quivr.worker` and `quivr.migrate`. `version` reports the engine build version. Debug events are hidden at the default `info` level. Nonempty environment overrides take precedence over the JSON file; unknown levels and nonpositive grace periods refuse startup.
+Engine processes write one JSON event per line to stdout. Every event includes `ts`, `level`, `msg`, `service`, `version`, `instance`, `environment`, `trace_id` and `span_id` (empty outside a trace); events within an HTTP request also include `request_id`. `service` distinguishes `quivr.api`, `quivr.worker` and `quivr.migrate`. `version` reports the distribution release, independent of API `v0` and plugin engine compatibility `0.2.0`. The startup event also includes the commit as `revision`, `api_version` and `plugin_engine_version`; [Check that it is ready](/run-quivr/deploy#check-that-it-is-ready) lists the HTTP and metric version checks. Debug events are hidden at the default `info` level. Nonempty environment overrides take precedence over the JSON file; unknown levels, malformed durations and nonpositive grace periods refuse startup.
 
 Each completed public or probe HTTP request writes an access event with `route`, `method`, `status`, `duration_ms`, `response_size` (bytes written), `client_ip`, `api_key_id`, `error_code` and `request_id`. Routes are registered templates, with `unmatched` for unknown paths. For public requests, client IP follows the trusted proxy policy in `connector_push.trusted_proxy_cidrs`; otherwise it is the socket peer. Probe requests use the socket peer. The key ID is a 128-bit SHA-256 fingerprint of a bearer token present in the configured `keys`; it is empty for instance tokens and requests without a configured API key. No bearer token, request body, query string or arbitrary request path is logged.
 

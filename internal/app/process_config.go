@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/buildinfo"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
@@ -63,7 +64,7 @@ func (cfg *Config) configureProcess(command string) (time.Duration, error) {
 		}
 		output = io.MultiWriter(os.Stdout, &rotatingLog{path: filepath.Join(cfg.LogDirectory, command+".log")})
 	}
-	logger, err := logging.New(output, logging.Options{Level: level, Service: "quivr." + command, Version: plugins.EngineVersion,
+	logger, err := logging.New(output, logging.Options{Level: level, Service: "quivr." + command, Version: buildinfo.Version,
 		Instance: cfg.Instance, Environment: cfg.Environment, Secrets: cfg.logSecrets()})
 	if err != nil {
 		return 0, err

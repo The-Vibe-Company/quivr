@@ -16,6 +16,18 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 )
 
+// Owns the process build gauge, including dependency failures from either
+// metrics handler. Build identity must remain scrapeable during an outage.
+func TestBuildMetricsSurvivesDependencyFailure(t *testing.T) {
+	w := httptest.NewRecorder()
+	buildMetrics(apiMetrics(telemetry.NewCommands(), func(context.Context) (int64, time.Duration, error) {
+		return 0, 0, errors.New("storage unavailable")
+	}, func(io.Writer) {})).ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	if !strings.Contains(w.Body.String(), `quivr_build_info{version="dev",revision="unknown"} 1`) {
+		t.Fatal(w.Body.String())
+	}
+}
+
 func TestAPIMetricsExposeCommandsAndIngestionBacklog(t *testing.T) {
 	commands := telemetry.NewCommands()
 	commands.Accepted(telemetry.CommandRecord, 2)
