@@ -6,13 +6,16 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
@@ -107,8 +110,16 @@ func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
 			if format == "zip" {
 				makeArchive = syntheticZip
 			}
-			data := makeArchive(t, "folder/001.xml", "folder/skip.txt", "folder/002.xml", "folder/003.xml")
+			data := makeArchive(t, "folder/001.xml", "folder/skip.txt", "folder/002.xml", "folder/003\n.xml")
 			srv := objectServer(t, data)
+			var objectReads atomic.Int64
+			handler := srv.Config.Handler
+			srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "" {
+					objectReads.Add(1)
+				}
+				handler.ServeHTTP(w, r)
+			})
 			source := NewArchiveConnector()
 			t.Cleanup(source.Close)
 			req := fetchRequest(t, srv.URL, nil, `,"member_pattern":"**/*.xml"`)
@@ -145,12 +156,47 @@ func TestArchivePagesReplayAndResumeAfterLostCache(t *testing.T) {
 			if string(got) != "<item>folder/002.xml</item>" {
 				t.Fatalf("lost-cache bytes: %q", got)
 			}
+			// A cold last-member upload must recover earlier page uploads
+			// without another ranged GET or gzip prefix download.
+			before := objectReads.Load()
+			earlier, err := fresh.OpenAttachment(context.Background(), &quivrplugin.AttachmentRequest{OrganizationID: req.OrganizationID, Connector: req.Connector, Credential: req.Credential, Attachment: page.Items[0].Attachments[0]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstBytes, err := io.ReadAll(earlier)
+			earlier.Close()
+			if err != nil || string(firstBytes) != "<item>folder/001.xml</item>" {
+				t.Fatal("earlier page recovery", err)
+			}
+			if objectReads.Load() != before {
+				t.Fatal("earlier page upload re-downloaded the archive")
+			}
+
+			// Literal legacy ref keys must remain usable after a sidecar upgrade.
+			var oldRef map[string]any
+			_ = json.Unmarshal([]byte(at.Ref), &oldRef)
+			delete(oldRef, "batch_start")
+			delete(oldRef, "batch_end")
+			legacyRef, _ := json.Marshal(oldRef)
+			legacy := at
+			legacy.Ref = string(legacyRef)
+			legacySource := NewArchiveConnector()
+			defer legacySource.Close()
+			oldBody, err := legacySource.OpenAttachment(context.Background(), &quivrplugin.AttachmentRequest{OrganizationID: req.OrganizationID, Connector: req.Connector, Credential: req.Credential, Attachment: legacy})
+			if err != nil {
+				t.Fatal("legacy ref refused", err)
+			}
+			oldBytes, err := io.ReadAll(oldBody)
+			oldBody.Close()
+			if err != nil || string(oldBytes) != "<item>folder/002.xml</item>" {
+				t.Fatal("legacy bytes", err)
+			}
 			req = fetchRequest(t, srv.URL, page.Checkpoint, `,"member_pattern":"**/*.xml"`)
 			resumed, err := fresh.Fetch(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(resumed.Items) != 1 || resumed.Items[0].RecordKey != "003.xml" || resumed.Items[0].SourcePosition != "3" || resumed.Diagnostics["members_done"] != int64(3) {
+			if len(resumed.Items) != 1 || resumed.Items[0].RecordKey != "003\n.xml" || resumed.Items[0].SourcePosition != "3" || resumed.Diagnostics["members_done"] != int64(3) {
 				t.Fatalf("resumed page: %+v", resumed)
 			}
 		})
@@ -237,4 +283,69 @@ func TestArchiveRejectsDamagedGzipBeforeReturningPage(t *testing.T) {
 	if page != nil || !ok || classified.Code != "malformed_archive" {
 		t.Fatalf("damaged source returned a checkpoint: page=%+v error=%v", page, err)
 	}
+}
+
+// Owner boundary: reject directory allocations before parsing and prevent
+// tiny deflate ReadAt calls from amplifying into thousands of S3 requests.
+func TestZipDirectoryBoundsAndBufferedDeflate(t *testing.T) {
+	t.Run("directory_limit", func(t *testing.T) {
+		data := syntheticZip(t, "item.xml")
+		end := bytes.LastIndex(data, []byte{'P', 'K', 5, 6})
+		binary.LittleEndian.PutUint32(data[end+12:end+16], maxZipDirectoryBytes+1)
+		source := NewArchiveConnector()
+		defer source.Close()
+		srv := objectServer(t, data)
+		page, err := source.Fetch(context.Background(), fetchRequest(t, srv.URL, nil, ""))
+		classified, ok := err.(*quivrplugin.Error)
+		if page != nil || !ok || classified.Code != "zip_directory_too_large" {
+			t.Fatalf("directory limit: page=%+v err=%v", page, err)
+		}
+	})
+	t.Run("deflate_window", func(t *testing.T) {
+		payload := make([]byte, 2<<20)
+		_, _ = rand.New(rand.NewSource(1)).Read(payload)
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		out, err := zw.Create("item.xml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = out.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+		if err = zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		srv := objectServer(t, buf.Bytes())
+		handler := srv.Config.Handler
+		var ranges atomic.Int64
+		srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Range") != "" {
+				ranges.Add(1)
+			}
+			handler.ServeHTTP(w, r)
+		})
+		source := NewArchiveConnector()
+		defer source.Close()
+		req := fetchRequest(t, srv.URL, nil, "")
+		page, err := source.Fetch(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) != 1 {
+			t.Fatalf("page: %+v", page)
+		}
+		body, err := source.OpenAttachment(context.Background(), &quivrplugin.AttachmentRequest{OrganizationID: req.OrganizationID, Connector: req.Connector, Credential: req.Credential, Attachment: page.Items[0].Attachments[0]})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := io.ReadAll(body)
+		body.Close()
+		if err != nil || !bytes.Equal(got, payload) {
+			t.Fatal("deflate bytes corrupted", err)
+		}
+		if count := ranges.Load(); count > 10 {
+			t.Fatalf("2 MiB deflate required %d ranged GETs", count)
+		}
+	})
 }

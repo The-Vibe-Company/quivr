@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
@@ -55,6 +56,10 @@ func openArchive(ctx context.Context, s *storage, obj object) (*archiveReader, e
 	r.cancel = cancel
 	if strings.HasSuffix(obj.Key, ".zip") {
 		remote := &rangeReader{ctx: live, s: s, obj: obj, count: &r.bytes}
+		if err := checkZipDirectory(remote, obj.Size); err != nil {
+			cancel()
+			return nil, archiveError(err)
+		}
 		zr, err := zip.NewReader(remote, obj.Size)
 		if err != nil {
 			cancel()
@@ -122,35 +127,65 @@ func (r *archiveReader) next() (member, error) {
 // ReaderAt fetches only requested ZIP ranges; the central directory and each
 // member are read without downloading or extracting the entire archive.
 type rangeReader struct {
-	ctx   context.Context
-	s     *storage
-	obj   object
-	count *atomic.Int64
+	ctx          context.Context
+	s            *storage
+	obj          object
+	count        *atomic.Int64
+	mu           sync.Mutex
+	window       []byte
+	windowOffset int64
 }
 
 func (r *rangeReader) ReadAt(p []byte, off int64) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(p) == 0 {
+		return 0, nil
+	}
 	if off < 0 {
 		return 0, fmt.Errorf("negative archive offset")
 	}
 	if off >= r.obj.Size {
 		return 0, io.EOF
 	}
-	nbytes := int64(len(p))
-	if off+nbytes > r.obj.Size {
-		nbytes = r.obj.Size - off
+	nbytes := min(int64(len(p)), r.obj.Size-off)
+	if off >= r.windowOffset && off+nbytes <= r.windowOffset+int64(len(r.window)) {
+		n := copy(p, r.window[off-r.windowOffset:off-r.windowOffset+nbytes])
+		if n < len(p) {
+			return n, io.EOF
+		}
+		return n, nil
 	}
-	body, err := r.s.open(r.ctx, r.obj, fmt.Sprintf("bytes=%d-%d", off, off+nbytes-1))
+	// Deflate can request 512-byte fragments; one bounded window avoids one
+	// signed network request per fragment while retaining ranged archive reads.
+	fetchBytes := min(max(nbytes, int64(1<<20)), r.obj.Size-off)
+	body, err := r.s.open(r.ctx, r.obj, fmt.Sprintf("bytes=%d-%d", off, off+fetchBytes-1))
 	if err != nil {
 		return 0, err
 	}
 	defer body.Close()
-	n, err := io.ReadFull(body, p[:nbytes])
-	r.count.Add(int64(n))
-	if err == nil && n < len(p) {
-		err = io.EOF
+	if nbytes >= 1<<20 {
+		n, err := io.ReadFull(body, p[:nbytes])
+		r.count.Add(int64(n))
+		if err == nil && n < len(p) {
+			err = io.EOF
+		}
+		return n, err
 	}
-	return n, err
+	data := make([]byte, fetchBytes)
+	n, err := io.ReadFull(body, data)
+	r.count.Add(int64(n))
+	if err != nil {
+		return 0, err
+	}
+	r.window, r.windowOffset = data, off
+	n = copy(p, data[:nbytes])
+	if n < len(p) {
+		return n, io.EOF
+	}
+	return n, nil
 }
+
 func archiveError(err error) error {
 	if err == nil {
 		return nil

@@ -38,7 +38,7 @@ type archiveConfig struct {
 // Globs are slash-aware; ** matches across directory boundaries.
 func glob(pattern string) (*regexp.Regexp, error) {
 	var b strings.Builder
-	b.WriteString("^")
+	b.WriteString("(?s)^")
 	for i := 0; i < len(pattern); i++ {
 		switch pattern[i] {
 		case '*':
@@ -69,7 +69,7 @@ func decodeConfig(raw json.RawMessage) (archiveConfig, error) {
 	}
 	if c.Endpoint != "" {
 		u, err := url.Parse(c.Endpoint)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 			return c, quivrplugin.SourceError("invalid_config", "endpoint must be an HTTP or HTTPS origin")
 		}
 	}

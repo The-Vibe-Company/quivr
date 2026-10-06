@@ -19,7 +19,7 @@ contributions:
             region: {type: string, minLength: 1, maxLength: 128, title: Region}
             endpoint:
               type: string
-              pattern: "^https?://"
+              pattern: '^https?://(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?::[0-9]+)?/?$'
               maxLength: 2048
               title: S3-compatible endpoint
               description: Optional endpoint for an S3-compatible store. Use an origin without credentials, query parameters or fragments.

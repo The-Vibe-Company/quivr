@@ -227,9 +227,18 @@ func TestTypedPageCarriesNewConnectorFieldsOnSupportedAPI(t *testing.T) {
 	if wire["submission_concurrency"] != float64(32) {
 		t.Fatalf("encoded handler page lost its submission hint: %s", body)
 	}
+	for _, concurrency := range []int{-1, 33} {
+		_, problem := plugin.encodePage(&Page{SubmissionConcurrency: concurrency})
+		if !strings.Contains(problem, "1 to 32") {
+			t.Fatalf("submission_concurrency %d has no actionable bounds diagnostic: %q", concurrency, problem)
+		}
+	}
 	invalid, err := filepath.Glob(filepath.Join(fixtures, "responses/connector/attachment-only-invalid-*.json"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(invalid) == 0 {
+		t.Fatal("no attachment-only invalid fixtures found; the SDK semantic guard would be untested")
 	}
 	for _, path := range invalid {
 		t.Run(filepath.Base(path), func(t *testing.T) {

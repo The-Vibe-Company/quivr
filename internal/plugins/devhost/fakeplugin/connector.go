@@ -24,8 +24,10 @@ import (
 // connector-credential-leak (logs the credential), connector-stalled-checkpoint
 // (more: true without moving the checkpoint), connector-ignores-checkpoint
 // (every run restarts from the first item), connector-wrong-error-class (an
-// access error marked retryable), // connector-blob-part (a Blob Part in a
+// access error marked retryable), connector-blob-part (a Blob Part in a
 // Manifest), connector-too-many-items (one item over max_items),
+// connector-invalid-concurrency (a hint above 32),
+// connector-unsupported-concurrency (a hint served by an older Plugin API),
 // connector-attachment-mismatch (uploads other bytes than it described) and
 // accept-invalid (invalid requests answered 202) and
 // connector-receive-invalid-verdict (a refused delivery that carries items).

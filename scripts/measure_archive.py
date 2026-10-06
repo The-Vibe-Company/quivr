@@ -5,6 +5,7 @@ import json
 import pathlib
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -41,6 +42,8 @@ def main():
         try:
             with urllib.request.urlopen(req, timeout=30) as response:
                 return json.load(response)
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f'Archive measurement API {method} failed with HTTP {exc.code}') from None
         except Exception:
             raise RuntimeError(f'Archive measurement API {method} failed') from None
 
@@ -73,7 +76,7 @@ def main():
                     if event['type'] == 'record.retrieval_ready':
                         seen.add(event['resource']['id'])
                 cursor = page['next_cursor']
-                if len(page['items']) < 100:
+                if not page['has_more']:
                     break
             elapsed = time.monotonic() - started
             if accepted_at is None and done == expected and len(accepted_events) == expected:

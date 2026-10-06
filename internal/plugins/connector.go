@@ -151,6 +151,11 @@ func CheckConnectorOutput(ctx context.Context, raw []byte, requestCheckpoint jso
 		return []Issue{{Code: CodeResponseTooLarge, Message: fmt.Sprintf("the response is %d bytes; the limit is %d (declared max_response_bytes, capped by the engine at %d)", len(raw), limit, EngineMaxResponseBytes)}}
 	}
 	if issues := ValidateDocument("connector-fetch-response.schema.json", raw); len(issues) > 0 {
+		for index := range issues {
+			if issues[index].Path == "/submission_concurrency" {
+				issues[index].Message = "submission_concurrency must be an integer from 1 to 32; omit it for serial submission: " + issues[index].Message
+			}
+		}
 		return issues
 	}
 	var page ConnectorPage

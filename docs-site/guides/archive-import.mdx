@@ -22,7 +22,7 @@ token. A normalizer must support the configured media type: for XML, pin a
 normalizer with the matching XML route before importing.
 
 Keep the source objects immutable. Archives are visited in lexicographic
-object-key order. New keys must sort after the last completed archive. Use a
+object-key order. New keys must sort after the highest archive key already selected by the connector, including an in-progress archive. Use a
 separate Connector Instance, a scheduled source reader, to import earlier
 keys or a different historical range.
 
@@ -52,7 +52,7 @@ revision 12 stays current after importing the later folder.
 
 Each pattern is a Go regular expression with exactly one capture group.
 Every matched member must produce a nonempty key and a position containing
-only decimal digits. A malformed URL escape or invalid capture stops the page
+only decimal digits. Encode a literal percent sign as `%25`; decoding is strict so identity captures cannot silently switch to a different path representation. A malformed URL escape or invalid capture stops the page
 before it can advance its checkpoint. Instance configuration is fixed: disable
 the failed instance and create one with a corrected mapping or member filter.
 Keep the same Corpus and `source_namespace` when the Record Key mapping remains
@@ -114,7 +114,7 @@ Its diagnostics report:
 
 For a known total across the prefix, set optional `members_total`. Tar archives
 are never scanned once just to count members. ZIP's directory supplies its
-matching-member count. A percentage measures source reading, while
+matching-member count. ZIP directories are bounded to 4 MiB and 100,000 entries before parsing; use tar.gz for larger member sets. ZIP member reads retain one 1 MiB range window. A percentage measures source reading, while
 `members_done` measures committed ingestion progress, including permanent
 rejections reported as `item_rejected` in health. Accepted members can still
 be waiting for normalization or search publication; acceptance does not mean

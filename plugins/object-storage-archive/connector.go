@@ -26,9 +26,11 @@ type checkpoint struct {
 	Complete           bool   `json:"complete"`
 }
 type memberRef struct {
-	Archive string `json:"archive"`
-	ETag    string `json:"etag"`
-	Offset  int64  `json:"offset"`
+	Archive    string `json:"archive"`
+	ETag       string `json:"etag"`
+	Offset     int64  `json:"offset"`
+	BatchStart int64  `json:"batch_start,omitempty"`
+	BatchEnd   *int64 `json:"batch_end,omitempty"`
 }
 type bufferedMember struct {
 	member
@@ -204,6 +206,7 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 	r := s.reader
 	stop := context.AfterFunc(ctx, r.cancel)
 	defer stop()
+	batchStart := cp.MemberOffset
 	page := &quivrplugin.Page{SubmissionConcurrency: c.Concurrency}
 	var cached int64
 	seen := map[string]bool{}
@@ -235,7 +238,11 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 				cp.MemberOffset++
 				continue
 			}
-			if m.size < 1 || m.size > maxMemberBytes {
+			if m.size == 0 {
+				_ = m.close()
+				return fail(quivrplugin.SourceError("empty_member", "matched member is empty; exclude it with member_pattern"))
+			}
+			if m.size < 0 || m.size > maxMemberBytes {
 				_ = m.close()
 				return fail(quivrplugin.SourceError("member_too_large", "matched members must contain 1 to 25 MiB"))
 			}
@@ -259,7 +266,7 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 			s.pending = pending
 			break
 		}
-		refBytes, _ := json.Marshal(memberRef{cp.Archive, cp.ETag, pending.offset})
+		refBytes, _ := json.Marshal(memberRef{Archive: cp.Archive, ETag: cp.ETag, Offset: pending.offset, BatchStart: batchStart})
 		ref := string(refBytes)
 		if len(ref) > 1024 {
 			return fail(quivrplugin.SourceError("unsupported_archive_identity", "archive reference exceeds the protocol bound"))
@@ -277,6 +284,23 @@ func (a *ArchiveConnector) Fetch(ctx context.Context, req *quivrplugin.FetchRequ
 		cp.MemberOffset++
 		cp.MembersDone++
 		cp.ArchiveMembersDone++
+	}
+	// Every member carries the same page bounds. A cold attachment request for
+	// the last member must rebuild the entire page, not start a later cache batch.
+	for i := range page.Items {
+		at := &page.Items[i].Attachments[0]
+		var ref memberRef
+		_ = json.Unmarshal([]byte(at.Ref), &ref)
+		data := s.cache[at.Ref]
+		delete(s.cache, at.Ref)
+		batchEnd := cp.MemberOffset
+		ref.BatchEnd = &batchEnd
+		raw, _ := json.Marshal(ref)
+		at.Ref = string(raw)
+		if len(at.Ref) > 1024 {
+			return fail(quivrplugin.SourceError("unsupported_archive_identity", "archive reference exceeds the protocol bound"))
+		}
+		s.cache[at.Ref] = data
 	}
 	page.Checkpoint = cp
 	page.More = true
@@ -333,7 +357,7 @@ func (a *ArchiveConnector) OpenAttachment(ctx context.Context, req *quivrplugin.
 		return nil, err
 	}
 	var ref memberRef
-	if json.Unmarshal([]byte(req.Attachment.Ref), &ref) != nil || ref.Offset < 0 || ref.ETag == "" || !strings.HasPrefix(ref.Archive, c.Prefix) || !c.acceptsArchive(ref.Archive) {
+	if json.Unmarshal([]byte(req.Attachment.Ref), &ref) != nil || ref.Offset < 0 || ref.BatchStart < 0 || ref.BatchStart > ref.Offset || (ref.BatchEnd != nil && *ref.BatchEnd <= ref.Offset) || (ref.BatchEnd == nil && ref.BatchStart != 0) || ref.ETag == "" || !strings.HasPrefix(ref.Archive, c.Prefix) || !c.acceptsArchive(ref.Archive) {
 		return nil, quivrplugin.SourceError("invalid_attachment_ref", "archive member reference is invalid")
 	}
 	key := sessionKey(req.OrganizationID, req.Connector.ID, req.Connector.Config, req.Credential)
@@ -365,7 +389,13 @@ func (a *ArchiveConnector) OpenAttachment(ctx context.Context, req *quivrplugin.
 	// batch once, so concurrent grants do not each rescan the whole gzip stream.
 	session.cache = map[string][]byte{}
 	var cached int64
-	for i := int64(0); len(session.cache) < c.BatchSize; i++ {
+	// Older opaque refs have only archive/etag/offset. Retain their original
+	// bounded-batch recovery, while new refs recover exact whole-page bounds.
+	batchStart, batchEnd := ref.Offset, int64(1<<63-1)
+	if ref.BatchEnd != nil {
+		batchStart, batchEnd = ref.BatchStart, *ref.BatchEnd
+	}
+	for i := int64(0); i < batchEnd && len(session.cache) < c.BatchSize; i++ {
 		m, err := r.next()
 		if err == io.EOF {
 			break
@@ -373,7 +403,7 @@ func (a *ArchiveConnector) OpenAttachment(ctx context.Context, req *quivrplugin.
 		if err != nil {
 			return nil, archiveError(err)
 		}
-		if i < ref.Offset || !m.regular || !c.members.MatchString(m.name) {
+		if i < batchStart || !m.regular || !c.members.MatchString(m.name) {
 			_, err = io.Copy(io.Discard, m.body)
 			m.close()
 			if err != nil {
@@ -397,7 +427,7 @@ func (a *ArchiveConnector) OpenAttachment(ctx context.Context, req *quivrplugin.
 		if int64(len(data)) != m.size {
 			return nil, quivrplugin.SourceError("member_size_mismatch", "member bytes do not match the archive header")
 		}
-		raw, _ := json.Marshal(memberRef{ref.Archive, ref.ETag, i})
+		raw, _ := json.Marshal(memberRef{Archive: ref.Archive, ETag: ref.ETag, Offset: i, BatchStart: ref.BatchStart, BatchEnd: ref.BatchEnd})
 		session.cache[string(raw)] = data
 		cached += m.size
 	}

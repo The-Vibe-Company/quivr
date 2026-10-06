@@ -92,7 +92,7 @@
               "$ref": "#/$defs/ConnectorManifestContent"
             }
           ],
-          "description": "Text or a Manifest. A connector Manifest carries no Blob Parts: binary Parts are attachments. Since Plugin API 0.15, absent or empty text parts with one source attachment submit its verified Blob for normalization; see ConnectorManifestContent."
+          "description": "Text or a Manifest. A connector Manifest carries no Blob Parts: binary Parts are attachments. Since Plugin API 0.15, absent or empty text parts submit the verified Blob for normalization only with exactly one attachment whose key and role are source, no parent_key or Part extensions, and no relations."
         },
         "extensions": {
           "$ref": "../../shared/v0/manifest.schema.json#/$defs/Extensions",

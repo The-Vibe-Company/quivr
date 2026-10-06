@@ -519,6 +519,8 @@ func (p *Plugin) encodePage(page *Page) ([]byte, string) {
 	body := buf.Bytes()
 	diagnostics, _ := json.Marshal(page.Diagnostics)
 	switch {
+	case page.SubmissionConcurrency < 0 || page.SubmissionConcurrency > 32:
+		return nil, fmt.Sprintf("submission_concurrency %d must be from 1 to 32; leave it zero for serial submission", page.SubmissionConcurrency)
 	case page.SubmissionConcurrency != 0 && !resolveAPIFeatures(p.m.pluginAPI).speaks("connector_submission_concurrency"):
 		return nil, "submission_concurrency requires Plugin API " + FeatureSince["connector_submission_concurrency"]
 	case p.m.Connector.Attachments == nil && hasAttachments(page.Items):

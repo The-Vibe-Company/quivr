@@ -324,6 +324,10 @@ class CoreEntrypointTest(unittest.TestCase):
             self.assertNotIn('QUIVR_ENGINE_PLUGIN_KEYS', child)
             if name != 'object-storage-archive':
                 self.assertNotIn('QUIVR_PLUGIN_SIGNING_KEYS', child)
+        for ambiguous in ('{"same":{},"same":{}}',
+                          '{"other":{"active":"one","active":"two","keys":[]}}'):
+            with self.assertRaisesRegex(ValueError, 'Invalid engine plugin signing configuration'):
+                core_entrypoint.engine_signing_environment({**ENV, 'QUIVR_ENGINE_PLUGIN_KEYS': ambiguous})
         generated = core_entrypoint.engine_signing_environment(ENV)
         self.assertEqual(generated, core_entrypoint.engine_signing_environment(dict(ENV)))
         derived = json.loads(generated['QUIVR_ENGINE_PLUGIN_KEYS'])[plugin_id]['keys'][0]['secret']
