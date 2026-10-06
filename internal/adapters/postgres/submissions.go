@@ -64,7 +64,7 @@ func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c conte
 			return content.Receipt{}, err
 		}
 		if created {
-			return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: c.Source, Processing: content.Processing{State: "queued", Phase: "materialization"}, Diagnostics: []content.Diagnostic{}, NewRevision: true}, nil
+			return pendingReceipt(receiptID, recordID, c.Source, true), nil
 		}
 	}
 	tx, err := db.Begin(ctx)
@@ -149,7 +149,13 @@ func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c conte
 	if err = tx.Commit(ctx); err != nil {
 		return content.Receipt{}, err
 	}
-	return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: c.Source, Processing: content.Processing{State: "queued", Phase: "materialization"}, Diagnostics: []content.Diagnostic{}, NewRevision: reservation.RowsAffected() == 1}, nil
+	return pendingReceipt(receiptID, recordID, c.Source, reservation.RowsAffected() == 1), nil
+}
+
+func pendingReceipt(receiptID, recordID string, source content.Source, newRevision bool) content.Receipt {
+	return content.Receipt{ID: receiptID, State: "pending", RecordID: recordID, Source: source,
+		Processing:  content.Processing{State: "queued", Phase: "materialization"},
+		Diagnostics: []content.Diagnostic{}, NewRevision: newRevision}
 }
 
 // Withdraw commits the absorbing fence atomically: an existing or first-seen

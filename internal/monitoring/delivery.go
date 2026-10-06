@@ -289,7 +289,7 @@ func (d Deliverer) stepBatch(ctx context.Context, store DeliveryBatchStore) (boo
 		if admissionErrors[i] != nil {
 			errs = append(errs, admissionErrors[i])
 		} else if refused[i] != "" {
-			slog.Info("delivery not admitted", "organization", w.Organization, "delivery_id", w.DeliveryID, "reason", refused[i])
+			slog.InfoContext(telemetry.Restore(ctx, w.TraceContext), "delivery not admitted", "organization", w.Organization, "delivery_id", w.DeliveryID, "reason", refused[i])
 		} else {
 			attempts = append(attempts, admitted[i])
 		}
@@ -313,7 +313,11 @@ func (d Deliverer) stepBatch(ctx context.Context, store DeliveryBatchStore) (boo
 				start := time.Now()
 				sendCtx, span := telemetry.Start(telemetry.Restore(ctx, attempts[i].TraceContext), "webhook.delivery")
 				outcomes[i], known[i] = d.send(sendCtx, attempts[i])
-				telemetry.Fail(span, ctx.Err())
+				if !known[i] {
+					telemetry.Fail(span, sendCtx.Err())
+				} else if outcomes[i].Outcome != AttemptAcknowledged {
+					telemetry.Fail(span, errors.New(outcomes[i].ErrorCode))
+				}
 				attempts[i].TraceContext = telemetry.Encode(sendCtx)
 				span.End()
 				elapsed[i] = time.Since(start)
@@ -329,7 +333,7 @@ func (d Deliverer) stepBatch(ctx context.Context, store DeliveryBatchStore) (boo
 		if !known[i] {
 			// Interrupted and not-yet-started admitted attempts have no known
 			// receiver outcome. Their leases retain the existing recovery path.
-			slog.Warn("delivery attempt interrupted", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number)
+			slog.WarnContext(telemetry.Restore(ctx, a.TraceContext), "delivery attempt interrupted", "organization", a.Organization, "delivery_id", a.DeliveryID, "attempt", a.Number)
 			continue
 		}
 		retry := Retry{Window: policy.Window}

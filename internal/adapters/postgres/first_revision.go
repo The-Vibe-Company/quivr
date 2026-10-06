@@ -48,7 +48,7 @@ func acceptFirstRevision(ctx context.Context, pool *pgxpool.Pool, org string, c 
 ) SELECT EXISTS(SELECT 1 FROM record)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, canonical, content.Title(c), c.SourceMediaType, c.Key, eventID(pending), eventID(accepted), telemetry.Encode(ctx))
 	results := pool.SendBatch(ctx, batch)
 	defer results.Close()
-	for range 3 {
+	for range batch.Len() - 1 {
 		if _, err := results.Exec(); err != nil {
 			return false, err
 		}

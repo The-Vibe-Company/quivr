@@ -70,7 +70,7 @@ func deliveryGuardRows[T any](ctx context.Context, tx pgx.Tx, org, query string,
 	batch.Queue(query, args...)
 	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
-	for range 3 {
+	for range batch.Len() - 1 {
 		if _, err := results.Exec(); err != nil {
 			return nil, err
 		}

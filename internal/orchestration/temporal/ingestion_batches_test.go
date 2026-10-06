@@ -12,18 +12,21 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
+	sdktemporal "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"net/http"
 )
 
 // The activity boundary owns bounded receipt execution, retry checkpoints and
-// plan lifetime. Successful siblings retain pins through a failed sibling's
-// retry; releasing the batch after durable processing can retry independently.
+// plan lifetime. Successful siblings release after durable partial completion;
+// unfinished receipts and failed pin releases retry independently.
 func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	steps := &batchSteps{started: make(chan struct{}, 32), release: make(chan struct{}), runs: map[string]int{}, enriched: map[string]int{}, parents: map[string]string{}}
-	pins := &batchPins{steps: steps, expected: 32, held: map[string]bool{}, released: map[string]int{}}
+	pins := &batchPins{steps: steps, held: map[string]bool{}, released: map[string]int{}}
 	registerIngestionBatches(env, steps, pins)
 	in := content.DispatchBatch{ID: "batch"}
 	for i := 0; i < 32; i++ {
@@ -73,8 +76,8 @@ func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) 
 			t.Fatalf("receipt %d enriched successfully %d times, want 1", i, got)
 		}
 		wantReleases := 1
-		if i == 0 || i == 1 {
-			wantReleases = 2 // first release succeeded, then the second failed once
+		if i == 1 {
+			wantReleases = 2 // its completed-subset release failed once
 		}
 		if got := pins.released[fmt.Sprint(i)]; got != wantReleases {
 			t.Fatalf("receipt %d release attempts %d, want %d", i, got, wantReleases)
@@ -89,6 +92,39 @@ func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) 
 	if !pins.failed {
 		t.Fatal("release retry was not exercised")
 	}
+	t.Run("poisoned receipt retains only its own pin", func(t *testing.T) {
+		var suite testsuite.WorkflowTestSuite
+		env := suite.NewTestWorkflowEnvironment()
+		unblocked := make(chan struct{})
+		close(unblocked)
+		steps := &batchSteps{started: make(chan struct{}, 32), release: unblocked, runs: map[string]int{}, enriched: map[string]int{}, parents: map[string]string{}, poison: true, failed: true}
+		pins := &batchPins{steps: steps, held: map[string]bool{}, released: map[string]int{}, failed: true}
+		registerIngestionBatches(env, steps, pins)
+		observed := false
+		env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, args converter.EncodedValues) {
+			if info.ActivityType.Name != ingestionBatchActivity {
+				return
+			}
+			var input content.DispatchBatch
+			if err := args.Get(&input); err != nil {
+				t.Fatal(err)
+			}
+			if info.Attempt == 1 && len(input.Receipts) == 32 {
+				return
+			}
+			observed = true
+			pins.mu.Lock()
+			if len(pins.held) != 1 || !pins.held["0"] || len(pins.released) != 31 || len(pins.early) != 0 {
+				t.Errorf("poison retry retained completed siblings: held=%v released=%v early=%v", pins.held, pins.released, pins.early)
+			}
+			pins.mu.Unlock()
+			env.CancelWorkflow()
+		})
+		env.ExecuteWorkflow(ingestionBatchWorkflow, in)
+		if !observed || !sdktemporal.IsCanceledError(env.GetWorkflowError()) {
+			t.Fatalf("pending poison retry observation=%v workflow=%v", observed, env.GetWorkflowError())
+		}
+	})
 }
 
 type batchSteps struct {
@@ -101,6 +137,7 @@ type batchSteps struct {
 	enriched     map[string]int
 	normalized   bool
 	failed       bool
+	poison       bool
 }
 
 func (s *batchSteps) Run(ctx context.Context, _, id string) error {
@@ -121,7 +158,7 @@ func (s *batchSteps) Run(ctx context.Context, _, id string) error {
 	defer s.mu.Unlock()
 	s.runs[id]++
 	s.parents[id] = logging.RequestID(ctx)
-	if id == "0" && !s.normalized {
+	if id == "0" && (s.poison || !s.normalized) {
 		return content.ErrNormalizationPending
 	}
 	return nil
@@ -147,7 +184,6 @@ func (s *batchSteps) Enrich(_ context.Context, _, id string) error {
 // after the first pin was released, so its retry must be idempotent.
 type batchPins struct {
 	steps    *batchSteps
-	expected int
 	mu       sync.Mutex
 	held     map[string]bool
 	released map[string]int
@@ -164,12 +200,12 @@ func (p *batchPins) Pin(ctx context.Context, _, _, id string) (context.Context, 
 
 func (p *batchPins) Release(_ context.Context, _, _, id string) error {
 	p.steps.mu.Lock()
-	completed := len(p.steps.enriched)
+	completed := p.steps.enriched[id]
 	p.steps.mu.Unlock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.released[id]++
-	if completed != p.expected {
+	if completed == 0 {
 		p.early = append(p.early, id)
 	}
 	if id == "1" && !p.failed {

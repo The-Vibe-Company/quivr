@@ -367,10 +367,8 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		t.Fatal("evaluated step missing once every Subscription decided")
 	}
 
-	// A same-Version group is a single durable boundary: a SQL failure on its
-	// second positive rolls back the first positive, its completed intent and
-	// the journal allocation. The number is valid JSON but exceeds PostgreSQL's
-	// numeric range, so this fails during the real writes, after the first one.
+	// Fail a later Delivery insert after the batch has written Matches and
+	// journal positions, proving transaction rollback across statements.
 	groupRecord, groupVersion := searchable(a.ID, "group")
 	drain()
 	rows, err = pool.Query(ctx, `SELECT subscription_id,subscription_version_id,sequence,trace_context FROM evaluation_intents WHERE organization=$1 AND record_version_id=$2`, org, groupVersion)
@@ -413,11 +411,17 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 		return out
 	}
 	beforeHead, beforeFacts := head(), facts()
-	badGroup := append([]monitoring.MatchCommit(nil), group...)
-	badGroup[1].Evidence.Details = map[string]any{"score": json.Number("1e1000000")}
+	if _, err = pool.Exec(ctx, `CREATE FUNCTION fail_fixture_match_delivery() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF NEW.organization=TG_ARGV[0] THEN
+  IF NOT EXISTS(SELECT 1 FROM matches WHERE organization=NEW.organization AND id=NEW.match_id) THEN RAISE EXCEPTION 'match writes absent'; END IF;
+  RAISE EXCEPTION 'synthetic later match interruption';
+ END IF; RETURN NEW; END $$;`+fmt.Sprintf(`CREATE TRIGGER fail_fixture_match_delivery BEFORE INSERT ON deliveries FOR EACH ROW EXECUTE FUNCTION fail_fixture_match_delivery('%s')`, org)); err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Exec(context.Background(), "DROP TRIGGER IF EXISTS fail_fixture_match_delivery ON deliveries; DROP FUNCTION IF EXISTS fail_fixture_match_delivery()")
 	var sqlError *pgconn.PgError
-	if _, err = evaluation.CommitMatches(ctx, badGroup); !errors.As(err, &sqlError) || sqlError.Code != "22003" {
-		t.Fatalf("group must reach the numeric-range SQL failure: %v", err)
+	if _, err = evaluation.CommitMatches(ctx, group); !errors.As(err, &sqlError) || sqlError.Code != "P0001" || sqlError.Message != "synthetic later match interruption" {
+		t.Fatalf("group must reach later Delivery SQL failure: %v", err)
 	}
 	if got := head(); got != beforeHead {
 		t.Fatalf("failed group exposed journal head %d, want %d", got, beforeHead)
@@ -433,6 +437,10 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	activity, err := store.VersionActivity(ctx, org, groupVersion)
 	if err != nil || activity.Steps.Evaluated != nil {
 		t.Fatalf("failed group recorded evaluation: %+v %v", activity.Steps, err)
+	}
+
+	if _, err = pool.Exec(ctx, "DROP TRIGGER fail_fixture_match_delivery ON deliveries; DROP FUNCTION fail_fixture_match_delivery()"); err != nil {
+		t.Fatal(err)
 	}
 
 	// Retrieval and enrichment can put two intents for one Subscription in

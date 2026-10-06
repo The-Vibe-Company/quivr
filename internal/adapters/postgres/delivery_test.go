@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -193,34 +194,40 @@ func TestDeliveryAdmissionAndAppendOnlyAttempts(t *testing.T) {
 		}
 		return n
 	}
-	// A pre-existing canonical attempt forces a unique violation at the last
-	// write. Every earlier attempt, state change and journal event must roll
-	// back. The append-only fixture fact is then recovered through the normal
-	// unknown-attempt path after restoring its associated delivering state.
-	lostWork := works[len(works)-1]
-	lostID := content.StableID("attempt", org, lostWork.DeliveryID, "1")
-	if _, err = f.pool.Exec(ctx, `INSERT INTO delivery_attempts(organization,id,delivery_id,number) VALUES($1,$2,$3,1)`, org, lostID, lostWork.DeliveryID); err != nil {
+	// Fail the journal-event statement after attempts and delivery states have
+	// been written. The trigger observes those writes inside the transaction.
+	if _, err = f.pool.Exec(ctx, `CREATE FUNCTION fail_fixture_delivery_admission() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF NEW.organization=TG_ARGV[0] AND NEW.event_type='delivery.updated' THEN
+  IF NOT EXISTS(SELECT 1 FROM deliveries d JOIN delivery_attempts a ON (a.organization,a.delivery_id)=(d.organization,d.id) WHERE d.organization=NEW.organization AND d.id=NEW.resource_id AND d.state='delivering') THEN RAISE EXCEPTION 'admission writes absent'; END IF;
+  RAISE EXCEPTION 'synthetic later admission interruption';
+ END IF; RETURN NEW; END $$;`+fmt.Sprintf(`CREATE TRIGGER fail_fixture_delivery_admission BEFORE INSERT ON change_events FOR EACH ROW EXECUTE FUNCTION fail_fixture_delivery_admission('%s')`, org)); err != nil {
 		t.Fatal(err)
 	}
+	defer f.pool.Exec(context.Background(), "DROP TRIGGER IF EXISTS fail_fixture_delivery_admission ON change_events; DROP FUNCTION IF EXISTS fail_fixture_delivery_admission()")
 	beforeHead := head()
 	_, _, admissionErrors := ds.AdmitDeliveries(ctx, works, testWindow, configured)
 	for i, err := range admissionErrors {
 		var sqlError *pgconn.PgError
-		if !errors.As(err, &sqlError) || sqlError.Code != "23505" {
-			t.Fatalf("group admission %d must reach unique constraint: %v", i, err)
+		if !errors.As(err, &sqlError) || sqlError.Code != "P0001" || sqlError.Message != "synthetic later admission interruption" {
+			t.Fatalf("group admission %d must reach later journal write: %v", i, err)
 		}
 	}
 	for _, w := range works {
-		wantFacts := 0
-		if w.DeliveryID == lostWork.DeliveryID {
-			wantFacts = 1
-		}
-		if d := f.read(w.DeliveryID); d.State != "pending" || d.AttemptCount != 0 || f.attempts(w.DeliveryID) != wantFacts || f.updates(w.DeliveryID) != 0 {
+		if d := f.read(w.DeliveryID); d.State != "pending" || d.AttemptCount != 0 || f.attempts(w.DeliveryID) != 0 || f.updates(w.DeliveryID) != 0 {
 			t.Fatalf("failed admission leaked facts for %s: %+v", w.DeliveryID, d)
 		}
 	}
 	if head() != beforeHead {
 		t.Fatalf("failed admission advanced head to %d from %d", head(), beforeHead)
+	}
+	if _, err = f.pool.Exec(ctx, "DROP TRIGGER fail_fixture_delivery_admission ON change_events; DROP FUNCTION fail_fixture_delivery_admission()"); err != nil {
+		t.Fatal(err)
+	}
+	// Seed a lost attempt separately to retain the real unknown-outcome owner.
+	lostWork := works[len(works)-1]
+	lostID := content.StableID("attempt", org, lostWork.DeliveryID, "1")
+	if _, err = f.pool.Exec(ctx, `INSERT INTO delivery_attempts(organization,id,delivery_id,number) VALUES($1,$2,$3,1)`, org, lostID, lostWork.DeliveryID); err != nil {
+		t.Fatal(err)
 	}
 	if _, err = f.pool.Exec(ctx, `UPDATE deliveries SET state='delivering',attempt_count=1 WHERE organization=$1 AND id=$2`, org, lostWork.DeliveryID); err != nil {
 		t.Fatal(err)
@@ -235,18 +242,25 @@ func TestDeliveryAdmissionAndAppendOnlyAttempts(t *testing.T) {
 	if head() != beforeHead+32 {
 		t.Fatalf("common admission head %d, want %d", head(), beforeHead+32)
 	}
-	// A later invalid HTTP status reaches the real outcome constraint. It
-	// rolls back prior outcomes, terminal states, events and outbox deletion.
+	// Fail outbox deletion after outcomes, terminal states and events were
+	// written. Their transaction must restore all facts and retryable work.
 	outcomes, retries := make([]monitoring.AttemptOutcome, len(attempts)), make([]monitoring.Retry, len(attempts))
 	for i := range outcomes {
 		outcomes[i], retries[i] = monitoring.AttemptOutcome{Outcome: monitoring.AttemptAcknowledged, HTTPStatus: 204}, monitoring.Retry{Window: testWindow}
 	}
-	outcomes[1].HTTPStatus = 600
+	if _, err = f.pool.Exec(ctx, `CREATE FUNCTION fail_fixture_delivery_record() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF OLD.organization=TG_ARGV[0] THEN
+  IF NOT EXISTS(SELECT 1 FROM deliveries d JOIN delivery_attempts a ON (a.organization,a.delivery_id)=(d.organization,d.id) JOIN delivery_attempt_outcomes o ON (o.organization,o.attempt_id)=(a.organization,a.id) WHERE d.organization=OLD.organization AND d.id=OLD.delivery_id AND d.state='delivered' AND o.outcome='acknowledged') THEN RAISE EXCEPTION 'outcome writes absent'; END IF;
+  RAISE EXCEPTION 'synthetic later outcome interruption';
+ END IF; RETURN OLD; END $$;`+fmt.Sprintf(`CREATE TRIGGER fail_fixture_delivery_record BEFORE DELETE ON delivery_outbox FOR EACH ROW EXECUTE FUNCTION fail_fixture_delivery_record('%s')`, org)); err != nil {
+		t.Fatal(err)
+	}
+	defer f.pool.Exec(context.Background(), "DROP TRIGGER IF EXISTS fail_fixture_delivery_record ON delivery_outbox; DROP FUNCTION IF EXISTS fail_fixture_delivery_record()")
 	beforeHead = head()
 	for i, err := range ds.RecordDeliveries(ctx, attempts, outcomes, retries) {
 		var sqlError *pgconn.PgError
-		if !errors.As(err, &sqlError) || sqlError.Code != "23514" {
-			t.Fatalf("group outcome %d must reach HTTP-status constraint: %v", i, err)
+		if !errors.As(err, &sqlError) || sqlError.Code != "P0001" || sqlError.Message != "synthetic later outcome interruption" {
+			t.Fatalf("group outcome %d must reach later outbox deletion: %v", i, err)
 		}
 	}
 	for _, a := range attempts {
@@ -260,7 +274,9 @@ func TestDeliveryAdmissionAndAppendOnlyAttempts(t *testing.T) {
 	if head() != beforeHead {
 		t.Fatalf("failed outcomes advanced head to %d from %d", head(), beforeHead)
 	}
-	outcomes[1].HTTPStatus = 204
+	if _, err = f.pool.Exec(ctx, "DROP TRIGGER fail_fixture_delivery_record ON delivery_outbox; DROP FUNCTION fail_fixture_delivery_record()"); err != nil {
+		t.Fatal(err)
+	}
 	for replay := 0; replay < 2; replay++ {
 		for i, err := range ds.RecordDeliveries(ctx, attempts, outcomes, retries) {
 			if err != nil {

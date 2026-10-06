@@ -25,25 +25,48 @@ const ingestionReceiptConcurrency = 8
 // legacy stage deadlines; a silent worker is recovered by the heartbeat bound.
 const ingestionBatchTimeout = 4 * (30*time.Second + maxNormalizationRounds*(normalizationActivityTimeout+30*time.Second) + enrichmentActivityTimeout)
 
+// Remaining indexes belong to this activity's input. A nil result from an
+// older history means all receipts completed, preserving its release command.
+type ingestionBatchResult struct{ Remaining []int }
+
 func ingestionBatch(ctx workflow.Context, in content.DispatchBatch) error {
 	ctx = workflow.WithActivityOptions(ctx, activityPolicy{Timeout: ingestionBatchTimeout, Heartbeat: stepHeartbeatTimeout, RetryInterval: 10 * time.Second}.options())
-	if err := workflow.ExecuteActivity(ctx, ingestionBatchActivity, in).Get(ctx, nil); err != nil {
-		return err
+	for len(in.Receipts) > 0 {
+		var result ingestionBatchResult
+		if err := workflow.ExecuteActivity(ctx, ingestionBatchActivity, in).Get(ctx, &result); err != nil {
+			return err
+		}
+		pending := make(map[int]bool, len(result.Remaining))
+		for _, i := range result.Remaining {
+			pending[i] = true
+		}
+		completed, remaining := in, in
+		completed.Receipts, remaining.Receipts = nil, nil
+		for i, receipt := range in.Receipts {
+			if pending[i] {
+				remaining.Receipts = append(remaining.Receipts, receipt)
+			} else {
+				completed.Receipts = append(completed.Receipts, receipt)
+			}
+		}
+		// Only release receipts whose completion is now in workflow history.
+		// A poisoned sibling retains its own plan without holding finished work.
+		release := workflow.WithActivityOptions(ctx, activityPolicy{Timeout: 30 * time.Second, Heartbeat: stepHeartbeatTimeout, RetryInterval: 10 * time.Second}.options())
+		if err := workflow.ExecuteActivity(release, ingestionBatchReleaseActivity, completed).Get(release, nil); err != nil {
+			return err
+		}
+		in = remaining
 	}
-	// Processing completion is durable before pins are released. A lost
-	// heartbeat may replay a completed receipt while processing retries, so
-	// even successful siblings keep their original plans until this boundary.
-	release := workflow.WithActivityOptions(ctx, activityPolicy{Timeout: 30 * time.Second, Heartbeat: stepHeartbeatTimeout, RetryInterval: 10 * time.Second}.options())
-	return workflow.ExecuteActivity(release, ingestionBatchReleaseActivity, in).Get(release, nil)
+	return nil
 }
 
 func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 	w.RegisterWorkflowWithOptions(ingestionBatch, workflow.RegisterOptions{Name: ingestionBatchWorkflow})
-	w.RegisterActivityWithOptions(func(ctx context.Context, in content.DispatchBatch) error {
+	w.RegisterActivityWithOptions(func(ctx context.Context, in content.DispatchBatch) (ingestionBatchResult, error) {
 		var completed []int
 		if activity.HasHeartbeatDetails(ctx) {
 			if err := activity.GetHeartbeatDetails(ctx, &completed); err != nil {
-				return err
+				return ingestionBatchResult{}, err
 			}
 		}
 		var mu sync.Mutex
@@ -89,6 +112,7 @@ func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 					err := processBatchedReceipt(ctx, steps, pins, in.Receipts[i])
 					mu.Lock()
 					if err == nil {
+						done[i] = true
 						completed = append(completed, i)
 					} else {
 						failures = append(failures, err)
@@ -99,7 +123,16 @@ func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 			})
 		}
 		wg.Wait()
-		return errors.Join(append(failures, ctx.Err())...)
+		if len(completed) > 0 && ctx.Err() == nil {
+			result := ingestionBatchResult{}
+			for i, complete := range done {
+				if !complete {
+					result.Remaining = append(result.Remaining, i)
+				}
+			}
+			return result, nil
+		}
+		return ingestionBatchResult{}, errors.Join(append(failures, ctx.Err())...)
 	}, activity.RegisterOptions{Name: ingestionBatchActivity})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in content.DispatchBatch) error {
 		return heartbeating(ctx, stepHeartbeatTimeout/3, func() error {
@@ -149,7 +182,7 @@ func processBatchedReceipt(ctx context.Context, steps Steps, pins Pinner, in con
 	if err != nil {
 		return err
 	}
-	// Pins remain held while any sibling retries, delaying plan draining until
-	// the workflow records processing completion and releases the whole batch.
+	// The activity records completion before the workflow releases this pin.
+	// An interrupted activity may replay this receipt using the same plan.
 	return nil
 }

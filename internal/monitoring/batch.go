@@ -393,7 +393,7 @@ func (e Engine) applyGroup(ctx context.Context, group []pending, parts []Part, o
 		}
 		if err != nil || len(committed) != len(matches) {
 			for _, match := range matches {
-				if err := e.retry(ctx, match.Intent, "storage_unavailable"); err != nil {
+				if err := e.retry(commitCtx, match.Intent, "storage_unavailable"); err != nil {
 					errs = append(errs, err)
 				}
 			}
