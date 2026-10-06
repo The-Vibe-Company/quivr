@@ -103,32 +103,46 @@ def _metadata(item, language):
 
 
 def _common_metadata(item, document):
-    """THE-1166's common-field shape, retained in our owned namespace on API 0.1."""
-    result = {'source_type': 'newswire'}
-    if language := document.get('language'):
+    """Bound the shared filter view; complete values remain in source metadata."""
+    def bounded(value):
+        return value.strip()[:200]
+
+    def distinct(values):
+        return list(dict.fromkeys(value for raw in values if (value := bounded(raw))))[:50]
+
+    result = {'source_type': 'news_item'}
+    if language := bounded(document.get('language', '')):
         result['language'] = language
     for field in ('first_created', 'version_created'):
         if value := document.get(field):
+            match = re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:[0-5]\d(\.\d{1,9})?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)', value)
+            if not match:
+                continue
             try:
                 date = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                if date.tzinfo is not None:
-                    result['published_at'] = date.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
-                    break
-            except ValueError:
+                utc = date.astimezone(timezone.utc).isoformat(timespec='seconds')
+                # Keep the source's subsecond precision, including nanoseconds.
+                result['published_at'] = utc.removesuffix('+00:00') + (match[1] or '') + 'Z'
+                break
+            except (ValueError, OverflowError):
                 pass  # The original value remains in document and XML metadata.
     def identity(concept):
         return concept.get('uri') or concept.get('qcode') or next(iter(concept.get('names', [])), concept.get('value', ''))
     if providers := document.get('provider'):
-        if source := identity(providers[0]):
+        if source := bounded(identity(providers[0])):
             result['source'] = source
     for source, target in [('creators', 'author'), ('subjects', 'subjects')]:
         values = [identity(value) for value in document.get(source, [])]
-        if values := list(dict.fromkeys(value for value in values if value)):
+        if values := distinct(values):
             result[target] = values
     if tags := document.get('keywords'):
-        result['tags'] = list(dict.fromkeys(tags))
+        if values := distinct(tags):
+            result['tags'] = values
     places, countries = [], []
-    for located in item.findall('contentMeta/located', {'': NAR}):
+    geo = item.findall('contentMeta/located', {'': NAR})
+    geo += [node for node in item.findall('contentMeta/subject', {'': NAR})
+            if node.attrib.get('type', '').endswith(':geoArea')]
+    for located in geo:
         concept = _concept(located)
         places.extend(concept.get('names') or [identity(concept)])
         for node in located.iter():
@@ -136,7 +150,7 @@ def _common_metadata(item, document):
             if code.startswith('iso3166-1a2:'):
                 countries.append(code.split(':', 1)[1])
     for values, field in [(places, 'place'), (countries, 'country')]:
-        if values := list(dict.fromkeys(value for value in values if value)):
+        if values := distinct(values):
             result[field] = values
     return result
 
@@ -240,7 +254,7 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
                       content=BlobContent(blob_id=source.blob_id, media_type=source.media_type)))
     document = _metadata(item, language)
     extensions = {'newsml-g2.document': _extension(document),
-                  'newsml-g2.metadata': _extension(_common_metadata(item, document)),
+                  'quivr.metadata': _extension(_common_metadata(item, document)),
                   'newsml-g2.xml': _extension({'root': _tree(root)})}
     if paths := invocation.configuration.get('header_paths'):
         extensions['newsml-g2.headers'] = _extension(_selected_headers(root, paths))

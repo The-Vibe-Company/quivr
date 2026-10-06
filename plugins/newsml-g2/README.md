@@ -25,9 +25,8 @@ python3 -m unittest discover -s plugins/newsml-g2/tests
 
 Certification prints `CERTIFIED`. `sample.json` exercises the news-item media type;
 `message.json` exercises the news-message media type. Both appear in the report.
-The committed fixtures are original synthetic
-Arabic, French and English text, licensed under the repository's MIT license.
-The golden response in `tests/data/` records the mapping independently of the parser.
+Fixtures are synthetic Arabic, French and English text under the MIT license.
+The golden response in `tests/data/` records the mapping independently.
 
 Run `python3 -m newsml_g2` as a separate service. Pin its manifest and endpoint
 with required routes for both media types; [Pin a plugin](https://docs.quivr.thevibecompany.co/run-quivr/pin)
@@ -64,24 +63,34 @@ Corrections remain source versions; withdrawal submission is the acquirer's job.
 | Configured header paths | `newsml-g2.headers.paths`, arrays of matching element trees |
 | Original XML | `source` Blob Part, referencing the input without rewriting it |
 
-Only XHTML, NITF and unqualified paragraphs become body text; foreign elements
-remain in the XML tree. Part language and direction describe the whole element; span
-overrides remain in the XML tree. All extensions use schema version `1`.
-Subject QCodes, including mediatopics,
-remain as supplied; catalogs and scheme declarations remain in the XML tree.
-No remote vocabulary resolution takes place. Missing optional values are omitted.
+Only XHTML, NITF and unqualified paragraphs become body text. Part context
+describes the whole element; span overrides and foreign elements stay in the
+XML tree. All extensions use schema version `1`. Subject QCodes, catalogs and
+scheme declarations remain as supplied. Missing optional values are omitted.
 
 ## Common metadata
 
-`newsml-g2.metadata` schema `1` carries string `language`, `published_at`,
-`source_type` (`newswire`), `source`, and string arrays `author`, `subjects`, `tags`,
-`country`, `place`. Publication uses `firstCreated`, then `versionCreated`, converted
-to UTC only when a timezone is present. Provider/creator/subject identifiers prefer
-URI, then QCode, then name or value. Place uses names, falling back to that
-identifier order; country uses `iso3166-1a2` hints.
-Unknown fields are omitted. The original dates and codes remain in source metadata.
-The reserved `quivr.metadata` integration follows when the engine accepts it;
-current deployments can map these plugin fields through corpus retrieval mappings.
+`quivr.metadata` schema `1` carries string `language`, `published_at`,
+`source_type` (`news_item`), `source`, and string arrays `author`, `subjects`,
+`tags`, `country`, `place`. These fields answer `metadata.<field>` filters in
+[search and document lists](https://docs.quivr.thevibecompany.co/guides/search#filter-by-document-metadata)
+across sources and corpora. The reserved namespace needs no manifest ownership.
+
+Publication uses a valid RFC 3339 `firstCreated`, otherwise
+`versionCreated`, converted to UTC with its subsecond precision retained.
+A correction therefore keeps the original publication date when available.
+Dates without a timezone, malformed dates and leap seconds are omitted.
+Provider/creator/subject identifiers prefer URI, then QCode, then name or value.
+Place uses names from `located` and subjects typed `*:geoArea`, falling back to
+that identifier order. Country uses their `iso3166-1a2` QCodes, including broader
+locations. Keywords become tags; no remote vocabulary lookup takes place.
+
+Unknown and blank values are omitted. Common strings are trimmed and shortened
+to 200 characters; arrays keep the first 50 distinct bounded values in source
+order. Original dates, identifiers and full arrays remain in `newsml-g2.document`
+and `newsml-g2.xml`. The temporary `newsml-g2.metadata` extension is removed.
+Stored Versions keep their original metadata; a projection rebuild cannot add
+these fields. New source revisions run the updated normalizer.
 
 ## Settings and limits
 
@@ -98,18 +107,15 @@ The full XML tree is retained regardless of this list.
 
 All input refusals are terminal: forbidden DTDs/entities use `unsafe_xml`, malformed
 XML uses `invalid_xml`, and excessive depth or element count uses `xml_too_complex`.
-XML is limited to 10000 elements and
-64 levels. Adjacent body Parts (sluglines and paragraphs) with equal language and
-direction are grouped
-when needed to fit 64 text Parts, with a `paragraphs_grouped` warning. Omitted
-direction means `ltr` for grouping, as IPTC specifies. More than 64
-incompatible text groups are refused with `too_many_text_parts`. The source Part
-is additional. Items with no text Parts keep the source Blob and metadata, with a
-`no_text_parts` warning so operators can detect the lack of searchable text.
+XML is limited to 10000 elements and 64 levels. Adjacent body Parts with equal
+language and direction are grouped to fit 64 text Parts (`paragraphs_grouped`).
+Omitted direction means `ltr`. More than 64 incompatible text groups use
+`too_many_text_parts`. The source Part is additional. Items without text keep
+the source Blob and metadata, with a `no_text_parts` warning.
 
 Text beyond its budget and serialized responses of 2 MiB or more are refused
-with terminal diagnostics (`text_too_large`, `manifest_too_large`); metadata is
-never silently truncated. The engine's ingestion plugin may apply a smaller
+with terminal diagnostics (`text_too_large`, `manifest_too_large`); full source
+metadata is never silently truncated. The engine's ingestion plugin may apply a smaller
 segment budget. Keep the raw Blob to inspect a quarantined item.
 See [diagnostics and reprocessing](https://docs.quivr.thevibecompany.co/run-quivr/reprocess-quarantined-versions)
 for inspecting failures and processing them again after a fix.

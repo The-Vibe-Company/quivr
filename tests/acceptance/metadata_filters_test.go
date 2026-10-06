@@ -28,8 +28,17 @@ func TestMetadataFiltersAcrossCorpora(t *testing.T) {
 	for i, id := range ids {
 		cmd := inlineCommand(id, run+id, "harbour", "The harbour ferry report.")
 		cmd["extensions"] = map[string]any{
-			"quivr.metadata":    map[string]any{"schema_version": "1", "data": map[string]any{"language": "en", "published_at": "2026-09-30T12:00:00Z", "source_type": []string{"rss", "mail"}[i], "tags": []string{"sea weather"}}},
+			"quivr.metadata":    map[string]any{"schema_version": "1", "data": map[string]any{"language": "en", "published_at": "2026-09-30T12:00:00Z", "source_type": "rss", "tags": []string{"sea weather"}}},
 			"example.editorial": map[string]any{"schema_version": "1", "data": map[string]any{"flags": map[string]any{"urgency": 2.0}}},
+		}
+		if i == 0 {
+			// The real normalizer must supply common metadata from XML; copying
+			// it into the command would conceal a regression in its mapping.
+			const mediaType = "application/vnd.iptc.g2.newsmessage+xml"
+			xml := `<newsItem xmlns="http://iptc.org/std/nar/2006-10-01/" guid="urn:example:harbour" version="1" xml:lang="en"><itemMeta><firstCreated>2026-09-30T14:00:00+02:00</firstCreated><versionCreated>2026-10-01T12:00:00Z</versionCreated></itemMeta><contentMeta><keyword>sea weather</keyword></contentMeta><contentSet><inlineXML><p xmlns="">The harbour ferry report.</p></inlineXML></contentSet></newsItem>`
+			xml = `<newsMessage xmlns="http://iptc.org/std/nar/2006-10-01/"><itemSet>` + xml + `</itemSet></newsMessage>`
+			cmd["content"] = map[string]any{"kind": "blob", "blob_id": uploadBlob(t, admin, []byte(xml), mediaType), "media_type": mediaType}
+			delete(cmd["extensions"].(map[string]any), "quivr.metadata")
 		}
 		start := request(t, "GET", changesPath(id, "", 0), admin, nil, 200)["next_cursor"].(string)
 		receipt := request(t, "POST", "/v0/records", admin, cmd, 202)
@@ -64,6 +73,12 @@ func TestMetadataFiltersAcrossCorpora(t *testing.T) {
 	}
 	for _, mode := range []string{"lexical", "semantic", "hybrid"} {
 		search(mode, common, 2, "")
+		for _, negative := range [][]any{
+			{map[string]any{"field": "metadata.language", "any_of": []any{"de"}}},
+			{map[string]any{"field": "metadata.published_at", "gte": "2026-10-01T00:00:00Z"}},
+		} {
+			search(mode, negative, 0, "")
+		}
 	}
 	typed := append(append([]any{}, common...), map[string]any{"field": "urgency", "any_of": []any{2.0}})
 	search("lexical", typed, 1, b)
@@ -74,6 +89,14 @@ func TestMetadataFiltersAcrossCorpora(t *testing.T) {
 			params.Set("page_cursor", cursor)
 		}
 		return request(t, "GET", "/v0/records?"+params.Encode(), admin, nil, wantStatus)
+	}
+	for _, negative := range [][]any{
+		{map[string]any{"field": "metadata.language", "any_of": []any{"de"}}},
+		{map[string]any{"field": "metadata.published_at", "gte": "2026-10-01T00:00:00Z"}},
+	} {
+		if got := list(negative, 10, "", 200); len(got["items"].([]any)) != 0 {
+			t.Fatalf("nonmatching common metadata returned catalog items: %v", got)
+		}
 	}
 	page := list(common, 1, "", 200)
 	if len(page["items"].([]any)) != 1 {

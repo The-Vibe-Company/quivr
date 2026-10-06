@@ -391,12 +391,12 @@
         }
       }
     },
-    "newsml-g2.metadata": {
+    "quivr.metadata": {
       "schema_version": "1",
       "data": {
         "language": "ar",
         "published_at": "2026-01-02T12:00:00Z",
-        "source_type": "newswire",
+        "source_type": "news_item",
         "source": "https://example.com/news",
         "author": [
           "urn:example:author:1"

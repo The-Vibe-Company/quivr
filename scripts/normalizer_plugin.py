@@ -27,9 +27,11 @@ NAME = 'markdown-sections'
 SDK = ROOT / '.scratch' / 'plugin-sdk'
 PDF_TEXT = ROOT / 'plugins' / 'pdf-text'
 # Selection -> Python module, routed media type and plugin configuration.
-PLUGINS = {'pdf-text': ('pdf_text', 'application/pdf', {}),
-           'template': (NAME.replace('-', '_'), 'text/markdown', {'max_sections': 32})}
-CHOICES = ['pdf-text', 'template', 'none']
+PLUGINS = {'pdf-text': ('pdf_text', ['application/pdf'], {}),
+           'newsml-g2': ('newsml_g2', ['application/vnd.iptc.g2.newsitem+xml',
+                                    'application/vnd.iptc.g2.newsmessage+xml'], {}),
+           'template': (NAME.replace('-', '_'), ['text/markdown'], {'max_sections': 32})}
+CHOICES = [*PLUGINS, 'none']
 
 
 def from_environment():
@@ -62,7 +64,7 @@ def custom(stack):
 def directory(stack):
     if custom(stack):
         return pathlib.Path(selected(stack))
-    return PDF_TEXT if selected(stack) == 'pdf-text' else stack.directory / 'normalizer-plugin'
+    return ROOT / 'plugins' / selected(stack) if selected(stack) in {'pdf-text', 'newsml-g2'} else stack.directory / 'normalizer-plugin'
 
 
 def manifest(stack):
@@ -71,7 +73,7 @@ def manifest(stack):
 
 def describe(stack):
     """One line for `make dev`: what is pinned and how to change it."""
-    hint = 'QUIVR_NORMALIZER=pdf-text|template|none|<plugin-dir>'
+    hint = 'QUIVR_NORMALIZER=pdf-text|newsml-g2|template|none|<plugin-dir>'
     if custom(stack):
         port = stack.state['custom_plugin']['port']
         return f'External normalizer: {directory(stack)}, pinned at http://127.0.0.1:{port}; run it with: quivr plugin dev --port {port} {directory(stack)} ({hint})'
@@ -101,11 +103,11 @@ def pin(stack, manifest_path=None, configuration=None):
                 'routes': [{'media_type': m, 'mode': 'required'} for m in media_types(stack)]}
     if name not in PLUGINS or (manifest_path is None and not manifest(stack).exists()):
         return None
-    _, media_type, default = PLUGINS[name]
+    _, routed_types, default = PLUGINS[name]
     stack.state.setdefault('plugin_port', stack_port())
     return {'manifest': str(manifest_path or manifest(stack)), 'endpoint': f"http://127.0.0.1:{stack.state['plugin_port']}",
             'configuration': configuration if configuration is not None else default,
-            'routes': [{'media_type': media_type, 'mode': 'required'}]}
+            'routes': [{'media_type': value, 'mode': 'required'} for value in routed_types]}
 
 
 def python():
@@ -129,10 +131,11 @@ def prepare(stack):
     stack.state.setdefault('plugin_port', stack_port())
     stack.save()
     name = selected(stack)
-    if name == 'pdf-text':
-        if subprocess.run([str(python()), '-c', 'import pdf_text, pypdf, cryptography'], cwd=SDK, capture_output=True).returncode:
+    if name in {'pdf-text', 'newsml-g2'}:
+        imports = 'import pdf_text, pypdf, cryptography' if name == 'pdf-text' else 'import newsml_g2, defusedxml'
+        if subprocess.run([str(python()), '-c', imports], cwd=SDK, capture_output=True).returncode:
             subprocess.run([str(SDK / 'venv' / 'bin' / 'pip'), 'install', '-q', '--disable-pip-version-check',
-                            '-c', 'contracts/http/v0/checks/requirements.txt', '-e', str(PDF_TEXT)], cwd=ROOT, check=True)
+                            '-c', 'contracts/http/v0/checks/requirements.txt', '-e', str(directory(stack))], cwd=ROOT, check=True)
     elif name == 'template' and not manifest(stack).exists():
         with (stack.directory / 'normalizer-plugin-init.log').open('w') as log:
             subprocess.run([str(stack.directory / 'quivr'), 'plugin', 'init', NAME, '--dir', str(directory(stack))], cwd=ROOT, check=True, stdout=log, stderr=log)
