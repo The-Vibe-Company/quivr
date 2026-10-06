@@ -503,6 +503,7 @@ test("source logos: an RSS source of the demo corpus only, raster images served 
   assert.equal(logo.status, 200);
   assert.equal(logo.headers.get("content-type"), "image/png");
   assert.equal(logo.headers.get("x-content-type-options"), "nosniff");
+  assert.match(logo.headers.get("content-security-policy"), /default-src 'none'.*sandbox.*frame-ancestors 'none'/);
   assert.match(logo.headers.get("cache-control"), /^private/);
   assert.deepEqual(Buffer.from(await logo.arrayBuffer()), png);
   // A second request is served from the cache, without fetching the site again.
