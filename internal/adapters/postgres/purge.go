@@ -121,7 +121,12 @@ func (s PurgeStore) RecordPurge(ctx context.Context, it retrieval.PurgeItem, del
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if complete {
+	changed, err := tx.Exec(ctx, `UPDATE projection_purges SET objects_deleted=objects_deleted+$6,lease_until='-infinity',purged_at=CASE WHEN $7 THEN now() END
+WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND generation_id=$4 AND version_id=$5 AND purged_at IS NULL`, it.Organization, it.Kind, it.CorpusID, it.GenerationID, it.VersionID, deleted, complete)
+	if err != nil {
+		return err
+	}
+	if complete && changed.RowsAffected() > 0 {
 		if it.Kind == retrieval.PurgeVersion {
 			_, err = tx.Exec(ctx, `DELETE FROM projection_metadata WHERE organization=$1 AND version_id=$2`, it.Organization, it.VersionID)
 		} else {
@@ -131,11 +136,6 @@ WHERE pm.organization=$1 AND pm.generation_id=$2 AND (pm.organization,pm.version
 		if err != nil {
 			return err
 		}
-	}
-	_, err = tx.Exec(ctx, `UPDATE projection_purges SET objects_deleted=objects_deleted+$6,lease_until='-infinity',purged_at=CASE WHEN $7 THEN now() END
-WHERE organization=$1 AND kind=$2 AND corpus_id=$3 AND generation_id=$4 AND version_id=$5 AND purged_at IS NULL`, it.Organization, it.Kind, it.CorpusID, it.GenerationID, it.VersionID, deleted, complete)
-	if err != nil {
-		return err
 	}
 	return tx.Commit(ctx)
 }

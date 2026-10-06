@@ -46,10 +46,12 @@ var ErrQueryTooLong = publicerr.QueryTooLong
 var ErrUnsupportedProfile = publicerr.UnsupportedProfile
 var ErrUnavailable = publicerr.SearchUnavailable
 
-// ErrSourceFilterUnavailable reports a source filter on a Corpus whose routed
-// generation predates projected Source Namespaces; a rebuild enables it.
+// ErrMetadataFilterUnavailable requires rebuilding a generation that predates
+// typed metadata projection.
 var ErrMetadataFilterUnavailable = publicerr.MetadataFilterUnavailable
 
+// ErrSourceFilterUnavailable reports a source filter on a Corpus whose routed
+// generation predates projected Source Namespaces; a rebuild enables it.
 var ErrSourceFilterUnavailable = publicerr.SourceFilterUnavailable
 
 // ErrRouteChanged reports that routing moved to a generation of other spaces

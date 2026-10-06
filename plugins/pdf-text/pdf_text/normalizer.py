@@ -111,12 +111,17 @@ def normalize(invocation: Invocation) -> NormalizerResponse:
     submitted = (invocation.request.extensions or {}).get("quivr.metadata")
     if submitted and submitted.data.get("source_type"):
         common_metadata["source_type"] = submitted.data["source_type"]
-    pdf_metadata = reader.metadata
-    raw_author = getattr(pdf_metadata, "author", None) if pdf_metadata is not None else None
-    if raw_author:
-        author = clean(str(raw_author))[:200]
-        if author:
-            common_metadata["author"] = [author]
+    # PDF Info is advisory: pypdf resolves it lazily and malformed metadata
+    # must not turn an otherwise readable PDF into a normalization failure.
+    try:
+        pdf_metadata = reader.metadata
+        raw_author = getattr(pdf_metadata, "author", None) if pdf_metadata is not None else None
+        if raw_author:
+            author = clean(str(raw_author))[:200]
+            if author:
+                common_metadata["author"] = [author]
+    except Exception:
+        pass
     pages: list[tuple[int, str]] = []
     empty: list[int] = []
     unreadable: list[int] = []

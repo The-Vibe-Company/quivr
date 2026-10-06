@@ -62,6 +62,7 @@ func (s Service) Records(ctx context.Context, scope corpus.Scope, corpusID strin
 			return nil, err
 		}
 	}
+	q.CorpusIDs = []string{corpusID}
 	return s.Catalog.Records(ctx, scope.Organization, corpusID, q)
 }
 
@@ -71,6 +72,7 @@ func (s Service) CountRecords(ctx context.Context, scope corpus.Scope, corpusID 
 	if err := s.authorizeCatalog(ctx, scope, corpusID); err != nil {
 		return 0, err
 	}
+	q.CorpusIDs = []string{corpusID}
 	return s.Catalog.CountRecords(ctx, scope.Organization, corpusID, q)
 }
 

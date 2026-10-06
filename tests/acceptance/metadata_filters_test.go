@@ -38,7 +38,7 @@ func TestMetadataFiltersAcrossCorpora(t *testing.T) {
 		versions[version] = true
 	}
 	common := []any{map[string]any{"field": "metadata.language", "any_of": []any{"fr", "en"}}, map[string]any{"field": "metadata.published_at", "gte": "2026-09-30T12:00:00Z", "lte": "2026-09-30T12:00:00Z"}, map[string]any{"field": "metadata.tags", "any_of": []any{"sea weather"}}}
-	search := func(mode string, filters []any, want int, excluded string) {
+	search := func(mode string, filters []any, want int, excluded string) map[string]any {
 		t.Helper()
 		result := request(t, "POST", "/v0/search", admin, map[string]any{"query": "harbour", "corpus_ids": ids, "mode": mode, "filter": map[string]any{"metadata": filters}}, 200)
 		items := result["items"].([]any)
@@ -60,6 +60,7 @@ func TestMetadataFiltersAcrossCorpora(t *testing.T) {
 			}
 		}
 		assertExcluded()
+		return result
 	}
 	for _, mode := range []string{"lexical", "semantic", "hybrid"} {
 		search(mode, common, 2, "")
@@ -88,7 +89,8 @@ func TestMetadataFiltersAcrossCorpora(t *testing.T) {
 		t.Fatalf("filter cursor change %v", changed)
 	}
 	typedPage := list(typed, 10, "", 200)
-	if len(typedPage["items"].([]any)) != 1 || typedPage["excluded_corpora"].([]any)[0].(map[string]any)["corpus_id"] != b {
+	excluded, ok := typedPage["excluded_corpora"].([]any)
+	if len(typedPage["items"].([]any)) != 1 || !ok || len(excluded) != 1 || excluded[0].(map[string]any)["corpus_id"] != b {
 		t.Fatalf("typed catalog %v", typedPage)
 	}
 	op := request(t, "PUT", "/v0/corpora/"+b+"/retrieval", admin, map[string]any{"idempotency_key": run + "declare", "retrieval": map[string]any{"fields": []any{urgency}}}, 202)
@@ -102,7 +104,23 @@ func TestMetadataFiltersAcrossCorpora(t *testing.T) {
 	if got := list(common, 1, cursor, 409); got["code"] != "cursor_scope_changed" {
 		t.Fatalf("generation cursor %v", got)
 	}
-	search("lexical", []any{map[string]any{"field": "unknown", "any_of": []any{"x"}}}, 0, "")
+	missing := search("lexical", []any{map[string]any{"field": "unknown", "any_of": []any{"x"}}}, 0, "")
+	all, ok := missing["excluded_corpora"].([]any)
+	if !ok || len(all) != 2 {
+		t.Fatalf("all excluded: %v", missing)
+	}
+	seen := map[string]bool{}
+	for _, item := range all {
+		entry := item.(map[string]any)
+		fields, ok := entry["fields"].([]any)
+		if !ok || len(fields) != 1 || fields[0] != "unknown" {
+			t.Fatalf("missing field reason: %v", entry)
+		}
+		seen[entry["corpus_id"].(string)] = true
+	}
+	if !seen[a] || !seen[b] {
+		t.Fatalf("missing Corpus explanations: %v", missing)
+	}
 	request(t, "POST", "/v0/search", admin, map[string]any{"query": "harbour", "corpus_ids": ids, "filter": map[string]any{"metadata": []any{map[string]any{"field": "urgency", "any_of": []any{"2"}}}}}, 422)
 	request(t, "GET", "/v0/records?corpus_ids="+a+","+b, os.Getenv("QUIVR_TEST_SCOPED"), nil, 404)
 }

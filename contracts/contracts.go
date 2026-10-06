@@ -65,6 +65,21 @@ func CommonMetadata() []byte { return mustRead(commonMetadataPath) }
 // CommonMetadataSchema is the compiler URL of the common metadata schema.
 func CommonMetadataSchema() string { return BaseURL + commonMetadataPath }
 
+// CompileCommonMetadata validates formats only for the reserved metadata contract.
+// Existing HTTP, plugin and user schemas retain their annotation semantics.
+func CompileCommonMetadata() (*jsonschema.Schema, error) {
+	compiler := jsonschema.NewCompiler()
+	compiler.AssertFormat()
+	value, err := jsonschema.UnmarshalJSON(bytes.NewReader(CommonMetadata()))
+	if err != nil {
+		return nil, err
+	}
+	if err := compiler.AddResource(CommonMetadataSchema(), value); err != nil {
+		return nil, err
+	}
+	return compiler.Compile(CommonMetadataSchema())
+}
+
 // PluginSchemas returns the Plugin Protocol v0 schemas keyed by file name.
 func PluginSchemas() map[string][]byte {
 	out := map[string][]byte{}
@@ -88,7 +103,6 @@ func PluginSchema(file string) string { return BaseURL + path.Join(pluginSchema,
 // NewCompiler registers every contract document as a JSON Schema resource.
 func NewCompiler() (*jsonschema.Compiler, error) {
 	compiler := jsonschema.NewCompiler()
-	compiler.AssertFormat()
 	var doc map[string]any
 	if err := yaml.Unmarshal(OpenAPI(), &doc); err != nil {
 		return nil, err

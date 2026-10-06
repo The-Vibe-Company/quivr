@@ -336,9 +336,6 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   candidate depth and relative-score or RRF fusion (defaults: alpha 0.5, search limit,
   relative score). The engine ranks nothing itself.
 
-## What comes next
-
-
 ## Documentation
 
 The documentation site, [docs.quivr.thevibecompany.co](https://docs.quivr.thevibecompany.co),

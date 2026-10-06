@@ -44,7 +44,7 @@ func TestRegistryRefusesForeignAndClashingNamespaces(t *testing.T) {
 		"not prefixed by the plugin id": {"acme-md", "other.outline"},
 		"prefix without a dot":          {"acme-md", "acme-mdx"},
 		"clash with a built-in":         {"example", "example.editorial"},
-		"clash with common metadata":    {"example", "quivr.metadata"},
+		"clash with common metadata":    {"quivr", "quivr.metadata"},
 		"owned by another plugin":       {"acme-md.outline", "acme-md.outline"},
 		"registered twice":              {"acme-md", "acme-md.outline"},
 		"empty plugin id":               {"", "acme-md.x"},

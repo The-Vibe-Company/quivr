@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pypdf import PdfReader, PdfWriter
 from quivr_plugin.testing import expect_response, invoke_fixture
@@ -81,6 +82,23 @@ class Normalizer(unittest.TestCase):
         request.extensions = {"quivr.metadata": ExtensionEntry(schema_version="1", data={"source_type": "mail"})}
         reply = plugin.handle("POST", "/v0/contributions/normalizer", json.dumps(request.to_dict()).encode())
         self.assertEqual(expect_response(reply).extensions["quivr.metadata"].data["source_type"], "mail")
+
+    def test_broken_pdf_info_is_advisory(self):
+        class Page:
+            def extract_text(self):
+                return "Readable page"
+
+        class Reader:
+            pages = [Page()]
+
+            @property
+            def metadata(self):
+                raise ValueError("malformed Info dictionary")
+
+        with patch("pdf_text.normalizer._open", return_value=Reader()):
+            response = expect_response(self.invoke(b"placeholder", {"include_source": False}))
+        self.assertEqual(response.extensions["quivr.metadata"].data, {"source_type": "document"})
+        self.assertEqual(response.manifest.parts[0].content.text, "Readable page")
 
     def test_source_part_references_the_input_blob(self):
         from quivr_plugin.testing import build_request

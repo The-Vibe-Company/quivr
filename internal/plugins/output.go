@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/The-Vibe-Company/quivr/contracts"
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -191,22 +190,11 @@ type declaredExtensions struct {
 // no plugin-owned namespaces, but common metadata remains available.
 func newDeclaredExtensions(m *Manifest) *declaredExtensions {
 	d := &declaredExtensions{schemas: map[string]map[string]*jsonschema.Schema{}, errs: map[string]error{}}
-	add := func(namespace, version string, raw []byte) {
-		value, err := decodeInstance(raw)
-		var schema *jsonschema.Schema
-		if err == nil {
-			schema, err = compileUserSchema(value)
-		}
-		if d.schemas[namespace] == nil {
-			d.schemas[namespace] = map[string]*jsonschema.Schema{}
-		}
-		if err != nil {
-			d.errs[namespace+"\x00"+version] = err
-			return
-		}
-		d.schemas[namespace][version] = schema
+	schema, err := contracts.CompileCommonMetadata()
+	d.schemas[content.CommonMetadataNamespace] = map[string]*jsonschema.Schema{content.CommonMetadataVersion: schema}
+	if err != nil {
+		d.errs[content.CommonMetadataNamespace+"\x00"+content.CommonMetadataVersion] = err
 	}
-	add(content.CommonMetadataNamespace, content.CommonMetadataVersion, contracts.CommonMetadata())
 	if m == nil {
 		return d
 	}
@@ -285,14 +273,7 @@ func (d *declaredExtensions) Validate(_ context.Context, exts content.Extensions
 			return &Violation{Kind: content.ErrInvalid, Code: CodeInvalidExtension, Path: path + "/data",
 				Detail: fmt.Sprintf("%q data does not match its declared schema version %q: %s", ns, ext.SchemaVersion, detail)}
 		}
-		if ns == content.CommonMetadataNamespace && ext.SchemaVersion == content.CommonMetadataVersion {
-			if publishedAt, ok := ext.Data["published_at"].(string); ok {
-				if _, parseErr := time.Parse(time.RFC3339, publishedAt); parseErr != nil {
-					return &Violation{Kind: content.ErrInvalid, Code: CodeInvalidExtension, Path: path + "/data",
-						Detail: fmt.Sprintf("%q data has invalid published_at at /published_at: %v", ns, parseErr)}
-				}
-			}
-		}
+
 	}
 	return nil
 }

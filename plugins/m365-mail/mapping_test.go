@@ -7,6 +7,9 @@ func TestMapMessageEmitsCommonMetadata(t *testing.T) {
 	m.From = &address{}
 	m.From.EmailAddress.Name = "Desk"
 	m.From.EmailAddress.Address = "desk@example.org"
+	m.Sender = &address{}
+	m.Sender.EmailAddress.Name = "Delegate"
+	m.Sender.EmailAddress.Address = "delegate@example.org"
 	s := session{cfg: config{Mailbox: "reader@example.org", Folder: "archive"}}
 
 	item := s.mapMessage(m, nil)
@@ -29,5 +32,13 @@ func TestMapMessageEmitsCommonMetadata(t *testing.T) {
 	authors, ok := metadata.Data["author"].([]string)
 	if !ok || len(authors) != 1 || authors[0] != "Desk" {
 		t.Fatalf("author %v", metadata.Data["author"])
+	}
+
+	// A message sent on behalf of the From author keeps that author; Sender is
+	// only the fallback when From is absent.
+	m.From = nil
+	fallback := s.mapMessage(m, nil).Extensions["quivr.metadata"].Data["author"]
+	if got, ok := fallback.([]string); !ok || len(got) != 1 || got[0] != "Delegate" {
+		t.Fatalf("sender fallback author %v", fallback)
 	}
 }

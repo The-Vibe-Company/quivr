@@ -45,7 +45,6 @@ func (s *Store) ensureMetadata(ctx context.Context, g content.Generation) error 
 		return nil
 	}
 	s.metadataMu.Lock()
-	defer s.metadataMu.Unlock()
 	if s.metadataProperties == nil {
 		s.metadataProperties = map[string]bool{}
 	}
@@ -55,6 +54,7 @@ func (s *Store) ensureMetadata(ctx context.Context, g content.Generation) error 
 			missing = append(missing, f)
 		}
 	}
+	s.metadataMu.Unlock()
 	if len(missing) == 0 {
 		return nil
 	}
@@ -89,7 +89,9 @@ func (s *Store) ensureMetadata(ctx context.Context, g content.Generation) error 
 				}
 			}
 		}
+		s.metadataMu.Lock()
 		s.metadataProperties[g.Collection+"/"+name] = true
+		s.metadataMu.Unlock()
 	}
 	return nil
 }

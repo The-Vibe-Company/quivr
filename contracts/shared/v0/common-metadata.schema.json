@@ -1,46 +1,77 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://quivr.invalid/contracts/shared/v0/common-metadata.schema.json",
-  "$vocabulary": {
-    "https://json-schema.org/draft/2020-12/vocab/core": true,
-    "https://json-schema.org/draft/2020-12/vocab/applicator": true,
-    "https://json-schema.org/draft/2020-12/vocab/validation": true,
-    "https://json-schema.org/draft/2020-12/vocab/format-annotation": true,
-    "https://json-schema.org/draft/2020-12/vocab/format-assertion": true
-  },
   "title": "Quivr common metadata",
   "description": "Optional source metadata available to every connector and normalizer.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "language": {"type": "string", "maxLength": 200},
-    "published_at": {"type": "string", "format": "date-time", "maxLength": 200},
-    "source_type": {"type": "string", "maxLength": 200},
-    "source": {"type": "string", "maxLength": 200},
+    "language": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:[0-5]\\d(\\.\\d{1,9})?(Z|[+-]([01]\\d|2[0-3]):[0-5]\\d)$"
+    },
+    "source_type": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1
+    },
     "author": {
       "type": "array",
       "maxItems": 50,
-      "items": {"type": "string", "maxLength": 200}
+      "items": {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+      }
     },
     "subjects": {
       "type": "array",
       "maxItems": 50,
-      "items": {"type": "string", "maxLength": 200}
+      "items": {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+      }
     },
     "tags": {
       "type": "array",
       "maxItems": 50,
-      "items": {"type": "string", "maxLength": 200}
+      "items": {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+      }
     },
     "country": {
       "type": "array",
       "maxItems": 50,
-      "items": {"type": "string", "maxLength": 200}
+      "items": {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+      }
     },
     "place": {
       "type": "array",
       "maxItems": 50,
-      "items": {"type": "string", "maxLength": 200}
+      "items": {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1
+      }
     }
   }
 }

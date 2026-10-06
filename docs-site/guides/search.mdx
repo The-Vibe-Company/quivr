@@ -97,10 +97,11 @@ Common filter names start with `metadata.`:
 | Fields | Value type |
 | --- | --- |
 | `language`, `source_type`, `source` | String |
-| `published_at` | RFC3339 datetime |
+| `published_at` | RFC3339 datetime with seconds (no leap seconds) and at most nine fractional digits |
 | `author`, `subjects`, `tags`, `country`, `place` | Array of strings |
 
-Unknown source values are omitted. For example, a document without a language
+Common strings are nonempty and contain at most 200 characters; common arrays
+contain at most 50 strings. Unknown source values are omitted. For example, a document without a language
 never matches a language filter. Sources retain their original metadata in their
 own extensions alongside these common fields.
 
@@ -112,7 +113,7 @@ submillisecond digits are truncated. Strings compare exactly, including case
 and whitespace. A request has at most 16 predicates, 50 values per predicate,
 and 200 characters per string value. Each field appears once.
 
-For example, not run, this filter combines language and publication date:
+For example (not run), this filter combines language and publication date:
 
 ```json
 {"metadata": [

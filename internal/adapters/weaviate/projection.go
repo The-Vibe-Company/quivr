@@ -488,6 +488,13 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 		if len(typed) > 0 && !r.Generation.MetadataProjected {
 			return nil, retrieval.ErrMetadataFilterUnavailable
 		}
+		// An empty generation may be routed before its first publication.
+		// Reconcile declared fields before querying their schema properties.
+		if len(typed) > 0 {
+			if err := s.ensureMetadata(ctx, r.Generation); err != nil {
+				return nil, err
+			}
+		}
 		for _, f := range typed {
 			routeFilters = append(routeFilters, metadataCondition(f))
 		}

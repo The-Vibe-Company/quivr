@@ -91,11 +91,7 @@ func TestCompilerResolvesSharedReferences(t *testing.T) {
 // executable at its owner boundary. The inputs use literal wire keys so a
 // renamed Go field cannot make the test pass by serializing the same type.
 func TestCommonMetadataSchema(t *testing.T) {
-	compiler, err := contracts.NewCompiler()
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema, err := compiler.Compile(contracts.CommonMetadataSchema())
+	schema, err := contracts.CompileCommonMetadata()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,10 +106,14 @@ func TestCommonMetadataSchema(t *testing.T) {
 		})
 	}
 	for name, raw := range map[string]string{
-		"unknown key":   `{"unknown":"value"}`,
-		"invalid date":  `{"published_at":"not-a-date"}`,
-		"long string":   `{"source":"` + strings.Repeat("x", 201) + `"}`,
-		"too many tags": `{"tags":["x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x"]}`,
+		"unknown key":      `{"unknown":"value"}`,
+		"invalid calendar": `{"published_at":"2026-02-30T12:00:00Z"}`,
+		"leap second":      `{"published_at":"2026-01-01T12:00:60Z"}`,
+		"empty language":   `{"language":""}`,
+		"empty tag":        `{"tags":[""]}`,
+		"invalid date":     `{"published_at":"not-a-date"}`,
+		"long string":      `{"source":"` + strings.Repeat("x", 201) + `"}`,
+		"too many tags":    `{"tags":["x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x","x"]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := schema.Validate(decode(t, raw)); err == nil {

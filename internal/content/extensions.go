@@ -81,13 +81,21 @@ func compiledExtensionSchemas() (map[string]map[string]*jsonschema.Schema, error
 		for namespace, versions := range declaredExtensionSchemas {
 			compiled := map[string]*jsonschema.Schema{}
 			for version, raw := range versions {
+				if namespace == CommonMetadataNamespace {
+					schema, err := contracts.CompileCommonMetadata()
+					if err != nil {
+						extensionErr = err
+						return
+					}
+					compiled[version] = schema
+					continue
+				}
 				var doc any
 				if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 					extensionErr = err
 					return
 				}
 				compiler := jsonschema.NewCompiler()
-				compiler.AssertFormat()
 				url := "https://quivr.invalid/extensions/" + namespace + "/" + version
 				if err := compiler.AddResource(url, doc); err != nil {
 					extensionErr = err

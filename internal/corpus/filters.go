@@ -209,7 +209,9 @@ func FilterValue(v any, typ string, array bool) (any, bool) {
 			return s, ok && validScalar(s)
 		}
 		items, ok := v.([]any)
-		if !ok || len(items) == 0 || len(items) > MaxFilterValues {
+		// Source extension JSON is bounded at ingestion;
+		// the any_of request limit must not discard larger declared arrays.
+		if !ok || len(items) == 0 {
 			return nil, false
 		}
 		values := make([]string, len(items))

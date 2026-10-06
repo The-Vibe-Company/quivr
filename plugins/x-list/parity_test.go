@@ -168,11 +168,19 @@ func compareRun(t *testing.T, step int, want builtinRun, got []page, f *fakeX) {
 		g := pages[i]
 		wantRequests = append(wantRequests, w.XRequests...)
 		for _, item := range g.Items {
-			if extensions, ok := item["extensions"].(map[string]any); ok {
-				// Historical built-in fixtures predate the shared common
-				// metadata namespace.
-				delete(extensions, "quivr.metadata")
+			if withdrawn, _ := item["withdraw"].(bool); withdrawn {
+				continue
 			}
+			extensions, ok := item["extensions"].(map[string]any)
+			if !ok {
+				t.Fatalf("step %d page %d item %v has no extensions", step, i, item["record_key"])
+			}
+			if _, ok := extensions["quivr.metadata"]; !ok {
+				t.Fatalf("step %d page %d item %v has no common metadata", step, i, item["record_key"])
+			}
+			// Historical built-in fixtures predate the shared common
+			// metadata namespace; compare their connector-owned shape.
+			delete(extensions, "quivr.metadata")
 		}
 		if !reflect.DeepEqual(plain(t, g.Items), plain(t, w.Items)) {
 			t.Fatalf("step %d page %d items:\ngot  %v\nwant %v", step, i, plain(t, g.Items), plain(t, w.Items))

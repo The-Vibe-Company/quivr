@@ -222,7 +222,7 @@ func (s session) mapMessage(m message, list []attachment) quivrplugin.Item {
 			Ref:        encodeRef(attachmentRef, ref{Message: m.ID, Attachment: a.ID})})
 	}
 	author := ""
-	for _, candidate := range []*address{m.Sender, m.From} {
+	for _, candidate := range []*address{m.From, m.Sender} {
 		if candidate == nil {
 			continue
 		}

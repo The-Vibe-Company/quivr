@@ -253,6 +253,9 @@ func (a *API) catalogFilters(ctx context.Context, s corpus.Scope, q content.Reco
 	if len(q.Metadata) == 0 {
 		return q, nil, nil
 	}
+	if a.Retrieval.Routing == nil {
+		return q, nil, publicerr.ContentUnavailable
+	}
 	var excluded []corpus.CorpusExclusion
 	for _, id := range q.CorpusIDs {
 		g, err := a.Retrieval.Routing.Generation(ctx, s.Organization, id)
