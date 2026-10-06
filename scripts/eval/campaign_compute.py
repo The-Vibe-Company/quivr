@@ -92,7 +92,7 @@ class Measurement:
             return modal_search.launch(state['spec']['policy'], config, self.name, self.outbox, True,
                 app_name=app_name, on_launch=on_launch,
                 on_app=lambda app: self.store.bind(self.name, self.owner, resource['id'], app),
-                check=lambda: self.store.renew_owner(self.name, self.owner))
+                check=lambda: self.store.renew_owner(self.name, self.owner), parallelism=state['spec']['parallelism'])
         except network_recovery.Outage:
             raise
         except Exception as error:

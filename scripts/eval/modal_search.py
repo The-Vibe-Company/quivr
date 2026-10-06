@@ -154,13 +154,13 @@ def policy(value):
     return cfg
 
 
-def frozen_policy(policy, sha, scorer_digest, fresh_latency=True):
+def frozen_policy(policy, sha, scorer_digest, fresh_latency=True, parallelism=1):
     return {**policy, 'git_sha': sha, 'scorer_digest': scorer_digest,
-            'registry_digest': search_trial.digest(public_sets.SETS), 'fresh_latency': fresh_latency}
+            'registry_digest': search_trial.digest(public_sets.SETS), 'fresh_latency': fresh_latency, 'trial_parallelism': parallelism}
 
 
-def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, outbox, fresh_latency, *, measurement_slot=None):
-    frozen = frozen_policy(policy, sha, scorer_digest, fresh_latency)
+def dispatch(store, campaign, policy, cfg, name, sha, scorer_digest, invoke, outbox, fresh_latency, *, measurement_slot=None, parallelism=1):
+    frozen = frozen_policy(policy, sha, scorer_digest, fresh_latency, parallelism)
     store.campaign(campaign, frozen)
     key = search_trial.digest({'config': cfg, 'dataset': name, 'registry': policy['sets'][name].get('input', public_sets.SETS.get(name)),
                               'tier': 'direct', 'sha': sha, 'scorer': scorer_digest, 'fresh_latency': fresh_latency})
@@ -235,6 +235,7 @@ def remote_trial(request):
     import results
     import search_trial
     import trec
+    import network_recovery
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     log = logging.getLogger(__name__)
     log.info('trial started')
@@ -246,7 +247,7 @@ def remote_trial(request):
     store.campaign(request['campaign'], policy)
     lease = request['lease_key'], request['owner']
     store.renew(request['campaign'], *lease, ttl=policy['max_seconds'])
-    budget = control_store.Budget(store, request['campaign'], lease)
+    budget = control_store.Budget(store, request['campaign'], lease, ttl=policy['max_seconds'])
     volume = modal.Volume.from_name('quivr-eval-embeddings-cache')
     volume.reload()
     # Replay committed evidence even when its originating container has exited.
@@ -268,13 +269,16 @@ def remote_trial(request):
         configs = {'baseline': policy['baseline'], 'candidate': cfg}
         budgets, clients = {}, {}
         for side, config in configs.items():
-            budgets[side] = control_store.Budget(store, request['campaign'], lease)
+            budgets[side] = control_store.Budget(store, request['campaign'], lease, ttl=policy['max_seconds'])
             clients[side] = None if config['model'] == direct_bakeoff.E5_MODEL else direct_bakeoff.Hosted(
                 os.environ['AZURE_FOUNDRY_ENDPOINT'], os.environ['AZURE_FOUNDRY_KEY'],
                 budgets[side], name, policy['prices'])
+            if clients[side] is not None:
+                clients[side].provider_gate = control_store.ProviderAdmission(budgets[side])
         measurements = search_trial.measure_pair(configs, data, dataset, '/eval-cache/embeddings', budgets, clients,
             policy['prices'], float(policy['modal_usd_per_second']), request['fresh_latency'],
-            os.environ.get('TYPESAFE_API_KEY', ''), quality_concurrency=policy['quality_concurrency'], flush=volume.commit)
+            os.environ.get('TYPESAFE_API_KEY', ''), quality_concurrency=policy['quality_concurrency'], flush=volume.commit, refresh=volume.reload,
+            latency_scope=lambda: store.latency_window(request['campaign'], lease, policy['max_seconds']))
         rows = {}
         for side, config in configs.items():
             measured = measurements[side]
@@ -295,6 +299,8 @@ def remote_trial(request):
         results.Results(directory='/eval-cache/results').log(row)
         volume.commit()
         return row
+    except network_recovery.Outage:
+        raise  # Skip compensating writes after the bounded recovery window.
     except embeddings.BudgetExceeded:
         log.info('trial capped elapsed_seconds=%.3f', time.monotonic() - started)
         store.abandon(request['campaign'], *lease, 'capped')
@@ -343,7 +349,7 @@ def invoke(remote, request, check):
 
 
 def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quivr-search-measurement',
-           on_app=lambda identity: None, on_launch=lambda: None, check=lambda: None):
+           on_app=lambda identity: None, on_launch=lambda: None, check=lambda: None, parallelism=1):
     import modal
     if subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=ROOT).returncode:
         raise ValueError('measurement code must be committed before live dispatch')
@@ -356,15 +362,26 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     scorer_digest = 'sha256:' + search_trial.digest({name: (ROOT / 'scripts/eval' / name).read_text()
         for name in ('scoring.py', 'gates.py', 'search_trial.py', 'embeddings.py', 'direct_bakeoff.py', 'private_working.py', 'protected_inputs.py')})
-    store.campaign(campaign, frozen_policy(policy, sha, scorer_digest, fresh_latency))
-    slot_key, ttl = 'campaign-measurement-slot', policy['max_seconds'] + policy['startup_seconds']
-    slot = store.claim(campaign, slot_key, ttl)
-    if slot['status'] != 'claimed':
-        return {'status': 'leased', 'reason': 'another trial owns the campaign measurement slot', 'work': {}}
+    if type(parallelism) is not int or not 1 <= parallelism <= 16:
+        raise ValueError('trial parallelism must be 1..16')
+    store.campaign(campaign, frozen_policy(policy, sha, scorer_digest, fresh_latency, parallelism))
+    ttl = policy['max_seconds'] + policy['startup_seconds']
+    # Retain one slot per admitted app until acknowledged termination. Latency
+    # has its own remote window; indexing and quality may overlap across slots.
+    gate = network_recovery.admission(campaign)
+    while True:
+        try:
+            slot_identity = store.claim_slot(campaign, 'campaign-measurement-slot', parallelism, ttl, gate=gate)
+            break
+        except network_recovery.AdmissionPaused:
+            gate.wait()  # Rollback precedes waiting; no unused trial slot remains.
+    if slot_identity is None:
+        return {'status': 'leased', 'reason': 'all campaign trial slots are busy', 'work': {}}
+    slot_key, slot_owner = slot_identity
+    slot = {'owner': slot_owner}
     def slot_check():
         check()
         store.renew(campaign, slot_key, slot['owner'], ttl)
-    # Cover preparation too: concurrent indexing would contaminate provider latency.
     # Ambiguous detached calls retain the slot until their bounded lifetime expires.
     completed, launch_attempted = False, False
     try:
@@ -397,7 +414,7 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
                 slot_check()
                 outcome = dispatch(store, campaign, policy, candidate, name, sha, scorer_digest,
                                    lambda request: invoke(remote, request, slot_check), outbox, fresh_latency,
-                                   measurement_slot=(slot_key, slot['owner']))
+                                   measurement_slot=(slot_key, slot['owner']), parallelism=parallelism)
                 work[name + '/candidate'] = {k: v for k, v in outcome.items() if k not in ('record', 'baseline_record', 'baseline_receipt')}
                 if outcome['status'] in ('complete', 'reused'):
                     row = outcome['record']
@@ -425,7 +442,7 @@ def launch(policy, candidate, campaign, outbox, fresh_latency, *, app_name='quiv
 
     finally:
         if completed or (not launch_attempted and not isinstance(sys.exc_info()[1], network_recovery.Outage)):
-            store.release_many(campaign, {slot_key: slot['owner']})
+            store.release_slot(campaign, (slot_key, slot['owner']))
 
 
 def main(argv=None):

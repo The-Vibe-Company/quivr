@@ -252,8 +252,11 @@ class Runner(unittest.TestCase):
                 self.assertEqual(invalid['missing_or_incompatible_sets'], [self.name])
         with self.store.transaction() as db:
             rows = db.execute('SELECT key,payload FROM eval_control.leases WHERE campaign=%s', (self.campaign,)).fetchall()
-            self.assertEqual(len(rows), 2)  # no private text-derived cache leases
-            self.assertTrue(all(row[1]['per_query'] == {} for row in rows))
+            self.assertFalse(any(key.startswith('embedding/') for key, _ in rows),
+                             'private text-derived cache leases must never be persisted')
+            evidence = [payload for _, payload in rows if payload and payload.get('tier') == 'direct']
+            self.assertEqual(len(evidence), 2)
+            self.assertTrue(all(payload['per_query'] == {} for payload in evidence))
             self.assertEqual(db.execute("SELECT count(*) FROM eval_control.reservations WHERE campaign=%s AND kind='provider' AND settled",
                                        (self.campaign,)).fetchone()[0], len(self.calls))
         for phase in ('decrypting', 'embedding', 'indexing', 'search', 'scoring'):
