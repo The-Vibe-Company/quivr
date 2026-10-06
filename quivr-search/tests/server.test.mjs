@@ -5,6 +5,9 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { existsSync, readFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import zlib from "node:zlib";
 
 test("upstream read failures remain retryable; out-of-corpus resources stay hidden", async (t) => {
@@ -29,38 +32,13 @@ test("upstream read failures remain retryable; out-of-corpus resources stay hidd
     upstream.closeAllConnections();
     upstream.close();
   });
-  const demo = spawn(process.execPath, ["server.mjs"], {
-    env: {
-      ...process.env,
-      HOST: "127.0.0.1",
-      PORT: "0",
-      DEMO_PASSWORD: "",
-      QUIVR_API_URL: `http://127.0.0.1:${upstream.address().port}`,
-      QUIVR_API_KEY: "fixture-server-key",
-      QUIVR_DEMO_CORPUS_ID: "demo",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  t.after(async () => {
-    if (demo.exitCode === null) {
-      demo.kill();
-      await once(demo, "exit");
-    }
-  });
-  const ready = await Promise.race([
-    once(demo.stdout, "data"),
-    delay(5000, undefined, { ref: false }).then(() => {
-      throw new Error("demo startup timeout");
-    }),
-  ]);
-  const port = String(ready[0]).match(/127\.0\.0\.1:(\d+)/)?.[1];
-  assert.ok(port);
+  const base = await startDemo(t, upstream.address().port);
   for (const route of [
     "/v0/records/known",
     "/v0/records/known/versions/version",
     "/v0/ingestion-receipts/known",
   ]) {
-    const response = await fetch(`http://127.0.0.1:${port}${route}`);
+    const response = await fetch(base + route);
     assert.equal(response.status, 503, route);
     assert.deepEqual(await response.json(), {
       code: "dependency_unavailable",
@@ -74,7 +52,7 @@ test("upstream read failures remain retryable; out-of-corpus resources stay hidd
     "/v0/ingestion-receipts/outside",
   ]) {
     assert.equal(
-      (await fetch(`http://127.0.0.1:${port}${route}`)).status,
+      (await fetch(base + route)).status,
       404,
       route,
     );
@@ -1171,10 +1149,11 @@ test("the demo's numbers count every article of the corpus, beyond the feed's la
   const now = Date.now();
   const HOUR = 3600000;
   const DAY = 24 * HOUR;
-  // 300 articles of today fill the feed's snapshot; 120 older ones do not.
+  // The feed's own scan reads the newest 1,000 articles and keeps 300; only
+  // the index reads the 120 older ones, their hours and their titles.
   const core = fakeCore({
     records: [
-      ...Array.from({ length: 300 }, (_, i) => ({
+      ...Array.from({ length: 1000 }, (_, i) => ({
         id: `new${i}`,
         namespace: "Dépêches exemple",
         at: now - (i + 1) * 60000,
@@ -1187,7 +1166,10 @@ test("the demo's numbers count every article of the corpus, beyond the feed's la
         title: `Archives municipales : lot ${i}`,
       })),
     ],
-    alerts: [["sub_arch", "Archives", ["archives"]]],
+    alerts: [
+      ["sub_arch", "Archives", ["archives"]],
+      ["sub_new", "Volcans", ["volcan"]],
+    ],
   });
   core.server.listen(0, "127.0.0.1");
   await once(core.server, "listening");
@@ -1195,10 +1177,16 @@ test("the demo's numbers count every article of the corpus, beyond the feed's la
     core.server.closeAllConnections();
     core.server.close();
   });
+  const iso = (time) => new Date(time).toISOString();
+  // The demo noted when it created sub_new; sub_arch was there before it.
+  const dir = await mkdtemp(join(tmpdir(), "quivr-demo-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const state = join(dir, "state.json");
+  await writeFile(state, JSON.stringify({ created: { sub_new: iso(now - DAY) } }));
   const base = await startDemo(t, core.server.address().port, {
     QUIVR_DEMO_DESTINATION_ID: "demo-alerts-sink",
+    DEMO_STATE_FILE: state,
   });
-  const iso = (time) => new Date(time).toISOString();
   // Today and the three days before, newest first.
   const bounds = [iso(now + HOUR), iso(now - DAY), iso(now - 4 * DAY)];
   const stats = async (body) => {
@@ -1226,9 +1214,9 @@ test("the demo's numbers count every article of the corpus, beyond the feed's la
   assert.deepEqual(
     { total: all.total, buckets: all.buckets, sources: all.sources, alerts: all.alerts, any: all.any_alert },
     {
-      total: 420,
-      buckets: [300, 120],
-      sources: { "Dépêches exemple": 300, "Revue technique": 120 },
+      total: 1120,
+      buckets: [1000, 120],
+      sources: { "Dépêches exemple": 1000, "Revue technique": 120 },
       alerts: { sub_arch: 120 },
       any: 120,
     },
@@ -1259,14 +1247,18 @@ test("the demo's numbers count every article of the corpus, beyond the feed's la
   const alerts = await get("/demo/alerts");
   assert.equal(Object.keys(alerts.dated.records).length, 120);
   assert.deepEqual(alerts.dated.namespaces, ["Revue technique"]);
-  assert.equal(alerts.items[0].arrived, 420);
+  // Arrivals count from the oldest article indexed, or from when the demo
+  // created the alert.
+  assert.equal(alerts.dated.oldest, iso(now - 3 * DAY - 120 * 60000));
+  const arrived = Object.fromEntries(alerts.items.map((a) => [a.alert_id, a.arrived]));
+  assert.deepEqual(arrived, { sub_arch: 1120, sub_new: 1000 });
 
   // A correction moves an older article to today; a withdrawal removes one.
   core.correct("old0", "Archives municipales : lot corrigé");
-  await until(() => stats({ buckets: bounds }).then((r) => r.data.buckets), (b) => b[0] === 301, "corrected");
+  await until(() => stats({ buckets: bounds }).then((r) => r.data.buckets), (b) => b[0] === 1001, "corrected");
   core.withdraw("new0");
-  const after = await until(() => stats({ buckets: bounds }).then((r) => r.data), (d) => d.total === 419, "withdrawn");
-  assert.deepEqual(after.buckets, [300, 119]);
+  const after = await until(() => stats({ buckets: bounds }).then((r) => r.data), (d) => d.total === 1119, "withdrawn");
+  assert.deepEqual(after.buckets, [1000, 119]);
 
   for (const bad of [{ buckets: [...bounds].reverse() }, { read: "some" }, { sources: "Revue technique" }])
     assert.equal((await stats(bad)).status, 422, JSON.stringify(bad));

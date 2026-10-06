@@ -36,6 +36,17 @@ async function expectNoSecret(page: Page, secret: string) {
   expect(leaked).toBe(false);
 }
 
+/**
+ * Waits until the core reports `state` for the instance, then moves the page's
+ * clock past its 5 s live check, which shows it.
+ */
+async function healthReaches(page: Page, id: string, state: string) {
+  await expect
+    .poll(async () => (await (await page.request.get(`/v0/connectors/${id}`)).json()).health?.state)
+    .toBe(state);
+  await page.clock.fastForward(5000);
+}
+
 async function startFixture(page: Page, namespace: string, script: string) {
   await page.getByRole("button", { name: "Ajouter un connecteur" }).click();
   const dialog = page.getByRole("dialog", { name: "Ajouter un connecteur" });
@@ -50,6 +61,7 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
 }, info) => {
   const revoked = `fixture-revoked-ui-${run}`;
   const valid = `fixture-ok-ui-${run}`;
+  await page.clock.install();
   await openConnectors(page);
   const dialog = await startFixture(
     page,
@@ -66,7 +78,11 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
     path: info.outputPath("connector-create.png"),
     fullPage: true,
   });
+  const created = page.waitForResponse(
+    (r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/v0/connectors",
+  );
   await dialog.getByRole("button", { name: "Créer le connecteur" }).click();
+  const { connector_id: id } = await (await created).json();
 
   // The new instance opens in its settings; the secret is gone.
   const detail = page.getByRole("dialog", { name: `Réglages de wire-${run}` });
@@ -77,9 +93,8 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
   await expectNoSecret(page, revoked);
 
   // Live health: the refused credential shows without reloading the page.
-  await expect(detail.locator('[data-state="access_error"]')).toBeVisible({
-    timeout: 30000,
-  });
+  await healthReaches(page, id, "access_error");
+  await expect(detail.locator('[data-state="access_error"]')).toBeVisible();
   await expect(detail.getByText("unauthorized")).toBeVisible();
   await page.screenshot({
     path: info.outputPath("connector-access-error.png"),
@@ -97,9 +112,8 @@ test("créer, suivre la santé, remplacer l’identifiant, changer l’intervall
   ).toBeVisible();
   await expect(detail.getByText(/Présent · version 2/)).toBeVisible();
   await expectNoSecret(page, valid);
-  await expect(detail.locator('[data-state="active"]')).toBeVisible({
-    timeout: 30000,
-  });
+  await healthReaches(page, id, "active");
+  await expect(detail.locator('[data-state="active"]')).toBeVisible();
 
   // Interval change through the schedule route; saving closes the settings.
   await detail
