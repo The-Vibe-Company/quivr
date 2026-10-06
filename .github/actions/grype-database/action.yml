@@ -6,7 +6,7 @@ runs:
     - name: Install checksum-verified scanner
       shell: bash
       run: |
-        bash scripts/security_tools.sh grype "$RUNNER_TEMP/security-tools"
+        timeout --kill-after=5s 45s bash scripts/security_tools.sh grype "$RUNNER_TEMP/security-tools"
         echo "$RUNNER_TEMP/security-tools" >> "$GITHUB_PATH"
     - id: day
       shell: bash
@@ -26,7 +26,7 @@ runs:
           mkdir -p "$GRYPE_DB_CACHE_DIR"
           tar --zstd -xf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$GRYPE_DB_CACHE_DIR"
         fi
-        timeout --kill-after=5s 180s grype db update
+        timeout --kill-after=5s 120s grype db update
         grype db status
         mkdir -p "$RUNNER_TEMP/grype-database"
         tar --zstd -cf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$GRYPE_DB_CACHE_DIR" .

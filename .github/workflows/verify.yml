@@ -428,7 +428,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
-      GRYPE_DB_CACHE_DIR: .scratch/grype-db
       GRYPE_DB_AUTO_UPDATE: false
       GRYPE_DB_VALIDATE_AGE: true
       COSIGN_PASSWORD: ''
@@ -487,7 +486,7 @@ jobs:
           if-no-files-found: warn
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign, attest and verify without publishing packages
-        timeout-minutes: 7
+        timeout-minutes: 5
         run: |
           timeout --kill-after=5s 15s cosign generate-key-pair --timeout 10s --output-key-prefix "$RUNNER_TEMP/image-check"
           bash scripts/sign_image.sh "$IMAGE" sbom.spdx.json "$RUNNER_TEMP/image-check.key" "$RUNNER_TEMP/image-check.pub"

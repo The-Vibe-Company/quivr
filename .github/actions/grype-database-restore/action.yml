@@ -1,5 +1,5 @@
 name: Restore the vulnerability database
-description: Unpack the fresh database prepared by this workflow
+description: Restore into GRYPE_DB_CACHE_DIR or runner temp and export the directory
 runs:
   using: composite
   steps:
@@ -9,5 +9,7 @@ runs:
         path: ${{ runner.temp }}/grype-database
     - shell: bash
       run: |
-        mkdir -p "$GRYPE_DB_CACHE_DIR"
-        tar --zstd -xf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$GRYPE_DB_CACHE_DIR"
+        database_dir="${GRYPE_DB_CACHE_DIR:-$RUNNER_TEMP/grype-db}"
+        mkdir -p "$database_dir"
+        tar --zstd -xf "$RUNNER_TEMP/grype-database/grype-db.tar.zst" -C "$database_dir"
+        echo "GRYPE_DB_CACHE_DIR=$database_dir" >> "$GITHUB_ENV"

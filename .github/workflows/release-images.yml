@@ -44,7 +44,6 @@ jobs:
       packages: write
       id-token: write
     env:
-      GRYPE_DB_CACHE_DIR: .scratch/grype-db
       GRYPE_DB_AUTO_UPDATE: false
       GRYPE_DB_VALIDATE_AGE: true
     strategy:
@@ -114,7 +113,7 @@ jobs:
           if-no-files-found: warn
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign, attest and verify the immutable image
-        timeout-minutes: 7
+        timeout-minutes: 5
         env:
           IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}

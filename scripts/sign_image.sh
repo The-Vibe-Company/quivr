@@ -24,14 +24,14 @@ trap 'rm -rf "$output"' EXIT
 bounded() {
   local operation=$1 started=$SECONDS status
   shift
-  echo "Starting cosign $operation (90s deadline)"
+  echo "Starting cosign $operation (60s context deadline; 65s hard timeout; 5s kill grace)"
   # Cosign's context deadline does not cover blocked stdout or every dependency.
   # Never send the multi-megabyte, single-line DSSE payload to the Actions runner.
-  if timeout --kill-after=5s 95s cosign "$@" --timeout 90s > "$output/$operation.json"; then
+  if timeout --kill-after=5s 65s cosign "$@" --timeout 60s > "$output/$operation.json"; then
     echo "cosign $operation completed successfully in $((SECONDS - started))s"
   else
     status=$?
-    echo "::error::cosign $operation failed (exit $status, $((SECONDS - started))s; deadline 90s)" >&2
+    echo "::error::cosign $operation failed (exit $status, $((SECONDS - started))s; context 60s, hard timeout 65s, kill grace 5s)" >&2
     exit "$status"
   fi
 }
