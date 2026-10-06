@@ -29,7 +29,7 @@ The new API and worker report ready, ingestion resolves new receipts, and search
 
 | Symptom | Cause and fix |
 | --- | --- |
-| Migration times out | DDL lock acquisition is bounded to two seconds and each SQL batch to five seconds. Let conflicting transactions finish, then rerun; the failed database transaction is rolled back. |
+| Migration times out | Each DDL lock acquisition is bounded to two seconds and each SQL statement to five seconds. Let conflicting transactions finish, then rerun; the failed database transaction is rolled back. |
 | Worker never becomes ready | An expansion is pending or a dependency is unavailable. Run the new migrator and inspect startup logs. |
 | Previous binary fails after cleanup | The contract step closed the rollback window. Deploy a forward fix or follow your data recovery procedure. |
 

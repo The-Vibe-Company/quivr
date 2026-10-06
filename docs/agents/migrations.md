@@ -47,7 +47,7 @@ transaction/session commands, transient objects or concurrent DDL. Ordinary
 `quivr migrate --contract` applies all pending expansions and contracts in
 filename order, with transactional bookkeeping and an advisory lock.
 
-All migration runs bound lock acquisition to two seconds and each SQL batch to
+All migration runs bound each lock acquisition to two seconds and each SQL statement to
 five seconds. A timeout rolls back the whole migration transaction. Split large
 work into resumable application operations; retry migration after the conflicting
 transaction finishes. These bounds limit interference; they do not guarantee
