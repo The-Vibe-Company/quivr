@@ -3,9 +3,10 @@
 The go test case runs a real `go test -json` on a throwaway module, so a change in how
 test2json frames output breaks it here instead of on a red CI run.
 """
-import json, os, pathlib, re, subprocess, tempfile, unittest
+import json, os, pathlib, re, subprocess, sys, tempfile, unittest
 from unittest import mock
 
+import check as quickcheck
 import ci_summary
 import gotest
 import local
@@ -156,11 +157,91 @@ class Summary(unittest.TestCase):
         self.assertEqual(failures, [])
 
 
+class QuickCheck(unittest.TestCase):
+    def test_quick_runner_preserves_failures_skips_and_run_page_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            tests = root / 'tests'
+            tests.mkdir()
+            (root / 'scaffold_helper.py').write_text("import os\nVALUE = int(os.environ.get('QUICK_CHECK_FIXTURE', '0'))\n")
+            (tests / 'test_fixture.py').write_text('''import unittest
+import os
+os.environ.pop('QUICK_CHECK_FIXTURE', None)
+from scaffold_helper import VALUE
+if VALUE != 2:
+    raise RuntimeError('runtime initialized after environment was cleared')
+class Contract(unittest.TestCase):
+    def test_difference(self):
+        self.assertEqual(1, VALUE, 'expected two records')
+    @unittest.skip('optional dependency')
+    def test_optional(self):
+        pass
+    @unittest.expectedFailure
+    def test_known_failure(self):
+        self.fail('known failure')
+class BrokenFixture(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        raise RuntimeError('fixture unavailable')
+    def test_fixture(self):
+        pass
+''')
+            output = root / 'reports'
+            command = [sys.executable, str(local.ROOT / 'scripts/check.py'), '--output', str(output)]
+            failed = subprocess.run([*command, '--unittest', 'tests', '--preload', 'scaffold_helper'], cwd=root,
+                                    env={**os.environ, 'QUICK_CHECK_FIXTURE': '2'}, capture_output=True, text=True)
+            self.assertEqual(failed.returncode, 1)
+            reports = list(output.glob('unittest-*.json'))
+            self.assertEqual(len(reports), 1)
+            report = json.loads(reports[0].read_text())
+            self.assertEqual((report['count'], report['skipped'], report['successful']), (3, 1, False))
+            self.assertEqual(len(report['failures']), 2)
+            self.assertEqual(len(report['selected_tests']), 4)
+            partitions = []
+            for index in range(1, 4):
+                sharded = subprocess.run([*command, '--unittest', 'tests', '--preload', 'scaffold_helper',
+                                          '--shard', f'{index}/3'], cwd=root,
+                                         env={**os.environ, 'QUICK_CHECK_FIXTURE': '2'},
+                                         capture_output=True, text=True)
+                [path] = output.glob(f'unittest-*-shard{index}of3.json')
+                part = json.loads(path.read_text())
+                self.assertEqual(sharded.returncode, 0 if part['successful'] else 1)
+                partitions.append(part)
+            selected = [name for part in partitions for name in part['selected_tests']]
+            self.assertEqual(len(selected), len(set(selected)), 'a test ran in more than one partition')
+            self.assertEqual(set(selected), set(report['selected_tests']))
+            self.assertEqual(sum(part['count'] for part in partitions), 3)
+            self.assertEqual(sum(part['skipped'] for part in partitions), 1)
+            self.assertEqual(sum(len(part['failures']) for part in partitions), 2)
+            for path in output.glob('unittest-*-shard*.json'):
+                path.unlink()
+            summary = subprocess.run([*command, '--summary'], check=True, capture_output=True, text=True).stdout
+            self.assertIn('Contract.test_difference', summary)
+            self.assertIn('expected two records', summary)
+            self.assertIn('fixture unavailable', summary)
+            self.assertIn('Slowest tests', summary)
+            self.assertIn('Contract.test_known_failure', summary)
+            (tests / 'test_fixture.py').write_text('''import unittest
+from scaffold_helper import VALUE
+class Contract(unittest.TestCase):
+    def test_difference(self):
+        self.assertEqual(VALUE, 2)
+''')
+            passed = subprocess.run([*command, '--unittest', 'tests', '--preload', 'scaffold_helper'], cwd=root,
+                                    env={**os.environ, 'QUICK_CHECK_FIXTURE': '2'}, capture_output=True, text=True)
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+            report = json.loads(reports[0].read_text())
+            self.assertTrue(report['successful'])
+            self.assertEqual(report['failures'], [])
+
+
 class Parts(unittest.TestCase):
     def test_ci_runs_every_part_of_make_verify(self):
         workflow = (local.ROOT / '.github/workflows/verify.yml').read_text()
         matrix = re.search(r'^\s+part: \[(.*)\]$', workflow, re.M).group(1)
         self.assertEqual([p.strip() for p in matrix.split(',')], list(local.parts()) + [local.DEMO])
+        quick = re.search(r'^\s+group: \[(.*)\]$', workflow, re.M).group(1)
+        self.assertEqual([g.strip() for g in quick.split(',')], quickcheck.CI_GROUPS)
 
 
 if __name__ == '__main__':
