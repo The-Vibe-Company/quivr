@@ -137,6 +137,8 @@ type Config struct {
 	// dollars, default 0) in the api: a dry run estimated above it needs
 	// confirm_cost.
 	Backfill BackfillConfig `json:"backfill"`
+	// Rebuild bounds parallel Version coverage inside each rebuild activity.
+	Rebuild RebuildConfig `json:"rebuild"`
 }
 
 // RetrievalConfig names the search profiles selected by this deployment.
@@ -313,6 +315,10 @@ func Run(command string, args ...string) error {
 		if planPoll, err = time.ParseDuration(cfg.PluginPlanPoll); err != nil || planPoll <= 0 {
 			return badConfig(configInvalid, "plugin_plan_poll", "plugin_plan_poll must be a positive duration")
 		}
+	}
+	rebuildConcurrency, err := cfg.Rebuild.concurrency()
+	if err != nil {
+		return err
 	}
 	backfillSettings, err := cfg.Backfill.settings()
 	if err != nil {
@@ -696,7 +702,7 @@ func Run(command string, args ...string) error {
 	// External normalization runs in the worker only, before publication.
 	normalizer := normalization.Service{Content: contents, Store: normalizations, Signer: blobs, Pin: live, Plugin: pluginhttp.Normalizer{}}
 	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: baseline, LegacySpace: tei.Space().ID}
-	rebuilder := retrieval.Rebuilder{Store: rebuilds, Cancellation: operationStore, Content: contents, Projection: metadataProjection, Routing: baseline}
+	rebuilder := retrieval.Rebuilder{Concurrency: rebuildConcurrency, Store: rebuilds, Cancellation: operationStore, Content: contents, Projection: metadataProjection, Routing: baseline}
 	// The plan's ingestion plugin segments and embeds every Version, encodes
 	// the queries of its spaces and derives rebuild targets; each call
 	// resolves the plugin the plan names at that moment.

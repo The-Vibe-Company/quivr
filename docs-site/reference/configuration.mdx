@@ -45,6 +45,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `pinned_plugin_attempts` | no | How many attempts work pinned to an earlier Pipeline Plan gets when one of that plan's plugins, no longer in the active plan, cannot be reached, before it stops with `pinned_plugin_unavailable`. Worker only. Default `10`. |
 | `plugin_plan_poll` | no | How often api and worker check whether the active Pipeline Plan changed, to follow it without restarting. Default `2s`. |
 | `observability` | no | Counters of plugin calls, searches, document steps, documents received and Matches, read with an `observability:read` key. See [Observability](#observability). |
+| `rebuild` | no | Parallel Version coverage during Corpus rebuilds. See [Rebuild](#rebuild). |
 | `backfill` | no | How backfills run and when their cost needs a confirmation. See [Backfill](#backfill). |
 | `migration_wait` | no | How long a worker that starts before the api has applied its migrations waits for them, unready, before it exits. `0s` exits at once. Worker only. Default `5m`. |
 | `projection_purge_grace` | no | How long search objects of superseded Versions are kept before they are deleted, worker only. Default `1h`. |
@@ -275,6 +276,32 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 <Warning>
 `change_prune.allow_short_retention` can permanently delete change-feed events before API cursors expire by age. Slow consumers can lose events and receive `410 cursor_expired`; they must resynchronize from the catalog. It does not delete canonical Records. With the default `false`, pruning cannot shorten the API retention window. Prefer setting a shorter `change_retention` consistently on api and worker when they should promise the same window.
 </Warning>
+
+## Rebuild
+
+`rebuild` tunes Corpus rebuilds. The worker applies it after a restart.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `concurrency` | `8` | Versions in flight inside one rebuild step, range `1`–`32`; `0` selects the default. `1` restores serial work. Worker only. |
+
+Each step covers at most 25 Versions, then saves progress before a 200 ms pause.
+New rebuild histories run their activities on `quivr-rebuild-v0`, with one
+activity at a time per worker. The four `quivr-content-v0` activity slots remain
+available to live ingestion. Existing histories keep `quivr-content-v0` until
+their next history rollover, after at most 400 steps; their Version work uses
+the configured concurrency immediately.
+
+The ingestion plugin still enforces its own batching and provider concurrency
+limits. Live ingestion and rebuilds share those limits, storage and indexing
+capacity. Lower `concurrency` if a rebuild puts pressure on those resources;
+separate activity queues reserve worker slots, not provider throughput.
+Coverage records the Versions and vectors already included in the rebuild target.
+Retries reuse committed coverage and count each Version and vector once.
+Cancellation retains already committed coverage and counters. It stops new
+candidate work when observed, cancels in-flight calls, and joins them before
+settling the Operation. Coverage commits require the Operation to be running;
+cancellation cannot activate the target.
 
 ## Backfill
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -14,6 +16,7 @@ import (
 )
 
 type fakeRebuildStore struct {
+	mu         sync.Mutex
 	generation content.Generation
 	candidates []retrieval.RebuildCandidate
 	covered    map[string][]content.Embedding
@@ -38,6 +41,8 @@ func (f *fakeRebuildStore) current() string {
 }
 
 func (f *fakeRebuildStore) BeginRebuild(context.Context, string, string) (retrieval.RebuildTarget, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	g := f.generation
 	if g.ID == "" {
 		g = content.Generation{ID: "target", Collection: "Shared", SpaceID: "space"}
@@ -45,22 +50,31 @@ func (f *fakeRebuildStore) BeginRebuild(context.Context, string, string) (retrie
 	return retrieval.RebuildTarget{Operation: operations.Operation{ID: "op", CorpusID: "corpus", State: f.current()}, Generation: g}, nil
 }
 func (f *fakeRebuildStore) ConfirmCancel(context.Context, string, string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.current() == operations.StateCancelRequested {
 		f.state = operations.StateCanceled
 		f.confirms++
 	}
 	return nil
 }
-func (f *fakeRebuildStore) RebuildCandidates(context.Context, string, string, int) ([]retrieval.RebuildCandidate, error) {
+func (f *fakeRebuildStore) RebuildCandidates(_ context.Context, _, _ string, limit int) ([]retrieval.RebuildCandidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	out := []retrieval.RebuildCandidate{}
 	for _, c := range f.candidates {
 		if _, ok := f.covered[c.VersionID]; !ok || f.gap {
 			out = append(out, c)
+			if len(out) == limit {
+				break
+			}
 		}
 	}
 	return out, nil
 }
 func (f *fakeRebuildStore) CoverRebuild(_ context.Context, _, _ string, seg content.Segmentation, artifacts []content.Embedding) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.coverErr != nil {
 		return false, f.coverErr
 	}
@@ -74,6 +88,8 @@ func (f *fakeRebuildStore) CoverRebuild(_ context.Context, _, _ string, seg cont
 	return true, nil
 }
 func (f *fakeRebuildStore) ActivateRebuild(context.Context, string, string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.cancelBeforeActivate {
 		f.state = operations.StateCancelRequested
 	}
@@ -84,6 +100,8 @@ func (f *fakeRebuildStore) ActivateRebuild(context.Context, string, string) (boo
 	return f.activated, nil
 }
 func (f *fakeRebuildStore) FailRebuild(_ context.Context, _, _ string, e operations.Error) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	// Like the adapter, a failure only lands on a queued or running Operation.
 	if f.current() == operations.StateRunning || f.current() == operations.StateQueued {
 		f.failed = append(f.failed, e)
@@ -92,6 +110,7 @@ func (f *fakeRebuildStore) FailRebuild(_ context.Context, _, _ string, e operati
 }
 
 type fakeRebuildContent struct {
+	mu         sync.Mutex
 	versionErr error
 	reads      int
 	onRead     func()
@@ -99,6 +118,8 @@ type fakeRebuildContent struct {
 }
 
 func (f *fakeRebuildContent) TrustedVersion(_ context.Context, _, _ string, recordID, id string) (content.Version, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.reads++
 	if f.onRead != nil {
 		f.onRead()
@@ -110,17 +131,26 @@ func (f *fakeRebuildContent) TrustedVersion(_ context.Context, _, _ string, reco
 }
 
 func (f *fakeRebuildContent) CountEnrichmentTimeout(context.Context, string, string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.timeouts++
 	return f.timeouts, nil
 }
 
-type fakeRebuildProjection struct{ lexical, vectors int }
+type fakeRebuildProjection struct {
+	mu               sync.Mutex
+	lexical, vectors int
+}
 
 func (f *fakeRebuildProjection) Publish(context.Context, content.Generation, string, string, string, content.Version, content.Segmentation) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lexical++
 	return nil
 }
 func (f *fakeRebuildProjection) PublishEmbeddings(_ context.Context, _ content.Generation, _ string, data []content.EmbeddingData) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.vectors += len(data)
 	return nil
 }
@@ -130,6 +160,7 @@ func (f *fakeRebuildProjection) Search(context.Context, []retrieval.Route, corpu
 
 // fakeDeriver stands for the pinned ingestion plugin that owns "space".
 type fakeDeriver struct {
+	mu                sync.Mutex
 	err               error
 	derived, segments int
 	onDerive          func()
@@ -157,10 +188,14 @@ func (d *fakeDeriver) segmentation(v content.Version) content.Segmentation {
 	return content.Segmentation{ID: "plugin-seg-" + v.ID, VersionID: v.ID, Segments: []content.Segment{{ID: "plugin-segment-" + v.ID, PartKey: "body"}}}
 }
 func (d *fakeDeriver) Segment(_ context.Context, _, _ string, v content.Version, _ content.Generation) (content.Segmentation, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.segments++
 	return d.segmentation(v), d.err
 }
 func (d *fakeDeriver) Derive(_ context.Context, org, _ string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.derived++
 	if d.onDerive != nil {
 		d.onDerive()
@@ -183,7 +218,7 @@ func (r routedGeneration) Generation(context.Context, string, string) (content.G
 }
 
 func rebuilder(store *fakeRebuildStore, c *fakeRebuildContent, p *fakeRebuildProjection) retrieval.Rebuilder {
-	return retrieval.Rebuilder{Store: store, Cancellation: store, Content: c, Projection: p, Plugin: &fakeDeriver{}, Routing: routedTo("space")}
+	return retrieval.Rebuilder{Concurrency: 1, Store: store, Cancellation: store, Content: c, Projection: p, Plugin: &fakeDeriver{}, Routing: routedTo("space")}
 }
 
 func run(t *testing.T, r retrieval.Rebuilder) {
@@ -423,5 +458,168 @@ func TestRebuildStopsAfterTheSharedVectorDeadlineBudget(t *testing.T) {
 	done, err := rebuilder.Step(context.Background(), "org", "op")
 	if err != nil || !done || len(store.failed) != 1 || store.failed[0].Code != content.CodeEnrichmentTimeout || store.activated {
 		t.Fatalf("deadline budget: done=%v err=%v failures=%v activated=%v", done, err, store.failed, store.activated)
+	}
+}
+
+// Holding embedding calls open proves simultaneous Version work without sleeps.
+// Step must respect the cap and cover each candidate once before cutover.
+type gatedRebuildDeriver struct {
+	fakeDeriver
+	entered chan string
+	release <-chan struct{}
+}
+
+func (d *gatedRebuildDeriver) Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	select {
+	case d.entered <- v.ID:
+	case <-ctx.Done():
+		return content.Segmentation{}, nil, ctx.Err()
+	}
+	select {
+	case <-d.release:
+	case <-ctx.Done():
+		return content.Segmentation{}, nil, ctx.Err()
+	}
+	return d.fakeDeriver.Derive(ctx, org, corpusID, v, g)
+}
+func TestRebuildCoversVersionsConcurrentlyWithinTheLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	store := &fakeRebuildStore{covered: map[string][]content.Embedding{}}
+	for i := range 9 {
+		store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: fmt.Sprint(i), VectorsRequired: true})
+	}
+	release := make(chan struct{})
+	d := &gatedRebuildDeriver{entered: make(chan string, 9), release: release}
+	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+	r.Plugin, r.Concurrency = d, 3
+	finished := make(chan error, 1)
+	go func() { _, err := r.Step(ctx, "org", "op"); finished <- err }()
+	for range 3 {
+		select {
+		case <-d.entered:
+		case <-ctx.Done():
+			t.Fatal("three embedding calls did not overlap")
+		}
+	}
+	select {
+	case id := <-d.entered:
+		t.Errorf("Version %s exceeded concurrency 3", id)
+	default:
+	}
+	close(release)
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+	run(t, r)
+	if !store.activated || len(store.covered) != 9 || d.derived != 9 {
+		t.Fatalf("activated=%v coverage=%d embedding calls=%d", store.activated, len(store.covered), d.derived)
+	}
+}
+
+// A failed candidate cancels its siblings, and Step joins their cleanup before
+// recording failure or retrying. A parent cancellation has the same join rule.
+type interruptedRebuildDeriver struct {
+	fakeDeriver
+	entered  chan string
+	fail     <-chan struct{}
+	cleanup  <-chan struct{}
+	canceled chan string
+	cause    error
+}
+
+func (d *interruptedRebuildDeriver) Derive(ctx context.Context, _, _ string, v content.Version, _ content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	d.entered <- v.ID
+	if v.ID == "0" && d.cause != nil {
+		<-d.fail
+		return content.Segmentation{}, nil, d.cause
+	}
+	<-ctx.Done()
+	d.canceled <- v.ID
+	<-d.cleanup
+	return content.Segmentation{}, nil, ctx.Err()
+}
+func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
+	outage := errors.New("provider unavailable")
+	for _, tc := range []struct {
+		name  string
+		cause error
+		code  string
+	}{
+		{"outage", outage, ""},
+		{"terminal", content.ErrIngestionRefused, "ingestion_refused"},
+		{"context", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			watchdog, stop := context.WithTimeout(context.Background(), 2*time.Second)
+			defer stop()
+			store := &fakeRebuildStore{covered: map[string][]content.Embedding{}}
+			for i := range 9 {
+				store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: fmt.Sprint(i), VectorsRequired: true})
+			}
+			fail, cleanup := make(chan struct{}), make(chan struct{})
+			d := &interruptedRebuildDeriver{entered: make(chan string, 9), fail: fail, cleanup: cleanup, canceled: make(chan string, 3), cause: tc.cause}
+			r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+			r.Concurrency, r.Plugin = 3, d
+			finished := make(chan error, 1)
+			go func() { _, err := r.Step(ctx, "org", "op"); finished <- err }()
+			for range 3 {
+				select {
+				case <-d.entered:
+				case <-watchdog.Done():
+					t.Fatal("initial candidates did not overlap")
+				}
+			}
+			siblings := 2
+			if tc.cause == nil {
+				siblings = 3
+				cancel()
+			} else {
+				close(fail)
+			}
+			for range siblings {
+				select {
+				case <-d.canceled:
+				case <-watchdog.Done():
+					t.Fatal("candidate did not observe cancellation")
+				}
+			}
+			select {
+			case err := <-finished:
+				t.Fatalf("Step returned before siblings joined: %v", err)
+			default:
+			}
+			store.mu.Lock()
+			failuresBeforeJoin := len(store.failed)
+			store.mu.Unlock()
+			if failuresBeforeJoin != 0 {
+				t.Fatal("failure committed before canceled candidates joined")
+			}
+			close(cleanup)
+			var err error
+			select {
+			case err = <-finished:
+			case <-watchdog.Done():
+				t.Fatal("Step did not return after candidates joined")
+			}
+			if tc.code != "" {
+				if err != nil || len(store.failed) != 1 || store.failed[0].Code != tc.code {
+					t.Fatalf("terminal err=%v failures=%v", err, store.failed)
+				}
+			} else {
+				want := tc.cause
+				if want == nil {
+					want = context.Canceled
+				}
+				if !errors.Is(err, want) || len(store.failed) != 0 {
+					t.Fatalf("retry err=%v failures=%v, want %v", err, store.failed, want)
+				}
+			}
+			if len(d.entered) != 0 || len(store.covered) != 0 || store.activated {
+				t.Fatalf("remaining calls=%d covered=%v activated=%v", len(d.entered), store.covered, store.activated)
+			}
+		})
 	}
 }

@@ -132,10 +132,13 @@ func (unpinned) Release(context.Context, string, string, string) error          
 type Runtime struct {
 	dispatchDone         <-chan struct{}
 	IngestionBatchWorker worker.Worker
-	EvaluationWorker     worker.Worker
-	Evaluation           *processing.Evaluator
-	Client               client.Client
-	Worker               worker.Worker
+	// RebuildWorker serves a single activity on a separate queue. Version
+	// concurrency stays inside that activity, leaving live slots available.
+	RebuildWorker    worker.Worker
+	EvaluationWorker worker.Worker
+	Evaluation       *processing.Evaluator
+	Client           client.Client
+	Worker           worker.Worker
 	// BackfillWorker serves backfills on their own task queue, one activity
 	// at a time, below live content processing.
 	BackfillWorker worker.Worker
@@ -176,7 +179,10 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	w := worker.New(c, taskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
 	w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-e5-v3"})
 	registerIngestion(w, service, pins)
+	// Keep the legacy registration to replay and drain existing histories.
 	registerRebuild(w, rebuilder, pins)
+	rw := worker.New(c, rebuildTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 1, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
+	registerRebuildActivity(rw, rebuilder, pins)
 	var cw worker.Worker
 	if conns != nil {
 		cw = worker.New(c, connectorTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
@@ -221,8 +227,22 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 			return nil, err
 		}
 	}
+	if err = rw.Start(); err != nil {
+		if ew != nil {
+			ew.Stop()
+		}
+		if cw != nil {
+			cw.Stop()
+		}
+		if bw != nil {
+			bw.Stop()
+		}
+		c.Close()
+		return nil, err
+	}
 	// Start retries are bounded per attempt; the caller can retry startup without losing accepted work.
 	if err = w.Start(); err != nil {
+		rw.Stop()
 		if ew != nil {
 			ew.Stop()
 		}
@@ -238,6 +258,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	batchWorker := worker.New(c, ingestionBatchQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
 	registerIngestionBatches(batchWorker, service, pins)
 	if err = batchWorker.Start(); err != nil {
+		rw.Stop()
 		w.Stop()
 		if ew != nil {
 			ew.Stop()
@@ -251,7 +272,7 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		c.Close()
 		return nil, err
 	}
-	runtime := &Runtime{IngestionBatchWorker: batchWorker, EvaluationWorker: ew, Evaluation: service.Evaluation, Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
+	runtime := &Runtime{RebuildWorker: rw, IngestionBatchWorker: batchWorker, EvaluationWorker: ew, Evaluation: service.Evaluation, Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
 	done := make(chan struct{})
 	runtime.dispatchDone = done
 	go func() { defer close(done); runtime.dispatch(ctx) }()
@@ -346,7 +367,7 @@ type RuntimeOptions struct{ ShutdownGrace time.Duration }
 func (r *Runtime) Close(ctx context.Context) {
 	defer r.Client.Close()
 	var wg sync.WaitGroup
-	for _, w := range []worker.Worker{r.IngestionBatchWorker, r.EvaluationWorker, r.Worker, r.ConnectorWorker, r.BackfillWorker} {
+	for _, w := range []worker.Worker{r.RebuildWorker, r.IngestionBatchWorker, r.EvaluationWorker, r.Worker, r.ConnectorWorker, r.BackfillWorker} {
 		if w != nil {
 			wg.Add(1)
 			go func() { defer wg.Done(); w.Stop() }()

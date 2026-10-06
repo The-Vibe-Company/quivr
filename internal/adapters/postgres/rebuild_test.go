@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"golang.org/x/sync/errgroup"
 )
 
 // The cutover guards public tests cannot isolate: coverage validation against
@@ -148,7 +149,18 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	if got := candidates(x1.VersionID); !got[0].VectorsRequired {
 		t.Fatalf("vector coverage not required: %+v", got)
 	}
-	if _, err = rebuild.CoverRebuild(ctx, org, op.ID, x1, []content.Embedding{artifact}); err != nil {
+	// Concurrent workers and retries can submit the same coverage. Real SQL
+	// must count each Version and embedding once even when those commits race.
+	var covers errgroup.Group
+	covers.SetLimit(8)
+	for range 8 {
+		covers.Go(func() error {
+			_, err := rebuild.CoverRebuild(ctx, org, op.ID, x1, []content.Embedding{artifact})
+			return err
+		})
+		covers.Go(func() error { _, err := rebuild.CoverRebuild(ctx, org, op.ID, x2, nil); return err })
+	}
+	if err = covers.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	activate(true)
