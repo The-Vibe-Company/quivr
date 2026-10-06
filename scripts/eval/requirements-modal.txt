@@ -1,7 +1,7 @@
 # Paid measurement machines only. CI never invokes the Modal runner.
 ranx==0.3.21
 pyarrow==25.0.1
-numpy==2.0.2
-sentence-transformers==3.4.1
+numpy==2.5.3
+sentence-transformers==6.1.0
 modal==1.6.1         # Apache-2.0; coordinator-controlled compute
-psycopg[binary]==3.3.4  # LGPL-3.0; shared admission ledger
+psycopg[binary]==3.3.6  # LGPL-3.0; shared admission ledger
