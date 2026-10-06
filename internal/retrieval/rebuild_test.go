@@ -14,6 +14,7 @@ import (
 )
 
 type fakeRebuildStore struct {
+	generation content.Generation
 	candidates []retrieval.RebuildCandidate
 	covered    map[string][]content.Embedding
 	coverErr   error
@@ -37,7 +38,11 @@ func (f *fakeRebuildStore) current() string {
 }
 
 func (f *fakeRebuildStore) BeginRebuild(context.Context, string, string) (retrieval.RebuildTarget, error) {
-	return retrieval.RebuildTarget{Operation: operations.Operation{ID: "op", CorpusID: "corpus", State: f.current()}, Generation: content.Generation{ID: "target", Collection: "Shared", SpaceID: "space"}}, nil
+	g := f.generation
+	if g.ID == "" {
+		g = content.Generation{ID: "target", Collection: "Shared", SpaceID: "space"}
+	}
+	return retrieval.RebuildTarget{Operation: operations.Operation{ID: "op", CorpusID: "corpus", State: f.current()}, Generation: g}, nil
 }
 func (f *fakeRebuildStore) ConfirmCancel(context.Context, string, string) error {
 	if f.current() == operations.StateCancelRequested {
@@ -49,7 +54,7 @@ func (f *fakeRebuildStore) ConfirmCancel(context.Context, string, string) error 
 func (f *fakeRebuildStore) RebuildCandidates(context.Context, string, string, int) ([]retrieval.RebuildCandidate, error) {
 	out := []retrieval.RebuildCandidate{}
 	for _, c := range f.candidates {
-		if _, ok := f.covered[c.VersionID]; !ok {
+		if _, ok := f.covered[c.VersionID]; !ok || f.gap {
 			out = append(out, c)
 		}
 	}
@@ -89,11 +94,15 @@ func (f *fakeRebuildStore) FailRebuild(_ context.Context, _, _ string, e operati
 type fakeRebuildContent struct {
 	versionErr error
 	reads      int
+	onRead     func()
 	timeouts   int
 }
 
 func (f *fakeRebuildContent) TrustedVersion(_ context.Context, _, _ string, recordID, id string) (content.Version, error) {
 	f.reads++
+	if f.onRead != nil {
+		f.onRead()
+	}
 	if f.versionErr != nil {
 		return content.Version{}, f.versionErr
 	}
@@ -126,6 +135,20 @@ type fakeDeriver struct {
 	onDerive          func()
 }
 
+// ownerDeriver models the route-bound plugin's owner-specific served space.
+type ownerDeriver struct {
+	fakeDeriver
+	owner string
+}
+
+func (d *ownerDeriver) Bound(context.Context, string, []string) processing.DerivationDriver {
+	return d
+}
+func (d *ownerDeriver) ServedSpace(g content.Generation) string { return g.ServedFor(d.owner) }
+func (*ownerDeriver) Serves(context.Context, content.Version, content.Generation) error {
+	return nil
+}
+
 func (*fakeDeriver) Owns(_ context.Context, space string) bool { return space == "space" }
 func (*fakeDeriver) Gone(context.Context, error) (*content.Diagnostic, error) {
 	return nil, nil
@@ -151,6 +174,12 @@ type routedTo string
 
 func (r routedTo) Generation(context.Context, string, string) (content.Generation, error) {
 	return content.Generation{ID: "routed", SpaceID: string(r)}, nil
+}
+
+type routedGeneration content.Generation
+
+func (r routedGeneration) Generation(context.Context, string, string) (content.Generation, error) {
+	return content.Generation(r), nil
 }
 
 func rebuilder(store *fakeRebuildStore, c *fakeRebuildContent, p *fakeRebuildProjection) retrieval.Rebuilder {
@@ -202,6 +231,41 @@ func TestRebuildOntoAnotherSpaceEmbedsEveryVersion(t *testing.T) {
 	}
 }
 
+func TestRebuildAfterOwnerSwitchEmbedsCarriedSpace(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
+	store.generation = content.Generation{ID: "target", SpaceID: "space", IngestionRouting: &content.IngestionRouting{Default: "next.owner"}}
+	d := &fakeDeriver{}
+	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+	r.Plugin = d
+	r.Routing = routedGeneration(content.Generation{ID: "routed", SpaceID: "space", IngestionRouting: &content.IngestionRouting{Default: "previous.owner"}})
+	run(t, r)
+	if !store.activated || len(store.covered["v1"]) != 1 {
+		t.Fatalf("owner switch activated=%v vector coverage=%v", store.activated, store.covered)
+	}
+}
+
+func TestRebuildPreservesLegacyLexicalAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		current content.Generation
+		vectors int
+	}{
+		{"primary space", content.Generation{ID: "legacy", SpaceID: "space"}, 0},
+		{"carried owner space", content.Generation{ID: "legacy", SpaceID: "old-space", Spaces: []content.GenerationSpace{{ID: "old-space", OwnerPluginID: "old.owner", Role: content.SpaceServed}, {ID: "space", OwnerPluginID: "same.owner", Role: content.SpaceServed}}}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
+			store.generation = content.Generation{ID: "target", SpaceID: "space", IngestionRouting: &content.IngestionRouting{Default: "same.owner"}, Spaces: []content.GenerationSpace{{ID: "space", OwnerPluginID: "same.owner", Role: content.SpaceServed}}}
+			r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+			r.Plugin, r.Routing = &ownerDeriver{owner: "same.owner"}, routedGeneration(tc.current)
+			run(t, r)
+			if !store.activated || len(store.covered["v1"]) != tc.vectors {
+				t.Fatalf("legacy rebuild activated=%v vector coverage=%v, want %d", store.activated, store.covered, tc.vectors)
+			}
+		})
+	}
+}
+
 // A target whose served space the pinned plugin does not own cannot be built.
 func TestRebuildFailsForATargetNoPinnedPluginServes(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
@@ -217,6 +281,36 @@ func TestRebuildFailsWhenCanonicalTextArtifactIsLost(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
 	run(t, rebuilder(store, &fakeRebuildContent{versionErr: content.ErrArtifactCorrupt}, &fakeRebuildProjection{}))
 	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "canonical_content_unavailable" {
+		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
+	}
+}
+
+// A candidate that remains listed after canonical hydration returns not found
+// must terminate clearly instead of completing identical batches forever.
+func TestRebuildFailsWhenHeadCandidateCannotBeHydrated(t *testing.T) {
+	for _, withdrawn := range []bool{false, true} {
+		t.Run(fmt.Sprintf("withdrawn=%v", withdrawn), func(t *testing.T) {
+			store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
+			canonical := &fakeRebuildContent{versionErr: corpus.ErrNotFound}
+			if withdrawn {
+				canonical.onRead = func() { store.candidates = nil }
+			}
+			run(t, rebuilder(store, canonical, &fakeRebuildProjection{}))
+			if withdrawn {
+				if !store.activated || len(store.failed) != 0 {
+					t.Fatalf("withdrawn Version blocked activation: activated=%v failed=%v", store.activated, store.failed)
+				}
+			} else if store.activated || len(store.failed) != 1 || store.failed[0].Code != "canonical_content_unavailable" {
+				t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
+			}
+		})
+	}
+}
+
+func TestRebuildFailsWhenSuccessfulCoverageLeavesTheSameGap(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}, gap: true}
+	run(t, rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{}))
+	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "rebuild_no_progress" {
 		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
 	}
 }
