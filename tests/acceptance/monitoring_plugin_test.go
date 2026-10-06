@@ -90,8 +90,8 @@ func TestAlertPluginDecides(t *testing.T) {
 	calm := awaitReady(t, ingest(t, c, "alert-calm-"+run, "Rien à signaler sur le port "+run))
 	hit := awaitReady(t, ingest(t, c, "alert-hit-"+run, "Les dockers votent la "+strings.ToUpper(phrase[:1])+phrase[1:]+" au port"))
 	seen, _ := awaitMatches(t, admin, c, start, 2)
-	// Let any late decision of the earlier, non-matching article surface.
-	time.Sleep(3 * time.Second)
+	awaitEvaluated(t, calm)
+	awaitEvaluated(t, hit)
 	seen, _ = drain(t, admin, c, start, 0)
 	for _, s := range []string{subID, twin["subscription_id"].(string)} {
 		created := matchCreatedFor(seen, s)
@@ -136,13 +136,14 @@ func TestAlertPluginMetadataRuleMatches(t *testing.T) {
 
 	other := inlineCommand(c, "alert-other-desk-"+run, "other-desk-"+run, "Communiqué d'un autre producteur")
 	other["provenance"] = map[string]any{"producer": "another-desk"}
-	awaitReady(t, request(t, "POST", "/v0/records", admin, other, 202)["receipt_id"].(string))
+	calm := awaitReady(t, request(t, "POST", "/v0/records", admin, other, 202)["receipt_id"].(string))
 	ours := inlineCommand(c, "alert-our-desk-"+run, "our-desk-"+run, "Communiqué du producteur suivi")
 	ours["provenance"] = map[string]any{"producer": producer}
 	hit := awaitReady(t, request(t, "POST", "/v0/records", admin, ours, 202)["receipt_id"].(string))
 
 	awaitMatches(t, admin, c, start, 1)
-	time.Sleep(3 * time.Second)
+	awaitEvaluated(t, calm)
+	awaitEvaluated(t, hit)
 	seen, _ := drain(t, admin, c, start, 0)
 	created := matchCreatedFor(seen, subID)
 	if len(created) != 1 || created[0]["monitoring"].(map[string]any)["record_id"] != hit["record_id"] {
@@ -158,7 +159,7 @@ func alertOutagePath() string {
 // a Subscription can still be created, a matching article becomes searchable,
 // and no Match appears, because unavailability is never a decision.
 func TestAlertPluginOutageDelays(t *testing.T) {
-	alertEvaluator(t)
+	id, version := alertEvaluator(t)
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
 	run := monitoringRun()
 	c := changeCorpus(t, "alert-outage-"+run)
@@ -166,7 +167,34 @@ func TestAlertPluginOutageDelays(t *testing.T) {
 	phrase := "panne-" + run
 	_, sub := alertSubscription(t, "outage-"+run, c, map[string]any{"kind": "substring", "text": phrase}, nil, destinationCapture, 201)
 	hit := awaitReady(t, ingest(t, c, "alert-outage-"+run, "Alerte "+phrase+" sur le réseau"))
-	time.Sleep(5 * time.Second)
+	// The read-only preview identifies this exact Version's failed invocation,
+	// so unrelated unavailable work cannot satisfy the outage observation.
+	deadline := time.Now().Add(monitoringWait)
+	for {
+		state := request(t, "GET", "/v0/records/"+hit["record_id"].(string)+"/versions/"+hit["version_id"].(string), admin, nil, 200)
+		if steps, ok := state["steps"].(map[string]any); ok && steps["evaluated_at"] != nil {
+			t.Fatal("unavailable evaluation was recorded as a completed decision", state)
+		}
+		preview := request(t, "POST", "/v0/admin/subscriptions/evaluation-retirements", os.Getenv("QUIVR_TEST_BACKFILLER"), map[string]any{
+			"key": "observe-outage-" + run, "plugin_id": id, "version": version,
+			"reason": "Observe unavailable evaluation", "dry_run": true, "limit": 500,
+		}, 200)
+		observed := false
+		for _, item := range preview["items"].([]any) {
+			in := item.(map[string]any)
+			if in["subscription_id"] == sub["subscription_id"] && in["record_id"] == hit["record_id"] && in["record_version_id"] == hit["version_id"] {
+				observed = true
+				break
+			}
+		}
+		if observed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no unavailable evaluation for Subscription %v, Version %v: %v", sub["subscription_id"], hit["version_id"], preview)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 	seen, _ := drain(t, admin, c, start, 0)
 	if created := matchCreatedFor(seen, sub["subscription_id"].(string)); len(created) != 0 {
 		t.Fatal("a Match was decided while the plugin was down", created)

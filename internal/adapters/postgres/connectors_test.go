@@ -155,7 +155,9 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 		t.Fatal("next run must wait for its interval")
 	}
 	// A later transient failure keeps the unresolved access error.
-	time.Sleep(1100 * time.Millisecond)
+	if _, err := pool.Exec(ctx, "UPDATE connector_instances SET next_run_at=now()-interval '1 second' WHERE organization=$1 AND id=$2", scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
 	next := claim()
 	if len(next) != 1 || next[0].Run != run[0].Run+1 {
 		t.Fatalf("next run %+v", next)
