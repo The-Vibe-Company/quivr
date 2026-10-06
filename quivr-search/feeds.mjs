@@ -16,6 +16,9 @@ const MAX_SUGGESTIONS = 12;
 const MAX_LOGO_BYTES = 512 << 10;
 const MAX_LOGO_TRIES = 8;
 const MAX_MANIFEST_BYTES = 64 << 10;
+// A smaller raster icon blurs once enlarged to a logo tile: the next
+// candidate is tried, and without one the page shows the source's initial.
+const MIN_LOGO_PIXELS = 32;
 const FEED_ACCEPT =
   "application/rss+xml, application/atom+xml, application/feed+json, text/html;q=0.9, application/xml;q=0.8, */*;q=0.5";
 const IMAGE_ACCEPT = "image/png, image/webp, image/jpeg, image/gif, image/x-icon;q=0.9, */*;q=0.5";
@@ -302,7 +305,9 @@ export function feedGuard({ privateOrigins = [], resolve = dnsLookup } = {}) {
       try {
         const image = await follow(url.href, started, IMAGE_ACCEPT, MAX_LOGO_BYTES);
         const type = image.status < 300 && imageType(image.bytes, image.type);
-        if (type) return { type, bytes: image.bytes };
+        const size = type && rasterSize(image.bytes, type);
+        if (type && !(size && Math.min(size.width, size.height) < MIN_LOGO_PIXELS))
+          return { type, bytes: image.bytes };
       } catch {
         // Too large, refused or unreachable: try the next one.
       }
@@ -565,22 +570,26 @@ export function pageManifest(page, base) {
 /**
  * The type of an image, or null. A raster image is read from its first
  * bytes. An SVG counts only when served as one (`declared`, its
- * Content-Type) and free of scripts, event handlers and javascript: links:
- * it is drawn in an <img>, where none would run, and served under a sandbox
- * policy, but a logo has no use for them.
+ * Content-Type), without scripts, event handlers, javascript: links or
+ * entities that expand into others. That filter is a best effort: what keeps
+ * an SVG inert is that it is drawn in an <img>, where nothing runs, and
+ * served under a sandbox policy.
  */
 export function imageType(bytes, declared = "") {
   if (!bytes || bytes.length < 12) return null;
   if (declared.includes("image/svg+xml")) {
     const text = bytes.toString("utf8");
     // Character references and blanks could hide a tag or a scheme: read past them.
-    const plain = text.replace(/&#(?:x([0-9a-f]{1,6})|(\d{1,7}));?/gi, (_, hex, decimal) => {
+    const plain = text.replace(/&#(?:x([0-9a-f]+)|(\d+));?/gi, (_, hex, decimal) => {
       const code = parseInt(hex || decimal, hex ? 16 : 10);
       return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
     });
     const active =
       /<script|<foreignObject|\bon[a-z]+\s*=/i.test(plain) ||
-      /javascript:/i.test(plain.replace(/[\x00-\x20]+/g, ""));
+      /javascript:/i.test(plain.replace(/[\x00-\x20]+/g, "")) ||
+      // An entity built from entities is how an expansion bomb starts; the
+      // doctype that could declare one opens the document.
+      /<!ENTITY[^>]*&/i.test(text.slice(0, 4096));
     return svgRoot(text.slice(0, 4096)) && !active ? "image/svg+xml" : null;
   }
   const at = (offset, ...values) => values.every((v, i) => bytes[offset + i] === v);
@@ -623,6 +632,50 @@ function svgRoot(text) {
     if (next <= at) return false;
     at = next;
   }
+}
+
+/**
+ * The pixel size of a raster image, from its header (an icon file: its
+ * largest image), or null when it cannot be read (an SVG has none).
+ */
+export function rasterSize(bytes, type) {
+  try {
+    if (type === "image/png") return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+    if (type === "image/gif") return { width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) };
+    if (type === "image/x-icon") {
+      let width = 0;
+      let height = 0;
+      for (let i = 0, count = bytes.readUInt16LE(4); i < count && 6 + 16 * i + 1 < bytes.length; i++) {
+        width = Math.max(width, bytes[6 + 16 * i] || 256);
+        height = Math.max(height, bytes[6 + 16 * i + 1] || 256);
+      }
+      return width && height ? { width, height } : null;
+    }
+    if (type === "image/webp") {
+      const chunk = bytes.toString("latin1", 12, 16);
+      if (chunk === "VP8 ") return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+      if (chunk === "VP8L") {
+        const bits = bytes.readUInt32LE(21);
+        return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+      }
+      if (chunk === "VP8X") return { width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 };
+      return null;
+    }
+    if (type === "image/jpeg") {
+      // The frame header (SOFn, not DHT, JPG or DAC) carries the size; each
+      // other segment is skipped by its length, so the scan moves forward.
+      for (let at = 2; at + 9 < bytes.length; ) {
+        if (bytes[at] !== 0xff) return null;
+        const marker = bytes[at + 1];
+        if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker))
+          return { width: bytes.readUInt16BE(at + 7), height: bytes.readUInt16BE(at + 5) };
+        at += 2 + bytes.readUInt16BE(at + 2);
+      }
+    }
+  } catch {
+    // A truncated header: size unknown.
+  }
+  return null;
 }
 
 /** Parses DEMO_FEED_SUGGESTIONS: a JSON array of {title, url}. */
