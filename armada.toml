@@ -52,7 +52,7 @@ harness = "codex"
 model = "gpt-6.1-sol"
 effort = "high"
 permissions = "full"
-extra_args = ["-c", "check_for_update_on_startup=false"]
+extra_args = ["-c", "check_for_update_on_startup=false", "-c", "service_tier=\"default\""] # never fast/priority mode (Stan, 2026-10-06)
 
 [herdr.profiles.claude]
 harness = "claude"
