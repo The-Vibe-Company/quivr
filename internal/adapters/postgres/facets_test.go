@@ -60,9 +60,9 @@ func TestFacetsAcrossCorpora(t *testing.T) {
 		}
 		return work.RecordID
 	}
-	publish(a.ID, "one", "en", "2026-01-31T23:00:00Z", []string{"sea", "sea", "wind"}, 2, true)
+	publish(a.ID, "one", "en", "2026-02-01T01:00:00+02:00", []string{"sea", "sea", "wind"}, 2, true)
 	publish(b.ID, "two", "en", "2026-02-01T00:00:00Z", []string{"sea"}, 2, false)
-	publish(b.ID, "three", "fr", "2025-12-31T23:00:00Z", []string{"wind"}, 3, true)
+	publish(b.ID, "three", "fr", "2026-01-01T01:00:00+02:00", []string{"wind"}, 3, true)
 	hidden := publish(a.ID, "withdrawn", "fr", "2026-01-01T00:00:00Z", []string{"hidden"}, 9, true)
 	if _, err = pool.Exec(ctx, `UPDATE records SET withdrawn=true WHERE organization=$1 AND id=$2`, scope.Organization, hidden); err != nil {
 		t.Fatal(err)
@@ -135,6 +135,23 @@ func TestFacetsAcrossCorpora(t *testing.T) {
 	if _, err := svc.CountFacets(ctx, restricted, q, nil); err != corpus.ErrNotFound {
 		t.Fatalf("unauthorized corpus: %v", err)
 	}
+	selected := q
+	selected.Records.CorpusIDs = []string{a.ID}
+	prepared, err := svc.CountFacets(ctx, restricted, selected, func() (content.FacetQuery, error) {
+		// Mutate the caller's backing slice and return a broader query. Neither
+		// may expand the already-authorized corpus set seen by the real reader.
+		selected.Records.CorpusIDs[0] = b.ID
+		return q, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized := [][]content.FacetBucket{{{Value: "en", Count: 1}}, {{Value: "sea", Count: 1}, {Value: "wind", Count: 1}}, {{Value: float64(2), Count: 1}}, {{Value: true, Count: 1}}, {{Value: "2026-01-01T00:00:00Z", Count: 1}}}
+	for i, want := range authorized {
+		if !reflect.DeepEqual(prepared[i].Buckets, want) {
+			t.Fatalf("preparation expanded authorization for %s: %#v, want %#v", prepared[i].Field, prepared[i].Buckets, want)
+		}
+	}
 	filtered = q
 	filtered.Records.FilterRoutes = nil
 	if got := read(filtered); len(got[0].Buckets) != 0 {
@@ -142,7 +159,7 @@ func TestFacetsAcrossCorpora(t *testing.T) {
 	}
 	// Two documents with equal values across every requested field must retain
 	// their multiplicity when the adapter groups facet tuples before counting.
-	publish(b.ID, "four", "en", "2026-01-31T23:00:00Z", []string{"sea", "sea", "wind"}, 2, true)
+	publish(b.ID, "four", "en", "2026-02-01T01:00:00+02:00", []string{"sea", "sea", "wind"}, 2, true)
 	got = read(q)
 	weighted := [][]content.FacetBucket{{{Value: "en", Count: 3}}, {{Value: "sea", Count: 3}, {Value: "wind", Count: 3}}, {{Value: float64(2), Count: 3}, {Value: float64(3), Count: 1}}, {{Value: true, Count: 3}, {Value: false, Count: 1}}, {{Value: "2025-12-01T00:00:00Z", Count: 1}, {Value: "2026-01-01T00:00:00Z", Count: 2}, {Value: "2026-02-01T00:00:00Z", Count: 1}}}
 	for i, want := range weighted {

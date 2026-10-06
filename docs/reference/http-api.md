@@ -9777,11 +9777,11 @@ Example `typed_metadata_facets`:
       "field": "rating",
       "buckets": [
         {
-          "value": 2.5,
+          "value": 16777217,
           "count": 1
         },
         {
-          "value": 16777217,
+          "value": 2.5,
           "count": 1
         }
       ]

@@ -127,17 +127,16 @@ func TestFacetRequestAuthorizationAndRouting(t *testing.T) {
 
 // Owns execution bounds through the real handler with a blocked dependency.
 // synctest advances fake time; this adds no wall-clock wait to the suite.
-type blockedFacets struct{ entered chan struct{} }
+type blockedFacets struct{}
 
 func (s blockedFacets) CountFacets(ctx context.Context, _ string, _ content.FacetQuery) ([]content.Facet, error) {
-	s.entered <- struct{}{}
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
 func TestFacetCapacityAndDeadline(t *testing.T) {
 	routing := &facetRouting{generations: map[string]content.Generation{"corpus_a": {ID: "g_a", MetadataProjected: true}}}
 
-	handler, err := httpapi.New(knownCorpora{}, content.Service{Facets: blockedFacets{entered: make(chan struct{}, 8)}}, retrieval.Service{Routing: routing}, uploads.Service{}, map[string]corpus.Scope{catalogReader: {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}}}, catalogCursorKey)
+	handler, err := httpapi.New(knownCorpora{}, content.Service{Facets: blockedFacets{}}, retrieval.Service{Routing: routing}, uploads.Service{}, map[string]corpus.Scope{catalogReader: {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}}}, catalogCursorKey)
 	if err != nil {
 		t.Fatal(err)
 	}

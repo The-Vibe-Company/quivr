@@ -38,8 +38,9 @@ func (s Service) CountFacets(ctx context.Context, scope corpus.Scope, q FacetQue
 	if len(q.Records.CorpusIDs) == 0 || len(q.Records.CorpusIDs) > 16 {
 		return nil, ErrInvalid
 	}
+	authorized := append([]string(nil), q.Records.CorpusIDs...)
 	seen := map[string]bool{}
-	for _, id := range q.Records.CorpusIDs {
+	for _, id := range authorized {
 		if id == "" || seen[id] {
 			return nil, ErrInvalid
 		}
@@ -55,6 +56,7 @@ func (s Service) CountFacets(ctx context.Context, scope corpus.Scope, q FacetQue
 			return nil, err
 		}
 	}
+	q.Records.CorpusIDs = authorized
 	if s.Facets == nil {
 		return nil, publicerr.ContentUnavailable
 	}
