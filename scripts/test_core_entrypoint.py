@@ -239,10 +239,10 @@ class CoreEntrypointTest(unittest.TestCase):
             self.assertEqual(connectors, [{'manifest': '/app/plugins/rss/quivr-plugin.yaml', 'endpoint': 'http://127.0.0.1:9920', 'configuration': {}},
                                           {'manifest': '/app/plugins/x-list/quivr-plugin.yaml', 'endpoint': 'http://127.0.0.1:9930', 'configuration': {}}])
         commands = {name: argv for name, argv, _, _ in core_entrypoint.sidecar_commands({**ENV, 'PATH': '/usr/bin'})}
-        self.assertEqual(commands, {'rss': ['/usr/local/bin/quivr-rss'], 'x-list': ['/usr/local/bin/quivr-x-list'], 'm365-mail': ['/usr/local/bin/quivr-m365-mail'],
+        self.assertEqual(commands, {'rss': ['/usr/local/bin/quivr-rss'], 'x-list': ['/usr/local/bin/quivr-x-list'], 'm365-mail': ['/usr/local/bin/quivr-m365-mail'], 'object-storage-archive': ['/usr/local/bin/quivr-object-storage-archive'],
                                     'core-ingest': ['/usr/local/bin/quivr-core-ingest']})
         both = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin'})}
-        self.assertEqual(both, {'rss', 'x-list', 'm365-mail', 'core-ingest', 'pdf-text', 'alerts'})
+        self.assertEqual(both, {'rss', 'x-list', 'm365-mail', 'object-storage-archive', 'core-ingest', 'pdf-text', 'alerts'})
         # The API runs only the push connector plugins, to relay webhook deliveries to them,
         # the ingestion plugin, to encode queries, the retrieval plugin, to rank searches,
         # and the alerts plugin, for Subscription previews.
@@ -268,7 +268,7 @@ class CoreEntrypointTest(unittest.TestCase):
         # The pins name image paths; each must be a first-party plugin the image copies, with the same id.
         dockerfile = (ROOT / 'deploy' / 'railway' / 'core.Dockerfile').read_text()
         pins = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})['plugins']
-        self.assertEqual(sorted(p['endpoint'] for p in pins), ['http://127.0.0.1:9900', 'http://127.0.0.1:9910', 'http://127.0.0.1:9920', 'http://127.0.0.1:9930', 'http://127.0.0.1:9940', 'http://127.0.0.1:9950', 'http://127.0.0.1:9960'])
+        self.assertEqual(sorted(p['endpoint'] for p in pins), ['http://127.0.0.1:9900', 'http://127.0.0.1:9910', 'http://127.0.0.1:9920', 'http://127.0.0.1:9930', 'http://127.0.0.1:9940', 'http://127.0.0.1:9950', 'http://127.0.0.1:9960', 'http://127.0.0.1:9990'])
         ids = set()
         for pin in pins:
             source = pathlib.PurePosixPath(pin['manifest']).relative_to('/app')
@@ -278,7 +278,7 @@ class CoreEntrypointTest(unittest.TestCase):
             else:
                 self.assertIn(f'COPY {source.parent} /app/{source.parent}', dockerfile)
             ids.add(re.search(r'^id: (\S+)$', (ROOT / source).read_text(), re.M).group(1))
-        self.assertEqual(ids, {'alerts', 'pdf-text', 'connector.rss', 'connector.x_list', 'connector.m365_mail', 'core.ingest', 'core.retrieve'})
+        self.assertEqual(ids, {'alerts', 'pdf-text', 'connector.rss', 'connector.x_list', 'connector.m365_mail', 'connector.object_storage_archive', 'core.ingest', 'core.retrieve'})
         pdf = next(p for p in pins if 'pdf-text' in p['manifest'])
         self.assertEqual(pdf['routes'], [{'media_type': 'application/pdf', 'mode': 'required'}])
 
@@ -310,11 +310,35 @@ class CoreEntrypointTest(unittest.TestCase):
             children = {name: child for name, _, _, child in core_entrypoint.sidecar_commands({**env, 'TYPESAFE_API_KEY': value})}
             self.assertNotIn('TYPESAFE_API_KEY', children['alerts'])
 
+    def test_archive_signing_ring_is_shared_only_with_its_sidecar(self):
+        plugin_id = 'connector.object_storage_archive'
+        # Literal external key-ring fields protect deployment compatibility.
+        ring = {'active': 'primary', 'keys': [{'id': 'primary', 'secret': 'c3ludGhldGljLXNpZ25pbmcta2V5LXdpdGgtMzItYnl0ZXM'}]}
+        env = {**ENV, 'QUIVR_ENGINE_PLUGIN_KEYS': json.dumps({plugin_id: ring}),
+               'QUIVR_PLUGIN_SIGNING_KEYS': 'unrelated-parent-ring'}
+        engine = json.loads(core_entrypoint.engine_signing_environment(env)['QUIVR_ENGINE_PLUGIN_KEYS'])
+        children = {name: child for name, _, _, child in core_entrypoint.sidecar_commands(env)}
+        self.assertEqual(engine[plugin_id], ring)
+        self.assertEqual(json.loads(children['object-storage-archive']['QUIVR_PLUGIN_SIGNING_KEYS']), ring)
+        for name, child in children.items():
+            self.assertNotIn('QUIVR_ENGINE_PLUGIN_KEYS', child)
+            if name != 'object-storage-archive':
+                self.assertNotIn('QUIVR_PLUGIN_SIGNING_KEYS', child)
+        for ambiguous in ('{"same":{},"same":{}}',
+                          '{"other":{"active":"one","active":"two","keys":[]}}'):
+            with self.assertRaisesRegex(ValueError, 'Invalid engine plugin signing configuration: duplicate JSON member'):
+                core_entrypoint.engine_signing_environment({**ENV, 'QUIVR_ENGINE_PLUGIN_KEYS': ambiguous})
+        generated = core_entrypoint.engine_signing_environment(ENV)
+        self.assertEqual(generated, core_entrypoint.engine_signing_environment(dict(ENV)))
+        derived = json.loads(generated['QUIVR_ENGINE_PLUGIN_KEYS'])[plugin_id]['keys'][0]['secret']
+        changed = {**ENV, 'QUIVR_CURSOR_KEY': 'another-synthetic-root-key'}
+        self.assertNotEqual(derived, json.loads(core_entrypoint.engine_signing_environment(changed)['QUIVR_ENGINE_PLUGIN_KEYS'])[plugin_id]['keys'][0]['secret'])
+
     def test_described_alerts_are_offered_only_with_a_typesafe_key(self):
         def kinds(env):
             pins = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1', **env})['plugins']
             return {pathlib.PurePosixPath(p['manifest']).parent.name: p.get('kinds') for p in pins}
-        others = {'pdf-text': None, 'm365-mail': None, 'rss': None, 'x-list': None, 'core-ingest': None, 'core-retrieve': None}
+        others = {'object-storage-archive': None, 'pdf-text': None, 'm365-mail': None, 'rss': None, 'x-list': None, 'core-ingest': None, 'core-retrieve': None}
         self.assertEqual(kinds({}), {'alerts': ['keywords'], **others})
         self.assertEqual(kinds({'TYPESAFE_API_KEY': ' '}), {'alerts': ['keywords'], **others})
         self.assertEqual(kinds({'TYPESAFE_API_KEY': 'placeholder-typesafe-key'})['alerts'], ['keywords', 'described'])

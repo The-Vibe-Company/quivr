@@ -244,43 +244,7 @@ mark {
   font-size: var(--text-lede);
   line-height: 1.55;
 }
-/* The live indicator of Veille, Sources and Alertes. */
-.live-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-shrink: 0;
-  min-height: 30px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-pill);
-  background: var(--subtle);
-  box-shadow: inset 0 0 0 1px var(--border);
-  color: var(--muted);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.live-badge[data-live="true"] {
-  color: var(--success);
-  background: color-mix(in oklab, var(--success) 8%, var(--surface));
-  box-shadow: inset 0 0 0 1px
-    color-mix(in oklab, var(--success) 24%, transparent);
-}
-.live-dot {
-  position: relative;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
-.live-badge[data-live="true"] .live-dot::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: currentColor;
-  animation: live-pulse 2s var(--ease-out) infinite;
-}
+/* The pulse of a live dot (Admin’s live state). */
 @keyframes live-pulse {
   from {
     transform: scale(1);
@@ -411,6 +375,18 @@ mark {
 @keyframes shimmer {
   to {
     background-position: -200% 0;
+  }
+}
+/* A load that ends quickly shows nothing: the skeleton appears only after
+   200 ms, and so does a page's own panel holding it, instead of flashing
+   between two pages. A card inside a page keeps its frame meanwhile. */
+.loading-state,
+main > .panel:has(> .loading-state) {
+  animation: loading-wait 200ms step-end both;
+}
+@keyframes loading-wait {
+  from {
+    visibility: hidden;
   }
 }
 @media (max-width: 640px) {

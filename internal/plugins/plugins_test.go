@@ -408,5 +408,5 @@ func checkConnectorFixture(t *testing.T, c fixtureCase, raw []byte) []plugins.Is
 	if report.Manifest == nil {
 		t.Fatalf("connector response fixtures name a valid manifest: %+v", report.Errors)
 	}
-	return plugins.CheckConnectorOutput(context.Background(), raw, r.Checkpoint, report.Manifest)
+	return plugins.CheckConnectorOutput(context.Background(), raw, r.Checkpoint, report.Manifest, report.Compatibility.PluginAPI.Version)
 }

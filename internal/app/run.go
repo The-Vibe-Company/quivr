@@ -691,11 +691,12 @@ func Run(command string, args ...string) error {
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
 	// Coverage counts read every current segment of a Corpus; a search sees
 	// them at most 10 s old.
-	search := retrieval.Service{Embedder: embedding, Routing: baseline, Registry: spaces, Coverage: &retrieval.CoverageCache{TTL: 10 * time.Second}, Projection: projection, Content: contents}
+	metadataProjection := retrieval.MetadataProjection{Projection: projection, Metadata: records}
+	search := retrieval.Service{Embedder: embedding, Routing: baseline, Registry: spaces, Coverage: &retrieval.CoverageCache{TTL: 10 * time.Second}, Projection: metadataProjection, Content: contents}
 	// External normalization runs in the worker only, before publication.
 	normalizer := normalization.Service{Content: contents, Store: normalizations, Signer: blobs, Pin: live, Plugin: pluginhttp.Normalizer{}}
 	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: baseline, LegacySpace: tei.Space().ID}
-	rebuilder := retrieval.Rebuilder{Store: rebuilds, Cancellation: operationStore, Content: contents, Projection: projection, Routing: baseline}
+	rebuilder := retrieval.Rebuilder{Store: rebuilds, Cancellation: operationStore, Content: contents, Projection: metadataProjection, Routing: baseline}
 	// The plan's ingestion plugin segments and embeds every Version, encodes
 	// the queries of its spaces and derives rebuild targets; each call
 	// resolves the plugin the plan names at that moment.
@@ -704,12 +705,12 @@ func Run(command string, args ...string) error {
 	search.Spaces = ingestor
 	processor.Retrieval, processor.Enrichment = search, search
 	processor.Plugin = deriver
-	processor.Evaluation = &processing.Evaluator{Store: ingestionEvaluations, Serving: servingProjections, Content: contents, Plugin: deriver, Projection: projection}
+	processor.Evaluation = &processing.Evaluator{Store: ingestionEvaluations, Serving: servingProjections, Content: contents, Plugin: deriver, Projection: metadataProjection}
 	rebuilder.Plugin = deriver
 	// Backfills fill spaces through the plan each one is pinned to, paced
 	// below live ingestion on their own task queue.
 	pinnedIngestion := planIngestion{store: planStore, live: live}
-	backfiller := &backfill.Backfiller{Store: backfills, Cancellation: operationStore, Content: contents, Plugin: deriver, Projection: projection, Pinned: pinnedIngestion, Steps: recorder, Settings: backfillSettings}
+	backfiller := &backfill.Backfiller{Store: backfills, Cancellation: operationStore, Content: contents, Plugin: deriver, Projection: metadataProjection, Pinned: pinnedIngestion, Steps: recorder, Settings: backfillSettings}
 	// Quarantine reprocesses rerun normalization and processing through the
 	// plan each one is pinned to, paced like backfills on their queue. The
 	// processor is copied before the worker gives it its observer: a

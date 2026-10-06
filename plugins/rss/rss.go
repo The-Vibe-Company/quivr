@@ -408,8 +408,9 @@ type candidate struct {
 	order int
 }
 
-// itemFields are the item-level fields a revision covers. Feed metadata is
-// deliberately excluded: renaming a feed must not correct every item.
+// itemFields are the item-level fields a revision covers. The emitted common
+// metadata is added to the revision below so changes to feed language or link
+// cannot leave a stored item's source metadata stale.
 type itemFields struct {
 	GUID       string      `json:"guid,omitempty"`
 	Link       string      `json:"link,omitempty"`
@@ -564,7 +565,32 @@ func mapItem(it *gofeed.Item, meta feedFields) (candidate, bool) {
 		}
 	}
 
-	canonical, _ := json.Marshal(f)
+	commonAuthors := make([]string, 0, len(f.Authors))
+	for _, author := range f.Authors {
+		name := strings.TrimSpace(author.Name)
+		if name == "" {
+			name = strings.TrimSpace(author.Email)
+		}
+		if name != "" {
+			commonAuthors = append(commonAuthors, name)
+		}
+	}
+	publishedAt := f.Published
+	if publishedAt == "" {
+		publishedAt = f.Updated
+	}
+	commonMetadata := quivrplugin.CommonMetadataExtension(quivrplugin.CommonMetadata{
+		Language: meta.Language, PublishedAt: publishedAt, SourceType: "rss", Source: meta.Link,
+		Author: commonAuthors, Tags: append([]string(nil), f.Categories...),
+	})
+	// Checkpoints written by older RSS versions contain the item-only revision.
+	// After a successful feed fetch they can replay each existing item once to
+	// backfill common metadata; a 304 leaves the old checkpoint untouched. The
+	// returned checkpoint stores this revision and later polls are stable.
+	canonical, _ := json.Marshal(struct {
+		Item   itemFields     `json:"item"`
+		Common map[string]any `json:"common"`
+	}{Item: f, Common: commonMetadata.Data})
 	revision := "sha256:" + hash(canonical)
 	key := f.GUID
 	if key == "" {
@@ -592,7 +618,10 @@ func mapItem(it *gofeed.Item, meta feedFields) (candidate, bool) {
 		itemData = map[string]any{}
 	}
 	item := quivrplugin.Item{RecordKey: key, Revision: revision, Content: quivrplugin.NewManifest(parts...),
-		Extensions: map[string]quivrplugin.Extension{Extension: {SchemaVersion: "1", Data: map[string]any{"item": itemData, "feed": metaData}}}}
+		Extensions: map[string]quivrplugin.Extension{
+			Extension:                           {SchemaVersion: "1", Data: map[string]any{"item": itemData, "feed": metaData}},
+			quivrplugin.CommonMetadataNamespace: commonMetadata,
+		}}
 	sum := sha256.Sum256([]byte(key))
 	var when *time.Time
 	if it.PublishedParsed != nil {

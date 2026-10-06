@@ -161,6 +161,8 @@ class Connectors(unittest.TestCase):
 
     def test_page_self_checks_and_credential_status_schema(self):
         pages = [None, {"items": [], "checkpoint": None, "more": "yes"},
+                 {"items": [], "checkpoint": None, "more": False, "submission_concurrency": 2},
+                 {"items": [{"record_key": "empty", "content": {"kind": "manifest"}}], "checkpoint": None, "more": False},
                  {"items": [{"record_key": str(number), "content": {"kind": "text", "text": "body"}}
                             for number in range(2)], "checkpoint": 2, "more": False},
                  {"items": [], "checkpoint": "x" * 1024, "more": False},
@@ -176,6 +178,31 @@ class Connectors(unittest.TestCase):
         request = {key: value for key, value in self.request.items()
                    if key not in ("checkpoint", "page_in_run", "reads_today")}
         self.assert_error(self.invoke(request, CHECK), 500, "invalid_response")
+
+    def test_typed_page_carries_new_connector_fields_on_supported_api(self):
+        from quivr_plugin import ConnectorFetchResponse, ConnectorItem, ConnectorManifestContent, ConnectorAttachment
+
+        manifest = yaml.safe_load(self.path.read_text())
+        manifest["compatibility"]["plugin_api"] = ">=0.15.0 <0.16.0"
+        manifest["contributions"]["connector"]["attachments"] = {"max_bytes": 1048576}
+        self.path.write_text(yaml.safe_dump(manifest))
+        self.plugin = Plugin(self.path)
+        self.register(lambda request: ConnectorFetchResponse(
+            items=[ConnectorItem(record_key="member.xml", content=ConnectorManifestContent(),
+                                 attachments=[ConnectorAttachment(key="source", role="source",
+                                                                  media_type="application/xml", ref="member:1")])],
+            checkpoint=None, more=False, submission_concurrency=32))
+        reply = self.invoke()
+        self.assertEqual(reply.status, 200, reply.body)
+        self.assertEqual(reply.body["submission_concurrency"], 32)
+        fixtures = REPO / "contracts/plugins/v0/fixtures/responses/connector"
+        for path in fixtures.glob("attachment-only-invalid-*.json"):
+            with self.subTest(path.name):
+                self.register(lambda request: json.loads(path.read_text()))
+                reply = self.invoke()
+                self.assert_error(reply, 500, "invalid_response")
+                self.assertIn("attachment-only input", reply.body["message"])
+
 
     def test_configuration_diagnostics_redact_before_truncation(self):
         self.register(lambda request: self.fail("invalid configuration reached the source"))

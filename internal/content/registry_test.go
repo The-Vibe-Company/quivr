@@ -20,7 +20,7 @@ func ownedRegistry(t *testing.T) *content.ExtensionRegistry {
 
 func TestRegistryDeclaresBuiltinAndOwnedNamespaces(t *testing.T) {
 	r := ownedRegistry(t)
-	for ns, want := range map[string]bool{"example.editorial": true, "connector.rss": false, "acme-md": true, "acme-md.outline": true, "acme-md.other": false, "undeclared": false} {
+	for ns, want := range map[string]bool{"example.editorial": true, "quivr.metadata": true, "connector.rss": false, "acme-md": true, "acme-md.outline": true, "acme-md.other": false, "undeclared": false} {
 		if got := r.Declared(ns); got != want {
 			t.Errorf("Declared(%q) = %t, want %t", ns, got, want)
 		}
@@ -29,6 +29,9 @@ func TestRegistryDeclaresBuiltinAndOwnedNamespaces(t *testing.T) {
 		t.Fatalf("owner %q %t", owner, ok)
 	}
 	if _, ok := r.Owner("example.editorial"); ok {
+		t.Fatal("a built-in namespace has a plugin owner")
+	}
+	if _, ok := r.Owner("quivr.metadata"); ok {
 		t.Fatal("a built-in namespace has a plugin owner")
 	}
 }
@@ -41,6 +44,7 @@ func TestRegistryRefusesForeignAndClashingNamespaces(t *testing.T) {
 		"not prefixed by the plugin id": {"acme-md", "other.outline"},
 		"prefix without a dot":          {"acme-md", "acme-mdx"},
 		"clash with a built-in":         {"example", "example.editorial"},
+		"clash with common metadata":    {"quivr", "quivr.metadata"},
 		"owned by another plugin":       {"acme-md.outline", "acme-md.outline"},
 		"registered twice":              {"acme-md", "acme-md.outline"},
 		"empty plugin id":               {"", "acme-md.x"},
@@ -77,6 +81,9 @@ func TestClientWritesToOwnedNamespacesAreRejected(t *testing.T) {
 	if err := r.Validate(ctx, content.Extensions{"example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": 42}}}); !errors.Is(err, content.ErrInvalid) {
 		t.Fatalf("invalid built-in data: %v", err)
 	}
+	if err := r.Validate(ctx, content.Extensions{"quivr.metadata": {SchemaVersion: "1", Data: map[string]any{"source_type": "rss"}}}); err != nil {
+		t.Fatalf("common metadata namespace rejected: %v", err)
+	}
 
 	_, service := manifestService()
 	service.Extensions = r
@@ -96,7 +103,7 @@ func TestClientWritesToOwnedNamespacesAreRejected(t *testing.T) {
 	if !service.ExtensionDeclared("acme-md.outline") || service.ExtensionDeclared("acme-md.other") {
 		t.Fatal("the Service does not report the registry's namespaces")
 	}
-	if !(content.Service{}).ExtensionDeclared("example.editorial") {
+	if !(content.Service{}).ExtensionDeclared("example.editorial") || !(content.Service{}).ExtensionDeclared("quivr.metadata") {
 		t.Fatal("a Service without a registry lost the built-in namespaces")
 	}
 }
@@ -109,7 +116,7 @@ func TestTheOwningPluginWritesItsNamespacesThroughIngestion(t *testing.T) {
 	if err := r.Own("acme-other", "acme-other"); err != nil {
 		t.Fatal(err)
 	}
-	owned := content.Extensions{"acme-md.outline": {SchemaVersion: "1", Data: map[string]any{"heading_count": 2}}, "example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": "x"}}}
+	owned := content.Extensions{"acme-md.outline": {SchemaVersion: "1", Data: map[string]any{"heading_count": 2}}, "example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": "x"}}, "quivr.metadata": {SchemaVersion: "1", Data: map[string]any{"source_type": "rss"}}}
 	_, service := manifestService()
 	service.Extensions = r
 	command := manifestCommand()
@@ -122,7 +129,7 @@ func TestTheOwningPluginWritesItsNamespacesThroughIngestion(t *testing.T) {
 	if _, err := service.Accept(content.WithExtensionWriter(context.Background(), "acme-other"), scope(), command); !errors.Is(err, content.ErrExtensionOwned) {
 		t.Fatalf("another plugin wrote an owned namespace: %v", err)
 	}
-	invalid := content.Extensions{"acme-md.outline": owned["acme-md.outline"], "example.editorial": {SchemaVersion: "1", Data: map[string]any{"headline": 42}}}
+	invalid := content.Extensions{"acme-md.outline": owned["acme-md.outline"], "example.editorial": owned["example.editorial"], "quivr.metadata": {SchemaVersion: "1", Data: map[string]any{"source_type": 42}}}
 	if err := r.Validate(content.WithExtensionWriter(context.Background(), "acme-md"), invalid); !errors.Is(err, content.ErrInvalid) {
 		t.Fatalf("built-in namespaces lost their validation beside an owned one: %v", err)
 	}

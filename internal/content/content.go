@@ -1152,13 +1152,24 @@ func (s Service) normalizedManifest(ctx context.Context, work *Work, n Normalize
 	provenance["normalization"] = normalization
 	work.Command.Provenance = provenance
 	if len(n.Extensions) > 0 {
-		// Plugin-owned namespaces never collide with submitted ones: clients
-		// cannot write them.
+		// Common metadata is shared by acquirers and normalizers. Overlay only
+		// the fields supplied by normalization, preserving the source's other
+		// values without mutating the accepted command.
 		extensions := make(Extensions, len(work.Command.Extensions)+len(n.Extensions))
 		for ns, ext := range work.Command.Extensions {
 			extensions[ns] = ext
 		}
 		for ns, ext := range n.Extensions {
+			if ns == CommonMetadataNamespace {
+				data := make(map[string]any)
+				for key, value := range extensions[ns].Data {
+					data[key] = value
+				}
+				for key, value := range ext.Data {
+					data[key] = value
+				}
+				ext.Data = data
+			}
 			extensions[ns] = ext
 		}
 		work.Command.Extensions = extensions

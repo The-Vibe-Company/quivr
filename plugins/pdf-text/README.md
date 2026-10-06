@@ -15,6 +15,8 @@ and it is also the worked example of [Write a normalizer](https://docs.quivr.the
 - The Version extension `pdf-text.document` (schema version `1`) holds
   `page_count` and `text_pages`, the number of pages with text. Retrieval
   mappings may point at `/extensions/pdf-text.document/data/page_count`.
+- The reserved `quivr.metadata` extension (schema version `1`) records
+  `source_type: "document"` and the PDF Info author when the file supplies one.
 - Quivr indexes text Parts with the `title` and `body` roles, so every page is
   searchable, and a search hit names its page through `part_key`.
 - The Record Version also keeps the input PDF in `provenance.source_blob_ids`,

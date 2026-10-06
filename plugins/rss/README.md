@@ -39,13 +39,16 @@ any other outcome is left to the next fetch.
 ## Compatibility with the built-in kind
 
 The kind was built into the core before. The plugin keeps its kind name, its
-schemas, its Record Keys and revisions, its extension namespace and its
-checkpoint format, so existing instances continue from their checkpoints with
-no duplicate and no gap. `testdata/golden` holds pages and checkpoints written
-by the built-in code; `parity_test.go` replays them. One bound is new: a page
-stops after about 12 MiB of items, under the 16 MiB response limit. The
-manifest declares `max_checkpoint_bytes: 131072` (Plugin API 0.3.1) so the
-2000 revisions the checkpoint keeps still fit.
+schemas, its Record Keys, extension namespace and checkpoint format, so
+existing instances continue from their checkpoints without losing feed items.
+The shared `quivr.metadata` extension is part of each emitted item's revision.
+When an old checkpoint receives a full-feed `200` response, even when the feed
+contents are unchanged, each still-present item can replay once so the new
+metadata is stored. A `304 Not Modified` preserves item revisions while it may
+advance the next-poll deadline. Later polls use the new revisions and are stable.
+`parity_test.go` replays the built-in pages and checkpoints in `testdata/golden`. One bound is new: a page stops after about 12 MiB of items, under the 16
+MiB response limit. The manifest declares `max_checkpoint_bytes: 131072`
+(Plugin API 0.3.1) so the 2000 revisions the checkpoint keeps still fit.
 
 ## Test
 
