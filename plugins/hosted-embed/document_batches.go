@@ -65,7 +65,12 @@ func (b *documentBatcher) submit(ctx context.Context, organization string, input
 	c := b.provider.config
 	tokens := 0
 	for _, input := range inputs {
-		tokens += len(input) + specialTokens
+		cost, err := b.provider.inputCost(ctx, input)
+		if err != nil {
+			<-b.slots
+			return nil, err
+		}
+		tokens += cost
 	}
 	b.mu.Lock()
 	batch := b.pending[organization]

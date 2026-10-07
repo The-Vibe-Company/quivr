@@ -26,6 +26,7 @@ const (
 	FeatureConnectorSubmissionConcurrency Feature = "connector_submission_concurrency"
 	FeatureConnectorAttachmentOnly        Feature = "connector_attachment_only"
 	FeatureCoverageSnapshots              Feature = "coverage_snapshots"
+	FeatureMultiPartSegments              Feature = "multi_part_segments"
 )
 
 // FeatureDefinition records the public history and manifest admission rules.
@@ -58,6 +59,7 @@ var featureTable = []FeatureDefinition{
 	{FeatureConnectorSubmissionConcurrency, "0.15.0", "Bounded concurrent connector item submissions", "", ""},
 	{FeatureConnectorAttachmentOnly, "0.15.0", "Raw connector Blob input through a source attachment", "", ""},
 	{FeatureCoverageSnapshots, "0.16.0", "Informational coverage snapshots with unknown state and age", "", ""},
+	{FeatureMultiPartSegments, "0.17.0", "Ingestion segments spanning ordered ranges from multiple Parts", "", ""},
 }
 
 // FeatureTable returns the introduction history, oldest first.

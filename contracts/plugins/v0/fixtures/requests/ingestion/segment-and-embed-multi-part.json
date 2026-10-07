@@ -1,0 +1,27 @@
+{
+  "invocation_id": "inv-multi-1",
+  "idempotency_key": "ingest:org-1:multi-version-1",
+  "contribution": "ingestion",
+  "organization_id": "org-1",
+  "configuration": {},
+  "version": {
+    "corpus_id": "corpus-1",
+    "record_id": "record-1",
+    "record_version_id": "multi-version-1"
+  },
+  "parts": [
+    {
+      "key": "title",
+      "role": "title",
+      "text": "Title"
+    },
+    {
+      "key": "body",
+      "role": "body",
+      "text": "alpha beta gamma"
+    }
+  ],
+  "spaces": [
+    "example.multi.small"
+  ]
+}

@@ -9,7 +9,7 @@ The HTTP routes a plugin serves, with every field of their JSON bodies, the erro
 
 ## Plugin API versions
 
-Latest Plugin API: `0.16.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`, `0.16.0`.
+Latest Plugin API: `0.17.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`, `0.16.0`, `0.17.0`.
 
 | Feature | Since |
 | --- | --- |
@@ -33,6 +33,7 @@ Latest Plugin API: `0.16.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Bounded concurrent connector item submissions | `0.15.0` |
 | Raw connector Blob input through a source attachment | `0.15.0` |
 | Informational coverage snapshots with unknown state and age | `0.16.0` |
+| Ingestion segments spanning ordered ranges from multiple Parts | `0.17.0` |
 
 ## Trace context
 
@@ -501,6 +502,11 @@ Since Plugin API 0.6. One Record Version's text Parts and the enabled vector spa
 | `segments[].part_key` | string | yes | Key of the request Part the segment is cut from. |
 | `segments[].start` | integer | yes | First Unicode code point of the segment in the Part text. |
 | `segments[].end` | integer | yes | Code point after the last one. start = end is an empty segment, allowed only when the request has a Part with the role title: the segment then stands for the title alone. |
+| `segments[].source_ranges` | array of object | no | Optional ordered non-empty source slices for a segment spanning Parts. The first range must equal the legacy part_key/start/end anchor. 1 to 256 items. |
+| `segments[].source_ranges[].part_key` | string | yes | Key of a request Part contributing one source slice. |
+| `segments[].source_ranges[].start` | integer | yes | First Unicode code point of the source slice in the Part text. |
+| `segments[].source_ranges[].end` | integer | yes | Code point after the last one in the source slice. |
+| `segments[].source_separator` | string | no | Optional Unicode separator used between source ranges when constructing the packed passage. Missing and empty separators are equivalent. At most 16 characters. |
 | `segments[].vectors` | map of array of number | yes | One vector per requested space, by space id; empty when the request asks for no space (since Plugin API 0.8). 0 to 8 entries. |
 | `segments[].lexical_text` | string | no | Optional keyword-search text for the segment (for example lower-cased, folded or stemmed words). The core indexes it in a separate keyword field; excerpts always come from the source text. At most 16384 code points, no NUL. |
 | `segments[].provenance` | object | no | Optional details of how the segment was made (token counts, the embedded text's template), at most 4 KiB once serialized. Stored with the segmentation, never interpreted. |
@@ -569,6 +575,9 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `served[].candidates[].start` | integer | yes | Offsets of the text in its Part, in Unicode code points. |
 | `served[].candidates[].end` | integer | yes | — |
 | `served[].candidates[].score` | number | yes | The index score for this request; higher is better. bm25: BM25F; hybrid: the fused score; near_vector: 1 minus the distance. |
+| `served[].candidates[].passage_text` | string | no | Optional packed passage text used for this candidate; text and its legacy offsets remain the anchor Part slice. At most 16384 characters. |
+| `served[].candidates[].source_ranges` | array of object | no | Optional ordered source slices contributing to passage_text; the first range equals the legacy part_key/start/end anchor. 1 to 256 items. |
+| `served[].candidates[].source_separator` | string | no | Optional Unicode separator used between source_ranges; missing and empty are equivalent. At most 16 characters. |
 | `served[].candidates[].explanation` | string | no | The inner profile explanation, when profile candidates supply one. 1 to 1024 characters. |
 | `budget` | object | no | Present only for profile-candidates capable plugins. Remaining hard deadline and cost allowance across this profile and its dependencies; reported usage covers this plugin only. |
 | `budget.remaining_time_ms` | integer | yes | — |

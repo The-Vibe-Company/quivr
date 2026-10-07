@@ -15,22 +15,31 @@ import (
 const pluginID = "hosted.embed"
 
 type configuration struct {
-	PluginID          string `json:"plugin_id"`
-	Format            string `json:"format"`
-	BaseURL           string `json:"base_url"`
-	Auth              string `json:"auth"`
-	Model             string `json:"model"`
-	Dimensions        int    `json:"dimensions"`
-	SendDimensions    bool   `json:"send_dimensions"`
-	Metric            string `json:"metric"`
-	Revision          string `json:"model_revision"`
-	PluginVersion     string `json:"plugin_version"`
-	QueryPrefix       string `json:"query_prefix"`
-	DocumentPrefix    string `json:"document_prefix"`
-	QueryInputType    string `json:"query_input_type"`
-	DocumentInputType string `json:"document_input_type"`
-	MaxTokens         int    `json:"max_tokens_per_segment"`
-	Overlap           int    `json:"overlap"`
+	PluginID          string                  `json:"plugin_id"`
+	Format            string                  `json:"format"`
+	BaseURL           string                  `json:"base_url"`
+	Auth              string                  `json:"auth"`
+	Model             string                  `json:"model"`
+	Dimensions        int                     `json:"dimensions"`
+	SendDimensions    bool                    `json:"send_dimensions"`
+	Metric            string                  `json:"metric"`
+	Revision          string                  `json:"model_revision"`
+	PluginVersion     string                  `json:"plugin_version"`
+	QueryPrefix       string                  `json:"query_prefix"`
+	DocumentPrefix    string                  `json:"document_prefix"`
+	QueryInputType    string                  `json:"query_input_type"`
+	DocumentInputType string                  `json:"document_input_type"`
+	MaxTokens         int                     `json:"max_tokens_per_segment"`
+	Overlap           int                     `json:"overlap"`
+	Packing           string                  `json:"packing"`
+	BodyTokens        int                     `json:"body_tokens"`
+	MaxChunks         int                     `json:"max_chunks"`
+	RebalanceTail     bool                    `json:"rebalance_tail"`
+	TailMinFraction   float64                 `json:"tail_min_fraction"`
+	TitleSource       string                  `json:"title_source"`
+	TitleContextParts []string                `json:"title_context_parts,omitempty"`
+	DocumentTemplate  string                  `json:"document_template"`
+	Tokenizer         *tokenizerConfiguration `json:"tokenizer,omitempty"`
 	// BatchWaitMS collects concurrent document inputs; zero disables collection.
 	BatchWaitMS           int      `json:"batch_wait_ms"`
 	BatchSize             int      `json:"batch_size"`
@@ -43,7 +52,7 @@ type configuration struct {
 }
 
 func parseConfiguration(raw []byte) (configuration, error) {
-	c := configuration{PluginID: pluginID, SendDimensions: true, Metric: "cosine", Revision: "1", PluginVersion: "1.0.0", QueryInputType: "search_query", DocumentInputType: "search_document", MaxTokens: 512, Overlap: 48, BatchSize: 16, BatchWaitMS: 25, BatchTokens: 8192, RequestTimeoutMS: 4000, CallBudgetMS: 30000, MaxRetries: 2, MaxConcurrentRequests: 4}
+	c := configuration{PluginID: pluginID, SendDimensions: true, Metric: "cosine", Revision: "1", PluginVersion: "1.1.0", QueryInputType: "search_query", DocumentInputType: "search_document", MaxTokens: 512, Overlap: 48, BatchSize: 16, BatchWaitMS: 25, BatchTokens: 8192, RequestTimeoutMS: 4000, CallBudgetMS: 30000, MaxRetries: 2, MaxConcurrentRequests: 4, Packing: "paragraphs", BodyTokens: 512, MaxChunks: 4, RebalanceTail: true, TailMinFraction: 0.25, TitleSource: "title", DocumentTemplate: "auto"}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
@@ -54,6 +63,26 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	}
 	if len(c.PluginID) > 40 || !regexp.MustCompile(`^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$`).MatchString(c.PluginID) {
 		return c, fmt.Errorf("plugin_id must be a plugin identifier of at most 40 characters")
+	}
+	if c.Packing != "paragraphs" && c.Packing != "none" || c.BodyTokens < 8 || c.BodyTokens > 32768 || c.MaxChunks < 1 || c.MaxChunks > 256 || c.TailMinFraction < 0 || c.TailMinFraction > 0.5 {
+		return c, fmt.Errorf("invalid packing budget, cap or tail settings")
+	}
+	if c.TitleSource != "title" && c.TitleSource != "none" && c.TitleSource != "inline" {
+		return c, fmt.Errorf("invalid title_source")
+	}
+	if c.DocumentTemplate != "auto" && c.DocumentTemplate != "prefix" && c.DocumentTemplate != "gemma" {
+		return c, fmt.Errorf("invalid document_template")
+	}
+	if len(c.TitleContextParts) > 16 {
+		return c, fmt.Errorf("too many title_context_parts")
+	}
+	for _, key := range c.TitleContextParts {
+		if key == "" || strings.ContainsRune(key, 0) {
+			return c, fmt.Errorf("invalid title context key")
+		}
+	}
+	if c.Tokenizer != nil && (c.Tokenizer.Python == "" || c.Tokenizer.Model == "" || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(c.Tokenizer.SHA256)) {
+		return c, fmt.Errorf("tokenizer requires python, model and sha256")
 	}
 	u, err := url.Parse(c.BaseURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -110,7 +139,7 @@ func parseConfiguration(raw []byte) (configuration, error) {
 
 func (c configuration) spaceID() string {
 	// Endpoint, credentials and execution tuning do not change vector meaning.
-	semantics := []any{c.Format, c.Model, c.Dimensions, c.Metric, c.Revision, c.QueryPrefix, c.DocumentPrefix, c.QueryInputType, c.DocumentInputType}
+	semantics := []any{c.Format, c.Model, c.Dimensions, c.Metric, c.Revision, c.QueryPrefix, c.DocumentPrefix, c.QueryInputType, c.DocumentInputType, c.DocumentTemplate, c.TitleSource, c.TitleContextParts}
 	raw, _ := json.Marshal(semantics)
 	sum := sha256.Sum256(raw)
 	slug := strings.Trim(regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(c.Model), "-"), "-")
@@ -146,6 +175,6 @@ func (c configuration) manifest(command []string) ([]byte, error) {
 	if c.InputPrice != nil {
 		space["input_price"] = map[string]any{"usd_per_million_tokens": *c.InputPrice}
 	}
-	m := map[string]any{"id": c.PluginID, "version": c.PluginVersion, "description": "Text windows embedded with a configured hosted or OpenAI-compatible model.", "compatibility": map[string]string{"engine": ">=0.1.0 <0.3.0", "plugin_api": ">=0.13.0 <0.14.0"}, "contributions": map[string]any{"ingestion": map[string]any{"spaces": map[string]any{c.spaceID(): space}, "timeout_ms": 120000, "query_timeout_ms": 10000, "limits": map[string]int{"max_segments": 256}}}, "configuration": map[string]any{"schema": schema}, "secrets": []any{map[string]any{"name": "AZURE_FOUNDRY_KEY", "required": c.Auth != "none", "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration."}}, "run": map[string]any{"command": command}}
+	m := map[string]any{"id": c.PluginID, "version": c.PluginVersion, "description": "Text windows embedded with a configured hosted or OpenAI-compatible model.", "compatibility": map[string]string{"engine": ">=0.1.0 <0.3.0", "plugin_api": ">=0.17.0 <0.18.0"}, "contributions": map[string]any{"ingestion": map[string]any{"spaces": map[string]any{c.spaceID(): space}, "timeout_ms": 120000, "query_timeout_ms": 10000, "limits": map[string]int{"max_segments": 256}}}, "configuration": map[string]any{"schema": schema}, "secrets": []any{map[string]any{"name": "AZURE_FOUNDRY_KEY", "required": c.Auth != "none", "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration."}}, "run": map[string]any{"command": command}}
 	return json.MarshalIndent(m, "", "  ")
 }

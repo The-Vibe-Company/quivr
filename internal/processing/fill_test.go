@@ -162,3 +162,35 @@ func TestFillAdoptsAVectorAnotherDerivationStoredFirst(t *testing.T) {
 		}
 	}
 }
+
+func TestFillRefusesChangedPackedSources(t *testing.T) {
+	v := content.Version{ID: "v", Manifest: content.Manifest{Parts: []content.Part{
+		{Key: "a", Role: "body", Content: content.Text{Kind: "text", Text: "first"}},
+		{Key: "b", Role: "body", Content: content.Text{Kind: "text", Text: "second"}},
+	}}}
+	projected := content.SegmentInput{PartKey: "a", End: 5, SourceRanges: []content.SourceRange{{PartKey: "a", End: 5}, {PartKey: "b", End: 6}}, SourceSeparator: "\n\n"}
+	seg, err := content.PluginSegmentation("org", v, "plugin:p@1", nil, []content.SegmentInput{projected})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []string{"later range", "separator"} {
+		t.Run(change, func(t *testing.T) {
+			answer := projected
+			answer.SourceRanges = append([]content.SourceRange(nil), projected.SourceRanges...)
+			if change == "later range" {
+				answer.SourceRanges[1].End = 5
+			} else {
+				answer.SourceSeparator = " "
+			}
+			calls := 0
+			store := &memoryArtifacts{byDerivation: map[string]content.Embedding{}, blobs: map[string][]byte{}}
+			d := processing.PluginDeriver{Content: content.Service{Embeddings: store, Blobs: store}, Plugin: fillPlugin{segments: []content.SegmentInput{answer}, calls: &calls}}
+			if _, err = d.Fill(t.Context(), "org", "corpus", v, seg, []string{"p.large@1"}); !errors.Is(err, processing.ErrSegmentsDiffer) {
+				t.Fatalf("changed %s accepted: %v", change, err)
+			}
+			if len(store.byDerivation) != 0 {
+				t.Fatal("stored vector for different packed source")
+			}
+		})
+	}
+}

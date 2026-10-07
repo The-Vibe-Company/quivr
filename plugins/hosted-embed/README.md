@@ -2,7 +2,7 @@
 
 Reference for operators choosing a text embedding model. This optional Go
 plugin cuts text and embeds it through OpenAI-compatible or Cohere v2 HTTP
-APIs. It declares one configured vector space on Plugin API 0.13.0. The
+APIs. It declares one configured vector space on Plugin API 0.17.0. The
 engine's evaluation, backfill, promotion and rollback operations use that
 space normally. Keep `core.ingest` pinned as the rollback target when
 installing this separate plugin.
@@ -107,7 +107,7 @@ The generated space belongs to that ID. See
 and [backfill](https://docs.quivr.thevibecompany.co/plugins/backfill-a-vector-space).
 
 Each changed configuration is a new immutable registration: increment
-`plugin_version` (default `1.0.0`), regenerate and certify its package, then
+`plugin_version` (default `1.1.0`), regenerate and certify its package, then
 install it. The space id includes the model, dimensions and a hash of the wire
 format, metric, model revision and input templates. Changing any of those
 creates a new space. Set `model_revision` when a deployment name starts serving
@@ -125,8 +125,17 @@ Corpora need a rebuild or backfill before they carry a newly configured space.
 | `query_prefix`, `document_prefix` | empty | Text prepended before embedding |
 | `query_input_type`, `document_input_type` | `search_query`, `search_document` | Cohere retrieval modes |
 | `send_dimensions` | `true` | Send dimensions to the provider; always validate returned size |
-| `max_tokens_per_segment` | `512` | Maximum estimated model input tokens, 8–32768 |
-| `overlap` | `48` | Overlapping source bytes, always at code point boundaries |
+| `max_tokens_per_segment` | `512` | Full input window including title/template and special tokens, 8–32768 |
+| `packing` | `paragraphs` | Whole consecutive body paragraphs; `none` retains per-Part windows |
+| `body_tokens` | `512` | Body budget excluding the title prefix |
+| `max_chunks` | `4` | Maximum packed passages per Version, 1–256; excess is refused without truncation |
+| `rebalance_tail` | `true` | Move whole paragraphs between the last two passages to balance a short tail |
+| `tail_min_fraction` | `0.25` | Rebalance a tail below this fraction of the body budget, 0–0.5 |
+| `title_source` | `title` | `title`, `none`, or `inline`; headline comes from the sole title Part |
+| `title_context_parts` | empty | Optional explicit Part keys appended to title context in listed order |
+| `document_template` | `auto` | `gemma`, `prefix`, or model-name detection with `auto` |
+| `tokenizer` | absent | Local `python`, `model` path and `sha256` for pinned tokenizers 0.23.2 |
+| `overlap` | `48` | Legacy `packing: "none"` overlap in source bytes; paragraph packing uses no overlap |
 | `batch_size` | `16` | Most document inputs per provider request, across Versions, 1–32 |
 | `batch_wait_ms` | `25` | Document collection window, 0–100 ms and less than `call_budget_ms`; 0 disables cross-Version batching |
 | `max_batch_tokens` | `8192` | Maximum summed input estimate per request; at least the segment limit |
@@ -164,16 +173,38 @@ retry backoff supplies the shared delay. This cap and the engine's evaluation
 and backfill concurrency limits apply per process; tune all of them to your
 provider's allowance.
 
-Windows prefer paragraph, line and sentence endings in their latter half.
-Offsets refer to Unicode code points in the original body Part; if there is no
-nonempty body, the title is segmented instead. No tokenizer or model download
-is needed. One UTF-8 byte counts as one estimated token, plus eight reserved
-special tokens and the full prefix. This deliberately underfills byte/subword
-models. Configure the limit below the provider's actual maximum, and raise the
-reserve in a future plugin version for models with more special tokens. Queries
-over this bound are refused, without silent truncation.
+Paragraph packing preserves complete paragraphs and their reading order. It only
+splits a paragraph when that paragraph exceeds a budget or the excerpt bound.
+Consecutive body Parts can share a passage; other roles interrupt packing.
+There is no overlap. A final passage below `tail_min_fraction` is rebalanced
+with its predecessor by moving whole paragraphs, minimizing token imbalance;
+ties move the fewest paragraphs. Each source range remains an exact Unicode
+code-point slice of an immutable Part. Search responses expose `passage_text`
+and `source_excerpts`; the original `excerpt` remains the first source slice.
 
-A Version may have at most 64 Parts, one title, 256 KiB of text and 256 windows.
+For EmbeddingGemma, `auto` selects `title: {headline} | text: {body}`. Missing
+headlines use `title: none`. Dates, categories and codes are not automatically
+embedded. Generic prefix templates prepend the selected headline to the body.
+Set `title_source: "none"` to omit it. Queries keep their configured prefix.
+
+Use `python3 scripts/prepare_tokenizer.py --hosted` to prepare the pinned Gemma
+tokenizer offline before startup. Configure the returned local tokenizer paths
+and checksum. The Railway image prepares this tokenizer and uses a 512-token
+body budget with a 2048-token full window. Other models need their matching
+local tokenizer. Without one, a UTF-8 byte counts as one conservative token,
+plus eight reserved special tokens; this underfills subword models. No model
+weights are downloaded. Queries over the full window are refused.
+
+Every packing, title, tokenizer and tail option belongs to the immutable
+segmentation recipe. Install a new registration and rebuild existing Corpora
+when these settings change; a backfill requires matching cuts and cannot
+convert old per-Part segments into packed passages. Served segments remain
+unchanged until rebuild activation. Batching alone preserves cuts and space
+semantics. Core ingestion keeps its existing per-Part behavior.
+
+A Version may have at most 64 Parts, one title and 256 KiB of text. Packed
+passages allow at most 256 source ranges, 4096 code points per source excerpt
+and 16384 code points in the joined passage. `packing: "none"` allows 256 windows.
 Invalid text or oversized content is terminal. Provider 4xx responses other
 than 429 are terminal; transport failures, malformed vectors, 429 and 5xx are
 retryable. `Retry-After` seconds and HTTP dates take precedence over exponential
@@ -197,7 +228,7 @@ attempt, the count is the conservative input estimate. Sum these records by
 space and mode to account for document and query calls, including retries.
 Failed-attempt estimates make this an upper bound on billed input when a
 provider rejected the request before processing. Cached document vectors
-produce no provider call or token charge. API 0.13 has no ingestion response
+produce no provider call or token charge. API 0.17 has no ingestion response
 usage field; this accounting interface is the plugin's structured log.
 
 `make check` certifies generated packages in both formats against the shared

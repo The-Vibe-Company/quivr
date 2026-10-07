@@ -37,6 +37,43 @@
             "minimum": 0,
             "description": "Code point after the last one. start = end is an empty segment, allowed only when the request has a Part with the role title: the segment then stands for the title alone."
           },
+          "source_ranges": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "part_key",
+                "start",
+                "end"
+              ],
+              "properties": {
+                "part_key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Key of a request Part contributing one source slice."
+                },
+                "start": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "First Unicode code point of the source slice in the Part text."
+                },
+                "end": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Code point after the last one in the source slice."
+                }
+              }
+            },
+            "description": "Optional ordered non-empty source slices for a segment spanning Parts. The first range must equal the legacy part_key/start/end anchor."
+          },
+          "source_separator": {
+            "type": "string",
+            "maxLength": 16,
+            "description": "Optional Unicode separator used between source ranges when constructing the packed passage. Missing and empty separators are equivalent."
+          },
           "vectors": {
             "type": "object",
             "minProperties": 0,

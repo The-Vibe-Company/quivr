@@ -33,7 +33,7 @@ WORKDIR /app
 COPY scripts/prepare_tokenizer.py ./scripts/
 COPY third_party/tokenizer ./third_party/tokenizer
 COPY plugins/core-ingest/profile.json ./plugins/core-ingest/profile.json
-RUN python scripts/prepare_tokenizer.py
+RUN python scripts/prepare_tokenizer.py --hosted
 
 # First-party Python sidecars: newsml-g2 always runs for archive ingestion;
 # alerts/pdf-text use QUIVR_DEMO_PLUGINS=1;

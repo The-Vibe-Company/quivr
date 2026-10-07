@@ -996,10 +996,19 @@ class SegmentAndEmbedRequest(Model):
 
 
 @dataclass(kw_only=True)
+class SegmentAndEmbedResponseSegmentsItemSourceRangesItem(Model):
+    part_key: str
+    start: int
+    end: int
+
+
+@dataclass(kw_only=True)
 class SegmentAndEmbedResponseSegmentsItem(Model):
     part_key: str
     start: int
     end: int
+    source_ranges: list[SegmentAndEmbedResponseSegmentsItemSourceRangesItem] | None = None
+    source_separator: str | None = None
     vectors: dict[str, list[float]]
     lexical_text: str | None = None
     provenance: dict[str, Any] | None = None
@@ -1145,6 +1154,15 @@ class CandidateRequest(Model):
 
 
 @dataclass(kw_only=True)
+class SourceRange(Model):
+    "One source Part slice, using Unicode code point offsets."
+
+    part_key: str
+    start: int
+    end: int
+
+
+@dataclass(kw_only=True)
 class Candidate(Model):
     "One served candidate: an authorized, current segment of a Record."
 
@@ -1156,6 +1174,9 @@ class Candidate(Model):
     start: int
     end: int
     score: float
+    passage_text: str | None = None
+    source_ranges: list[SourceRange] | None = None
+    source_separator: str | None = None
     explanation: str | None = None
 
 
@@ -1390,8 +1411,10 @@ __all__ = [
     "SegmentAndEmbedRequestVersion",
     "SegmentAndEmbedResponse",
     "SegmentAndEmbedResponseSegmentsItem",
+    "SegmentAndEmbedResponseSegmentsItemSourceRangesItem",
     "SignedUrlReference",
     "SourceIdentity",
+    "SourceRange",
     "SubscriptionContribution",
     "SubscriptionContributionVectors",
     "SubscriptionFixture",

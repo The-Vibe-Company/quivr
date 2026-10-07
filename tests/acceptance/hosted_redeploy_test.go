@@ -106,7 +106,7 @@ func TestHostedEmbeddingRedeployAfter(t *testing.T) {
 		t.Fatal("redeploy did not replace the exact build registration")
 	}
 	plan := request(t, "GET", "/v0/admin/plugins/plan", operator, nil, 200)
-	if plan["plan_id"] == s.PromotedPlan || planRoles(plan)["ingestion-route:text/plain"] != "hosted.embed@1.0.0" || planRoles(plan)["ingestion-evaluation:text/plain:core.ingest"] == "" {
+	if plan["plan_id"] == s.PromotedPlan || planRoles(plan)["ingestion-route:text/plain"] != "hosted.embed@1.1.0" || planRoles(plan)["ingestion-evaluation:text/plain:core.ingest"] == "" {
 		t.Fatalf("redeploy lost promoted routing: %v", plan)
 	}
 	hostedRedeploySearch(t, admin, s, space)

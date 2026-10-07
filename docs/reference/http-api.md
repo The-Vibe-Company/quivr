@@ -10647,6 +10647,13 @@ One authorized segment hit. Rehydrate from canonical storage and recheck Organiz
 | `vector_space_id` | string |  | Minimum length `1`. |
 | `rank` | integer | yes | Minimum `1`. |
 | `excerpt` | [`SearchExcerpt`](#searchexcerpt) | yes |  |
+| `passage_text` | string |  | Exact packed passage text used for the hit, when the segment spans multiple source ranges. Maximum length `16384`. |
+| `source_excerpts` | array of object |  | At most `256` items. |
+| `source_excerpts[].part_key` | string | yes | Minimum length `1`. |
+| `source_excerpts[].text` | string | yes | Maximum length `4096`. |
+| `source_excerpts[].start` | integer | yes | Minimum `0`. |
+| `source_excerpts[].end` | integer | yes | Minimum `0`. |
+| `source_excerpts[].coordinate_system` | string | yes | One of `unicode_codepoint`. |
 | `availability` | [`Availability`](#availability) | yes |  |
 | `explanation` | string |  | Why the retrieval plugin ranked this hit here, when it says so. Minimum length `1`. Maximum length `1024`. |
 
@@ -10688,6 +10695,39 @@ properties:
     minimum: 1
   excerpt:
     $ref: '#/components/schemas/SearchExcerpt'
+  passage_text:
+    type: string
+    maxLength: 16384
+    description: Exact packed passage text used for the hit, when the segment spans multiple source ranges.
+  source_excerpts:
+    type: array
+    maxItems: 256
+    items:
+      type: object
+      additionalProperties: false
+      properties:
+        part_key:
+          type: string
+          minLength: 1
+        text:
+          type: string
+          maxLength: 4096
+        start:
+          type: integer
+          minimum: 0
+        end:
+          type: integer
+          minimum: 0
+        coordinate_system:
+          type: string
+          enum:
+            - unicode_codepoint
+      required:
+        - part_key
+        - text
+        - start
+        - end
+        - coordinate_system
   availability:
     $ref: '#/components/schemas/Availability'
   explanation:

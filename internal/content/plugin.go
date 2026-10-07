@@ -3,6 +3,8 @@ package content
 import (
 	"context"
 	"encoding/json"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
@@ -11,10 +13,12 @@ import (
 // code point offsets into a text Part, and the lexical text and provenance
 // the plugin returned for it.
 type SegmentInput struct {
-	PartKey     string
-	Start, End  int
-	LexicalText string
-	Provenance  json.RawMessage
+	PartKey         string
+	Start, End      int
+	LexicalText     string
+	Provenance      json.RawMessage
+	SourceRanges    []SourceRange
+	SourceSeparator string
 }
 
 // StoredSegmentation is a segmentation as PostgreSQL keeps it: its identity,
@@ -71,6 +75,23 @@ func PluginSegmentation(org string, v Version, recipe string, provenance json.Ra
 		d := SegmentDerivation{Ordinal: i, UTF8Start: len(string(runes[:s.Start])), UTF8End: len(string(runes[:s.End])),
 			NormalizedSHA256: Hash([]byte(text)), ModelInputSHA256: empty, LexicalText: s.LexicalText, Provenance: canonical(s.Provenance)}
 		segment := Segment{PartKey: s.PartKey, Text: string(runes[s.Start:s.End]), Start: s.Start, End: s.End, Title: title, TitleKey: titleKey, Derivation: d}
+		if len(s.SourceRanges) > 0 {
+			ranges, slices, err := SourceSlices(v, s.SourceRanges)
+			if err != nil || ranges[0].PartKey != s.PartKey || ranges[0].Start != s.Start || ranges[0].End != s.End || !validSourceSeparator(s.SourceSeparator) {
+				return out, ErrInvalid
+			}
+			segment.Derivation.SourceRanges = ranges
+			segment.Derivation.SourceSeparator = s.SourceSeparator
+			segment.SourceExcerpts = slices
+			texts := make([]string, len(slices))
+			for k, slice := range slices {
+				texts[k] = slice.Text
+			}
+			segment.Text = strings.Join(texts, s.SourceSeparator)
+			if utf8.RuneCountInString(segment.Text) > 16384 {
+				return out, ErrInvalid
+			}
+		}
 		segment.ID = SegmentID(org, out.ID, segment)
 		out.Segments = append(out.Segments, segment)
 	}
@@ -95,7 +116,7 @@ func (s Service) PluginSegmentationOf(ctx context.Context, org string, v Version
 	}
 	in := make([]SegmentInput, len(stored.Segments))
 	for i, p := range stored.Segments {
-		in[i] = SegmentInput{PartKey: p.PartKey, Start: p.Start, End: p.End, LexicalText: p.Derivation.LexicalText, Provenance: p.Derivation.Provenance}
+		in[i] = SegmentInput{PartKey: p.PartKey, Start: p.Start, End: p.End, LexicalText: p.Derivation.LexicalText, Provenance: p.Derivation.Provenance, SourceRanges: p.Derivation.SourceRanges, SourceSeparator: p.Derivation.SourceSeparator}
 	}
 	seg, err := PluginSegmentation(org, v, recipe, stored.Provenance, in)
 	if err != nil {

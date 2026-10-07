@@ -641,6 +641,25 @@
           "type": "number",
           "description": "The index score for this request; higher is better. bm25: BM25F; hybrid: the fused score; near_vector: 1 minus the distance."
         },
+        "passage_text": {
+          "type": "string",
+          "maxLength": 16384,
+          "description": "Optional packed passage text used for this candidate; text and its legacy offsets remain the anchor Part slice."
+        },
+        "source_ranges": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/SourceRange"
+          },
+          "description": "Optional ordered source slices contributing to passage_text; the first range equals the legacy part_key/start/end anchor."
+        },
+        "source_separator": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Optional Unicode separator used between source_ranges; missing and empty are equivalent."
+        },
         "explanation": {
           "type": "string",
           "minLength": 1,
@@ -648,6 +667,31 @@
           "description": "The inner profile explanation, when profile candidates supply one."
         }
       }
+    },
+    "SourceRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "part_key",
+        "start",
+        "end"
+      ],
+      "properties": {
+        "part_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "One source Part slice, using Unicode code point offsets."
     },
     "Filter": {
       "type": "object",

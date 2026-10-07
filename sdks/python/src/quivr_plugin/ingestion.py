@@ -8,8 +8,9 @@ import struct
 from collections.abc import Callable
 from typing import Any
 
-from .errors import ConfigurationError, PluginError
+from .api_versions import FEATURE_SINCE
 from ._json import storage_encoded
+from .errors import ConfigurationError, PluginError
 from .logs import invocation_context
 from .manifest import LoadedManifest
 from .models import (
@@ -27,6 +28,9 @@ MAX_EMBED_QUERY_RESPONSE_BYTES = 1 << 20
 MAX_LEXICAL_TEXT_CODEPOINTS = 16384
 MAX_PROVENANCE_BYTES = 4 << 10
 MAX_FLOAT32 = 3.4028234663852886e38
+MAX_SOURCE_RANGES = 256
+MAX_SOURCE_SEPARATOR_CODEPOINTS = 16
+MULTI_PART_SEGMENTS_API = FEATURE_SINCE.get("multi_part_segments", "0.17.0")
 
 SegmentAndEmbedHandler = Callable[[SegmentAndEmbedRequest], SegmentAndEmbedResponse | dict[str, Any]]
 EmbedQueryHandler = Callable[[EmbedQueryRequest], EmbedQueryResponse | dict[str, Any]]
@@ -64,6 +68,68 @@ def _finite_float32(value: Any) -> bool:
     return True
 
 
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    try:
+        major, minor, patch = (int(item) for item in value.split("."))
+    except (TypeError, ValueError):
+        return (0, 0, 0)
+    return major, minor, patch
+
+
+def _supports_multi_part_segments(manifest: LoadedManifest) -> bool:
+    return _version_tuple(manifest.plugin_api) >= _version_tuple(MULTI_PART_SEGMENTS_API)
+
+
+def _source_ranges_problems(manifest: LoadedManifest, segment: dict[str, Any], prefix: str,
+                            part_order: dict[str, int], lengths: dict[str, int]) -> list[str]:
+    problems: list[str] = []
+    ranges = segment.get("source_ranges")
+    separator = segment.get("source_separator")
+    if "source_ranges" in segment or "source_separator" in segment:
+        if not _supports_multi_part_segments(manifest):
+            problems.append(f"{prefix}: source ranges and separators require Plugin API {MULTI_PART_SEGMENTS_API}")
+    if separator is not None:
+        if "\x00" in separator:
+            problems.append(f"{prefix}/source_separator: source separator contains NUL")
+        elif len(separator) > MAX_SOURCE_SEPARATOR_CODEPOINTS:
+            problems.append(f"{prefix}/source_separator: source separator exceeds {MAX_SOURCE_SEPARATOR_CODEPOINTS} code points")
+    if not ranges:
+        return problems
+    if len(ranges) > MAX_SOURCE_RANGES:
+        problems.append(f"{prefix}/source_ranges: source ranges exceed {MAX_SOURCE_RANGES} items")
+    first = ranges[0]
+    if (first["part_key"], first["start"], first["end"]) != (segment["part_key"], segment["start"], segment["end"]):
+        problems.append(f"{prefix}/source_ranges/0: first source range must equal the legacy anchor")
+    seen: dict[tuple[str, int, int], int] = {}
+    last_part = -1
+    last_end: dict[str, int] = {}
+    for index, source_range in enumerate(ranges):
+        range_prefix = f"{prefix}/source_ranges/{index}"
+        key = source_range["part_key"]
+        start = source_range["start"]
+        end = source_range["end"]
+        if key not in lengths:
+            problems.append(f"{range_prefix}/part_key: the Part key is not in the request")
+            continue
+        if start >= end:
+            problems.append(f"{range_prefix}: source ranges must be non-empty")
+        elif start < 0 or end > lengths[key]:
+            problems.append(f"{range_prefix}: offsets [{start}, {end}) are outside the Part text")
+        identity = (key, start, end)
+        if identity in seen:
+            problems.append(f"{range_prefix}: source range is duplicated")
+            continue
+        else:
+            seen[identity] = index
+        order = part_order[key]
+        if order < last_part or (order == last_part and start < last_end.get(key, 0)):
+            problems.append(f"{range_prefix}: source ranges are out of reading order or overlap")
+        if order > last_part:
+            last_part = order
+        last_end[key] = max(last_end.get(key, 0), end)
+    return problems
+
+
 def _response_document(response: Any, model: type) -> dict[str, Any]:
     if isinstance(response, model):
         return response.to_dict()
@@ -88,10 +154,11 @@ def _output_problems(manifest: LoadedManifest, request: SegmentAndEmbedRequest,
         problems.append("the response exceeds max_segments")
 
     lengths = {part.key: len(part.text) for part in request.parts}
+    part_order = {part.key: index for index, part in enumerate(request.parts)}
     has_title = any(part.role == "title" for part in request.parts)
     spaces = manifest.model.contributions.ingestion.spaces
     requested = set(request.spaces)
-    seen: set[tuple[str, int, int]] = set()
+    seen: set[tuple[Any, ...]] = set()
     for index, segment in enumerate(segments):
         prefix = f"/segments/{index}"
         part_key = segment.get("part_key")
@@ -103,7 +170,9 @@ def _output_problems(manifest: LoadedManifest, request: SegmentAndEmbedRequest,
             problems.append(f"{prefix}: offsets [{start}, {end}) are outside the Part text")
         elif start == end and not has_title:
             problems.append(f"{prefix}: an empty segment requires a title Part")
-        identity = (part_key, start, end)
+        problems.extend(_source_ranges_problems(manifest, segment, prefix, part_order, lengths))
+        source_ranges = segment.get("source_ranges") or []
+        identity = tuple((item["part_key"], item["start"], item["end"]) for item in source_ranges) if source_ranges else (part_key, start, end)
         if identity in seen:
             problems.append(f"{prefix}: the segment is duplicated")
         seen.add(identity)

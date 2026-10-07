@@ -58,16 +58,26 @@ type IngestRequest struct {
 // Logger returns the request logger.
 func (r *IngestRequest) Logger() *slog.Logger { return r.logger }
 
+// SourceRange is one non-empty Unicode code point slice of a request Part.
+// Ranges in one Segment are listed in the request's reading order.
+type SourceRange struct {
+	PartKey string `json:"part_key"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+}
+
 // Segment is one segment of a Part: Unicode code point offsets [Start, End)
-// in the Part text, a vector per requested space, and optional lexical text
-// and provenance.
+// in the Part text, a vector per requested space, and optional lexical text,
+// provenance and multi-Part source ranges.
 type Segment struct {
-	PartKey     string               `json:"part_key"`
-	Start       int                  `json:"start"`
-	End         int                  `json:"end"`
-	Vectors     map[string][]float32 `json:"vectors"`
-	LexicalText string               `json:"lexical_text,omitempty"`
-	Provenance  map[string]any       `json:"provenance,omitempty"`
+	PartKey         string               `json:"part_key"`
+	Start           int                  `json:"start"`
+	End             int                  `json:"end"`
+	SourceRanges    []SourceRange        `json:"source_ranges,omitempty"`
+	SourceSeparator string               `json:"source_separator,omitempty"`
+	Vectors         map[string][]float32 `json:"vectors"`
+	LexicalText     string               `json:"lexical_text,omitempty"`
+	Provenance      map[string]any       `json:"provenance,omitempty"`
 }
 
 // QueryRequest is a validated embed_query request.
@@ -214,9 +224,11 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		return nil, fmt.Sprintf("%d segments exceed max_segments %d", len(segments), in.Limits.MaxSegments)
 	}
 	lengths := map[string]int{}
+	partOrder := map[string]int{}
 	hasTitle := false
-	for _, part := range req.Parts {
+	for index, part := range req.Parts {
 		lengths[part.Key] = utf8.RuneCountInString(part.Text)
+		partOrder[part.Key] = index
 		hasTitle = hasTitle || part.Role == "title"
 	}
 	seen := map[string]bool{}
@@ -232,7 +244,24 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		if s.Start == s.End && !hasTitle {
 			return nil, fmt.Sprintf("segment %d is empty without a title Part", i)
 		}
-		identity := fmt.Sprintf("%s\x00%d\x00%d", s.PartKey, s.Start, s.End)
+		if len(s.SourceRanges) > 0 || s.SourceSeparator != "" {
+			if compareVersions(p.m.pluginAPI, "0.17.0") < 0 {
+				return nil, fmt.Sprintf("segment %d uses source ranges or a source separator, which requires Plugin API 0.17.0", i)
+			}
+		}
+		if len(s.SourceRanges) > 256 {
+			return nil, fmt.Sprintf("segment %d has %d source ranges; at most 256 are allowed", i, len(s.SourceRanges))
+		}
+		if !utf8.ValidString(s.SourceSeparator) || strings.ContainsRune(s.SourceSeparator, 0) {
+			return nil, fmt.Sprintf("segment %d: source separator must be valid UTF-8 without NUL", i)
+		}
+		if utf8.RuneCountInString(s.SourceSeparator) > 16 {
+			return nil, fmt.Sprintf("segment %d: source separator must be at most 16 code points", i)
+		}
+		if problem := sourceRangesProblem(s, lengths, partOrder); problem != "" {
+			return nil, fmt.Sprintf("segment %d: %s", i, problem)
+		}
+		identity := sourceSegmentIdentity(s)
 		if seen[identity] {
 			return nil, fmt.Sprintf("segment %d repeats the same Part and offsets", i)
 		}
@@ -270,6 +299,55 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		return nil, "the segments do not match the response schema: " + err.Error()
 	}
 	return body, ""
+}
+
+func sourceSegmentIdentity(s Segment) string {
+	if len(s.SourceRanges) == 0 {
+		return fmt.Sprintf("%s\x00%d\x00%d", s.PartKey, s.Start, s.End)
+	}
+	var b strings.Builder
+	for _, r := range s.SourceRanges {
+		fmt.Fprintf(&b, "%s\x00%d\x00%d\x00", r.PartKey, r.Start, r.End)
+	}
+	return b.String()
+}
+
+func sourceRangesProblem(s Segment, lengths, partOrder map[string]int) string {
+	if len(s.SourceRanges) == 0 {
+		return ""
+	}
+	first := s.SourceRanges[0]
+	if first.PartKey != s.PartKey || first.Start != s.Start || first.End != s.End {
+		return "the first source range must equal the legacy part_key/start/end anchor"
+	}
+	seen := map[string]bool{}
+	lastPart := -1
+	lastEnd := map[string]int{}
+	for _, r := range s.SourceRanges {
+		length, ok := lengths[r.PartKey]
+		if !ok {
+			return fmt.Sprintf("source range names unknown Part %q", r.PartKey)
+		}
+		if r.Start < 0 || r.Start >= r.End || r.End > length {
+			return fmt.Sprintf("source range [%d, %d) is not a non-empty slice of Part %q", r.Start, r.End, r.PartKey)
+		}
+		identity := fmt.Sprintf("%s\x00%d\x00%d", r.PartKey, r.Start, r.End)
+		if seen[identity] {
+			return fmt.Sprintf("source range [%d, %d) of Part %q is duplicated", r.Start, r.End, r.PartKey)
+		}
+		seen[identity] = true
+		order := partOrder[r.PartKey]
+		if order < lastPart || (order == lastPart && r.Start < lastEnd[r.PartKey]) {
+			return "source ranges must follow request Part order and be increasing without overlap within a Part"
+		}
+		if order > lastPart {
+			lastPart = order
+		}
+		if r.End > lastEnd[r.PartKey] {
+			lastEnd[r.PartKey] = r.End
+		}
+	}
+	return ""
 }
 
 func (p *Plugin) serveEmbedQuery(w http.ResponseWriter, r *http.Request) {
