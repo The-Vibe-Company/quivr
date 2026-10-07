@@ -321,6 +321,13 @@ func (s ConnectorStore) ChangeSchedule(ctx context.Context, org, id string, inte
 // floor after the last run and by the source's Retry-After, in one statement
 // so a concurrent FinishRun or disable is seen whole. Repeating it is a no-op.
 func (s ConnectorStore) RequestRun(ctx context.Context, org, id string, floor time.Duration) (time.Time, error) {
+	var archived bool
+	if err := database(ctx, s.Pool).QueryRow(ctx, `SELECT cp.archived FROM connector_instances ci JOIN corpora cp ON (cp.organization,cp.id)=(ci.organization,ci.corpus_id) WHERE ci.organization=$1 AND ci.id=$2`, org, id).Scan(&archived); err != nil {
+		return time.Time{}, notFound(err)
+	}
+	if archived {
+		return time.Time{}, corpus.ErrArchived
+	}
 	var enabled bool
 	var at time.Time
 	err := database(ctx, s.Pool).QueryRow(ctx, `UPDATE connector_instances SET next_run_at=CASE WHEN enabled THEN LEAST(next_run_at,GREATEST(now(),
@@ -386,7 +393,7 @@ func (s ConnectorStore) ReplaceCredential(ctx context.Context, org, id string, d
 func (s ConnectorStore) ClaimConnectorRuns(ctx context.Context, lease time.Duration, limit int) ([]connectors.ConnectorRun, error) {
 	q, _ := workqueue.Selected(ctx)
 	rows, err := database(ctx, s.Pool).Query(ctx, `UPDATE connector_instances c SET lease_until=now()+make_interval(secs => $1::double precision)
-FROM (SELECT organization,id FROM connector_instances WHERE ($3='' OR work_queue=$3) AND enabled AND next_run_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at LIMIT $2 FOR UPDATE SKIP LOCKED) d
+FROM (SELECT organization,id FROM connector_instances ci WHERE ($3='' OR work_queue=$3) AND enabled AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=ci.organization AND cp.id=ci.corpus_id AND cp.archived) AND next_run_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at LIMIT $2 FOR UPDATE SKIP LOCKED) d
 WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,c.run_sequence,c.work_queue`, lease.Seconds(), limit, q)
 	if err != nil {
 		return nil, err
@@ -407,6 +414,33 @@ WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,
 func (s ConnectorStore) ReleaseConnectorRun(ctx context.Context, r connectors.ConnectorRun) error {
 	_, err := database(ctx, s.Pool).Exec(ctx, "UPDATE connector_instances SET lease_until=NULL WHERE organization=$1 AND id=$2 AND run_sequence=$3", r.Organization, r.ConnectorID, r.Run)
 	return err
+}
+
+// BeginPoll admits one external attempt while holding the corpus row shared.
+// Archive cannot commit until admitted attempts release; later attempts observe
+// the archive even when their run target was loaded before the transition.
+func (s ConnectorStore) BeginPoll(ctx context.Context, org, id string, run int64) (func(), bool, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	release := func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanup)
+	}
+	var active bool
+	err = tx.QueryRow(ctx, `SELECT ci.enabled AND ci.run_sequence=$3 AND NOT cp.archived
+ FROM connector_instances ci JOIN corpora cp ON (cp.organization,cp.id)=(ci.organization,ci.corpus_id)
+ WHERE ci.organization=$1 AND ci.id=$2 FOR SHARE OF cp`, org, id, run).Scan(&active)
+	if err != nil || !active {
+		release()
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = nil
+		}
+		return nil, false, err
+	}
+	return release, true, nil
 }
 
 // LoadRun reads an instance, its checkpoint and its current sealed credential.
@@ -447,6 +481,13 @@ func (s ConnectorStore) LoadDelivery(ctx context.Context, id string) (connectors
 
 func (s ConnectorStore) target(ctx context.Context, in connectors.Instance) (connectors.Target, error) {
 	org, id := in.Organization, in.ID
+	var archived bool
+	if err := database(ctx, s.Pool).QueryRow(ctx, `SELECT archived FROM corpora WHERE organization=$1 AND id=$2`, org, in.CorpusID).Scan(&archived); err != nil {
+		return connectors.Target{}, notFound(err)
+	}
+	if archived {
+		in.Enabled = false
+	}
 	t := connectors.Target{Instance: in}
 	var err error
 	if in.Health.Usage != nil {
@@ -501,7 +542,7 @@ func (s ConnectorStore) CommitCheckpoint(ctx context.Context, org, id string, ru
  push_error_class=CASE WHEN $12 THEN 'transient' ELSE push_error_class END,
  push_error_code=CASE WHEN $12 THEN '`+connectors.CodeMissedDeliveries+`' ELSE push_error_code END,
  push_error_at=CASE WHEN $12 THEN now() ELSE push_error_at END
-WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled`, org, id, run, []byte(p.Checkpoint), p.Items, p.Reads, diagnostics, pushState, pushClass, pushCode, pushInterval, p.Missed)
+WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=connector_instances.organization AND cp.id=connector_instances.corpus_id AND cp.archived)`, org, id, run, []byte(p.Checkpoint), p.Items, p.Reads, diagnostics, pushState, pushClass, pushCode, pushInterval, p.Missed)
 	return tag.RowsAffected() == 1, err
 }
 
@@ -556,6 +597,12 @@ func (s ConnectorStore) FinishRun(ctx context.Context, org, id string, run int64
 		return err
 	}
 	defer tx.Rollback(ctx)
+	// Order this lock before the journal and connector locks. The archive
+	// transition waits until this live finish transaction has committed.
+	var archived bool
+	if err = tx.QueryRow(ctx, `SELECT cp.archived FROM connector_instances ci JOIN corpora cp ON (cp.organization,cp.id)=(ci.organization,ci.corpus_id) WHERE ci.organization=$1 AND ci.id=$2 FOR SHARE OF cp`, org, id).Scan(&archived); err != nil || archived {
+		return err
+	}
 	if err = lockJournal(ctx, tx, org); err != nil {
 		return err
 	}

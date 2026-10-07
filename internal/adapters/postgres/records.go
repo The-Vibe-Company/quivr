@@ -47,6 +47,7 @@ func catalogRange(q content.RecordQuery, args *[]any) string {
 		(*args)[1] = q.CorpusIDs
 		where = "records.organization=$1 AND records.corpus_id=ANY($2::text[])"
 	}
+	where += " AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=records.organization AND c.id=records.corpus_id AND c.archived)"
 	where += catalogMetadata(q, args)
 	if q.AcceptedAfter != nil || q.AcceptedBefore != nil {
 		where += " AND current_accepted_at IS NOT NULL"
@@ -117,7 +118,7 @@ func (s RecordStore) Resolve(ctx context.Context, scope corpus.Scope, relations 
 			continue
 		}
 		var recordID, versionID string
-		err := database(ctx, s.Pool).QueryRow(ctx, `SELECT r.id,r.current_version_id FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) WHERE r.organization=$1 AND r.corpus_id=$2 AND r.namespace=$3 AND r.record_key=$4 AND `+eligibleVersionSQL, scope.Organization, relation.Target.CorpusID, relation.Target.Namespace, relation.Target.RecordKey).Scan(&recordID, &versionID)
+		err := database(ctx, s.Pool).QueryRow(ctx, `SELECT r.id,r.current_version_id FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) WHERE r.organization=$1 AND r.corpus_id=$2 AND r.namespace=$3 AND r.record_key=$4 AND `+eligibleVersionSQL+` AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=r.organization AND c.id=r.corpus_id AND c.archived)`, scope.Organization, relation.Target.CorpusID, relation.Target.Namespace, relation.Target.RecordKey).Scan(&recordID, &versionID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}

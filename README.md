@@ -99,6 +99,17 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   see [Run Quivr behind TLS](https://docs.quivr.thevibecompany.co/run-quivr/tls).
 
 - **Corpora** with scoped API keys per Organization, action and Corpus.
+- **Corpus lifecycle controls**: archive and restore a Corpus with
+  `POST /v0/corpora/{corpus_id}/archive` and `/unarchive` (`corpora:archive`).
+  Archived Corpora stay stored but disappear from the default list, search and
+  catalog scopes, and the change feed; explicit search or catalog access returns
+  `409 corpus_archived`, while connector polling stops without changing its
+  enabled state. `GET /v0/corpora?include_archived=true` lists archived entries,
+  and `GET /v0/corpora/{corpus_id}` exposes its archived state.
+  `PATCH /v0/corpora/{corpus_id}` renames it with `corpora:rename`. These commands
+  are audited.
+  Archived direct record, version and explorer timeline reads return `not_found`
+  until restored.
 - **Durable, idempotent ingestion**: inline text, bounded batches with per-entry
   outcomes, verified uploads (presigned PUT + checksum confirm), structured Manifests,
   extensions and relations.

@@ -41,6 +41,7 @@ func declareResponse(code string, response *Error) *Error {
 }
 
 var (
+	CorpusArchived                   = declare("corpus_archived", ConflictClass, false)
 	InvalidPlugin                    = declare("invalid_plugin", InvalidClass, false)
 	SubscriptionChanged              = declare("subscription_changed", ConflictClass, false)
 	BackfillInProgress               = declare("backfill_in_progress", ConflictClass, false)

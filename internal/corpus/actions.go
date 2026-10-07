@@ -29,6 +29,8 @@ const (
 	ActionContentRecords                      Action = "content.records"
 	ActionContentVersion                      Action = "content.version"
 	ActionContentHydrate                      Action = "content.hydrate"
+	ActionCorpusArchive                       Action = "corpus.archive"
+	ActionCorpusRename                        Action = "corpus.rename"
 	ActionCorpusCreate                        Action = "corpus.create"
 	ActionCorpusRead                          Action = "corpus.read"
 	ActionCorpusList                          Action = "corpus.list"
@@ -129,6 +131,8 @@ var actionRequirements = map[Action]requirement{
 	ActionContentRecords:                      {permissions: []string{"content:read"}, allCorpora: false},
 	ActionContentVersion:                      {permissions: []string{"content:read"}, allCorpora: false},
 	ActionContentHydrate:                      {permissions: []string{"content:read", "search:query"}, allCorpora: false},
+	ActionCorpusArchive:                       {permissions: []string{"corpora:archive"}},
+	ActionCorpusRename:                        {permissions: []string{"corpora:rename"}},
 	ActionCorpusCreate:                        {permissions: []string{"corpora:write"}, allCorpora: true},
 	ActionCorpusRead:                          {permissions: []string{"corpora:read"}, allCorpora: false},
 	ActionCorpusList:                          {permissions: []string{"corpora:read"}, allCorpora: false},
