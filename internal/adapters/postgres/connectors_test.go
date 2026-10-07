@@ -34,7 +34,7 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	registry, _ := connectors.NewRegistry(fakeplugin.FixtureConnector{})
 	sealer, _ := connectors.NewSealer("adapter-test-credential-key-0123456789")
 	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer, MinInterval: time.Second}
-	one := 1
+	one := 3600
 	input := connectors.CreateInput{Key: "k1", CorpusID: c.ID, Namespace: "wire", Kind: "fixture", Config: json.RawMessage(`{"script":[]}`), IntervalSeconds: &one, Secret: json.RawMessage(`{"token":"fixture-test-secret-adapter"}`)}
 	created, err := service.Create(ctx, scope, input)
 	if err != nil {
@@ -94,6 +94,31 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	run := claim()
 	if len(run) != 1 || run[0].Run != first[0].Run {
 		t.Fatalf("re-dispatch must target the same run: %+v", run)
+	}
+	// A completed bounded page can continue as a new durable run immediately,
+	// despite the one-hour interval. The normal finish still waits.
+	continuation, ok := any(store).(interface {
+		ContinueRun(context.Context, string, string, int64) error
+	})
+	if !ok {
+		t.Fatal("store cannot immediately continue a progressing bounded run")
+	}
+	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run, connectors.Progress{Checkpoint: json.RawMessage(`{"step":-1}`), Items: true}); !ok || err != nil {
+		t.Fatalf("continuation checkpoint: %v %v", ok, err)
+	}
+	previous := run[0]
+	if err = continuation.ContinueRun(ctx, scope.Organization, created.ID, previous.Run); err != nil {
+		t.Fatal(err)
+	}
+	run = claim()
+	if len(run) != 1 || run[0].Run != previous.Run+1 || run[0].WorkQueue != previous.WorkQueue {
+		t.Fatalf("continuation not immediately claimable in its original queue: %+v", run)
+	}
+	if err = continuation.ContinueRun(ctx, scope.Organization, created.ID, previous.Run); err != nil {
+		t.Fatal(err)
+	}
+	if again := claim(); len(again) != 0 {
+		t.Fatalf("stale continuation released or duplicated the current lease: %+v", again)
 	}
 	// Archive fences both scheduling and a run leased before the transition,
 	// without rewriting the enabled flag needed when the Corpus is restored.
@@ -167,6 +192,14 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 		if sequence != archivedSequence || !schedule.Equal(beforeSchedule) {
 			t.Fatalf("archived finish changed schedule: sequence=%d at=%v", sequence, schedule)
 		}
+	}
+	if err = continuation.ContinueRun(ctx, scope.Organization, created.ID, archivedSequence); err != nil {
+		t.Fatal(err)
+	}
+	var unchangedSequence int64
+	var unchangedSchedule time.Time
+	if err = pool.QueryRow(ctx, `SELECT run_sequence,next_run_at FROM connector_instances WHERE organization=$1 AND id=$2`, scope.Organization, created.ID).Scan(&unchangedSequence, &unchangedSchedule); err != nil || unchangedSequence != archivedSequence || !unchangedSchedule.Equal(beforeSchedule) {
+		t.Fatalf("archived continuation changed sequence/schedule: %d %v %v", unchangedSequence, unchangedSchedule, err)
 	}
 	if err = store.ReleaseConnectorRun(ctx, run[0]); err != nil {
 		t.Fatal(err)
@@ -267,12 +300,23 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if skipped.RunSequence != next[0].Run+2 || skipped.Health.LastSuccessAt != nil || skipped.Health.State != connectors.HealthAccessError || skipped.Health.LastError.Code != "source_unavailable" {
+	if skipped.RunSequence != next[0].Run+2 || (skipped.Health.LastSuccessAt == nil || after.Health.LastSuccessAt == nil || !skipped.Health.LastSuccessAt.Equal(*after.Health.LastSuccessAt)) || skipped.Health.State != connectors.HealthAccessError || skipped.Health.LastError.Code != "source_unavailable" {
 		t.Fatalf("skipped run changed health: %+v", skipped.Health)
 	}
 	disabled, err := service.Disable(ctx, scope, created.ID)
 	if err != nil || disabled.Enabled || disabled.Health.State != connectors.HealthDisabled {
 		t.Fatalf("disable %v %+v", err, disabled)
+	}
+	beforeDisabled, err := store.LoadRun(ctx, scope.Organization, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = continuation.ContinueRun(ctx, scope.Organization, created.ID, beforeDisabled.RunSequence); err != nil {
+		t.Fatal(err)
+	}
+	afterDisabled, err := store.LoadRun(ctx, scope.Organization, created.ID)
+	if err != nil || afterDisabled.RunSequence != beforeDisabled.RunSequence || len(claim()) != 0 {
+		t.Fatalf("disabled continuation changed sequence or became claimable: %+v %v", afterDisabled, err)
 	}
 	page, err := feed.Read(ctx, scope, c.ID, start, 10)
 	if err != nil {

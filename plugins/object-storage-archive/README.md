@@ -62,6 +62,25 @@ on the same quiet stack. The measurement creates a separate Corpus and source
 bucket, disables its connector when finished, and leaves them for inspection.
 Remove the local stack with its usual reset command when finished.
 
+The engine adds per-page `acquisition` timing to connector diagnostics and
+structured logs: fetch, grant, plugin upload, stored-byte verification and
+durable acceptance. Worker stage times are sums across concurrent submissions;
+`page_ms` is elapsed time. Run limits and the configured interval are also
+reported so acquisition work can be distinguished from scheduled idle time.
+A successful run that reaches its page, time or byte bound continues in a new
+leased run immediately when its last page contains items, reports more and
+advances both the page's input and the run's starting checkpoint. Empty pages, unchanged checkpoints, exhaustion,
+errors, notices and permanent rejections retain normal interval/retry scheduling.
+The `continuation` timing field reports that request; run bounds, durable
+acceptance before checkpointing and same-record ordering stay in place.
+See the operator guide for all fields and diagnostics-size fallback behavior.
+With the standard HTTP transport, the SDK retains up to 32 idle upload connections per storage host between
+pages (128 total), with the default transport's 90-second idle expiry. Active
+submissions remain bounded by `concurrency`; upload grants, checksum checks
+and redirect refusal retain their existing behavior. The SDK upload client
+preserves a custom `http.DefaultTransport` without assuming it is a standard
+transport; this does not configure the archive reader's storage client.
+
 ZIP directories are limited to 4 MiB and 100,000 entries before metadata parsing; use tar.gz for larger member sets. A 1 MiB ranged-read window bounds ZIP buffering and avoids a network request for each deflate fragment.
 
 Refs retain the 1,024-byte protocol bound. Escape-heavy object identities use the compact legacy recovery form if page bounds would exceed it; recovering out-of-order uploads of those refs can rescan the gzip prefix more than once.

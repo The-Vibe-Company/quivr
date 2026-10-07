@@ -1,10 +1,13 @@
 package connectors
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -268,10 +271,15 @@ func stubAcquirer(t *testing.T, stub *stubConnector, readsToday int64) (Acquirer
 }
 
 func TestARateLimitedSourceDefersTheNextRunUntilItsReset(t *testing.T) {
-	stub := &stubConnector{err: &Error{Class: ClassTransient, Code: "rate_limited", RetryAfter: 7 * time.Minute}}
+	stub := &stubConnector{pages: []Page{{Items: []Item{{RecordKey: "first", Content: content.Text{Kind: "text", Text: "body"}}}, Checkpoint: json.RawMessage(`{"next":1}`), More: true}}, err: &Error{Class: ClassTransient, Code: "rate_limited", RetryAfter: 7 * time.Minute}}
 	a, runs := stubAcquirer(t, stub, 0)
+	observed := &continuingRuns{fakeRuns: runs}
+	a.Store = observed
 	if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
 		t.Fatal(err)
+	}
+	if observed.continued != 0 || len(runs.checkpoints) != 1 || len(runs.finished) != 1 {
+		t.Fatalf("rate-limited run after progress continued or lost checkpoint: continued=%d checkpoints=%v finished=%v", observed.continued, runs.checkpoints, runs.finished)
 	}
 	if f := runs.finished[0]; f == nil || f.Code != "rate_limited" || f.Class != ClassTransient || f.RetryAfter != 7*time.Minute {
 		t.Fatalf("finish %+v", f)
@@ -279,23 +287,55 @@ func TestARateLimitedSourceDefersTheNextRunUntilItsReset(t *testing.T) {
 }
 
 func TestPagesReportReadsAndDiagnosticsWithTheirCheckpoint(t *testing.T) {
-	stub := &stubConnector{pages: []Page{
-		{Checkpoint: json.RawMessage(`{"n":1}`), Reads: 40, Diagnostics: json.RawMessage(`{"d":1}`), More: true},
-		{Checkpoint: json.RawMessage(`{"n":2}`), Reads: 2, Diagnostics: json.RawMessage(`{"d":2}`)},
-	}}
-	a, runs := stubAcquirer(t, stub, 100)
-	if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
-		t.Fatal(err)
-	}
-	if len(runs.progress) != 2 || runs.progress[0].Reads != 40 || runs.progress[1].Reads != 2 || string(runs.progress[1].Diagnostics) != `{"d":2}` {
-		t.Fatalf("progress %+v", runs.progress)
-	}
-	// Each page sees the reads already spent today, including earlier pages of this run.
-	if stub.requests[0].ReadsToday != 100 || stub.requests[1].ReadsToday != 140 || stub.requests[0].PageInRun != 0 || stub.requests[1].PageInRun != 1 {
-		t.Fatalf("requests %+v", stub.requests)
-	}
-	if runs.finished[0] != nil {
-		t.Fatalf("finish %+v", runs.finished[0])
+	for _, tc := range []struct {
+		name, diagnostic string
+		timing           bool
+	}{
+		{"progress", `{"d":2}`, true},
+		{"omitted diagnostics", "", false},
+		{"null diagnostics", "null", false},
+		{"kind owns acquisition", `{"d":2,"acquisition":{"source":"retained"}}`, false},
+		{"full object", `{"d":2,"padding":"` + strings.Repeat("x", 16*1024-30) + `"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubConnector{pages: []Page{
+				{Checkpoint: json.RawMessage(`{"n":1}`), Reads: 40, Diagnostics: json.RawMessage(`{"d":1}`), More: true},
+				{Checkpoint: json.RawMessage(`{"n":2}`), Reads: 2, Diagnostics: json.RawMessage(tc.diagnostic)},
+			}}
+			a, runs := stubAcquirer(t, stub, 100)
+			if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+				t.Fatal(err)
+			}
+			if len(runs.progress) != 2 {
+				t.Fatalf("progress %+v", runs.progress)
+			}
+			var diagnostics map[string]json.RawMessage
+			if tc.diagnostic == "" || tc.diagnostic == "null" {
+				if string(runs.progress[1].Diagnostics) != tc.diagnostic {
+					t.Fatal("omitted diagnostics must retain prior kind progress")
+				}
+				return
+			}
+			if err := json.Unmarshal(runs.progress[1].Diagnostics, &diagnostics); err != nil {
+				t.Fatal(err)
+			}
+			if runs.progress[0].Reads != 40 || runs.progress[1].Reads != 2 || string(diagnostics["d"]) != "2" || len(runs.progress[1].Diagnostics) > 16<<10 {
+				t.Fatalf("progress %+v", runs.progress)
+			}
+			if tc.timing {
+				if diagnostics["acquisition"] == nil {
+					t.Fatal("engine timing missing")
+				}
+			} else if string(runs.progress[1].Diagnostics) != tc.diagnostic {
+				t.Fatal("kind diagnostics changed when timing would overwrite or exceed its bound")
+			}
+			if stub.requests[0].ReadsToday != 100 || stub.requests[1].ReadsToday != 140 || stub.requests[0].PageInRun != 0 || stub.requests[1].PageInRun != 1 {
+				t.Fatalf("requests %+v", stub.requests)
+			}
+			if runs.finished[0] != nil {
+				t.Fatalf("finish %+v", runs.finished)
+			}
+		})
 	}
 }
 
@@ -477,6 +517,7 @@ type observedRuns struct {
 	*fakeRuns
 	ingest    *heldIngest
 	premature bool
+	continued int
 }
 
 func (f *observedRuns) CommitCheckpoint(ctx context.Context, org, id string, run int64, progress Progress) (bool, error) {
@@ -487,6 +528,12 @@ func (f *observedRuns) CommitCheckpoint(ctx context.Context, org, id string, run
 func (f *observedRuns) FinishRun(ctx context.Context, org, id string, run int64, failure *RunError) error {
 	f.premature = f.premature || f.ingest.active.Load() != 0
 	return f.fakeRuns.FinishRun(ctx, org, id, run, failure)
+}
+
+func (f *observedRuns) ContinueRun(context.Context, string, string, int64) error {
+	f.premature = f.premature || f.ingest.active.Load() != 0 || len(f.checkpoints) == 0
+	f.continued++
+	return nil
 }
 
 func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
@@ -514,13 +561,13 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 			if tc.duplicate {
 				items[1].RecordKey = items[0].RecordKey
 			}
-			page := Page{Items: items, Checkpoint: json.RawMessage(`{"member":36}`), SubmissionConcurrency: tc.hint}
+			page := Page{Items: items, Checkpoint: json.RawMessage(`{"member":36}`), More: true, SubmissionConcurrency: tc.hint}
 			stub := &stubConnector{pages: []Page{page}}
 			a, runs := stubAcquirer(t, stub, 0)
 			ingest := &heldIngest{calls: make(chan heldSubmission, len(items)), failKey: items[0].RecordKey, failure: tc.failure}
 			a.Ingest = ingest
 			observed := &observedRuns{fakeRuns: runs, ingest: ingest}
-			a.Store = observed
+			a.Store, a.MaxPages = observed, 1
 			done := make(chan error, 1)
 			go func() { done <- a.Run(ctx, "org_a", "connector_1", 1) }()
 			first := make([]heldSubmission, tc.simultaneous)
@@ -588,7 +635,7 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						if len(runs.checkpoints) != 1 || replayed != len(items) {
+						if len(runs.checkpoints) != 1 || replayed != len(items) || observed.continued != 1 || observed.premature {
 							t.Fatalf("replayed %d/%d items; checkpoints %v", replayed, len(items), runs.checkpoints)
 						}
 						return
@@ -599,6 +646,12 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 			}
 			if count != len(items) || len(runs.checkpoints) != 1 || !runs.items[0] {
 				t.Fatalf("submitted=%d checkpoints=%v activity=%v", count, runs.checkpoints, runs.items)
+			}
+			if tc.failure == nil && (observed.continued != 1 || len(runs.finished) != 0) {
+				t.Fatalf("successful bounded page did not continue after acceptance/checkpoint: continued=%d finished=%v", observed.continued, runs.finished)
+			}
+			if tc.failure != nil && observed.continued != 0 {
+				t.Fatal("permanent rejection continued immediately")
 			}
 			if tc.failure != nil && (runs.finished[0] == nil || runs.finished[0].Code != "item_rejected") {
 				t.Fatalf("permanent item failure did not report rejection: %v", runs.finished)
@@ -678,5 +731,42 @@ func TestAttachmentOnlyInputSubmitsAVerifiedSourceBlob(t *testing.T) {
 				t.Fatalf("producer or record extensions lost: provenance=%v extensions=%v", command.Provenance, command.Extensions)
 			}
 		})
+	}
+}
+
+// Intentional source skips and inactive leases are not incomplete pages.
+func TestSkippedRunsDoNotReportIncompletePages(t *testing.T) {
+	previous := slog.Default()
+	defer slog.SetDefault(previous)
+	for _, inactive := range []bool{false, true} {
+		var logs bytes.Buffer
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+		stub := &stubConnector{err: ErrNotDue}
+		a, runs := stubAcquirer(t, stub, 0)
+		if inactive {
+			a.Store = &archivePollingRuns{fakeRuns: runs, archived: true}
+		}
+		if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+			t.Fatal(err)
+		}
+		if inactive {
+			if len(stub.requests) != 0 || len(runs.finished) != 0 {
+				t.Fatal("inactive lease attempted a source request or completion")
+			}
+		} else if len(stub.requests) != 1 || len(runs.finished) != 1 || runs.finished[0] == nil || !runs.finished[0].Skipped {
+			t.Fatal("source not-due did not intentionally skip the fetched run")
+		}
+		decoder := json.NewDecoder(&logs)
+		for decoder.More() {
+			var event struct {
+				Message string `json:"msg"`
+			}
+			if err := decoder.Decode(&event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Message == "connector acquisition page" {
+				t.Fatalf("inactive=%v: intentional skip emitted a page diagnostic", inactive)
+			}
+		}
 	}
 }
