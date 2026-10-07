@@ -49,7 +49,11 @@ func TestControllerHoldsCapacityOnErrors(t *testing.T) {
 		if b.err != nil && d.Waiting != -1 {
 			t.Fatalf("queue error must log unknown backlog -1, got decision %+v", d)
 		}
-		if (err != nil) != wantErr || r.current != want {
+		wantApplied := want
+		if r.readErr != nil {
+			wantApplied = -1
+		}
+		if (err != nil) != wantErr || r.current != want || d.Applied != wantApplied {
 			t.Fatalf("second %d: decision %+v error %v; want count %d, error %v", seconds, d, err, want, wantErr)
 		}
 	}
@@ -88,4 +92,40 @@ func TestControllerHoldsCapacityOnErrors(t *testing.T) {
 	step(202, 4, false)
 	step(261, 4, false)
 	step(262, 1, false)
+}
+
+// Scaling restarts workers, so decisions keep observing backlog while actions
+// are spaced by a supplied clock. Failures must not consume an action window.
+func TestControllerSpacesScalingActions(t *testing.T) {
+	b := &backlog{waiting: 40001}
+	r := &replicas{current: 1}
+	p, err := autoscaling.NewPolicy(autoscaling.Config{Min: 1, Max: 8, DocumentsPerReplica: 20000, DownscaleWindow: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := autoscaling.NewController(p, b, r)
+	c.MinScaleInterval = 2 * time.Minute
+	start := time.Unix(1000, 0)
+	step := func(seconds, target, applied, writes int, outcome string, wantErr bool) {
+		t.Helper()
+		d, err := c.Step(context.Background(), start.Add(time.Duration(seconds)*time.Second))
+		if (err != nil) != wantErr || d.Target != target || d.Applied != applied || d.Outcome != outcome || len(r.writes) != writes {
+			t.Fatalf("second %d: decision %+v/error %v/writes %v; want target %d applied %d outcome %s writes %d error %v", seconds, d, err, r.writes, target, applied, outcome, writes, wantErr)
+		}
+	}
+	step(0, 3, 3, 1, "scaled", false)
+	b.waiting = 80001
+	step(30, 5, 3, 1, "cooldown", false)
+	step(119, 5, 3, 1, "cooldown", false)
+	r.writeErr = errors.New("deploy rejected")
+	step(120, 5, 3, 2, "update_error", true)
+	r.writeErr = nil
+	step(121, 5, 5, 3, "scaled", false)
+	b.waiting = 0
+	step(240, 1, 5, 3, "cooldown", false)
+	step(241, 1, 1, 4, "scaled", false)
+	// An operator can disable spacing without changing the policy.
+	c.MinScaleInterval = 0
+	b.waiting = 200000
+	step(242, 8, 8, 5, "scaled", false)
 }
