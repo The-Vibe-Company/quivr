@@ -2943,13 +2943,13 @@ paths:
       x-required-permissions: [queues:read]
       responses:
         '200':
-          description: Current queue backlog.
+          description: Latest shared queue observation, refreshed in the background.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/QueueBacklog'
         default:
-          description: Structured error; 401 unauthenticated, 403 without installation operator grant, 503 storage unavailable.
+          description: Structured error; 401 unauthenticated, 403 without installation operator grant, 503 storage unavailable, or queue snapshot missing or older than one minute.
           content:
             application/json:
               schema:

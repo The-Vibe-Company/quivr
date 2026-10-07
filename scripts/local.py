@@ -131,7 +131,7 @@ class Stack:
             # Push connector instances (x_list webhook mode) register webhooks here; the fake X calls it on loopback.
             public_url=f"http://127.0.0.1:{s['api_port']}",
             keys={
-            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','observability:read','queues:read'],['*']),
+            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','observability:read'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write','connectors:admin','connector:push'],['*']),
             # Connector acceptance owns org_c so its scheduled load cannot skew org_a/org_b scenarios.
             s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
@@ -145,7 +145,7 @@ class Stack:
             s['reader']:scope('org_a',['corpora:read'],['*']),
             # The deployment operator: reads the plugin registry (plugins:admin), which no Organization key gets,
             # and the admin views (observability:read).
-            s['operator']:scope('org_ops',['plugins:admin','observability:read'],['*']),
+            s['operator']:scope('org_ops',['plugins:admin','observability:read','queues:read'],['*']),
             # An operator of org_a: backfills its Corpora and promotes vector spaces (THE-784).
             s['backfiller']:scope('org_a',['plugins:admin','operations:read','operations:write'],['*']),
             # Observability acceptance owns org_o: its stats reads see only its own ingestion and searches.
@@ -209,7 +209,7 @@ class Stack:
         self.save()
     def await_ready(self,key,timeout=20):
         """Bounded readiness wait; a timeout names the probe, its last answer and the logs to read."""
-        probe={'probe_port':'api','worker_probe_port':'worker','short_probe_port':'short-api'}.get(key,key)
+        probe={'probe_port':'api','worker_probe_port':'worker','short_probe_port':'short-api','queue_bulk_probe_port':'worker'}.get(key,key)
         url=f"http://127.0.0.1:{self.state[key]}/readyz";start=time.monotonic();last='no answer'
         while True:
             try:

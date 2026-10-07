@@ -308,6 +308,15 @@ func TestIngestionQueueClaimsIsolateLiveFromBulk(t *testing.T) {
 			t.Fatalf("mixed class batch: %+v", b)
 		}
 	}
+	for _, batch := range bulkBatches {
+		if err = store.IngestionBatchDispatched(ctx, batch.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	remaining, err := store.ClaimIngestionBatches(workqueue.WithClass(ctx, workqueue.Bulk), 8)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("acknowledged bulk was reclaimed: %+v %v", remaining, err)
+	}
 	if _, err = pool.Exec(ctx, "UPDATE ingestion_batches SET lease_until='-infinity'"); err != nil {
 		t.Fatal(err)
 	}

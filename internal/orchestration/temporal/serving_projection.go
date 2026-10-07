@@ -47,7 +47,9 @@ func (r *Runtime) servingProjectionIntents(classes ...string) IntentSource {
 		}
 		intents := make([]Intent, 0, len(jobs))
 		for _, j := range jobs {
-			queue := taskQueue
+			// Unstarted legacy jobs may start on live; an existing workflow keeps
+			// its recorded queue under the unchanged ID and payload.
+			queue := workqueue.TaskQueue(workqueue.Live)
 			if workqueue.Valid(j.WorkQueue) {
 				queue = workqueue.TaskQueue(j.WorkQueue)
 			}

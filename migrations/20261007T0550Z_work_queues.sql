@@ -27,3 +27,26 @@ CREATE TABLE queue_backlog_snapshots (
  oldest_waiting_age_seconds double precision NOT NULL,
  observed_at timestamptz NOT NULL
 );
+
+-- Bulk ingestion never shares the live arrival index. New tables keep expansion
+-- compatible with previous writers without blocking index builds on old tables.
+CREATE TABLE bulk_ingestion_outbox (
+ organization text NOT NULL, receipt_id text NOT NULL,
+ dispatched boolean NOT NULL DEFAULT false,
+ lease_until timestamptz NOT NULL DEFAULT 'infinity',
+ enqueued_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ legacy_workflow boolean NOT NULL DEFAULT false,
+ trace_context text NOT NULL DEFAULT '',
+ work_queue text NOT NULL DEFAULT 'bulk',
+ PRIMARY KEY (organization,receipt_id)
+);
+CREATE INDEX bulk_ingestion_outbox_pending_arrival ON bulk_ingestion_outbox(enqueued_at,organization,receipt_id) WHERE NOT dispatched;
+CREATE TABLE bulk_ingestion_batches (
+ id text PRIMARY KEY,
+ receipts jsonb NOT NULL CHECK (jsonb_typeof(receipts)='array' AND jsonb_array_length(receipts) BETWEEN 1 AND 32),
+ enqueued_at timestamptz NOT NULL,
+ lease_until timestamptz NOT NULL DEFAULT '-infinity',
+ legacy_workflow boolean NOT NULL DEFAULT false,
+ work_queue text NOT NULL DEFAULT 'bulk'
+);
+CREATE INDEX bulk_ingestion_batches_arrival ON bulk_ingestion_batches(enqueued_at,id);

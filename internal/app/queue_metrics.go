@@ -13,7 +13,7 @@ import (
 )
 
 // Both process types expose the same installation-wide snapshot. A failed
-// database scrape returns 503; reporting a false zero could scale work to zero.
+// database scrape omits queue series; reporting a false zero could scale work to zero.
 func queueMetrics(next http.Handler, reader workqueue.Reader) http.Handler {
 	names := []string{"quivr_queue_waiting_documents", "quivr_queue_in_progress_documents", "quivr_queue_oldest_waiting_age_seconds"}
 	help := []string{"Documents waiting for processing slots.", "Documents being processed by live attempts.", "Age of the oldest waiting document in seconds."}
@@ -56,7 +56,9 @@ func queueMetrics(next http.Handler, reader workqueue.Reader) http.Handler {
 		defer cancel()
 		rows, err := reader.QueueBacklog(read)
 		if err != nil {
-			http.Error(w, "queue backlog unavailable", http.StatusServiceUnavailable)
+			// Missing queue series are an unavailable observation. Preserve the
+			// independent metric families served by the rest of the handler.
+			next.ServeHTTP(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")

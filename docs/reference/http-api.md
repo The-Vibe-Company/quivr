@@ -1572,8 +1572,8 @@ Installation-wide document backlog for live and bulk workers. Requires the opera
 
 | Status | Body | Description |
 | --- | --- | --- |
-| `200` | `application/json` [`QueueBacklog`](#queuebacklog) | Current queue backlog. |
-| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without installation operator grant, 503 storage unavailable. |
+| `200` | `application/json` [`QueueBacklog`](#queuebacklog) | Latest shared queue observation, refreshed in the background. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without installation operator grant, 503 storage unavailable, or queue snapshot missing or older than one minute. |
 
 #### `GET /v0/admin/quarantine`
 

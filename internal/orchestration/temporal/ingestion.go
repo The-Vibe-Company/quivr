@@ -244,10 +244,12 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 		}
 		for _, queue := range legacy {
 			legacyGate := gate
+			legacySlots := settings.Capacity(q)
 			if queue == taskQueue {
+				legacySlots += settings.Capacity(workqueue.Bulk)
 				legacyGate = &capacityGate{class: workqueue.Live, slots: gate.slots, bulk: gates[workqueue.Bulk]}
 			}
-			if err = startWorker(queue, settings.Capacity(q), legacyGate, registerCore); err != nil {
+			if err = startWorker(queue, legacySlots, legacyGate, registerCore); err != nil {
 				break
 			}
 		}

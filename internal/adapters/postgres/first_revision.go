@@ -35,10 +35,13 @@ func acceptFirstRevision(ctx context.Context, pool *pgxpool.Pool, org string, c 
  SELECT $1,$3,$14,$11::bytea,convert_from($11::bytea,'UTF8')::jsonb,$4,record_id,1,$9,$10,$18 FROM revision RETURNING id
 ), outbox AS (
  INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue)
- SELECT $1,id,false,'infinity'::timestamptz,$17,$18 FROM receipt RETURNING receipt_id
+ SELECT $1,id,false,'infinity'::timestamptz,$17,$18 FROM receipt WHERE $18<>'bulk' RETURNING receipt_id
+), bulk_outbox AS (
+ INSERT INTO bulk_ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue)
+ SELECT $1,id,false,'infinity'::timestamptz,$17,$18 FROM receipt WHERE $18='bulk' RETURNING receipt_id
 ), positions AS (
  UPDATE organization_journals SET last_sequence=last_sequence+2
- WHERE organization=$1 AND EXISTS(SELECT 1 FROM outbox) RETURNING last_sequence
+ WHERE organization=$1 AND (EXISTS(SELECT 1 FROM outbox) OR EXISTS(SELECT 1 FROM bulk_outbox)) RETURNING last_sequence
 ), events AS (
  INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,trace_context)
  SELECT $1,p.last_sequence+e.delta,e.id,$4,e.kind,e.resource,e.resource_id,$17

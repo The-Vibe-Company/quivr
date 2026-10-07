@@ -15,6 +15,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/stretchr/testify/mock"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -352,4 +353,43 @@ func (s *dispatchStore) receiptBatch(d content.Dispatch) content.DispatchBatch {
 		b.ID, b.Legacy = content.StableID("ingestion-e5-v4", d.Organization, d.ReceiptID), true
 	}
 	return b
+}
+
+// The dispatcher owns start routing and workflow identity across upgrades.
+// Previously accepted, unstarted serving jobs must work with a live-only worker;
+// a lost acknowledgement must retain the same workflow ID and payload.
+type servingDispatchStore struct {
+	processing.ServingProjectionStore
+	job          content.IngestionEvaluation
+	acknowledged int
+}
+
+func (s *servingDispatchStore) ClaimServingProjections(context.Context, int) ([]content.IngestionEvaluation, error) {
+	return []content.IngestionEvaluation{s.job}, nil
+}
+func (s *servingDispatchStore) ServingProjectionDispatched(context.Context, content.IngestionEvaluation) error {
+	s.acknowledged++
+	return nil
+}
+func TestServingDispatchRoutesUnstartedLegacyJobsToLiveAndPreservesIdentity(t *testing.T) {
+	for _, class := range []string{"", "live", "bulk"} {
+		t.Run("class_"+class, func(t *testing.T) {
+			store := &servingDispatchStore{job: content.IngestionEvaluation{Organization: "org", ID: "job", WorkQueue: class}}
+			queue := "quivr-live-v1"
+			if class == "bulk" {
+				queue = "quivr-bulk-v1"
+			}
+			c := &mocks.Client{}
+			options := mock.MatchedBy(func(o client.StartWorkflowOptions) bool {
+				return o.ID == content.StableID("serving-projection-workflow", "org", "job") && o.TaskQueue == queue && o.WorkflowIDReusePolicy == enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE
+			})
+			c.On("ExecuteWorkflow", mock.Anything, options, "publish-serving-projection-v0", Input{Organization: "org", ReceiptID: "job"}).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{}).Once()
+			runtime := Runtime{Client: c, Evaluation: &processing.Evaluator{Serving: store}}
+			runtime.dispatchBatch(context.Background(), runtime.servingProjectionIntents(), 1)
+			if store.acknowledged != 1 {
+				t.Fatalf("existing serving workflow acknowledgement=%d, want1", store.acknowledged)
+			}
+			c.AssertExpectations(t)
+		})
+	}
 }

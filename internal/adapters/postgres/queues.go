@@ -78,6 +78,7 @@ func (t QueueTracker) Track(ctx context.Context, org, kind, workID, documentID s
 	}
 
 	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	renewed := make(chan error, 1)
 	go func() {
 		interval := lease / 3
@@ -238,7 +239,7 @@ func queueBacklogSQL() string {
  LEFT JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.acceptance_order)=(v.organization,v.record_id,v.acceptance_order)
  WHERE NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
    AND ((NOT v.baseline_ready AND NOT v.quarantined AND v.processing IN ('queued','running','retrying'))
-     OR (v.baseline_ready AND NOT v.quarantined AND v.enrichment_state IN ('queued','running','retrying')))
+     OR (v.baseline_ready AND r.current_version_id=v.id AND NOT v.quarantined AND v.enrichment_state IN ('queued','running','retrying')))
  UNION ALL
  SELECT CASE WHEN COALESCE(NULLIF(e.work_queue,''),NULLIF(rc.work_queue,''),'live')='bulk' THEN 'bulk' ELSE 'live' END,
         e.organization,e.version_id,e.created_at,false

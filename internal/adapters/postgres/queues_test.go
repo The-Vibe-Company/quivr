@@ -95,17 +95,21 @@ func TestQueueBacklogCountsDistinctDocumentsAndActiveAttempts(t *testing.T) {
 	go func() {
 		tracked <- workqueue.Track(workqueue.WithTracker(ctx, postgres.QueueTracker{Pool: pool}), org, "ingestion", live.ID, live.ID, func(run context.Context) error {
 			close(started)
-			<-release
-			return run.Err()
+			select {
+			case <-release:
+				return run.Err()
+			case <-run.Done():
+				return run.Err()
+			}
 		})
 	}()
-	<-started
+	waitForTrackStart(t, ctx, started, tracked)
 	status = readQueueStatus(t, reader, ctx)
 	if status[workqueue.Live].Waiting != before[workqueue.Live].Waiting || status[workqueue.Live].InProgress != before[workqueue.Live].InProgress+1 {
 		t.Fatalf("live active backlog = %+v, want one new in progress document over %+v", status[workqueue.Live], before[workqueue.Live])
 	}
 	close(release)
-	if err = <-tracked; err != nil {
+	if err = waitForTrackResult(t, ctx, tracked); err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,6 +120,42 @@ func TestQueueBacklogCountsDistinctDocumentsAndActiveAttempts(t *testing.T) {
 	status = readQueueStatus(t, reader, ctx)
 	if status[workqueue.Live].Waiting != before[workqueue.Live].Waiting || status[workqueue.Live].InProgress != before[workqueue.Live].InProgress {
 		t.Fatalf("withdrawn live backlog = %+v, want baseline %+v", status[workqueue.Live], before[workqueue.Live])
+	}
+	// Current enrichment waits, but superseded enrichment that the indexer
+	// skips must not remain in the backlog after its replacement finishes.
+	if _, err = pool.Exec(ctx, `UPDATE ingestion_receipts SET state='resolved',outcome='created' WHERE organization=$1 AND id=$2`, org, bulk.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE record_versions SET baseline_ready=true,processing='idle',enrichment_state='queued' WHERE organization=$1 AND id=$2`, org, versionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE records SET current_version_id=$2 WHERE organization=$1 AND id=(SELECT record_id FROM record_versions WHERE organization=$1 AND id=$2)`, org, versionID); err != nil {
+		t.Fatal(err)
+	}
+	status = readQueueStatus(t, reader, ctx)
+	if status[workqueue.Bulk].Waiting != before[workqueue.Bulk].Waiting+1 {
+		t.Fatalf("current enrichment backlog = %+v, want one waiting document over %+v", status[workqueue.Bulk], before[workqueue.Bulk])
+	}
+	correction, err := service.Accept(bulkCtx, scope, content.Command{Key: "bulk-correction", Source: bulk.Source, Content: content.Text{Kind: "text", Text: "corrected"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrected, _, err := stores.Work(ctx, org, correction.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = stores.Publish(ctx, corrected, publication(content.Blob{Key: "queues/corrected", SHA256: "queues-corrected-text", Size: 9}, content.Blob{Key: "queues/corrected-manifest", SHA256: "queues-corrected-manifest", Size: 2})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE record_versions SET baseline_ready=true,processing='idle',enrichment_state='idle' WHERE organization=$1 AND id=$2`, org, corrected.VersionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE records SET current_version_id=$2 WHERE organization=$1 AND id=(SELECT record_id FROM record_versions WHERE organization=$1 AND id=$2)`, org, corrected.VersionID); err != nil {
+		t.Fatal(err)
+	}
+	status = readQueueStatus(t, reader, ctx)
+	if status[workqueue.Bulk].Waiting != before[workqueue.Bulk].Waiting || status[workqueue.Bulk].InProgress != before[workqueue.Bulk].InProgress {
+		t.Fatalf("superseded enrichment backlog = %+v, want baseline %+v", status[workqueue.Bulk], before[workqueue.Bulk])
 	}
 	if _, err = pool.Exec(ctx, `UPDATE records SET withdrawn=true WHERE organization=$1 AND id=(SELECT record_id FROM ingestion_receipts WHERE organization=$1 AND id=$2)`, org, bulk.ID); err != nil {
 		t.Fatal(err)
@@ -138,13 +178,17 @@ func TestQueueTrackerFencesExpiredAttempt(t *testing.T) {
 	thirdStarted, thirdRelease := make(chan struct{}), make(chan struct{})
 	first := make(chan error, 1)
 	go func() {
-		first <- tracker.Track(ctx, org, "test", "receipt", "document", func(context.Context) error {
+		first <- tracker.Track(ctx, org, "test", "receipt", "document", func(run context.Context) error {
 			close(started)
-			<-release
-			return nil
+			select {
+			case <-release:
+				return nil
+			case <-run.Done():
+				return run.Err()
+			}
 		})
 	}()
-	<-started
+	waitForTrackStart(t, ctx, started, first)
 	if _, err := pool.Exec(ctx, `UPDATE queue_document_attempts SET lease_until='-infinity' WHERE organization=$1 AND kind='test' AND work_id='receipt' AND document_id='document'`, org); err != nil {
 		t.Fatal(err)
 	}
@@ -153,19 +197,23 @@ func TestQueueTrackerFencesExpiredAttempt(t *testing.T) {
 	}
 	third := make(chan error, 1)
 	go func() {
-		third <- tracker.Track(ctx, org, "test", "receipt", "document", func(context.Context) error {
+		third <- tracker.Track(ctx, org, "test", "receipt", "document", func(run context.Context) error {
 			close(thirdStarted)
-			<-thirdRelease
-			return nil
+			select {
+			case <-thirdRelease:
+				return nil
+			case <-run.Done():
+				return run.Err()
+			}
 		})
 	}()
-	<-thirdStarted
+	waitForTrackStart(t, ctx, thirdStarted, third)
 	close(release)
-	if err := <-first; !errors.Is(err, workqueue.ErrLeaseLost) {
+	if err := waitForTrackResult(t, ctx, first); !errors.Is(err, workqueue.ErrLeaseLost) {
 		t.Fatalf("stale claimant error = %v, want lease lost", err)
 	}
 	close(thirdRelease)
-	if err := <-third; err != nil {
+	if err := waitForTrackResult(t, ctx, third); err != nil {
 		t.Fatalf("new claimant after stale release = %v", err)
 	}
 	var retained int
@@ -174,6 +222,42 @@ func TestQueueTrackerFencesExpiredAttempt(t *testing.T) {
 	}
 	if retained != 0 {
 		t.Fatalf("completed attempts retained = %d, want no execution history", retained)
+	}
+}
+
+func TestQueueTrackerCancelsRunContextAfterPanic(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := rebuildAdapterPool(t, ctx)
+	org := fmt.Sprintf("adapter-queue-panic-%d", time.Now().UnixNano())
+	tracker := postgres.QueueTracker{Pool: pool}
+	var runCtx context.Context
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		_ = tracker.Track(ctx, org, "panic", "work", "document", func(passed context.Context) error {
+			runCtx = passed
+			panic("tracked callback panic")
+		})
+	}()
+	if recovered == nil {
+		t.Fatal("tracked callback panic was not propagated")
+	}
+	if runCtx == nil {
+		t.Fatal("tracked callback did not receive a context")
+	}
+	if !errors.Is(runCtx.Err(), context.Canceled) {
+		t.Fatalf("panic callback context error = %v, want immediate cancellation", runCtx.Err())
+	}
+	var active bool
+	if err := pool.QueryRow(ctx, `SELECT lease_until>clock_timestamp() FROM queue_document_attempts WHERE organization=$1 AND kind='panic' AND work_id='work' AND document_id='document'`, org).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if !active {
+		t.Fatal("panic attempt was not observable before cleanup")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE queue_document_attempts SET lease_until='-infinity' WHERE organization=$1 AND kind='panic' AND work_id='work' AND document_id='document'`, org); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -240,13 +324,17 @@ func TestQueueBacklogOperationStateAndLeaseTransitions(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	tracked := make(chan error, 1)
 	go func() {
-		tracked <- workqueue.Track(workqueue.WithTracker(ctx, postgres.QueueTracker{Pool: pool}), org, "operation", op.ID, versionID, func(context.Context) error {
+		tracked <- workqueue.Track(workqueue.WithTracker(ctx, postgres.QueueTracker{Pool: pool}), org, "operation", op.ID, versionID, func(run context.Context) error {
 			close(started)
-			<-release
-			return nil
+			select {
+			case <-release:
+				return nil
+			case <-run.Done():
+				return run.Err()
+			}
 		})
 	}()
-	<-started
+	waitForTrackStart(t, ctx, started, tracked)
 	status = readQueueStatus(t, reader, ctx)
 	if status[workqueue.Bulk].Waiting != before[workqueue.Bulk].Waiting || status[workqueue.Bulk].InProgress != before[workqueue.Bulk].InProgress+1 {
 		t.Fatalf("active rebuild backlog = %+v, want one new in progress document over %+v", status[workqueue.Bulk], before[workqueue.Bulk])
@@ -273,7 +361,7 @@ func TestQueueBacklogOperationStateAndLeaseTransitions(t *testing.T) {
 		t.Fatalf("expired rebuild lease backlog = %+v, want one new waiting document over %+v", status[workqueue.Bulk], before[workqueue.Bulk])
 	}
 	close(release)
-	if err = <-tracked; !errors.Is(err, workqueue.ErrLeaseLost) {
+	if err = waitForTrackResult(t, ctx, tracked); !errors.Is(err, workqueue.ErrLeaseLost) {
 		t.Fatalf("expired attempt error = %v, want lease lost", err)
 	}
 	if _, err = pool.Exec(ctx, `UPDATE operations SET state='paused' WHERE organization=$1 AND id=$2`, org, op.ID); err != nil {
@@ -319,7 +407,7 @@ func TestQueueBacklogOperationStateAndLeaseTransitions(t *testing.T) {
 			}
 		})
 	}()
-	<-alertStarted
+	waitForTrackStart(t, ctx, alertStarted, alertDone)
 	live = readQueueStatus(t, reader, ctx)[workqueue.Live]
 	if live.InProgress != liveBefore.InProgress+1 {
 		t.Fatalf("active alert backlog = %+v, want one admitted attempt over %+v", live, liveBefore)
@@ -331,7 +419,7 @@ func TestQueueBacklogOperationStateAndLeaseTransitions(t *testing.T) {
 	}
 	live = readQueueStatus(t, reader, ctx)[workqueue.Live]
 	close(alertRelease)
-	if err = <-alertDone; err != nil {
+	if err = waitForTrackResult(t, ctx, alertDone); err != nil {
 		t.Fatal(err)
 	}
 	if live.Waiting != liveBefore.Waiting || live.InProgress != liveBefore.InProgress {
@@ -365,6 +453,28 @@ func readQueueStatus(t *testing.T, reader postgres.QueueSnapshots, ctx context.C
 		got[row.Queue] = row
 	}
 	return got
+}
+
+func waitForTrackStart(t *testing.T, ctx context.Context, started <-chan struct{}, result <-chan error) {
+	t.Helper()
+	select {
+	case <-started:
+	case err := <-result:
+		t.Fatalf("tracked callback did not start: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("tracked callback did not start before context ended: %v", ctx.Err())
+	}
+}
+
+func waitForTrackResult(t *testing.T, ctx context.Context, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		t.Fatalf("tracked callback did not finish before context ended: %v", ctx.Err())
+		return ctx.Err()
+	}
 }
 
 // Autoscaler reads must stay independent of operation/document tables. A

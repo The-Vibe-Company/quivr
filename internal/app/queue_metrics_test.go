@@ -23,9 +23,9 @@ func (s metricQueueRows) QueueBacklog(context.Context) ([]workqueue.Status, erro
 func TestQueueMetricsExposeNumericClassGaugesAndFailClosed(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		res := httptest.NewRecorder()
-		queueMetrics(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), metricQueueRows{fail}).ServeHTTP(res, httptest.NewRequest("GET", "/metrics", nil))
+		queueMetrics(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("quivr_buildinfo 1\n")) }), metricQueueRows{fail}).ServeHTTP(res, httptest.NewRequest("GET", "/metrics", nil))
 		if fail {
-			if res.Code != 503 || strings.Contains(res.Body.String(), "quivr_queue_waiting_documents{") {
+			if res.Code != 200 || !strings.Contains(res.Body.String(), "quivr_buildinfo 1") || strings.Contains(res.Body.String(), "quivr_queue_waiting_documents{") {
 				t.Fatalf("failed snapshot advertised zero: %d %s", res.Code, res.Body.String())
 			}
 			continue

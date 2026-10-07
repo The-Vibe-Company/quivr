@@ -312,9 +312,9 @@ func settle(ctx context.Context, tx pgx.Tx, org, id, versionID, phase, code stri
 
 // release lifts a Version's quarantine so its baseline runs like a new
 // Version's; quarantined_at is cleared, and set again by a new quarantine.
-func release(ctx context.Context, tx pgx.Tx, org, versionID string) error {
+func release(ctx context.Context, tx pgx.Tx, org, versionID, receiptID string) error {
 	// Reprocessing owns the released pipeline and its follow-on jobs as bulk.
-	if _, err := tx.Exec(ctx, `UPDATE ingestion_receipts SET work_queue='bulk' WHERE organization=$1 AND version_id=$2`, org, versionID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE ingestion_receipts SET work_queue='bulk' WHERE organization=$1 AND id=$2`, org, receiptID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE record_versions SET quarantined=false,quarantine=NULL,quarantine_stage=NULL,quarantined_at=NULL,processing='queued',error_code='' WHERE organization=$1 AND id=$2`, org, versionID)
@@ -390,7 +390,7 @@ func (s QuarantineStore) StartReprocessItem(ctx context.Context, org, id string)
 			return nil, err
 		}
 		it.Phase = quarantine.PhaseRenormalizing
-	} else if err = release(ctx, tx, org, it.VersionID); err != nil {
+	} else if err = release(ctx, tx, org, it.VersionID, it.ReceiptID); err != nil {
 		return nil, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE quarantine_reprocess_items SET phase=$4,stage=$5,updated_at=now() WHERE organization=$1 AND operation_id=$2 AND version_id=$3`, org, id, it.VersionID, it.Phase, it.Stage); err != nil {
@@ -489,7 +489,7 @@ func (s QuarantineStore) republish(ctx context.Context, org, id string, item qua
 		org, item.VersionID, content.StableID("blob", org, p.Normalized.SHA256), content.StableID("blob", org, p.Manifest.SHA256), provenance, extensionsJSON); err != nil {
 		return err
 	}
-	if err = release(ctx, tx, org, item.VersionID); err != nil {
+	if err = release(ctx, tx, org, item.VersionID, item.ReceiptID); err != nil {
 		return err
 	}
 	// The Version's content changed: consumers reread it.

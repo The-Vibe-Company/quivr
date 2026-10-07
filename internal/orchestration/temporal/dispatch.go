@@ -184,7 +184,13 @@ func (r *Runtime) ingestionIntents(classes ...string) IntentSource {
 				traceContext: b.Receipts[0].TraceContext,
 				options:      client.StartWorkflowOptions{ID: b.ID, TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
 				name:         name, input: input,
-				complete: func(ctx context.Context) error { return r.Store.IngestionBatchDispatched(ctx, b.ID) },
+				complete: func(ctx context.Context) error {
+					class := b.WorkQueue
+					if !workqueue.Valid(class) {
+						class = workqueue.Live
+					}
+					return r.Store.IngestionBatchDispatched(workqueue.WithClass(ctx, class), b.ID)
+				},
 				retry: func(ctx context.Context) error {
 					for _, d := range b.Receipts {
 						if err := r.Store.Progress(ctx, d.Organization, d.ReceiptID, "retrying", "dispatch_unavailable"); err != nil {

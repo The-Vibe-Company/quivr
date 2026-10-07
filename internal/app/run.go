@@ -578,18 +578,28 @@ func Run(command string, args ...string) error {
 	}
 	queueSnapshots := postgres.QueueSnapshots{Pool: pool}
 	loops.Go(func(ctx context.Context) {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
+		delay := time.Second
+		failed := false
 		for {
 			refresh, cancel := context.WithTimeout(ctx, 30*time.Second)
-			if err := queueSnapshots.Refresh(refresh); err != nil && ctx.Err() == nil {
-				slog.Warn("queue backlog refresh unavailable")
-			}
+			err := queueSnapshots.Refresh(refresh)
 			cancel()
+			if err != nil && ctx.Err() == nil {
+				if !failed {
+					slog.Warn("queue backlog refresh unavailable")
+				}
+				failed = true
+				delay = min(delay*2, 15*time.Second)
+			} else {
+				failed = false
+				delay = time.Second
+			}
+			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case <-ticker.C:
+			case <-timer.C:
 			}
 		}
 	})

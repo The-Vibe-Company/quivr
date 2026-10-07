@@ -55,6 +55,7 @@ func (i *capacityActivity) ExecuteActivity(ctx context.Context, in *interceptor.
 						})
 						return result, err
 					}
+					activity.GetLogger(ctx).Warn("legacy ingestion activity has unexpected tracking input", "activity_type", name)
 				}
 			}
 			return i.Next.ExecuteActivity(ctx, in)

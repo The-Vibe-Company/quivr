@@ -25,7 +25,7 @@ func queueScenario(t *testing.T) (string, string) {
 
 func queueSnapshot(t *testing.T) map[string]any {
 	t.Helper()
-	return request(t, "GET", "/v0/admin/queues", os.Getenv("QUIVR_TEST_ADMIN"), nil, 200)["queues"].(map[string]any)
+	return request(t, "GET", "/v0/admin/queues", os.Getenv("QUIVR_TEST_OPERATOR"), nil, 200)["queues"].(map[string]any)
 }
 
 // Setup runs before the harness adds the rebuild-only embedder. Both Corpora
