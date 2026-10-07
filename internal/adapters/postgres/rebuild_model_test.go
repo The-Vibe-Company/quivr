@@ -327,6 +327,9 @@ contributions:
 				t.Fatalf("historical work needs a bounded current-plan handoff: %+v %v", jobs, err)
 			}
 			for _, job := range jobs {
+				if job.PlanID != nextPlan.Plan {
+					t.Fatalf("serving job must use the current plan: %+v", job)
+				}
 				jobCtx, err := live.Pin(ctx, plugins.Work{Kind: "serving_projection", Organization: scope.Organization, ID: job.ID, Plan: job.PlanID}, nil, 3)
 				if err != nil {
 					t.Fatal(err)
@@ -337,6 +340,9 @@ contributions:
 				}
 			}
 			for _, historical := range []content.Receipt{delayedEnrichment, delayedBaseline} {
+				if pinned, _, err := pluginStore.PinWork(ctx, plugins.WorkIngestion, scope.Organization, historical.ID, nextPlan.Plan); err != nil || pinned != originalPlan.Plan {
+					t.Fatalf("historical receipt pin changed during handoff: %q %v", pinned, err)
+				}
 				r, err := store.Receipt(ctx, scope.Organization, historical.ID)
 				if err != nil {
 					t.Fatal(err)

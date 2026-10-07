@@ -109,7 +109,14 @@ func (s Service) route(ctx context.Context, org string, v content.Version) (rout
 	if driver.Plugin != nil {
 		owner := content.PluginOfRecipe(driver.descriptor.Recipe)
 		space := g.ServedFor(owner)
-		sameOwner := g.IngestionRouting == nil || g.IngestionRouting.For(v.SourceMediaType) == owner
+		sameOwner := g.IngestionRouting != nil && g.IngestionRouting.For(v.SourceMediaType) == owner
+		if g.IngestionRouting == nil {
+			for _, sp := range g.Spaces {
+				if sp.OwnerPluginID == owner && sp.Role == content.SpaceServed {
+					sameOwner = true
+				}
+			}
+		}
 		mismatch = owner != "" && sameOwner && space != "" && !driver.owns(space)
 	}
 	return route{corpusID: r.Source.CorpusID, generation: g, legacy: s.LegacySpace != "" && g.SpaceID == s.LegacySpace, recipeMismatch: mismatch}, nil

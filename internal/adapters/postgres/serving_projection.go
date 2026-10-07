@@ -40,8 +40,20 @@ func currentServingRecipe(ctx context.Context, q querier, org, versionID string,
 	if err != nil {
 		return "", err
 	}
+	// Serving jobs require recorded owner/space metadata for eligibility.
+	// A legacy primary alone cannot authorize a historical handoff.
+	primary := g.ServedFor(r.PluginID)
+	known := false
+	for _, sp := range g.Spaces {
+		if sp.ID == primary && sp.OwnerPluginID == r.PluginID && sp.Role == content.SpaceServed {
+			known = true
+		}
+	}
+	if !known {
+		return "", nil
+	}
 	for _, space := range pin.EnabledSpaces() {
-		if space.Key == g.ServedFor(r.PluginID) {
+		if space.Key == primary {
 			return registry.IngestionRecipe(pin), nil
 		}
 	}

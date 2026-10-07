@@ -155,6 +155,9 @@ func (s EmbeddingStore) ReconcileServingEnrichment(ctx context.Context, org stri
 		return false, ErrGenerationChanged
 	}
 	if !eligible {
+		if _, err = tx.Exec(ctx, settleWithdrawnEnrichmentSQL, org, seg.VersionID); err != nil {
+			return false, err
+		}
 		return false, tx.Commit(ctx)
 	}
 	if current == seg.ID {

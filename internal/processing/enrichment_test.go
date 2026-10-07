@@ -55,6 +55,11 @@ func (s *oneVersion) CountEnrichmentTimeout(context.Context, string, string) (in
 	return s.timeouts, nil
 }
 
+func (s *oneVersion) BlockEnrichment(_ context.Context, _, _ string, reason content.Diagnostic) error {
+	s.progress = append(s.progress, "blocked "+reason.Code)
+	return nil
+}
+
 // plugin is an ingestion plugin whose next calls fail with the given errors.
 type plugin struct {
 	processing.IngestionPlugin
@@ -128,4 +133,25 @@ func TestEnrichmentAlreadySucceededEndsTheRetry(t *testing.T) {
 	if len(p.errs) == 0 || len(store.progress) > 0 {
 		t.Fatalf("an enriched Version was enriched again: plugin called %t, progress %q", len(p.errs) == 0, store.progress)
 	}
+}
+
+// Missing ownership metadata cannot authorize lexical fallback or claim a
+// same-owner recipe change. The generation must first identify its owner.
+func TestUnownedGenerationIsNotARecipeSwitch(t *testing.T) {
+	store := &oneVersion{}
+	p := &plugin{errs: []error{errors.New("must not call a different owner")}}
+	service := processing.Service{Content: content.Service{Receipts: store, RecordStore: store, Versions: store, Blobs: store, Embeddings: store},
+		Plugin: &processing.PluginDeriver{Plugin: p}, Routing: unknownOwner{}}
+	if err := service.Enrich(context.Background(), "org", "receipt"); err == nil {
+		t.Fatalf("unverified owner was treated as a recipe switch: %v", store.progress)
+	}
+	if len(p.errs) != 1 {
+		t.Fatal("unowned generation called the plugin")
+	}
+}
+
+type unknownOwner struct{}
+
+func (unknownOwner) Generation(context.Context, string, string) (content.Generation, error) {
+	return content.Generation{ID: "generation", SpaceID: "retired.space@1"}, nil
 }
