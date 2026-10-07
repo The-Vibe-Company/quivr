@@ -406,7 +406,15 @@ const unavailable = (status) =>
       )
     : failure(503, "Le suivi est momentanément indisponible. Réessayez.");
 
-export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
+export function createAdmin({
+  upstream,
+  corpus,
+  follow,
+  clock = Date.now,
+  // How long a rollup read is reused; a test harness shortens it to its
+  // engine's flush interval.
+  statsMs = STATS_MS,
+}) {
   // The demo corpus's documents of the last 24 hours, by Version.
   const day = new Map();
   // What each browser was last sent for the documents on show, by Version.
@@ -424,7 +432,7 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
   let tick;
   let unfollow;
 
-  // The engine's rollups, by kind, window and limit, for STATS_MS.
+  // The engine's rollups, by kind, window and limit, for statsMs.
   const rollups = new Map();
   let overlay = null;
   let overlayAt = 0;
@@ -451,7 +459,7 @@ export function createAdmin({ upstream, corpus, follow, clock = Date.now }) {
   async function rollup(kind, window, limit) {
     const path = `/v0/admin/stats/${kind}?window=${window}${limit ? `&limit=${limit}` : ""}`;
     const cached = rollups.get(path);
-    if (cached && clock() - cached.at < STATS_MS) return cached.response;
+    if (cached && clock() - cached.at < statsMs) return cached.response;
     const pending = upstream(path);
     rollups.set(path, { at: clock(), response: pending });
     try {
