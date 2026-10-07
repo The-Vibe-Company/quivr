@@ -289,18 +289,23 @@ func (d PluginDeriver) derive(ctx context.Context, org, corpusID string, v conte
 // saveOrAdopt stores a segment's vector, or adopts the artifact another
 // derivation of the same input stored first, for example an ingestion running
 // beside a rebuild. Embedding providers are not bitwise deterministic, so the
-// first stored artifact is canonical; only an unreadable or differently sized
-// stored vector keeps the conflict.
+// first stored artifact is canonical. Saving the stored vector again yields
+// that same artifact and still checks the registered space, so a space whose
+// manifest changed, or an unreadable or differently sized stored vector,
+// keeps the conflict.
 func (d PluginDeriver) saveOrAdopt(ctx context.Context, org string, input content.Embedding, space content.VectorSpace, vector []float32) (content.Embedding, []float32, error) {
 	artifact, err := d.Content.SaveEmbedding(ctx, input, space, vector)
 	if !errors.Is(err, content.ErrConflict) {
 		return artifact, vector, err
 	}
-	stored, storedVector, loadErr := d.Content.LoadEmbedding(ctx, org, input.DerivationID)
-	if loadErr != nil || len(storedVector) != len(vector) {
+	_, stored, loadErr := d.Content.LoadEmbedding(ctx, org, input.DerivationID)
+	if loadErr != nil || len(stored) != len(vector) {
 		return artifact, vector, err
 	}
-	return stored, storedVector, nil
+	if artifact, err = d.Content.SaveEmbedding(ctx, input, space, stored); err != nil {
+		return artifact, vector, err
+	}
+	return artifact, stored, nil
 }
 
 // ErrSegmentsDiffer reports that the plugin cuts a Version into other

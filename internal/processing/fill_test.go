@@ -95,11 +95,19 @@ func TestFillKeepsTheProjectedSegments(t *testing.T) {
 	}
 }
 
-// firstWriterArtifacts keeps the first artifact stored for a derivation, as
-// the repository does, and reports a later different one as a conflict.
-type firstWriterArtifacts struct{ *memoryArtifacts }
+// firstWriterArtifacts keeps the first artifact stored for a derivation and
+// the first manifest registered for a space, as the repository does, and
+// reports a later different one as a conflict.
+type firstWriterArtifacts struct {
+	*memoryArtifacts
+	spaces map[string]string
+}
 
 func (m firstWriterArtifacts) SaveEmbedding(ctx context.Context, e content.Embedding, space content.VectorSpace) error {
+	if old, ok := m.spaces[space.ID]; ok && old != string(space.Manifest) {
+		return content.ErrConflict
+	}
+	m.spaces[space.ID] = string(space.Manifest)
 	if old, ok := m.byDerivation[e.DerivationID]; ok && old.ID != e.ID {
 		return content.ErrConflict
 	}
@@ -109,6 +117,7 @@ func (m firstWriterArtifacts) SaveEmbedding(ctx context.Context, e content.Embed
 // An ingestion running beside a rebuild can store a segment's vector first.
 // The provider is not bitwise deterministic, so the plugin's answer may
 // differ: the stored artifact is adopted instead of refusing the Version.
+// A space whose registered manifest changed is still refused.
 func TestFillAdoptsAVectorAnotherDerivationStoredFirst(t *testing.T) {
 	v := content.Version{RecordID: "r", ID: "v", Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "first paragraph\n\nsecond paragraph"}}}}}
 	projected := []content.SegmentInput{{PartKey: "body", Start: 0, End: 15}, {PartKey: "body", Start: 17, End: 33}}
@@ -116,21 +125,40 @@ func TestFillAdoptsAVectorAnotherDerivationStoredFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls := 0
-	plugin := fillPlugin{segments: projected, calls: &calls}
-	store := firstWriterArtifacts{&memoryArtifacts{byDerivation: map[string]content.Embedding{}, blobs: map[string][]byte{}}}
-	service := content.Service{Embeddings: store, Blobs: store}
-	space := plugin.Descriptor().VectorSpaces["p.large@1"]
-	// The concurrent ingestion stored only the first segment, with a slightly different vector.
-	if _, err = service.SaveEmbedding(context.Background(), content.EmbeddingInput("org", "corpus", v, seg, seg.Segments[0], space, "plugin:p@2"), space, []float32{1, 0.001}); err != nil {
-		t.Fatal(err)
-	}
-	d := processing.PluginDeriver{Content: service, Plugin: plugin}
-	data, err := d.Fill(context.Background(), "org", "corpus", v, seg, []string{"p.large@1"})
-	if err != nil || calls != 1 {
-		t.Fatalf("fill: %v after %d plugin calls", err, calls)
-	}
-	if len(data) != 2 || data[0].Vector[1] != 0.001 || data[1].Vector[1] != 1 {
-		t.Fatalf("vectors %+v, want the stored first vector and the plugin's second", data)
+	for _, tc := range []struct {
+		name       string
+		stored     []float32
+		registered string
+		refused    bool
+	}{
+		{"nearly equal vector", []float32{1, 0.001}, "", false},
+		{"space manifest changed", []float32{1, 0.001}, `{"space":"p.large","metric":"dot"}`, true},
+	} {
+		calls := 0
+		plugin := fillPlugin{segments: projected, calls: &calls}
+		store := firstWriterArtifacts{&memoryArtifacts{byDerivation: map[string]content.Embedding{}, blobs: map[string][]byte{}}, map[string]string{}}
+		service := content.Service{Embeddings: store, Blobs: store}
+		space := plugin.Descriptor().VectorSpaces["p.large@1"]
+		// The concurrent ingestion stored only the first segment.
+		if _, err = service.SaveEmbedding(context.Background(), content.EmbeddingInput("org", "corpus", v, seg, seg.Segments[0], space, "plugin:p@2"), space, tc.stored); err != nil {
+			t.Fatal(err)
+		}
+		if tc.registered != "" {
+			store.spaces[space.ID] = tc.registered
+		}
+		d := processing.PluginDeriver{Content: service, Plugin: plugin}
+		data, err := d.Fill(context.Background(), "org", "corpus", v, seg, []string{"p.large@1"})
+		if tc.refused {
+			if !errors.Is(err, content.ErrIngestionRefused) {
+				t.Fatalf("%s: %v, want a refusal", tc.name, err)
+			}
+			continue
+		}
+		if err != nil || calls != 1 {
+			t.Fatalf("%s: %v after %d plugin calls", tc.name, err, calls)
+		}
+		if len(data) != 2 || data[0].Vector[1] != 0.001 || data[1].Vector[1] != 1 {
+			t.Fatalf("%s: vectors %+v, want the stored first vector and the plugin's second", tc.name, data)
+		}
 	}
 }
