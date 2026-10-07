@@ -2,7 +2,7 @@
 
 Reference for operators choosing a text embedding model. This optional Go
 plugin cuts text and embeds it through OpenAI-compatible or Cohere v2 HTTP
-APIs. It declares one configured vector space on Plugin API 0.17.0. The
+APIs. It declares one configured vector space on Plugin API 0.18.0. The
 engine's evaluation, backfill, promotion and rollback operations use that
 space normally. Keep `core.ingest` pinned as the rollback target when
 installing this separate plugin.
@@ -137,9 +137,11 @@ The generated space belongs to that ID. See
 and [backfill](https://docs.quivr.thevibecompany.co/plugins/backfill-a-vector-space).
 
 Each changed configuration is a new immutable registration: increment
-`plugin_version` (default `1.1.0`), regenerate and certify its package, then
+`plugin_version` (default `1.2.0`), regenerate and certify its package, then
 install it. The space id includes the model, dimensions and a hash of the wire
-format, metric, model revision and input templates. Changing any of those
+format, metric, model revision, input templates and full-text context mode.
+Version `1.2.0` introduces separate title/context passages and declares a new
+space, so install it with a rebuild or evaluation cutover. Changing any of those
 creates a new space. Set `model_revision` when a deployment name starts serving
 new weights; the plugin cannot detect a provider changing weights behind a
 stable name. Changing batching or timeouts preserves the vector space. Existing
@@ -156,16 +158,16 @@ Corpora need a rebuild or backfill before they carry a newly configured space.
 | `query_input_type`, `document_input_type` | `search_query`, `search_document` | Cohere retrieval modes |
 | `send_dimensions` | `true` | Send dimensions to the provider; always validate returned size |
 | `max_tokens_per_segment` | `512` | Full input window including title/template and special tokens, 8–32768 |
-| `packing` | `paragraphs` | Whole consecutive body paragraphs; `none` retains per-Part windows |
+| `packing` | `paragraphs` | Consecutive paragraphs inside each source window; `none` uses plain windows |
 | `body_tokens` | `512` | Body budget excluding the title prefix |
-| `max_chunks` | `4` | Maximum packed passages per Version, 1–256; excess is refused without truncation |
+| `max_chunks` | `4` | Maximum passages returned per bounded work page, 1–256; all remaining text continues in later pages |
 | `rebalance_tail` | `true` | Move whole paragraphs between the last two passages to balance a short tail |
 | `tail_min_fraction` | `0.25` | Rebalance a tail below this fraction of the body budget, 0–0.5 |
 | `title_source` | `title` | `title`, `none`, or `inline`; headline comes from the sole title Part |
 | `title_context_parts` | empty | Optional explicit Part keys appended to title context in listed order |
 | `document_template` | `auto` | `gemma`, `prefix`, or model-name detection with `auto` |
 | `tokenizer` | absent | Local `python`, `model` path and `sha256` for pinned tokenizers 0.23.2 |
-| `overlap` | `48` | Legacy `packing: "none"` overlap in source bytes; paragraph packing uses no overlap |
+| `overlap` | `48` | Legacy unpaged overlap in source bytes; paged ingestion uses no overlap |
 | `batch_size` | `16` | Most document inputs per provider request, across Versions, 1–32 |
 | `batch_wait_ms` | `25` | Document collection window, 0–100 ms and less than `call_budget_ms`; 0 disables cross-Version batching |
 | `max_batch_tokens` | `8192` | Maximum summed input estimate per request; at least the segment limit |
@@ -196,6 +198,9 @@ counts the whole provider request once, including retry attempts, rather than
 attributing its full usage to every Version. No source text or credentials enter
 these logs. Batching preserves vector-space identity and resume-cache keys.
 
+Document authentication, endpoint and model configuration failures retry; they
+affect the provider connection and do not quarantine individual items.
+
 A 429 response shares its `Retry-After` delay across subsequent calls in the
 plugin process, including calls from other documents and query encoding.
 Already outstanding requests may finish. Without `Retry-After`, the bounded
@@ -203,19 +208,21 @@ retry backoff supplies the shared delay. This cap and the engine's evaluation
 and backfill concurrency limits apply per process; tune all of them to your
 provider's allowance.
 
-Paragraph packing preserves complete paragraphs and their reading order. It only
-splits a paragraph when that paragraph exceeds a budget or the excerpt bound.
-Consecutive body Parts can share a passage; other roles interrupt packing.
+Paged ingestion preserves every text Part in reading order, including titles and
+context. The engine sends source windows of at most 4096 Unicode code points;
+paragraph packing preserves complete paragraphs inside each window and splits
+larger paragraphs at model or window boundaries. Parts have separate passages.
 There is no overlap. A final passage below `tail_min_fraction` is rebalanced
 with its predecessor by moving whole paragraphs, minimizing token imbalance;
 ties move the fewest paragraphs. Each source range remains an exact Unicode
 code-point slice of an immutable Part. Search responses expose `passage_text`
 and `source_excerpts`; the original `excerpt` remains the first source slice.
 
-For EmbeddingGemma, `auto` selects `title: {headline} | text: {body}`. Missing
-headlines use `title: none`. Dates, categories and codes are not automatically
-embedded. Generic prefix templates prepend the selected headline to the body.
-Set `title_source: "none"` to omit it. Queries keep their configured prefix.
+For EmbeddingGemma, `auto` selects `title: none | text: {passage}`. Titles and
+context are independently embedded rather than repeated in every body input;
+this prevents a large headline from exceeding every provider request. Paged
+provenance records `context_mode: separate_passages`. The title configuration
+options remain available for legacy unpaged invocations. Queries keep their prefix.
 
 Use `python3 scripts/prepare_tokenizer.py --hosted` to prepare the pinned Gemma
 tokenizer offline before startup. Configure the returned local tokenizer paths
@@ -232,14 +239,26 @@ convert old per-Part segments into packed passages. Served segments remain
 unchanged until rebuild activation. Batching alone preserves cuts and space
 semantics. Core ingestion keeps its existing per-Part behavior.
 
-A Version may have at most 64 Parts, one title and 256 KiB of text. Packed
-passages allow at most 256 source ranges, 4096 code points per source excerpt
-and 16384 code points in the joined passage. `packing: "none"` allows 256 windows.
-Invalid text or oversized content is terminal. Provider 4xx responses other
-than 429 are terminal; transport failures, malformed vectors, 429 and 5xx are
-retryable. `Retry-After` seconds and HTTP dates take precedence over exponential
+There is no per-Version passage or text-size cap in paged ingestion. A provider
+input-size refusal bisects the source into additional independently embedded
+passages; no text is discarded and vectors are never averaged. Unembedded
+source is negotiated on the next page; committed cuts and vectors are reused. Each accepted split
+cut records `provider_split: true`; structured `hosted_embedding_split` events
+record split counts without source text. A provider that rejects even one source
+code point, or another terminal per-item failure, quarantines that Version while
+other ingestion and rebuild work continues. Rebuild operations count held versions
+in `versions_quarantined` and retain up to 20 error samples; activation ignores
+quarantined versions. Fix the cause and use the existing quarantine reprocess API.
+Transport failures, page deadlines, malformed vectors, 429 and 5xx retry. `Retry-After` seconds and HTTP dates take precedence over exponential
 delay. If its delay exceeds the invocation deadline, the call returns control
 to the engine without starting another request.
+
+Complete ingestion pages, including their provider-negotiated source cuts and
+vectors, are committed to PostgreSQL before the next page is requested. An
+activity or process restart reuses those pages. The complete immutable
+segmentation is published only after the final page; a new Version waits for its
+vectors before keyword readiness. Its keyword representation retains the full text.
+Legacy plugins without `contributions.ingestion.paging` keep their existing flow.
 
 Completed document batches stay in a per-organization, per-process LRU cache
 (up to 4096 vectors or 32 MiB of vector data). A retryable failure returns
@@ -258,7 +277,7 @@ attempt, the count is the conservative input estimate. Sum these records by
 space and mode to account for document and query calls, including retries.
 Failed-attempt estimates make this an upper bound on billed input when a
 provider rejected the request before processing. Cached document vectors
-produce no provider call or token charge. API 0.17 has no ingestion response
+produce no provider call or token charge. API 0.18 has no ingestion response
 usage field; this accounting interface is the plugin's structured log.
 
 `make check` certifies generated packages in both formats against the shared

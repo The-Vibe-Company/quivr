@@ -100,8 +100,9 @@ Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written i
 | `contributions.ingestion.timeout_ms` | integer | no | Deadline of one segment_and_embed invocation. 1000 to 300000. Default `30000`. |
 | `contributions.ingestion.query_timeout_ms` | integer | no | Deadline of one embed_query invocation; a search waits for it. 100 to 10000. Default `2000`. |
 | `contributions.ingestion.limits` | object | no | — |
-| `contributions.ingestion.limits.max_segments` | integer | no | Most segments one Record Version yields. 1 to 1024. Default `256`. |
+| `contributions.ingestion.limits.max_segments` | integer | no | Most segments in one answer. With paging, this bounds each page, never the total passages of a Record Version. 1 to 1024. Default `256`. |
 | `contributions.ingestion.limits.max_response_bytes` | integer | no | 1024 to 16777216. Default `16777216`. |
+| `contributions.ingestion.paging` | boolean | no | Since Plugin API 0.18. Opt in to bounded source windows and paged segment_and_embed responses. Limits apply per page; the host persists provider-negotiated cuts and vectors before advancing. |
 
 ## Retrieval
 

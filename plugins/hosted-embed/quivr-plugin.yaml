@@ -1,7 +1,7 @@
 {
   "compatibility": {
     "engine": ">=0.1.0 <0.3.0",
-    "plugin_api": ">=0.17.0 <0.18.0"
+    "plugin_api": ">=0.18.0 <0.19.0"
   },
   "configuration": {
     "schema": {
@@ -74,7 +74,7 @@
           "const": "hosted.embed"
         },
         "plugin_version": {
-          "const": "1.1.0"
+          "const": "1.2.0"
         },
         "query_input_type": {
           "const": "search_query"
@@ -125,9 +125,10 @@
       "limits": {
         "max_segments": 256
       },
+      "paging": true,
       "query_timeout_ms": 10000,
       "spaces": {
-        "hosted.embed.intfloat-multilingual-e5-sma-384-96f19d0e4243e08b": {
+        "hosted.embed.intfloat-multilingual-e5-sma-384-ff4367462a0d1408": {
           "dimensions": 384,
           "indexes": [
             "text"
@@ -159,5 +160,5 @@
       "required": false
     }
   ],
-  "version": "1.1.0"
+  "version": "1.2.0"
 }

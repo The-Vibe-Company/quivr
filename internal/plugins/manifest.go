@@ -173,6 +173,7 @@ type SubscriptionVectors struct {
 // text Parts of one Version into segments, embeds each in the vector spaces
 // the plugin owns, and encodes queries into one of them.
 type Ingestion struct {
+	Paging bool `json:"paging,omitempty"`
 	// Spaces are the vector spaces the plugin owns, by space id.
 	Spaces         map[string]VectorSpace `json:"spaces"`
 	TimeoutMS      int                    `json:"timeout_ms"`
@@ -712,6 +713,12 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 	for _, row := range featureTable {
 		if row.Field == "" || !pointerPresent(root, row.Field) {
 			continue
+		}
+		if row.Feature == FeatureIngestionPages {
+			ingestion, _ := contributions["ingestion"].(map[string]any)
+			if ingestion["paging"] != true {
+				continue
+			}
 		}
 		if minimum, admitted := admitsFeature(r, row.Feature); !admitted {
 			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: row.Field,

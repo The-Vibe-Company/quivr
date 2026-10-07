@@ -32,6 +32,7 @@ type fakeRebuildStore struct {
 	cancelBeforeActivate bool
 	confirms             int
 	checkpoints          int
+	quarantined          map[string]content.Diagnostic
 }
 
 func (f *fakeRebuildStore) current() string {
@@ -64,6 +65,9 @@ func (f *fakeRebuildStore) RebuildCandidates(_ context.Context, _, _ string, lim
 	defer f.mu.Unlock()
 	out := []retrieval.RebuildCandidate{}
 	for _, c := range f.candidates {
+		if _, held := f.quarantined[c.VersionID]; held {
+			continue
+		}
 		if _, ok := f.covered[c.VersionID]; !ok || f.gap {
 			out = append(out, c)
 			if len(out) == limit {
@@ -74,6 +78,7 @@ func (f *fakeRebuildStore) RebuildCandidates(_ context.Context, _, _ string, lim
 	return out, nil
 }
 func (f *fakeRebuildStore) CheckpointRebuild(context.Context, string, string, string) error {
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.current() != operations.StateRunning {
@@ -82,6 +87,42 @@ func (f *fakeRebuildStore) CheckpointRebuild(context.Context, string, string, st
 	f.checkpoints++
 	return nil
 }
+func (f *fakeRebuildStore) QuarantineRebuild(_ context.Context, _, _ string, version string, reason content.Diagnostic) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.current() != operations.StateRunning {
+		return operations.ErrNotRunning
+	}
+	if f.quarantined == nil {
+		f.quarantined = map[string]content.Diagnostic{}
+	}
+	f.quarantined[version] = reason
+	return nil
+}
+
+type selectiveRebuildDeriver struct {
+	fakeDeriver
+	refused string
+}
+
+func (d *selectiveRebuildDeriver) Derive(ctx context.Context, org, corpusID string, v content.Version, g content.Generation) (content.Segmentation, []content.EmbeddingData, error) {
+	if v.ID == d.refused {
+		return content.Segmentation{}, nil, content.Refused("cannot process this item")
+	}
+	return d.fakeDeriver.Derive(ctx, org, corpusID, v, g)
+}
+
+func TestRebuildQuarantinesOneTerminalItemAndActivatesOthers(t *testing.T) {
+	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}, {RecordID: "r2", VersionID: "v2", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
+	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+	r.Plugin = &selectiveRebuildDeriver{refused: "v1"}
+	r.Concurrency = 2
+	run(t, r)
+	if !store.activated || len(store.failed) != 0 || len(store.quarantined) != 1 || store.quarantined["v1"].Code != "ingestion_refused" || len(store.covered["v2"]) != 1 {
+		t.Fatalf("activated=%v failed=%v held=%v covered=%v", store.activated, store.failed, store.quarantined, store.covered)
+	}
+}
+
 func (f *fakeRebuildStore) CoverRebuild(_ context.Context, _, _ string, seg content.Segmentation, artifacts []content.Embedding) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -312,27 +353,27 @@ func TestRebuildPreservesLegacyLexicalAvailability(t *testing.T) {
 }
 
 // A target whose served space the pinned plugin does not own cannot be built.
-func TestRebuildFailsForATargetNoPinnedPluginServes(t *testing.T) {
+func TestRebuildRetriesWhenNoPinnedPluginServesTarget(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
 	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
 	r.Plugin = nil
-	run(t, r)
-	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "unsupported_vector_space" {
+	done, err := r.Step(t.Context(), "org", "op")
+	if done || !errors.Is(err, processing.ErrSpaceUnowned) || store.activated || len(store.failed) != 0 || len(store.quarantined) != 0 {
 		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
 	}
 }
 
-func TestRebuildFailsWhenCanonicalTextArtifactIsLost(t *testing.T) {
+func TestRebuildQuarantinesAnItemWhoseCanonicalArtifactIsLost(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
 	run(t, rebuilder(store, &fakeRebuildContent{versionErr: content.ErrArtifactCorrupt}, &fakeRebuildProjection{}))
-	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "canonical_content_unavailable" {
+	if !store.activated || len(store.failed) != 0 || store.quarantined["v1"].Code != "canonical_content_unavailable" {
 		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
 	}
 }
 
 // A candidate that remains listed after canonical hydration returns not found
 // must terminate clearly instead of completing identical batches forever.
-func TestRebuildFailsWhenHeadCandidateCannotBeHydrated(t *testing.T) {
+func TestRebuildQuarantinesAnEligibleItemThatCannotBeHydrated(t *testing.T) {
 	for _, withdrawn := range []bool{false, true} {
 		t.Run(fmt.Sprintf("withdrawn=%v", withdrawn), func(t *testing.T) {
 			store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
@@ -345,25 +386,26 @@ func TestRebuildFailsWhenHeadCandidateCannotBeHydrated(t *testing.T) {
 				if !store.activated || len(store.failed) != 0 {
 					t.Fatalf("withdrawn Version blocked activation: activated=%v failed=%v", store.activated, store.failed)
 				}
-			} else if store.activated || len(store.failed) != 1 || store.failed[0].Code != "canonical_content_unavailable" {
+			} else if !store.activated || len(store.failed) != 0 || store.quarantined["v1"].Code != "canonical_content_unavailable" {
 				t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
 			}
 		})
 	}
 }
 
-func TestRebuildFailsWhenSuccessfulCoverageLeavesTheSameGap(t *testing.T) {
+func TestRebuildRetriesWhenStorageLeavesTheSameCoverageGap(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}, gap: true}
-	run(t, rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{}))
-	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "rebuild_no_progress" || store.checkpoints != 0 {
+	done, err := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{}).Step(t.Context(), "org", "op")
+	if done || err == nil || store.activated || len(store.failed) != 0 || store.checkpoints != 0 {
+
 		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
 	}
 }
 
-func TestRebuildRejectsSegmentationDifferingFromDurableArtifact(t *testing.T) {
+func TestRebuildQuarantinesSegmentationDifferingFromDurableArtifact(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}, coverErr: content.ErrConflict}
 	run(t, rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{}))
-	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "segmentation_mismatch" {
+	if !store.activated || len(store.failed) != 0 || store.quarantined["v1"].Code != "segmentation_mismatch" {
 		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
 	}
 }
@@ -416,15 +458,14 @@ func TestRebuildCancellationBeforeActivationPreventsCutover(t *testing.T) {
 	}
 }
 
-// A plugin refusal or a segmentation that differs from the stored one fails
-// the rebuild; an outage retries it.
+// Terminal per-item failures quarantine only that item; outages retry.
 func TestRebuildPluginFailures(t *testing.T) {
 	for code, err := range map[string]error{"ingestion_refused": fmt.Errorf("%w: terminal", content.ErrIngestionRefused), "segmentation_mismatch": content.ErrConflict} {
 		store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
 		r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
 		r.Plugin = &fakeDeriver{err: err}
 		run(t, r)
-		if store.activated || len(store.failed) != 1 || store.failed[0].Code != code || store.failed[0].Retryable {
+		if !store.activated || len(store.failed) != 0 || store.quarantined["v1"].Code != code || store.quarantined["v1"].Retryable {
 			t.Fatalf("%s: activated=%v failed=%v", code, store.activated, store.failed)
 		}
 	}
@@ -448,8 +489,8 @@ func TestRebuildTerminalFailureAfterCancelRequestSettlesCanceled(t *testing.T) {
 	}
 }
 
-// A rebuild shares the vector deadline budget with enrichment: outages retry
-// freely; the third reached deadline fails the Operation without cutover.
+// The shared per-item deadline budget holds only that Version; outages retry
+// freely and never consume it.
 func TestRebuildStopsAfterTheSharedVectorDeadlineBudget(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
 	canonical := &fakeRebuildContent{}
@@ -466,8 +507,12 @@ func TestRebuildStopsAfterTheSharedVectorDeadlineBudget(t *testing.T) {
 	}
 	plugin.err = processing.ErrPluginDeadline
 	done, err := rebuilder.Step(context.Background(), "org", "op")
-	if err != nil || !done || len(store.failed) != 1 || store.failed[0].Code != content.CodeEnrichmentTimeout || store.activated {
+	if err != nil || done || len(store.failed) != 0 || store.quarantined["v1"].Code != content.CodeEnrichmentTimeout {
 		t.Fatalf("deadline budget: done=%v err=%v failures=%v activated=%v", done, err, store.failed, store.activated)
+	}
+	run(t, rebuilder)
+	if !store.activated {
+		t.Fatal("held item blocked activation")
 	}
 }
 
@@ -563,14 +608,13 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		cause       error
-		code        string
 		afterCancel error
 		canceled    bool
 	}{
 		{name: "outage", cause: outage},
-		{name: "terminal", cause: content.ErrIngestionRefused, code: "ingestion_refused"},
+
 		{name: "context"},
-		{name: "terminal precedence", cause: outage, afterCancel: content.ErrIngestionRefused, code: "ingestion_refused"},
+		{name: "item isolation during outage", cause: outage, afterCancel: content.ErrIngestionRefused},
 		{name: "cancellation precedence", cause: outage, afterCancel: operations.ErrNotRunning, canceled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -636,10 +680,6 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 				if err != nil || store.state != operations.StateCanceled || store.confirms != 1 || len(store.failed) != 0 {
 					t.Fatalf("cancellation err=%v state=%s confirms=%d failures=%v", err, store.state, store.confirms, store.failed)
 				}
-			} else if tc.code != "" {
-				if err != nil || len(store.failed) != 1 || store.failed[0].Code != tc.code {
-					t.Fatalf("terminal err=%v failures=%v", err, store.failed)
-				}
 			} else {
 				want := tc.cause
 				if want == nil {
@@ -648,6 +688,9 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 				if !errors.Is(err, want) || len(store.failed) != 0 {
 					t.Fatalf("retry err=%v failures=%v, want %v", err, store.failed, want)
 				}
+			}
+			if tc.afterCancel == content.ErrIngestionRefused && store.quarantined["1"].Code != "ingestion_refused" {
+				t.Fatalf("terminal sibling was not quarantined: %v", store.quarantined)
 			}
 			if len(d.entered) != 0 || len(store.covered) != 0 || store.activated || store.checkpoints != 0 {
 				t.Fatalf("remaining calls=%d covered=%v activated=%v", len(d.entered), store.covered, store.activated)

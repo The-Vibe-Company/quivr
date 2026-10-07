@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -21,6 +22,9 @@ const CheckEmbedQuery = "embed_query"
 // (Plugin API 0.8): the same segments, without vectors.
 const CheckSegmentsOnly = "segments_only"
 
+// CheckIngestionPages certifies bounded continuation and page replay.
+const CheckIngestionPages = "ingestion_pages"
+
 // ContributionIngestion is the ingestion Contribution (Plugin API 0.6).
 const ContributionIngestion = "ingestion"
 
@@ -35,7 +39,11 @@ type ingestionRun struct {
 func (r *run) ingestion(ctx context.Context, own []ownFixture) {
 	runs := r.ingestionFixtures(own)
 	for _, ir := range runs {
-		r.invokeIngestion(ctx, ir)
+		if r.m.Contributions.Ingestion.Paging && r.api.Speaks(plugins.FeatureIngestionPages) {
+			r.ingestionPages(ctx, ir)
+		} else {
+			r.invokeIngestion(ctx, ir)
+		}
 		r.embedQueries(ctx, ir)
 	}
 	if len(runs) > 0 {
@@ -173,6 +181,71 @@ func (r *run) invokeIngestion(ctx context.Context, ir ingestionRun) {
 	if len(replay.Issues) == 0 && r.api.Speaks(plugins.FeatureSegmentsOnly) {
 		r.segmentsOnly(ctx, ir, first.Body)
 	}
+}
+
+// ingestionPages follows each bounded source window to completion and replays
+// every page. A nonzero-start probe also checks plugins that answer a whole
+// window in one page: silently ignoring the cursor must not certify.
+func (r *run) ingestionPages(ctx context.Context, ir ingestionRun) {
+	started := time.Now()
+	check := Check{ID: CheckIngestionPages, Contribution: ContributionIngestion, Fixture: ir.label,
+		Title: "bounded pages cover every source character and replay identically"}
+	var base plugins.SegmentAndEmbedRequest
+	if err := json.Unmarshal(ir.run.Request, &base); err != nil {
+		return
+	}
+	call := func(part plugins.IngestionPart, window, start int) (*plugins.IngestionAnswer, bool) {
+		request := base
+		request.Parts = []plugins.IngestionPart{part}
+		request.Page = &plugins.IngestionPageRequest{Start: start, MaxSegments: 1}
+		pageIdentity, _ := json.Marshal([]any{base.IdempotencyKey, part.Key, window, start})
+		request.IdempotencyKey = fmt.Sprintf("page-%x", sha256.Sum256(pageIdentity))
+		request.InvocationID = request.IdempotencyKey
+		body, _ := plugins.BuildSegmentAndEmbedRequest(request)
+		first, problem := r.callSegmentAndEmbed(ctx, body)
+		check.Issues = judgeSuccess(first, problem)
+		if len(check.Issues) != 0 {
+			return nil, false
+		}
+		request.InvocationID += ":replay"
+		body, _ = plugins.BuildSegmentAndEmbedRequest(request)
+		second, problem := r.callSegmentAndEmbed(ctx, body)
+		check.Issues = judgeSuccess(second, problem)
+		if len(check.Issues) != 0 {
+			return nil, false
+		}
+		if diff := firstDifference(decoded(first.Body), decoded(second.Body), ""); diff != "" {
+			check.Issues = []plugins.Issue{{Code: CodeNondeterministic, Path: diff, Message: "replaying a page changed its passages or vectors"}}
+			return nil, false
+		}
+		answer, _ := plugins.DecodeSegmentAndEmbed(first.Body)
+		return &answer, true
+	}
+	for _, part := range base.Parts {
+		runes := []rune(part.Text)
+		for window := 0; window < len(runes); window += plugins.MaxSourceRangeRunes {
+			local := plugins.IngestionPart{Key: part.Key, Role: "body", Text: string(runes[window:min(len(runes), window+plugins.MaxSourceRangeRunes)])}
+			n := len([]rune(local.Text))
+			for start := 0; ; {
+				answer, ok := call(local, window, start)
+				if !ok {
+					r.add(check, started)
+					return
+				}
+				if answer.NextStart == nil {
+					if start == 0 && n > 1 {
+						if _, ok = call(local, window, 1); !ok {
+							r.add(check, started)
+							return
+						}
+					}
+					break
+				}
+				start = *answer.NextStart
+			}
+		}
+	}
+	r.add(check, started)
 }
 
 // segmentsOnly asks for the fixture's segments without any space, as the

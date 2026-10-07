@@ -14,6 +14,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"golang.org/x/sync/errgroup"
 )
@@ -123,6 +124,34 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	if _, err = rebuild.CoverRebuild(ctx, org, op.ID, x2, nil); err != nil {
 		t.Fatal(err)
 	}
+	// A terminal refusal of an already searchable version is held atomically.
+	// Retrying the same observation must not duplicate the counter or sample.
+	blocked := segmented(a.ID, "blocked")
+	if err = promote(a.ID, blocked); err != nil {
+		t.Fatal(err)
+	}
+	reason := content.Diagnostic{Code: "ingestion_refused", Message: "invalid provider output", Plugin: "example.paged", PluginVersion: "0.1.0"}
+	for range 2 {
+		if err = rebuild.QuarantineRebuild(ctx, org, op.ID, blocked.VersionID, reason); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A neighboring corpus must never be quarantined by this operation.
+	if err = rebuild.QuarantineRebuild(ctx, org, op.ID, y1.VersionID, reason); err != nil {
+		t.Fatal(err)
+	}
+	admin := scope
+	admin.Actions = append(admin.Actions, operations.BackfillPermission)
+	q := quarantine.Service{Store: store}
+	entries, err := q.List(ctx, admin, quarantine.Filter{CorpusID: a.ID}, "", quarantine.MaxPage)
+	if err != nil || len(entries) != 1 || entries[0].VersionID != blocked.VersionID || entries[0].Reason.Plugin != reason.Plugin || entries[0].Stage != content.QuarantineIngestion {
+		t.Fatalf("rebuild refusal absent from quarantine: %+v %v", entries, err)
+	}
+	activeReprocessPlan(t, ctx, pool)
+	estimate, _, err := q.Request(ctx, admin, quarantine.Request{Key: "repair", Filter: quarantine.Filter{CorpusID: a.ID}, DryRun: true})
+	if err != nil || estimate.Versions != 1 {
+		t.Fatalf("rebuild quarantine cannot be reprocessed: %+v %v", estimate, err)
+	}
 	// Enrichment committed on the old generation after lexical coverage requires
 	// the target to reuse the stored vector artifact.
 	var manifest []byte
@@ -157,7 +186,7 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	}
 	activate(true)
 	read, err := store.Operation(ctx, org, op.ID)
-	if err != nil || read.State != operations.StateSucceeded || read.ResultGenerationID != op.TargetGenerationID || read.Counters["indexed"] != 2 || read.Counters["vectors_reused"] != 1 {
+	if err != nil || read.State != operations.StateSucceeded || read.ResultGenerationID != op.TargetGenerationID || read.Counters["indexed"] != 2 || read.Counters["vectors_reused"] != 1 || read.Counters["versions_quarantined"] != 1 || len(read.Errors) != 1 || read.Errors[0].Code != reason.Code {
 		t.Fatalf("succeeded operation %+v %v", read, err)
 	}
 	if g, _ := store.Generation(ctx, org, a.ID); g.ID != op.TargetGenerationID {
@@ -190,7 +219,7 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	if err = rebuild.FailRebuild(ctx, org, op.ID, operations.Error{Code: "late_failure", Message: "late failure"}); err != nil {
 		t.Fatal(err)
 	}
-	if read, _ = store.Operation(ctx, org, op.ID); read.State != operations.StateSucceeded || len(read.Errors) != 0 {
+	if read, _ = store.Operation(ctx, org, op.ID); read.State != operations.StateSucceeded || len(read.Errors) != 1 {
 		t.Fatalf("terminal success overwritten: %+v", read)
 	}
 	var transitions int

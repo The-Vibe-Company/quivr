@@ -102,8 +102,15 @@ type SourceRange struct {
 // IngestionRequestView is what output validation needs from a
 // segment_and_embed request: the Parts and the requested spaces.
 type IngestionRequestView struct {
-	Parts  []IngestionPart `json:"parts"`
-	Spaces []string        `json:"spaces"`
+	Parts  []IngestionPart       `json:"parts"`
+	Spaces []string              `json:"spaces"`
+	Page   *IngestionPageRequest `json:"page,omitempty"`
+}
+
+// IngestionPageRequest bounds one call without bounding the item's coverage.
+type IngestionPageRequest struct {
+	Start       int `json:"start"`
+	MaxSegments int `json:"max_segments"`
 }
 
 // ViewIngestionRequest reads a segment_and_embed request body.
@@ -128,7 +135,8 @@ type IngestionSegment struct {
 
 // IngestionAnswer is a decoded segment_and_embed answer.
 type IngestionAnswer struct {
-	Segments []IngestionSegment `json:"segments"`
+	Segments  []IngestionSegment `json:"segments"`
+	NextStart *int               `json:"next_start,omitempty"`
 }
 
 // CheckSegmentAndEmbedOutput judges a 200 segment_and_embed answer exactly as
@@ -237,7 +245,47 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 			}
 		}
 	}
+	issues = append(issues, ingestionPageIssues(answer, request, m)...)
 	return issues
+}
+
+func ingestionPageIssues(answer IngestionAnswer, request IngestionRequestView, m *Manifest) []Issue {
+	bad := func(message string) []Issue { return []Issue{{Code: "invalid_ingestion_page", Message: message}} }
+	if request.Page == nil {
+		if answer.NextStart != nil {
+			return bad("next_start requires a paged request")
+		}
+		return nil
+	}
+	if !manifestSpeaks(m, FeatureIngestionPages) {
+		return bad("ingestion pages require Plugin API 0.18.0")
+	}
+	if len(request.Parts) != 1 || request.Page.Start < 0 || request.Page.MaxSegments < 1 || len(answer.Segments) > request.Page.MaxSegments {
+		return bad("a page needs one Part and must respect its work bound")
+	}
+	part := request.Parts[0]
+	end := request.Page.Start
+	for _, segment := range answer.Segments {
+		ranges := segment.SourceRanges
+		if len(ranges) == 0 {
+			ranges = []SourceRange{{PartKey: segment.PartKey, Start: segment.Start, End: segment.End}}
+		}
+		for _, r := range ranges {
+			if r.PartKey != part.Key || r.Start != end || r.End <= r.Start {
+				return bad("paged source ranges must cover every code point once in reading order")
+			}
+			end = r.End
+		}
+	}
+	length := utf8.RuneCountInString(part.Text)
+	if answer.NextStart != nil {
+		if *answer.NextStart != end || end <= request.Page.Start || end >= length {
+			return bad("next_start must advance to the first uncovered code point")
+		}
+	} else if end != length {
+		return bad("a final page must cover the entire remaining source")
+	}
+	return nil
 }
 
 // sourceFieldsPresent reports whether an answer explicitly carries either of
