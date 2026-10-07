@@ -106,7 +106,7 @@ func TestIngestionPlugin(t *testing.T) {
 		return hits
 	}
 	fresh := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Ingestion plugin, new", "idempotency_key": "ingestion-plugin-new-" + run}, 201)["corpus_id"].(string)
-	if spaces, _ := vectorSpaces(t, fresh); len(spaces) != 3 || spaces[pluginServedSpace]["role"] != "served" || spaces[pluginEvaluationSpace]["role"] != "evaluation" || spaces[coreIngestSpace]["role"] != "served" {
+	if spaces, _ := vectorSpaces(t, fresh); len(spaces) != 2 || spaces[pluginServedSpace]["role"] != "served" || spaces[pluginEvaluationSpace]["role"] != "evaluation" || spaces[coreIngestSpace] != nil {
 		t.Fatalf("a Corpus created after the swap starts on the plugin's spaces: %v", spaces)
 	}
 	tide := ingestEnriched(t, fresh, "tide-"+run, "tide", "The tide turned before noon at the harbour mouth.")
@@ -121,7 +121,7 @@ func TestIngestionPlugin(t *testing.T) {
 	}
 	after, total := awaitVectorSpaces(t, corpusID)
 	served, evaluation := after[pluginServedSpace], after[pluginEvaluationSpace]
-	if len(after) != 3 || served == nil || evaluation == nil || after[coreIngestSpace]["role"] != "served" || total < 2 {
+	if len(after) != 2 || served == nil || evaluation == nil || after[coreIngestSpace] != nil || total < 2 {
 		t.Fatalf("after the rebuild the plugin's two spaces: %v, %v segments", after, total)
 	}
 	owner := served["owner"].(map[string]any)

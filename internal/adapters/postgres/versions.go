@@ -22,7 +22,7 @@ var servedVectorsCompleteSQL = `EXISTS(SELECT 1 FROM projection_coverage pc
  AND (g.ingestion_routing IS NULL OR pc.plugin_id=COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default',''))
  AND EXISTS(SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.segmentation_id=pc.segmentation_id)
  AND NOT EXISTS(SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.segmentation_id=pc.segmentation_id
-  AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=g.id
+  AND NOT EXISTS(SELECT 1 FROM ` + embeddingCoverageRelation + ` ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=g.id
    AND ec.space_id=COALESCE((SELECT sp->>'id' FROM jsonb_array_elements(g.spaces) sp WHERE sp->>'owner_plugin_id'=pc.plugin_id AND sp->>'role'='served' LIMIT 1),g.space_id))))`
 
 var _ content.VersionReader = VersionStore{}
