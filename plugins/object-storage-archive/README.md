@@ -77,8 +77,9 @@ See the operator guide for all fields and diagnostics-size fallback behavior.
 With the standard HTTP transport, the SDK retains up to 32 idle upload connections per storage host between
 pages (128 total), with the default transport's 90-second idle expiry. Active
 submissions remain bounded by `concurrency`; upload grants, checksum checks
-and redirect refusal retain their existing behavior. A host-provided custom
-HTTP transport is preserved without assuming it is a standard transport.
+and redirect refusal retain their existing behavior. The SDK upload client
+preserves a custom `http.DefaultTransport` without assuming it is a standard
+transport; this does not configure the archive reader's storage client.
 
 ZIP directories are limited to 4 MiB and 100,000 entries before metadata parsing; use tar.gz for larger member sets. A 1 MiB ranged-read window bounds ZIP buffering and avoids a network request for each deflate fragment.
 

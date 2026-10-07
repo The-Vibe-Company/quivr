@@ -631,7 +631,7 @@ func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
 				} `json:"acquisition"`
 			}
 			if err := json.Unmarshal(runs.progress[len(runs.progress)-1].Diagnostics, &diagnostic); err != nil || diagnostic.Acquisition.Continuation != (tc.want && tc.bound != "checkpoint") {
-				t.Fatalf("continuation diagnostic=%s err=%v", runs.progress[0].Diagnostics, err)
+				t.Fatalf("continuation diagnostic=%s err=%v", runs.progress[len(runs.progress)-1].Diagnostics, err)
 			}
 		})
 	}
