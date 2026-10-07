@@ -106,6 +106,19 @@ type RunStore interface {
 	FinishRun(ctx context.Context, org, id string, run int64, failure *RunError) error
 }
 
+// PollingStore coordinates source attempts with reversible corpus visibility.
+// Release must run before ingestion or progress transactions begin.
+type PollingStore interface {
+	BeginPoll(context.Context, string, string, int64) (release func(), active bool, err error)
+}
+
+func (a Acquirer) beginPoll(ctx context.Context, org, id string, run int64) (func(), bool, error) {
+	if store, ok := a.Store.(PollingStore); ok {
+		return store.BeginPoll(ctx, org, id, run)
+	}
+	return func() {}, true, nil
+}
+
 // Ingestor is the internal ingestion command path shared with the public API.
 type Ingestor interface {
 	TrustedAccept(context.Context, string, string, content.Command) (content.Receipt, error)
@@ -188,7 +201,17 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		(target.Health.LastSuccessAt == nil || target.Credential.DepositedAt.After(*target.Health.LastSuccessAt)) {
 		// A new or rotated credential, or one that has not worked since its
 		// deposit: ask the source before fetching.
-		err := checker.CheckCredential(ctx, CredentialRequest{Organization: org, InstanceID: id, Config: target.Config, Credential: credential, Now: a.now()})
+		release, active, err := a.beginPoll(ctx, org, id, run)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return nil
+		}
+		err = func() error {
+			defer release()
+			return checker.CheckCredential(ctx, CredentialRequest{Organization: org, InstanceID: id, Config: target.Config, Credential: credential, Now: a.now()})
+		}()
 		if err != nil {
 			var typed *Error
 			if errors.As(err, &typed) {
@@ -220,7 +243,17 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	var notice string
 	reads := target.ReadsToday
 	for i := 0; i < pages; i++ {
-		page, err := connector.Fetch(ctx, FetchRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace, WebhookURL: receiverWebhookURL(connector, a.PublicURL, id), Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now(), PageInRun: i, ReadsToday: reads})
+		release, active, err := a.beginPoll(ctx, org, id, run)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return nil
+		}
+		page, err := func() (Page, error) {
+			defer release()
+			return connector.Fetch(ctx, FetchRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace, WebhookURL: receiverWebhookURL(connector, a.PublicURL, id), Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now(), PageInRun: i, ReadsToday: reads})
+		}()
 		if errors.Is(err, ErrNotDue) && i == 0 {
 			slog.Info("connector run skipped", "connector_id", id, "reason", "not_due")
 			return a.Store.FinishRun(ctx, org, id, run, &RunError{Skipped: true, At: a.now()})
@@ -251,6 +284,8 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			if err != nil {
 				var typed *Error
 				switch {
+				case errors.Is(err, corpus.ErrArchived):
+					return nil
 				case errors.As(err, &typed):
 					return deferred(typed)
 				case errors.Is(err, errSkipped):
@@ -499,8 +534,18 @@ func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes
 		if attempt == 0 && at.SHA256 != "" && at.SizeBytes != nil {
 			d = AttachmentDescription{SizeBytes: *at.SizeBytes, SHA256: at.SHA256}
 		} else {
-			var err error
-			if d, err = ex.DescribeAttachment(ctx, req); err != nil {
+			release, active, err := a.beginPoll(ctx, req.Organization, req.InstanceID, run)
+			if err != nil {
+				return "", 0, nil, err
+			}
+			if !active {
+				return "", 0, nil, corpus.ErrArchived
+			}
+			d, err = func() (AttachmentDescription, error) {
+				defer release()
+				return ex.DescribeAttachment(ctx, req)
+			}()
+			if err != nil {
 				return "", 0, nil, err
 			}
 		}
@@ -522,7 +567,17 @@ func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes
 		if session.State == "verified" {
 			return session.BlobID, d.SizeBytes, nil, nil
 		}
-		err = ex.UploadAttachment(ctx, req, UploadGrant{URL: session.UploadURL, Headers: session.UploadHeaders, SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType, ExpiresAt: session.ExpiresAt})
+		release, active, err := a.beginPoll(ctx, req.Organization, req.InstanceID, run)
+		if err != nil {
+			return "", 0, nil, err
+		}
+		if !active {
+			return "", 0, nil, corpus.ErrArchived
+		}
+		err = func() error {
+			defer release()
+			return ex.UploadAttachment(ctx, req, UploadGrant{URL: session.UploadURL, Headers: session.UploadHeaders, SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType, ExpiresAt: session.ExpiresAt})
+		}()
 		var typed *Error
 		if errors.As(err, &typed) && typed.Class == ClassSource && typed.Code == CodeAttachmentChanged {
 			continue

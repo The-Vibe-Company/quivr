@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/changes"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -26,17 +27,18 @@ WITH head AS (
   SELECT COALESCE((SELECT last_sequence FROM organization_journals WHERE organization=$1), 0) AS h
 ), bound AS (
   SELECT h, LEAST(h, $3::bigint + $5::bigint) AS upper,
+    EXISTS(SELECT 1 FROM corpora c WHERE c.organization=$1 AND c.id=$2 AND c.archived) AS archived,
     $3::bigint < COALESCE((SELECT pruned_through FROM change_journal_prunes WHERE organization=$1), 0)
     OR COALESCE((SELECT occurred_at < now() - make_interval(secs => $6::double precision) FROM change_events WHERE organization=$1 AND sequence=$3::bigint + 1), false) AS expired
   FROM head
 )
-SELECT b.h, b.upper, b.expired, e.sequence, e.event_id, e.event_type, e.resource_type, e.resource_id, e.occurred_at,
+SELECT b.h, b.upper, b.expired, b.archived, e.sequence, e.event_id, e.event_type, e.resource_type, e.resource_id, e.occurred_at,
   n.match_id, n.record_id, n.record_version_id, n.subscription_id, n.subscription_version_id, n.delivery_id, coalesce(n.previous_match_id,''), coalesce(s.owner,'')
 FROM bound b
 LEFT JOIN LATERAL (
   SELECT sequence, event_id, event_type, resource_type, resource_id, occurred_at
   FROM change_events
-  WHERE organization=$1 AND corpus_id=$2 AND sequence > $3 AND sequence <= b.upper
+  WHERE organization=$1 AND corpus_id=$2 AND NOT b.archived AND sequence > $3 AND sequence <= b.upper
   ORDER BY sequence
   LIMIT $4
 ) e ON true
@@ -51,12 +53,16 @@ ORDER BY e.sequence`, org, corpusID, after, max(limit, 0)+1, changeScanBudget, r
 	var upper int64
 	var visible []changes.Event
 	for rows.Next() {
+		var archived bool
 		var sequence *int64
 		var id, kind, resource, resourceID *string
 		var occurred *time.Time
 		var match, record, version, subscription, subscriptionVersion, delivery, previous, owner *string
-		if err = rows.Scan(&w.Head, &upper, &w.Expired, &sequence, &id, &kind, &resource, &resourceID, &occurred, &match, &record, &version, &subscription, &subscriptionVersion, &delivery, &previous, &owner); err != nil {
+		if err = rows.Scan(&w.Head, &upper, &w.Expired, &archived, &sequence, &id, &kind, &resource, &resourceID, &occurred, &match, &record, &version, &subscription, &subscriptionVersion, &delivery, &previous, &owner); err != nil {
 			return changes.Window{}, err
+		}
+		if archived {
+			return changes.Window{}, corpus.ErrArchived
 		}
 		if sequence != nil {
 			e := changes.Event{Position: *sequence, ID: *id, Type: *kind, CorpusID: corpusID, ResourceKind: *resource, ResourceID: *resourceID, OccurredAt: *occurred}

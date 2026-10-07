@@ -43,6 +43,9 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`POST /v0/corpora`](#post-v0corpora) | `createCorpus` | `corpora:write` |
 | [`GET /v0/corpora`](#get-v0corpora) | `listCorpora` | `corpora:read` |
 | [`GET /v0/corpora/{corpus_id}`](#get-v0corporacorpus_id) | `getCorpus` | `corpora:read` |
+| [`PATCH /v0/corpora/{corpus_id}`](#patch-v0corporacorpus_id) | `renameCorpus` | `corpora:rename` |
+| [`POST /v0/corpora/{corpus_id}/archive`](#post-v0corporacorpus_idarchive) | `archiveCorpus` | `corpora:archive` |
+| [`POST /v0/corpora/{corpus_id}/unarchive`](#post-v0corporacorpus_idunarchive) | `unarchiveCorpus` | `corpora:archive` |
 | [`PUT /v0/corpora/{corpus_id}/retrieval`](#put-v0corporacorpus_idretrieval) | `configureRetrieval` | `corpora:write`, `operations:write` |
 | [`GET /v0/corpora/{corpus_id}/vector-spaces`](#get-v0corporacorpus_idvector-spaces) | `listVectorSpaces` | `corpora:read` |
 | [`POST /v0/corpora/{corpus_id}/rebuilds`](#post-v0corporacorpus_idrebuilds) | `rebuildCorpusProjection` | `projections:rebuild` |
@@ -513,6 +516,7 @@ Authorized Corpora only. Opaque page cursor bound to action/filter/scope; not a 
 | --- | --- | --- | --- | --- |
 | `page_cursor` | query | string |  | Minimum length `1`. |
 | `limit` | query | integer |  | The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit. Default `100`. Minimum `1`. Maximum `100`. |
+| `include_archived` | query | boolean |  | Include archived corpora; false by default. Bound into the page cursor. Default `false`. |
 
 **Responses**
 
@@ -526,6 +530,65 @@ Authorized Corpora only. Opaque page cursor bound to action/filter/scope; not a 
 Operation `getCorpus`. Requires `corpora:read`.
 
 Read effective resolved configuration.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `PATCH /v0/corpora/{corpus_id}`
+
+Operation `renameCorpus`. Requires `corpora:rename`.
+
+Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`CorpusRenameRequest`](#corpusrenamerequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `POST /v0/corpora/{corpus_id}/archive`
+
+Operation `archiveCorpus`. Requires `corpora:archive`.
+
+Reversibly hide a corpus from default listings, search, catalog, change feed and connector polling. Explicitly scoped search, catalog and feed requests return 409 corpus_archived; direct record, version and document-timeline reads return 404 not_found until restoration. Keeps canonical data and connector enabled state.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `corpus_id` | path | string | yes | Minimum length `1`. |
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Corpus`](#corpus) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `POST /v0/corpora/{corpus_id}/unarchive`
+
+Operation `unarchiveCorpus`. Requires `corpora:archive`.
+
+Restore an archived corpus and make its retained data visible again.
 
 **Parameters**
 
@@ -7576,10 +7639,34 @@ required:
 
 </details>
 
+### `CorpusRenameRequest`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | yes | A nonblank corpus name without embedded NUL characters. Minimum length `1`. Maximum length `256`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  name:
+    type: string
+    description: A nonblank corpus name without embedded NUL characters.
+    minLength: 1
+    maxLength: 256
+required: [name]
+```
+
+</details>
+
 ### `Corpus`
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| `archived` | boolean |  | Reversible visibility fence; archived corpora retain all data. |
 | `corpus_id` | string | yes | Minimum length `1`. |
 | `name` | string | yes | Minimum length `1`. |
 | `effective_retrieval` | [`RetrievalConfig`](#retrievalconfig) | yes |  |
@@ -7591,6 +7678,9 @@ required:
 type: object
 additionalProperties: false
 properties:
+  archived:
+    type: boolean
+    description: Reversible visibility fence; archived corpora retain all data.
   corpus_id:
     type: string
     minLength: 1

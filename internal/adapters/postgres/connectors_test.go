@@ -95,6 +95,92 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if len(run) != 1 || run[0].Run != first[0].Run {
 		t.Fatalf("re-dispatch must target the same run: %+v", run)
 	}
+	// Archive fences both scheduling and a run leased before the transition,
+	// without rewriting the enabled flag needed when the Corpus is restored.
+	corpora := postgres.Store{Pool: pool}
+	releasePoll, active, err := store.BeginPoll(ctx, scope.Organization, created.ID, run[0].Run)
+	if err != nil || !active {
+		t.Fatalf("live poll admission: %v %v", active, err)
+	}
+	defer releasePoll()
+	archived := make(chan error, 1)
+	go func() { _, err := corpora.Archive(ctx, scope.Organization, c.ID, true); archived <- err }()
+	// Observe a database lock wait rather than giving the goroutine a timed head
+	// start: a real archive must wait behind the admitted source attempt.
+	for {
+		var waiting bool
+		if err = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity a, unnest(pg_blocking_pids(a.pid)) blocker(pid) JOIN pg_locks l ON l.pid=blocker.pid WHERE l.relation='corpora'::regclass AND l.mode='RowShareLock')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err := <-archived:
+			t.Fatalf("archive completed during admitted poll: %v", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		default:
+		}
+	}
+	releasePoll()
+	select {
+	case err := <-archived:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if release, active, err := store.BeginPoll(ctx, scope.Organization, created.ID, run[0].Run); err != nil || active {
+		if release != nil {
+			release()
+		}
+		t.Fatalf("stale target admitted poll after archive: %v %v", active, err)
+	}
+	if held, err := store.LoadRun(ctx, scope.Organization, created.ID); err != nil || held.Enabled {
+		t.Fatalf("archived leased run can poll: %+v %v", held, err)
+	}
+	if ok, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, run[0].Run, connectors.Progress{Checkpoint: json.RawMessage(`{"step":99}`)}); ok || err != nil {
+		t.Fatalf("archived run continued: %v %v", ok, err)
+	}
+	var beforeSchedule time.Time
+	var archivedSequence int64
+	if err = pool.QueryRow(ctx, `SELECT run_sequence FROM connector_instances WHERE organization=$1 AND id=$2`, scope.Organization, created.ID).Scan(&archivedSequence); err != nil || archivedSequence <= run[0].Run {
+		t.Fatalf("archive did not invalidate completed workflow identity: %d %v", archivedSequence, err)
+	}
+	if _, err = corpora.Archive(ctx, scope.Organization, c.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT next_run_at FROM connector_instances WHERE organization=$1 AND id=$2`, scope.Organization, created.ID).Scan(&beforeSchedule); err != nil {
+		t.Fatal(err)
+	}
+	for _, outcome := range []*connectors.RunError{nil, {Skipped: true}, {Class: connectors.ClassTransient, Code: "source_unavailable"}} {
+		if err = store.FinishRun(ctx, scope.Organization, created.ID, run[0].Run, outcome); err != nil {
+			t.Fatal(err)
+		}
+		var sequence int64
+		var schedule time.Time
+		if err = pool.QueryRow(ctx, `SELECT run_sequence,next_run_at FROM connector_instances WHERE organization=$1 AND id=$2`, scope.Organization, created.ID).Scan(&sequence, &schedule); err != nil {
+			t.Fatal(err)
+		}
+		if sequence != archivedSequence || !schedule.Equal(beforeSchedule) {
+			t.Fatalf("archived finish changed schedule: sequence=%d at=%v", sequence, schedule)
+		}
+	}
+	if err = store.ReleaseConnectorRun(ctx, run[0]); err != nil {
+		t.Fatal(err)
+	}
+	if held := claim(); len(held) != 0 {
+		t.Fatalf("archived connector scheduled: %+v", held)
+	}
+	if _, err = corpora.Archive(ctx, scope.Organization, c.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	run = claim()
+	if len(run) != 1 || run[0].Run != archivedSequence {
+		t.Fatalf("restored connector did not resume: %+v", run)
+	}
 	target, err := store.LoadRun(ctx, scope.Organization, created.ID)
 	if err != nil || target.Sealed == nil {
 		t.Fatalf("load %v %+v", err, target)

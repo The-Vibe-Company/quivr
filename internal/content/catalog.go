@@ -43,7 +43,10 @@ func (s Service) authorizeCatalog(ctx context.Context, scope corpus.Scope, corpu
 		return corpus.ErrNotFound
 	}
 	if s.Corpora != nil {
-		_, err := s.Corpora.Read(ctx, scope.Organization, corpusID)
+		c, err := s.Corpora.Read(ctx, scope.Organization, corpusID)
+		if err == nil && c.Archived {
+			return corpus.ErrArchived
+		}
 		return err
 	}
 	return nil

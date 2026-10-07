@@ -21,13 +21,14 @@ type exchangingConnector struct {
 }
 
 type fakeSource struct {
-	bytes     map[string]string // ref -> bytes
-	changed   map[string]int    // ref -> uploads that send other bytes
-	describes int
-	uploads   int
-	err       error
-	skip      *AttachmentDescription
-	storage   *fakeGrants
+	bytes      map[string]string // ref -> bytes
+	changed    map[string]int    // ref -> uploads that send other bytes
+	describes  int
+	uploads    int
+	err        error
+	skip       *AttachmentDescription
+	storage    *fakeGrants
+	onDescribe func()
 }
 
 func (c exchangingConnector) Fetch(context.Context, FetchRequest) (Page, error) {
@@ -36,6 +37,9 @@ func (c exchangingConnector) Fetch(context.Context, FetchRequest) (Page, error) 
 
 func (c exchangingConnector) DescribeAttachment(_ context.Context, r AttachmentRequest) (AttachmentDescription, error) {
 	c.src.describes++
+	if c.src.onDescribe != nil {
+		c.src.onDescribe()
+	}
 	if c.src.err != nil {
 		return AttachmentDescription{}, c.src.err
 	}
@@ -44,6 +48,46 @@ func (c exchangingConnector) DescribeAttachment(_ context.Context, r AttachmentR
 	}
 	b := c.src.bytes[r.Attachment.Ref]
 	return AttachmentDescription{SizeBytes: int64(len(b)), SHA256: content.Hash([]byte(b))}, nil
+}
+
+type archivePollingRuns struct {
+	*fakeRuns
+	archived bool
+}
+
+func (s *archivePollingRuns) BeginPoll(context.Context, string, string, int64) (func(), bool, error) {
+	return func() {}, !s.archived, nil
+}
+
+// The source exchange owner covers an archive after a page was fetched or
+// after its bytes were described; neither may initiate a later source call.
+func TestArchivedPageStopsAttachmentSourceExchanges(t *testing.T) {
+	for _, after := range []string{"fetch", "describe"} {
+		t.Run(after, func(t *testing.T) {
+			var held *archivePollingRuns
+			item := mailItem("archived")
+			item.Attachments = item.Attachments[1:] // requires describe before upload
+			a, runs, ingest, src := exchangingAcquirer(t, func() []Item {
+				if after == "fetch" {
+					held.archived = true
+				}
+				return []Item{item}
+			})
+			held = &archivePollingRuns{fakeRuns: runs}
+			a.Store = held
+			src.onDescribe = func() { held.archived = true }
+			if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+				t.Fatal(err)
+			}
+			wantDescribes := 0
+			if after == "describe" {
+				wantDescribes = 1
+			}
+			if src.describes != wantDescribes || src.uploads != 0 || len(ingest.accepted) != 0 || len(runs.checkpoints) != 0 {
+				t.Fatalf("archived source exchange continued: describes=%d uploads=%d accepted=%d checkpoints=%d", src.describes, src.uploads, len(ingest.accepted), len(runs.checkpoints))
+			}
+		})
+	}
 }
 
 func (c exchangingConnector) UploadAttachment(_ context.Context, r AttachmentRequest, g UploadGrant) error {

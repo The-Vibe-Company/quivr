@@ -265,7 +265,10 @@ func (s Service) authorize(ctx context.Context, scope corpus.Scope, id string) e
 		return corpus.ErrNotFound
 	}
 	if s.Corpora != nil {
-		_, err := s.Corpora.Read(ctx, scope.Organization, id)
+		c, err := s.Corpora.Read(ctx, scope.Organization, id)
+		if err == nil && c.Archived {
+			return corpus.ErrArchived
+		}
 		return err
 	}
 	return nil

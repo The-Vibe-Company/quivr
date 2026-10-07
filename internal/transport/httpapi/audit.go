@@ -31,6 +31,9 @@ type auditedRoute struct{ action, target, parameter string }
 // Only commands are enrolled; reads, searches, push delivery and ingestion do
 // not create audit events. Add new sensitive routes here when introduced.
 var auditedRoutes = map[string]auditedRoute{
+	"PATCH /v0/corpora/{corpus_id}":                               {"corpus.rename", "corpus", "corpus_id"},
+	"POST /v0/corpora/{corpus_id}/archive":                        {"corpus.archive", "corpus", "corpus_id"},
+	"POST /v0/corpora/{corpus_id}/unarchive":                      {"corpus.unarchive", "corpus", "corpus_id"},
 	"POST /v0/corpora":                                            {"corpus.create", "corpus", ""},
 	"PUT /v0/corpora/{corpus_id}/retrieval":                       {"corpus.configure", "corpus", "corpus_id"},
 	"POST /v0/corpora/{corpus_id}/rebuilds":                       {"operation.rebuild", "corpus", "corpus_id"},
