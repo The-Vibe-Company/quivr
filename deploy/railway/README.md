@@ -10,23 +10,23 @@ development and the optional shared password.
 
 ## Hosted deployment
 
-This deployment runs the real [`quivr-search`](../../quivr-search/) UI and V2 core. One dedicated Railway project,
-`quivr-v2-demo`, contains eight single-replica services. Only `web` is exposed publicly.
+This deployment runs the [`quivr-search`](../../quivr-search/) UI and V2 core in a dedicated Railway project.
+Only `web` is exposed publicly; bulk workers can [scale on backlog](autoscaler/README.md).
 
 | Service | Runtime / responsibility | Persistence |
 | --- | --- | --- |
 | web | Node facade, static React bundle, shared-password session | Stateless |
 | api | Go HTTP API; applies migrations before serving | PostgreSQL/S3 |
-| worker | Go/Temporal processing and optional E5 enrichment | PostgreSQL/S3/Temporal |
+| worker | Live Go/Temporal processing, fixed at one replica | PostgreSQL/S3/Temporal |
+| worker-bulk | Bulk Go/Temporal processing, one to eight replicas with autoscaling | PostgreSQL/S3/Temporal |
 | postgres | Pinned PostgreSQL 17 | `/data/pgdata` on `/data` volume |
 | seaweed | Pinned SeaweedFS mini, authenticated S3 | `/data` volume |
 | temporal | Pinned Temporal dev server, headless | SQLite `/data/temporal.db` volume |
 | weaviate | Pinned standalone search projection | `/var/lib/weaviate` volume |
 | tei | Pinned CPU E5 inference | Model baked into image; derived artifacts in S3 |
 
-This is a single-node evaluation deployment, with the accepted Temporal dev server
-and no high availability. Redeploying a volume-backed service can interrupt requests.
-No Railway TCP proxies or public dependency domains are needed.
+This evaluation deployment uses the Temporal dev server and single-replica dependencies without high availability.
+Redeploying a volume-backed service can interrupt requests. No public dependency domains are needed.
 
 Webhook delivery and the RSS connector refuse private and internal addresses
 (checked after DNS resolution, so Railway's private network is unreachable
@@ -67,10 +67,10 @@ unreadable (`access_error` / `credential_unreadable`) until they are deposited a
 ## Operator key (optional)
 
 `QUIVR_OPERATOR_KEY` on api adds a second key with `projections:rebuild`, `plugins:admin`, `operations:write` and
-`observability:read`; the web app never gets the first two. Use it from inside the deployment
+`observability:read` and `queues:read`; the web app never gets administration or queue grants. Use it from inside the deployment
 (`railway ssh --service api`, port 8080) to rebuild a Corpus projection, to follow documents through
 their steps (`GET /v0/admin/documents`), or to register and activate plugins ([Switch plugins without restarting](https://docs.quivr.thevibecompany.co/plugins/switch-plugins-without-restarting)); a redeploy that changes the plugin pins applies them, even over an earlier activation of the same role. `QUIVR_REBUILD_CONCURRENCY` on worker sets how many Versions a rebuild step covers in parallel (1–32, default 8); raise it when a large Corpus rebuild is slow while PostgreSQL and Weaviate stay idle.
-`QUIVR_DEMO_ADMIN=1` on api gives the web app's key `observability:read`, which turns on the web app's read-only **Admin** tab (live flow of documents, timelines, throughput).
+`QUIVR_QUEUE_KEY` adds a distinct, read-only queue key for the [autoscaler](autoscaler/README.md). `QUIVR_DEMO_ADMIN=1` on api gives the web app's key `observability:read`, which turns on the web app's read-only **Admin** tab (live flow of documents, timelines, throughput).
 
 ## Core plugins and the rebuild after THE-777
 
@@ -211,7 +211,7 @@ Follow the [bounded retirement procedure](https://docs.quivr.thevibecompany.co/r
 
 Authenticate `railway login`, then create/link a dedicated project in the intended
 workspace. The provisioner refuses any project not named `quivr-v2-demo` or whose ID
-does not match the explicit argument.
+does not match the explicit argument; [drain old mixed work first](autoscaler/README.md#create-the-workers).
 
 ```sh
 railway init --name quivr-v2-demo --workspace YOUR_WORKSPACE_ID --json
@@ -235,14 +235,14 @@ python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID postgres temporal 
 # Wait for dependencies to start successfully, then:
 python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID api
 # Wait for API readiness, then:
-python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID worker web
+python3 deploy/railway/deploy.py --project-id YOUR_PROJECT_ID worker worker-bulk web
 ```
 
 The provisioner sets each Dockerfile path. Deploy in order:
 
 1. postgres, seaweed, temporal, weaviate and tei; inspect deployment status/logs.
 2. api; its startup migration bootstraps schema, bucket and projection, then readiness.
-3. worker and web; verify readiness before publishing.
+3. worker, worker-bulk and web; verify readiness before publishing.
 
 Core readiness uses `PORT=8081`; internal API traffic uses port 8080. The worker
 also probes on 8081. Only the web service uses its port 3000 for public traffic.

@@ -232,7 +232,35 @@ def build_config(env):
     if operator:
         config['keys'][operator] = {'organization': 'quivr-demo', 'corpora': ['*'],
                                     'actions': ['corpora:read', 'projections:rebuild', 'operations:read', 'operations:write',
-                                                'plugins:admin', 'observability:read', 'corpora:archive', 'corpora:rename']}
+                                                'plugins:admin', 'observability:read', 'queues:read', 'corpora:archive', 'corpora:rename']}
+    queue_key = env.get('QUIVR_QUEUE_KEY', '').strip()
+    if queue_key:
+        if queue_key in config['keys']:
+            raise ValueError('QUIVR_QUEUE_KEY must differ from API and operator keys')
+        config['keys'][queue_key] = {'organization': 'quivr-demo', 'corpora': ['*'],
+                                     'actions': ['queues:read']}
+    # Omitted queue variables retain the mixed worker needed for old histories.
+    worker = {}
+    if 'QUIVR_WORKER_QUEUES' in env:
+        queues = [queue.strip() for queue in env['QUIVR_WORKER_QUEUES'].split(',')]
+        if any(queue not in ('live', 'bulk') for queue in queues) or len(set(queues)) != len(queues):
+            raise ValueError('QUIVR_WORKER_QUEUES must select live, bulk or live,bulk')
+        worker['queues'] = queues
+    slots = {}
+    for queue in ('live', 'bulk'):
+        name = 'QUIVR_WORKER_' + queue.upper() + '_SLOTS'
+        if name in env:
+            try:
+                value = int(env[name])
+            except ValueError:
+                raise ValueError(name + ' must be an integer from 1 to 1024') from None
+            if not 1 <= value <= 1024:
+                raise ValueError(name + ' must be an integer from 1 to 1024')
+            slots[queue] = value
+    if slots:
+        worker['slots'] = slots
+    if worker:
+        config['worker'] = worker
     if CONNECTORS:
         config['plugins'] = connector_pins(env)
     config['plugins'] = config.get('plugins', []) + plugin_pins(env)
@@ -253,8 +281,11 @@ def build_config(env):
     if env.get('QUIVR_PUBLIC_URL', '').strip():
         config['public_url'] = env['QUIVR_PUBLIC_URL'].strip()
     # Optional: Versions a rebuild step covers in parallel (1-32, engine default 8).
-    if env.get('QUIVR_REBUILD_CONCURRENCY', '').strip():
-        config['rebuild'] = {'concurrency': int(env['QUIVR_REBUILD_CONCURRENCY'])}
+    concurrency = env.get('QUIVR_REBUILD_CONCURRENCY', '').strip()
+    if concurrency:
+        if not concurrency.isdigit() or not 1 <= int(concurrency) <= 32:
+            raise ValueError('QUIVR_REBUILD_CONCURRENCY must be an integer from 1 to 32')
+        config['rebuild'] = {'concurrency': int(concurrency)}
     return config
 
 
