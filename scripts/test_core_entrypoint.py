@@ -351,6 +351,16 @@ class CoreEntrypointTest(unittest.TestCase):
         api = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'PATH': '/usr/bin'}, 'api')}
         self.assertEqual(api, {'x-list', 'core-ingest', 'core-retrieve'})
 
+    def test_core_ingest_can_be_dropped_once_hosted_embeddings_serve(self):
+        def manifests(env):
+            return {p['manifest'] for p in core_entrypoint.build_config(env)['plugins']}
+        core = '/app/plugins/core-ingest/quivr-plugin.yaml'
+        gemma = {**ENV, 'QUIVR_DEMO_EMBEDDING': 'gemma', 'EMBED_URL': 'https://embed.example', 'EMBED_API_KEY': 'k'}
+        self.assertIn(core, manifests(gemma))
+        self.assertNotIn(core, manifests({**gemma, 'QUIVR_DEMO_CORE_INGEST': '0'}))
+        # Without a hosted space the engine still needs core.ingest.
+        self.assertIn(core, manifests({**ENV, 'QUIVR_DEMO_CORE_INGEST': '0'}))
+
     def test_core_ingest_embeds_with_the_deployment_tei_and_the_image_tokenizer(self):
         # The engine segments and embeds nothing itself: api and worker refuse to start without it.
         pin = next(p for p in core_entrypoint.build_config(ENV)['plugins'] if p['manifest'] == '/app/plugins/core-ingest/quivr-plugin.yaml')
