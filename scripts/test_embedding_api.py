@@ -50,7 +50,7 @@ class EmbeddingAPITest(unittest.IsolatedAsyncioTestCase):
                              ({'dimensions': 256}, 'dimensions'), ({'input': []}, 'input'),
                              ({'input': [1]}, 'input'), ({'input': ['']}, 'input'),
                              ({'input': ['x'] * 33}, 'input'),
-                             ({'input': ['é' * 1025]}, 'input'),
+                             ({'input': ['é' * (16 * 1024 + 1)]}, 'input'),
                              ({'input': ['\x00']}, 'input'), ({'input': ['\ud800']}, 'input'),
                              ({'encoding_format': 'base64'}, 'encoding_format')]:
             with self.subTest(patch=patch):
@@ -59,7 +59,7 @@ class EmbeddingAPITest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(body['error']['param'], param)
                 inference.assert_not_called()
         for raw in (b'[]', b'null', b'{', b'{"model":"other","model":"google/embeddinggemma-2","input":"a"}',
-                    b'x' * (512 * 1024 + 1), b'[' * 10000 + b'0' + b']' * 10000):
+                    b'x' * (8 * 1024 * 1024 + 1), b'[' * 10000 + b'0' + b']' * 10000):
             status, _, inference, _ = await self.request(raw=raw)
             self.assertEqual(status, 400)
             inference.assert_not_called()
@@ -73,9 +73,15 @@ class EmbeddingAPITest(unittest.IsolatedAsyncioTestCase):
         status, _, inference, _ = await self.request({**valid, 'input': 'a string'})
         self.assertEqual(status, 200)
         inference.assert_awaited_once_with(['a string'])
+        # A packed passage (512 body tokens plus its headline) is several KiB of
+        # accented UTF-8 text and must be accepted.
+        passage = 'title: Élection | text: ' + 'é' * 4000
+        status, _, inference, _ = await self.request({**valid, 'input': [passage]}, vectors=[vectors[0]])
+        self.assertEqual(status, 200)
+        inference.assert_awaited_once_with([passage])
         # Go's encoding/json escapes HTML characters. A valid full provider
         # batch must fit the wire limit even when each byte expands sixfold.
-        texts = ['<' * 2048] * 32
+        texts = ['<' * (32 * 1024)] * 32
         raw = json.dumps({**valid, 'input': texts}).replace('<', '\\u003c').encode()
         status, _, inference, _ = await self.request(raw=raw, vectors=[vectors[0]] * 32)
         self.assertEqual(status, 200)
