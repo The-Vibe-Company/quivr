@@ -47,7 +47,7 @@ FROM pg_index
 WHERE indexrelid = to_regclass('segments_by_segmentation');
 ```
 
-If it is invalid and matches the definition below, run `DROP INDEX CONCURRENTLY segments_by_segmentation` first. Preserve any incompatible object and follow the conflict guidance above. In a separate database session outside a transaction, allow up to two hours for the build:
+In a separate database session outside a transaction, if the index is invalid and matches the definition below, run `DROP INDEX CONCURRENTLY segments_by_segmentation` first. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours for the build:
 
 ```sql
 SET lock_timeout = '2s';
