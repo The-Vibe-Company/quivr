@@ -113,7 +113,9 @@ func TestNormalizerOutageRecovers(t *testing.T) {
 		t.Fatal(ready)
 	}
 	version := request(t, "GET", "/v0/records/"+ready["record_id"].(string)+"/versions/"+ready["version_id"].(string), admin, nil, 200)
-	if n, _ := version["provenance"].(map[string]any)["normalization"].(map[string]any); n["invocation_id"] == nil || n["fallback"] != nil {
+	n, _ := version["provenance"].(map[string]any)["normalization"].(map[string]any)
+	key, _ := n["idempotency_key"].(string)
+	if !strings.HasPrefix(key, "nk_") || n["fallback"] != nil {
 		t.Fatalf("provenance %v", version["provenance"])
 	}
 	hits := request(t, "POST", "/v0/search", admin, map[string]any{"query": "ferry", "corpus_ids": []string{state.Corpus}, "mode": "lexical"}, 200)["items"].([]any)
