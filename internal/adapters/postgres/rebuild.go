@@ -20,8 +20,10 @@ import (
 // ingestion plugin or version) gets its vectors with its projection. The same
 // predicate lists work and validates activation, so they cannot drift. It
 // requires aliases r and v and parameters $1 (organization), $2, $3.
+// Served coverage is unique; the scalar probe keeps the bounded candidate
+// lookup from hashing every covered Version into an EXISTS subplan.
 var rebuildGapSQL = `r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + ` AND (
- NOT EXISTS(SELECT 1 FROM projection_coverage t WHERE t.organization=v.organization AND t.version_id=v.id AND t.generation_id=$3 AND t.role='served')
+ NOT COALESCE((SELECT true FROM projection_coverage t WHERE t.organization=v.organization AND t.version_id=v.id AND t.generation_id=$3 AND t.role='served'),false)
  OR EXISTS(SELECT 1 FROM embedding_coverage ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id)
   JOIN projection_coverage tc ON (tc.organization,tc.version_id,tc.segmentation_id,tc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3) AND tc.role='served'
   WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.generation_id<>$3
@@ -112,14 +114,23 @@ func (s RebuildStore) beginRebuildAttempt(ctx context.Context, org, id string) (
 }
 
 func (s RebuildStore) RebuildCandidates(ctx context.Context, org, id string, limit int) ([]retrieval.RebuildCandidate, error) {
-	op, err := (OperationStore{Pool: s.Pool}).Operation(ctx, org, id)
-	if err != nil {
-		return nil, err
+	var corpusID, generationID, after string
+	if err := s.Pool.QueryRow(ctx, `SELECT corpus_id,target_generation_id,rebuild_cursor FROM operations WHERE organization=$1 AND id=$2`, org, id).Scan(&corpusID, &generationID, &after); err != nil {
+		return nil, notFound(err)
 	}
-	// Vectors are required only when the routed generation serves the
-	// target's space: a target of another space derives its own.
+	out, err := s.rebuildCandidatesAfter(ctx, org, corpusID, generationID, after, limit)
+	if err != nil || len(out) > 0 || after == "" {
+		return out, err
+	}
+	// A final full gap sweep catches promotions and enrichment behind the cursor.
+	// Activation independently checks again under its canonical cutover fence.
+	return s.rebuildCandidatesAfter(ctx, org, corpusID, generationID, "", limit)
+}
+
+func (s RebuildStore) rebuildCandidatesAfter(ctx context.Context, org, corpusID, generationID, after string, limit int) ([]retrieval.RebuildCandidate, error) {
+	// The current-version key gives the corpus index both the range and ordering.
 	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,r.namespace,EXISTS(SELECT 1 FROM embedding_coverage ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id) JOIN projection_generations rg ON rg.id=ec.generation_id JOIN projection_generations tg ON tg.id=$3 WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.space_id=tg.space_id AND rg.space_id=tg.space_id AND ec.generation_id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`)
-FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+` ORDER BY v.id LIMIT $4`, org, op.CorpusID, op.TargetGenerationID, limit)
+FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+` AND r.current_version_id > $5 AND v.id > $5 ORDER BY r.current_version_id LIMIT $4`, org, corpusID, generationID, limit, after)
 	if err != nil {
 		return nil, err
 	}
@@ -423,3 +434,16 @@ var _ retrieval.RebuildStore = RebuildStore{}
 
 // RebuildStore persists rebuild state.
 type RebuildStore struct{ Pool *pgxpool.Pool }
+
+// CheckpointRebuild persists a joined successful page, never an individual
+// concurrent completion. A reconciliation page may restart below the old cursor.
+func (s RebuildStore) CheckpointRebuild(ctx context.Context, org, id, after string) error {
+	tag, err := s.Pool.Exec(ctx, `UPDATE operations SET rebuild_cursor=$3,updated_at=now() WHERE organization=$1 AND id=$2 AND state='running'`, org, id, after)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return operations.ErrNotRunning
+	}
+	return nil
+}
