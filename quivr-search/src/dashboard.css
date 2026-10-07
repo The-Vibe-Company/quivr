@@ -681,10 +681,11 @@ mark {
   transition: opacity 120ms 200ms;
 }
 /* Fixed widths, so that counts and picks never shift the bar. */
-/* Counts read like a moment's: a small pill, wide enough for three
-   digits so the bar never shifts. */
+/* Counts read like a moment's: a small pill, as wide as the longest count
+   the page has shown (--count-digits, three at least; a digit is narrower
+   than 1ch), so a filter that drops a digit never shifts the bar. */
 .filters .chip-count {
-  min-width: 34px;
+  min-width: calc(var(--count-digits, 3) * 1ch + 14px);
   height: 20px;
   padding: 0 7px;
   border-radius: 999px;
@@ -868,13 +869,20 @@ mark {
   padding: 16px 0 14px;
   border-bottom: 1px solid var(--line);
 }
+/* A search's title has a line of its own, cut to it (the whole of it on
+   hover): the search tools below start at the same place however long the
+   words typed. */
 .panel-head .feed-title {
-  margin: 0 8px 0 0;
+  flex-basis: 100%;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
   font-size: 18px;
   font-weight: 650;
   letter-spacing: -0.3px;
   line-height: 1.15;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chips {
   display: flex;
