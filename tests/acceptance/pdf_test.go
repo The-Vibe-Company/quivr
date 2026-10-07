@@ -86,7 +86,8 @@ func TestPDFIsSearchableByPageText(t *testing.T) {
 
 	provenance := version["provenance"].(map[string]any)
 	normalization, _ := provenance["normalization"].(map[string]any)
-	if normalization["plugin_id"] != "pdf-text" || normalization["plugin_version"] != "0.1.0" || normalization["contribution"] != "normalizer" || normalization["input_sha256"] != hex.EncodeToString(sum[:]) || normalization["invocation_id"] == nil {
+	key, _ := normalization["idempotency_key"].(string)
+	if normalization["plugin_id"] != "pdf-text" || normalization["plugin_version"] != "0.1.0" || normalization["contribution"] != "normalizer" || normalization["input_sha256"] != hex.EncodeToString(sum[:]) || !strings.HasPrefix(key, "nk_") {
 		t.Fatalf("normalization provenance %v", provenance)
 	}
 	if provenance["producer"] != "acceptance-client" || provenance["source_blob_ids"].([]any)[0] != blobID {

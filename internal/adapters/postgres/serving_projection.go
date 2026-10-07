@@ -344,7 +344,7 @@ func (s ServingProjectionStore) coverServingProjectionAttempt(ctx context.Contex
 		return ErrGenerationChanged
 	}
 	var complete bool
-	err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM segments sg CROSS JOIN unnest($4::text[]) sp(id) WHERE sg.organization=$1 AND sg.segmentation_id=$2 AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=$1 AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=sp.id))`, j.Organization, seg.ID, g.ID, j.Spaces).Scan(&complete)
+	err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM segments sg CROSS JOIN unnest($4::text[]) sp(id) WHERE sg.organization=$1 AND sg.segmentation_id=$2 AND NOT EXISTS(SELECT 1 FROM `+embeddingCoverageRelation+` ec WHERE ec.organization=$1 AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=sp.id))`, j.Organization, seg.ID, g.ID, j.Spaces).Scan(&complete)
 	if err != nil {
 		return err
 	}

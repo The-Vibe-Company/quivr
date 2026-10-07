@@ -14,9 +14,18 @@ import (
 func (s EmbeddingStore) Embedding(ctx context.Context, org, derivation string) (content.Embedding, error) {
 	var e content.Embedding
 	var b []byte
-	err := s.Pool.QueryRow(ctx, `SELECT metadata FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2`, org, derivation).Scan(&b)
+	err := s.Pool.QueryRow(ctx, `SELECT metadata FROM `+embeddingArtifactsRelation+` WHERE organization=$1 AND derivation_id=$2`, org, derivation).Scan(&b)
 	if err == nil {
 		err = json.Unmarshal(b, &e)
+	}
+	return e, notFound(err)
+}
+func (s EmbeddingStore) LegacyEmbedding(ctx context.Context, org, derivation string) (content.Embedding, error) {
+	var e content.Embedding
+	var raw []byte
+	err := s.Pool.QueryRow(ctx, `SELECT metadata FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2`, org, derivation).Scan(&raw)
+	if err == nil {
+		err = json.Unmarshal(raw, &e)
 	}
 	return e, notFound(err)
 }
@@ -40,7 +49,7 @@ func (s EmbeddingStore) SaveEmbedding(ctx context.Context, e content.Embedding, 
 		return content.ErrConflict
 	}
 	var prior string
-	err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2`, e.Organization, e.DerivationID).Scan(&prior)
+	err = tx.QueryRow(ctx, `SELECT id FROM `+embeddingArtifactsRelation+` WHERE organization=$1 AND derivation_id=$2`, e.Organization, e.DerivationID).Scan(&prior)
 	if err == nil {
 		if prior != e.ID {
 			return content.ErrConflict

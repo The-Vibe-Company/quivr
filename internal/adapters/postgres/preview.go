@@ -18,7 +18,7 @@ func (s EvaluationStore) Recent(ctx context.Context, org string, corpora []strin
 		since = &after
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT r.corpus_id,r.id,v.id,rc.accepted_at,
-  EXISTS(SELECT 1 FROM segments sg JOIN embedding_coverage ec ON (ec.organization,ec.segment_id)=(sg.organization,sg.id) WHERE sg.organization=$1 AND sg.version_id=v.id AND ec.generation_id=`+routedGenerationSQL("$1", "r.corpus_id")+`)
+  EXISTS(SELECT 1 FROM segments sg JOIN `+embeddingCoverageRelation+` ec ON (ec.organization,ec.segment_id)=(sg.organization,sg.id) WHERE sg.organization=$1 AND sg.version_id=v.id AND ec.generation_id=`+routedGenerationSQL("$1", "r.corpus_id")+`)
 FROM ingestion_receipts rc
 JOIN records r ON (r.organization,r.id)=(rc.organization,rc.record_id)
 JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id) AND v.acceptance_order=rc.acceptance_order

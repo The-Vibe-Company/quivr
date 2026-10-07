@@ -62,10 +62,11 @@ func versionsOnce(t *testing.T, seen []map[string]any, byKey map[string]string) 
 
 // TestCollectorPluginCollectsAndResumes: the plugin kind is published with its
 // schemas, an instance collects through it, its Records are searchable, and a
-// second run resumes from the committed checkpoint. A run fetches at most 10
-// pages, so the first run stops at item 10; the source-read counter then
-// proves the second run did not start over (a restart from offset 0 would
-// read 35 items, which the idempotent Receipts alone would hide).
+// subsequent runs resume from the committed checkpoint. Each run fetches at
+// most 10 pages and may continue immediately, so observing its completion
+// does not freeze collection. Exactly 25 source reads and one Version per
+// item prove that resumed runs never start over, which idempotent Receipts
+// alone would hide.
 func TestCollectorPluginCollectsAndResumes(t *testing.T) {
 	token := collectorPluginKey(t)
 	catalog := request(t, "GET", "/v0/connector-kinds", token, nil, 200)
@@ -87,11 +88,8 @@ func TestCollectorPluginCollectsAndResumes(t *testing.T) {
 	for _, key := range keys[:10] {
 		first[key] = 1
 	}
-	awaitHealth(t, token, id, func(h map[string]any) bool { return h["last_success_at"] != nil && itemsRead(h) == 10 })
+	awaitHealth(t, token, id, func(h map[string]any) bool { return h["last_success_at"] != nil && itemsRead(h) >= 10 })
 	byKey, _ := recordsByKey(t, token, corpusID, cursor, first)
-	if len(byKey) != 10 {
-		t.Fatalf("the first run collected %d Records, want 10: %v", len(byKey), byKey)
-	}
 	// Materialization precedes indexing; wait for each Record's searchable
 	// publication, replaying the original cursor so earlier events stay visible.
 	for _, recordID := range byKey {
@@ -102,13 +100,16 @@ func TestCollectorPluginCollectsAndResumes(t *testing.T) {
 		t.Fatal("collected Records are not searchable")
 	}
 
-	// Pull the next run forward: it resumes at offset 10.
+	// Pull any pending run forward; automatic continuations may already have advanced.
 	request(t, "PUT", "/v0/connectors/"+id+"/schedule", token, map[string]any{"interval_seconds": 1}, 200)
 	all := map[string]int{}
 	for _, key := range keys {
 		all[key] = 1
 	}
 	byKey, seen := recordsByKey(t, token, corpusID, cursor, all)
+	if len(byKey) != 25 {
+		t.Fatalf("collection produced %d Records, want exactly 25: %v", len(byKey), byKey)
+	}
 	versionsOnce(t, seen, byKey)
 	c := awaitHealth(t, token, id, func(h map[string]any) bool { return itemsRead(h) >= 25 })
 	if h := c["health"].(map[string]any); itemsRead(h) != 25 || h["state"] != "active" || h["last_error"] != nil {

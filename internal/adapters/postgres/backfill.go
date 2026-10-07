@@ -164,7 +164,7 @@ WHERE $10::bool OR (
       WHERE sg.organization=$1 AND sg.version_id=selected.version_id AND sg.segmentation_id=selected.owner_segmentation_id
         AND NOT EXISTS(
           SELECT 1
-          FROM embedding_coverage ec
+          FROM ` + embeddingCoverageRelation + ` ec
           JOIN vector_spaces vs ON vs.id=ec.space_id
           WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3
             AND vs.owner_plugin_id=selected.plugin_id
@@ -181,7 +181,7 @@ WHERE $10::bool OR (
       WHERE sg.organization=$1 AND sg.version_id=selected.version_id AND sg.segmentation_id=selected.owner_segmentation_id
         AND NOT EXISTS(
           SELECT 1
-          FROM embedding_coverage ec
+          FROM ` + embeddingCoverageRelation + ` ec
           WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=target.space
         )
     )
@@ -527,7 +527,7 @@ func (s BackfillStore) CoveredEmbeddings(ctx context.Context, org, generationID 
 	for i, p := range seg.Segments {
 		ids[i] = p.ID
 	}
-	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT a.metadata FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT a.metadata FROM `+embeddingCoverageRelation+` ec JOIN `+embeddingArtifactsRelation+` a ON (a.organization,a.segment_id,a.space_id,a.id)=(ec.organization,ec.segment_id,ec.space_id,ec.artifact_id)
 WHERE ec.organization=$1 AND ec.generation_id=$2 AND ec.segment_id=ANY($3) ORDER BY ec.segment_id,ec.space_id`, org, generationID, ids)
 	if err != nil {
 		return nil, err
@@ -590,21 +590,22 @@ FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v
 	}
 	segments := map[string]bool{}
 	if eligible {
+		groups := map[string][]content.Embedding{}
 		for _, e := range artifacts {
 			if e.Organization != org || e.VersionID != versionID || !g.Carries(e.SpaceID) {
 				return content.ErrInvalid
 			}
-			var stored string
-			if err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2 AND segment_id=$3 AND space_id=$4`, org, e.DerivationID, e.SegmentID, e.SpaceID).Scan(&stored); err != nil {
-				return notFound(err)
+			groups[e.SegmentationID] = append(groups[e.SegmentationID], e)
+			segments[e.SegmentID] = true
+		}
+		for segmentationID, group := range groups {
+			seg := content.Segmentation{ID: segmentationID, VersionID: versionID}
+			for _, e := range group {
+				seg.Segments = append(seg.Segments, content.Segment{ID: e.SegmentID})
 			}
-			if stored != e.ID {
-				return content.ErrConflict
-			}
-			if _, err = tx.Exec(ctx, `INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, g.ID, e.ID, e.SpaceID); err != nil {
+			if _, err = insertEmbeddingCoverage(ctx, tx, org, seg, g, group); err != nil {
 				return err
 			}
-			segments[e.SegmentID] = true
 		}
 	}
 	counters := map[string]int64{"versions_done": 1, "segments": int64(len(segments))}

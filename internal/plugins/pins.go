@@ -25,15 +25,16 @@ const CodeSpaceConflict = "space_owner_conflict"
 // id and version, connectors by kind, and ingestion plugins by source media
 // type and declared vector space. A nil set pins nothing.
 type PinSet struct {
-	pins             []*Pin
-	normalizers      map[string]*Pin
-	evaluators       map[string]*Pin
-	connectors       map[string]*Pin
-	ingestion        *Pin
-	ingestions       map[string]*Pin
-	spaces           map[string]*Pin
-	ingestionRouting IngestionRouting
-	retrieval        []*Pin
+	pins                     []*Pin
+	normalizers              map[string]*Pin
+	evaluators               map[string]*Pin
+	connectors               map[string]*Pin
+	ingestion                *Pin
+	ingestions               map[string]*Pin
+	spaces                   map[string]*Pin
+	ingestionRouting         IngestionRouting
+	explicitIngestionRouting bool
+	retrieval                []*Pin
 }
 
 // LoadPins validates each pin with LoadPin, then routes the Contributions of

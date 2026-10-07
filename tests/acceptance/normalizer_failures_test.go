@@ -1,6 +1,8 @@
 package acceptance
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -113,7 +115,10 @@ func TestNormalizerOutageRecovers(t *testing.T) {
 		t.Fatal(ready)
 	}
 	version := request(t, "GET", "/v0/records/"+ready["record_id"].(string)+"/versions/"+ready["version_id"].(string), admin, nil, 200)
-	if n, _ := version["provenance"].(map[string]any)["normalization"].(map[string]any); n["invocation_id"] == nil || n["fallback"] != nil {
+	n, _ := version["provenance"].(map[string]any)["normalization"].(map[string]any)
+	key, _ := n["idempotency_key"].(string)
+	sum := sha256.Sum256([]byte(outageMarkdown))
+	if !strings.HasPrefix(key, "nk_") || n["input_sha256"] != hex.EncodeToString(sum[:]) || n["fallback"] != nil {
 		t.Fatalf("provenance %v", version["provenance"])
 	}
 	hits := request(t, "POST", "/v0/search", admin, map[string]any{"query": "ferry", "corpus_ids": []string{state.Corpus}, "mode": "lexical"}, 200)["items"].([]any)

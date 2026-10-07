@@ -101,6 +101,7 @@ func (s *PinSet) ConfigureIngestion(c IngestionRouting) error {
 		}
 		evaluation[mediaType] = copied
 	}
+	s.explicitIngestionRouting = c.Default != "" || len(c.Routes) > 0
 	s.ingestionRouting = IngestionRouting{Default: defaultID, Routes: routes, Evaluation: evaluation}
 	s.ingestion = s.ingestions[defaultID]
 	return nil
@@ -216,3 +217,7 @@ func (s *PinSet) IngestionRouting() IngestionRouting {
 	}
 	return IngestionRouting{Default: s.ingestionRouting.Default, Routes: routes, Evaluation: evaluation}
 }
+
+// ExplicitIngestionRouting distinguishes an operator selection from legacy
+// automatic defaulting, whose configured spaces remain registered.
+func (s *PinSet) ExplicitIngestionRouting() bool { return s != nil && s.explicitIngestionRouting }

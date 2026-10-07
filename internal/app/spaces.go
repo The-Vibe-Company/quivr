@@ -24,6 +24,9 @@ func DeploymentSpaces(pins *plugins.PinSet) []content.RegisteredSpace {
 			}
 		}
 		for _, pin := range pins.Ingestions() {
+			if pins.ExplicitIngestionRouting() && !pins.ServingIngestion(pin.Manifest.ID) && !evaluationOwners[pin.Manifest.ID] {
+				continue
+			}
 			for _, s := range pin.EnabledSpaces() {
 				role := s.Role
 				if evaluationOwners[pin.Manifest.ID] && !pins.ServingIngestion(pin.Manifest.ID) {

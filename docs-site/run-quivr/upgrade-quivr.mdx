@@ -35,6 +35,51 @@ process has stopped before enabling those writes.
 
 The ingestion path prepares blob and embedding coverage writes before locking the organization's change journal. Upgrade every API instance and every live and bulk worker that writes to the database as one deployment. Wait until all previous processes finish draining and stop before relying on the improved import throughput. Previous writers acquire these locks in a different order and lack the bounded deadlock retries. New writers make at most three transaction attempts, including the first attempt, for a PostgreSQL deadlock. The third failed attempt returns the storage error to the caller; the `quivr.postgres.journal_deadlock` log event records `operation`, `attempt`, `retry_count` and `retry_exhausted`.
 
+## Compact import storage
+
+Compact storage keeps each Version's vectors in one current float32 file per segmentation and vector space. Each uploaded object is immutable; a partial group can replace its descriptor with a new immutable object as more canonical vectors arrive. A segmentation is the saved set of passages; a vector space identifies the embedding model. Compact PostgreSQL rows retain vector and public artifact digests, file ordinals and generation coverage. Rebuilds reuse these files without calling the embedding provider. Each file is bounded to 256 MiB; ordinary canonical objects retain their 2 MiB bound.
+
+New installations start in compact mode. Existing installations retain legacy writes after the additive migration so previous binaries can still read new work. Use the new binary and `QUIVR_CONFIG` for these commands:
+
+```sh
+quivr storage status
+```
+
+The JSON field `compact` identifies the write mode. Before closing the rollback window, you can prepack stored vectors without removing legacy rows:
+
+```sh
+quivr storage compact --id prepare-storage --batch 100
+quivr storage status --id prepare-storage
+```
+
+Repeat the same command to resume its saved checkpoint. `phase: "done"` means that operation finished its scan. Each batch processes at most the requested number of units; a vector unit packs one whole segmentation/space group. Object verification finishes before database locks. No search service, tokenizer or embedding credentials are needed. The compaction configuration needs [PostgreSQL and S3 settings](/reference/configuration). Compaction never calls an embedding provider. Each unit has a 30-second deadline; a timed-out unit keeps the previous checkpoint.
+
+After all previous API, live-worker and bulk-worker processes have drained and stopped, explicitly activate compact writes:
+
+```sh
+quivr storage activate --writers-drained
+```
+
+Activation closes application rollback to previous binaries, even if no contract migration is pending. The flag acknowledges your platform's completed drain; Quivr cannot check those processes. Activation is durable and repeatable; it does not downgrade storage.
+
+Start a new operation after activation to retire redundant vector rows and convert their exact coverage subsets:
+
+```sh
+quivr storage compact --id compact-storage --batch 100
+```
+
+Repeat until its phase is `done`. A preactivation operation does not retire already-scanned rows; use a new identifier after the drain. On failure, the previous checkpoint remains. Restore missing/corrupt durable artifacts or fix storage access, then rerun the same operation. Conversion keeps public artifact IDs and canonical first-writer vectors, including partial files. Interrupted or concurrent attempts cannot overwrite a previously stored vector.
+
+Historical canonical requests and normalization audit detail remain captured by default. To retire that detail explicitly, use a separate operation:
+
+```sh
+quivr storage compact --id compact-import-detail --batch 100 --retire-audit-detail
+```
+
+Keep this flag on every resume of that operation. Required execution input, idempotency digests, normalization extensions and failure/conflict diagnostics remain. Future capture follows `retain_import_audit_detail`, which defaults to `false`; configure the API and workers consistently.
+
+All physical S3 objects remain after compaction. Old payload/manifest objects require a separately guarded deletion procedure. Deleted PostgreSQL rows become dead tuples; autovacuum makes their space reusable, while file size may stay unchanged. Do not run `VACUUM FULL` as part of a live import rollout. Compare matched imports with `python3 scripts/measure_storage.py --output <report.json>` using the same sample and count, including heap, TOAST and indexes. Coordinator or operator measurements establish throughput and search quality on the deployment.
+
 ## Check it worked
 
 The new API and worker report ready, ingestion resolves new receipts, and search returns the expected records. CI checks the previous version's inline ingestion, authorization and lexical search against the expanded schema, including a restart. Until versioned release artifacts supply the previous binary, CI uses the branch's merge-base commit; this is a focused compatibility check, not a complete release matrix.
