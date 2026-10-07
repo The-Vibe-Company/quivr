@@ -14,8 +14,9 @@ import (
 type AuditStore struct{ Pool *pgxpool.Pool }
 type auditTransactionKey struct{}
 type auditTransaction struct {
-	pool *pgxpool.Pool
-	tx   pgx.Tx
+	pool     *pgxpool.Pool
+	tx       pgx.Tx
+	deadlock *error
 }
 
 // database keeps ordinary/background calls on their pool and binds audited
@@ -32,6 +33,14 @@ func database(ctx context.Context, pool *pgxpool.Pool) transactionalDatabase {
 	return pool
 }
 func (s AuditStore) Record(ctx context.Context, e *audit.Event, command func(context.Context) error) error {
+	initial := *e
+	return retryJournalWrite(ctx, "Audit.Record", func(ctx context.Context) error {
+		*e = initial
+		return s.recordAttempt(ctx, e, command)
+	})
+}
+
+func (s AuditStore) recordAttempt(ctx context.Context, e *audit.Event, command func(context.Context) error) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -44,8 +53,15 @@ func (s AuditStore) Record(ctx context.Context, e *audit.Event, command func(con
 	work, hooks := audit.WithCommitHooks(ctx)
 	committed := false
 	defer func() { hooks(committed) }()
-	work = context.WithValue(work, auditTransactionKey{}, auditTransaction{s.Pool, action})
-	if err = command(work); err != nil {
+	var deadlock error
+	work = context.WithValue(work, auditTransactionKey{}, auditTransaction{s.Pool, action, &deadlock})
+	err = command(work)
+	// HTTP commands translate storage failures into buffered refusals. Preserve
+	// a nested deadlock so the parent retries the command and audit atomically.
+	if deadlock != nil {
+		return deadlock
+	}
+	if err != nil {
 		if errors.Is(err, audit.ErrReadOnly) {
 			// Estimates may cache confirmation facts; commit those read-side writes
 			// while excluding the estimate itself from the sensitive-action trail.

@@ -129,6 +129,16 @@ func (s QuarantineStore) ReprocessEstimate(ctx context.Context, org, corpusID, k
 // AcceptReprocess commits a queued reprocess with the Versions it takes,
 // pinned to the active plan, or replays the one accepted under the key.
 func (s QuarantineStore) AcceptReprocess(ctx context.Context, org, key string, canonical []byte, f quarantine.Filter, fromStage string, e operations.ReprocessEstimate) (operations.Operation, error) {
+	var result0 operations.Operation
+	err := retryJournalWrite(ctx, "AcceptReprocess", func(ctx context.Context) error {
+		var err error
+		result0, err = s.acceptReprocessAttempt(ctx, org, key, canonical, f, fromStage, e)
+		return err
+	})
+	return result0, err
+}
+
+func (s QuarantineStore) acceptReprocessAttempt(ctx context.Context, org, key string, canonical []byte, f quarantine.Filter, fromStage string, e operations.ReprocessEstimate) (operations.Operation, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -251,6 +261,17 @@ func scanItem(row pgx.Row) (*quarantine.Item, error) {
 
 // BeginReprocess starts a reprocess step: see quarantine.RunStore.
 func (s QuarantineStore) BeginReprocess(ctx context.Context, org, id string) (operations.Operation, *quarantine.Item, error) {
+	var result0 operations.Operation
+	var result1 *quarantine.Item
+	err := retryJournalWrite(ctx, "BeginReprocess", func(ctx context.Context) error {
+		var err error
+		result0, result1, err = s.beginReprocessAttempt(ctx, org, id)
+		return err
+	})
+	return result0, result1, err
+}
+
+func (s QuarantineStore) beginReprocessAttempt(ctx context.Context, org, id string) (operations.Operation, *quarantine.Item, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, nil, err
@@ -324,6 +345,16 @@ func release(ctx context.Context, tx pgx.Tx, org, versionID, receiptID string) e
 // StartReprocessItem takes and prepares the next pending item: see
 // quarantine.RunStore.
 func (s QuarantineStore) StartReprocessItem(ctx context.Context, org, id string) (*quarantine.Item, error) {
+	var result0 *quarantine.Item
+	err := retryJournalWrite(ctx, "StartReprocessItem", func(ctx context.Context) error {
+		var err error
+		result0, err = s.startReprocessItemAttempt(ctx, org, id)
+		return err
+	})
+	return result0, err
+}
+
+func (s QuarantineStore) startReprocessItemAttempt(ctx context.Context, org, id string) (*quarantine.Item, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -430,23 +461,65 @@ func (s QuarantineStore) RepublishItem(ctx context.Context, org, id string, item
 }
 
 func (s QuarantineStore) republish(ctx context.Context, org, id string, item quarantine.Item, w content.Work, p content.Publication, released *bool) error {
+	err := retryJournalWrite(ctx, "republish", func(ctx context.Context) error {
+		*released = false
+		return s.republishAttempt(ctx, org, id, item, w, p, released)
+	})
+	return err
+}
+
+func (s QuarantineStore) republishAttempt(ctx context.Context, org, id string, item quarantine.Item, w content.Work, p content.Publication, released *bool) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return err
+	}
+	var hint bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM quarantine_reprocess_items i JOIN record_versions v ON (v.organization,v.id)=(i.organization,i.version_id) WHERE i.organization=$1 AND i.operation_id=$2 AND i.version_id=$3 AND i.phase='renormalizing' AND v.quarantined AND NOT EXISTS(SELECT 1 FROM segmentations sg WHERE sg.organization=$1 AND sg.version_id=$3))`, org, id, item.VersionID).Scan(&hint); err != nil {
+		return err
+	}
+	var stage pgx.Tx
+	if hint {
+		stage, err = prepareJournal(ctx, tx, func(stage pgx.Tx) error { return insertPublicationBlobs(ctx, stage, org, p) })
+		if err != nil {
+			return err
+		}
+	}
 	if err = lockJournal(ctx, tx, org); err != nil {
 		return err
 	}
 	it, _, started, err := lockItem(ctx, tx, org, id, item.VersionID)
 	if err != nil || !started || it.Phase != quarantine.PhaseRenormalizing {
-		return commitAfter(ctx, tx, err)
+		return err
 	}
 	v, err := lockVersion(ctx, tx, org, item.VersionID)
 	if err != nil {
 		return err
 	}
 	if !v.quarantined {
+		if stage != nil {
+			if err = stage.Rollback(ctx); err != nil {
+				return err
+			}
+			if err = lockJournal(ctx, tx, org); err != nil {
+				return err
+			}
+			// Re-read the item and Version after releasing the savepoint fence.
+			it, _, started, err = lockItem(ctx, tx, org, id, item.VersionID)
+			if err != nil || !started || it.Phase != quarantine.PhaseRenormalizing {
+				return err
+			}
+			v, err = lockVersion(ctx, tx, org, item.VersionID)
+			if err != nil {
+				return err
+			}
+			if v.quarantined {
+				return content.ErrConflict
+			}
+		}
 		return commitAfter(ctx, tx, settle(ctx, tx, org, id, item.VersionID, quarantine.PhaseSkipped, quarantine.SkipNotQuarantined))
 	}
 	var segmented bool
@@ -456,14 +529,8 @@ func (s QuarantineStore) republish(ctx context.Context, org, id string, item qua
 	if segmented {
 		return content.ErrConflict
 	}
-	blobs := []content.Blob{p.Normalized, p.Manifest}
-	for _, part := range p.Parts {
-		blobs = append(blobs, part.Blob)
-	}
-	for _, b := range blobs {
-		if _, err = tx.Exec(ctx, "INSERT INTO content_blobs VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", org, content.StableID("blob", org, b.SHA256), b.Key, b.SHA256, b.Size); err != nil {
-			return err
-		}
+	if stage == nil {
+		return content.ErrConflict
 	}
 	provenance, err := json.Marshal(w.Command.Provenance)
 	if err != nil {
@@ -506,6 +573,13 @@ func (s QuarantineStore) republish(ctx context.Context, org, id string, item qua
 // RequarantineItem keeps a renormalizing Version quarantined with its new
 // reason and finishes the item.
 func (s QuarantineStore) RequarantineItem(ctx context.Context, org, id string, item quarantine.Item, reason content.Diagnostic) error {
+	err := retryJournalWrite(ctx, "RequarantineItem", func(ctx context.Context) error {
+		return s.requarantineItemAttempt(ctx, org, id, item, reason)
+	})
+	return err
+}
+
+func (s QuarantineStore) requarantineItemAttempt(ctx context.Context, org, id string, item quarantine.Item, reason content.Diagnostic) error {
 	raw, err := json.Marshal(reason)
 	if err != nil {
 		return err
@@ -553,6 +627,13 @@ func (s QuarantineStore) AbandonItem(ctx context.Context, org, id string, item q
 // is quarantined again with its previous reason: it never waits for a
 // processing nobody runs.
 func (s QuarantineStore) endItem(ctx context.Context, org, id string, item quarantine.Item, canceled bool) error {
+	err := retryJournalWrite(ctx, "endItem", func(ctx context.Context) error {
+		return s.endItemAttempt(ctx, org, id, item, canceled)
+	})
+	return err
+}
+
+func (s QuarantineStore) endItemAttempt(ctx context.Context, org, id string, item quarantine.Item, canceled bool) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
@@ -608,6 +689,13 @@ func (s QuarantineStore) endItem(ctx context.Context, org, id string, item quara
 // SkipItem ends a started item that no retry can carry further, leaving its
 // Version quarantined with its reason.
 func (s QuarantineStore) SkipItem(ctx context.Context, org, id string, item quarantine.Item, code string) error {
+	err := retryJournalWrite(ctx, "SkipItem", func(ctx context.Context) error {
+		return s.skipItemAttempt(ctx, org, id, item, code)
+	})
+	return err
+}
+
+func (s QuarantineStore) skipItemAttempt(ctx context.Context, org, id string, item quarantine.Item, code string) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
@@ -625,6 +713,13 @@ func (s QuarantineStore) SkipItem(ctx context.Context, org, id string, item quar
 
 // CompleteReprocess records a reprocess's success.
 func (s QuarantineStore) CompleteReprocess(ctx context.Context, org, id string) error {
+	err := retryJournalWrite(ctx, "CompleteReprocess", func(ctx context.Context) error {
+		return s.completeReprocessAttempt(ctx, org, id)
+	})
+	return err
+}
+
+func (s QuarantineStore) completeReprocessAttempt(ctx context.Context, org, id string) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,12 +92,25 @@ func (a *API) serveSensitive(w http.ResponseWriter, r *http.Request) {
 			buffered.header.Set(name, id)
 		}
 	}
+	initialHeaders := buffered.header.Clone()
+	body := &auditBodyReplay{source: r.Body}
+	if body.source == nil {
+		body.source = http.NoBody
+	}
 	err := a.Audit.Record(ctx, &event, func(work context.Context) error {
+		// The store may replay a deadlocked parent transaction. Only the last
+		// attempt's response escapes, with the same bounded request bytes.
+		buffered = &auditResponse{header: initialHeaders.Clone()}
+		if body.overflow {
+			return errors.New("audited request exceeds replay bound")
+		}
 		work = audit.WithTargetRecorder(work, func(targetType, targetID string) {
 			event.TargetType = boundedAuditID(targetType)
 			event.TargetID = boundedAuditID(targetID)
 		})
-		a.servePushAudited(buffered, r.WithContext(work))
+		request := r.Clone(work)
+		request.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body.cached.Bytes()), io.TeeReader(body.source, body)))
+		a.servePushAudited(buffered, request)
 		if buffered.err != nil {
 			return buffered.err
 		}
@@ -161,6 +175,22 @@ func (a *API) serveSensitive(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(buffered.status)
 	_, _ = w.Write(buffered.body.Bytes())
+}
+
+// Capture only bytes a handler reads. Its decoder still owns media-type and
+// size errors; a retry replays the captured prefix followed by any unread tail.
+type auditBodyReplay struct {
+	source   io.Reader
+	cached   bytes.Buffer
+	overflow bool
+}
+
+func (b *auditBodyReplay) Write(p []byte) (int, error) {
+	remaining := maxPluginRegistrationBytes + 1 - b.cached.Len()
+	n := min(len(p), remaining)
+	b.cached.Write(p[:n])
+	b.overflow = b.overflow || n < len(p)
+	return len(p), nil
 }
 func boundedAuditID(s string) string {
 	if len(s) > 512 {

@@ -402,6 +402,16 @@ func (s EvaluationStore) CommitWithdrawal(ctx context.Context, in monitoring.Int
 // commit runs one decision under the journal lock and completes its intent in
 // the same transaction.
 func (s EvaluationStore) commit(ctx context.Context, in monitoring.Intent, decide func(pgx.Tx) (string, error)) (string, error) {
+	var result0 string
+	err := retryJournalWrite(ctx, "commit", func(ctx context.Context) error {
+		var err error
+		result0, err = s.commitAttempt(ctx, in, decide)
+		return err
+	})
+	return result0, err
+}
+
+func (s EvaluationStore) commitAttempt(ctx context.Context, in monitoring.Intent, decide func(pgx.Tx) (string, error)) (string, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -432,8 +442,18 @@ type subscriptionPin struct{ queryID, queryVersionID, destination string }
 // supersededSQL reports whether a later Version of the Subscription of the
 // subscription_versions row v was activated before the trigger position.
 func supersededSQL(v, position string) string {
-	return `EXISTS(SELECT 1 FROM subscription_versions later WHERE later.organization=` + v + `.organization AND later.subscription_id=` + v + `.subscription_id
-  AND later.activation_position>` + v + `.activation_position AND later.activation_position<` + position + `)`
+	return `EXISTS(` + supersedingVersionQuery(v, position) + `)`
+}
+
+// Keep bounded journal guards on the Subscription's activation index. A
+// scalar subquery cannot turn into a hash of every Subscription Version.
+func supersededPointSQL(v, position string) string {
+	return `COALESCE((` + supersedingVersionQuery(v, position) + ` LIMIT 1),false)`
+}
+
+func supersedingVersionQuery(v, position string) string {
+	return `SELECT true FROM subscription_versions later WHERE later.organization=` + v + `.organization AND later.subscription_id=` + v + `.subscription_id
+ AND later.activation_position>` + v + `.activation_position AND later.activation_position<` + position
 }
 
 // guardEvaluation is the core eligibility guard of an evaluated Version: the

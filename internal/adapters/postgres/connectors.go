@@ -154,6 +154,16 @@ func reevaluate(ctx context.Context, tx pgx.Tx, org, id string) (connectors.Inst
 // CreateConnector inserts an instance with its optional first credential, or
 // replays an existing one created under the same key and request.
 func (s ConnectorStore) CreateConnector(ctx context.Context, n connectors.NewInstance) (connectors.Instance, error) {
+	var result0 connectors.Instance
+	err := retryJournalWrite(ctx, "CreateConnector", func(ctx context.Context) error {
+		var err error
+		result0, err = s.createConnectorAttempt(ctx, n)
+		return err
+	})
+	return result0, err
+}
+
+func (s ConnectorStore) createConnectorAttempt(ctx context.Context, n connectors.NewInstance) (connectors.Instance, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.Instance{}, err
@@ -256,6 +266,16 @@ func (s ConnectorStore) ListConnectors(ctx context.Context, scope corpus.Scope, 
 
 // DisableConnector disables an instance once; repeats return it unchanged.
 func (s ConnectorStore) DisableConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
+	var result0 connectors.Instance
+	err := retryJournalWrite(ctx, "DisableConnector", func(ctx context.Context) error {
+		var err error
+		result0, err = s.disableConnectorAttempt(ctx, org, id)
+		return err
+	})
+	return result0, err
+}
+
+func (s ConnectorStore) disableConnectorAttempt(ctx context.Context, org, id string) (connectors.Instance, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.Instance{}, err
@@ -284,6 +304,16 @@ func (s ConnectorStore) DisableConnector(ctx context.Context, org, id string) (c
 // unchanged value commits nothing. A shorter interval pulls the next run in; a
 // longer one applies after the run already scheduled.
 func (s ConnectorStore) ChangeSchedule(ctx context.Context, org, id string, interval time.Duration) (connectors.Instance, error) {
+	var result0 connectors.Instance
+	err := retryJournalWrite(ctx, "ChangeSchedule", func(ctx context.Context) error {
+		var err error
+		result0, err = s.changeScheduleAttempt(ctx, org, id, interval)
+		return err
+	})
+	return result0, err
+}
+
+func (s ConnectorStore) changeScheduleAttempt(ctx context.Context, org, id string, interval time.Duration) (connectors.Instance, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.Instance{}, err
@@ -345,6 +375,16 @@ WHERE organization=$1 AND id=$2 RETURNING enabled,GREATEST(next_run_at,now())`, 
 // ReplaceCredential deposits the next credential version, or replays one
 // deposited under the same key and request.
 func (s ConnectorStore) ReplaceCredential(ctx context.Context, org, id string, d connectors.CredentialDeposit) (connectors.Instance, error) {
+	var result0 connectors.Instance
+	err := retryJournalWrite(ctx, "ReplaceCredential", func(ctx context.Context) error {
+		var err error
+		result0, err = s.replaceCredentialAttempt(ctx, org, id, d)
+		return err
+	})
+	return result0, err
+}
+
+func (s ConnectorStore) replaceCredentialAttempt(ctx context.Context, org, id string, d connectors.CredentialDeposit) (connectors.Instance, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return connectors.Instance{}, err
@@ -552,6 +592,13 @@ WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled AND NOT EXISTS(S
 // pull run relaxed by healthy push back to the instance's interval. Connector
 // Health is re-evaluated in the same transaction.
 func (s ConnectorStore) RecordDelivery(ctx context.Context, org, id string, o connectors.DeliveryOutcome) error {
+	err := retryJournalWrite(ctx, "RecordDelivery", func(ctx context.Context) error {
+		return s.recordDeliveryAttempt(ctx, org, id, o)
+	})
+	return err
+}
+
+func (s ConnectorStore) recordDeliveryAttempt(ctx context.Context, org, id string, o connectors.DeliveryOutcome) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
@@ -592,6 +639,13 @@ WHERE organization=$1 AND id=$2`, org, id, o.Accepted, o.Carried, class, code, o
 // one interval later (or after the failure's RetryAfter when longer),
 // releases the lease and commits re-evaluated health.
 func (s ConnectorStore) FinishRun(ctx context.Context, org, id string, run int64, failure *connectors.RunError) error {
+	err := retryJournalWrite(ctx, "FinishRun", func(ctx context.Context) error {
+		return s.finishRunAttempt(ctx, org, id, run, failure)
+	})
+	return err
+}
+
+func (s ConnectorStore) finishRunAttempt(ctx context.Context, org, id string, run int64, failure *connectors.RunError) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err

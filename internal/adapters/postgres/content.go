@@ -111,25 +111,79 @@ func (s MaterializationStore) Progress(ctx context.Context, org, id, state, code
 	return err
 }
 func (s MaterializationStore) Publish(ctx context.Context, w content.Work, publication content.Publication) error {
-	tx, err := s.Pool.Begin(ctx)
+	err := retryJournalWrite(ctx, "Publish", func(ctx context.Context) error {
+		return s.publishAttempt(ctx, w, publication)
+	})
+	return err
+}
+
+func (s MaterializationStore) publishAttempt(ctx context.Context, w content.Work, publication content.Publication) error {
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 	var state string
 	var reserved *string
-	var withdrawn, exists bool
-	err = readJournal(ctx, tx, w.Organization, `SELECT rc.state,
+	var withdrawn, exists, created bool
+	guard := `SELECT rc.state,
  (SELECT a.digest FROM accepted_revisions a WHERE a.organization=$1 AND a.record_id=$3 AND a.slot=$4),
  coalesce((SELECT r.withdrawn FROM records r WHERE r.organization=$1 AND r.id=$3),false),
  EXISTS(SELECT 1 FROM record_versions WHERE organization=$1 AND id=$5)
- FROM ingestion_receipts rc WHERE rc.organization=$1 AND rc.id=$2 FOR UPDATE OF rc`,
-		[]any{w.Organization, w.ReceiptID, w.RecordID, w.Slot, w.VersionID}, &state, &reserved, &withdrawn, &exists)
-	if err != nil {
+ FROM ingestion_receipts rc WHERE rc.organization=$1 AND rc.id=$2`
+	args := []any{w.Organization, w.ReceiptID, w.RecordID, w.Slot, w.VersionID}
+	read := func(fence bool) error {
+		if fence {
+			err := readJournal(ctx, tx, w.Organization, guard+" FOR UPDATE OF rc", args, &state, &reserved, &withdrawn, &exists)
+			if err == nil && created {
+				exists = false
+			}
+			return err
+		}
+		return tx.QueryRow(ctx, guard, args...).Scan(&state, &reserved, &withdrawn, &exists)
+	}
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return err
+	}
+	if err = read(false); err != nil {
+		return err
+	}
+	// Resolved receipts are immutable. A committed replay needs no writes or
+	// journal acquisition, and must not validate another publication's blobs.
+	if state == "resolved" {
+		return nil
+	}
+	var stage pgx.Tx
+	if reserved != nil && *reserved == w.Digest && !withdrawn && !exists {
+		stage, err = prepareJournal(ctx, tx, func(stage pgx.Tx) error {
+			var err error
+			created, err = insertPublicationVersion(ctx, stage, w, publication)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if err = read(true); err != nil {
 		return err
 	}
 	if state == "resolved" {
-		return tx.Commit(ctx)
+		return nil
+	}
+	// Discard prepared blobs on a duplicate or source conflict. Rolling back
+	// releases the fence, so the guarded read must acquire a fresh one.
+	if stage != nil && reserved != nil && (*reserved != w.Digest || withdrawn || exists) {
+		if err = stage.Rollback(ctx); err != nil {
+			return err
+		}
+		created = false
+		if err = read(true); err != nil {
+			return err
+		}
+		if state == "resolved" {
+			return nil
+		}
+		stage = nil
 	}
 	if reserved == nil {
 		return pgx.ErrNoRows
@@ -148,39 +202,8 @@ func (s MaterializationStore) Publish(ctx context.Context, w content.Work, publi
 		if exists {
 			outcome = "duplicate"
 		} else {
-			blobs := make([]content.Blob, 0, len(publication.Parts)+2)
-			blobs = append(blobs, publication.Normalized, publication.Manifest)
-			for _, part := range publication.Parts {
-				blobs = append(blobs, part.Blob)
-			}
-			for _, b := range blobs {
-				writes.Queue("INSERT INTO content_blobs VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", w.Organization, content.StableID("blob", w.Organization, b.SHA256), b.Key, b.SHA256, b.Size)
-			}
-			provenance, err := json.Marshal(w.Command.Provenance)
-			if err != nil {
-				return err
-			}
-			extensions := w.Command.Extensions
-			if extensions == nil {
-				extensions = content.Extensions{}
-			}
-			extensionsJSON, err := json.Marshal(extensions)
-			if err != nil {
-				return err
-			}
-			// A quarantined publication is held in the same transaction: no
-			// worker can observe it as materialized and process it.
-			var quarantine []byte
-			processing, code := "queued", ""
-			if q := publication.Quarantine; q != nil {
-				if quarantine, err = json.Marshal(q); err != nil {
-					return err
-				}
-				processing, code = "blocked", q.Code
-			}
-			writes.Queue(`INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,predecessor_id,text_blob_id,manifest_blob_id,provenance,extensions,quarantined,processing,error_code,quarantine,materialized_at,quarantined_at,quarantine_stage) VALUES($1,$2,$3,$4,$5,$6,$7,nullif($8,''),$9,$10,$11,$12,$13,$14,$15,$16,clock_timestamp(),CASE WHEN $13 THEN clock_timestamp() END,CASE WHEN $13 THEN 'normalization' END)`, w.Organization, w.VersionID, w.RecordID, w.Slot, w.Digest, w.Order, w.Position, w.PredecessorID, content.StableID("blob", w.Organization, publication.Normalized.SHA256), content.StableID("blob", w.Organization, publication.Manifest.SHA256), provenance, extensionsJSON, publication.Quarantine != nil, processing, code, quarantine)
-			for _, part := range publication.Parts {
-				writes.Queue("INSERT INTO version_parts VALUES($1,$2,$3,$4,$5)", w.Organization, w.VersionID, part.Key, part.Role, content.StableID("blob", w.Organization, part.Blob.SHA256))
+			if stage == nil {
+				return ErrGenerationChanged
 			}
 			queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.materialized", Resource: "record", ResourceID: w.RecordID, MutationID: w.VersionID})
 			if q := publication.Quarantine; q != nil {
