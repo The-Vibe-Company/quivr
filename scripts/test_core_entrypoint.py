@@ -25,6 +25,52 @@ ENV = {'QUIVR_API_KEY': 'placeholder-api-key', 'DATABASE_URL': 'postgres://place
 
 
 class CoreEntrypointTest(unittest.TestCase):
+    def test_local_text_encoder_runs_only_beside_api_without_changing_pins(self):
+        env = {**ENV, 'QUIVR_DEMO_EMBEDDING': 'gemma',
+               'EMBED_URL': 'https://example--embeddings.modal.run',
+               'EMBED_API_KEY': 'fixture-modal-token'}
+        original = core_entrypoint.build_config(env)
+        for flag in (None, '0', '1'):
+            selected = dict(env)
+            if flag is not None:
+                selected['QUIVR_LOCAL_QUERY_ENCODER'] = flag
+            selected['QUIVR_QUERY_ENCODER_THREADS'] = '4'
+            self.assertEqual(core_entrypoint.build_config(selected), original)
+            for role in ('api', 'worker', 'migrate'):
+                commands = core_entrypoint.sidecar_commands(selected, role)
+                cpu = [item for item in commands if item[0] == 'text-encoder']
+                expected = flag == '1' and role == 'api'
+                self.assertEqual(bool(cpu), expected)
+                hosted = [child for name, _, _, child in commands if name == 'hosted-embed']
+                if hosted:
+                    self.assertEqual(hosted[0].get('QUIVR_HOSTED_QUERY_URL'),
+                                     'http://127.0.0.1:9995/v1' if expected else None)
+                if cpu:
+                    _, argv, cwd, child = cpu[0]
+                    self.assertEqual(argv[0], '/opt/query-encoder/venv/bin/python')
+                    self.assertIn('deploy.cpu.text_encoder', argv)
+                    self.assertEqual(cwd, '/app')
+                    self.assertEqual(child['HF_HUB_OFFLINE'], '1')
+                    self.assertEqual(child['TRANSFORMERS_OFFLINE'], '1')
+                    self.assertNotIn('EMBED_API_KEY', child)
+                    self.assertNotIn('AZURE_FOUNDRY_KEY', child)
+        with patch.dict(os.environ, {**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1', 'QUIVR_ROLE': 'api'}, clear=True), \
+             patch.object(core_entrypoint.pathlib.Path, 'is_file', return_value=False):
+            with self.assertRaisesRegex(ValueError, 'QUIVR_BUILD_LOCAL_QUERY_ENCODER=1'):
+                core_entrypoint.main()
+        for selection in ('', 'cohere'):
+            with self.assertRaisesRegex(ValueError, 'QUIVR_LOCAL_QUERY_ENCODER'):
+                core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
+                                                  'QUIVR_DEMO_EMBEDDING': selection}, 'api')
+        for role in ('worker', 'migrate'):
+            commands = core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
+                                                       'QUIVR_QUERY_ENCODER_THREADS': 'many'}, role)
+            self.assertNotIn('text-encoder', [item[0] for item in commands])
+        for threads in ('0', '33', 'many'):
+            with self.assertRaisesRegex(ValueError, 'QUIVR_QUERY_ENCODER_THREADS'):
+                core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
+                                                  'QUIVR_QUERY_ENCODER_THREADS': threads}, 'api')
+
     def test_core_processes_keep_runtime_config_without_provider_secret(self):
         # main owns environment inheritance; sidecar_commands alone cannot see this leak.
         with tempfile.TemporaryDirectory() as tmp:
@@ -351,6 +397,16 @@ class CoreEntrypointTest(unittest.TestCase):
         api = {name for name, *_ in core_entrypoint.sidecar_commands({**ENV, 'PATH': '/usr/bin'}, 'api')}
         self.assertEqual(api, {'x-list', 'core-ingest', 'core-retrieve'})
 
+    def test_core_ingest_can_be_dropped_once_hosted_embeddings_serve(self):
+        def manifests(env):
+            return {p['manifest'] for p in core_entrypoint.build_config(env)['plugins']}
+        core = '/app/plugins/core-ingest/quivr-plugin.yaml'
+        gemma = {**ENV, 'QUIVR_DEMO_EMBEDDING': 'gemma', 'EMBED_URL': 'https://embed.example', 'EMBED_API_KEY': 'k'}
+        self.assertIn(core, manifests(gemma))
+        self.assertNotIn(core, manifests({**gemma, 'QUIVR_DEMO_CORE_INGEST': '0'}))
+        # Without a hosted space the engine still needs core.ingest.
+        self.assertIn(core, manifests({**ENV, 'QUIVR_DEMO_CORE_INGEST': '0'}))
+
     def test_core_ingest_embeds_with_the_deployment_tei_and_the_image_tokenizer(self):
         # The engine segments and embeds nothing itself: api and worker refuse to start without it.
         pin = next(p for p in core_entrypoint.build_config(ENV)['plugins'] if p['manifest'] == '/app/plugins/core-ingest/quivr-plugin.yaml')
@@ -455,6 +511,48 @@ class CoreEntrypointTest(unittest.TestCase):
 class SuperviseTest(unittest.TestCase):
     def command(self, name, code):
         return (name, [sys.executable, '-c', code], None, None)
+
+    def test_encoder_readiness_fences_core_startup_and_handles_failure(self):
+        from unittest.mock import Mock
+        commands = [('text-encoder', ['encoder'], None, {}), ('core', ['core'], None, {})]
+        ready = {'name': 'text-encoder', 'url': 'http://127.0.0.1:9995/health',
+                 'timeout': 120, 'model': 'google/embeddinggemma-2',
+                 'model_revision': '914f7f89142e33e7',
+                 'source_revision': '914f7f89142e33e77833254d9c9b90c3cef7303b', 'dimensions': 768}
+        for outcome in ('ready', 'timeout', 'exit', 'signal', 'identity'):
+            with self.subTest(outcome=outcome):
+                encoder = Mock()
+                encoder.poll.return_value = 3 if outcome == 'exit' else None
+                encoder.returncode = 3 if outcome == 'exit' else None
+                core = Mock()
+                core.poll.return_value = 7
+                core.returncode = 7
+                callbacks = {}
+                def register(sig, handler):
+                    if callable(handler):
+                        callbacks[sig] = handler
+                def health(*args, **kwargs):
+                    if outcome == 'signal':
+                        callbacks[core_entrypoint.signal.SIGTERM](15, None)
+                        raise OSError('cancelled')
+                    if outcome == 'timeout':
+                        raise OSError('not ready')
+                    import io
+                    metadata = {**ready, 'status': 'ok'}
+                    if outcome == 'identity':
+                        metadata['model_revision'] = 'other'
+                    return io.BytesIO(json.dumps(metadata).encode())
+                # Controlled clock/dependency events exercise startup without wall waits.
+                with patch.object(core_entrypoint.subprocess, 'Popen', side_effect=[encoder, core]) as popen, \
+                     patch.object(core_entrypoint.signal, 'signal', side_effect=register), \
+                     patch.object(core_entrypoint.time, 'monotonic', side_effect=[0, 0, 121, 121, 121, 121]), \
+                     patch.object(core_entrypoint.time, 'sleep'), \
+                     patch.object(core_entrypoint, 'read_encoder_health', side_effect=health):
+                    status = core_entrypoint.supervise(commands, readiness=ready)
+                self.assertEqual(popen.call_count, 2 if outcome == 'ready' else 1)
+                self.assertEqual(status, 0 if outcome == 'signal' else 7 if outcome == 'ready' else 1)
+                if outcome != 'exit':
+                    encoder.send_signal.assert_called()
 
     def test_first_exit_stops_the_others_with_its_status(self):
         status = core_entrypoint.supervise([self.command('long', 'import time; time.sleep(60)'),

@@ -20,6 +20,7 @@ var concurrentIndexes = []struct {
 	Predicate   string
 }{
 	{Name: "segments_by_segmentation", Table: "segments", Columns: []string{"organization", "segmentation_id"}},
+	{Name: "records_by_current_version", Table: "records", Columns: []string{"organization", "corpus_id", "current_version_id"}},
 }
 
 // Index setup errors let the CLI report operator actions without logging raw

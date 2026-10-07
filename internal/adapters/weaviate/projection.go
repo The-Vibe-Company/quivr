@@ -291,22 +291,46 @@ func sameProperties(stored, want map[string]any) bool {
 	return true
 }
 
-// insert writes one object. A lost response is not an error here: the caller
-// reconciles it by reading the deterministic identity.
-func (s *Store) insert(ctx context.Context, object map[string]any) error {
+// projectionBatch bounds request size and the number of unverified objects.
+const projectionBatch = 100
+
+// insertBatch checks every object result. A lost HTTP response is reconciled
+// by the caller reading deterministic identities; an explicit request or object
+// error or malformed successful response must never be treated as success.
+func (s *Store) insertBatch(ctx context.Context, objects []map[string]any) error {
 	var result []struct {
+		ID     string `json:"id"`
 		Result struct {
 			Status string `json:"status"`
 			Errors any    `json:"errors"`
 		} `json:"result"`
 	}
-	if _, err := s.call(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": []any{object}}, &result); err != nil {
-		return nil
+	// Request only identities; returning properties/vectors can exceed the
+	// bounded response decoder even for a modest number of large objects.
+	status, err := s.call(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": objects, "fields": []string{"id"}}, &result)
+	if err != nil {
+		if status == 0 {
+			return nil
+		}
+		if status >= 400 {
+			return fmt.Errorf("projection batch request failed (HTTP %d): %w", status, err)
+		}
+		return errors.New("projection publication response invalid")
 	}
-	if len(result) != 1 || result[0].Result.Status != "SUCCESS" || result[0].Result.Errors != nil {
+	if len(result) != len(objects) {
 		return errors.New("projection publication failed")
 	}
+	for i, r := range result {
+		if r.ID != objects[i]["id"] || r.Result.Status != "SUCCESS" || r.Result.Errors != nil {
+			return errors.New("projection publication failed")
+		}
+	}
 	return nil
+}
+
+// insert uses the same checked batch path for a standalone item anchor.
+func (s *Store) insert(ctx context.Context, object map[string]any) error {
+	return s.insertBatch(ctx, []map[string]any{object})
 }
 
 // Publish projects each segment's immutable anchor and, for item-capable
@@ -333,6 +357,27 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 		}
 	}
 	texts, _ := content.ProjectionText(v, seg, g.Fields)
+	objects := make([]map[string]any, 0, projectionBatch)
+	flush := func() error {
+		if len(objects) == 0 {
+			return nil
+		}
+		if err := s.insertBatch(ctx, objects); err != nil {
+			return err
+		}
+		for _, object := range objects {
+			stored, found, err := s.object(ctx, g.Collection, object["id"].(string))
+			if err != nil {
+				return err
+			}
+			if !found || !sameProperties(stored.Properties, object["properties"].(map[string]any)) {
+				return errors.New("projection verification mismatch")
+			}
+		}
+		objects = objects[:0]
+		return nil
+	}
+
 	for i, p := range seg.Segments {
 		id := objectID(org, g.ID, p.ID)
 		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, sourceNamespaceProperty: namespace, "body": texts[i].Body, "title": texts[i].Title}
@@ -376,22 +421,22 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 		if found && sameProperties(existing.Properties, properties) {
 			continue
 		}
-		if err = s.insert(ctx, map[string]any{"class": g.Collection, "id": id, "properties": properties}); err != nil {
-			return err
+		objects = append(objects, map[string]any{"class": g.Collection, "id": id, "properties": properties})
+		if len(objects) == projectionBatch {
+			if err := flush(); err != nil {
+				return err
+			}
 		}
-		stored, found, err := s.object(ctx, g.Collection, id)
-		if err != nil {
-			return err
-		}
-		if !found || !sameProperties(stored.Properties, properties) {
-			return errors.New("projection verification mismatch")
-		}
+	}
+	if err := flush(); err != nil {
+		return err
 	}
 	if g.ItemKeywordsProjected {
 		return s.publishItem(ctx, g, org, corpusID, namespace, v, metadata)
 	}
 	return nil
 }
+
 func quote(v string) string { b, _ := json.Marshal(v); return string(b) }
 func equal(field, value string) string {
 	return "{path:[" + quote(field) + "],operator:Equal,valueText:" + quote(value) + "}"
@@ -646,6 +691,44 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 		}
 		bySegment[e.SegmentID] = append(bySegment[e.SegmentID], p)
 	}
+
+	type attachment struct {
+		id, segment string
+		vectors     []content.EmbeddingData
+	}
+	pending := make([]attachment, 0, projectionBatch)
+	objects := make([]map[string]any, 0, projectionBatch)
+	flush := func() error {
+		if len(objects) > 0 {
+			if err := s.insertBatch(ctx, objects); err != nil {
+				return err
+			}
+		}
+		for _, a := range pending {
+			// Existing objects may disappear while the rest of the batch is built.
+			// Verify the current identity before cleanup or durable coverage.
+			stored, found, err := s.object(ctx, g.Collection, a.id)
+			if err != nil {
+				return err
+			}
+			if !found || stored.Properties["segmentId"] != a.segment {
+				return errors.New("embedding projection verification failed")
+			}
+			for _, p := range a.vectors {
+				recovered, err := content.VectorBytes(stored.Vectors[s.VectorName(g, p.Artifact.SpaceID)])
+				if err != nil || content.Hash(recovered) != p.Artifact.Payload.SHA256 {
+					return errors.New("embedding projection verification failed")
+				}
+			}
+			// Cleanup still runs on retries of objects already verified and written.
+			if err := s.removeStaleEnriched(ctx, g, org, a.segment, a.id); err != nil {
+				return err
+			}
+		}
+		pending = pending[:0]
+		objects = objects[:0]
+		return nil
+	}
 	for _, segment := range order {
 		vectors := bySegment[segment]
 		payload := vectors[0].Artifact.Payload.SHA256
@@ -663,7 +746,7 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 			named[s.VectorName(g, p.Artifact.SpaceID)] = p.Vector
 		}
 		id := enrichedID(org, g.ID, segment, payload)
-		stored, found, err := s.object(ctx, g.Collection, id)
+		_, found, err := s.object(ctx, g.Collection, id)
 		if err != nil {
 			return err
 		}
@@ -691,28 +774,18 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 					lexical[key] = value
 				}
 			}
-			// Create-only: an object already written by a concurrent attachment is
-			// never re-indexed. A rejected or lost create is reconciled by the read below.
-			_, _ = s.call(ctx, "POST", "/v1/objects", map[string]any{"class": g.Collection, "id": id, "properties": lexical, "vectors": named}, nil)
-			if stored, found, err = s.object(ctx, g.Collection, id); err != nil {
+			// Matching identities were omitted above, so a completed retry does
+			// not rewrite the enriched object or its permanent lexical anchor.
+			objects = append(objects, map[string]any{"class": g.Collection, "id": id, "properties": lexical, "vectors": named})
+		}
+		pending = append(pending, attachment{id: id, segment: segment, vectors: vectors})
+		if len(pending) == projectionBatch {
+			if err := flush(); err != nil {
 				return err
 			}
 		}
-		if !found || stored.Properties["segmentId"] != segment {
-			return errors.New("embedding projection verification failed")
-		}
-		for _, p := range vectors {
-			recovered, err := content.VectorBytes(stored.Vectors[s.VectorName(g, p.Artifact.SpaceID)])
-			if err != nil || content.Hash(recovered) != p.Artifact.Payload.SHA256 {
-				return errors.New("embedding projection verification failed")
-			}
-		}
-		// Cleanup runs on every attempt, so a retry after an interrupted attachment converges.
-		if err = s.removeStaleEnriched(ctx, g, org, segment, id); err != nil {
-			return err
-		}
 	}
-	return nil
+	return flush()
 }
 
 // staleListLimit bounds one listing of a segment's objects; a segment holds
