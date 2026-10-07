@@ -7,6 +7,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
+	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/stretchr/testify/mock"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -99,7 +101,7 @@ func TestIngestionDispatchRestartAcknowledgesExistingWorkflow(t *testing.T) {
 				return o.ID == id && o.WorkflowIDReusePolicy == enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE && o.TaskQueue == queue
 			})
 			tc.On("ExecuteWorkflow", propagated, options, name, input).Return(nil, nil).Once()
-			r := Runtime{Client: tc, Store: store}
+			r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
 			r.dispatchBatch(context.Background(), r.ingestionIntents(), 1)
 			if len(store.acknowledged) != 0 || len(store.feedback) != 1 {
 				t.Fatalf("lost acknowledgement: ack=%v feedback=%v", store.acknowledged, store.feedback)
@@ -136,7 +138,7 @@ func TestIngestionDispatchFailureKeepsUnstartedWorkRecoverable(t *testing.T) {
 			if !stop {
 				tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, ingestionBatchWorkflow, testDispatchBatch(second)).Return(nil, nil).Once()
 			}
-			r := Runtime{Client: tc, Store: store}
+			r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
 			r.dispatchBatch(ctx, r.ingestionIntents(), 1)
 			want := 0
 			if !stop {
@@ -173,15 +175,15 @@ func TestBackgroundDispatchKeepsLegacyOperationIdentities(t *testing.T) {
 			d := operations.Dispatch{Organization: "org_a", OperationID: "operation_1", Kind: kind}
 			store := &dispatchStore{operations: []operations.Dispatch{d}, acknowledgementError: errors.New("acknowledgement lost")}
 			tc := &mocks.Client{}
-			wantID, name, queue := "", rebuildWorkflowName, taskQueue
+			wantID, name, queue := "", rebuildWorkflowName, "quivr-bulk-v1"
 			switch kind {
 			case operations.KindProjectionRebuild:
 				wantID = "projection-rebuild-v1_a9ee87bc3d2099318ff511e1fd4eb6e347ee25f5fea95a71b325c37374b457f9"
 			case operations.KindBackfill:
-				name, queue = backfillWorkflowName, backfillTaskQueue
+				name = backfillWorkflowName
 				wantID = "backfill-v1_a9ee87bc3d2099318ff511e1fd4eb6e347ee25f5fea95a71b325c37374b457f9"
 			case operations.KindQuarantineReprocess:
-				name, queue = reprocessWorkflowName, backfillTaskQueue
+				name = reprocessWorkflowName
 				wantID = "quarantine-reprocess-v1_a9ee87bc3d2099318ff511e1fd4eb6e347ee25f5fea95a71b325c37374b457f9"
 			}
 			options := mock.MatchedBy(func(o client.StartWorkflowOptions) bool {
@@ -189,7 +191,7 @@ func TestBackgroundDispatchKeepsLegacyOperationIdentities(t *testing.T) {
 			})
 			in := RebuildInput{Organization: d.Organization, OperationID: d.OperationID}
 			tc.On("ExecuteWorkflow", mock.Anything, options, name, in).Return(nil, nil).Once()
-			r := Runtime{Client: tc, Store: store}
+			r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
 			r.dispatchBatch(context.Background(), r.operationIntents(), 1)
 			if len(store.operationsAcknowledged) != 0 {
 				t.Fatal("lost acknowledgement was recorded")
@@ -243,7 +245,7 @@ func TestBackgroundDispatcherDoesNotBlockReceiptsBehindConnectors(t *testing.T) 
 	}}
 	tc := &mocks.Client{}
 	tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, ingestionBatchWorkflow, testDispatchBatch(receipt)).Return(nil, nil).Run(func(mock.Arguments) { cancel() }).Once()
-	r := Runtime{Client: tc, Store: store, Connectors: &Connectors{Scheduler: s}}
+	r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store, Connectors: &Connectors{Scheduler: s}}
 	done := make(chan struct{})
 	go func() { r.dispatch(ctx); close(done) }()
 	select {
@@ -281,7 +283,7 @@ func TestReceiptDispatchStartsABoundedBurst(t *testing.T) {
 			return ctx.Err()
 		}
 	}}
-	r := Runtime{Client: tc, Store: store}
+	r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
 	done := make(chan struct{})
 	go func() { r.dispatch(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
@@ -351,4 +353,43 @@ func (s *dispatchStore) receiptBatch(d content.Dispatch) content.DispatchBatch {
 		b.ID, b.Legacy = content.StableID("ingestion-e5-v4", d.Organization, d.ReceiptID), true
 	}
 	return b
+}
+
+// The dispatcher owns start routing and workflow identity across upgrades.
+// Previously accepted, unstarted serving jobs must work with a live-only worker;
+// a lost acknowledgement must retain the same workflow ID and payload.
+type servingDispatchStore struct {
+	processing.ServingProjectionStore
+	job          content.IngestionEvaluation
+	acknowledged int
+}
+
+func (s *servingDispatchStore) ClaimServingProjections(context.Context, int) ([]content.IngestionEvaluation, error) {
+	return []content.IngestionEvaluation{s.job}, nil
+}
+func (s *servingDispatchStore) ServingProjectionDispatched(context.Context, content.IngestionEvaluation) error {
+	s.acknowledged++
+	return nil
+}
+func TestServingDispatchRoutesUnstartedLegacyJobsToLiveAndPreservesIdentity(t *testing.T) {
+	for _, class := range []string{"", "live", "bulk"} {
+		t.Run("class_"+class, func(t *testing.T) {
+			store := &servingDispatchStore{job: content.IngestionEvaluation{Organization: "org", ID: "job", WorkQueue: class}}
+			queue := "quivr-live-v1"
+			if class == "bulk" {
+				queue = "quivr-bulk-v1"
+			}
+			c := &mocks.Client{}
+			options := mock.MatchedBy(func(o client.StartWorkflowOptions) bool {
+				return o.ID == content.StableID("serving-projection-workflow", "org", "job") && o.TaskQueue == queue && o.WorkflowIDReusePolicy == enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE
+			})
+			c.On("ExecuteWorkflow", mock.Anything, options, "publish-serving-projection-v0", Input{Organization: "org", ReceiptID: "job"}).Return(nil, &serviceerror.WorkflowExecutionAlreadyStarted{}).Once()
+			runtime := Runtime{Client: c, Evaluation: &processing.Evaluator{Serving: store}}
+			runtime.dispatchBatch(context.Background(), runtime.servingProjectionIntents(), 1)
+			if store.acknowledged != 1 {
+				t.Fatalf("existing serving workflow acknowledgement=%d, want1", store.acknowledged)
+			}
+			c.AssertExpectations(t)
+		})
+	}
 }

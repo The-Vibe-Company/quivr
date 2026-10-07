@@ -19,6 +19,10 @@ func WithConnectors(service connectors.Service) Option {
 
 func (a *API) connectorToTransport(in connectors.Instance) transport.Connector {
 	out := transport.Connector{ConnectorId: in.ID, CorpusId: in.CorpusID, SourceNamespace: in.Namespace, Kind: transport.ConnectorKind(in.Kind), Enabled: in.Enabled, CreatedAt: in.CreatedAt.UTC(), Config: map[string]any{}}
+	if in.WorkQueue != "" {
+		q := transport.ConnectorWorkQueue(in.WorkQueue)
+		out.WorkQueue = &q
+	}
 	_ = json.Unmarshal(in.Config, &out.Config)
 	if in.PushPolicy != nil {
 		out.PushPolicy = &transport.ConnectorPushPolicy{}
@@ -150,6 +154,9 @@ func (a *API) handleCreateConnector(w http.ResponseWriter, r *http.Request, scop
 			return connectors.CreateInput{}, errResponseWritten
 		}
 		in := connectors.CreateInput{Key: body.IdempotencyKey, CorpusID: body.CorpusId, Namespace: body.SourceNamespace, Kind: string(body.Kind), Config: rawJSON(&body.Config)}
+		if body.WorkQueue != nil {
+			in.WorkQueue = string(*body.WorkQueue)
+		}
 		if body.PushPolicy != nil {
 			in.PushPolicy = &connectors.PushPolicy{}
 			if body.PushPolicy.RatePerSecond != nil {

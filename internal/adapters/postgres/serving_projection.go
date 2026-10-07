@@ -9,6 +9,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -70,7 +71,7 @@ func queueServingProjection(ctx context.Context, tx pgx.Tx, org, versionID strin
 	if len(supersededID) > 0 && job.ID == supersededID[0] {
 		return ErrGenerationChanged
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO serving_projections(organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, org, job.ID, job.RecordID, versionID, job.GenerationID, job.PluginID, job.RegistrationID, job.PlanID, spaces)
+	tag, err := tx.Exec(ctx, `INSERT INTO serving_projections(organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,work_queue) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE(NULLIF($10,''),(SELECT work_queue FROM ingestion_receipts WHERE organization=$1 AND version_id=$4 ORDER BY accepted_at LIMIT 1),'live')) ON CONFLICT DO NOTHING`, org, job.ID, job.RecordID, versionID, job.GenerationID, job.PluginID, job.RegistrationID, job.PlanID, spaces, selectedQueue(ctx))
 	if err != nil {
 		return err
 	}
@@ -109,7 +110,8 @@ func queuePendingServingProjections(ctx context.Context, tx pgx.Tx, previous reg
 }
 
 func (s ServingProjectionStore) ClaimServingProjections(ctx context.Context, limit int) ([]content.IngestionEvaluation, error) {
-	rows, err := s.Pool.Query(ctx, `UPDATE serving_projections SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM serving_projections WHERE NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state`, limit)
+	q, _ := workqueue.Selected(ctx)
+	rows, err := s.Pool.Query(ctx, `UPDATE serving_projections SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM serving_projections WHERE ($2='' OR work_queue=$2 OR (work_queue='' AND $2='live')) AND NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue`, limit, q)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +119,7 @@ func (s ServingProjectionStore) ClaimServingProjections(ctx context.Context, lim
 }
 
 func (s ServingProjectionStore) ServingProjection(ctx context.Context, org, id string) (content.IngestionEvaluation, error) {
-	j, err := scanIngestionEvaluation(s.Pool.QueryRow(ctx, `SELECT organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state FROM serving_projections WHERE organization=$1 AND id=$2`, org, id))
+	j, err := scanIngestionEvaluation(s.Pool.QueryRow(ctx, `SELECT organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue FROM serving_projections WHERE organization=$1 AND id=$2`, org, id))
 	return j, notFound(err)
 }
 

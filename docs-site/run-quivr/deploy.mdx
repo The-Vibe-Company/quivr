@@ -159,7 +159,7 @@ Each `api` and `worker` serves three probes on its `probe_listen` address, `127.
 | --- | --- |
 | `GET /healthz` | `204` once the process has started |
 | `GET /readyz` | `204` once the process can serve, `503` otherwise |
-| `GET /metrics` | Counters in Prometheus text format |
+| `GET /metrics` | Counters and gauges in Prometheus text format |
 
 `GET /v0/version` accepts any valid bearer API key and reports the running release, commit, API version and plugin engine compatibility version. Both process startup logs include these fields; `/metrics` includes `quivr_build_info{version="…",revision="…"} 1`. The distribution release is independent of the API (`v0`) and plugin engine compatibility (`0.2.0`) versions.
 
@@ -176,6 +176,74 @@ Stop a process with SIGTERM or SIGINT. Its `/readyz` becomes `503` first, then i
 Set `telemetry.endpoint` to your OpenTelemetry collector in the API and worker configuration, then restart both. The [OpenTelemetry reference](/reference/configuration#opentelemetry) lists HTTP/gRPC, authentication headers and sampling settings. Search your collector by the response’s `X-Trace-ID`, or the `trace_id` in a JSON error or log line. The trace continues through durable background work and outgoing plugin and webhook requests.
 
 Keep `/metrics` scraping as it is: metric names and buckets remain unchanged. Each plugin process needs its own exporter configuration to send its internal spans to the collector.
+
+## Scale workers on backlog
+
+Run separate `quivr worker` processes with `worker.queues: ["live"]` and `["bulk"]`; choose each process's slots using [Worker queues](/reference/configuration#worker-queues). Replicas keep no durable local work: PostgreSQL and Temporal own claims, progress and retries. Use the same database, Temporal namespace, storage, signing keys and active plugin plan. Give processes distinct probe addresses on a shared host, or separate network namespaces. Plugin endpoints may point to shared services or sidecars in each process's network namespace; each sidecar needs its own lifecycle and writable temporary directory. A shared embedding provider still needs enough capacity for both classes.
+
+During an upgrade, keep at least one worker serving both classes until queued legacy receipts and every unfinished history on `quivr-content-v0` have drained. Inspect that queue's running workflows in Temporal and confirm no pending `legacy_workflow` rows remain in `ingestion_outbox` or `ingestion_batches` before removing the mixed worker. Queue-specific workers do not drain that old mixed queue.
+
+`GET /v0/admin/queues` accepts a bearer API key granted `queues:read` with all-corpus scope (`corpora: ["*"]`); configure it under [API keys](/reference/configuration#api-keys). Its numeric paths stay stable, including `queues.bulk.waiting` and `queues.live.waiting`. For example, not run:
+
+```json
+{"queues":{"live":{"waiting":0,"in_progress":1,"oldest_waiting_age_seconds":0},"bulk":{"waiting":123,"in_progress":2,"oldest_waiting_age_seconds":45}}}
+```
+
+For Kubernetes with KEDA installed, create a Deployment named `quivr-bulk` running `quivr worker` with `worker.queues: ["bulk"]`. Mount its configuration and supply plugin secrets as for any worker. Put the operator API key in the `token` entry of a Secret named `quivr-queue-reader`. Give KEDA HTTPS access to the API service. This example scales between one and ten workers, targeting fifty waiting documents per replica. Choose the target from measured document throughput and your provider's capacity.
+
+For example, not run; substitute your API service URL:
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: quivr-queue-reader
+spec:
+  secretTargetRef:
+    - parameter: token
+      name: quivr-queue-reader
+      key: token
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: quivr-bulk
+spec:
+  scaleTargetRef:
+    name: quivr-bulk
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    - type: metrics-api
+      metadata:
+        url: https://quivr-api.example.org/v0/admin/queues
+        format: json
+        valueLocation: queues.bulk.waiting
+        targetValue: "50"
+        authMode: bearer
+      authenticationRef:
+        name: quivr-queue-reader
+```
+
+KEDA's [metrics-api scaler](https://keda.sh/docs/2.20/scalers/metrics-api/) reads that numeric path and sends the Secret as `Authorization: Bearer …`. Counts are installation-wide, so a request to any healthy API replica is sufficient. Keep at least one bulk worker while scaling on waiting documents so admitted work continues when waiting reaches zero. Set the Deployment's termination grace period longer than Quivr's `shutdown_grace`.
+
+Alternatively, scrape Quivr's private probe endpoint `/metrics` and replace the trigger with KEDA's [Prometheus scaler](https://keda.sh/docs/2.20/scalers/prometheus/). The example `job` selector must identify only this Quivr installation. `max` avoids adding the same database count once per scraped replica. Configure Prometheus authentication separately when required.
+
+For example, not run:
+
+```yaml
+triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus.monitoring.svc:9090
+      query: max(quivr_queue_waiting_documents{queue="bulk",job="quivr"})
+      threshold: "50"
+      ignoreNullValues: "false"
+```
+
+The same gauges expose `in_progress` and `oldest_waiting_age_seconds` for dashboards and saturation alerts. A shared PostgreSQL snapshot keeps scrapes independent of operation size. Processes refresh it in the background at most once per second, with a 30-second refresh budget; counts describe the last completed observation. The queue API returns 503 for a missing snapshot or one older than a minute. Metrics instead omit unavailable queue series and continue serving other families. Set `ignoreNullValues: "false"` so the Prometheus scaler treats an empty result as an error instead of zero backlog. The API and metrics need no Railway-specific service and can drive any orchestrator that replicates stateless worker processes.
 
 ## Example deployments
 

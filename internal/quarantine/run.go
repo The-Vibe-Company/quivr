@@ -3,6 +3,7 @@ package quarantine
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -221,6 +222,10 @@ func (r Reprocessor) Step(ctx context.Context, org, id string) (Progress, error)
 
 // item carries one started Version from its phase to its outcome.
 func (r Reprocessor) item(ctx context.Context, org, id string, it Item) error {
+	return workqueue.Track(ctx, org, "operation", id, it.VersionID, func(ctx context.Context) error { return r.processItem(ctx, org, id, it) })
+}
+
+func (r Reprocessor) processItem(ctx context.Context, org, id string, it Item) error {
 	if it.Phase == PhaseRenormalizing {
 		if err := r.Normalizer.Renormalize(ctx, org, it.ReceiptID); err != nil {
 			return err
