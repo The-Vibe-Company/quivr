@@ -1,6 +1,7 @@
 package connectors
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -104,6 +105,33 @@ type RunStore interface {
 	// FinishRun ends the run, schedules the next one and commits re-evaluated
 	// Connector Health (with its event) in one transaction.
 	FinishRun(ctx context.Context, org, id string, run int64, failure *RunError) error
+}
+
+// RunContinuationStore optionally makes the next bounded acquisition run due
+// immediately. It must retain FinishRun's lease, sequence and lifecycle fences.
+// Stores without it keep the configured interval.
+type RunContinuationStore interface {
+	ContinueRun(ctx context.Context, org, id string, run int64) error
+}
+
+// JSON checkpoints can come back from persistence with different whitespace
+// and key order. Preserve integer precision when comparing opaque cursors.
+func checkpointChanged(previous, next json.RawMessage) bool {
+	canonical := func(raw json.RawMessage) ([]byte, error) {
+		if len(raw) == 0 {
+			return []byte("null"), nil
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	}
+	before, errBefore := canonical(previous)
+	after, errAfter := canonical(next)
+	return errBefore == nil && errAfter == nil && !bytes.Equal(before, after)
 }
 
 // PollingStore coordinates source attempts with reversible corpus visibility.
@@ -241,6 +269,8 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	var stored int64
 	var rejected string
 	var notice string
+	continuationStore, canContinue := a.Store.(RunContinuationStore)
+	continueNext := false
 	reads := target.ReadsToday
 	var activeTiming *pageTimings
 	var activePage int
@@ -333,6 +363,12 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			reason = "page_limit"
 		}
 		timing := activeTiming.diagnostic(now, started, page.More, reason, target.Interval)
+		continuation := func() bool {
+			return canContinue && (reason == "page_limit" || reason == "soft_limit" || reason == "attachment_budget") &&
+				page.More && len(page.Items) > 0 && checkpointChanged(target.Checkpoint, page.Checkpoint) &&
+				notice == "" && page.Notice == "" && rejected == ""
+		}
+		timing["continuation"] = continuation()
 		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, Progress{Checkpoint: page.Checkpoint, Items: fresh, Reads: page.Reads, Diagnostics: acquisitionDiagnostics(page.Diagnostics, timing), Push: page.Push, Missed: missed})
 		if err != nil {
 			return err
@@ -347,6 +383,8 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			reason = "soft_limit"
 		}
 		timing = activeTiming.diagnostic(now, started, page.More, reason, target.Interval)
+		continueNext = continuation()
+		timing["continuation"] = continueNext
 		logPageTiming(id, run, i, "committed", timing)
 		activeTiming = nil
 		checkpoint = page.Checkpoint
@@ -365,6 +403,9 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	if rejected != "" {
 		slog.Warn("connector item rejected", "connector_id", id, "code", rejected)
 		return a.Store.FinishRun(ctx, org, id, run, &RunError{Class: ClassSource, Code: rejected, At: a.now(), Completed: true})
+	}
+	if continueNext {
+		return continuationStore.ContinueRun(ctx, org, id, run)
 	}
 	return a.Store.FinishRun(ctx, org, id, run, nil)
 }

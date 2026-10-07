@@ -269,10 +269,15 @@ func stubAcquirer(t *testing.T, stub *stubConnector, readsToday int64) (Acquirer
 }
 
 func TestARateLimitedSourceDefersTheNextRunUntilItsReset(t *testing.T) {
-	stub := &stubConnector{err: &Error{Class: ClassTransient, Code: "rate_limited", RetryAfter: 7 * time.Minute}}
+	stub := &stubConnector{pages: []Page{{Items: []Item{{RecordKey: "first", Content: content.Text{Kind: "text", Text: "body"}}}, Checkpoint: json.RawMessage(`{"next":1}`), More: true}}, err: &Error{Class: ClassTransient, Code: "rate_limited", RetryAfter: 7 * time.Minute}}
 	a, runs := stubAcquirer(t, stub, 0)
+	observed := &continuingRuns{fakeRuns: runs}
+	a.Store = observed
 	if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
 		t.Fatal(err)
+	}
+	if observed.continued != 0 || len(runs.checkpoints) != 1 || len(runs.finished) != 1 {
+		t.Fatalf("rate-limited run after progress continued or lost checkpoint: continued=%d checkpoints=%v finished=%v", observed.continued, runs.checkpoints, runs.finished)
 	}
 	if f := runs.finished[0]; f == nil || f.Code != "rate_limited" || f.Class != ClassTransient || f.RetryAfter != 7*time.Minute {
 		t.Fatalf("finish %+v", f)
@@ -510,6 +515,7 @@ type observedRuns struct {
 	*fakeRuns
 	ingest    *heldIngest
 	premature bool
+	continued int
 }
 
 func (f *observedRuns) CommitCheckpoint(ctx context.Context, org, id string, run int64, progress Progress) (bool, error) {
@@ -520,6 +526,12 @@ func (f *observedRuns) CommitCheckpoint(ctx context.Context, org, id string, run
 func (f *observedRuns) FinishRun(ctx context.Context, org, id string, run int64, failure *RunError) error {
 	f.premature = f.premature || f.ingest.active.Load() != 0
 	return f.fakeRuns.FinishRun(ctx, org, id, run, failure)
+}
+
+func (f *observedRuns) ContinueRun(context.Context, string, string, int64) error {
+	f.premature = f.premature || f.ingest.active.Load() != 0 || len(f.checkpoints) == 0
+	f.continued++
+	return nil
 }
 
 func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
@@ -547,13 +559,13 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 			if tc.duplicate {
 				items[1].RecordKey = items[0].RecordKey
 			}
-			page := Page{Items: items, Checkpoint: json.RawMessage(`{"member":36}`), SubmissionConcurrency: tc.hint}
+			page := Page{Items: items, Checkpoint: json.RawMessage(`{"member":36}`), More: true, SubmissionConcurrency: tc.hint}
 			stub := &stubConnector{pages: []Page{page}}
 			a, runs := stubAcquirer(t, stub, 0)
 			ingest := &heldIngest{calls: make(chan heldSubmission, len(items)), failKey: items[0].RecordKey, failure: tc.failure}
 			a.Ingest = ingest
 			observed := &observedRuns{fakeRuns: runs, ingest: ingest}
-			a.Store = observed
+			a.Store, a.MaxPages = observed, 1
 			done := make(chan error, 1)
 			go func() { done <- a.Run(ctx, "org_a", "connector_1", 1) }()
 			first := make([]heldSubmission, tc.simultaneous)
@@ -621,7 +633,7 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						if len(runs.checkpoints) != 1 || replayed != len(items) {
+						if len(runs.checkpoints) != 1 || replayed != len(items) || observed.continued != 1 || observed.premature {
 							t.Fatalf("replayed %d/%d items; checkpoints %v", replayed, len(items), runs.checkpoints)
 						}
 						return
@@ -632,6 +644,12 @@ func TestPageSubmissionConcurrencyAndFailureResume(t *testing.T) {
 			}
 			if count != len(items) || len(runs.checkpoints) != 1 || !runs.items[0] {
 				t.Fatalf("submitted=%d checkpoints=%v activity=%v", count, runs.checkpoints, runs.items)
+			}
+			if tc.failure == nil && (observed.continued != 1 || len(runs.finished) != 0) {
+				t.Fatalf("successful bounded page did not continue after acceptance/checkpoint: continued=%d finished=%v", observed.continued, runs.finished)
+			}
+			if tc.failure != nil && observed.continued != 0 {
+				t.Fatal("permanent rejection continued immediately")
 			}
 			if tc.failure != nil && (runs.finished[0] == nil || runs.finished[0].Code != "item_rejected") {
 				t.Fatalf("permanent item failure did not report rejection: %v", runs.finished)
