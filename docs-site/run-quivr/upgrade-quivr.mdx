@@ -64,7 +64,7 @@ WHERE indexrelid IN (to_regclass('segments_by_segmentation'),
                      to_regclass('records_by_current_version'));
 ```
 
-In a separate database session outside a transaction, drop each invalid index only if it matches its definition below, using `DROP INDEX CONCURRENTLY segments_by_segmentation` or `DROP INDEX CONCURRENTLY records_by_current_version`. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours for the builds:
+In a separate database session outside a transaction, drop each invalid index only if it matches its definition below, using `DROP INDEX CONCURRENTLY segments_by_segmentation` or `DROP INDEX CONCURRENTLY records_by_current_version`. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours per build; the builds run sequentially:
 
 ```sql
 SET lock_timeout = '0';
