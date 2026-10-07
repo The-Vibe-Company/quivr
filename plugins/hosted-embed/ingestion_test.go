@@ -72,6 +72,86 @@ func TestProviderModesAndUsage(t *testing.T) {
 
 // Owns local query routing through the plugin HTTP boundary. The remote mapping
 // keeper above owns provider formats; these dependencies only supply HTTP vectors.
+// Tokenizer cancellation barriers exercise admission without wall-clock waits.
+type queryCostCounter struct{ calls *atomic.Int32 }
+
+func (c *queryCostCounter) Encode(_ context.Context, inputs []tokenInput) ([]tokenEncoding, error) {
+	c.calls.Add(1)
+	return []tokenEncoding{{Tokens: len(inputs[0].Text) + specialTokens}}, nil
+}
+
+type queryBudgetCounter struct {
+	t       *testing.T
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (c *queryBudgetCounter) Encode(ctx context.Context, _ []tokenInput) ([]tokenEncoding, error) {
+	c.calls.Add(1)
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) > time.Second {
+		c.t.Error("local tokenization lacks the one-second query budget")
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return nil, ctx.Err()
+	}
+	c.started <- struct{}{}
+	<-c.release
+	return nil, ctx.Err()
+}
+func TestLocalQueryTokenizationSharesDeadlineAndAdmission(t *testing.T) {
+	c := testConfig("openai", "http://127.0.0.1:9")
+	i := newIngester(c, "", slog.New(slog.DiscardHandler))
+	counter := &queryBudgetCounter{t: t, started: make(chan struct{}, 5), release: make(chan struct{})}
+	var released sync.Once
+	release := func() { released.Do(func() { close(counter.release) }) }
+	defer release()
+	i.provider.counter = counter
+	local := c
+	local.RequestTimeoutMS, local.MaxRetries, local.Auth = 1000, 0, "none"
+	i.queries = &provider{config: local, counter: counter, log: i.provider.log, local: true, gate: &providerGate{slots: make(chan struct{}, 4)}}
+	completed := make(chan error, 4)
+	cancels := []context.CancelFunc{}
+	defer func() {
+		for _, cancel := range cancels {
+			cancel()
+		}
+	}()
+	for range 4 {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancels = append(cancels, cancel)
+		go func() { _, err := i.EmbedQuery(ctx, queryRequest(c, "A library opens.")); completed <- err }()
+		select {
+		case <-counter.started:
+		case <-t.Context().Done():
+			t.Fatal("tokenizer did not begin")
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := i.EmbedQuery(ctx, queryRequest(c, "A library opens.")); err == nil {
+		t.Fatal("cancelled waiting query accepted")
+	}
+	if counter.calls.Load() != 4 {
+		t.Fatalf("tokenization exceeded four admitted queries: %d", counter.calls.Load())
+	}
+	for _, cancel := range cancels {
+		cancel()
+	}
+	release()
+	for range 4 {
+		select {
+		case err := <-completed:
+			if err == nil {
+				t.Fatal("cancelled tokenization succeeded")
+			}
+		case <-t.Context().Done():
+			t.Fatal("cancelled query did not finish")
+		}
+	}
+}
+
 func TestLocalQueryRouting(t *testing.T) {
 	const revision = "914f7f89142e33e7"
 	for _, enabled := range []bool{false, true} {
@@ -135,14 +215,24 @@ func TestLocalQueryRouting(t *testing.T) {
 				t.Helper()
 				body, _ := json.Marshal(request)
 				response := httptest.NewRecorder()
-				handler.ServeHTTP(response, httptest.NewRequest("POST", "/v0/contributions/ingestion/"+method, bytes.NewReader(body)))
+				httpRequest := httptest.NewRequest("POST", "/v0/contributions/ingestion/"+method, bytes.NewReader(body))
+				signTestRequest(t, c.PluginID, httpRequest, body)
+				handler.ServeHTTP(response, httpRequest)
 				return response
 			}
 			if got := invoke("segment_and_embed", ingestRequest(c, "A library opens downtown.", true)); got.Code != 200 {
 				t.Fatalf("document: %d %s", got.Code, got.Body.String())
 			}
+			var counts atomic.Int32
+			if enabled {
+				counter := &queryCostCounter{calls: &counts}
+				i.provider.counter, i.queries.counter = counter, counter
+			}
 			if got := invoke("embed_query", queryRequest(c, "A library opens downtown.")); got.Code != 200 {
 				t.Fatalf("query: %d %s", got.Code, got.Body.String())
+			}
+			if enabled && counts.Load() != 1 {
+				t.Fatalf("query tokenization repeated: %d", counts.Load())
 			}
 			wantRemote, wantLocal := 2, int32(0)
 			if enabled {
@@ -173,6 +263,9 @@ func TestLocalQueryRefusesIdentityAndEndpointDrift(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			metadata := map[string]any{"status": "ok", "model": "test-model", "model_revision": "914f7f89142e33e7", "source_revision": "914f7f89142e33e77833254d9c9b90c3cef7303b", "dimensions": 8}
 			metadata[field] = "other"
+			if field == "dimensions" {
+				metadata[field] = 9
+			}
 			if field == "source_revision" {
 				metadata[field] = "014f7f89142e33e77833254d9c9b90c3cef7303b"
 			}
@@ -186,9 +279,17 @@ func TestLocalQueryRefusesIdentityAndEndpointDrift(t *testing.T) {
 		})
 	}
 	c := testConfig("openai", "http://127.0.0.1:9")
-	for _, url := range []string{"https://127.0.0.1/v1", "http://example.org/v1", "http://localhost/v1", "http://key@127.0.0.1/v1", "http://127.0.0.1/v1?token=value", "http://127.0.0.1/v1#fragment", "http://127.0.0.1/other"} {
-		if err := newIngester(c, "", slog.New(slog.DiscardHandler)).localQueries(t.Context(), url); err == nil {
-			t.Fatalf("accepted invalid local endpoint")
+	for _, url := range []string{"https://127.0.0.1/v1", "http://example.org/v1", "http://localhost/v1", "http://key@127.0.0.1/v1", "http://127.0.0.1/v1?token=value", "http://127.0.0.1/v1#fragment", "http://127.0.0.1/other", "http://127.0.0.1/v1%2f", "http://127.0.0.1/v%31"} {
+		if err := newIngester(c, "", slog.New(slog.DiscardHandler)).localQueries(t.Context(), url); err == nil || !strings.Contains(err.Error(), "QUIVR_HOSTED_QUERY_URL") {
+			t.Fatalf("invalid local endpoint: %v", err)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("invalid revision reached readiness") }))
+	defer server.Close()
+	for _, revision := range []string{"1", "release-2026-0016", "914f7f89142e33eX"} {
+		c.Revision = revision
+		if err := newIngester(c, "", slog.New(slog.DiscardHandler)).localQueries(t.Context(), server.URL+"/v1"); err == nil || !strings.Contains(err.Error(), "model_revision") {
+			t.Fatalf("invalid local revision: %v", err)
 		}
 	}
 	c.Format = "cohere"

@@ -7,13 +7,15 @@ import json
 import os
 import pathlib
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / 'third_party' / 'query-encoder' / 'model-lock.json'
-DOWNLOAD_TIMEOUT_SECONDS = 120
+DOWNLOAD_TIMEOUT_SECONDS = 120  # Socket idle timeout.
+DOWNLOAD_TOTAL_SECONDS = 600
 CHUNK_SIZE = 1024 * 1024
 
 
@@ -105,12 +107,20 @@ def _download_asset(directory, name, expected, lock):
            + '/resolve/' + urllib.parse.quote(lock['source_revision'], safe='') + '/'
            + urllib.parse.quote(name, safe='/') + '?download=true')
     try:
+        deadline = time.monotonic() + DOWNLOAD_TOTAL_SECONDS
         with os.fdopen(fd, 'wb') as output:
             with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
-                while chunk := response.read(CHUNK_SIZE):
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError('model asset transfer deadline exceeded')
+                    chunk = response.read1(min(CHUNK_SIZE, expected['size'] + 1 - size))
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > expected['size']:
+                        raise RuntimeError('size mismatch for pinned model asset: ' + name)
                     output.write(chunk)
                     digest.update(chunk)
-                    size += len(chunk)
             output.flush()
             os.fsync(output.fileno())
             if size != expected['size']:

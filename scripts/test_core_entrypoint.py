@@ -62,6 +62,10 @@ class CoreEntrypointTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'QUIVR_LOCAL_QUERY_ENCODER'):
                 core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
                                                   'QUIVR_DEMO_EMBEDDING': selection}, 'api')
+        for role in ('worker', 'migrate'):
+            commands = core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',
+                                                       'QUIVR_QUERY_ENCODER_THREADS': 'many'}, role)
+            self.assertNotIn('text-encoder', [item[0] for item in commands])
         for threads in ('0', '33', 'many'):
             with self.assertRaisesRegex(ValueError, 'QUIVR_QUERY_ENCODER_THREADS'):
                 core_entrypoint.sidecar_commands({**env, 'QUIVR_LOCAL_QUERY_ENCODER': '1',

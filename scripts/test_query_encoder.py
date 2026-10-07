@@ -2,8 +2,10 @@
 import http.client
 import json
 import queue
+import socket
 import threading
 import unittest
+from unittest.mock import patch
 
 from deploy.cpu import text_encoder
 
@@ -31,7 +33,7 @@ class FakeModel:
         self.calls.append((list(texts), kwargs))
         self.started.set()
         if self.block:
-            self.release.wait(2)
+            self.release.wait()
         return Array([VECTOR[:] for _ in texts])
 
 
@@ -48,8 +50,9 @@ class QueryEncoderHTTPTest(unittest.TestCase):
         self.thread.join(2)
 
     def request(self, body=None, *, method='POST', path='/v1/embeddings', headers=None,
-                raw=None):
-        connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=2)
+                raw=None, timeout=2):
+        connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port,
+                                                timeout=timeout)
         if raw is None:
             raw = json.dumps(body).encode()
         connection.request(method, path, body=raw, headers={
@@ -77,6 +80,45 @@ class QueryEncoderHTTPTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(len(response['data']), 2)
         self.assertEqual(self.model.calls[0][0], texts)
+
+    def test_slow_headers_have_total_deadline_and_completed_headers_cancel_watchdog(self):
+        timers = queue.Queue()
+
+        class ControlledTimer:
+            def __init__(self, _seconds, callback):
+                self.callback = callback
+                self.cancelled = threading.Event()
+
+            def start(self):
+                timers.put(self)
+
+            def cancel(self):
+                self.cancelled.set()
+
+            def fire(self):
+                self.callback()
+
+        client = None
+        completed = None
+        with patch.object(text_encoder.threading, 'Timer', ControlledTimer):
+            try:
+                client = socket.create_connection(('127.0.0.1', self.server.server_port), timeout=1)
+                client.sendall(b'GET /health HTTP/1.1\r\nHost: localhost\r\n')
+                timers.get(timeout=1).fire()
+                self.assertEqual(client.recv(1), b'')
+
+                completed = socket.create_connection(
+                    ('127.0.0.1', self.server.server_port), timeout=1)
+                completed.sendall(b'GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n')
+                timer = timers.get(timeout=1)
+                response = completed.recv(4096)
+                self.assertIn(b' 200 ', response)
+                self.assertTrue(timer.cancelled.wait(1))
+            finally:
+                if client is not None:
+                    client.close()
+                if completed is not None:
+                    completed.close()
 
     def test_malformed_request_and_output_are_sanitized(self):
         valid = {'model': 'google/embeddinggemma-2', 'input': 'question'}
@@ -119,17 +161,18 @@ class QueryEncoderHTTPTest(unittest.TestCase):
 
         first = threading.Thread(target=first_request)
         first.start()
-        self.assertTrue(self.model.started.wait(1))
+        try:
+            self.assertTrue(self.model.started.wait(1))
 
-        status, response = self.request(
-            {'model': 'google/embeddinggemma-2', 'input': 'queued'},
-            headers={'X-Quivr-Timeout-Ms': '1'})
-        self.assertEqual(status, 504)
-        self.assertEqual(response['error']['code'], 'deadline_exceeded')
-        self.assertEqual(len(self.model.calls), 1)
-
-        self.model.release.set()
-        first.join(2)
+            status, response = self.request(
+                {'model': 'google/embeddinggemma-2', 'input': 'queued'},
+                headers={'X-Quivr-Timeout-Ms': '1'})
+            self.assertEqual(status, 504)
+            self.assertEqual(response['error']['code'], 'deadline_exceeded')
+            self.assertEqual(len(self.model.calls), 1)
+        finally:
+            self.model.release.set()
+            first.join(2)
         self.assertEqual(first_result[0][0], 200)
 
     def test_fifth_waiter_is_admitted_and_sixth_request_is_overloaded(self):
@@ -168,7 +211,9 @@ class QueryEncoderHTTPTest(unittest.TestCase):
         waiters = []
 
         def request():
-            results.append(self.request({'model': 'google/embeddinggemma-2', 'input': 'queued'}))
+            results.append(self.request(
+                {'model': 'google/embeddinggemma-2', 'input': 'queued'}, timeout=12,
+                headers={'X-Quivr-Timeout-Ms': '10000'}))
 
         try:
             first = threading.Thread(target=request)
@@ -188,9 +233,9 @@ class QueryEncoderHTTPTest(unittest.TestCase):
         finally:
             model.release.set()
             if first is not None:
-                first.join(2)
+                first.join(12)
             for waiter in waiters:
-                waiter.join(2)
+                waiter.join(12)
         self.assertEqual(len(results), 5)
         self.assertTrue(all(status == 200 for status, _ in results))
 

@@ -38,6 +38,7 @@ MAX_RUNNING = 1
 MAX_WAITING = 4
 MAX_HANDLERS = 8
 WARMUP_TEXT = 'task: search result | query: readiness'
+HEADER_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000
 
 
 class RequestFailure(Exception):
@@ -140,6 +141,35 @@ def _reject_json_constant(value):
     raise ValueError('non-finite JSON number')
 
 
+class HeaderWatchdog:
+    """Close an accepted socket if its complete HTTP headers take too long."""
+
+    def __init__(self, connection, seconds):
+        self.connection = connection
+        self._lock = threading.Lock()
+        self._cancelled = False
+        self.timer = threading.Timer(seconds, self._expire)
+        self.timer.daemon = True
+
+    def start(self):
+        self.timer.start()
+
+    def cancel(self):
+        with self._lock:
+            self._cancelled = True
+        self.timer.cancel()
+
+    def _expire(self):
+        with self._lock:
+            if self._cancelled:
+                return
+            self._cancelled = True
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
 class EncoderHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     server_version = 'QuivrQueryEncoder'
@@ -152,9 +182,37 @@ class EncoderHandler(http.server.BaseHTTPRequestHandler):
     def log_error(self, *_args):
         return
 
-    def send_error(self, *_args, **_kwargs):
+    def setup(self):
+        self._header_watchdog = self.server._take_header_watchdog(self.request)
+        try:
+            super().setup()
+        except BaseException:
+            self._cancel_header_watchdog()
+            raise
+
+    def finish(self):
+        self._cancel_header_watchdog()
+        super().finish()
+
+    def _cancel_header_watchdog(self):
+        watchdog = getattr(self, '_header_watchdog', None)
+        if watchdog is not None:
+            self._header_watchdog = None
+            watchdog.cancel()
+
+    def parse_request(self):
+        try:
+            return super().parse_request()
+        finally:
+            # The body and inference use their own propagated deadline after
+            # this point; a completed header parse must stop the watchdog.
+            self._cancel_header_watchdog()
+
+    def send_error(self, code, *_args, **_kwargs):
         # BaseHTTPRequestHandler's default error page can echo request details.
-        self._error(400, 'invalid_request')
+        self._cancel_header_watchdog()
+        status = code if 400 <= code <= 599 else 400
+        self._error(status, 'invalid_request')
 
     def _reply(self, status, body, *, deadline=None):
         raw = json.dumps(body, allow_nan=False, separators=(',', ':')).encode('utf-8')
@@ -319,11 +377,26 @@ class BoundedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         if type(max_handlers) is not int or max_handlers < 1:
             raise ValueError('max_handlers must be positive')
         self._handler_slots = threading.BoundedSemaphore(max_handlers)
+        self._header_watchdogs = {}
+        self._header_watchdogs_lock = threading.Lock()
         self.model = model
         self.metadata = metadata
         self.admission = threading.BoundedSemaphore(MAX_RUNNING + MAX_WAITING)
         self.running = threading.Semaphore(MAX_RUNNING)
         super().__init__(server_address, handler_cls)
+
+    def _register_header_watchdog(self, request, watchdog):
+        with self._header_watchdogs_lock:
+            self._header_watchdogs[id(request)] = watchdog
+
+    def _take_header_watchdog(self, request):
+        with self._header_watchdogs_lock:
+            return self._header_watchdogs.pop(id(request), None)
+
+    def _cancel_registered_header_watchdog(self, request):
+        watchdog = self._take_header_watchdog(request)
+        if watchdog is not None:
+            watchdog.cancel()
 
     def process_request(self, request, client_address):
         if not self._handler_slots.acquire(blocking=False):
@@ -333,6 +406,9 @@ class BoundedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         try:
             # A client that drips headers must not occupy a handler forever.
             request.settimeout(MAX_TIMEOUT_MS / 1000)
+            watchdog = HeaderWatchdog(request, HEADER_TIMEOUT_SECONDS)
+            self._register_header_watchdog(request, watchdog)
+            watchdog.start()
             thread = threading.Thread(
                 target=self.process_request_thread,
                 args=(request, client_address),
@@ -340,6 +416,7 @@ class BoundedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
             )
             thread.start()
         except BaseException:
+            self._cancel_registered_header_watchdog(request)
             self._handler_slots.release()
             self.shutdown_request(request)
             raise
@@ -348,6 +425,7 @@ class BoundedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         try:
             socketserver.ThreadingMixIn.process_request_thread(self, request, client_address)
         finally:
+            self._cancel_registered_header_watchdog(request)
             self._handler_slots.release()
 
     def handle_error(self, *_args):

@@ -6,8 +6,10 @@ encoder latency; demo query_encoding remains a separate deployment measurement.
 Run long comparisons through the coordinator's Armada job runner.
 """
 import argparse
+import base64
 import concurrent.futures
 import hashlib
+import hmac
 import json
 import math
 import multiprocessing
@@ -21,6 +23,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
+
+import numpy as np
 
 MODEL = 'google/embeddinggemma-2'
 REVISION = '914f7f89142e33e77833254d9c9b90c3cef7303b'
@@ -33,12 +38,42 @@ class RefuseRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def request_json(url, body=None, token='', timeout=10):
+def engine_token(raw, url, audience):
+    """Sign the exact plugin request using a privately supplied verification ring."""
+    ring = json.loads(os.environ['QUIVR_PLUGIN_SIGNING_KEYS'])
+    keys = ring['keys']
+    if not isinstance(keys, list) or not 1 <= len(keys) <= 16:
+        raise ValueError('invalid signing ring')
+    selected = [key for key in keys if key['id'] == ring['active']]
+    if len(selected) != 1:
+        raise ValueError('invalid signing ring')
+    key = selected[0]
+    encoded = key['secret']
+    secret = base64.b64decode(encoded + '=' * (-len(encoded) % 4), altchars=b'-_', validate=True)
+    now = int(time.time())
+    if (len(secret) < 32 or now < key.get('not_before', 0)
+            or (key.get('not_after', 0) and now >= key['not_after'])):
+        raise ValueError('inactive signing key')
+    target = urllib.parse.urlsplit(url).path
+    header = {'alg': 'HS256', 'typ': 'quivr-engine+jwt', 'kid': key['id']}
+    claims = {'aud': audience, 'plugin_id': audience, 'contribution': 'ingestion',
+              'method': 'POST', 'target': target, 'iat': now, 'exp': now + 60,
+              'body_sha256': hashlib.sha256(raw).hexdigest()}
+    def part(value):
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip('=')
+    unsigned = part(header) + '.' + part(claims)
+    signature = base64.urlsafe_b64encode(hmac.digest(secret, unsigned.encode(), 'sha256')).decode().rstrip('=')
+    return unsigned + '.' + signature
+
+
+def request_json(url, body=None, token='', timeout=10, signing_audience=''):
     deadline = time.monotonic() + timeout
     headers = {'Content-Type': 'application/json'}
+    raw = json.dumps(body).encode() if body is not None else None
+    if signing_audience:
+        token = engine_token(raw, url, signing_audience)
     if token:
         headers['Authorization'] = 'Bearer ' + token
-    raw = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=raw, headers=headers)
     # Do not inherit proxy credentials, and never send bearer auth to a redirect.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), RefuseRedirect())
@@ -71,12 +106,13 @@ def encode(url, text, *, token='', timeout=10, plugin=None):
         body = {'model': MODEL, 'dimensions': DIMENSIONS, 'input': [PREFIX + text]}
         path = '/embeddings'
     else:
-        body = {'invocation_id': 'query-encoder-parity', 'contribution': 'ingestion',
+        body = {'invocation_id': 'query-encoder-parity-' + uuid.uuid4().hex, 'contribution': 'ingestion',
                 'organization_id': 'evaluation', 'configuration': plugin['configuration'],
                 'space': plugin['space'], 'query': {'modality': 'text', 'text': text}}
         path = '/v0/contributions/ingestion/embed_query'
     started = time.monotonic()
-    result = request_json(url.rstrip('/') + path, body, token, timeout)
+    audience = plugin['configuration'].get('plugin_id', 'hosted.embed') if plugin else ''
+    result = request_json(url.rstrip('/') + path, body, token, timeout, signing_audience=audience)
     elapsed = (time.monotonic() - started) * 1000
     if plugin is not None:
         vector = result.get('vector')
@@ -104,14 +140,29 @@ def cosine(a, b):
     return dot / math.sqrt(sum(x*x for x in a) * sum(y*y for y in b))
 
 
-def top10(vector, candidates, deadline):
-    scored = []
-    for n, item in enumerate(candidates):
-        if n % 100 == 0 and time.monotonic() >= deadline:
+class CandidateRanking:
+    """Normalize frozen candidates once; keep scoring outside HTTP latency."""
+
+    def __init__(self, candidates):
+        self.ids = np.asarray([item['id'] for item in candidates])
+        matrix = np.asarray([item['vector'] for item in candidates], dtype=np.float64)
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        if not np.all(np.isfinite(norms)) or np.any(norms == 0):
+            raise ValueError('invalid candidate vector norm')
+        self.normalized = matrix / norms
+
+    def top10(self, vector, deadline):
+        if time.monotonic() >= deadline:
             raise TimeoutError('overall deadline exceeded')
-        scored.append((cosine(vector, item['vector']), item['id']))
-    # Stable IDs make exact ties deterministic across backends.
-    return [identifier for _, identifier in sorted(scored, key=lambda x: (-x[0], x[1]))[:10]]
+        query = np.asarray(vector, dtype=np.float64)
+        scores = self.normalized @ (query / np.linalg.norm(query))
+        if not np.all(np.isfinite(scores)):
+            raise ValueError('invalid ranking scores')
+        if time.monotonic() >= deadline:
+            raise TimeoutError('overall deadline exceeded')
+        # Stable IDs make exact ties deterministic across backends.
+        order = np.lexsort((self.ids, -scores))[:10]
+        return self.ids[order].tolist()
 
 
 def latency(values):
@@ -201,15 +252,17 @@ def main(argv=None):
                 raise TimeoutError('overall deadline exceeded')
             return encode(url, text, timeout=min(args.timeout, remaining), **kwargs)
         details, sequential, remote_times = [], [], []
-        remote_vectors = []
+        remote_vectors, remote_ranks = [], []
+        ranking = CandidateRanking(data['candidates'])
         for n, query in enumerate(data['queries']):
             local, elapsed = call(args.local_url, query['text'])
             remote, remote_elapsed = call(args.remote_url, query['text'], token=token)
             remote_vectors.append(remote)
+            remote_ranks.append(ranking.top10(remote, deadline))
             sequential.append(elapsed)
             remote_times.append(remote_elapsed)
             details.append({'query_index': n, 'cosine': cosine(local, remote),
-                            'top10_equal': top10(local, data['candidates'], deadline) == top10(remote, data['candidates'], deadline)})
+                            'top10_equal': ranking.top10(local, deadline) == remote_ranks[n]})
         # executor.map bounds outstanding work instead of materializing 2000 tasks;
         # each wave contains exactly the intended traffic concurrency.
         concurrent_times, plugin_times = [], []
@@ -221,7 +274,7 @@ def main(argv=None):
                     vector, elapsed = future.result(timeout=max(0.001, deadline - time.monotonic()))
                     n = start + offset
                     details[n]['concurrent_cosine'] = cosine(vector, remote_vectors[n])
-                    details[n]['concurrent_top10_equal'] = top10(vector, data['candidates'], deadline) == top10(remote_vectors[n], data['candidates'], deadline)
+                    details[n]['concurrent_top10_equal'] = ranking.top10(vector, deadline) == remote_ranks[n]
                     concurrent_times.append(elapsed)
                 if plugin is not None:
                     futures = [pool.submit(call, args.plugin_url, q['text'], plugin=plugin) for q in wave]
@@ -229,7 +282,7 @@ def main(argv=None):
                         vector, elapsed = future.result(timeout=max(0.001, deadline - time.monotonic()))
                         n = start + offset
                         details[n]['plugin_cosine'] = cosine(vector, remote_vectors[n])
-                        details[n]['plugin_top10_equal'] = top10(vector, data['candidates'], deadline) == top10(remote_vectors[n], data['candidates'], deadline)
+                        details[n]['plugin_top10_equal'] = ranking.top10(vector, deadline) == remote_ranks[n]
                         plugin_times.append(elapsed)
         report.update({'queries': details, 'local_sequential_ms': latency(sequential),
                        'local_concurrent_ms': latency(concurrent_times), 'remote_ms': latency(remote_times),

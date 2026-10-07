@@ -53,7 +53,7 @@ class QueryEncoderAssetsTest(unittest.TestCase):
             def __exit__(self, *_args):
                 return False
 
-            def read(self, size):
+            def read1(self, size):
                 chunk, self.remaining = self.remaining[:size], self.remaining[size:]
                 return chunk
 

@@ -36,8 +36,11 @@ func (i *ingester) localQueries(ctx context.Context, endpoint string) error {
 		return nil
 	}
 	u, err := url.Parse(endpoint)
-	if err != nil || u.Scheme != "http" || !net.ParseIP(u.Hostname()).IsLoopback() || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.TrimRight(u.Path, "/") != "/v1" || i.config.Format != "openai" {
+	if err != nil || u.Scheme != "http" || !net.ParseIP(u.Hostname()).IsLoopback() || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.TrimRight(u.EscapedPath(), "/") != "/v1" || i.config.Format != "openai" {
 		return fmt.Errorf("QUIVR_HOSTED_QUERY_URL requires an OpenAI loopback HTTP /v1 base without credentials, query or fragment")
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{16,32}$`).MatchString(i.config.Revision) {
+		return fmt.Errorf("local query encoding requires model_revision to be a 16–32 character immutable hexadecimal source revision prefix")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -85,6 +88,12 @@ func (p provider) embed(ctx context.Context, inputs []string, mode string, invoc
 }
 
 func (p provider) request(ctx context.Context, inputs []string, mode string, invocations []string, admitted bool) ([][]float32, error) {
+	return p.requestWithCost(ctx, inputs, mode, invocations, admitted, nil)
+}
+
+// A local query already counted its input inside admission. Reuse that count
+// for usage estimation rather than starting another tokenizer exchange.
+func (p provider) requestWithCost(ctx context.Context, inputs []string, mode string, invocations []string, admitted bool, knownCost *int) ([][]float32, error) {
 	c := p.config
 	if c.Auth != "none" && p.key == "" {
 		if admitted {
@@ -114,15 +123,19 @@ func (p provider) request(ctx context.Context, inputs []string, mode string, inv
 	}
 	encoded, _ := json.Marshal(body)
 	estimate := 0
-	for _, s := range inputs {
-		cost, err := p.inputCost(ctx, s)
-		if err != nil {
-			if admitted {
-				p.gate.release()
+	if knownCost != nil {
+		estimate = *knownCost
+	} else {
+		for _, s := range inputs {
+			cost, err := p.inputCost(ctx, s)
+			if err != nil {
+				if admitted {
+					p.gate.release()
+				}
+				return nil, err
 			}
-			return nil, err
+			estimate += cost
 		}
-		estimate += cost
 	}
 	client := &http.Client{Timeout: time.Duration(c.RequestTimeoutMS) * time.Millisecond, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for attempt := 0; attempt <= c.MaxRetries; attempt++ {

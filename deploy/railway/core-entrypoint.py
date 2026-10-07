@@ -360,9 +360,9 @@ def sidecar_commands(env, role='worker'):
     The plugins are first-party code under the same user as the worker, not an isolation boundary.
     """
     commands = []
-    settings = encoder_settings(env)
     if role == 'migrate':
         return commands
+    settings = encoder_settings(env) if role == 'api' else None
     if settings and role == 'api':
         commands.append(('text-encoder', [ENCODER_PYTHON, '-m', 'deploy.cpu.text_encoder',
                          '--model-dir', ENCODER_MODEL, '--port', '9995',
@@ -495,7 +495,7 @@ def main():
     if mode not in ('api', 'worker', 'migrate'):
         raise SystemExit('QUIVR_ROLE must be api, worker or migrate')
     config = build_config(os.environ)
-    settings = encoder_settings(os.environ)
+    settings = encoder_settings(os.environ) if mode == 'api' else None
     readiness = None
     if mode == 'api' and settings:
         if not pathlib.Path(ENCODER_PYTHON).is_file() or not pathlib.Path(ENCODER_MODEL + '/model.safetensors').is_file():

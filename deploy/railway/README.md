@@ -131,7 +131,12 @@ The input JSON contains `queries` (at least 200 distinct `{id, text}` objects)
 and `candidates` (at least ten frozen `{id, vector}` document vectors from the
 remote model). Keep private data and reports in an ignored directory. For a
 measurement through the hosted plugin, also include `plugin.configuration` and
-`plugin.space`, taken from that deployment's installed pin.
+`plugin.space`, taken from that deployment's installed pin. Supply that plugin's
+verification ring privately as `QUIVR_PLUGIN_SIGNING_KEYS`; the CLI signs each
+request with a fresh invocation ID and never writes keys or tokens to reports.
+
+Install the CLI numerical dependency with `python3 -m pip install numpy==2.5.3`.
+Candidate vectors are normalized once and ranked with float64 matrix operations.
 
 Example command, not run against a live provider here:
 

@@ -47,9 +47,7 @@ RUN mkdir -p /opt/query-encoder/model /opt/query-encoder/venv \
       0) ;; \
       1) python -m venv /opt/query-encoder/venv \
          && /opt/query-encoder/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
-              --index-url https://download.pytorch.org/whl/cpu torch==2.8.0+cpu torchvision==0.23.0+cpu \
-         && /opt/query-encoder/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
-              -r third_party/query-encoder/requirements.txt \
+              --require-hashes -r third_party/query-encoder/requirements.txt \
          && python scripts/prepare_query_encoder.py --output /opt/query-encoder/model ;; \
       *) echo 'QUIVR_BUILD_LOCAL_QUERY_ENCODER must be 0 or 1' >&2; exit 1 ;; \
     esac
@@ -76,7 +74,7 @@ COPY --from=build /quivr /usr/local/bin/quivr
 COPY --from=tokenizer /app /app
 COPY --from=query-encoder /opt/query-encoder /opt/query-encoder
 COPY --from=query-encoder /app/scripts/prepare_query_encoder.py /app/scripts/prepare_query_encoder.py
-COPY --from=query-encoder /app/third_party/query-encoder/model-lock.json /app/third_party/query-encoder/model-lock.json
+COPY --from=query-encoder /app/third_party/query-encoder /app/third_party/query-encoder
 COPY deploy/cpu /app/deploy/cpu
 COPY deploy/modal/embedding_api.py /app/deploy/modal/embedding_api.py
 COPY --from=plugins /opt/quivr-plugins /opt/quivr-plugins
