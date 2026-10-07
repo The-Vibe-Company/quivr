@@ -239,7 +239,7 @@ class CoreEntrypointTest(unittest.TestCase):
             'model_revision': '914f7f89142e33e7',
             'query_prefix': 'task: search result | query: ',
              'document_template': 'gemma', 'title_source': 'title',
-            'packing': 'paragraphs', 'body_tokens': 512, 'max_chunks': 4,
+            'packing': 'paragraphs', 'body_tokens': 512, 'max_chunks': 256,
             'rebalance_tail': True, 'tail_min_fraction': 0.25,
             'tokenizer': {'python': '/app/.scratch/tokenizer/venv/bin/python',
                           'model': '/app/.scratch/tokenizer/embeddinggemma-2.json',
