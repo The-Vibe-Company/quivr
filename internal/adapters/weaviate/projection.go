@@ -294,8 +294,8 @@ func sameProperties(stored, want map[string]any) bool {
 // projectionBatch bounds request size and the number of unverified objects.
 const projectionBatch = 100
 
-// insertBatch checks every object result. A lost or rejected HTTP response is
-// reconciled by the caller reading deterministic identities; an explicit object
+// insertBatch checks every object result. A lost HTTP response is reconciled
+// by the caller reading deterministic identities; an explicit request or object
 // error or malformed successful response must never be treated as success.
 func (s *Store) insertBatch(ctx context.Context, objects []map[string]any) error {
 	var result []struct {
@@ -309,8 +309,11 @@ func (s *Store) insertBatch(ctx context.Context, objects []map[string]any) error
 	// bounded response decoder even for a modest number of large objects.
 	status, err := s.call(ctx, "POST", "/v1/batch/objects", map[string]any{"objects": objects, "fields": []string{"id"}}, &result)
 	if err != nil {
-		if status == 0 || status >= 400 {
+		if status == 0 {
 			return nil
+		}
+		if status >= 400 {
+			return fmt.Errorf("projection batch request failed (HTTP %d): %w", status, err)
 		}
 		return errors.New("projection publication response invalid")
 	}
@@ -692,8 +695,6 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 	type attachment struct {
 		id, segment string
 		vectors     []content.EmbeddingData
-		stored      storedObject
-		found       bool
 	}
 	pending := make([]attachment, 0, projectionBatch)
 	objects := make([]map[string]any, 0, projectionBatch)
@@ -704,13 +705,11 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 			}
 		}
 		for _, a := range pending {
-			stored, found := a.stored, a.found
-			if !found {
-				var err error
-				stored, found, err = s.object(ctx, g.Collection, a.id)
-				if err != nil {
-					return err
-				}
+			// Existing objects may disappear while the rest of the batch is built.
+			// Verify the current identity before cleanup or durable coverage.
+			stored, found, err := s.object(ctx, g.Collection, a.id)
+			if err != nil {
+				return err
 			}
 			if !found || stored.Properties["segmentId"] != a.segment {
 				return errors.New("embedding projection verification failed")
@@ -747,7 +746,7 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 			named[s.VectorName(g, p.Artifact.SpaceID)] = p.Vector
 		}
 		id := enrichedID(org, g.ID, segment, payload)
-		stored, found, err := s.object(ctx, g.Collection, id)
+		_, found, err := s.object(ctx, g.Collection, id)
 		if err != nil {
 			return err
 		}
@@ -779,7 +778,7 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 			// not rewrite the enriched object or its permanent lexical anchor.
 			objects = append(objects, map[string]any{"class": g.Collection, "id": id, "properties": lexical, "vectors": named})
 		}
-		pending = append(pending, attachment{id: id, segment: segment, vectors: vectors, stored: stored, found: found})
+		pending = append(pending, attachment{id: id, segment: segment, vectors: vectors})
 		if len(pending) == projectionBatch {
 			if err := flush(); err != nil {
 				return err

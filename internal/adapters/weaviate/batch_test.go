@@ -17,9 +17,11 @@ import (
 // batchProjectionHTTP supplies only the remote object API. Publication,
 // verification, retry selection and batch boundaries belong to the real adapter.
 type batchProjectionHTTP struct {
-	objects map[string]map[string]any
-	batches []int
-	fault   string
+	objects   map[string]map[string]any
+	batches   []int
+	submitted []string
+	removeID  string
+	fault     string
 }
 
 func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -57,6 +59,17 @@ func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error)
 			objects = body.Objects
 		}
 		h.batches = append(h.batches, len(objects))
+		for _, object := range objects {
+			h.submitted = append(h.submitted, object["id"].(string))
+		}
+		if h.fault == "HTTP 413" || h.fault == "HTTP 500" {
+			status := 413
+			if h.fault == "HTTP 500" {
+				status = 500
+			}
+			h.fault = ""
+			return reply(status, nil)
+		}
 		var results []any
 		for i, object := range objects {
 			result := map[string]any{"status": "SUCCESS"}
@@ -68,6 +81,9 @@ func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error)
 			results = append(results, map[string]any{"id": object["id"], "result": result})
 		}
 		fault := h.fault
+		if fault == "removed while batching" {
+			delete(h.objects, h.removeID)
+		}
 		h.fault = ""
 		if fault == "lost response" {
 			return nil, errors.New("injected lost response after write")
@@ -87,7 +103,10 @@ func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error)
 func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 	for _, mode := range []struct{ embedding, item bool }{{}, {embedding: true}, {item: true}, {embedding: true, item: true}} {
 		embedding := mode.embedding
-		for _, fault := range []string{"", "object error", "lost response", "incomplete response"} {
+		for _, fault := range []string{"", "object error", "lost response", "incomplete response", "HTTP 413", "HTTP 500", "removed while batching"} {
+			if fault == "removed while batching" && !embedding {
+				continue
+			}
 			t.Run(fmt.Sprintf("embeddings=%v/items=%v/%s", embedding, mode.item, fault), func(t *testing.T) {
 				h := &batchProjectionHTTP{objects: map[string]map[string]any{}}
 				s := weaviate.New("http://projection.invalid")
@@ -112,20 +131,47 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 					if err := publish(); err != nil {
 						t.Fatal(err)
 					}
+					if fault == "removed while batching" {
+						if err := s.PublishEmbeddings(context.Background(), g, "organization", data[:1]); err != nil {
+							t.Fatal(err)
+						}
+						for id, object := range h.objects {
+							if object["vectors"] != nil {
+								h.removeID = id
+							}
+						}
+					}
 					h.batches = nil
 					publish = func() error { return s.PublishEmbeddings(context.Background(), g, "organization", data) }
 				}
 				h.fault = fault
 				err := publish()
-				wantError := fault == "object error" || fault == "incomplete response"
+				wantError := fault == "object error" || fault == "incomplete response" || strings.HasPrefix(fault, "HTTP ") || fault == "removed while batching"
 				if (err != nil) != wantError {
 					t.Fatalf("publication error=%v; wantError=%v", err, wantError)
 				}
-				if len(h.batches) == 0 || h.batches[0] != 100 {
-					t.Fatalf("batch sizes=%v; want first bounded multi-object batch of 100", h.batches)
+				if strings.HasPrefix(fault, "HTTP ") && (err == nil || !strings.Contains(err.Error(), fault)) {
+					t.Fatalf("HTTP rejection error=%v; want status %s", err, fault)
 				}
+				firstBatch := 100
+				if fault == "removed while batching" {
+					firstBatch = 99
+				}
+				if len(h.batches) == 0 || h.batches[0] != firstBatch {
+					t.Fatalf("batch sizes=%v; want first bounded multi-object batch of %d", h.batches, firstBatch)
+				}
+				prior := map[string]bool{}
+				for id := range h.objects {
+					prior[id] = true
+				}
+				beforeRetry := len(h.submitted)
 				if err := publish(); err != nil {
 					t.Fatalf("retry: %v", err)
+				}
+				for _, id := range h.submitted[beforeRetry:] {
+					if prior[id] {
+						t.Fatalf("partial retry rewrote verified object %s", id)
+					}
 				}
 				for _, n := range h.batches {
 					if n < 1 || n > 100 {
