@@ -13,6 +13,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import socket
+import re
 import urllib.parse
 
 
@@ -41,31 +43,62 @@ SELECT json_build_object(
  'compact_coverage_rows',(SELECT count(*) FROM compact_embedding_coverage),
  'captured_request_copies',(SELECT count(*) FROM ingestion_receipts WHERE octet_length(canonical_request)>0),
  'normalization_outcome_objects',(SELECT count(*) FROM normalizations WHERE outcome_key IS NOT NULL),
- 'compact_vector_column_bytes',(SELECT avg(pg_column_size(organization_id)+pg_column_size(segment_id)+pg_column_size(space_id)+pg_column_size(file_id)+pg_column_size(ordinal)+pg_column_size(vector_sha256)+pg_column_size(artifact_sha256)) FROM compact_embeddings)
+ 'average_compact_vector_column_bytes',(SELECT avg(pg_column_size(organization_id)+pg_column_size(segment_id)+pg_column_size(space_id)+pg_column_size(file_id)+pg_column_size(ordinal)+pg_column_size(vector_sha256)+pg_column_size(artifact_sha256)) FROM compact_embeddings)
 );
 COMMIT;
 """
 
 
-def snapshot(config: Path) -> dict:
-    cfg = json.loads(config.read_text())
+def connection_environment(cfg: dict) -> dict:
     url = urllib.parse.urlsplit(cfg['database_url'])
     if url.scheme not in ('postgres', 'postgresql') or not url.hostname:
         raise ValueError('unsupported database configuration')
     # Credentials go through the child environment, never argv or report text.
     child_env = dict(os.environ)
-    for key, value in {
+    for variable in ('PGSSLMODE', 'PGSSLROOTCERT', 'PGSSLCERT', 'PGSSLKEY',
+                     'PGHOSTADDR', 'PGSSLMINPROTOCOLVERSION'):
+        child_env.pop(variable, None)
+    child_env.update({
         'PGHOST': url.hostname, 'PGPORT': str(url.port or 5432),
         'PGUSER': urllib.parse.unquote(url.username or ''),
         'PGPASSWORD': urllib.parse.unquote(url.password or ''),
         'PGDATABASE': urllib.parse.unquote(url.path.lstrip('/')),
-    }.items():
-        child_env[key] = value
+    })
     parameters = urllib.parse.parse_qs(url.query)
     for field, variable in [('sslmode', 'PGSSLMODE'), ('sslrootcert', 'PGSSLROOTCERT'),
                             ('sslcert', 'PGSSLCERT'), ('sslkey', 'PGSSLKEY')]:
         if field in parameters:
             child_env[variable] = parameters[field][-1]
+    tls = cfg.get('tls', {}).get('postgres', {})
+    settings = ('ca_file', 'cert_file', 'key_file', 'server_name')
+    if 'enabled' in tls or any(tls.get(key) for key in settings):
+        enabled = tls.get('enabled', True)
+        if type(enabled) is not bool or (not enabled and any(tls.get(key) for key in settings)):
+            raise ValueError('invalid PostgreSQL TLS policy')
+        child_env['PGSSLMODE'] = 'verify-full' if enabled else 'disable'
+        for key, variable in [('ca_file', 'PGSSLROOTCERT'), ('cert_file', 'PGSSLCERT'), ('key_file', 'PGSSLKEY')]:
+            child_env.pop(variable, None)
+            if tls.get(key):
+                child_env[variable] = tls[key]
+        name = tls.get('server_name')
+        if name:
+            if not re.fullmatch(r'[A-Za-z0-9.:-]+', name):
+                raise ValueError('invalid PostgreSQL TLS server name')
+            # libpq verifies PGHOST but connects to PGHOSTADDR. Preserve the
+            # configured endpoint while honoring a certificate name override.
+            address = socket.getaddrinfo(url.hostname, url.port or 5432, type=socket.SOCK_STREAM)[0][4][0]
+            child_env['PGHOSTADDR'] = address
+            child_env['PGHOST'] = name
+    if child_env.get('PGSSLMODE') not in ('verify-full', 'disable'):
+        raise ValueError('PostgreSQL requires verified TLS or explicit plaintext')
+    if bool(child_env.get('PGSSLCERT')) != bool(child_env.get('PGSSLKEY')):
+        raise ValueError('PostgreSQL TLS certificate and key must be paired')
+    child_env['PGSSLMINPROTOCOLVERSION'] = 'TLSv1.2'
+    return child_env
+
+
+def snapshot(config: Path) -> dict:
+    child_env = connection_environment(json.loads(config.read_text()))
     result = subprocess.run(['psql', '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1'],
                             input=SQL, text=True, env=child_env,
                             capture_output=True, timeout=40, check=False)

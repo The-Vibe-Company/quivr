@@ -101,7 +101,10 @@ func TestNormalizerMakesRoutedBlobsSearchable(t *testing.T) {
 	provenance := version["provenance"].(map[string]any)
 	normalization, _ := provenance["normalization"].(map[string]any)
 	invocation, _ := normalization["invocation_id"].(string)
-	if invocation == "" || normalization["input_sha256"] != hex.EncodeToString(sum[:]) || normalization["contribution"] != "normalizer" || normalization["plugin_id"] == nil || normalization["idempotency_key"] == nil || normalization["plugin_api"] == nil {
+	// Successful invocation IDs are optional audit detail; the deterministic
+	// digest and input/plugin provenance remain required for reuse.
+	key, _ := normalization["idempotency_key"].(string)
+	if !strings.HasPrefix(key, "nk_") || normalization["input_sha256"] != hex.EncodeToString(sum[:]) || normalization["contribution"] != "normalizer" || normalization["plugin_id"] == nil || normalization["plugin_api"] == nil {
 		t.Fatalf("normalization provenance %v", provenance)
 	}
 	// The acquirer and the input Blob keep their meaning.

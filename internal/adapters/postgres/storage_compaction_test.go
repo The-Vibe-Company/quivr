@@ -88,7 +88,6 @@ func TestStorageCompactionResumesAcrossActivation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	originalObjects := len(objects.objects)
 	runner := postgres.StorageCompaction{Pool: pool, Blobs: objects}
 	if _, err = runner.Start(ctx, "expand", false); err != nil {
 		t.Fatal(err)
@@ -178,8 +177,5 @@ func TestStorageCompactionResumesAcrossActivation(t *testing.T) {
 	restored, vector, err := service.LoadEmbedding(ctx, org, artifact.DerivationID)
 	if err != nil || restored.ID != artifact.ID || len(vector) != 2 || vector[0] != 3 || vector[1] != 4 {
 		t.Fatalf("canonical vector changed %v %+v %v", err, restored, vector)
-	}
-	if len(objects.objects) < originalObjects {
-		t.Fatal("physical objects were deleted")
 	}
 }

@@ -41,13 +41,13 @@ func TestCompactReceiptDigestAndOptionalAudit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var copies bool
+			var requestCopy, commandCopy bool
 			var digest []byte
-			if err = pool.QueryRow(ctx, `SELECT octet_length(canonical_request)>0 OR command<>'{}'::jsonb,request_digest FROM ingestion_receipts WHERE organization=$1 AND id=$2`, org, r.ID).Scan(&copies, &digest); err != nil {
+			if err = pool.QueryRow(ctx, `SELECT octet_length(canonical_request)>0,command<>'{}'::jsonb,request_digest FROM ingestion_receipts WHERE organization=$1 AND id=$2`, org, r.ID).Scan(&requestCopy, &commandCopy, &digest); err != nil {
 				t.Fatal(err)
 			}
-			if copies != detail || len(digest) != 32 {
-				t.Fatalf("audit copies=%v digest bytes=%d; want %v/32", copies, len(digest), detail)
+			if requestCopy != detail || commandCopy != detail || len(digest) != 32 {
+				t.Fatalf("audit request=%v command=%v digest bytes=%d; want %v/%v/32", requestCopy, commandCopy, len(digest), detail, detail)
 			}
 			work, _, err := (postgres.MaterializationStore{Pool: pool}).Work(ctx, org, r.ID)
 			if err != nil || work.Command.Content.Text != "Durable input" {

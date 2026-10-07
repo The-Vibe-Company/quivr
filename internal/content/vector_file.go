@@ -6,7 +6,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"math"
 	"reflect"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
@@ -98,7 +101,7 @@ func EncodeEmbeddingFile(f EmbeddingFile, vectors [][]float32) ([]byte, error) {
 	return raw, nil
 }
 
-func DecodeEmbeddingFile(f EmbeddingFile, raw []byte) ([][]float32, error) {
+func embeddingFileMatrix(f EmbeddingFile, raw []byte) ([]byte, error) {
 	if !validFileShape(f) || len(raw) < 12 || int64(len(raw)) > MaxVectorFileBytes || !bytes.Equal(raw[:8], []byte("QVEC\x00\x00\x00\x01")) {
 		return nil, ErrArtifactCorrupt
 	}
@@ -110,28 +113,73 @@ func DecodeEmbeddingFile(f EmbeddingFile, raw []byte) ([][]float32, error) {
 	if json.Unmarshal(raw[12:12+n], &header) != nil || !reflect.DeepEqual(header, fileHeader(f)) {
 		return nil, ErrArtifactCorrupt
 	}
-	vectors := make([][]float32, f.RowCount)
+	matrix := raw[12+n:]
 	zero := make([]byte, 4*f.Dimensions)
-	offset := 12 + n
-	for i := range vectors {
-		row := raw[offset : offset+4*f.Dimensions]
-		offset += 4 * f.Dimensions
+	for i := range f.RowCount {
+		row := matrix[i*4*f.Dimensions : (i+1)*4*f.Dimensions]
 		if !Present(f.Presence, i) {
 			if !bytes.Equal(row, zero) {
 				return nil, ErrArtifactCorrupt
 			}
 			continue
 		}
-		var err error
-		vectors[i], err = ReadVector(row)
-		if err != nil {
-			return nil, ErrArtifactCorrupt
+		for offset := 0; offset < len(row); offset += 4 {
+			v := float64(math.Float32frombits(binary.LittleEndian.Uint32(row[offset:])))
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				return nil, ErrArtifactCorrupt
+			}
+		}
+	}
+	return matrix, nil
+}
+
+func DecodeEmbeddingFile(f EmbeddingFile, raw []byte) ([][]float32, error) {
+	matrix, err := embeddingFileMatrix(f, raw)
+	if err != nil {
+		return nil, err
+	}
+	vectors := make([][]float32, f.RowCount)
+	for i := range vectors {
+		if Present(f.Presence, i) {
+			vectors[i], err = ReadVector(matrix[i*4*f.Dimensions : (i+1)*4*f.Dimensions])
+			if err != nil {
+				return nil, ErrArtifactCorrupt
+			}
 		}
 	}
 	return vectors, nil
 }
 
+// Share a byte budget across concurrent reads. Reserve twice the descriptor's
+// size for the object buffer and decoding; returned requested vectors belong
+// to the caller's already bounded projection batch.
+var vectorReadBudget = semaphore.NewWeighted(2 * MaxVectorFileBytes)
+
+func reserveVectorRead(ctx context.Context, f EmbeddingFile) (func(), error) {
+	if f.Blob.Size < 0 || f.Blob.Size > MaxVectorFileBytes {
+		return nil, ErrArtifactCorrupt
+	}
+	weight := max(int64(1), 2*f.Blob.Size)
+	if err := vectorReadBudget.Acquire(ctx, weight); err != nil {
+		return nil, err
+	}
+	return func() { vectorReadBudget.Release(weight) }, nil
+}
+
 func (s Service) readVectorFile(ctx context.Context, f EmbeddingFile) ([][]float32, error) {
+	release, err := reserveVectorRead(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	raw, err := s.readVectorFileBytes(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return DecodeEmbeddingFile(f, raw)
+}
+
+func (s Service) readVectorFileBytes(ctx context.Context, f EmbeddingFile) ([]byte, error) {
 	if f.Blob.Size < 0 || f.Blob.Size > MaxVectorFileBytes {
 		return nil, ErrArtifactCorrupt
 	}
@@ -148,53 +196,75 @@ func (s Service) readVectorFile(ctx context.Context, f EmbeddingFile) ([][]float
 	if int64(len(raw)) != f.Blob.Size || Hash(raw) != f.Blob.SHA256 {
 		return nil, ErrArtifactCorrupt
 	}
-	return DecodeEmbeddingFile(f, raw)
+	return raw, nil
 }
 
 // LoadEmbeddingData reads each referenced file once and verifies each vector's
 // content and original public artifact identity. Legacy artifacts remain readable.
 func (s Service) LoadEmbeddingData(ctx context.Context, artifacts []Embedding) ([]EmbeddingData, error) {
-	type loadedFile struct {
+	type fileGroup struct {
 		descriptor EmbeddingFile
-		vectors    [][]float32
+		indices    []int
 	}
-	files := map[string]loadedFile{}
-	result := make([]EmbeddingData, 0, len(artifacts))
-	for _, e := range artifacts {
+	files := map[string]*fileGroup{}
+	result := make([]EmbeddingData, len(artifacts))
+	for i, e := range artifacts {
 		if e.File == nil {
 			a, v, err := s.loadEmbeddingArtifact(ctx, e)
 			if err != nil {
 				return nil, err
 			}
-			result = append(result, EmbeddingData{a, v})
+			result[i] = EmbeddingData{a, v}
 			continue
 		}
 		f := *e.File
-		cached, ok := files[f.Blob.Key]
-		vectors := cached.vectors
+		group, ok := files[f.Blob.Key]
 		if !ok {
-			var err error
-			vectors, err = s.readVectorFile(ctx, f)
+			group = &fileGroup{descriptor: f}
+			files[f.Blob.Key] = group
+		} else if group.descriptor.Blob != f.Blob || !reflect.DeepEqual(fileHeader(group.descriptor), fileHeader(f)) {
+			return nil, ErrArtifactCorrupt
+		}
+		group.indices = append(group.indices, i)
+	}
+	// Decode only requested rows; do not retain whole decoded matrices across
+	// all documents of a rebuild or subscription batch.
+	for _, group := range files {
+		if err := func() error {
+			f := group.descriptor
+			release, err := reserveVectorRead(ctx, f)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			files[f.Blob.Key] = loadedFile{f, vectors}
-		} else if cached.descriptor.Blob != f.Blob || !reflect.DeepEqual(fileHeader(cached.descriptor), fileHeader(f)) {
-			return nil, ErrArtifactCorrupt
+			defer release()
+			raw, err := s.readVectorFileBytes(ctx, f)
+			if err != nil {
+				return err
+			}
+			matrix, err := embeddingFileMatrix(f, raw)
+			if err != nil {
+				return err
+			}
+			for _, i := range group.indices {
+				e := artifacts[i]
+				if e.Ordinal < 0 || e.Ordinal >= f.RowCount || !Present(f.Presence, e.Ordinal) || e.Organization != f.Organization || e.VersionID != f.VersionID || e.SegmentationID != f.SegmentationID || e.SpaceID != f.SpaceID || e.Producer != f.Producer {
+					return ErrArtifactCorrupt
+				}
+				row := matrix[e.Ordinal*4*f.Dimensions : (e.Ordinal+1)*4*f.Dimensions]
+				vector, err := ReadVector(row)
+				expected := e
+				expected.ID = ""
+				expected.Manifest = Blob{}
+				manifest := embeddingManifest(expected)
+				if err != nil || Hash(row) != e.Payload.SHA256 || e.ID != Hash(append(append([]byte("quivr/embedding-artifact/v1\x00"), manifest...), row...)) {
+					return ErrArtifactCorrupt
+				}
+				result[i] = EmbeddingData{e, vector}
+			}
+			return nil
+		}(); err != nil {
+			return nil, err
 		}
-		if e.Ordinal < 0 || e.Ordinal >= len(vectors) || !Present(f.Presence, e.Ordinal) || e.Organization != f.Organization || e.VersionID != f.VersionID || e.SegmentationID != f.SegmentationID || e.SpaceID != f.SpaceID || e.Producer != f.Producer {
-			return nil, ErrArtifactCorrupt
-		}
-		vector := vectors[e.Ordinal]
-		raw, err := VectorBytes(vector)
-		expected := e
-		expected.ID = ""
-		expected.Manifest = Blob{}
-		manifest := embeddingManifest(expected)
-		if err != nil || Hash(raw) != e.Payload.SHA256 || e.ID != Hash(append(append([]byte("quivr/embedding-artifact/v1\x00"), manifest...), raw...)) {
-			return nil, ErrArtifactCorrupt
-		}
-		result = append(result, EmbeddingData{e, vector})
 	}
 	return result, nil
 }

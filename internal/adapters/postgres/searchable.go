@@ -494,7 +494,7 @@ func compactSegmentDerivation(d content.SegmentDerivation) ([]byte, error) {
 		return nil, err
 	}
 	for key, value := range fields {
-		if string(value) == "0" || string(value) == "false" || string(value) == `""` || string(value) == "null" {
+		if key != "provenance" && (string(value) == "0" || string(value) == "false" || string(value) == `""` || string(value) == "null") {
 			delete(fields, key)
 		}
 	}

@@ -30,7 +30,7 @@ const compactArtifactRowsSQL = `SELECT o.organization,encode(e.artifact_sha256,'
 
 const embeddingArtifactsRelation = `(SELECT a.organization,a.id,a.derivation_id,a.segment_id,a.space_id,a.metadata FROM embedding_artifacts a
  WHERE NOT EXISTS(SELECT 1 FROM storage_organizations o JOIN storage_segments k ON k.organization_id=o.id AND k.segment_id=a.segment_id
- JOIN storage_spaces sp ON sp.space_id=a.space_id JOIN compact_embeddings e ON (e.organization_id,e.segment_id,e.space_id)=(o.id,k.id,sp.id) WHERE o.organization=a.organization)
+ JOIN storage_spaces sp ON sp.space_id=a.space_id JOIN compact_embeddings e ON (e.organization_id,e.segment_id,e.space_id)=(o.id,k.id,sp.id) WHERE o.organization=a.organization AND encode(e.artifact_sha256,'hex')=a.id)
  UNION ALL ` + compactArtifactRowsSQL + `)`
 
 const embeddingCoverageRelation = `(SELECT organization,segment_id,generation_id,artifact_id,space_id FROM embedding_coverage

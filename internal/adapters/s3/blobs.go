@@ -44,7 +44,8 @@ func newWithTransport(cfg Config, transport *http.Transport) *Store {
 	client := awss3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")), HTTPClient: &http.Client{Timeout: 5 * time.Second, Transport: telemetry.Transport(transport, "s3.request"), CheckRedirect: outbound.CheckRedirect}}, func(o *awss3.Options) { o.BaseEndpoint = aws.String(cfg.Endpoint); o.UsePathStyle = true })
 	vectorClient := awss3.New(client.Options(), func(o *awss3.Options) {
 		httpClient := *o.HTTPClient.(*http.Client)
-		httpClient.Timeout = 30 * time.Second
+		// Large transfers use the caller's processing/operation deadline.
+		httpClient.Timeout = 0
 		o.HTTPClient = &httpClient
 	})
 	return &Store{client: client, vectorClient: vectorClient, bucket: cfg.Bucket}

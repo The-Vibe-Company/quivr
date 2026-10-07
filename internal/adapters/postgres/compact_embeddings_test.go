@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		seg, err := content.PluginSegmentation(org, v, "plugin:core.ingest@1.0.0", json.RawMessage(`{"producer":"example"}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 5}, {PartKey: "body", Start: 6, End: 12}})
+		seg, err := content.PluginSegmentation(org, v, "plugin:core.ingest@1.0.0", json.RawMessage(`{"producer":"example"}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 5, Provenance: json.RawMessage(`null`)}, {PartKey: "body", Start: 6, End: 12}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +79,7 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 		}
 		before := len(objects.objects)
 		var packed []content.EmbeddingData
-		expectedFirst, expectedLast, expectedObjects := float32(1), float32(4), 1
+		expectedVectors, expectedObjects := [][]float32{{1, 2}, {3, 4}}, 1
 		if scenario.race {
 			gated := &concurrentVectorBlobs{Blobs: objects, arrived: make(chan struct{}, 2), release: make(chan struct{})}
 			service.Blobs = gated
@@ -112,10 +113,10 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 				t.Fatal("incomplete concurrent winner")
 			}
 			if packed[0].Vector[0] == 7 {
-				expectedFirst, expectedLast = 7, 6
+				expectedVectors = [][]float32{{7, 8}, {5, 6}}
 			}
 			for i := range packed {
-				if packed[i].Artifact.ID != second.data[i].Artifact.ID || packed[i].Vector[0] != second.data[i].Vector[0] {
+				if packed[i].Artifact.ID != second.data[i].Artifact.ID || !slices.Equal(packed[i].Vector, second.data[i].Vector) {
 					t.Fatal("concurrent writers did not adopt one canonical file")
 				}
 			}
@@ -147,7 +148,7 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 		if files != 1 || (!scenario.activation && len(objects.objects) != before+expectedObjects) || (scenario.activation && len(objects.objects) > before+expectedObjects) {
 			t.Fatalf("files=%d additional objects=%d; want one current descriptor and bounded candidate uploads", files, len(objects.objects)-before)
 		}
-		if len(packed) != 2 || packed[0].Vector[0] != expectedFirst || packed[1].Vector[1] != expectedLast {
+		if len(packed) != 2 || !slices.Equal(packed[0].Vector, expectedVectors[0]) || !slices.Equal(packed[1].Vector, expectedVectors[1]) {
 			t.Fatalf("canonical partial output changed: %+v", packed)
 		}
 		if partial && packed[0].Artifact.ID != originalID {
@@ -155,7 +156,7 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 		}
 		inputs := []content.Embedding{data[0].Artifact, data[1].Artifact}
 		recovered, complete, err := service.LoadEmbeddingGroup(ctx, inputs)
-		if err != nil || !complete || len(recovered) != 2 || recovered[0].Vector[0] != expectedFirst || recovered[1].Vector[1] != expectedLast {
+		if err != nil || !complete || len(recovered) != 2 || !slices.Equal(recovered[0].Vector, expectedVectors[0]) || !slices.Equal(recovered[1].Vector, expectedVectors[1]) {
 			t.Fatalf("stored group reuse: %+v complete=%v err=%v", recovered, complete, err)
 		}
 		// A new generation must recover the same float32s with the provider disabled.
@@ -163,14 +164,29 @@ func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
 		rebuildGeneration.ID = "rebuilt-generation"
 		deriver := processing.PluginDeriver{Content: service, Plugin: storedVectorProvider{space: space, recipe: seg.Recipe}}
 		_, reused, err := deriver.Derive(ctx, org, c.ID, v, rebuildGeneration)
-		if err != nil || len(reused) != 2 || reused[0].Vector[0] != expectedFirst || reused[1].Vector[1] != expectedLast || reused[0].Artifact.ID != packed[0].Artifact.ID {
+		if err != nil || len(reused) != 2 || !slices.Equal(reused[0].Vector, expectedVectors[0]) || !slices.Equal(reused[1].Vector, expectedVectors[1]) || reused[0].Artifact.ID != packed[0].Artifact.ID {
 			t.Fatalf("rebuild called disabled provider or changed vectors: %v %+v", err, reused)
 		}
 
 		for _, d := range packed {
 			loaded, vector, err := service.LoadEmbedding(ctx, org, d.Artifact.DerivationID)
-			if err != nil || loaded.ID != d.Artifact.ID || vector[0] != d.Vector[0] {
+			if err != nil || loaded.ID != d.Artifact.ID || !slices.Equal(vector, d.Vector) {
 				t.Fatalf("mixed-format reader: %v %+v", err, loaded)
+			}
+		}
+		if partial {
+			// A historical derivation with another producer remains readable until
+			// explicitly retired, even beside the canonical compact tuple.
+			prior := data[0].Artifact
+			prior.Producer = "plugin:alternate@1.0.0"
+			prior.DerivationID = content.StableID("embedding-derivation", org, prior.SegmentID, space.ID, prior.InputSHA, prior.Producer)
+			legacy, err := service.SaveEmbedding(ctx, prior, space, []float32{9, 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, vector, err := service.LoadEmbedding(ctx, org, legacy.DerivationID)
+			if err != nil || loaded.ID != legacy.ID || !slices.Equal(vector, []float32{9, 10}) {
+				t.Fatalf("historical derivation hidden by compact tuple: %v %+v %v", err, loaded, vector)
 			}
 		}
 		if err = service.Promote(ctx, org, seg, g); err != nil {
