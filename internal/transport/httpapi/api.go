@@ -281,10 +281,10 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 	var limit int
 	var ok bool
 	var scope string
-	items, err := a.Service.List(r.Context(), s, "", 0, func() (string, int, error) {
+	items, err := a.listCorporaRequest(r.Context(), s, r, func() (string, int, error) {
 		q := r.URL.Query()
 		for k, v := range q {
-			if (k != "limit" && k != "page_cursor") || len(v) != 1 {
+			if (k != "limit" && k != "page_cursor" && k != "include_archived") || len(v) != 1 {
 				writeError(w, publicerr.InvalidQuery, nil)
 				return "", 0, errResponseWritten
 			}
@@ -295,6 +295,9 @@ func (a *API) list(w http.ResponseWriter, r *http.Request, s corpus.Scope) {
 		}
 		after := ""
 		scope = scopeDigest(s)
+		if q.Get("include_archived") == "true" {
+			scope += ":archived"
+		}
 		if q.Has("page_cursor") {
 			var c cursor
 			if a.decodePage(corpusPageDomain, q.Get("page_cursor"), &c) != nil || c.Scope != scope {

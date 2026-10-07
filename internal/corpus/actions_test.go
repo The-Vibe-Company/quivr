@@ -37,6 +37,8 @@ func TestActionPermissions(t *testing.T) {
 		{ActionCorpusCreate, []string{"corpora:write"}, true},
 		{ActionCorpusRead, []string{"corpora:read"}, false},
 		{ActionCorpusList, []string{"corpora:read"}, false},
+		{ActionCorpusArchive, []string{"corpora:archive"}, false},
+		{ActionCorpusRename, []string{"corpora:rename"}, false},
 		{ActionMonitoringSavedQueryVersion, []string{"monitoring:read"}, false},
 		{ActionMonitoringSubscriptionVersion, []string{"monitoring:read"}, false},
 		{ActionMonitoringAttempts, []string{"monitoring:read"}, false},

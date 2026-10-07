@@ -36,7 +36,7 @@ FROM bound b
 LEFT JOIN LATERAL (
   SELECT sequence, event_id, event_type, resource_type, resource_id, occurred_at
   FROM change_events
-  WHERE organization=$1 AND corpus_id=$2 AND sequence > $3 AND sequence <= b.upper
+  WHERE organization=$1 AND corpus_id=$2 AND NOT EXISTS(SELECT 1 FROM corpora c WHERE c.organization=$1 AND c.id=$2 AND c.archived) AND sequence > $3 AND sequence <= b.upper
   ORDER BY sequence
   LIMIT $4
 ) e ON true

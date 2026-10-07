@@ -130,7 +130,7 @@ class Stack:
             # Push connector instances (x_list webhook mode) register webhooks here; the fake X calls it on loopback.
             public_url=f"http://127.0.0.1:{s['api_port']}",
             keys={
-            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','observability:read'],['*']),
+            s['admin']:scope('org_a',['corpora:archive','corpora:rename','audit:read','corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','observability:read'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write','connectors:admin','connector:push'],['*']),
             # Connector acceptance owns org_c so its scheduled load cannot skew org_a/org_b scenarios.
             s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
@@ -568,6 +568,7 @@ def parts():
             # order-sensitive acceptance and timed outage scenarios. The outages kill every process, so
             # the short-retention API starts after them.
             step('short_retention_api',Stack.start_short_retention_api),
+            acceptance('corpus_lifecycle','^TestCorpusLifecycle$'),
             acceptance('changes_catalog_rebuild','TestChange|TestCatalog|TestRebuild|TestRetrievalConfiguration|TestFacets|TestEnrichedVersions'),
             step('newsml_normalizer_pin',normalizer_plugin.switch,'newsml-g2'),
             acceptance('metadata_filters','^TestMetadataFiltersAcrossCorpora$'),

@@ -9,6 +9,7 @@ import (
 )
 
 var (
+	ErrArchived           = publicerr.CorpusArchived
 	ErrForbidden          = publicerr.Forbidden
 	ErrNotFound           = publicerr.NotFound
 	ErrInvalidMapping     = publicerr.InvalidMapping
@@ -16,6 +17,7 @@ var (
 )
 
 type Corpus struct {
+	Archived  bool           `json:"archived"`
 	ID        string         `json:"corpus_id"`
 	Name      string         `json:"name"`
 	Retrieval map[string]any `json:"effective_retrieval"`

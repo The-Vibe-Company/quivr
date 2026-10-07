@@ -110,13 +110,16 @@ func (s ProjectionStore) Generation(ctx context.Context, org, corpusID string) (
 	return g, err
 }
 func (s ProjectionStore) Authorize(ctx context.Context, scope corpus.Scope, ids []string) error {
-	var count int
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT count(*) FROM corpora WHERE organization=$1 AND id=ANY($2)`, scope.Organization, ids).Scan(&count)
+	var count, archived int
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE archived) FROM corpora WHERE organization=$1 AND id=ANY($2)`, scope.Organization, ids).Scan(&count, &archived)
 	if err != nil {
 		return err
 	}
 	if count != len(ids) {
 		return corpus.ErrForbidden
+	}
+	if archived > 0 {
+		return corpus.ErrArchived
 	}
 	return nil
 }
@@ -362,7 +365,7 @@ CROSS JOIN LATERAL (SELECT b.object_key,b.sha256,b.byte_length FROM content_blob
 CROSS JOIN LATERAL (SELECT FROM projection_coverage pc WHERE pc.organization=c.organization AND pc.version_id=sg.version_id AND pc.generation_id=c.generation_id AND pc.segmentation_id=sg.segmentation_id AND ((c.evaluation_plugin='' AND pc.role='served') OR (c.evaluation_plugin<>'' AND pc.plugin_id=c.evaluation_plugin)) OFFSET 0) pc
 LEFT JOIN LATERAL (SELECT a.id,a.space_id FROM embedding_coverage ec JOIN embedding_artifacts a ON (a.organization,a.id)=(ec.organization,ec.artifact_id) JOIN projection_generations g ON g.id=ec.generation_id AND ((c.evaluation_plugin='' AND (g.space_id=a.space_id OR g.spaces @> jsonb_build_array(jsonb_build_object('id',a.space_id,'role','served')))) OR (c.evaluation_plugin<>'' AND a.space_id=c.evaluation_space))
   WHERE ec.organization=c.organization AND ec.segment_id=c.segment_id AND ec.generation_id=c.generation_id ORDER BY a.id LIMIT 1) e ON true
-WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` AND r.current_version_id=v.id AND ` + eligibleVersionSQL
+WHERE c.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` AND r.current_version_id=v.id AND ` + eligibleVersionSQL + ` AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=r.organization AND cp.id=r.corpus_id AND cp.archived)`
 
 // Hydrate looks a batch of candidates up in one query (hydrateSQL). A
 // candidate outside the caller's Corpora is absent, as if it did not exist.

@@ -7,6 +7,17 @@ info:
 security:
 - ApiKey: []
 x-public-errors:
+  corpus_archived:
+    status_class: 409
+    retryable: false
+    operations:
+    - searchRecords
+    - listRecords
+    - countRecords
+    - countFacets
+    - pollChanges
+    - streamChanges
+    - requestConnectorRun
   delivery_failed:
     status_class: 500
     retryable: false
@@ -1873,6 +1884,13 @@ paths:
           minimum: 1
           maximum: 100
           default: 100
+      - name: include_archived
+        in: query
+        required: false
+        description: Include archived corpora; false by default. Bound into the page cursor.
+        schema:
+          type: boolean
+          default: false
       x-required-permissions:
       - corpora:read
       tags:
@@ -1907,6 +1925,100 @@ paths:
       tags:
       - Corpora
       summary: Get corpus
+    patch:
+      operationId: renameCorpus
+      description: Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative
+        grant.
+      parameters:
+      - name: corpus_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - corpora:rename
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Corpus'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorpusRenameRequest'
+      tags:
+      - Corpora
+      summary: Rename corpus
+  /v0/corpora/{corpus_id}/archive:
+    post:
+      operationId: archiveCorpus
+      description: Reversibly hide a corpus from default listings, search, catalog, change feed and connector polling. Keeps
+        canonical data and connector enabled state.
+      parameters:
+      - name: corpus_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - corpora:archive
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Corpus'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Corpora
+      summary: Archive corpus
+  /v0/corpora/{corpus_id}/unarchive:
+    post:
+      operationId: unarchiveCorpus
+      description: Restore an archived corpus and make its retained data visible again.
+      parameters:
+      - name: corpus_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      x-required-permissions:
+      - corpora:archive
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Corpus'
+        default:
+          description: Structured error; see contract HTTP mapping.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      tags:
+      - Corpora
+      summary: Unarchive corpus
   /v0/corpora/{corpus_id}/retrieval:
     put:
       operationId: configureRetrieval
@@ -7658,10 +7770,23 @@ components:
       required:
       - idempotency_key
       - name
+    CorpusRenameRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+      required:
+      - name
     Corpus:
       type: object
       additionalProperties: false
       properties:
+        archived:
+          type: boolean
+          description: Reversible visibility fence; archived corpora retain all data.
         corpus_id:
           type: string
           minLength: 1

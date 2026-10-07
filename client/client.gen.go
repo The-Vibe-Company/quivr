@@ -1766,6 +1766,8 @@ type ConnectorUsage struct {
 
 // Corpus defines model for Corpus.
 type Corpus struct {
+	// Archived Reversible visibility fence; archived corpora retain all data.
+	Archived *bool  `json:"archived,omitempty"`
 	CorpusId string `json:"corpus_id"`
 
 	// EffectiveRetrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
@@ -1783,6 +1785,11 @@ type CorpusExclusion struct {
 type CorpusPage struct {
 	Items          []Corpus `json:"items"`
 	NextPageCursor *string  `json:"next_page_cursor,omitempty"`
+}
+
+// CorpusRenameRequest defines model for CorpusRenameRequest.
+type CorpusRenameRequest struct {
+	Name string `json:"name"`
 }
 
 // CorpusRequest defines model for CorpusRequest.
@@ -3601,6 +3608,9 @@ type ListCorporaParams struct {
 
 	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// IncludeArchived Include archived corpora; false by default. Bound into the page cursor.
+	IncludeArchived *bool `form:"include_archived,omitempty" json:"include_archived,omitempty"`
 }
 
 // ListDeliveryAttemptsParams defines parameters for ListDeliveryAttempts.
@@ -3707,6 +3717,9 @@ type ChangeConnectorScheduleJSONRequestBody = ScheduleChange
 
 // CreateCorpusJSONRequestBody defines body for CreateCorpus for application/json ContentType.
 type CreateCorpusJSONRequestBody = CorpusRequest
+
+// RenameCorpusJSONRequestBody defines body for RenameCorpus for application/json ContentType.
+type RenameCorpusJSONRequestBody = CorpusRenameRequest
 
 // RebuildCorpusProjectionJSONRequestBody defines body for RebuildCorpusProjection for application/json ContentType.
 type RebuildCorpusProjectionJSONRequestBody = ActionRequest
@@ -4587,6 +4600,23 @@ type ClientInterface interface {
 	// Read effective resolved configuration.
 	GetCorpus(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RenameCorpusWithBody performs a PATCH /v0/corpora/{corpus_id} (the `RenameCorpus` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+	RenameCorpusWithBody(ctx context.Context, corpusId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RenameCorpus performs a PATCH /v0/corpora/{corpus_id} (the `RenameCorpus` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+	RenameCorpus(ctx context.Context, corpusId string, body RenameCorpusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ArchiveCorpus performs a POST /v0/corpora/{corpus_id}/archive (the `ArchiveCorpus` operationId) request.
+	//
+	// Reversibly hide a corpus from default listings, search, catalog, change feed and connector polling. Keeps canonical data and connector enabled state.
+	ArchiveCorpus(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RebuildCorpusProjectionWithBody performs a POST /v0/corpora/{corpus_id}/rebuilds (the `RebuildCorpusProjection` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -4610,6 +4640,11 @@ type ClientInterface interface {
 	//
 	// Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
 	ConfigureRetrieval(ctx context.Context, corpusId string, body ConfigureRetrievalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UnarchiveCorpus performs a POST /v0/corpora/{corpus_id}/unarchive (the `UnarchiveCorpus` operationId) request.
+	//
+	// Restore an archived corpus and make its retained data visible again.
+	UnarchiveCorpus(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVectorSpaces performs a GET /v0/corpora/{corpus_id}/vector-spaces (the `ListVectorSpaces` operationId) request.
 	//
@@ -5957,6 +5992,53 @@ func (c *Client) GetCorpus(ctx context.Context, corpusId string, reqEditors ...R
 	return c.Client.Do(req)
 }
 
+// RenameCorpusWithBody performs a PATCH /v0/corpora/{corpus_id} (the `RenameCorpus` operationId) request,
+// with any type of body and a specified content type.
+//
+// Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+func (c *Client) RenameCorpusWithBody(ctx context.Context, corpusId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameCorpusRequestWithBody(c.Server, corpusId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RenameCorpus performs a PATCH /v0/corpora/{corpus_id} (the `RenameCorpus` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+func (c *Client) RenameCorpus(ctx context.Context, corpusId string, body RenameCorpusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameCorpusRequest(c.Server, corpusId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ArchiveCorpus performs a POST /v0/corpora/{corpus_id}/archive (the `ArchiveCorpus` operationId) request.
+//
+// Reversibly hide a corpus from default listings, search, catalog, change feed and connector polling. Keeps canonical data and connector enabled state.
+func (c *Client) ArchiveCorpus(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewArchiveCorpusRequest(c.Server, corpusId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // RebuildCorpusProjectionWithBody performs a POST /v0/corpora/{corpus_id}/rebuilds (the `RebuildCorpusProjection` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -6011,6 +6093,21 @@ func (c *Client) ConfigureRetrievalWithBody(ctx context.Context, corpusId string
 // Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
 func (c *Client) ConfigureRetrieval(ctx context.Context, corpusId string, body ConfigureRetrievalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewConfigureRetrievalRequest(c.Server, corpusId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UnarchiveCorpus performs a POST /v0/corpora/{corpus_id}/unarchive (the `UnarchiveCorpus` operationId) request.
+//
+// Restore an archived corpus and make its retained data visible again.
+func (c *Client) UnarchiveCorpus(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnarchiveCorpusRequest(c.Server, corpusId)
 	if err != nil {
 		return nil, err
 	}
@@ -9395,6 +9492,18 @@ func NewListCorporaRequest(server string, params *ListCorporaParams) (*http.Requ
 
 		}
 
+		if params.IncludeArchived != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "include_archived", *params.IncludeArchived, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -9476,6 +9585,87 @@ func NewGetCorpusRequest(server string, corpusId string) (*http.Request, error) 
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRenameCorpusRequest calls the generic RenameCorpus builder with application/json body
+func NewRenameCorpusRequest(server string, corpusId string, body RenameCorpusJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRenameCorpusRequestWithBody(server, corpusId, "application/json", bodyReader)
+}
+
+// NewRenameCorpusRequestWithBody constructs an http.Request for the RenameCorpus method, with any body, and a specified content type
+func NewRenameCorpusRequestWithBody(server string, corpusId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "corpus_id", corpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/corpora/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewArchiveCorpusRequest constructs an http.Request for the ArchiveCorpus method
+func NewArchiveCorpusRequest(server string, corpusId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "corpus_id", corpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/corpora/%s/archive", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -9573,6 +9763,40 @@ func NewConfigureRetrievalRequestWithBody(server string, corpusId string, conten
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewUnarchiveCorpusRequest constructs an http.Request for the UnarchiveCorpus method
+func NewUnarchiveCorpusRequest(server string, corpusId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "corpus_id", corpusId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/corpora/%s/unarchive", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -11952,6 +12176,27 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetCorpusWithResponse(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*GetCorpusResponse, error)
 
+	// RenameCorpusWithBodyWithResponse performs a PATCH /v0/corpora/{corpus_id} (the `RenameCorpus` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RenameCorpusWithBodyWithResponse(ctx context.Context, corpusId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameCorpusResponse, error)
+
+	// RenameCorpusWithResponse performs a PATCH /v0/corpora/{corpus_id} (the `RenameCorpus` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+	RenameCorpusWithResponse(ctx context.Context, corpusId string, body RenameCorpusJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameCorpusResponse, error)
+
+	// ArchiveCorpusWithResponse performs a POST /v0/corpora/{corpus_id}/archive (the `ArchiveCorpus` operationId) request.
+	//
+	// Reversibly hide a corpus from default listings, search, catalog, change feed and connector polling. Keeps canonical data and connector enabled state.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ArchiveCorpusWithResponse(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*ArchiveCorpusResponse, error)
+
 	// RebuildCorpusProjectionWithBodyWithResponse performs a POST /v0/corpora/{corpus_id}/rebuilds (the `RebuildCorpusProjection` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -11979,6 +12224,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Resolve mapping and schedule a new immutable Projection Generation through a retrieval_configuration Operation (202 with Location). Existing active config remains in effect, and is what getCorpus returns, until validated cutover; the Operation reports the pending config's progress and outcome but not its content. A newer accepted config supersedes older pending ones, and a generation pinned to an older config than the effective one fails with retrieval_configuration_superseded instead of reverting it. Same key and canonical request replay the Operation; a changed request is 409 idempotency_conflict. Does not require a separate per-Corpus physical collection.
 	ConfigureRetrievalWithResponse(ctx context.Context, corpusId string, body ConfigureRetrievalJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfigureRetrievalResponse, error)
+
+	// UnarchiveCorpusWithResponse performs a POST /v0/corpora/{corpus_id}/unarchive (the `UnarchiveCorpus` operationId) request.
+	//
+	// Restore an archived corpus and make its retained data visible again.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	UnarchiveCorpusWithResponse(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*UnarchiveCorpusResponse, error)
 
 	// ListVectorSpacesWithResponse performs a GET /v0/corpora/{corpus_id}/vector-spaces (the `ListVectorSpaces` operationId) request.
 	//
@@ -14818,6 +15070,102 @@ func (r GetCorpusResponse) ContentType() string {
 	return ""
 }
 
+type RenameCorpusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Corpus
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RenameCorpusResponse) GetJSON200() *Corpus {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RenameCorpusResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RenameCorpusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RenameCorpusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RenameCorpusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RenameCorpusResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ArchiveCorpusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Corpus
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ArchiveCorpusResponse) GetJSON200() *Corpus {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ArchiveCorpusResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ArchiveCorpusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ArchiveCorpusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ArchiveCorpusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ArchiveCorpusResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // RebuildCorpusProjectionResponse202Headers the declared response headers of an HTTP 202 response for RebuildCorpusProjection
 type RebuildCorpusProjectionResponse202Headers struct {
 	Location *string
@@ -14915,6 +15263,54 @@ func (r ConfigureRetrievalResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ConfigureRetrievalResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UnarchiveCorpusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Corpus
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UnarchiveCorpusResponse) GetJSON200() *Corpus {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r UnarchiveCorpusResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r UnarchiveCorpusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UnarchiveCorpusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UnarchiveCorpusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UnarchiveCorpusResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -17731,6 +18127,45 @@ func (c *ClientWithResponses) GetCorpusWithResponse(ctx context.Context, corpusI
 	return ParseGetCorpusResponse(rsp)
 }
 
+// RenameCorpusWithBodyWithResponse performs a PATCH /v0/corpora/{corpus_id} (the `RenameCorpus` operationId) request,
+// with any type of body and a specified content type.
+//
+// Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RenameCorpusWithBodyWithResponse(ctx context.Context, corpusId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameCorpusResponse, error) {
+	rsp, err := c.RenameCorpusWithBody(ctx, corpusId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameCorpusResponse(rsp)
+}
+
+// RenameCorpusWithResponse performs a PATCH /v0/corpora/{corpus_id} (the `RenameCorpus` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Rename an authorized corpus. Does not change its identity or content. Requires a separate administrative grant.
+func (c *ClientWithResponses) RenameCorpusWithResponse(ctx context.Context, corpusId string, body RenameCorpusJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameCorpusResponse, error) {
+	rsp, err := c.RenameCorpus(ctx, corpusId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameCorpusResponse(rsp)
+}
+
+// ArchiveCorpusWithResponse performs a POST /v0/corpora/{corpus_id}/archive (the `ArchiveCorpus` operationId) request.
+//
+// Reversibly hide a corpus from default listings, search, catalog, change feed and connector polling. Keeps canonical data and connector enabled state.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ArchiveCorpusWithResponse(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*ArchiveCorpusResponse, error) {
+	rsp, err := c.ArchiveCorpus(ctx, corpusId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseArchiveCorpusResponse(rsp)
+}
+
 // RebuildCorpusProjectionWithBodyWithResponse performs a POST /v0/corpora/{corpus_id}/rebuilds (the `RebuildCorpusProjection` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -17781,6 +18216,19 @@ func (c *ClientWithResponses) ConfigureRetrievalWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseConfigureRetrievalResponse(rsp)
+}
+
+// UnarchiveCorpusWithResponse performs a POST /v0/corpora/{corpus_id}/unarchive (the `UnarchiveCorpus` operationId) request.
+//
+// Restore an archived corpus and make its retained data visible again.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) UnarchiveCorpusWithResponse(ctx context.Context, corpusId string, reqEditors ...RequestEditorFn) (*UnarchiveCorpusResponse, error) {
+	rsp, err := c.UnarchiveCorpus(ctx, corpusId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnarchiveCorpusResponse(rsp)
 }
 
 // ListVectorSpacesWithResponse performs a GET /v0/corpora/{corpus_id}/vector-spaces (the `ListVectorSpaces` operationId) request.
@@ -20308,6 +20756,72 @@ func ParseGetCorpusResponse(rsp *http.Response) (*GetCorpusResponse, error) {
 	return response, nil
 }
 
+// ParseRenameCorpusResponse parses an HTTP response from a RenameCorpusWithResponse call
+func ParseRenameCorpusResponse(rsp *http.Response) (*RenameCorpusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RenameCorpusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Corpus
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseArchiveCorpusResponse parses an HTTP response from a ArchiveCorpusWithResponse call
+func ParseArchiveCorpusResponse(rsp *http.Response) (*ArchiveCorpusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ArchiveCorpusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Corpus
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRebuildCorpusProjectionResponse parses an HTTP response from a RebuildCorpusProjectionWithResponse call
 func ParseRebuildCorpusProjectionResponse(rsp *http.Response) (*RebuildCorpusProjectionResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -20374,6 +20888,39 @@ func ParseConfigureRetrievalResponse(rsp *http.Response) (*ConfigureRetrievalRes
 			return nil, err
 		}
 		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUnarchiveCorpusResponse parses an HTTP response from a UnarchiveCorpusWithResponse call
+func ParseUnarchiveCorpusResponse(rsp *http.Response) (*UnarchiveCorpusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UnarchiveCorpusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Corpus
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
