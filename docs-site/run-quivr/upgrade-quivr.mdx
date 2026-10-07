@@ -26,6 +26,12 @@ Corpus to enable item keyword fields and range-indexed dates; a successful
 rebuild activates the new recipe. New Corpora use it immediately. Lexical and
 hybrid searches across both recipes combine their reciprocal ranks before
 applying the result limit, because their keyword scores use different populations.
+Drain every previous API and worker instance before creating new Corpora,
+writing content or starting rebuilds or retrieval configuration changes that
+target the new recipe. Previous binaries cannot populate item keyword anchors,
+even though they can continue serving historical generations.
+Use your platform's rollout status to confirm that every old API and worker
+process has stopped before enabling those writes.
 
 ## Check it worked
 

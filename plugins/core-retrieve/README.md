@@ -14,7 +14,7 @@ Up to two rounds of candidates, then the ranking:
   search whose Corpora serve no vector space is refused (422
   `unsupported_search`).
 - **Ranking** merges candidates by descending index score and keeps each
-  Record once across served spaces, with its strongest passage and an explanation
+  Record once across served spaces, with its best available passage and an explanation
   naming the primitive and space. Equal scores rank by segment id.
 
 It makes no model call: the engine encodes the query with the owner of the
@@ -48,6 +48,8 @@ for a deployment example, trial mapping and Jev shortlist settings.
 New/rebuilt generations index keyword fields once per Version and fuse item
 BM25 with maximum passage-vector scores. Legacy generations keep their keyword
 recipe until rebuild. Candidates are hydrated and checked for currentness and access.
+Individual keyword and vector candidate queries request at most 2,400 objects.
+Lexical highlights inspect up to 2,400 canonical passages per field mapping; longer documents may have a better unseen passage.
 The retrieval baseline (`make measure`) records hits of 24 CC0 queries and edge
 cases in all three modes. Score ties may differ between installations because segment ids derive from the Corpus.
 

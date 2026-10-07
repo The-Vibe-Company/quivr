@@ -211,7 +211,7 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 			return "", err
 		}
 		values := []string{equal("corpusId", r.CorpusID), equal("generationId", r.Generation.ID)}
-		if kind == "passage" {
+		if kind != "item" {
 			values = append(values, projectionOwnerFilter(r.Generation, q.EvaluationPlugin))
 		}
 		for _, f := range typed {
@@ -222,7 +222,13 @@ func (s *Store) itemWhere(ctx context.Context, routes []retrieval.Route, scope c
 	if len(clauses) == 0 {
 		return "", nil
 	}
-	all := []string{equal("organization", scope.Organization), equal(itemKind, kind), or(clauses...)}
+	kinds := equal(itemKind, kind)
+	if kind == "vector" {
+		// Include earlier enriched objects with the passage kind; nearVector
+		// only scores objects carrying this target vector.
+		kinds = or(kinds, equal(itemKind, "passage"))
+	}
+	all := []string{equal("organization", scope.Organization), kinds, or(clauses...)}
 	if len(q.SourceNamespaces) > 0 {
 		var namespaces []string
 		for _, v := range q.SourceNamespaces {
@@ -270,9 +276,11 @@ func termCoverage(text, query string) int {
 		words[w] = true
 	}
 	score := 0
+	seen := map[string]bool{}
 	for _, t := range terms {
-		if words[t] {
+		if words[t] && !seen[t] {
 			score++
+			seen[t] = true
 		}
 	}
 	return score
@@ -284,7 +292,7 @@ func termCoverage(text, query string) int {
 func (s *Store) itemPassages(ctx context.Context, collection, where, query string, limit, items int, grouped bool) ([]itemRow, error) {
 	const ceiling = 2400
 	page := min(128, max(8, 8*limit))
-	terms := len(strings.Fields(content.AnalyzeKeywords(query, "french_light")))
+	terms := termCoverage(query, query)
 	best := map[string]int{}
 	var rows []itemRow
 	for offset := 0; offset < ceiling; offset += page {
@@ -360,88 +368,97 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 				continue
 			}
 			items := map[string]content.Candidate{}
-			for _, normalized := range []bool{false, true} {
-				var props []string
-				for _, f := range p.fields {
-					property := itemProperty(f)
-					if normalized {
-						if f.Analyzer == "" {
-							continue
+			// An ownerless item may not yet have passages from the selected
+			// ingestion owner. Refill before allowing it to consume the page.
+			for depth := limit; ; depth = min(2400, depth*2) {
+				more := false
+				for _, normalized := range []bool{false, true} {
+					var props []string
+					for _, f := range p.fields {
+						property := itemProperty(f)
+						if normalized {
+							if f.Analyzer == "" {
+								continue
+							}
+							property += "_fr"
 						}
-						property += "_fr"
+						props = append(props, property+"^"+strconv.Itoa(f.EffectiveBoost()))
 					}
-					props = append(props, property+"^"+strconv.Itoa(f.EffectiveBoost()))
+					if len(props) == 0 {
+						continue
+					}
+					query := q.Query
+					if normalized {
+						query = content.AnalyzeKeywords(query, "french_light")
+					}
+					if strings.TrimSpace(query) == "" {
+						continue
+					}
+					encoded, _ := json.Marshal(props)
+					rows, err := s.itemQuery(ctx, collection, fmt.Sprintf("bm25:{query:%s,properties:%s},", quote(query), encoded), where, depth, false)
+					if err != nil {
+						return nil, err
+					}
+					more = more || len(rows) == depth
+					for _, r := range rows {
+						c := r.candidate(false)
+						keepBest(items, c, true)
+					}
 				}
-				if len(props) == 0 {
-					continue
+				if len(items) == 0 {
+					break
 				}
-				query := q.Query
-				if normalized {
-					query = content.AnalyzeKeywords(query, "french_light")
-				}
-				if strings.TrimSpace(query) == "" {
-					continue
-				}
-				encoded, _ := json.Marshal(props)
-				rows, err := s.itemQuery(ctx, collection, fmt.Sprintf("bm25:{query:%s,properties:%s},", quote(query), encoded), where, limit, false)
+				passageWhere, err := s.itemWhere(ctx, p.routes, scope, q, "passage")
 				if err != nil {
 					return nil, err
 				}
+				var ids []string
+				for _, c := range ordered(items) {
+					ids = append(ids, equal("versionId", c.VersionID))
+				}
+				rows, err := s.itemPassages(ctx, collection, and(passageWhere, or(ids...)), q.Query, limit, len(items), grouped)
+				if err != nil {
+					return nil, err
+				}
+				// Passage selection uses lexical term coverage with deterministic ties;
+				// every returned ID is subsequently hydrated from canonical storage.
+				coverage := map[string]int{}
 				for _, r := range rows {
+					coverage[r.SegmentID] = termCoverage(r.Text, q.Query)
+				}
+				sort.Slice(rows, func(i, j int) bool {
+					a, b := coverage[rows[i].SegmentID], coverage[rows[j].SegmentID]
+					if a != b {
+						return a > b
+					}
+					return rows[i].SegmentID < rows[j].SegmentID
+				})
+				chosen := map[string]bool{}
+				for _, r := range rows {
+					item, ok := items[r.GenerationID+"/"+r.VersionID]
+					if !ok || r.SegmentID == "" {
+						continue
+					}
 					c := r.candidate(false)
-					keepBest(items, c, true)
+					c.Score = item.Score
+					id := candidateKey(c, grouped)
+					if grouped && chosen[id] {
+						continue
+					}
+					chosen[id] = true
+					// Preserve the selected passage on equal original/French scores.
+					if prev, ok := sparse[id]; !ok || c.Score > prev.Score {
+						sparse[id] = c
+					}
 				}
-			}
-			if len(items) == 0 {
-				continue
-			}
-			passageWhere, err := s.itemWhere(ctx, p.routes, scope, q, "passage")
-			if err != nil {
-				return nil, err
-			}
-			var ids []string
-			for _, c := range ordered(items) {
-				ids = append(ids, equal("versionId", c.VersionID))
-			}
-			rows, err := s.itemPassages(ctx, collection, and(passageWhere, or(ids...)), q.Query, limit, len(items), grouped)
-			if err != nil {
-				return nil, err
-			}
-			// Passage selection uses lexical term coverage with deterministic ties;
-			// every returned ID is subsequently hydrated from canonical storage.
-			coverage := map[string]int{}
-			for _, r := range rows {
-				coverage[r.SegmentID] = termCoverage(r.Text, q.Query)
-			}
-			sort.Slice(rows, func(i, j int) bool {
-				a, b := coverage[rows[i].SegmentID], coverage[rows[j].SegmentID]
-				if a != b {
-					return a > b
-				}
-				return rows[i].SegmentID < rows[j].SegmentID
-			})
-			chosen := map[string]bool{}
-			for _, r := range rows {
-				item, ok := items[r.GenerationID+"/"+r.VersionID]
-				if !ok || r.SegmentID == "" {
-					continue
-				}
-				c := r.candidate(false)
-				c.Score = item.Score
-				id := candidateKey(c, grouped)
-				if grouped && chosen[id] {
-					continue
-				}
-				chosen[id] = true
-				// Preserve the selected passage on equal original/French scores.
-				if prev, ok := sparse[id]; !ok || c.Score > prev.Score {
-					sparse[id] = c
+				if len(chosen) >= limit || !more || depth >= 2400 {
+					break
 				}
 			}
 		}
 	}
 	if q.Mode != "lexical" {
-		where, err := s.itemWhere(ctx, routes, scope, q, "passage")
+		where, err := s.itemWhere(ctx, routes, scope, q, "vector")
 		if err != nil {
 			return nil, err
 		}

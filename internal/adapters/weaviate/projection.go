@@ -683,6 +683,9 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 					lexical[key] = value
 				}
 			}
+			if g.ItemKeywordsProjected {
+				lexical[itemKind] = "vector"
+			}
 			for key, value := range anchor.Properties {
 				if strings.HasPrefix(key, "m_") {
 					lexical[key] = value

@@ -109,6 +109,7 @@ func TestFrenchLightKeywordCopy(t *testing.T) {
 		{"chevaux cheval", "cheval cheval"},
 		{"actrices acteurs", "acteu acteu"},
 		{"LE port et la mer", "port mer"},
+		{"cœur coeur ŒUVRES oeuvres", "coeu coeu oeuvr oeuvr"},
 	} {
 		if got := content.AnalyzeKeywords(tc.in, "french_light"); got != tc.want {
 			t.Errorf("%q: %q, want %q", tc.in, got, tc.want)

@@ -65,12 +65,13 @@ func AnalyzeKeywords(text, analyzer string) string {
 	if analyzer != "french_light" {
 		return text
 	}
+	text = strings.NewReplacer("œ", "oe", "æ", "ae").Replace(strings.ToLower(text))
 	folded := strings.Map(func(r rune) rune {
 		if unicode.Is(unicode.Mn, r) {
 			return -1
 		}
 		return r
-	}, norm.NFD.String(strings.ToLower(text)))
+	}, norm.NFD.String(text))
 	words := strings.FieldsFunc(folded, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
 	out := words[:0]
 	for _, word := range words {

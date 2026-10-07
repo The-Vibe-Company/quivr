@@ -263,7 +263,7 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		seen := map[string]bool{}
 		for _, id := range ids {
-			if id == "" || len(id) > 200 || seen[id] {
+			if id == "" || utf8.RuneCountInString(id) > 200 || seen[id] {
 				return out, publicerr.InvalidQuery
 			}
 			seen[id] = true

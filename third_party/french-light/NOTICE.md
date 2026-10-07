@@ -9,6 +9,18 @@ French stopword list. It is used only for configured keyword copies. Original
 content and vector input are preserved.
 
 The Apache-2.0 license is in [LICENSE.apache-2.0](LICENSE.apache-2.0).
+The relevant attribution from the pinned [Lucene NOTICE](https://github.com/apache/lucene/blob/1f4da953f0c13b9b5a3a38dfcfc3c7b6a5a2f6cd/NOTICE.txt) is:
+
+```text
+Apache Lucene
+Copyright 2001-2025 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+```
+
+Lucene also attributes its light stemmers to the BSD reference implementations
+by Jacques Savoy and Ljiljana Dolamic. The French source retains Savoy's notice below.
 The upstream source additionally retains the following Savoy copyright and
 BSD notice. Distributions of the compiled engine must include both notices.
 

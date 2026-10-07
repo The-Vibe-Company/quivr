@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // Field is one logical, typed source-field retrieval mapping. SourcePointer is
@@ -114,7 +115,7 @@ func validField(f Field, declared func(string) bool) bool {
 		return false
 	}
 	if f.PartRole != "" {
-		return f.SourcePointer == "" && f.ValuePointer == "" && f.Searchable() && (f.PartRole == "title" || f.PartRole == "body" || f.PartRole == "caption" || f.PartRole == "transcript") && len(f.PartKeyPrefix) <= 200
+		return f.SourcePointer == "" && f.ValuePointer == "" && f.Searchable() && (f.PartRole == "title" || f.PartRole == "body" || f.PartRole == "caption" || f.PartRole == "transcript") && utf8.RuneCountInString(f.PartKeyPrefix) <= 200
 	}
 	if f.PartKeyPrefix != "" {
 		return false

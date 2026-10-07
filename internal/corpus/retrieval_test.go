@@ -3,6 +3,7 @@ package corpus_test
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -94,6 +95,13 @@ func TestResolveRetrievalAcceptsTypedFieldsAndProfileOverrides(t *testing.T) {
 
 // Owns literal configuration keys and omitted-option compatibility for item fields.
 func TestItemFieldConfiguration(t *testing.T) {
+	for _, n := range []int{200, 201} {
+		body := `{"fields":[{"name":"body","part_role":"body","part_key_prefix":"` + strings.Repeat("é", n) + `","type":"string","roles":["search"]}]}`
+		_, err := corpus.ResolveRetrieval(raw(t, body), declared)
+		if (err == nil) != (n == 200) {
+			t.Fatalf("Unicode prefix length %d: %v", n, err)
+		}
+	}
 	for _, tc := range []struct {
 		body  string
 		valid bool

@@ -137,13 +137,39 @@ func TestItemHybridKeepsBestPassage(t *testing.T) {
 		seg.Segments = append(seg.Segments, content.Segment{ID: fmt.Sprintf("filler-%02d", i), PartKey: "body", Text: "harbour"})
 	}
 	seg.Segments = append(seg.Segments, content.Segment{ID: "zz-best", PartKey: "body", Text: "harbour ferries"})
-	v := content.Version{ID: seg.VersionID, RecordID: "record", Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: strings.Repeat("harbour\n", 32) + "harbour ferries"}}}}}
+	seg.Segments = append(seg.Segments, content.Segment{ID: "zz-coverage", PartKey: "body", Text: "ferries boat water"})
+	v := content.Version{ID: seg.VersionID, RecordID: "record", Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: strings.Repeat("harbour\n", 32) + "harbour ferries\nferries boat water"}}}}}
 	if err := f.store.Publish(f.ctx, g, f.org, f.corpusID, "feed", v, seg); err != nil {
 		t.Fatal(err)
 	}
 	query := unitVector(1)
 	if err := f.store.PublishEmbeddings(f.ctx, g, f.org, []content.EmbeddingData{f.embedding(g, "low", unitVector(2)), f.embedding(g, "zz-best", query), f.embedding(g, "other", unitVector(3))}); err != nil {
 		t.Fatal(err)
+	}
+	// The lexical scan budget counts canonical passages even after vectors
+	// are attached: enriched physical copies must not occupy those slots.
+	queryJSON, _ := json.Marshal(map[string]string{"query": fmt.Sprintf(`{Get{%s(where:{operator:And,operands:[{path:["organization"],operator:Equal,valueText:%q},{path:["generationId"],operator:Equal,valueText:%q},{path:["itemKind"],operator:Equal,valueText:"passage"}]},limit:100){segmentId}}}`, g.Collection, f.org, g.ID)})
+	req, err := http.NewRequestWithContext(f.ctx, http.MethodPost, f.url+"/v1/graphql", strings.NewReader(string(queryJSON)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := f.store.Client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scan struct {
+		Data struct {
+			Get map[string][]struct {
+				SegmentID string `json:"segmentId"`
+			} `json:"Get"`
+		} `json:"data"`
+		Errors []any `json:"errors"`
+	}
+	err = json.NewDecoder(res.Body).Decode(&scan)
+	res.Body.Close()
+	if err != nil || len(scan.Errors) != 0 || len(scan.Data.Get[g.Collection]) != len(seg.Segments) {
+		t.Fatalf("lexical passage population after enrichment: %+v %v", scan, err)
 	}
 	for _, mode := range []string{"semantic", "hybrid"} {
 		hits, err := f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "harbour", Mode: mode, Vector: query, GroupBy: "record", K: 10})
@@ -157,6 +183,10 @@ func TestItemHybridKeepsBestPassage(t *testing.T) {
 	hits, err := f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "ferries", Mode: "lexical", GroupBy: "record", K: 1})
 	if err != nil || len(hits) != 1 || hits[0].SegmentID != "zz-best" {
 		t.Fatalf("lexical highlight %+v %v", hits, err)
+	}
+	hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "harbour harbour harbour ferries boat water", Mode: "lexical", GroupBy: "record", K: 1})
+	if err != nil || len(hits) != 1 || hits[0].SegmentID != "zz-coverage" {
+		t.Fatalf("distinct query-term highlight %+v %v", hits, err)
 	}
 }
 
@@ -244,5 +274,26 @@ func TestItemIndexedMetadataAndIdentityFilters(t *testing.T) {
 	}
 	if dates == 0 {
 		t.Fatal("publication date index missing")
+	}
+	// Shared keyword anchors stay ownerless. Higher-scoring anchors from
+	// another owner must not consume an evaluation owner's candidate window.
+	for _, owner := range []string{"served.owner", "trial.owner"} {
+		body, title := "other", "ownerterm"
+		if owner == "trial.owner" {
+			body, title = "ownerterm", "other"
+		}
+		seg := f.segmentation(owner, body)
+		seg.Recipe = "plugin:" + owner + "@1.0.0"
+		v := content.Version{ID: seg.VersionID, RecordID: "record-" + owner, Manifest: content.Manifest{Parts: []content.Part{{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: title}}, {Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: body}}}}}
+		if err := f.store.Publish(f.ctx, g, f.org, f.corpusID, "owner-feed", v, seg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, mode := range []string{"lexical", "hybrid"} {
+		q := retrieval.Request{Query: "ownerterm", Mode: mode, Vector: vector, K: 1, GroupBy: "record", SourceNamespaces: []string{"owner-feed"}, EvaluationPlugin: "trial.owner", Hybrid: &retrieval.HybridOptions{Alpha: 0, Fusion: retrieval.FusionRelativeScore}}
+		hits, err := f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, q)
+		if err != nil || len(hits) != 1 || hits[0].SegmentID != "trial.owner" {
+			t.Fatalf("%s owner-eligible item refill: %+v %v", mode, hits, err)
+		}
 	}
 }

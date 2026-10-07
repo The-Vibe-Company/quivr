@@ -41,8 +41,9 @@ type DefaultMove struct {
 // it is rebuilt. That default is then marked former, and a new default in the
 // same collection and profile, carrying the registry's spaces, takes over.
 // No existing Corpus changes generation, so in-flight work keeps the one it
-// read. A default that already matches, or a database with no default or no
-// served space yet, is left as it is. It runs after RegisterSpaces, in
+// read. A default that already matches, or a database with no default, is left
+// as it is. Missing projection capabilities rotate the default even before a
+// served space is registered, retaining its prior spaces. It runs after RegisterSpaces, in
 // migrate and at api and worker startup.
 func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMove, error) {
 	var move DefaultMove

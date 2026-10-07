@@ -163,11 +163,11 @@ func TestSearchesEveryServedSpaceAndDeduplicatesHits(t *testing.T) {
 	req.Round = 2
 	req.Served = []quivrplugin.ServedRequest{
 		{Request: answer.Requests[0], Candidates: []quivrplugin.Candidate{{SegmentID: "text", RecordID: "a", Score: .9}, {SegmentID: "other-passage", RecordID: "a", Score: .1}}},
-		{Request: answer.Requests[1], Candidates: []quivrplugin.Candidate{{SegmentID: "pdf", RecordID: "b", Score: .8}, {SegmentID: "another-pdf", RecordID: "b", Score: .2}}},
+		{Request: answer.Requests[1], Candidates: []quivrplugin.Candidate{{SegmentID: "pdf", RecordID: "b", Score: .8}, {SegmentID: "another-pdf", RecordID: "b", Score: .2}, {SegmentID: "cross-space", RecordID: "a", Score: .95}}},
 	}
 	answer, err = (retriever{}).Search(t.Context(), req)
-	if err != nil || len(answer.Ranking) != 2 || answer.Ranking[0].SegmentID != "text" || answer.Ranking[1].SegmentID != "pdf" || answer.Ranking[1].Score != .8 {
-		t.Fatalf("ranking = %+v (%v), want each segment once with its best score", answer, err)
+	if err != nil || len(answer.Ranking) != 2 || answer.Ranking[0].SegmentID != "cross-space" || answer.Ranking[0].Score != .95 || answer.Ranking[1].SegmentID != "pdf" || answer.Ranking[1].Score != .8 {
+		t.Fatalf("ranking = %+v (%v), want each Record once with its best passage across spaces", answer, err)
 	}
 	if answer.Ranking[1].Explanation != "keywords and vectors in pdf@1, alpha 0.7, ranked fusion (RRF)" {
 		t.Fatalf("explanation = %q, want configured weight and fusion", answer.Ranking[1].Explanation)

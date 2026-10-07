@@ -55,11 +55,14 @@ func TestSearchIdentityFilterWireContract(t *testing.T) {
 	for _, tc := range []struct {
 		filter string
 		status int
+		record string
 	}{
-		{`{"record_ids":["record-a"],"version_ids":["version-a"]}`, 200},
-		{`{"record_ids":[]}`, 422},
-		{`{"version_ids":["version-a","version-a"]}`, 422},
-		{`{"record_ids":[7]}`, 422},
+		{`{"record_ids":["record-a"],"version_ids":["version-a"]}`, 200, "record-a"},
+		{`{"record_ids":["` + strings.Repeat("é", 200) + `"],"version_ids":["version-a"]}`, 200, strings.Repeat("é", 200)},
+		{`{"record_ids":["` + strings.Repeat("é", 201) + `"]}`, 422, ""},
+		{`{"record_ids":[]}`, 422, ""},
+		{`{"version_ids":["version-a","version-a"]}`, 422, ""},
+		{`{"record_ids":[7]}`, 422, ""},
 	} {
 		r := httptest.NewRequest(http.MethodPost, "/v0/search", strings.NewReader(`{"query":"harbour","corpus_ids":["corpus_a"],"mode":"lexical","filter":`+tc.filter+`}`))
 		r.Header.Set("Authorization", "Bearer "+observer)
@@ -69,7 +72,7 @@ func TestSearchIdentityFilterWireContract(t *testing.T) {
 		if w.Code != tc.status {
 			t.Fatalf("%s: %d %s", tc.filter, w.Code, w.Body.String())
 		}
-		if tc.status == 200 && (!reflect.DeepEqual(s.query.RecordIDs, []string{"record-a"}) || !reflect.DeepEqual(s.query.VersionIDs, []string{"version-a"})) {
+		if tc.status == 200 && (!reflect.DeepEqual(s.query.RecordIDs, []string{tc.record}) || !reflect.DeepEqual(s.query.VersionIDs, []string{"version-a"})) {
 			t.Fatalf("identity filters lost: %+v", s.query)
 		}
 	}
