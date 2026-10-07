@@ -39,7 +39,7 @@ func claimRequest(ctx context.Context, tx pgx.Tx, org, family, key string, canon
 // rolls the claim back with it. It returns the claimed resource ID.
 func (s MonitoringStore) monitoringCommand(ctx context.Context, org, family, key string, canonical any, resourceID string, apply func(pgx.Tx) error) (string, error) {
 	var result0 string
-	err := retryJournalWrite(ctx, "monitoringCommand", func(ctx context.Context) error {
+	err := retryJournalWrite(ctx, "monitoringCommand:"+family, func(ctx context.Context) error {
 		var err error
 		result0, err = s.monitoringCommandAttempt(ctx, org, family, key, canonical, resourceID, apply)
 		return err

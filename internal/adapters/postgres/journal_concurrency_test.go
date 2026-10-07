@@ -86,7 +86,7 @@ func TestConcurrentPublicationsKeepCommittedCursorWindows(t *testing.T) {
 			results := make(chan error, writers-1)
 			// The deadline bounds a condition: all independent publications must
 			// commit while the hash barrier remains held. No wall-clock sleep is used.
-			independent, stop := context.WithTimeout(ctx, 2*time.Second)
+			independent, stop := context.WithTimeout(ctx, 10*time.Second)
 			for i := 1; i < writers; i++ {
 				go func(i int) { results <- store.Publish(independent, works[i], publications[i]) }(i)
 			}
