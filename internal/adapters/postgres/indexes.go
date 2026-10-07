@@ -20,15 +20,20 @@ var concurrentIndexes = []struct {
 	Predicate   string
 }{
 	{Name: "segments_by_segmentation", Table: "segments", Columns: []string{"organization", "segmentation_id"}},
+	{Name: "records_by_current_version", Table: "records", Columns: []string{"organization", "corpus_id", "current_version_id"}},
 }
 
 // Index setup errors let the CLI report operator actions without logging raw
 // database diagnostics, which can contain deployment credentials or data.
 var (
-	ErrIndexSetup    = errors.New("concurrent index setup failed; rerun migrate to resume")
-	ErrIndexBusy     = errors.New("another database setup is running; rerun migrate after it finishes")
+	ErrIndexSetup    = errors.New("concurrent index setup failed; background maintenance will retry")
+	ErrIndexBusy     = errors.New("another database setup is running")
 	ErrIndexConflict = errors.New("concurrent index definition conflicts with an existing object")
 )
+
+// Reserved independently of schema migrations: a build waiting for an older
+// writer must not prevent another process from applying required migrations.
+const indexAdvisoryLock int64 = 642004
 
 // EnsureIndexes runs resumable index work after schema migrations commit. Each
 // build preserves concurrent writes, reuses a matching valid index, and repairs
@@ -52,13 +57,13 @@ func EnsureIndexes(ctx context.Context, pool *pgxpool.Pool) (err error) {
 		defer cancel()
 		conn.Close(cleanup)
 	}()
-	if _, err := conn.Exec(ctx, "SET lock_timeout = '2s'; SET statement_timeout = '30min'"); err != nil {
+	if _, err := conn.Exec(ctx, "SET lock_timeout = '0'; SET statement_timeout = '30min'"); err != nil {
 		return err
 	}
 	var locked bool
-	// Share the SQL migrator's lock identity, but fail promptly instead of
-	// waiting behind another installer for the duration of its index work.
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", migrationAdvisoryLock).Scan(&locked); err != nil {
+	// Only one live process maintains indexes. Other processes retry promptly
+	// instead of waiting on this session for the duration of its index work.
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", indexAdvisoryLock).Scan(&locked); err != nil {
 		return err
 	}
 	if !locked {
@@ -88,7 +93,7 @@ LEFT JOIN pg_am am ON am.oid=c.relam WHERE c.oid=to_regclass($1)`,
 		}
 		if err == nil {
 			if !matches {
-				return fmt.Errorf("index %s has an incompatible definition; inspect and rename the conflicting object before rerunning migrate: %w", index.Name, ErrIndexConflict)
+				return fmt.Errorf("index %s has an incompatible definition; inspect and rename the conflicting object: %w", index.Name, ErrIndexConflict)
 			}
 			if valid {
 				continue
@@ -107,7 +112,7 @@ LEFT JOIN pg_am am ON am.oid=c.relam WHERE c.oid=to_regclass($1)`,
 			sql += " WHERE " + index.Predicate
 		}
 		if _, err := conn.Exec(ctx, sql); err != nil {
-			return fmt.Errorf("build index %s; rerun migrate to resume: %w", index.Name, err)
+			return fmt.Errorf("build index %s: %w", index.Name, err)
 		}
 		if valid, matches, err := state(); err != nil || !valid || !matches {
 			return fmt.Errorf("index %s did not become valid with the expected definition (valid=%t, matches=%t): %v", index.Name, valid, matches, err)

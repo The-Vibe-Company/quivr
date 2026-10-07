@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -71,7 +72,11 @@ func run() error {
 	if !ok || space.Dimensions != c.Dimensions || space.Model != c.Model || space.Metric != c.Metric {
 		return fmt.Errorf("manifest space differs from configuration; regenerate it")
 	}
-	if err := p.Ingestion(newIngester(c, os.Getenv("AZURE_FOUNDRY_KEY"), logger)); err != nil {
+	ingester := newIngester(c, os.Getenv("AZURE_FOUNDRY_KEY"), logger)
+	if err := ingester.localQueries(context.Background(), os.Getenv("QUIVR_HOSTED_QUERY_URL")); err != nil {
+		return err
+	}
+	if err := p.Ingestion(ingester); err != nil {
 		return err
 	}
 	return p.Serve()

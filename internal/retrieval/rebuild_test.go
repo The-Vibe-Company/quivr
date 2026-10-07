@@ -31,6 +31,7 @@ type fakeRebuildStore struct {
 	// cancelBeforeActivate requests cancellation just before activation commits.
 	cancelBeforeActivate bool
 	confirms             int
+	checkpoints          int
 }
 
 func (f *fakeRebuildStore) current() string {
@@ -71,6 +72,15 @@ func (f *fakeRebuildStore) RebuildCandidates(_ context.Context, _, _ string, lim
 		}
 	}
 	return out, nil
+}
+func (f *fakeRebuildStore) CheckpointRebuild(context.Context, string, string, string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.current() != operations.StateRunning {
+		return operations.ErrNotRunning
+	}
+	f.checkpoints++
+	return nil
 }
 func (f *fakeRebuildStore) CoverRebuild(_ context.Context, _, _ string, seg content.Segmentation, artifacts []content.Embedding) (bool, error) {
 	f.mu.Lock()
@@ -345,7 +355,7 @@ func TestRebuildFailsWhenHeadCandidateCannotBeHydrated(t *testing.T) {
 func TestRebuildFailsWhenSuccessfulCoverageLeavesTheSameGap(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}}, covered: map[string][]content.Embedding{}, gap: true}
 	run(t, rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{}))
-	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "rebuild_no_progress" {
+	if store.activated || len(store.failed) != 1 || store.failed[0].Code != "rebuild_no_progress" || store.checkpoints != 0 {
 		t.Fatalf("activated=%v failed=%v", store.activated, store.failed)
 	}
 }
@@ -421,7 +431,7 @@ func TestRebuildPluginFailures(t *testing.T) {
 	store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1"}}, covered: map[string][]content.Embedding{}}
 	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
 	r.Plugin = &fakeDeriver{err: errors.New("plugin unavailable")}
-	if _, err := r.Step(context.Background(), "org", "op"); err == nil || len(store.failed) != 0 {
+	if _, err := r.Step(context.Background(), "org", "op"); err == nil || len(store.failed) != 0 || store.checkpoints != 0 {
 		t.Fatalf("outage: err=%v failed=%v", err, store.failed)
 	}
 }
@@ -483,37 +493,42 @@ func (d *gatedRebuildDeriver) Derive(ctx context.Context, org, corpusID string, 
 	return d.fakeDeriver.Derive(ctx, org, corpusID, v, g)
 }
 func TestRebuildCoversVersionsConcurrentlyWithinTheLimit(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	store := &fakeRebuildStore{covered: map[string][]content.Embedding{}}
-	for i := range 9 {
-		store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: fmt.Sprint(i), VectorsRequired: true})
-	}
-	release := make(chan struct{})
-	d := &gatedRebuildDeriver{entered: make(chan string, 9), release: release}
-	r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
-	r.Plugin, r.Concurrency = d, 3
-	finished := make(chan error, 1)
-	go func() { _, err := r.Step(ctx, "org", "op"); finished <- err }()
-	for range 3 {
-		select {
-		case <-d.entered:
-		case <-ctx.Done():
-			t.Fatal("three embedding calls did not overlap")
-		}
-	}
-	select {
-	case id := <-d.entered:
-		t.Errorf("Version %s exceeded concurrency 3", id)
-	default:
-	}
-	close(release)
-	if err := <-finished; err != nil {
-		t.Fatal(err)
-	}
-	run(t, r)
-	if !store.activated || len(store.covered) != 9 || d.derived != 9 {
-		t.Fatalf("activated=%v coverage=%d embedding calls=%d", store.activated, len(store.covered), d.derived)
+	for _, concurrency := range []int{3, 32} {
+		t.Run(fmt.Sprint(concurrency), func(t *testing.T) {
+			versions := concurrency * 3
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			store := &fakeRebuildStore{covered: map[string][]content.Embedding{}}
+			for i := range versions {
+				store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: fmt.Sprint(i), VectorsRequired: true})
+			}
+			release := make(chan struct{})
+			d := &gatedRebuildDeriver{entered: make(chan string, versions), release: release}
+			r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
+			r.Plugin, r.Concurrency = d, concurrency
+			finished := make(chan error, 1)
+			go func() { _, err := r.Step(ctx, "org", "op"); finished <- err }()
+			for range concurrency {
+				select {
+				case <-d.entered:
+				case <-ctx.Done():
+					t.Fatalf("%d embedding calls did not overlap", concurrency)
+				}
+			}
+			select {
+			case id := <-d.entered:
+				t.Errorf("Version %s exceeded configured concurrency", id)
+			default:
+			}
+			close(release)
+			if err := <-finished; err != nil {
+				t.Fatal(err)
+			}
+			run(t, r)
+			if !store.activated || len(store.covered) != versions || d.derived != versions {
+				t.Fatalf("activated=%v coverage=%d embedding calls=%d", store.activated, len(store.covered), d.derived)
+			}
+		})
 	}
 }
 
@@ -634,7 +649,7 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 					t.Fatalf("retry err=%v failures=%v, want %v", err, store.failed, want)
 				}
 			}
-			if len(d.entered) != 0 || len(store.covered) != 0 || store.activated {
+			if len(d.entered) != 0 || len(store.covered) != 0 || store.activated || store.checkpoints != 0 {
 				t.Fatalf("remaining calls=%d covered=%v activated=%v", len(d.entered), store.covered, store.activated)
 			}
 		})

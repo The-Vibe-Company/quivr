@@ -15,13 +15,14 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Database bootstrap owns concurrent index setup: schema migration alone cannot
-// build an index on a large existing table within its five-second SQL budget.
-func TestDatabaseBootstrapBuildsSegmentLookupIndex(t *testing.T) {
+// Owns nonblocking database setup and resumable performance-index maintenance
+// against real PostgreSQL, including invalid-index recovery and name conflicts.
+func TestDatabaseSetupAndBackgroundLookupIndexes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	for _, upgraded := range []bool{false, true} {
@@ -31,6 +32,28 @@ func TestDatabaseBootstrapBuildsSegmentLookupIndex(t *testing.T) {
 				if err := postgres.Migrate(ctx, pool); err != nil {
 					t.Fatal(err)
 				}
+				// A writer that can hold optional index work indefinitely must not
+				// delay required migration setup or schema readiness.
+				writer, err := pool.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer writer.Rollback(ctx)
+				if _, err := writer.Exec(ctx, "LOCK TABLE segments IN ROW EXCLUSIVE MODE"); err != nil {
+					t.Fatal(err)
+				}
+				startup, stop := context.WithTimeout(ctx, time.Second)
+				err = app.BootstrapDatabase(startup, pool, app.DeploymentSpaces(nil))
+				stop()
+				if err != nil {
+					t.Fatalf("blocked performance index prevented migration setup: %v", err)
+				}
+				if err := postgres.SchemaReady(ctx, pool); err != nil {
+					t.Fatalf("blocked performance index prevented readiness: %v", err)
+				}
+				if err := writer.Rollback(ctx); err != nil {
+					t.Fatal(err)
+				}
 			}
 			bootstrap := func() {
 				t.Helper()
@@ -38,25 +61,40 @@ func TestDatabaseBootstrapBuildsSegmentLookupIndex(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			index := func() uint32 {
+			index := func(name, want string) uint32 {
 				t.Helper()
 				var oid uint32
 				var valid bool
 				var definition string
 				if err := pool.QueryRow(ctx, `SELECT i.indexrelid, i.indisvalid, pg_get_indexdef(i.indexrelid)
-FROM pg_index i WHERE i.indexrelid=to_regclass('segments_by_segmentation')`).Scan(&oid, &valid, &definition); err != nil {
-					t.Fatalf("segment lookup index missing: %v", err)
+FROM pg_index i WHERE i.indexrelid=to_regclass($1)`, name).Scan(&oid, &valid, &definition); err != nil {
+					t.Fatalf("lookup index %s missing: %v", name, err)
 				}
-				if !valid || definition != "CREATE INDEX segments_by_segmentation ON public.segments USING btree (organization, segmentation_id)" {
-					t.Fatalf("want valid organization/segmentation index, got valid=%v definition=%s", valid, definition)
+				if !valid || definition != want {
+					t.Fatalf("want valid index %s, got valid=%v definition=%s", name, valid, definition)
 				}
 				return oid
 			}
+			segmentIndex := func() uint32 {
+				return index("segments_by_segmentation", "CREATE INDEX segments_by_segmentation ON public.segments USING btree (organization, segmentation_id)")
+			}
+			rebuildIndex := func() uint32 {
+				return index("records_by_current_version", "CREATE INDEX records_by_current_version ON public.records USING btree (organization, corpus_id, current_version_id)")
+			}
 			bootstrap()
-			oid := index()
+			if err := postgres.EnsureIndexes(ctx, pool); err != nil {
+				t.Fatal(err)
+			}
+			oid, rebuildOID := segmentIndex(), rebuildIndex()
 			bootstrap()
-			if got := index(); got != oid {
-				t.Fatalf("rerun rebuilt valid index: OID %d became %d", oid, got)
+			if err := postgres.EnsureIndexes(ctx, pool); err != nil {
+				t.Fatal(err)
+			}
+			if got := segmentIndex(); got != oid {
+				t.Fatalf("rerun rebuilt segment index: OID %d became %d", oid, got)
+			}
+			if got := rebuildIndex(); got != rebuildOID {
+				t.Fatalf("rerun rebuilt current-version index: OID %d became %d", rebuildOID, got)
 			}
 			if !upgraded {
 				return
@@ -74,36 +112,42 @@ FROM pg_index i WHERE i.indexrelid=to_regclass('segments_by_segmentation')`).Sca
 			if _, err := writer.Exec(ctx, "LOCK TABLE segments IN ROW EXCLUSIVE MODE"); err != nil {
 				t.Fatal(err)
 			}
-			buildCtx, stopBuild := context.WithCancel(ctx)
-			defer stopBuild()
-			built := make(chan error, 1)
-			go func() {
-				_, err := pool.Exec(buildCtx, "CREATE INDEX CONCURRENTLY segments_by_segmentation ON segments(organization, segmentation_id)")
-				built <- err
-			}()
+			maintenance := &app.IndexMaintenance{Pool: pool}
+			runCtx, stopMaintenance := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() { maintenance.Run(runCtx); close(done) }()
+			defer func() { stopMaintenance(); <-done }()
+			var buildPID int
 			for {
-				var invalid bool
-				if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT FROM pg_index WHERE indexrelid=to_regclass('segments_by_segmentation') AND NOT indisvalid)").Scan(&invalid); err != nil {
+				if err := pool.QueryRow(ctx, `SELECT COALESCE((SELECT pid FROM pg_stat_activity
+WHERE datname=current_database() AND query LIKE 'CREATE INDEX CONCURRENTLY%segments_by_segmentation%'
+AND wait_event_type='Lock' AND pid<>pg_backend_pid() LIMIT 1), 0)`).Scan(&buildPID); err != nil {
 					t.Fatal(err)
 				}
-				if invalid {
+				if buildPID != 0 {
 					break
 				}
 				select {
-				case err := <-built:
-					t.Fatalf("build ended before cancellation: %v", err)
+				case <-done:
+					t.Fatal("maintenance ended before the blocked build was observed")
 				default:
 				}
 			}
-			stopBuild()
-			if err := <-built; err == nil {
-				t.Fatal("blocked build must be canceled")
-			}
-			if err := writer.Rollback(ctx); err != nil {
-				t.Fatal(err)
-			}
+			// The maintainer owns its lock and waits on the writer. Required
+			// setup and readiness must still complete before either is released.
 			bootstrap()
-			index()
+			if err := postgres.SchemaReady(ctx, pool); err != nil {
+				t.Fatalf("index build blocked schema readiness: %v", err)
+			}
+			startup, stopStartup := context.WithTimeout(ctx, time.Second)
+			_, err = (postgres.PluginStore{Pool: pool}).ApplyConfiguration(startup, registry.Seed{})
+			stopStartup()
+			if err != nil {
+				t.Fatalf("index build blocked required plugin configuration: %v", err)
+			}
+			if err := postgres.EnsureIndexes(ctx, pool); !errors.Is(err, postgres.ErrIndexBusy) {
+				t.Fatalf("want prompt competing-maintainer contention, got %v", err)
+			}
 			// Exercise the actual two-second migrator lock timeout while another
 			// installer holds the shared lock; do not delay on the test clock.
 			installer, err := pool.Begin(ctx)
@@ -121,13 +165,49 @@ FROM pg_index i WHERE i.indexrelid=to_regclass('segments_by_segmentation')`).Sca
 				t.Fatal(err)
 			}
 
+			// The real migrator lock timeout elapsed while the optional DDL
+			// waited. Its original backend must still be waiting, not canceled
+			// by the old two-second index lock timeout.
+			var waiting bool
+			if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT FROM pg_stat_activity WHERE pid=$1 AND wait_event_type='Lock' AND state='active')", buildPID).Scan(&waiting); err != nil || !waiting {
+				t.Fatalf("concurrent DDL must keep waiting for its writer: waiting=%v, %v", waiting, err)
+			}
+			var canceled bool
+			if err := pool.QueryRow(ctx, "SELECT pg_cancel_backend($1)", buildPID).Scan(&canceled); err != nil || !canceled {
+				t.Fatalf("cancel blocked index attempt: canceled=%v, %v", canceled, err)
+			}
+			for maintenance.State() != "retrying" {
+				// Round trips observe the canceled build rather than delay by time.
+				if _, err := pool.Exec(ctx, "SELECT 1"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var invalid bool
+			if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT FROM pg_index WHERE indexrelid=to_regclass('segments_by_segmentation') AND NOT indisvalid)").Scan(&invalid); err != nil || !invalid {
+				t.Fatalf("canceled attempt must leave an invalid index: invalid=%v, %v", invalid, err)
+			}
+			if err := writer.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("background retry did not complete after the writer released its lock")
+			}
+			if got := maintenance.State(); got != "ready" {
+				t.Fatalf("background maintenance state: want ready, got %s", got)
+			}
+			segmentIndex()
+			rebuildIndex()
+
 			// Reuse must preserve the equality query's columns, collations and
 			// default operator classes. Conflicting objects remain untouched.
 			for _, keys := range []string{"version_id", `organization COLLATE "C", segmentation_id`, "organization text_pattern_ops, segmentation_id"} {
 				if _, err := pool.Exec(ctx, "DROP INDEX segments_by_segmentation; CREATE INDEX segments_by_segmentation ON segments("+keys+")"); err != nil {
 					t.Fatal(err)
 				}
-				if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err == nil || !strings.Contains(err.Error(), "incompatible definition") {
+				bootstrap()
+				if err := postgres.EnsureIndexes(ctx, pool); err == nil || !strings.Contains(err.Error(), "incompatible definition") {
 					t.Fatalf("want actionable index conflict for %s, got %v", keys, err)
 				}
 				var definition string

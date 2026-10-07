@@ -575,6 +575,7 @@ def parts():
     from connector_x_restart import verify as verify_connector_x_restart
     from connector_x_push import verify as verify_connector_x_push
     from lifecycle import verify as verify_lifecycle
+    from weaviate_upgrade import verify as verify_weaviate_upgrade
     # Every part first restarts PostgreSQL under load and grants the scoped key its Corpus.
     setup=[step('persistence_across_restart',persistence)]
     return {
@@ -583,6 +584,7 @@ def parts():
             acceptance('core_acceptance','TestAuthorization|TestValidation|TestPagination|TestConcurrent|TestInline|TestStructuredManifest|TestManifest|TestWithdrawal|TestCorrection|TestLexical|TestLong|TestSemantic|TestUpload|TestBatch'),
             # A cold query encoder and a fresh api answer the first semantic and hybrid searches (THE-813).
             step('first_search_after_start',verify_first_search),
+            step('weaviate_persistence_upgrade',verify_weaviate_upgrade),
             step('adapter_integration',adapters),
             # Tokenizer-only golden parity and certification; full vectors run in ingest-parity nightly.
             step('core_ingest_plugin',core_ingest_plugin.verify),
