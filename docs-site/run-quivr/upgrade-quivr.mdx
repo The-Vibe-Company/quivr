@@ -13,7 +13,7 @@ Read the release notes for required backfills and contract migrations. Historica
 
 ## Steps
 
-1. Run the new binary's `quivr migrate` with `QUIVR_CONFIG` pointing to its deployment configuration. It applies pending expansions and leaves tagged contracts untouched. A failed database step rolls back its transaction; rerunning finishes remaining dependency setup.
+1. Run the new binary's `quivr migrate` with `QUIVR_CONFIG` pointing to its deployment configuration. It applies pending expansions and leaves tagged contracts untouched. After the SQL transaction commits, it builds missing performance indexes concurrently, allowing database writes to continue. It reuses matching valid indexes, including `segments_by_segmentation`, which speeds up document rebuilds. Rerunning finishes interrupted index builds and remaining dependency setup.
 2. Roll the API instances. Wait for each new instance's `/readyz` to return HTTP 204 before routing traffic to it, then drain the previous instance. Keep at least one ready API serving throughout.
 3. Roll the workers. Start a new worker and wait for its `/readyz`, then signal the previous worker to drain. Keep the compatible plugin versions available to both versions while work is in flight.
 4. Observe ingestion, search and worker processing before ending the rollback window. Until you apply contracts, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place.
@@ -35,11 +35,34 @@ The new API and worker report ready, ingestion resolves new receipts, and search
 
 | Symptom | Cause and fix |
 | --- | --- |
-| Migration times out | Each DDL lock acquisition is bounded to two seconds and each SQL statement to five seconds. Let conflicting transactions finish, then rerun; the failed database transaction is rolled back. |
+| Migration times out | SQL migrations bound locks to two seconds and statements to five seconds; a failure rolls back their transaction. Concurrent index setup has a 30-minute total budget and two-second lock timeout. Let conflicting transactions finish, then rerun. |
+| `index_setup_failed` or `index_setup_busy` | Rerun `quivr migrate` after the other installer or conflicting transaction finishes. An interrupted concurrent build can leave an invalid index; the next run repairs it. Completed SQL migrations stay applied. |
+| `index_definition_conflict` | A required performance index name belongs to an object with a different definition. Inspect the database catalog and rename the conflicting object before rerunning `quivr migrate`. Quivr leaves it untouched. |
 | Worker never becomes ready | An expansion is pending or a dependency is unavailable. Run the new migrator and inspect startup logs. |
 | Previous binary fails after cleanup | The contract step closed the rollback window. Deploy a forward fix or follow your data recovery procedure. |
 
 Database writes can wait briefly for additive DDL locks. Compatibility requires both application versions to support the expanded representation; rollout and data backfills still need deployment-specific review.
+
+An interrupted index build restarts from scratch on the next run. If index setup consistently exceeds 30 minutes, build the required indexes concurrently in an operator database session with a longer timeout, then rerun `quivr migrate` to reuse them. Use the same index names, columns and predicates; remove a matching invalid index before rebuilding it.
+
+For the document-rebuild index, inspect the existing definition first:
+
+```sql
+SELECT indisvalid, pg_get_indexdef(indexrelid) AS definition
+FROM pg_index
+WHERE indexrelid = to_regclass('segments_by_segmentation');
+```
+
+In a separate database session outside a transaction, if the index is invalid and matches the definition below, run `DROP INDEX CONCURRENTLY segments_by_segmentation` first. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours for the build:
+
+```sql
+SET lock_timeout = '2s';
+SET statement_timeout = '2h';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS segments_by_segmentation
+  ON segments (organization, segmentation_id);
+```
+
+A valid matching index is reused; close this session afterward and rerun `quivr migrate` to finish setup.
 
 ## Next
 

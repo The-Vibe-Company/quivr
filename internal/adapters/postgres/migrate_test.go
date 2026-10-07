@@ -8,14 +8,136 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/app"
 	"github.com/The-Vibe-Company/quivr/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Database bootstrap owns concurrent index setup: schema migration alone cannot
+// build an index on a large existing table within its five-second SQL budget.
+func TestDatabaseBootstrapBuildsSegmentLookupIndex(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	for _, upgraded := range []bool{false, true} {
+		t.Run(map[bool]string{false: "fresh", true: "upgrade"}[upgraded], func(t *testing.T) {
+			pool := scratchDatabase(t, ctx)
+			if upgraded {
+				if err := postgres.Migrate(ctx, pool); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bootstrap := func() {
+				t.Helper()
+				if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			index := func() uint32 {
+				t.Helper()
+				var oid uint32
+				var valid bool
+				var definition string
+				if err := pool.QueryRow(ctx, `SELECT i.indexrelid, i.indisvalid, pg_get_indexdef(i.indexrelid)
+FROM pg_index i WHERE i.indexrelid=to_regclass('segments_by_segmentation')`).Scan(&oid, &valid, &definition); err != nil {
+					t.Fatalf("segment lookup index missing: %v", err)
+				}
+				if !valid || definition != "CREATE INDEX segments_by_segmentation ON public.segments USING btree (organization, segmentation_id)" {
+					t.Fatalf("want valid organization/segmentation index, got valid=%v definition=%s", valid, definition)
+				}
+				return oid
+			}
+			bootstrap()
+			oid := index()
+			bootstrap()
+			if got := index(); got != oid {
+				t.Fatalf("rerun rebuilt valid index: OID %d became %d", oid, got)
+			}
+			if !upgraded {
+				return
+			}
+			if _, err := pool.Exec(ctx, "DROP INDEX segments_by_segmentation"); err != nil {
+				t.Fatal(err)
+			}
+			// An open writer holds the concurrent build after its catalog entry
+			// commits. Cancel only once that entry is visible: no clock waits.
+			writer, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer writer.Rollback(ctx)
+			if _, err := writer.Exec(ctx, "LOCK TABLE segments IN ROW EXCLUSIVE MODE"); err != nil {
+				t.Fatal(err)
+			}
+			buildCtx, stopBuild := context.WithCancel(ctx)
+			defer stopBuild()
+			built := make(chan error, 1)
+			go func() {
+				_, err := pool.Exec(buildCtx, "CREATE INDEX CONCURRENTLY segments_by_segmentation ON segments(organization, segmentation_id)")
+				built <- err
+			}()
+			for {
+				var invalid bool
+				if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT FROM pg_index WHERE indexrelid=to_regclass('segments_by_segmentation') AND NOT indisvalid)").Scan(&invalid); err != nil {
+					t.Fatal(err)
+				}
+				if invalid {
+					break
+				}
+				select {
+				case err := <-built:
+					t.Fatalf("build ended before cancellation: %v", err)
+				default:
+				}
+			}
+			stopBuild()
+			if err := <-built; err == nil {
+				t.Fatal("blocked build must be canceled")
+			}
+			if err := writer.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			bootstrap()
+			index()
+			// Exercise the actual two-second migrator lock timeout while another
+			// installer holds the shared lock; do not delay on the test clock.
+			installer, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer installer.Rollback(ctx)
+			if _, err := installer.Exec(ctx, "SELECT pg_advisory_xact_lock(642001)"); err != nil {
+				t.Fatal(err)
+			}
+			if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); !errors.Is(err, postgres.ErrIndexBusy) {
+				t.Fatalf("want retryable setup contention, got %v", err)
+			}
+			if err := installer.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+
+			// Reuse must preserve the equality query's columns, collations and
+			// default operator classes. Conflicting objects remain untouched.
+			for _, keys := range []string{"version_id", `organization COLLATE "C", segmentation_id`, "organization text_pattern_ops, segmentation_id"} {
+				if _, err := pool.Exec(ctx, "DROP INDEX segments_by_segmentation; CREATE INDEX segments_by_segmentation ON segments("+keys+")"); err != nil {
+					t.Fatal(err)
+				}
+				if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err == nil || !strings.Contains(err.Error(), "incompatible definition") {
+					t.Fatalf("want actionable index conflict for %s, got %v", keys, err)
+				}
+				var definition string
+				if err := pool.QueryRow(ctx, "SELECT pg_get_indexdef('segments_by_segmentation'::regclass)").Scan(&definition); err != nil || definition != "CREATE INDEX segments_by_segmentation ON public.segments USING btree ("+keys+")" {
+					t.Fatalf("conflicting index changed: %s, %v", definition, err)
+				}
+			}
+		})
+	}
+}
 
 // scratchDatabase creates an empty database next to the adapter database so
 // migration history can be exercised without touching shared state.
