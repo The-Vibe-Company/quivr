@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/adapters/tei"
@@ -20,9 +21,19 @@ import (
 // the PostgreSQL adapter tests (make adapter-postgres). Every step is
 // idempotent.
 func BootstrapDatabase(ctx context.Context, pool *pgxpool.Pool, spaces []content.RegisteredSpace) error {
-	if err := postgres.Migrate(ctx, pool); err != nil {
+	migrationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	err := postgres.Migrate(migrationCtx, pool)
+	cancel()
+	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	if err := postgres.EnsureIndexes(ctx, pool); err != nil {
+		return fmt.Errorf("concurrent index setup: %w", err)
+	}
+	// Index builds get a longer budget, while registry/default-generation work
+	// retains its bounded startup deadline, including advisory-lock waits.
+	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	// Once a Pipeline Plan is active, api and worker register the spaces of
 	// the plan they follow, which an operator may have changed since the
 	// configuration last applied; migrate leaves them alone.

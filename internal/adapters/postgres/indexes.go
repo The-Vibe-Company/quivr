@@ -1,0 +1,113 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// concurrentIndexes contains installation-wide performance indexes. Predicates
+// use PostgreSQL's canonical pg_get_expr spelling so an existing index can be
+// checked before reuse or recovery. These definitions are trusted engine SQL.
+var concurrentIndexes = []struct {
+	Name, Table string
+	Columns     []string
+	Predicate   string
+}{
+	{Name: "segments_by_segmentation", Table: "segments", Columns: []string{"organization", "segmentation_id"}},
+}
+
+// Index setup errors let the CLI report operator actions without logging raw
+// database diagnostics, which can contain deployment credentials or data.
+var (
+	ErrIndexSetup    = errors.New("concurrent index setup failed; rerun migrate to resume")
+	ErrIndexBusy     = errors.New("another database setup is running; rerun migrate after it finishes")
+	ErrIndexConflict = errors.New("concurrent index definition conflicts with an existing object")
+)
+
+// EnsureIndexes runs resumable index work after schema migrations commit. Each
+// build preserves concurrent writes, reuses a matching valid index, and repairs
+// the invalid catalog entry PostgreSQL can leave after a canceled build.
+func EnsureIndexes(ctx context.Context, pool *pgxpool.Pool) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %w", ErrIndexSetup, err)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	pooled, err := pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	// A dedicated session keeps settings and the session lock out of the pool.
+	conn := pooled.Hijack()
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		conn.Close(cleanup)
+	}()
+	if _, err := conn.Exec(ctx, "SET lock_timeout = '2s'; SET statement_timeout = '30min'"); err != nil {
+		return err
+	}
+	var locked bool
+	// Share the SQL migrator's lock identity, but fail promptly instead of
+	// waiting behind another installer for the duration of its index work.
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(642001)").Scan(&locked); err != nil {
+		return err
+	}
+	if !locked {
+		return ErrIndexBusy
+	}
+	for _, index := range concurrentIndexes {
+		state := func() (valid, matches bool, err error) {
+			err = conn.QueryRow(ctx, `SELECT COALESCE(i.indisvalid, false), COALESCE(
+ i.indrelid=to_regclass($2) AND am.amname='btree' AND NOT i.indisunique
+ AND i.indexprs IS NULL AND i.indnatts=i.indnkeyatts
+ AND ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY k(attnum, ordinal)
+           JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum
+           ORDER BY k.ordinal)=$3::text[]
+ AND COALESCE(pg_get_expr(i.indpred, i.indrelid), '')=$4, false)
+FROM pg_class c LEFT JOIN pg_index i ON i.indexrelid=c.oid
+LEFT JOIN pg_am am ON am.oid=c.relam WHERE c.oid=to_regclass($1)`,
+				index.Name, index.Table, index.Columns, index.Predicate).Scan(&valid, &matches)
+			return
+		}
+		valid, matches, err := state()
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("inspect index %s: %w", index.Name, err)
+		}
+		if err == nil {
+			if !matches {
+				return fmt.Errorf("index %s has an incompatible definition; inspect and rename the conflicting object before rerunning migrate: %w", index.Name, ErrIndexConflict)
+			}
+			if valid {
+				continue
+			}
+			if _, err := conn.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+pgx.Identifier{index.Name}.Sanitize()); err != nil {
+				return fmt.Errorf("recover index %s: %w", index.Name, err)
+			}
+		}
+		columns := make([]string, len(index.Columns))
+		for n, column := range index.Columns {
+			columns[n] = pgx.Identifier{column}.Sanitize()
+		}
+		sql := "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + pgx.Identifier{index.Name}.Sanitize() +
+			" ON " + pgx.Identifier{index.Table}.Sanitize() + " (" + strings.Join(columns, ", ") + ")"
+		if index.Predicate != "" {
+			sql += " WHERE " + index.Predicate
+		}
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			return fmt.Errorf("build index %s; rerun migrate to resume: %w", index.Name, err)
+		}
+		if valid, matches, err := state(); err != nil || !valid || !matches {
+			return fmt.Errorf("index %s did not become valid with the expected definition (valid=%t, matches=%t): %v", index.Name, valid, matches, err)
+		}
+	}
+	return nil
+}

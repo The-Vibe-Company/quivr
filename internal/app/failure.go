@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
@@ -18,6 +19,14 @@ func LogFailure(err error) {
 		return
 	}
 	code := "process_failed"
+	switch {
+	case errors.Is(err, postgres.ErrIndexConflict):
+		code = "index_definition_conflict"
+	case errors.Is(err, postgres.ErrIndexBusy):
+		code = "index_setup_busy"
+	case errors.Is(err, postgres.ErrIndexSetup):
+		code = "index_setup_failed"
+	}
 	var pin *plugins.PinError
 	if errors.As(err, &pin) {
 		var codes []string
