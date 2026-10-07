@@ -127,6 +127,8 @@ type Reprocess struct {
 	// PlanID is the Pipeline Plan it runs with: the one active when it was
 	// accepted.
 	PlanID string `json:"plan_id,omitempty"`
+	// FromStage overrides the failed step when set to normalization.
+	FromStage string `json:"from_stage,omitempty"`
 	// Estimate is the dry run it was accepted after.
 	Estimate ReprocessEstimate `json:"estimate"`
 }

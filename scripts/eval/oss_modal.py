@@ -10,12 +10,14 @@ STARTUP_TIMEOUT = 60
 
 class JobFailed(Exception):
     """Sanitized failed-job identity for the local campaign artifact."""
-    def __init__(self, app_id, error_type):
+    def __init__(self, app_id, error):
         # Exception text may contain provider inputs or credentials.
+        from embeddings import error_identity
+        error_type = type(error).__name__
         super().__init__(f'Modal job failed ({error_type}); inspect operator console')
         self.app_id = app_id
         self.reason = {'kind': 'timeout' if error_type in ('TimeoutError', 'FunctionTimeoutError') else 'provider_error',
-                       'error_type': error_type}
+                       **error_identity(error)}
 
 
 def remote_measure(label, hardware, sets, git_sha, max_tokens, timeout, restricted, started, reference=None):
@@ -30,14 +32,20 @@ def remote_measure(label, hardware, sets, git_sha, max_tokens, timeout, restrict
 
 
 def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, reference=None):
-    from oss_bakeoff import image_for, report_campaign
+    from oss_bakeoff import image_for, report_campaign, TORCH_PACKAGE, TEXT_PACKAGES
+    from embeddinggemma_server import LABELS
     # Only the local dispatcher needs the checkout. Modal imports this module
     # from /root/oss_modal.py, which has no repository-relative parent layout.
     root = pathlib.Path(__file__).resolve().parents[2]
     app = modal.App('quivr-embedding-measurement')
-    image = (modal.Image.from_registry(image_for(hardware), add_python='3.12')
-             .entrypoint([])
-             .pip_install('torch==2.6.0', index_url='https://download.pytorch.org/whl/cpu')
+    gemma = label in LABELS
+    spec = image_for(hardware, label)
+    base = (modal.Image.debian_slim(python_version=spec['python']) if gemma else
+            modal.Image.from_registry(image_for(hardware), add_python='3.12').entrypoint([]))
+    torch_package = spec['torch'] if gemma else TORCH_PACKAGE
+    torch_index = spec['torch_index_url'] if gemma else 'https://download.pytorch.org/whl/cpu'
+    image = (base
+             .pip_install(torch_package, *(spec['torch_extras'] if gemma else []), index_url=torch_index)
              .env({'OMP_NUM_THREADS': '4', 'RAYON_NUM_THREADS': '4', 'TOKENIZERS_PARALLELISM': 'false',
                    'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1'})
              .add_local_dir(root / 'scripts/eval', '/workspace/scripts/eval', copy=True,
@@ -46,7 +54,9 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
              .add_local_file(root / 'plugins/core-ingest/profile.json', '/workspace/plugins/core-ingest/profile.json', copy=True)
              # Modal's requirements helper copies only the top-level file;
              # install here so relative -r requirements.txt resolves correctly.
-             .run_commands('python -m pip install -r /workspace/scripts/eval/requirements-direct.txt'))
+             .run_commands('python -m pip install -r /workspace/scripts/eval/requirements-oss.txt')
+             .pip_install(*(spec['packages'] if gemma else TEXT_PACKAGES))
+             .run_commands(('QUIVR_GEMMA_IMAGE=1 ' if gemma else '') + 'HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python /workspace/scripts/eval/oss_image_check.py'))
     worker = app.function(image=image, gpu=None if hardware == 'cpu' else 'L4',
                           cpu=(4, 4), memory=(8192, 8192), timeout=timeout,
                           startup_timeout=STARTUP_TIMEOUT,
@@ -69,8 +79,13 @@ def dispatch(label, hardware, sets, git_sha, max_tokens, timeout, restricted, re
                 call.cancel(terminate_containers=True)
                 raise
             result['campaign']['modal_app_id'] = app.app_id
+            try:
+                result['campaign']['modal_image_id'] = image.object_id
+            except AttributeError:
+                # Offline SDK definitions have no built image identity.
+                result['campaign']['modal_image_id'] = None
             for report in result['reports']:
                 report['serving_campaign'] = report_campaign(result['campaign'])
             return result
     except Exception as error:
-        raise JobFailed(app.app_id, type(error).__name__) from None
+        raise JobFailed(app.app_id, error) from None

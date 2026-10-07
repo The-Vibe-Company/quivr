@@ -13,8 +13,6 @@ const ready = new Map<string, string | null>();
 const RETRY_MS = 10 * 60 * 1000;
 const SCAN = 64;
 const OUT = 96;
-// A smaller icon blurs once enlarged to the tile: the initial shows instead.
-const MIN_ICON = 32;
 
 function tone(name: string) {
   let hash = 0;
@@ -44,11 +42,10 @@ export function initial(name: string) {
  * corners share one colour) is trimmed to its mark and centred on that
  * colour. Otherwise transparent margins are trimmed: a tile with solid
  * edges, rounded or not, fills the circle, and a lone mark sits on white.
- * Null for a blank icon or one too small to enlarge sharply.
+ * Null for a blank icon.
  */
 function round(image: HTMLImageElement) {
   const { naturalWidth: w, naturalHeight: h } = image;
-  if (Math.min(w, h) < MIN_ICON) return null;
   const scan = document.createElement("canvas");
   scan.width = scan.height = SCAN;
   const context = scan.getContext("2d", { willReadFrequently: true });
@@ -110,8 +107,8 @@ function round(image: HTMLImageElement) {
 
 /**
  * A source's logo: the icon of the site behind an RSS source, fetched by the
- * demo server, over a tile with the source's initial while it loads, when the
- * site has none or when its icon is too small to show sharp. Decorative: the
+ * demo server (which keeps none too small to show sharp), over a tile with the
+ * source's initial while it loads or when the site has none. Decorative: the
  * source's name is always written beside.
  */
 export function SourceLogo({
@@ -146,7 +143,8 @@ export function SourceLogo({
       {connectorId && logo === undefined && (
         <img
           className="logo-source"
-          src={`/demo/sources/logo/${encodeURIComponent(connectorId)}`}
+          // v=2: logos cached before the server passed over tiny icons are asked again.
+          src={`/demo/sources/logo/${encodeURIComponent(connectorId)}?v=2`}
           alt=""
           decoding="async"
           onLoad={(event) => {

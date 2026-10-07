@@ -17,8 +17,15 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type rebuildPublication struct{ evaluationPublication }
+
+func (*rebuildPublication) Search(context.Context, []retrieval.Route, corpus.Scope, retrieval.Request) ([]content.Candidate, error) {
+	return nil, errors.New("unused")
+}
 
 // This storage lifecycle owns route cutover, concurrent old-plan publication
 // and rollback. The existing evaluation owner owns optional call isolation;
@@ -673,25 +680,24 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	bDeriver := processing.PluginDeriver{Content: contents, Plugin: pluginhttp.Ingestor{Pin: b}}
-	for _, candidate := range migrationCandidates {
-		v, err := contents.TrustedVersion(migrationCtx, scope.Organization, c.ID, candidate.RecordID, candidate.VersionID)
-		if err != nil {
-			t.Fatal(err)
+	if migrationTarget.Generation.SpaceID != "certified.ingestion-valid.small@1" {
+		t.Fatalf("configured-owner served space: %+v", migrationTarget.Generation)
+	}
+	if len(migrationCandidates) == 0 {
+		t.Fatal("configured-owner rebuild has no candidates")
+	}
+	runner := retrieval.Rebuilder{Store: store, Cancellation: store, Content: contents, Projection: &rebuildPublication{}, Plugin: bDeriver, Routing: store}
+	for round := 0; round < 10; round++ {
+		done, stepErr := runner.Step(migrationCtx, scope.Organization, migration.ID)
+		if stepErr != nil {
+			t.Fatal(stepErr)
 		}
-		seg, data, err := bDeriver.Derive(migrationCtx, scope.Organization, c.ID, v, migrationTarget.Generation)
-		if err != nil {
-			t.Fatal(err)
-		}
-		artifacts := make([]content.Embedding, len(data))
-		for i := range data {
-			artifacts[i] = data[i].Artifact
-		}
-		if covered, err := store.CoverRebuild(migrationCtx, scope.Organization, migration.ID, seg, artifacts); err != nil || !covered {
-			t.Fatalf("configured-owner coverage: %v %v", covered, err)
+		if done {
+			break
 		}
 	}
-	if activated, err := store.ActivateRebuild(migrationCtx, scope.Organization, migration.ID); err != nil || !activated {
-		t.Fatalf("fresh configured-owner rebuild refused: %v %v", activated, err)
+	if outcome, err := store.Operation(ctx, scope.Organization, migration.ID); err != nil || outcome.State != operations.StateSucceeded || outcome.Counters["vectors_reused"] == 0 {
+		t.Fatalf("configured-owner rebuild did not finish with vectors: %+v %v", outcome, err)
 	}
 	if current, err := store.Generation(ctx, scope.Organization, c.ID); err != nil || current.IngestionRouting.For("text/plain") != b.Manifest.ID {
 		t.Fatalf("configured-owner route: %+v %v", current, err)

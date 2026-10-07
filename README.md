@@ -268,7 +268,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   the built-in text path ([guide](https://docs.quivr.thevibecompany.co/plugins/pin)).
 - **Reprocessing quarantined Versions**: after a plugin fix or rollback, an operator
   lists quarantined Versions, runs a dry run, then reprocesses them with the active
-  plan. The Operation is paced, resumable and keeps each Version's identity
+  plan, optionally restarting from the stored source through normalization. The
+  Operation is paced, resumable and keeps each Version's identity
   ([guide](https://docs.quivr.thevibecompany.co/plugins/reprocess-quarantined-versions)).
 - **Plugin-owned extension namespaces**: the pinned plugin's declared namespaces are
   registered at startup beside the built-in ones. Its normalizer's extensions are

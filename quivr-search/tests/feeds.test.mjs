@@ -9,7 +9,9 @@ import {
   feedLinks,
   imageType,
   pageIcons,
+  pageManifest,
   parseSuggestions,
+  rasterSize,
   publicAddress,
 } from "../feeds.mjs";
 
@@ -211,6 +213,15 @@ test("discovery follows the page, refuses private hops and reports clear errors"
 });
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+// A PNG header for the given size.
+const png = (width, height) => {
+  const bytes = Buffer.alloc(24);
+  PNG.copy(bytes);
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return bytes;
+};
+const SVG = Buffer.from(`<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><path d="M0 0h96v96H0z"/></svg>`);
 
 test("a feed names its site and image, and a page its icons, best first", () => {
   const base = new URL("https://news.example.org/feeds/main.xml");
@@ -220,7 +231,11 @@ test("a feed names its site and image, and a page its icons, best first", () => 
       "application/rss+xml",
       base,
     ),
-    { site: new URL("https://www.example.org/news/"), image: new URL("https://news.example.org/img/logo.png") },
+    {
+      site: new URL("https://www.example.org/news/"),
+      image: new URL("https://news.example.org/img/logo.png"),
+      article: new URL("https://www.example.org/a"),
+    },
   );
   assert.deepEqual(
     feedLinks(`<feed><link rel="self" href="/atom"/><link href="https://example.org/"/><icon>/i.png</icon><entry/></feed>`, "", base),
@@ -234,14 +249,44 @@ test("a feed names its site and image, and a page its icons, best first", () => 
 <link rel="icon" sizes="192x192" href="/icon-192.png"><link rel="apple-touch-icon" href="/touch.png"><link rel="mask-icon" href="/m.svg"></head>`;
   assert.deepEqual(
     pageIcons(page, new URL("https://example.org/")).map((u) => u.pathname),
-    ["/touch.png", "/icon-192.png", "/favicon.ico"],
+    ["/touch.png", "/icon.svg", "/icon-192.png", "/favicon.ico"],
+  );
+  assert.equal(
+    pageManifest('<link rel="icon" href="/i.png"><link rel="manifest" href="/app.json?v=2">', new URL("https://example.org/")).href,
+    "https://example.org/app.json?v=2",
   );
   assert.equal(imageType(PNG), "image/png");
-  assert.equal(imageType(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>")), null);
-  assert.equal(imageType(Buffer.from("<html>not an image</html>")), null);
+  assert.deepEqual(rasterSize(png(180, 120), "image/png"), { width: 180, height: 120 });
+  // An icon file: its largest image; 0 stands for 256.
+  const ico = Buffer.from("0000010002001010000000000000000000000000000000000000000000000000000000000000", "hex");
+  assert.deepEqual(rasterSize(ico, "image/x-icon"), { width: 256, height: 256 });
+  assert.equal(rasterSize(SVG, "image/svg+xml"), null);
+  // An SVG only when served as one, and without anything that could run.
+  assert.equal(imageType(SVG, "image/svg+xml"), "image/svg+xml");
+  assert.equal(
+    imageType(Buffer.from('\uFEFF<!-- c --><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x"><svg width="9"></svg>'), "image/svg+xml; charset=utf-8"),
+    "image/svg+xml",
+  );
+  assert.equal(imageType(SVG), null);
+  assert.equal(imageType(PNG, "image/svg+xml"), null);
+  // Many comments ahead of a non-SVG root: read at once, not backtracked over.
+  assert.equal(imageType(Buffer.from("<!--a-->".repeat(40) + "<html>"), "image/svg+xml"), null);
+  // A stylesheet instruction and an internal subset may precede the root;
+  // an unclosed subset ends the scan.
+  const svg = (text) => imageType(Buffer.from(text), "image/svg+xml");
+  assert.equal(svg('<?xml version="1.0"?><?xml-stylesheet href="a.css"?><!DOCTYPE svg [ <!ENTITY a "b"> ]><svg/>'), "image/svg+xml");
+  assert.equal(svg("<?x?><!DOCTYPE svg [ <svg/>"), null);
+  // A link scheme hidden behind character references or blanks still counts.
+  assert.equal(svg('<svg><a href="&#106;avascript:x()"/></svg>'), null);
+  assert.equal(svg('<svg><a href="java\tscript:x()"/></svg>'), null);
+  // An entity built from entities, even behind a ">" in a quoted value.
+  assert.equal(svg('<!DOCTYPE svg [<!ENTITY a "x"><!ENTITY b ">&a;&a;">]><svg/>'), null);
+  assert.equal(imageType(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg' onload='x()'/>"), "image/svg+xml"), null);
+  assert.equal(imageType(Buffer.from("<svg><script>x()</script></svg>"), "image/svg+xml"), null);
+  assert.equal(imageType(Buffer.from("<html>not an image</html>"), "image/svg+xml"), null);
 });
 
-test("a source's logo comes from its site's icons, raster images only", async (t) => {
+test("a source's logo comes from its site's icons, an SVG only when served as one and inert", async (t) => {
   const server = http.createServer((req, res) => {
     const send = (status, type, body) => {
       res.writeHead(status, { "Content-Type": type });
@@ -253,6 +298,20 @@ test("a source's logo comes from its site's icons, raster images only", async (t
     else if (req.url === "/fake.png") send(200, "image/png", "<svg onload=alert(1)>");
     else if (req.url === "/real.png") send(200, "image/png", PNG);
     else if (req.url === "/bare") send(200, "application/rss+xml", "<rss><channel><item/></channel></rss>");
+    // A tiny icon first: too small to show sharp, the next one is kept.
+    else if (req.url === "/tiny-first") send(200, "application/rss+xml", `<rss><channel><link>${host}/tiny-home</link><item/></channel></rss>`);
+    else if (req.url === "/tiny-home") send(200, "text/html", '<link rel="apple-touch-icon" href="/tiny.png"><link rel="icon" sizes="64x64" href="/big.png">');
+    else if (req.url === "/tiny.png") send(200, "image/png", png(64, 16));
+    else if (req.url === "/big.png") send(200, "image/png", png(64, 64));
+    // A home page behind a bot wall: its first article declares a manifest,
+    // whose vector icon needs the manifest's own query.
+    else if (req.url === "/walled") send(200, "application/rss+xml", `<rss><channel><link>${host}/wall</link><item><link>${host}/article</link></item></channel></rss>`);
+    else if (req.url === "/wall") send(403, "text/html", "refused");
+    else if (req.url === "/article") send(200, "text/html", '<link rel="icon" href="/tiny.ico"><link rel="manifest" href="/app/manifest.json?d=7">');
+    else if (req.url === "/app/manifest.json?d=7")
+      send(200, "application/manifest+json", JSON.stringify({ icons: [{ src: "/app/small.png", sizes: "16x16" }, { src: "/app/logo.svg", type: "image/svg+xml", sizes: "512x512" }] }));
+    else if (req.url === "/app/logo.svg") send(400, "text/plain", "deployment id is required");
+    else if (req.url === "/app/logo.svg?d=7") send(200, "image/svg+xml", SVG);
     else send(404, "text/plain", "missing");
   });
   server.listen(0, "127.0.0.1");
@@ -264,6 +323,10 @@ test("a source's logo comes from its site's icons, raster images only", async (t
   assert.equal(logo.type, "image/png");
   assert.deepEqual(logo.bytes, PNG);
   assert.equal(await guard.logo(`${base}/bare`), null);
+  assert.deepEqual((await guard.logo(`${base}/tiny-first`)).bytes, png(64, 64));
+  const vector = await guard.logo(`${base}/walled`);
+  assert.equal(vector.type, "image/svg+xml");
+  assert.deepEqual(vector.bytes, SVG);
   assert.equal(await guard.logo(`${base}/missing`), null);
   // Without the exemption, the local site is refused like any private address.
   await assert.rejects(feedGuard().logo(`${base}/rss`), { code: "private_address" });

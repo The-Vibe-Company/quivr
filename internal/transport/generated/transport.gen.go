@@ -495,6 +495,21 @@ func (e OperationState) Valid() bool {
 	}
 }
 
+// Defines values for OperationQuarantineReprocessFromStage.
+const (
+	OperationQuarantineReprocessFromStageNormalization OperationQuarantineReprocessFromStage = "normalization"
+)
+
+// Valid indicates whether the value is a known member of the OperationQuarantineReprocessFromStage enum.
+func (e OperationQuarantineReprocessFromStage) Valid() bool {
+	switch e {
+	case OperationQuarantineReprocessFromStageNormalization:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PipelinePlanSource.
 const (
 	Activation    PipelinePlanSource = "activation"
@@ -705,6 +720,21 @@ func (e ProcessingSummaryState) Valid() bool {
 	case ProcessingSummaryStateRetrying:
 		return true
 	case ProcessingSummaryStateRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for QuarantineReprocessRequestFromStage.
+const (
+	QuarantineReprocessRequestFromStageNormalization QuarantineReprocessRequestFromStage = "normalization"
+)
+
+// Valid indicates whether the value is a known member of the QuarantineReprocessRequestFromStage enum.
+func (e QuarantineReprocessRequestFromStage) Valid() bool {
+	switch e {
+	case QuarantineReprocessRequestFromStageNormalization:
 		return true
 	default:
 		return false
@@ -2264,12 +2294,18 @@ type OperationQuarantineReprocess struct {
 	Code     *string                     `json:"code,omitempty"`
 	Estimate QuarantineReprocessEstimate `json:"estimate"`
 
+	// FromStage The requested restart stage; omitted when retrying the failed step.
+	FromStage *OperationQuarantineReprocessFromStage `json:"from_stage,omitempty"`
+
 	// PlanId The Pipeline Plan it runs with, the one active when it was accepted.
 	PlanId            string     `json:"plan_id"`
 	Plugin            *string    `json:"plugin,omitempty"`
 	QuarantinedAfter  *time.Time `json:"quarantined_after,omitempty"`
 	QuarantinedBefore *time.Time `json:"quarantined_before,omitempty"`
 }
+
+// OperationQuarantineReprocessFromStage The requested restart stage; omitted when retrying the failed step.
+type OperationQuarantineReprocessFromStage string
 
 // Part defines model for Part.
 type Part struct {
@@ -2520,8 +2556,11 @@ type QuarantineReprocessRequest struct {
 	CorpusId string  `json:"corpus_id"`
 
 	// DryRun true reports the count and records it; false starts the reprocess a dry run with the same key and scope preceded.
-	DryRun         bool   `json:"dry_run"`
-	IdempotencyKey string `json:"idempotency_key"`
+	DryRun bool `json:"dry_run"`
+
+	// FromStage Restart from the stored source Blob through normalization, then ingestion. Omit to retry the step that failed. Inputs that cannot be republished stay quarantined and are skipped.
+	FromStage      *QuarantineReprocessRequestFromStage `json:"from_stage,omitempty"`
+	IdempotencyKey string                               `json:"idempotency_key"`
 
 	// Plugin Only Versions whose quarantine reason names this plugin id.
 	Plugin *string `json:"plugin,omitempty"`
@@ -2532,6 +2571,9 @@ type QuarantineReprocessRequest struct {
 	// QuarantinedBefore Only Versions quarantined before this time.
 	QuarantinedBefore *time.Time `json:"quarantined_before,omitempty"`
 }
+
+// QuarantineReprocessRequestFromStage Restart from the stored source Blob through normalization, then ingestion. Omit to retry the step that failed. Inputs that cannot be republished stay quarantined and are skipped.
+type QuarantineReprocessRequestFromStage string
 
 // QuarantinedVersion A Record Version stuck in quarantine.
 type QuarantinedVersion struct {

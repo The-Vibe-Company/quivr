@@ -3,6 +3,7 @@ package acceptance
 import (
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,9 +27,12 @@ func quarantined(t *testing.T, token, corpusID, code string) []map[string]any {
 // reprocess checks that a dry run is required, dry-runs the reprocess of a
 // Corpus's Versions quarantined with code, expecting versions, then starts it
 // and waits for its end.
-func reprocess(t *testing.T, token, key, corpusID, code string, versions int) (map[string]any, map[string]any) {
+func reprocess(t *testing.T, token, key, corpusID, code string, versions int, fromStage ...string) (map[string]any, map[string]any) {
 	t.Helper()
 	body := map[string]any{"idempotency_key": key, "corpus_id": corpusID, "code": code, "dry_run": false}
+	if len(fromStage) > 0 {
+		body["from_stage"] = fromStage[0]
+	}
 	if refused := request(t, "POST", "/v0/admin/quarantine/reprocess", token, body, 409); refused["code"] != "dry_run_required" {
 		t.Fatalf("a reprocess without a dry run: %v", refused)
 	}
@@ -171,5 +175,106 @@ func TestQuarantineReprocessIngestion(t *testing.T) {
 	}
 	if left := quarantined(t, backfiller, corpusID, "pinned_plan_stopped"); len(left) != 0 {
 		t.Fatalf("still stuck %v", left)
+	}
+}
+
+// TestQuarantineRenormalizesIngestion recovers an ingestion refusal caused by
+// successful but unusable normalization, without replacing a newer revision.
+func TestQuarantineRenormalizesIngestion(t *testing.T) {
+	endpoint, operator, backfiller := os.Getenv("QUIVR_TEST_FIXED_NORMALIZER_ENDPOINT"), os.Getenv("QUIVR_TEST_OPERATOR"), os.Getenv("QUIVR_TEST_BACKFILLER")
+	if endpoint == "" || operator == "" || backfiller == "" {
+		t.Skip("scripts/normalizer_plugin.py supplies the faulty and fixed normalizers")
+	}
+	fixed, err := os.ReadFile(os.Getenv("QUIVR_TEST_FIXED_NORMALIZER_MANIFEST"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := os.Getenv("QUIVR_TEST_ADMIN")
+	run := monitoringRun()
+	corpusID := request(t, "POST", "/v0/corpora", admin, map[string]any{"name": "Normalization restart", "idempotency_key": "restart-" + run}, 201)["corpus_id"].(string)
+	blobID := uploadBlob(t, admin, []byte("The ferry crossed the harbour.\n"), "text/x-fault")
+	accept := func(key string) map[string]any {
+		receipt := awaitReceipt(t, request(t, "POST", "/v0/records", admin, map[string]any{
+			"idempotency_key": key + run,
+			"source":          map[string]any{"corpus_id": corpusID, "namespace": "faults", "record_key": key},
+			"content":         map[string]any{"kind": "blob", "blob_id": blobID, "media_type": "text/x-fault"},
+		}, 202)["receipt_id"].(string))
+		path := "/v0/records/" + receipt["record_id"].(string) + "/versions/" + receipt["version_id"].(string)
+		deadline, poll := time.NewTimer(10*time.Second), time.NewTicker(20*time.Millisecond)
+		defer deadline.Stop()
+		defer poll.Stop()
+		for {
+			v := request(t, "GET", path, admin, nil, 200)
+			if v["availability"].(map[string]any)["state"] == "quarantined" {
+				d := v["diagnostics"].([]any)[0].(map[string]any)
+				if d["code"] != "ingestion_refused" || !strings.Contains(d["message"].(string), "segmentation_limit") {
+					t.Fatalf("quarantine reason %v, want the ingestion recipe's two-title refusal", d)
+				}
+				return receipt
+			}
+			select {
+			case <-deadline.C:
+				t.Fatalf("Version never quarantined: %v", v)
+			case <-poll.C:
+			}
+		}
+	}
+	stuck, older := accept("two-titles.recover"), accept("two-titles.replaced")
+	versionPath := "/v0/records/" + stuck["record_id"].(string) + "/versions/" + stuck["version_id"].(string)
+	before := request(t, "GET", versionPath, admin, nil, 200)
+	if items := quarantined(t, backfiller, corpusID, "ingestion_refused"); len(items) != 2 || items[0]["stage"] != "ingestion" || items[1]["stage"] != "ingestion" {
+		t.Fatalf("ingestion quarantines %v, want both schema-valid two-title Manifests", items)
+	}
+	oldNormalization := before["provenance"].(map[string]any)["normalization"].(map[string]any)
+	if oldNormalization["plugin_version"] != "0.1.0" || len(before["manifest"].(map[string]any)["parts"].([]any)) != 3 {
+		t.Fatalf("original normalization %v", before)
+	}
+
+	registration := request(t, "POST", "/v0/admin/plugins", operator, map[string]any{
+		"idempotency_key": "restart-fixed-" + run, "endpoint": endpoint, "manifest": string(fixed),
+		"routes": []map[string]any{{"media_type": "text/x-fault", "mode": "required"}, {"media_type": "text/x-fault-optional", "mode": "optional"}},
+	}, 202)
+	if checked := awaitCheck(t, operator, "/v0/admin/plugins/"+registration["registration_id"].(string)); (checked["state"] != "validated" && checked["state"] != "inactive") || checked["check"].(map[string]any)["certified"] != true {
+		t.Fatalf("fixed normalizer validation %v", checked)
+	}
+	request(t, "POST", "/v0/admin/plugins/"+registration["registration_id"].(string)+"/activate", operator, map[string]any{}, 200)
+	t.Cleanup(func() {
+		request(t, "POST", "/v0/admin/plugins/plan/rollback", operator, map[string]any{"idempotency_key": "restart-rollback-" + run}, 200)
+	})
+
+	// The default still segments the old output after the fixed plugin is active.
+	_, done := reprocess(t, backfiller, "restart-default-"+run, corpusID, "ingestion_refused", 2)
+	if counter(done, "versions_quarantined") != 2 || counter(done, "versions_recovered") != 0 {
+		t.Fatalf("default retry %v, want the unchanged stale Manifests refused again", done)
+	}
+	// A newer accepted revision is excluded from recovery of the older Version.
+	replacement := awaitReady(t, request(t, "POST", "/v0/records", admin, map[string]any{
+		"idempotency_key": "replacement-" + run,
+		"source":          map[string]any{"corpus_id": corpusID, "namespace": "faults", "record_key": "two-titles.replaced"},
+		"content":         map[string]any{"kind": "text", "text": "The replacement ferry timetable."},
+	}, 202)["receipt_id"].(string))
+	body, done := reprocess(t, backfiller, "restart-normalization-"+run, corpusID, "ingestion_refused", 1, "normalization")
+	if done["state"] != "succeeded" || counter(done, "versions_recovered") != 1 || done["quarantine_reprocess"].(map[string]any)["from_stage"] != "normalization" {
+		t.Fatalf("normalization restart %v", done)
+	}
+	if replay := request(t, "POST", "/v0/admin/quarantine/reprocess", backfiller, body, 202); replay["operation_id"] != done["operation_id"] {
+		t.Fatalf("restart replay %v, want %v", replay, done)
+	}
+	recovered := request(t, "GET", versionPath, admin, nil, 200)
+	normalized := recovered["provenance"].(map[string]any)["normalization"].(map[string]any)
+	availability := recovered["availability"].(map[string]any)
+	if availability["is_current"] != true || availability["searchable"] != true || normalized["plugin_version"] != "0.2.0" || normalized["input_sha256"] != oldNormalization["input_sha256"] || len(recovered["manifest"].(map[string]any)["parts"].([]any)) != 1 {
+		t.Fatalf("recovered same source Version %v", recovered)
+	}
+	if hits := lexicalHits(t, []string{corpusID}, "echo"); len(hits) != 1 || hits[stuck["version_id"].(string)] == nil {
+		t.Fatalf("recovered search results %v", hits)
+	}
+	old := request(t, "GET", "/v0/records/"+older["record_id"].(string)+"/versions/"+older["version_id"].(string), admin, nil, 200)
+	if a := old["availability"].(map[string]any); a["is_current"] != false || a["searchable"] != false {
+		t.Fatalf("superseded Version became current or searchable: %v", old)
+	}
+	current := request(t, "GET", "/v0/records/"+replacement["record_id"].(string)+"/versions/"+replacement["version_id"].(string), admin, nil, 200)
+	if current["availability"].(map[string]any)["is_current"] != true {
+		t.Fatalf("replacement lost currentness: %v", current)
 	}
 }

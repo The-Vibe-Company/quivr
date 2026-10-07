@@ -42,7 +42,8 @@ class ConfigurationMapping(unittest.TestCase):
                     'format': 'cohere', 'base_url': 'https://runtime.invalid/providers/cohere/v2',
                     'auth': 'api-key', 'model': 'Cohere-Embed-V5-Fast', 'dimensions': 512,
                     'document_input_type': 'search_document', 'query_input_type': 'search_query',
-                    'max_tokens_per_segment': 6144, 'overlap': 192, 'max_batch_tokens': 98304,
+                    'max_tokens_per_segment': 6144, 'overlap': 192, 'batch_size': 32,
+                    'max_batch_tokens': 196608, 'max_concurrent_requests': 16,
                     'usd_per_million_tokens': .08}.items()}}},
                 'contributions': {'ingestion': {'spaces': {'hosted.text': {
                     'model': 'Cohere-Embed-V5-Fast', 'dimensions': 512,
@@ -219,7 +220,8 @@ class TrustedPromotion(unittest.TestCase):
                 'format': 'cohere', 'base_url': 'https://runtime.invalid/providers/cohere/v2',
                 'auth': 'api-key', 'model': 'Cohere-Embed-V5-Fast', 'dimensions': 512,
                 'document_input_type': 'search_document', 'query_input_type': 'search_query',
-                'max_tokens_per_segment': 6144, 'overlap': 192, 'max_batch_tokens': 98304,
+                'max_tokens_per_segment': 6144, 'overlap': 192, 'batch_size': 32,
+                'max_batch_tokens': 196608, 'max_concurrent_requests': 16,
                 'usd_per_million_tokens': .08}.items()}}},
             'contributions': {'ingestion': {'spaces': {'hosted.text': {
                 'model': 'Cohere-Embed-V5-Fast', 'dimensions': 512,

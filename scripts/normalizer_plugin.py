@@ -324,7 +324,7 @@ def failures(stack):
         stack.stop_processes()
         stack.start_processes()
         stack.tests('TestNormalizerFailures', {'QUIVR_TEST_FAULTY_NORMALIZER': '1'})
-        stack.tests('^TestQuarantineReprocessNormalization$', {'QUIVR_TEST_FIXED_NORMALIZER_ENDPOINT': f'http://127.0.0.1:{fixed_port}',
+        stack.tests('^TestQuarantine(ReprocessNormalization|RenormalizesIngestion)$', {'QUIVR_TEST_FIXED_NORMALIZER_ENDPOINT': f'http://127.0.0.1:{fixed_port}',
                                                                'QUIVR_TEST_FIXED_NORMALIZER_MANIFEST': str(fixed_manifest)})
     finally:
         for name, text in configs.items():

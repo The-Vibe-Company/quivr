@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 
 # First-party plugins baked into the core image (core.Dockerfile), pinned when
 # QUIVR_DEMO_PLUGINS=1, except newsml-g2, which is always pinned alongside
@@ -57,7 +58,6 @@ CONNECTORS = [
 HOSTED_MANIFEST = '/tmp/hosted-embed/quivr-plugin.yaml'
 HOSTED_EMBED = {'id': 'hosted-embed', 'port': 9980, 'api': True,
                 'manifest': HOSTED_MANIFEST, 'secrets': ['AZURE_FOUNDRY_KEY']}
-HOSTED_MEDIA_TYPES = ('text/plain', 'text/html', 'application/pdf')
 # The demo Organization's webhook destination. The web facade reads Matches
 # through the API, so nothing needs the webhook: the reserved .invalid name never
 # resolves and every delivery attempt fails without leaving the container. The
@@ -81,10 +81,13 @@ def described_enabled(env):
 
 
 def runtime_connectors(env):
-    """Keep core.ingest and optionally add evaluation embeddings and Jev."""
+    """Keep core.ingest reachable and optionally select hosted embeddings and Jev."""
     connectors = CONNECTORS
-    if env.get('QUIVR_DEMO_HOSTED_EMBED') == '1':
-        connectors = connectors + [{**HOSTED_EMBED, 'configuration': hosted_configuration(env)}]
+    selection = embedding_selection(env)
+    if selection:
+        connectors = connectors + [{**HOSTED_EMBED, 'configuration': selected_hosted_configuration(env),
+                                    'secrets': HOSTED_EMBED['secrets'] if selection == 'cohere' else ['EMBED_API_KEY'],
+                                    'secret_names': {} if selection == 'cohere' else {'EMBED_API_KEY': 'AZURE_FOUNDRY_KEY'}}]
     if env.get('QUIVR_DEMO_JEV_RERANK') != '1':
         return connectors
     return connectors + [{
@@ -96,6 +99,46 @@ def runtime_connectors(env):
     }]
 
 
+def embedding_selection(env):
+    selection = env.get('QUIVR_DEMO_EMBEDDING', '').strip()
+    if selection and selection not in ('gemma', 'cohere'):
+        raise ValueError('QUIVR_DEMO_EMBEDDING must be gemma or cohere')
+    return selection or ('cohere' if env.get('QUIVR_DEMO_HOSTED_EMBED') == '1' else '')
+
+
+def selected_hosted_configuration(env):
+    return gemma_configuration(env) if embedding_selection(env) == 'gemma' else hosted_configuration(env)
+
+
+def gemma_configuration(env):
+    endpoint = env.get('EMBED_URL', '').strip().rstrip('/')
+    try:
+        url = urlsplit(endpoint)
+        port = url.port
+    except ValueError:
+        raise ValueError('EMBED_URL must be a valid HTTPS endpoint origin') from None
+    if (url.scheme != 'https' or not url.hostname
+            or any(char.isspace() or ord(char) < 32 for char in endpoint)
+            or port == 0 or url.netloc.endswith(':')
+            or url.username is not None or url.password is not None
+            or url.path or url.query or url.fragment):
+        raise ValueError('EMBED_URL must be an HTTPS endpoint origin without credentials, path, query or fragment')
+    key = env.get('EMBED_API_KEY', '')
+    if not key or not key.isascii() or any(char.isspace() for char in key):
+        raise ValueError('EMBED_API_KEY must be a nonempty ASCII bearer token without whitespace')
+    return {'format': 'openai', 'base_url': endpoint + '/v1', 'auth': 'bearer',
+            'model': 'google/embeddinggemma-2', 'dimensions': 768,
+            # The plugin revision field is bounded to 32 bytes; the image pins the full SHA.
+            'model_revision': '914f7f89142e33e7',
+            'query_prefix': 'task: search result | query: ',
+            'document_prefix': 'title: none | text: ',
+            # UTF-8 bytes conservatively bound tokens; stay below the model's 8K window.
+            'max_tokens_per_segment': 2048, 'overlap': 64,
+            'batch_size': 32, 'max_batch_tokens': 65536, 'max_concurrent_requests': 4,
+            'request_timeout_ms': 10000, 'call_budget_ms': 90000,
+            'usd_per_million_tokens': 0}
+
+
 def hosted_configuration(env):
     for name in ('AZURE_FOUNDRY_ENDPOINT', 'AZURE_FOUNDRY_KEY'):
         if not env.get(name, '').strip():
@@ -105,17 +148,18 @@ def hosted_configuration(env):
             'auth': 'api-key', 'model': 'Cohere-Embed-V5-Pro', 'dimensions': 1024,
             'document_input_type': 'search_document', 'query_input_type': 'search_query',
             # Conservative UTF-8 byte/token bound, not an exact provider token window.
-            'max_tokens_per_segment': 6144, 'overlap': 192, 'max_batch_tokens': 98304,
+            'max_tokens_per_segment': 6144, 'overlap': 192,
+            'batch_size': 32, 'max_batch_tokens': 196608, 'max_concurrent_requests': 16,
             'usd_per_million_tokens': 0.12}
 
 
 def prepare_hosted_manifest(env):
-    if env.get('QUIVR_DEMO_HOSTED_EMBED') != '1':
+    if not embedding_selection(env):
         return
     manifest = pathlib.Path(HOSTED_MANIFEST)
     manifest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     configuration = manifest.parent / 'configuration.json'
-    configuration.write_text(json.dumps(hosted_configuration(env)))
+    configuration.write_text(json.dumps(selected_hosted_configuration(env)))
     # Configure needs no credentials. Its errors name fields, never runtime values.
     with manifest.open('w') as output:
         subprocess.run(['/usr/local/bin/quivr-hosted-embed', 'configure', str(configuration)],
@@ -191,9 +235,10 @@ def build_config(env):
     if CONNECTORS:
         config['plugins'] = connector_pins(env)
     config['plugins'] = config.get('plugins', []) + plugin_pins(env)
-    if env.get('QUIVR_DEMO_HOSTED_EMBED') == '1':
-        config['ingestion'] = {'default': 'core.ingest',
-                               'evaluation': {media: ['hosted.embed'] for media in HOSTED_MEDIA_TYPES}}
+    if embedding_selection(env):
+        # The default covers every source format after normalization. Keeping
+        # core.ingest pinned serves historical generations, not E5 evaluation.
+        config['ingestion'] = {'default': 'hosted.embed'}
     if env.get('QUIVR_DEMO_JEV_RERANK') == '1':
         config['retrieval'] = {'profiles': {'default': 'core.retrieve/default', 'deep': 'jev.rerank/deep'}}
     if plugins_enabled(env):
@@ -264,7 +309,8 @@ def sidecar_commands(env, role='worker'):
         if connector.get('signing_id'):
             rings = json.loads(engine_signing_environment(env)['QUIVR_ENGINE_PLUGIN_KEYS'])
             child['QUIVR_PLUGIN_SIGNING_KEYS'] = json.dumps(rings[connector['signing_id']])
-        child.update({name: env[name] for name in connector.get('secrets', []) if env.get(name, '').strip()})
+        child.update({connector.get('secret_names', {}).get(name, name): env[name]
+                      for name in connector.get('secrets', []) if env.get(name, '').strip()})
         if 'module' in connector:
             child['PYTHONUNBUFFERED'] = '1'
             argv = [PLUGIN_PYTHON, '-m', connector['module']]
@@ -340,6 +386,7 @@ def main():
     # Plugin-only credentials belong to declared sidecar environments, not the engine.
     plugin_secrets = {name for plugin in PLUGINS + runtime_connectors(os.environ) + [HOSTED_EMBED]
                       for name in plugin.get('secrets', [])}
+    plugin_secrets.add('EMBED_API_KEY')
     core_env = {name: value for name, value in os.environ.items() if name not in plugin_secrets and name != 'QUIVR_PLUGIN_SIGNING_KEYS'}
     core_env.update(engine_signing_environment(os.environ))
     # Only the API applies startup migrations; failures abort before serving.

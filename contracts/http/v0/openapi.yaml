@@ -3020,10 +3020,11 @@ paths:
         alerts are evaluated, and the change feed announces it (record.materialized when its content changed,
         record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined
         with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by
-        the optional filters, taken when the reprocess is accepted. A dry run is required. dry_run true
+        the optional filters, taken when the reprocess is accepted. Set from_stage to normalization to
+        normalize its stored source Blob again before ingestion; omit it to retry the failed step. A dry run is required. dry_run true
         answers 200 with the count and records it under the idempotency key. The same body with dry_run
         false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded
-        under that key and scope, the answer is 409 dry_run_required. The same key with another scope is 409
+        under that key and Corpus, the answer is 409 dry_run_required. The same key with another filter scope or restart stage is 409
         idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess
         has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the
         deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed,
@@ -5248,6 +5249,12 @@ components:
           type: string
           format: date-time
           description: Only Versions quarantined before this time.
+        from_stage:
+          type: string
+          enum: [normalization]
+          x-enum-varnames: [QuarantineReprocessRequestFromStageNormalization]
+          description: Restart from the stored source Blob through normalization, then ingestion. Omit to
+            retry the step that failed. Inputs that cannot be republished stay quarantined and are skipped.
         dry_run:
           type: boolean
           description: true reports the count and records it; false starts the reprocess a dry run with the
@@ -5305,6 +5312,11 @@ components:
         quarantined_before:
           type: string
           format: date-time
+        from_stage:
+          type: string
+          enum: [normalization]
+          x-enum-varnames: [OperationQuarantineReprocessFromStageNormalization]
+          description: The requested restart stage; omitted when retrying the failed step.
         plan_id:
           type: string
           minLength: 1

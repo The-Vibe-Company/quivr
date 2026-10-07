@@ -95,6 +95,9 @@ const TITLES: Record<View, string> = {
   admin: "Admin",
 };
 
+// The keys the Explorer keeps in the address (lib/explore.ts writeState).
+const EXPLORER_KEYS = ["q", "f", "range", "window", "sort", "selected"];
+
 function urlState() {
   const p = new URLSearchParams(location.search);
   const view = p.get("view") || "";
@@ -107,7 +110,8 @@ function urlState() {
     alert: p.get("alert"),
     // A document's timeline on the Admin tab.
     version: p.get("version"),
-    query: p.get("q") || "",
+    // The Explorer keeps its own search in the address.
+    query: view === "explorer" ? "" : p.get("q") || "",
     // "Idées proches" is on unless the address turns it off.
     near: p.get("near") !== "0" && p.get("mode") !== "lexical",
     doc:
@@ -265,7 +269,11 @@ function Dashboard({
   // The top bar's places a page fills (see InBar), held once mounted.
   const [barMeta, setBarMeta] = useState<HTMLElement | null>(null);
   const [barActions, setBarActions] = useState<HTMLElement | null>(null);
-  const bar = useMemo(() => ({ meta: barMeta, actions: barActions }), [barMeta, barActions]);
+  const [barSearch, setBarSearch] = useState<HTMLElement | null>(null);
+  const bar = useMemo(
+    () => ({ meta: barMeta, actions: barActions, search: barSearch }),
+    [barMeta, barActions, barSearch],
+  );
   const [input, setInput] = useState(initial.query);
   const [near, setNear] = useState(initial.near);
   // "Recherche approfondie": offered when the engine serves it, off at every
@@ -284,6 +292,9 @@ function Dashboard({
   const [openSource, setOpenSource] = useState<string | null>(null);
   // Every corpus the demo reads; the feed and the Explorer each span some.
   const [allCorpora, setAllCorpora] = useState<Corpus[]>([]);
+  // Whether the corpora were read, or could not be: the Explorer types its
+  // restored filters with them, and goes on without them on a failure.
+  const [corporaRead, setCorporaRead] = useState(false);
   const [feedCorpora, setFeedCorpora] = useState<string[]>(() =>
     initial.view === "feed" && initial.corpora.length ? initial.corpora : [corpus],
   );
@@ -291,6 +302,15 @@ function Dashboard({
     initial.view === "explorer" && initial.corpora.length ? initial.corpora : [corpus],
   );
   const [record, setRecord] = useState<string | null>(initial.explored);
+  // The Explorer's own part of the address: its search, filters, range and
+  // the document it previews (THE-1204).
+  const [explorerParams, setExplorerParams] = useState(() => {
+    const own = new URLSearchParams();
+    if (initial.view === "explorer")
+      for (const [key, value] of new URLSearchParams(location.search))
+        if (EXPLORER_KEYS.includes(key)) own.append(key, value);
+    return own.toString();
+  });
   const scope = scopeOf(feedCorpora, corpus);
   const searchRef = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -315,6 +335,7 @@ function Dashboard({
     const controller = new AbortController();
     fetchCorpora(controller.signal)
       .then((list) => {
+        if (controller.signal.aborted) return;
         setAllCorpora(list.items);
         // A corpus the address names that the demo no longer reads is dropped.
         const known = new Set(list.items.map((c) => c.corpus_id));
@@ -324,9 +345,12 @@ function Dashboard({
         };
         setFeedCorpora(keep);
         setExplored(keep);
+        setCorporaRead(true);
       })
       .catch((error) => {
-        if (error instanceof APIError && error.status === 401) onUnauthorized();
+        if (controller.signal.aborted) return;
+        if (error instanceof APIError && error.status === 401) return onUnauthorized();
+        setCorporaRead(true);
       });
     return () => controller.abort();
   }, [corpus, onUnauthorized]);
@@ -369,6 +393,8 @@ function Dashboard({
     if (view === "feed" && query && !near) p.set("near", "0");
     if (view === "feed" && scope) p.set("corpora", scope);
     if (view === "explorer" && scopeOf(explored, corpus)) p.set("corpora", explored.join(","));
+    if (view === "explorer")
+      for (const [key, value] of new URLSearchParams(explorerParams)) p.append(key, value);
     if (view === "explorer" && record) p.set("record", record);
     if (view === "feed" && doc) {
       p.set("record", doc.record);
@@ -383,7 +409,7 @@ function Dashboard({
       view === "feed" && query
         ? `${query} — Quivr Veille`
         : `${TITLES[view]} — Quivr Veille`;
-  }, [view, alert, version, query, near, doc, scope, explored, record, corpus]);
+  }, [view, alert, version, query, near, doc, scope, explored, explorerParams, record, corpus]);
 
   // "/" or Ctrl/Cmd+K puts the cursor in the search box, from any page.
   useEffect(() => {
@@ -397,9 +423,12 @@ function Dashboard({
         (event.key === "/" && !typing) ||
         ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k")
       ) {
+        // The Explorer has its own search field, in place of the bar's.
+        const field = document.querySelector<HTMLInputElement>("#explorer-search") || searchRef.current;
+        if (!field) return;
         event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
+        field.focus();
+        field.select();
       }
     };
     window.addEventListener("keydown", listener);
@@ -555,6 +584,10 @@ function Dashboard({
           {/* A page's own figures beside its title: its count, what needs a look. */}
           <span className="bar-meta" ref={setBarMeta} data-stale={view !== page || undefined} />
         </span>
+        {/* The Explorer's list puts its own search field here; its document page keeps the bar's. */}
+        {view === "explorer" && !record ? (
+          <div className="bar-slot" ref={setBarSearch} data-stale={view !== page || undefined} />
+        ) : (
         <form
           role="search"
           className="bar-search"
@@ -607,6 +640,7 @@ function Dashboard({
             </kbd>
           )}
         </form>
+        )}
         {/* A page's main action, at the top right. Until the page asked for
             is drawn (`page` follows `view`), the previous page's stay hidden. */}
         <div className="bar-actions" ref={setBarActions} data-stale={view !== page || undefined} />
@@ -678,7 +712,9 @@ function Dashboard({
             />
           ) : page === "explorer" ? (
             <ExplorerView
+              bar={bar}
               corpora={allCorpora}
+              corporaRead={corporaRead}
               picked={explored}
               onPicked={setExplored}
               record={record}
@@ -686,6 +722,8 @@ function Dashboard({
                 setRecord(id);
                 window.scrollTo(0, 0);
               }}
+              initial={explorerParams}
+              onState={setExplorerParams}
               onUnauthorized={onUnauthorized}
             />
           ) : page === "admin" ? (

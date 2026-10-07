@@ -30,11 +30,12 @@ class CoreEntrypointTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = pathlib.Path(tmp) / 'runtime.json'
             manifest = pathlib.Path(tmp) / 'hosted-embed' / 'quivr-plugin.yaml'
-            for role in ('api', 'worker', 'migrate'):
-                with self.subTest(role=role), patch.dict(os.environ, {
+            for role, provider in ((r, p) for r in ('api', 'worker', 'migrate') for p in ('cohere', 'gemma')):
+                with self.subTest(role=role, provider=provider), patch.dict(os.environ, {
                     **ENV, 'QUIVR_ROLE': role, 'QUIVR_DEMO_JEV_RERANK': '1',
                     'TYPESAFE_API_KEY': 'fixture-typesafe-key', 'PATH': '/usr/bin',
-                    'AZURE_FOUNDRY_KEY': 'fixture-foundry-key',
+                    'AZURE_FOUNDRY_KEY': 'fixture-foundry-key', 'QUIVR_DEMO_EMBEDDING': provider,
+                    'EMBED_URL': 'https://example--embeddings.modal.run', 'EMBED_API_KEY': 'fixture-modal-token',
                     'AZURE_FOUNDRY_ENDPOINT': 'https://resource.example.org', 'QUIVR_DEMO_HOSTED_EMBED': '1',
                 }, clear=True), patch.object(core_entrypoint.pathlib, 'Path',
                     side_effect=lambda value: runtime if value == '/tmp/quivr-runtime.json' else manifest), \
@@ -50,6 +51,8 @@ class CoreEntrypointTest(unittest.TestCase):
                     self.assertEqual(configure.args[0], ['/usr/local/bin/quivr-hosted-embed', 'configure',
                                      str(manifest.parent / 'configuration.json')])
                     self.assertNotIn('AZURE_FOUNDRY_KEY', configure.kwargs['env'])
+                    self.assertNotIn('EMBED_API_KEY', configure.kwargs['env'])
+                    self.assertNotIn('fixture-modal-token', (manifest.parent / 'configuration.json').read_text())
                     self.assertNotIn('fixture-foundry-key', (manifest.parent / 'configuration.json').read_text())
                     if role == 'migrate':
                         effective = explicit_exec.call_args.args[2] if explicit_exec.called else dict(os.environ)
@@ -59,18 +62,21 @@ class CoreEntrypointTest(unittest.TestCase):
                         effective = core_env if core_env is not None else dict(os.environ)
                         jev = [child for name, _, _, child in commands if name == 'jev-rerank']
                         hosted = [child for name, _, _, child in commands if name == 'hosted-embed']
-                        self.assertEqual(hosted[0]['AZURE_FOUNDRY_KEY'], 'fixture-foundry-key')
+                        self.assertEqual(hosted[0]['AZURE_FOUNDRY_KEY'],
+                                         'fixture-foundry-key' if provider == 'cohere' else 'fixture-modal-token')
                         self.assertEqual(len(jev), 1 if role == 'api' else 0)
                         if jev:
                             self.assertEqual(jev[0]['TYPESAFE_API_KEY'], 'fixture-typesafe-key')
                     self.assertNotIn('TYPESAFE_API_KEY', effective)
                     self.assertNotIn('AZURE_FOUNDRY_KEY', effective)
+                    self.assertNotIn('EMBED_API_KEY', effective)
                     self.assertEqual(effective['QUIVR_CONFIG'], str(runtime))
                     self.assertEqual(effective['DATABASE_URL'], ENV['DATABASE_URL'])
                     if role == 'api':
                         migration_env = migrate.call_args.kwargs.get('env', dict(os.environ))
                         self.assertNotIn('TYPESAFE_API_KEY', migration_env)
                         self.assertNotIn('AZURE_FOUNDRY_KEY', migration_env)
+                        self.assertNotIn('EMBED_API_KEY', migration_env)
                         self.assertEqual(migration_env['QUIVR_CONFIG'], str(runtime))
                     else:
                         self.assertEqual(migrate.call_count, 1)  # configure only; no migration
@@ -118,25 +124,30 @@ class CoreEntrypointTest(unittest.TestCase):
                 else:
                     self.assertEqual(config, core_entrypoint.build_config(ENV))
 
-    def test_hosted_embedding_is_evaluation_only_and_has_its_own_secret(self):
+    def test_hosted_embedding_is_default_for_all_sources_and_has_its_own_secret(self):
         # Owns runtime selection and inheritance; a shared-key or served-owner
         # regression is not visible to the hosted plugin's provider tests.
-        for switch in ('', '0', 'true', '1'):
-            with self.subTest(switch=switch):
+        for switch, selection in [(None, None), ('', None), ('0', None), ('true', None), ('1', None),
+                                  (None, 'cohere'), ('1', 'cohere')]:
+            with self.subTest(switch=switch, selection=selection):
                 env = {**ENV, 'QUIVR_DEMO_HOSTED_EMBED': switch,
                        'AZURE_FOUNDRY_ENDPOINT': 'https://resource.example.org/',
                        'AZURE_FOUNDRY_KEY': 'fixture-foundry-key'}
+                if switch is None:
+                    del env['QUIVR_DEMO_HOSTED_EMBED']
+                if selection is not None:
+                    env['QUIVR_DEMO_EMBEDDING'] = selection
                 config = core_entrypoint.build_config(env)
                 pins = {pathlib.PurePosixPath(p['manifest']).parent.name: p for p in config['plugins']}
-                enabled = switch == '1'
+                enabled = switch == '1' or selection == 'cohere'
                 self.assertEqual('hosted-embed' in pins, enabled)
                 self.assertEqual(pins['core-ingest'], next(p for p in core_entrypoint.build_config(ENV)['plugins']
                                  if p['manifest'] == pins['core-ingest']['manifest']))
                 self.assertNotIn('fixture-foundry-key', json.dumps(config))
                 if enabled:
-                    self.assertEqual(config['ingestion']['default'], 'core.ingest')
-                    self.assertEqual(config['ingestion']['evaluation'], {
-                        media: ['hosted.embed'] for media in ('text/plain', 'text/html', 'application/pdf')})
+                    # A default without routes covers every normalized source,
+                    # including XML and future media types; no E5 evaluation.
+                    self.assertEqual(config['ingestion'], {'default': 'hosted.embed'})
                     hosted = pins['hosted-embed']['configuration']
                     self.assertEqual(hosted['base_url'], 'https://resource.example.org/providers/cohere/v2')
                     self.assertEqual((hosted['model'], hosted['dimensions']), ('Cohere-Embed-V5-Pro', 1024))
@@ -167,6 +178,45 @@ class CoreEntrypointTest(unittest.TestCase):
                 with self.subTest(name=name, value=value):
                     with self.assertRaisesRegex(ValueError, name):
                         core_entrypoint.build_config(env)
+
+    def test_gemma_selects_modal_openai_embeddings_with_an_isolated_bearer_secret(self):
+        # Deployment mapping owns model identity, prompt bytes and opt-in selection.
+        env = {**ENV, 'QUIVR_DEMO_EMBEDDING': 'gemma',
+               'EMBED_URL': 'https://example--embeddings.modal.run/', 'EMBED_API_KEY': 'fixture-modal-token',
+               'AZURE_FOUNDRY_KEY': 'unused-placeholder-key'}
+        config = core_entrypoint.build_config(env)
+        pin = next(p for p in config['plugins'] if p['manifest'] == '/tmp/hosted-embed/quivr-plugin.yaml')
+        self.assertEqual(config['ingestion'], {'default': 'hosted.embed'})
+        self.assertEqual(pin['configuration'], {
+            'format': 'openai', 'base_url': 'https://example--embeddings.modal.run/v1',
+            'auth': 'bearer', 'model': 'google/embeddinggemma-2', 'dimensions': 768,
+            'model_revision': '914f7f89142e33e7',
+            'query_prefix': 'task: search result | query: ',
+            'document_prefix': 'title: none | text: ',
+            'max_tokens_per_segment': 2048, 'overlap': 64,
+            'batch_size': 32, 'max_batch_tokens': 65536, 'max_concurrent_requests': 4,
+            'request_timeout_ms': 10000, 'call_budget_ms': 90000, 'usd_per_million_tokens': 0,
+        })
+        self.assertNotIn('fixture-modal-token', json.dumps(config))
+        for role in ('api', 'worker'):
+            child = next(child for name, _, _, child in core_entrypoint.sidecar_commands(env, role)
+                         if name == 'hosted-embed')
+            self.assertEqual(child['AZURE_FOUNDRY_KEY'], 'fixture-modal-token')
+            self.assertNotIn('EMBED_API_KEY', child)
+        for selection, endpoint in [('typo', env['EMBED_URL']), ('gemma', ''),
+                                    ('gemma', 'http://example--embeddings.modal.run'),
+                                    ('gemma', 'https://user:pass@example--embeddings.modal.run'),
+                                    ('gemma', 'https://example--embeddings.modal.run/v1?key=value'),
+                                    ('gemma', 'https://bad host.modal.run'),
+                                    ('gemma', 'https://host.modal.run:not-a-port'),
+                                    ('gemma', 'https://host.modal.run:65536')]:
+            with self.subTest(selection=selection, endpoint=endpoint):
+                with self.assertRaises(ValueError):
+                    core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_EMBEDDING': selection,
+                                                'EMBED_URL': endpoint, 'EMBED_API_KEY': 'fixture-modal-token'})
+        for key in ('', ' ', 'has space', 'has\nnewline', 'non-ascii-é'):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'EMBED_API_KEY'):
+                core_entrypoint.build_config({**env, 'EMBED_API_KEY': key})
 
     def test_credential_key_is_passed_when_set(self):
         config = core_entrypoint.build_config({**ENV, 'QUIVR_CREDENTIAL_KEY': 'placeholder-credential-key'})

@@ -42,8 +42,8 @@ type SegmentationStore interface {
 // segments. Segments are numbered in order; each carries the Version's title
 // when it has exactly one text Part with the role title, as the built-in
 // windows do, so the projection's title field is the same for every path.
-// The recipe names the plugin and its version, so another plugin, or another
-// version of it, makes another Segmentation with other segment ids.
+// The recipe names the plugin, its version and installed derivation inputs, so
+// changing its model or segment settings makes another Segmentation and ids.
 func PluginSegmentation(org string, v Version, recipe string, provenance json.RawMessage, in []SegmentInput) (Segmentation, error) {
 	out := Segmentation{ID: StableID("segmentation", org, v.ID, recipe), VersionID: v.ID, Recipe: recipe, Provenance: canonical(provenance)}
 	parts := map[string]string{}

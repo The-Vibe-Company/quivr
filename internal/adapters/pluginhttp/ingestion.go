@@ -12,6 +12,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/call"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/devhost"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
@@ -36,8 +37,14 @@ func (i Ingestor) contribution() *plugins.Ingestion { return i.Pin.Manifest.Cont
 
 // Descriptor captures the metadata of this installed ingestion owner.
 func (i Ingestor) Descriptor() processing.IngestionDescriptor {
-	recipe := "plugin:" + i.Pin.Manifest.ID + "@" + i.Pin.Manifest.Version
-	provenance, _ := json.Marshal(map[string]string{"plugin_id": i.Pin.Manifest.ID, "plugin_version": i.Pin.Manifest.Version})
+	// Model and segment settings can change without a plugin version change.
+	// Keep both derivations immutable and reusable across projection generations;
+	// endpoints, registration ids and enabled roles do not affect the output.
+	configuration := registry.SettingsOf(i.Pin).Configuration
+	digest := content.StableID("ingestion", i.Pin.ManifestDigest, string(configuration))
+	recipe := "plugin:" + i.Pin.Manifest.ID + "@" + i.Pin.Manifest.Version + "#" + digest
+	provenance, _ := json.Marshal(map[string]string{"plugin_id": i.Pin.Manifest.ID, "plugin_version": i.Pin.Manifest.Version,
+		"manifest_digest": i.Pin.ManifestDigest, "configuration_digest": content.Hash(configuration)})
 	d := processing.IngestionDescriptor{PluginID: i.Pin.Manifest.ID, PluginVersion: i.Pin.Manifest.Version,
 		RegistrationID: i.Pin.Registration, Configuration: i.Pin.Configuration, InputPrices: map[string]*float64{},
 		Recipe: recipe, Producer: recipe, Provenance: provenance,

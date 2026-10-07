@@ -308,7 +308,7 @@ func (s OperationStore) AcceptRerun(ctx context.Context, org, sourceID, key stri
 	if source.Kind == operations.KindQuarantineReprocess && source.Reprocess != nil {
 		// A reprocess rerun takes what is still stuck in the same scope,
 		// with the plan active now.
-		op, err := insertReprocess(ctx, tx, org, content.StableID("operation", org, "rerun", sourceID, key), key, canonical, sourceID, reprocessFilter(source), source.Reprocess.Estimate)
+		op, err := insertReprocess(ctx, tx, org, content.StableID("operation", org, "rerun", sourceID, key), key, canonical, sourceID, reprocessFilter(source), source.Reprocess.FromStage, source.Reprocess.Estimate)
 		if err != nil {
 			return op, err
 		}

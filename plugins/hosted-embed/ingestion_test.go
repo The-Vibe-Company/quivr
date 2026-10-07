@@ -287,7 +287,23 @@ func TestResumeCacheIsolatesOrganizationsAndQueryMode(t *testing.T) {
 }
 
 func TestConfigAndContentRefusals(t *testing.T) {
+	// Literal external keys and omission protect the configuration contract.
+	for _, tc := range []struct {
+		raw  string
+		wait int
+	}{
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8}`, 25},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":0}`, 0},
+	} {
+		c, err := parseConfiguration([]byte(tc.raw))
+		if err != nil || c.BatchWaitMS != tc.wait {
+			t.Fatalf("batch collection default: %d %v", c.BatchWaitMS, err)
+		}
+	}
 	for _, tc := range []struct{ raw, reason string }{
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":-1}`, "batch_wait_ms must be between 0 and 100"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":101}`, "batch_wait_ms must be between 0 and 100"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":100,"call_budget_ms":100}`, "batch_wait_ms must be less than call_budget_ms"},
 		{`{"format":"openai","base_url":"https://key@example.org","auth":"bearer","model":"m","dimensions":8}`, "base_url must be an HTTP(S) base without credentials"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"bearer","model":"m","dimensions":8,"api_key":"secret"}`, "configuration must contain only declared fields"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"overlap":512}`, "invalid segment, overlap or batch limits"},
@@ -454,5 +470,313 @@ func TestProviderSharesThrottleAcrossCalls(t *testing.T) {
 	_, err = i.EmbedQuery(ctx, queryRequest(c, "second"))
 	if err == nil || calls.Load() != 1 {
 		t.Fatalf("throttled waiter made a provider call: calls=%d error=%v", calls.Load(), err)
+	}
+}
+
+// Owns cross-Version coalescing and result routing at the ingestion boundary.
+// Existing provider tests own wire modes, and retry tests own resume caching.
+func TestConcurrentVersionsShareBoundedProviderBatches(t *testing.T) {
+	var mu sync.Mutex
+	var batches [][]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		mu.Lock()
+		batches = append(batches, req.Input)
+		mu.Unlock()
+		data := []map[string]any{}
+		for n, text := range req.Input {
+			var id int
+			fmt.Sscanf(text, "bulletin %d", &id)
+			data = append(data, map[string]any{"index": n, "embedding": []float32{float32(id + 1), 1, 0, 0, 0, 0, 0, 0}})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+	c := testConfig("openai", server.URL)
+	c.BatchSize = 16
+	c.MaxConcurrentRequests = 1
+	i := newIngester(c, "fake-key", slog.Default())
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	for n := range 16 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			req := ingestRequest(c, fmt.Sprintf("bulletin %d", n), true)
+			req.InvocationID = fmt.Sprintf("inv-%d", n)
+			req.Version.RecordID = fmt.Sprintf("record-%d", n)
+			req.Version.RecordVersionID = fmt.Sprintf("version-%d", n)
+			got, err := i.SegmentAndEmbed(ctx, req)
+			if err != nil || len(got) != 1 {
+				t.Errorf("Version %d: %v %v", n, got, err)
+				return
+			}
+			if v := got[0].Vectors[c.spaceID()]; len(v) != 8 || v[0] != float32(n+1) {
+				t.Errorf("Version %d received another vector: %v", n, v)
+			}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	shared := false
+	for _, batch := range batches {
+		if len(batch) > c.BatchSize {
+			t.Fatalf("provider input limit exceeded: %d", len(batch))
+		}
+		if len(batch) > 1 {
+			shared = true
+		}
+	}
+	if !shared {
+		t.Fatalf("all %d provider calls contain one Version; archive latency is paid per Version", len(batches))
+	}
+}
+
+// The queue boundary owns cancellation, tenant isolation and poisoning of a
+// shared call. Gate admission is held by a channel, never a wall-clock wait.
+func TestDocumentBatchQueueIsolatesCancellationAndRefusal(t *testing.T) {
+	var mu sync.Mutex
+	var batches [][]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		batches = append(batches, req.Input)
+		mu.Unlock()
+		for _, input := range req.Input {
+			if input == "deny" {
+				w.WriteHeader(400)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"param": "input", "code": "invalid_input"}})
+				return
+			}
+		}
+		data := []map[string]any{}
+		for n, input := range req.Input {
+			data = append(data, map[string]any{"index": n, "embedding": []float32{float32(input[0]), 1, 0, 0, 0, 0, 0, 0}})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+	c := testConfig("openai", server.URL)
+	c.BatchSize = 3
+	c.BatchTokens = 25
+	c.MaxConcurrentRequests = 4
+	c.BatchWaitMS = 10
+	i := newIngester(c, "fake-key", slog.Default())
+	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stop()
+	for range c.MaxConcurrentRequests {
+		if err := i.provider.gate.acquire(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	admitted := true
+	defer func() {
+		if admitted {
+			for range c.MaxConcurrentRequests {
+				i.provider.gate.release()
+			}
+		}
+	}()
+	type queued struct {
+		text   string
+		result <-chan documentResult
+	}
+	var requests []queued
+	canceled, cancel := context.WithCancel(ctx)
+	for _, job := range []struct {
+		org, text string
+		ctx       context.Context
+	}{
+		{"one", "A", ctx}, {"one", "deny", ctx}, {"one", "E", ctx},
+		{"two", "B", ctx}, {"two", "C", ctx},
+		{"three", "cancel", canceled}, {"three", "D", ctx},
+	} {
+		result, err := i.documents.submit(job.ctx, job.org, []string{job.text}, job.text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requests = append(requests, queued{job.text, result})
+	}
+	cancel()
+	for range c.MaxConcurrentRequests {
+		i.provider.gate.release()
+	}
+	admitted = false
+	for _, job := range requests {
+		select {
+		case result := <-job.result:
+			if job.text == "deny" {
+				var refusal *quivrplugin.IngestError
+				if !errors.As(result.err, &refusal) || refusal.Retryable {
+					t.Fatalf("refusal: %v", result.err)
+				}
+			} else if job.text == "cancel" {
+				if !errors.Is(result.err, context.Canceled) {
+					t.Fatalf("cancellation: %v", result.err)
+				}
+			} else if result.err != nil || len(result.vectors) != 1 || result.vectors[0][0] != float32(job.text[0]) {
+				t.Fatalf("healthy %s: %+v", job.text, result)
+			}
+		case <-ctx.Done():
+			t.Fatal("queue did not settle")
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, batch := range batches {
+		org := ""
+		tokens := 0
+		for _, text := range batch {
+			if text == "cancel" {
+				t.Fatal("cancelled input reached provider")
+			}
+			group := map[string]string{"A": "one", "deny": "one", "E": "one", "B": "two", "C": "two", "D": "three"}[text]
+			if org != "" && group != org {
+				t.Fatalf("mixed Organizations: %v", batch)
+			}
+			org = group
+			tokens += len(text) + specialTokens
+		}
+		if len(batch) > 3 || tokens > 25 {
+			t.Fatalf("provider limits exceeded: %v", batch)
+		}
+	}
+}
+
+// Shared credential/endpoint failures belong to the provider boundary: one
+// collected batch must fail once, without replaying its inputs through splits.
+func TestDocumentBatchPropagatesGlobalProviderRefusalOnce(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 404, 422} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(status)
+				if status == 400 || status == 422 {
+					_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"param": "model", "code": "invalid_model"}})
+				}
+			}))
+			defer server.Close()
+			c := testConfig("openai", server.URL)
+			c.MaxConcurrentRequests = 1
+			i := newIngester(c, "fake-key", slog.Default())
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := i.provider.gate.acquire(ctx); err != nil {
+				t.Fatal(err)
+			}
+			results := make([]<-chan documentResult, 0, c.BatchSize)
+			for range c.BatchSize {
+				result, err := i.documents.submit(ctx, "org_a", []string{"document"}, "opaque")
+				if err != nil {
+					i.provider.gate.release()
+					t.Fatal(err)
+				}
+				results = append(results, result)
+			}
+			i.provider.gate.release()
+			for _, result := range results {
+				select {
+				case out := <-result:
+					var refusal *quivrplugin.IngestError
+					if !errors.As(out.err, &refusal) || refusal.Retryable || refusal.Code != "inference_refused" {
+						t.Fatalf("global refusal: %v", out.err)
+					}
+				case <-ctx.Done():
+					t.Fatal("global refusal did not settle")
+				}
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("global HTTP %d refusal issued %d provider calls, want 1", status, got)
+			}
+		})
+	}
+}
+
+func TestDocumentBatchDropsCancellationBeforeRefusalProbe(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	var mu sync.Mutex
+	var calls [][]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		calls = append(calls, req.Input)
+		first := len(calls) == 1
+		mu.Unlock()
+		if first {
+			close(started)
+			<-release
+		}
+		w.WriteHeader(400)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"param": "input"}})
+	}))
+	defer server.Close()
+	defer releaseOnce.Do(func() { close(release) })
+	c := testConfig("openai", server.URL)
+	c.BatchSize, c.MaxConcurrentRequests = 2, 1
+	i := newIngester(c, "fake-key", slog.Default())
+	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stop()
+	if err := i.provider.gate.acquire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	defer cancel()
+	left, err := i.documents.submit(canceled, "org_a", []string{"cancel"}, "cancel")
+	if err != nil {
+		i.provider.gate.release()
+		t.Fatal(err)
+	}
+	right, err := i.documents.submit(ctx, "org_a", []string{"deny"}, "deny")
+	i.provider.gate.release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("combined request did not start")
+	}
+	cancel()
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case out := <-left:
+		if !errors.Is(out.err, context.Canceled) {
+			t.Fatalf("canceled: %v", out.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("canceled request did not settle")
+	}
+	select {
+	case out := <-right:
+		var refusal *quivrplugin.IngestError
+		if !errors.As(out.err, &refusal) || refusal.Retryable {
+			t.Fatalf("refusal: %v", out.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("refused request did not settle")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 2 || len(calls[1]) != 1 || calls[1][0] != "deny" {
+		t.Fatalf("canceled input retried in provider calls: %v", calls)
 	}
 }

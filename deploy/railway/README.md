@@ -82,10 +82,60 @@ rebuild each earlier Corpus once with the operator key (later ones start on core
 Until then search works in every mode and new articles are searchable by keyword at once;
 their vectors attach at the rebuild, which re-embeds with the same model, so results hold.
 
-## Jev deep searches (optional)
+## EmbeddingGemma 2 on Modal (selected demo default)
 
-For optional Cohere embeddings beside core.ingest, follow
-[Switch hosted text embeddings with rollback](hosted-embeddings.md).
+The coordinator deploys a pinned text-only `google/embeddinggemma-2` service on
+Modal L4 and selects it with `QUIVR_DEMO_EMBEDDING=gemma` on api and worker.
+`EMBED_URL` is the deployed HTTPS origin; `EMBED_API_KEY` is its bearer secret.
+`hosted.embed` uses 768 dimensions and Gemma's search/document prefixes.
+Follow the [Modal rollout guide](../modal/README.md) to create the secret,
+run `modal deploy`, rebuild every Corpus, check coverage/search and roll back
+with `QUIVR_DEMO_EMBEDDING=cohere` and retained Foundry endpoint/key variables.
+Model changes need a maintenance window while old generations rebuild. Real GPU latency/throughput remain for coordinator
+validation; this change's measurements use fake inference only.
+
+## Hosted Azure embeddings for every source (optional)
+
+Set `QUIVR_DEMO_HOSTED_EMBED=1`, `AZURE_FOUNDRY_ENDPOINT` (Foundry resource root)
+and the secret `AZURE_FOUNDRY_KEY` identically on api and worker. For existing Corpora,
+save the plan and restore it if needed before redeploying; finish step 1's checks afterward.
+The default ingestion is `hosted.embed`: Cohere-Embed-V5-Pro, 1024 dimensions, for every source format after normalization, including NewsML-G2 XML.
+PDFs still need `QUIVR_DEMO_PLUGINS=1` for `pdf-text`. Other switch values keep E5.
+The generated config has no E5 evaluation route, saving CPU after plan verification. Keep core.ingest and TEI reachable for historical generations and already-pinned work.
+
+Each hosted sidecar uses `batch_size=32`, `max_concurrent_requests=16` and `max_batch_tokens=196608` (32 × the unchanged 6144 segment bound). The document queue admits up to 256 document subrequests per process (`min(256, max_concurrent_requests × batch_size)`). These settings preserve `hosted.embed.cohere-embed-v5-pro-1024-c025d1f04d71722f@1`, so tuning them needs no Corpus rebuild.
+Concurrency 16 is half the plugin maximum: at roughly one second per call it permits about 960 requests/minute per process. [Foundry's documented defaults](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/quotas-limits) for other models are 1000 requests/minute, 400000 tokens/minute and 300 concurrent requests; check the actual deployment allowance and combined api/worker load. Concurrency does not enforce a token or request rate. The plugin shares a 429 `Retry-After` cooldown across its process, falls back to bounded exponential backoff, and retries twice; lower concurrency if throttling persists.
+Redeploy both services together. Changed settings create a new registration and apply startup routing, retaining this deployment's configured hosted default. Inspect the active plan afterward if you added operator routes: compatible build replacement preserves those overrides only when settings are unchanged. Already-pinned work and historical plans keep their exact registrations; saved plans can require restoring the old settings for rollback.
+
+Existing Corpora keep their old search generation after redeploy and can still
+require E5 until rebuilt. Use the operator key inside api (port 8080), with
+`plugins:admin`, `corpora:read`, `projections:rebuild`, `operations:read` and
+`operations:write`. These are operator examples, not run against the paid provider:
+
+1. Save `GET /v0/admin/plugins/plan` before redeploy for rollback. If earlier hosted
+   promotions added E5 evaluation, restore the saved pre-promotion plan first:
+   startup preserves operator-created routes. After redeploy, verify the active
+   plan has `ingestion-default` on `hosted.embed`, no `ingestion-evaluation:*:core.ingest`
+   and no source routes to E5. Inspect `GET /v0/admin/plugins` and list every Corpus
+   with `GET /v0/corpora`, following pagination.
+2. Inspect `GET /v0/corpora/{corpus_id}/vector-spaces`. Re-index each existing
+   Corpus with `POST /v0/corpora/{corpus_id}/rebuilds` and a fresh `idempotency_key`.
+   The rebuild re-runs segmentation and embedding of existing Versions with the
+   active default, `hosted.embed`, calling the paid provider. Search keeps its old
+   generation until the prepared hosted generation is ready. Poll the Operation
+   at `GET /v0/operations/{operation_id}` until `succeeded`; inspect failures.
+3. Recheck hosted `coverage.segments` against its own `coverage.total_segments`
+   and confirm `coverage.versions_covered` includes every eligible current Version.
+   Run semantic/hybrid searches with `profile: default`: hits must name the hosted
+   space without evaluation fields. The default profile uses the served vectors.
+
+Backfill cannot convert an E5-only Corpus without hosted source assignments.
+For eligible hosted gaps, use `POST /v0/admin/backfills`: `dry_run: true`, inspect
+cost, then resend with `dry_run: false` and `confirm_cost: true`. A zero estimate
+does not prove coverage. The [hosted guide](hosted-embeddings.md) gives full request
+bodies and rollback precautions: new hosted Versions have no E5 rollback vectors.
+
+## Jev deep searches (optional)
 
 The core image includes [`jev.rerank`](../../plugins/jev-rerank/README.md).
 To enable it, set `QUIVR_DEMO_JEV_RERANK=1` identically on api and worker,
