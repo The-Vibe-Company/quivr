@@ -194,16 +194,16 @@
               "segments": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Snapshot segments holding a vector in this space, over every requested Corpus; zero before coverage is known."
+                "description": "Snapshot segments holding a vector in this space, summed over requested Corpora. Corpora without a completed snapshot contribute zero."
               },
               "total": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Snapshot segments of the requested Corpora; zero before coverage is known."
+                "description": "Snapshot segments summed over requested Corpora. Corpora without a completed snapshot contribute zero."
               },
               "unknown": {
                 "type": "boolean",
-                "description": "Plugin API 0.16+: no completed coverage snapshot yet. Counts are placeholders and never gate retrieval."
+                "description": "Plugin API 0.16+: at least one requested Corpus has no completed coverage snapshot yet. Counts may combine known snapshots with zero placeholders and never gate retrieval."
               },
               "age_ms": {
                 "type": "integer",

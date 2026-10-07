@@ -63,6 +63,7 @@ func TestConfigurationAtHTTPBoundary(t *testing.T) {
 	if err = json.Unmarshal(fixture, &body); err != nil {
 		t.Fatal(err)
 	}
+	fixtureSpaces := body["spaces"]
 	for _, tc := range []struct {
 		config  string
 		valid   bool
@@ -80,7 +81,7 @@ func TestConfigurationAtHTTPBoundary(t *testing.T) {
 		{`{"hybrid_fusion":null}`, false, false}, {`{"alpha":0.5}`, false, false},
 	} {
 		var spaces []quivrplugin.SearchSpace
-		if err := json.Unmarshal(body["spaces"], &spaces); err != nil {
+		if err := json.Unmarshal(fixtureSpaces, &spaces); err != nil {
 			t.Fatal(err)
 		}
 		spaces[0].Coverage.Unknown = tc.unknown

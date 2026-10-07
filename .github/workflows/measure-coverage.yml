@@ -1,0 +1,39 @@
+name: Coverage measurement
+# Fixed p95 regression gate for THE-1231; seeds at least one million segments.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - internal/adapters/postgres/space*.go
+      - internal/retrieval/**
+      - migrations/**
+      - .github/workflows/measure-coverage.yml
+permissions:
+  contents: read
+concurrency:
+  group: coverage-measurement-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  vector-coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: make adapter-postgres args='-v -run ^TestIndependentEvaluationProjectionCoverage$'
+        env:
+          QUIVR_MEASURE: '1'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vector-coverage
+          include-hidden-files: true
+          path: .scratch/quivr-adapter-pg-*/adapter-postgres.log
+          if-no-files-found: warn

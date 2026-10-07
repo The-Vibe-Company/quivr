@@ -541,9 +541,9 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `spaces[].query_modalities` | array of string | yes | — |
 | `spaces[].role` | `served`, `evaluation` | yes | served answers search by default; evaluation is indexed and compared. |
 | `spaces[].coverage` | object | yes | Informational background coverage. Counts can be stale or zero placeholders before the first snapshot. Candidate eligibility is determined by routing and canonical hydration, never these counts. |
-| `spaces[].coverage.segments` | integer | yes | Snapshot segments holding a vector in this space, over every requested Corpus; zero before coverage is known. |
-| `spaces[].coverage.total` | integer | yes | Snapshot segments of the requested Corpora; zero before coverage is known. |
-| `spaces[].coverage.unknown` | boolean | no | Plugin API 0.16+: no completed coverage snapshot yet. Counts are placeholders and never gate retrieval. |
+| `spaces[].coverage.segments` | integer | yes | Snapshot segments holding a vector in this space, summed over requested Corpora. Corpora without a completed snapshot contribute zero. |
+| `spaces[].coverage.total` | integer | yes | Snapshot segments summed over requested Corpora. Corpora without a completed snapshot contribute zero. |
+| `spaces[].coverage.unknown` | boolean | no | Plugin API 0.16+: at least one requested Corpus has no completed coverage snapshot yet. Counts may combine known snapshots with zero placeholders and never gate retrieval. |
 | `spaces[].coverage.age_ms` | integer | no | Plugin API 0.16+: age of the oldest coverage snapshot across the requested Corpora. Counts are informational and may be stale. |
 | `served` | array of object | yes | Every candidate request of earlier rounds with the candidates the core served for it, in order. Empty in round 1. At most 24 items. |
 | `served[].round` | integer | yes | 1 to 3. |

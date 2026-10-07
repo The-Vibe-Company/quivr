@@ -341,6 +341,41 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	if p95 >= time.Second {
 		t.Fatalf("search p95 %s, objective <1s", p95)
 	}
+	// The same PostgreSQL source must eventually publish real counts, not
+	// leave every request unknown because the background query always fails.
+	refresh, stop := context.WithTimeout(ctx, 30*time.Second)
+	defer stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, completed, total, err := snapshots.VectorSpaces(refresh, org, c.ID)
+		if err != nil {
+			t.Fatalf("completed coverage: %v", err)
+		}
+		if len(completed) > 0 && !completed[0].CoverageUnknown {
+			if total != int64(cuts*(copies+1)) {
+				t.Fatalf("snapshot serving total %d, want %d", total, cuts*(copies+1))
+			}
+			found := false
+			for _, sp := range completed {
+				if sp.ID == space.ID {
+					found = true
+					if sp.CoverageUnknown || sp.CoverageAgeMS == nil || sp.Segments != int64(2*(copies+1)) || sp.TotalSegments == nil || *sp.TotalSegments != int64(2*(copies+1)) || sp.VersionsCovered != int64(copies+1) {
+						t.Fatalf("completed independent coverage: %+v", sp)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("completed snapshot lost the evaluation space")
+			}
+			break
+		}
+		select {
+		case <-refresh.Done():
+			t.Fatalf("background coverage did not complete: %v", refresh.Err())
+		case <-ticker.C:
+		}
+	}
 	if _, err = pool.Exec(ctx, `INSERT INTO tombstones(organization,record_id) VALUES($1,$2)`, org, v.RecordID); err != nil {
 		t.Fatal(err)
 	}
