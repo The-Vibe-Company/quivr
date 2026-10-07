@@ -92,9 +92,18 @@ func TestCollectorPluginCollectsAndResumes(t *testing.T) {
 	if len(byKey) != 10 {
 		t.Fatalf("the first run collected %d Records, want 10: %v", len(byKey), byKey)
 	}
-	hits := request(t, "POST", "/v0/search", token, map[string]any{"query": "Harbourlight", "corpus_ids": []string{corpusID}, "mode": "lexical"}, 200)["items"].([]any)
-	if len(hits) == 0 {
-		t.Fatal("collected Records are not searchable")
+	// Materialized is not searchable yet: segmenting and indexing follow, so
+	// the search is repeated until the collected Records are found.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		hits := request(t, "POST", "/v0/search", token, map[string]any{"query": "Harbourlight", "corpus_ids": []string{corpusID}, "mode": "lexical"}, 200)["items"].([]any)
+		if len(hits) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("collected Records are not searchable 30 s after materializing: %v", byKey)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Pull the next run forward: it resumes at offset 10.
