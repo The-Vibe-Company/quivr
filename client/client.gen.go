@@ -3350,12 +3350,17 @@ type UploadRequest struct {
 // VectorSpace defines model for VectorSpace.
 type VectorSpace struct {
 	Coverage struct {
-		Segments int `json:"segments"`
+		// AgeMs Age of this space's coverage snapshot. Coverage is informational and may be stale.
+		AgeMs    *int `json:"age_ms,omitempty"`
+		Segments int  `json:"segments"`
 
-		// TotalSegments Current segments in this plugin's own projection; different plugins may cut the same Version differently.
+		// TotalSegments Snapshot segments in this plugin's own projection; different plugins may cut the same Version differently.
 		TotalSegments *int `json:"total_segments,omitempty"`
 
-		// VersionsCovered Current eligible Versions whose entire projection has vectors in this space.
+		// Unknown True until a background snapshot completes; counts are placeholders.
+		Unknown *bool `json:"unknown,omitempty"`
+
+		// VersionsCovered Snapshot eligible Versions whose entire projection has vectors in this space.
 		VersionsCovered *int `json:"versions_covered,omitempty"`
 	} `json:"coverage"`
 	Dimensions int               `json:"dimensions"`
@@ -3387,10 +3392,15 @@ type VectorSpaceRole string
 
 // VectorSpaceList defines model for VectorSpaceList.
 type VectorSpaceList struct {
+	// CoverageAgeMs Age of the background coverage snapshot. Counts may be stale during refresh or dependency failure.
+	CoverageAgeMs *int `json:"coverage_age_ms,omitempty"`
+
+	// CoverageUnknown True until a background coverage snapshot completes; counts are placeholders.
+	CoverageUnknown        *bool         `json:"coverage_unknown,omitempty"`
 	Items                  []VectorSpace `json:"items"`
 	ProjectionGenerationId string        `json:"projection_generation_id"`
 
-	// Segments Current segments the generation projects; a space whose coverage equals it holds a vector for every one.
+	// Segments Background snapshot of segments the generation projects; zero before coverage is known. Counts may be stale.
 	Segments int `json:"segments"`
 }
 

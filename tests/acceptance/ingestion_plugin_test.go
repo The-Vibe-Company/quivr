@@ -3,6 +3,7 @@ package acceptance
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 const (
@@ -15,6 +16,34 @@ const (
 func vectorSpaces(t *testing.T, corpusID string) (map[string]map[string]any, float64) {
 	t.Helper()
 	list := request(t, "GET", "/v0/corpora/"+corpusID+"/vector-spaces", os.Getenv("QUIVR_TEST_ADMIN"), nil, 200)
+	return decodeVectorSpaces(list)
+}
+
+// Snapshot counts become observable asynchronously. The local harness shortens
+// the real refresh interval; wait for a count started after this read began.
+func awaitVectorSpaces(t *testing.T, corpusID string) (map[string]map[string]any, float64) {
+	t.Helper()
+	started := time.Now()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
+		list := request(t, "GET", "/v0/corpora/"+corpusID+"/vector-spaces", os.Getenv("QUIVR_TEST_ADMIN"), nil, 200)
+		unknown, _ := list["coverage_unknown"].(bool)
+		age, known := list["coverage_age_ms"].(float64)
+		if !unknown && known && age <= float64(time.Since(started).Milliseconds()) {
+			return decodeVectorSpaces(list)
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatalf("no coverage snapshot started after the read for %s: %v", corpusID, list)
+		}
+	}
+}
+
+func decodeVectorSpaces(list map[string]any) (map[string]map[string]any, float64) {
 	out := map[string]map[string]any{}
 	for _, item := range list["items"].([]any) {
 		space := item.(map[string]any)
@@ -90,7 +119,7 @@ func TestIngestionPlugin(t *testing.T) {
 	if done := awaitOperation(t, location); done["state"] != "succeeded" {
 		t.Fatalf("rebuild onto the plugin's spaces: %v", done)
 	}
-	after, total := vectorSpaces(t, corpusID)
+	after, total := awaitVectorSpaces(t, corpusID)
 	served, evaluation := after[pluginServedSpace], after[pluginEvaluationSpace]
 	if len(after) != 3 || served == nil || evaluation == nil || after[coreIngestSpace]["role"] != "served" || total < 2 {
 		t.Fatalf("after the rebuild the plugin's two spaces: %v, %v segments", after, total)
@@ -113,7 +142,7 @@ func TestIngestionPlugin(t *testing.T) {
 	if len(hits) == 0 || hits[0]["version_id"] != vineyard || hits[0]["vector_space_id"] != pluginServedSpace {
 		t.Fatalf("a Record ingested through the plugin: %v", hits)
 	}
-	after, total = vectorSpaces(t, corpusID)
+	after, total = awaitVectorSpaces(t, corpusID)
 	if coverage(after[pluginServedSpace]) != total || coverage(after[pluginEvaluationSpace]) != total {
 		t.Fatalf("coverage after a new Record: %v of %v", after, total)
 	}

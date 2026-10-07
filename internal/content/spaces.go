@@ -68,4 +68,8 @@ type SpaceCoverage struct {
 	VersionsCovered int64
 	// ServingSegments counts this owner's current served projection, when known.
 	ServingSegments *int64
+	// CoverageUnknown means no background snapshot has completed yet. Counts
+	// are informational and must not gate candidate retrieval.
+	CoverageUnknown bool
+	CoverageAgeMS   *int64
 }

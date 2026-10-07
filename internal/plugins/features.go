@@ -25,6 +25,7 @@ const (
 	FeatureSignedCalls                    Feature = "signed_calls"
 	FeatureConnectorSubmissionConcurrency Feature = "connector_submission_concurrency"
 	FeatureConnectorAttachmentOnly        Feature = "connector_attachment_only"
+	FeatureCoverageSnapshots              Feature = "coverage_snapshots"
 )
 
 // FeatureDefinition records the public history and manifest admission rules.
@@ -56,6 +57,7 @@ var featureTable = []FeatureDefinition{
 	{FeatureSignedCalls, "0.14.0", "Signed engine requests with per-plugin audience and body digest", "", ""},
 	{FeatureConnectorSubmissionConcurrency, "0.15.0", "Bounded concurrent connector item submissions", "", ""},
 	{FeatureConnectorAttachmentOnly, "0.15.0", "Raw connector Blob input through a source attachment", "", ""},
+	{FeatureCoverageSnapshots, "0.16.0", "Informational coverage snapshots with unknown state and age", "", ""},
 }
 
 // FeatureTable returns the introduction history, oldest first.

@@ -146,7 +146,7 @@ func TestBackfillFillsWindowAndPromotesSpaces(t *testing.T) {
 	if done["state"] != "succeeded" || counter(done, "versions_in_scope") != 3 || counter(done, "versions_done") != 3 || counter(done, "versions_skipped") != 0 {
 		t.Fatalf("resumed backfill %v, want each of the window's 3 articles filled once", done)
 	}
-	spaces, total := vectorSpaces(t, corpusID)
+	spaces, total := awaitVectorSpaces(t, corpusID)
 	if large := spaces[pluginEvaluationSpace]; total != 5 || large == nil || large["role"] != "evaluation" || coverage(large) != 3 || coverage(spaces[pluginServedSpace]) != 5 {
 		t.Fatalf("after the backfill %v of %v segments, want the large space on the window's 3 only", spaces, total)
 	}
