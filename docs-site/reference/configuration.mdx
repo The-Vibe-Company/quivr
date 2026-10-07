@@ -165,7 +165,7 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 | `connector:push` | calling a source plugin’s declared API routes on authorized Corpora |
 | `operations:read`, `operations:write` | reading, cancelling and rerunning Operations |
 | `projections:rebuild` | starting a Corpus rebuild |
-| `queues:read` | reading installation-wide document backlog (`GET /v0/admin/queues`); requires all-Corpora scope and an operator key |
+| `queues:read` | reading installation-wide document backlog (`GET /v0/admin/queues`); requires all-Corpora scope; give it only to an operator key |
 | `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`), backfilling a Corpus (`/v0/admin/backfills`) and promoting a vector space (`/v0/admin/spaces/{id}/promote`); give it only to an operator key |
 | `audit:read` | Reading sensitive-action audit entries in the key's organization (`/v0/admin/audit`); requires `corpora: ["*"]`. |
 | `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches, steps, documents received and Matches (`/v0/admin/stats/*`) |
