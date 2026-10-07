@@ -3,6 +3,7 @@ package retrieval
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"slices"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"golang.org/x/sync/errgroup"
 )
 
 // RebuildTarget is a running rebuild Operation and its logical target generation.
@@ -79,6 +81,13 @@ type GenerationRouter interface {
 // heartbeats stay frequent.
 const rebuildBatch = 25
 
+// Rebuild concurrency bounds Version work inside one activity. Plugin/provider
+// limits remain authoritative; activity slots are configured independently.
+const (
+	DefaultRebuildConcurrency = 8
+	MaxRebuildConcurrency     = 32
+)
+
 // Cancellation settles a stopped worker's cancellation request.
 type Cancellation interface {
 	ConfirmCancel(context.Context, string, string) error
@@ -87,6 +96,9 @@ type Cancellation interface {
 // Rebuilder reconstructs a Corpus projection from canonical text and stored
 // vectors, then activates it through canonical PostgreSQL routing.
 type Rebuilder struct {
+	// Concurrency bounds Versions in flight per Step; zero selects 8.
+	// The supported range is 1–32; 1 restores serial coverage.
+	Concurrency  int
 	Cancellation Cancellation
 	Store        RebuildStore
 	Content      RebuildContent
@@ -107,6 +119,13 @@ func (t terminal) Error() string { return t.failure.Code }
 // Operation needs no further steps. Transient failures return an error so the
 // caller retries with backoff; the Operation stays running.
 func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, error) {
+	concurrency := r.Concurrency
+	if concurrency == 0 {
+		concurrency = DefaultRebuildConcurrency
+	}
+	if concurrency < 1 || concurrency > MaxRebuildConcurrency {
+		return false, fmt.Errorf("rebuild concurrency must be between 1 and %d", MaxRebuildConcurrency)
+	}
 	target, err := r.Store.BeginRebuild(ctx, org, operationID)
 	if err != nil {
 		return false, err
@@ -118,23 +137,49 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	for _, c := range candidates {
-		err = r.cover(ctx, org, target, c)
+	group, work := errgroup.WithContext(ctx)
+	group.SetLimit(concurrency)
+	// Each goroutine owns its outcome slot; read only after the join.
+	outcomes := make([]error, len(candidates))
+	for i, c := range candidates {
+		if work.Err() != nil {
+			break
+		}
+		group.Go(func() error {
+			// Go may unblock after another candidate canceled the group.
+			if err := work.Err(); err != nil {
+				return err
+			}
+			outcomes[i] = r.cover(work, org, target, c)
+			return outcomes[i]
+		})
+	}
+	// Join every effect before settling, comparing progress, or retrying. The
+	// store fences canonical effects and idempotently counts committed coverage.
+	err = group.Wait()
+	// The first transient error cancels work, but cannot hide a cancellation
+	// or deterministic failure another candidate already observed.
+	for _, outcome := range outcomes {
+		if errors.Is(outcome, operations.ErrNotRunning) {
+			return r.stop(ctx, org, operationID)
+		}
+	}
+	for _, outcome := range outcomes {
 		var failure terminal
-		if errors.As(err, &failure) {
-			// A failure never overrides an earlier cancellation request.
+		if errors.As(outcome, &failure) {
+			// Use the parent context: the group context is canceled after Wait.
+			// The store preserves an earlier cancellation request over this failure.
 			if err = r.Store.FailRebuild(ctx, org, operationID, failure.failure); err != nil {
 				return false, err
 			}
 			return r.stop(ctx, org, operationID)
 		}
-		if errors.Is(err, operations.ErrNotRunning) {
-			return r.stop(ctx, org, operationID)
-		}
-		if err != nil {
-			return false, err
-		}
 	}
+
+	if err != nil {
+		return false, err
+	}
+
 	if len(candidates) > 0 {
 		remaining, err := r.Store.RebuildCandidates(ctx, org, operationID, rebuildBatch)
 		if err != nil {
