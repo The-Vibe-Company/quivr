@@ -81,11 +81,21 @@ func eventArguments(ctx context.Context, event eventInput) []any {
 func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, error) {
 	var sequence int64
 	err := tx.QueryRow(ctx, appendEventSQL, eventArguments(ctx, event)...).Scan(&sequence)
+	if err == nil && event.Resource == "record" {
+		err = observeQueueRecords(ctx, tx, []string{event.Organization}, []string{event.ResourceID})
+	}
+	if err == nil {
+		_, err = tx.Exec(ctx, acknowledgeQueueJournalSQL, event.Organization, 1)
+	}
 	return sequence, err
 }
 
 func queueEvent(ctx context.Context, batch *pgx.Batch, event eventInput) {
 	batch.Queue(appendEventSQL, eventArguments(ctx, event)...)
+	if event.Resource == "record" {
+		queueRecordObservations(batch, []string{event.Organization}, []string{event.ResourceID})
+	}
+	batch.Queue(acknowledgeQueueJournalSQL, event.Organization, 1)
 }
 
 func notFound(err error) error {

@@ -232,6 +232,9 @@ SELECT $1,x.delivery_id,$3 FROM unnest($2::text[]) WITH ORDINALITY AS x(delivery
 	if writes.Len() == 0 {
 		return nil
 	}
+	if count > 0 {
+		writes.Queue(acknowledgeQueueJournalSQL, org, count)
+	}
 	return tx.SendBatch(ctx, writes).Close()
 }
 

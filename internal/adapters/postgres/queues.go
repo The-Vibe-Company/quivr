@@ -221,7 +221,20 @@ func queueBacklogSQL() string {
 	// The empty queue value is the rolling-upgrade representation of live work.
 	// Operations have no source queue because administrative work is always
 	// bulk. Version class comes from its receipt rather than a Version column.
-	return `WITH work AS (
+	return `WITH enrichment_versions AS MATERIALIZED (
+ SELECT q.organization,q.version_id FROM queue_enrichment_records q
+ WHERE q.pending AND (SELECT initialized AND NOT EXISTS(SELECT FROM organization_journals j
+ LEFT JOIN queue_observation_journals q USING(organization) WHERE j.last_sequence>coalesce(q.position,0))
+ FROM queue_enrichment_bootstrap WHERE singleton)
+ UNION ALL
+ SELECT v.organization,v.id FROM record_versions v
+ JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
+ WHERE NOT (SELECT initialized AND NOT EXISTS(SELECT FROM organization_journals j
+ LEFT JOIN queue_observation_journals q USING(organization) WHERE j.last_sequence>coalesce(q.position,0))
+ FROM queue_enrichment_bootstrap WHERE singleton)
+   AND v.baseline_ready AND r.current_version_id=v.id AND NOT v.quarantined
+   AND v.enrichment_state IN ('queued','running','retrying')
+), work AS (
  SELECT CASE WHEN COALESCE(NULLIF(rc.work_queue,''),'live')='bulk' THEN 'bulk' ELSE 'live' END AS queue,
         rc.organization,COALESCE(NULLIF(rc.version_id,''),ar.version_id,rc.id) AS document_id,
         COALESCE(LEAST(rc.accepted_at,ar.accepted_at),rc.accepted_at,ar.accepted_at) AS admitted_at,false AS active
@@ -238,8 +251,18 @@ func queueBacklogSQL() string {
  JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
  LEFT JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.acceptance_order)=(v.organization,v.record_id,v.acceptance_order)
  WHERE NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
-   AND ((NOT v.baseline_ready AND NOT v.quarantined AND v.processing IN ('queued','running','retrying'))
-     OR (v.baseline_ready AND r.current_version_id=v.id AND NOT v.quarantined AND v.enrichment_state IN ('queued','running','retrying')))
+   AND NOT v.baseline_ready AND NOT v.quarantined AND v.processing IN ('queued','running','retrying')
+ UNION ALL
+ SELECT CASE WHEN COALESCE(NULLIF(rc.work_queue,''),'live')='bulk' THEN 'bulk' ELSE 'live' END,
+        v.organization,v.id,COALESCE(LEAST(rc.accepted_at,ar.accepted_at),rc.accepted_at,ar.accepted_at),false
+ FROM enrichment_versions ev
+ JOIN record_versions v ON (v.organization,v.id)=(ev.organization,ev.version_id)
+ JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
+ JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
+ LEFT JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.acceptance_order)=(v.organization,v.record_id,v.acceptance_order)
+ WHERE v.baseline_ready AND r.current_version_id=v.id AND NOT v.quarantined
+   AND v.enrichment_state IN ('queued','running','retrying')
+   AND NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
  UNION ALL
  SELECT CASE WHEN COALESCE(NULLIF(e.work_queue,''),NULLIF(rc.work_queue,''),'live')='bulk' THEN 'bulk' ELSE 'live' END,
         e.organization,e.version_id,e.created_at,false
@@ -264,7 +287,6 @@ func queueBacklogSQL() string {
  FROM evaluation_intents i
  JOIN record_versions v ON (v.organization,v.id)=(i.organization,i.record_version_id)
  JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
- LEFT JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.acceptance_order)=(v.organization,v.record_id,v.acceptance_order)
  WHERE i.kind='evaluation' AND i.state='pending' AND i.available_at<=statement_timestamp()
    AND NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
  UNION ALL

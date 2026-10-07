@@ -174,6 +174,9 @@ func (s ProjectionStore) SaveSegmentation(ctx context.Context, org string, resul
 			return err
 		}
 	}
+	if err = enqueueProjectionPurge(ctx, tx, org, result.VersionID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -368,6 +371,9 @@ func (s ProjectionStore) promoteAttempt(ctx context.Context, org string, seg con
 		return err
 	}
 
+	if err = observeQueueRecords(ctx, tx, []string{org}, []string{recordID}); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
