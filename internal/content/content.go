@@ -655,7 +655,14 @@ func (s Service) Record(ctx context.Context, scope corpus.Scope, id string) (Rec
 	if err := scope.Require(corpus.ActionContentRecord); err != nil {
 		return Record{}, err
 	}
-	return s.record(ctx, scope, id)
+	r, err := s.record(ctx, scope, id)
+	if err == nil {
+		err = s.visibleCorpus(ctx, scope.Organization, r.Source.CorpusID)
+	}
+	if err != nil {
+		return Record{}, err
+	}
+	return r, nil
 }
 
 func (s Service) record(ctx context.Context, scope corpus.Scope, id string) (Record, error) {
@@ -670,17 +677,47 @@ func (s Service) Version(ctx context.Context, scope corpus.Scope, recordID, id s
 	if err := scope.Require(corpus.ActionContentVersion); err != nil {
 		return Version{}, err
 	}
-	return s.version(ctx, scope, recordID, id)
-}
-
-func (s Service) version(ctx context.Context, scope corpus.Scope, recordID, id string) (Version, error) {
-	stored, err := s.Versions.Version(ctx, scope.Organization, recordID, id)
+	stored, err := s.storedVersion(ctx, scope, recordID, id)
+	if err == nil {
+		err = s.visibleCorpus(ctx, scope.Organization, stored.CorpusID)
+	}
 	if err != nil {
 		return Version{}, err
 	}
-	if !scope.Contains(stored.CorpusID) {
-		return Version{}, corpus.ErrNotFound
+	return s.versionFromStored(ctx, scope, recordID, id, stored)
+}
+
+// Public content reads respect archive visibility. Trusted workers still read
+// retained content so archiving cannot consume or strand their pending work.
+func (s Service) visibleCorpus(ctx context.Context, org, id string) error {
+	if s.Corpora == nil {
+		return nil
 	}
+	c, err := s.Corpora.Read(ctx, org, id)
+	if err == nil && c.Archived {
+		return corpus.ErrNotFound
+	}
+	return err
+}
+
+func (s Service) version(ctx context.Context, scope corpus.Scope, recordID, id string) (Version, error) {
+	stored, err := s.storedVersion(ctx, scope, recordID, id)
+	if err != nil {
+		return Version{}, err
+	}
+	return s.versionFromStored(ctx, scope, recordID, id, stored)
+}
+func (s Service) storedVersion(ctx context.Context, scope corpus.Scope, recordID, id string) (StoredVersion, error) {
+	stored, err := s.Versions.Version(ctx, scope.Organization, recordID, id)
+	if err != nil {
+		return StoredVersion{}, err
+	}
+	if !scope.Contains(stored.CorpusID) {
+		return StoredVersion{}, corpus.ErrNotFound
+	}
+	return stored, nil
+}
+func (s Service) versionFromStored(ctx context.Context, scope corpus.Scope, recordID, id string, stored StoredVersion) (Version, error) {
 	data, err := s.Blobs.Read(ctx, stored.ManifestBlob)
 	if err != nil {
 		return Version{}, err

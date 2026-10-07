@@ -1814,6 +1814,8 @@ type ConnectorUsage struct {
 
 // Corpus defines model for Corpus.
 type Corpus struct {
+	// Archived Reversible visibility fence; archived corpora retain all data.
+	Archived *bool  `json:"archived,omitempty"`
 	CorpusId string `json:"corpus_id"`
 
 	// EffectiveRetrieval Pin a plugin-provided profile when resolving config. Explicit fields override default fields by logical name; unmapped source data remains preserved. getCorpus returns the effective resolved fields. The only built-in profile, example.editorial, is illustrative (paired with the example extension namespace), not a product default; an uninstalled profile is 422 unsupported_profile.
@@ -1831,6 +1833,12 @@ type CorpusExclusion struct {
 type CorpusPage struct {
 	Items          []Corpus `json:"items"`
 	NextPageCursor *string  `json:"next_page_cursor,omitempty"`
+}
+
+// CorpusRenameRequest defines model for CorpusRenameRequest.
+type CorpusRenameRequest struct {
+	// Name A nonblank corpus name without embedded NUL characters.
+	Name string `json:"name"`
 }
 
 // CorpusRequest defines model for CorpusRequest.
@@ -3664,6 +3672,9 @@ type ListCorporaParams struct {
 
 	// Limit The most items to return. An empty, non-integer or out-of-range value is 422 invalid_limit.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// IncludeArchived Include archived corpora; false by default. Bound into the page cursor.
+	IncludeArchived *bool `form:"include_archived,omitempty" json:"include_archived,omitempty"`
 }
 
 // ListDeliveryAttemptsParams defines parameters for ListDeliveryAttempts.
@@ -3770,6 +3781,9 @@ type ChangeConnectorScheduleJSONRequestBody = ScheduleChange
 
 // CreateCorpusJSONRequestBody defines body for CreateCorpus for application/json ContentType.
 type CreateCorpusJSONRequestBody = CorpusRequest
+
+// RenameCorpusJSONRequestBody defines body for RenameCorpus for application/json ContentType.
+type RenameCorpusJSONRequestBody = CorpusRenameRequest
 
 // RebuildCorpusProjectionJSONRequestBody defines body for RebuildCorpusProjection for application/json ContentType.
 type RebuildCorpusProjectionJSONRequestBody = ActionRequest
@@ -4368,11 +4382,20 @@ type ServerInterface interface {
 	// (GET /v0/corpora/{corpus_id})
 	GetCorpus(w http.ResponseWriter, r *http.Request, corpusId string)
 
+	// (PATCH /v0/corpora/{corpus_id})
+	RenameCorpus(w http.ResponseWriter, r *http.Request, corpusId string)
+
+	// (POST /v0/corpora/{corpus_id}/archive)
+	ArchiveCorpus(w http.ResponseWriter, r *http.Request, corpusId string)
+
 	// (POST /v0/corpora/{corpus_id}/rebuilds)
 	RebuildCorpusProjection(w http.ResponseWriter, r *http.Request, corpusId string)
 
 	// (PUT /v0/corpora/{corpus_id}/retrieval)
 	ConfigureRetrieval(w http.ResponseWriter, r *http.Request, corpusId string)
+
+	// (POST /v0/corpora/{corpus_id}/unarchive)
+	UnarchiveCorpus(w http.ResponseWriter, r *http.Request, corpusId string)
 
 	// (GET /v0/corpora/{corpus_id}/vector-spaces)
 	ListVectorSpaces(w http.ResponseWriter, r *http.Request, corpusId string)
@@ -5082,6 +5105,30 @@ func (siw *ServerInterfaceWrapper) GetCorpus(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+func (siw *ServerInterfaceWrapper) RenameCorpus(w http.ResponseWriter, r *http.Request) {
+	corpusId := string(r.PathValue("corpus_id"))
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameCorpus(w, r, corpusId)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func (siw *ServerInterfaceWrapper) ArchiveCorpus(w http.ResponseWriter, r *http.Request) {
+	corpusId := string(r.PathValue("corpus_id"))
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArchiveCorpus(w, r, corpusId)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
 func (siw *ServerInterfaceWrapper) RebuildCorpusProjection(w http.ResponseWriter, r *http.Request) {
 	corpusId := string(r.PathValue("corpus_id"))
 
@@ -5099,6 +5146,18 @@ func (siw *ServerInterfaceWrapper) ConfigureRetrieval(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ConfigureRetrieval(w, r, corpusId)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func (siw *ServerInterfaceWrapper) UnarchiveCorpus(w http.ResponseWriter, r *http.Request) {
+	corpusId := string(r.PathValue("corpus_id"))
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UnarchiveCorpus(w, r, corpusId)
 	}))
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
@@ -5655,6 +5714,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/corpora", wrapper.ListCorpora)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora", wrapper.CreateCorpus)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/corpora/{corpus_id}", wrapper.GetCorpus)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v0/corpora/{corpus_id}", wrapper.RenameCorpus)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/archive", wrapper.ArchiveCorpus)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/corpora/{corpus_id}/unarchive", wrapper.UnarchiveCorpus)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/corpora/{corpus_id}/retrieval", wrapper.ConfigureRetrieval)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/changes", wrapper.PollChanges)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/changes/stream", wrapper.StreamChanges)
@@ -8382,6 +8444,105 @@ func (response GetCorpusdefaultJSONResponse) VisitGetCorpusResponse(w http.Respo
 	return err
 }
 
+type RenameCorpusRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
+	Body        *RenameCorpusJSONRequestBody
+}
+
+type RenameCorpusResponseObject interface {
+	VisitRenameCorpusResponse(w http.ResponseWriter) error
+}
+
+// RenameCorpusResponseFunc writes a deferred response, including streams and plugin answers.
+type RenameCorpusResponseFunc func(http.ResponseWriter)
+
+func (response RenameCorpusResponseFunc) VisitRenameCorpusResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type RenameCorpus200JSONResponse Corpus
+
+func (response RenameCorpus200JSONResponse) VisitRenameCorpusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameCorpusdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RenameCorpusdefaultJSONResponse) VisitRenameCorpusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveCorpusRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
+}
+
+type ArchiveCorpusResponseObject interface {
+	VisitArchiveCorpusResponse(w http.ResponseWriter) error
+}
+
+// ArchiveCorpusResponseFunc writes a deferred response, including streams and plugin answers.
+type ArchiveCorpusResponseFunc func(http.ResponseWriter)
+
+func (response ArchiveCorpusResponseFunc) VisitArchiveCorpusResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type ArchiveCorpus200JSONResponse Corpus
+
+func (response ArchiveCorpus200JSONResponse) VisitArchiveCorpusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArchiveCorpusdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ArchiveCorpusdefaultJSONResponse) VisitArchiveCorpusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RebuildCorpusProjectionRequestObject struct {
 	// HTTPRequest retains bounded, deferred input parsing after service authorization.
 	HTTPRequest *http.Request
@@ -8481,6 +8642,55 @@ type ConfigureRetrievaldefaultJSONResponse struct {
 }
 
 func (response ConfigureRetrievaldefaultJSONResponse) VisitConfigureRetrievalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnarchiveCorpusRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	CorpusId    string `json:"corpus_id"`
+}
+
+type UnarchiveCorpusResponseObject interface {
+	VisitUnarchiveCorpusResponse(w http.ResponseWriter) error
+}
+
+// UnarchiveCorpusResponseFunc writes a deferred response, including streams and plugin answers.
+type UnarchiveCorpusResponseFunc func(http.ResponseWriter)
+
+func (response UnarchiveCorpusResponseFunc) VisitUnarchiveCorpusResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type UnarchiveCorpus200JSONResponse Corpus
+
+func (response UnarchiveCorpus200JSONResponse) VisitUnarchiveCorpusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnarchiveCorpusdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response UnarchiveCorpusdefaultJSONResponse) VisitUnarchiveCorpusResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -10676,11 +10886,20 @@ type StrictServerInterface interface {
 	// (GET /v0/corpora/{corpus_id})
 	GetCorpus(ctx context.Context, request GetCorpusRequestObject) (GetCorpusResponseObject, error)
 
+	// (PATCH /v0/corpora/{corpus_id})
+	RenameCorpus(ctx context.Context, request RenameCorpusRequestObject) (RenameCorpusResponseObject, error)
+
+	// (POST /v0/corpora/{corpus_id}/archive)
+	ArchiveCorpus(ctx context.Context, request ArchiveCorpusRequestObject) (ArchiveCorpusResponseObject, error)
+
 	// (POST /v0/corpora/{corpus_id}/rebuilds)
 	RebuildCorpusProjection(ctx context.Context, request RebuildCorpusProjectionRequestObject) (RebuildCorpusProjectionResponseObject, error)
 
 	// (PUT /v0/corpora/{corpus_id}/retrieval)
 	ConfigureRetrieval(ctx context.Context, request ConfigureRetrievalRequestObject) (ConfigureRetrievalResponseObject, error)
+
+	// (POST /v0/corpora/{corpus_id}/unarchive)
+	UnarchiveCorpus(ctx context.Context, request UnarchiveCorpusRequestObject) (UnarchiveCorpusResponseObject, error)
 
 	// (GET /v0/corpora/{corpus_id}/vector-spaces)
 	ListVectorSpaces(ctx context.Context, request ListVectorSpacesRequestObject) (ListVectorSpacesResponseObject, error)
@@ -12239,6 +12458,62 @@ func (sh *strictHandler) GetCorpus(w http.ResponseWriter, r *http.Request, corpu
 	}
 }
 
+// RenameCorpus operation middleware
+func (sh *strictHandler) RenameCorpus(w http.ResponseWriter, r *http.Request, corpusId string) {
+	var request RenameCorpusRequestObject
+
+	request.CorpusId = corpusId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameCorpus(ctx, request.(RenameCorpusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameCorpus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameCorpusResponseObject); ok {
+		if err := validResponse.VisitRenameCorpusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ArchiveCorpus operation middleware
+func (sh *strictHandler) ArchiveCorpus(w http.ResponseWriter, r *http.Request, corpusId string) {
+	var request ArchiveCorpusRequestObject
+
+	request.CorpusId = corpusId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ArchiveCorpus(ctx, request.(ArchiveCorpusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArchiveCorpus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ArchiveCorpusResponseObject); ok {
+		if err := validResponse.VisitArchiveCorpusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RebuildCorpusProjection operation middleware
 func (sh *strictHandler) RebuildCorpusProjection(w http.ResponseWriter, r *http.Request, corpusId string) {
 	var request RebuildCorpusProjectionRequestObject
@@ -12288,6 +12563,34 @@ func (sh *strictHandler) ConfigureRetrieval(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ConfigureRetrievalResponseObject); ok {
 		if err := validResponse.VisitConfigureRetrievalResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UnarchiveCorpus operation middleware
+func (sh *strictHandler) UnarchiveCorpus(w http.ResponseWriter, r *http.Request, corpusId string) {
+	var request UnarchiveCorpusRequestObject
+
+	request.CorpusId = corpusId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UnarchiveCorpus(ctx, request.(UnarchiveCorpusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UnarchiveCorpus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UnarchiveCorpusResponseObject); ok {
+		if err := validResponse.VisitUnarchiveCorpusResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
