@@ -73,6 +73,9 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	if c.DocumentTemplate != "auto" && c.DocumentTemplate != "prefix" && c.DocumentTemplate != "gemma" {
 		return c, fmt.Errorf("invalid document_template")
 	}
+	if len(c.TitleContextParts) == 0 {
+		c.TitleContextParts = nil
+	}
 	if len(c.TitleContextParts) > 16 {
 		return c, fmt.Errorf("too many title_context_parts")
 	}
@@ -81,7 +84,7 @@ func parseConfiguration(raw []byte) (configuration, error) {
 			return c, fmt.Errorf("invalid title context key")
 		}
 	}
-	if c.Tokenizer != nil && (c.Tokenizer.Python == "" || c.Tokenizer.Model == "" || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(c.Tokenizer.SHA256)) {
+	if c.Tokenizer != nil && (c.Tokenizer.Python == "" || c.Tokenizer.Model == "" || strings.ContainsRune(c.Tokenizer.Python, 0) || strings.ContainsRune(c.Tokenizer.Model, 0) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(c.Tokenizer.SHA256)) {
 		return c, fmt.Errorf("tokenizer requires python, model and sha256")
 	}
 	u, err := url.Parse(c.BaseURL)
@@ -139,7 +142,11 @@ func parseConfiguration(raw []byte) (configuration, error) {
 
 func (c configuration) spaceID() string {
 	// Endpoint, credentials and execution tuning do not change vector meaning.
-	semantics := []any{c.Format, c.Model, c.Dimensions, c.Metric, c.Revision, c.QueryPrefix, c.DocumentPrefix, c.QueryInputType, c.DocumentInputType, c.DocumentTemplate, c.TitleSource, c.TitleContextParts}
+	contextParts := c.TitleContextParts
+	if len(contextParts) == 0 {
+		contextParts = nil
+	}
+	semantics := []any{c.Format, c.Model, c.Dimensions, c.Metric, c.Revision, c.QueryPrefix, c.DocumentPrefix, c.QueryInputType, c.DocumentInputType, c.DocumentTemplate, c.TitleSource, contextParts}
 	raw, _ := json.Marshal(semantics)
 	sum := sha256.Sum256(raw)
 	slug := strings.Trim(regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(c.Model), "-"), "-")
@@ -169,7 +176,17 @@ func (c configuration) manifest(command []string) ([]byte, error) {
 	for k, v := range fields {
 		props[k] = map[string]any{"const": v}
 	}
-	// Nullable price is omitted when unset; all other fields have locked defaults.
+	// Empty optional context has one semantic identity, while both explicit
+	// null/empty arrays and omission remain valid installer input.
+	if len(c.TitleContextParts) == 0 {
+		props["title_context_parts"] = map[string]any{"enum": []any{nil, []string{}}}
+	}
+	if c.Tokenizer == nil {
+		props["tokenizer"] = map[string]any{"const": nil}
+	}
+	if c.InputPrice == nil {
+		props["usd_per_million_tokens"] = map[string]any{"const": nil}
+	}
 	schema := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"format", "base_url", "auth", "model", "dimensions"}, "properties": props}
 	space := map[string]any{"version": c.Revision, "model": c.Model, "dimensions": c.Dimensions, "metric": c.Metric, "indexes": []string{"text"}, "query_modalities": []string{"text"}}
 	if c.InputPrice != nil {

@@ -65,6 +65,7 @@ func PluginSegmentation(org string, v Version, recipe string, provenance json.Ra
 	if titles != 1 {
 		title, titleKey = "", ""
 	}
+	sources := newSourceParts(v)
 	empty := Hash(nil)
 	for i, s := range in {
 		text, ok := parts[s.PartKey]
@@ -76,7 +77,7 @@ func PluginSegmentation(org string, v Version, recipe string, provenance json.Ra
 			NormalizedSHA256: Hash([]byte(text)), ModelInputSHA256: empty, LexicalText: s.LexicalText, Provenance: canonical(s.Provenance)}
 		segment := Segment{PartKey: s.PartKey, Text: string(runes[s.Start:s.End]), Start: s.Start, End: s.End, Title: title, TitleKey: titleKey, Derivation: d}
 		if len(s.SourceRanges) > 0 {
-			ranges, slices, err := SourceSlices(v, s.SourceRanges)
+			ranges, slices, err := sources.resolve(s.SourceRanges)
 			if err != nil || ranges[0].PartKey != s.PartKey || ranges[0].Start != s.Start || ranges[0].End != s.End || !validSourceSeparator(s.SourceSeparator) {
 				return out, ErrInvalid
 			}

@@ -68,7 +68,7 @@ func (m *Manifest) SupportsCoverageSnapshots() bool {
 }
 
 // SupportsMultiPartSegments requires the declared range to exclude older
-// implementations whose ingestion response schemas reject source ranges.
+// retrieval candidate schemas that reject source ranges.
 func (m *Manifest) SupportsMultiPartSegments() bool {
 	r, err := ParseRange(m.Compatibility.PluginAPI)
 	if err != nil {

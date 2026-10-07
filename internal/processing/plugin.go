@@ -344,7 +344,7 @@ func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content
 		return nil, ErrSegmentsDiffer
 	}
 	for i, p := range seg.Segments {
-		if s := segments[i]; s.PartKey != p.PartKey || s.Start != p.Start || s.End != p.End || !slices.Equal(s.SourceRanges, p.Derivation.SourceRanges) || s.SourceSeparator != p.Derivation.SourceSeparator {
+		if s := segments[i]; s.PartKey != p.PartKey || s.Start != p.Start || s.End != p.End || !slices.Equal(s.SourceRanges, p.Derivation.SourceRanges) || len(s.SourceRanges) > 0 && s.SourceSeparator != p.Derivation.SourceSeparator {
 			return nil, ErrSegmentsDiffer
 		}
 	}

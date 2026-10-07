@@ -66,6 +66,13 @@ type SourceRange struct {
 	End     int    `json:"end"`
 }
 
+const (
+	// MaxSourceRangeRunes matches the host's maximum size for one source slice.
+	MaxSourceRangeRunes = 4096
+	// MaxPackedTextRunes matches the host's maximum joined passage size.
+	MaxPackedTextRunes = 16384
+)
+
 // Segment is one segment of a Part: Unicode code point offsets [Start, End)
 // in the Part text, a vector per requested space, and optional lexical text,
 // provenance and multi-Part source ranges.
@@ -323,6 +330,7 @@ func sourceRangesProblem(s Segment, lengths, partOrder map[string]int) string {
 	seen := map[string]bool{}
 	lastPart := -1
 	lastEnd := map[string]int{}
+	packedRunes := 0
 	for _, r := range s.SourceRanges {
 		length, ok := lengths[r.PartKey]
 		if !ok {
@@ -331,6 +339,13 @@ func sourceRangesProblem(s Segment, lengths, partOrder map[string]int) string {
 		if r.Start < 0 || r.Start >= r.End || r.End > length {
 			return fmt.Sprintf("source range [%d, %d) is not a non-empty slice of Part %q", r.Start, r.End, r.PartKey)
 		}
+		if r.End-r.Start > MaxSourceRangeRunes {
+			return fmt.Sprintf("source range [%d, %d) spans more than %d code points", r.Start, r.End, MaxSourceRangeRunes)
+		}
+		if packedRunes > 0 {
+			packedRunes += utf8.RuneCountInString(s.SourceSeparator)
+		}
+		packedRunes += r.End - r.Start
 		identity := fmt.Sprintf("%s\x00%d\x00%d", r.PartKey, r.Start, r.End)
 		if seen[identity] {
 			return fmt.Sprintf("source range [%d, %d) of Part %q is duplicated", r.Start, r.End, r.PartKey)
@@ -346,6 +361,9 @@ func sourceRangesProblem(s Segment, lengths, partOrder map[string]int) string {
 		if r.End > lastEnd[r.PartKey] {
 			lastEnd[r.PartKey] = r.End
 		}
+	}
+	if packedRunes > MaxPackedTextRunes {
+		return fmt.Sprintf("joined source ranges span more than %d code points", MaxPackedTextRunes)
 	}
 	return ""
 }

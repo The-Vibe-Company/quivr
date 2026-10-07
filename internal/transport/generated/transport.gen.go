@@ -2924,7 +2924,7 @@ type SearchHit struct {
 	Explanation *string `json:"explanation,omitempty"`
 	PartKey     string  `json:"part_key"`
 
-	// PassageText Exact packed passage text used for the hit, when the segment spans multiple source ranges.
+	// PassageText Exact packed passage text used for the hit, when source-range metadata is available.
 	PassageText            *string `json:"passage_text,omitempty"`
 	ProjectionGenerationId string  `json:"projection_generation_id"`
 	Rank                   int     `json:"rank"`

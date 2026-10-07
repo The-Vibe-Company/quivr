@@ -131,6 +131,13 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	if total > 256<<10 {
 		return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "more than 256 KiB of text")
 	}
+	titleOnly := false
+	modelBody := func(body string) string {
+		if titleOnly {
+			return ""
+		}
+		return body
+	}
 	title, err := c.headline(parts)
 	if err != nil {
 		return nil, nil, err
@@ -138,11 +145,11 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	// Body budget is separate from the model's full templated-input window.
 	fits := func(group []paragraph) (bool, int, error) {
 		text := paragraphText(group)
-		e, err := encodeOne(ctx, t, text, false)
+		e, err := encodeOne(ctx, t, modelBody(text), false)
 		if err != nil {
 			return false, 0, err
 		}
-		full, err := encodeOne(ctx, t, c.documentInput(title, text), true)
+		full, err := encodeOne(ctx, t, c.documentInput(title, modelBody(text)), true)
 		if err != nil {
 			return false, 0, err
 		}
@@ -163,6 +170,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		}
 	}
 	if !hasBody {
+		titleOnly = c.TitleSource != "none"
 		bodyParts = nil
 		for _, part := range parts {
 			if part.Role == "title" && strings.TrimSpace(part.Text) != "" {
@@ -183,10 +191,19 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		for start := 0; start < len(runes); {
 			end := len(runes)
 			for n := start + 1; n < len(runes); n++ {
-				if runes[n-1] == '\n' && runes[n] == '\n' {
+				if runes[n-1] == '\n' && (runes[n] == '\n' || runes[n] == '\r' && n+1 < len(runes) && runes[n+1] == '\n') {
 					end = n + 1
-					for end < len(runes) && runes[end] == '\n' {
+					if runes[n] == '\r' {
 						end++
+					}
+					for end < len(runes) {
+						if runes[end] == '\n' {
+							end++
+						} else if runes[end] == '\r' && end+1 < len(runes) && runes[end+1] == '\n' {
+							end += 2
+						} else {
+							break
+						}
 					}
 					break
 				}
@@ -200,6 +217,9 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 				if ok {
 					units = append(units, raw)
 					break
+				}
+				if titleOnly {
+					return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "title-only input exceeds model or excerpt limit")
 				}
 				// Only an oversized paragraph is split. Find the longest safe token
 				// boundary that fits both body and full-model budgets, then prefer an
@@ -234,7 +254,14 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 				local := []rune(raw.text)
 				snapped := snap(local, 0, cut)
 				if snapped > 0 {
-					cut = snapped
+					candidate := raw
+					candidate.end = raw.start + snapped
+					candidate.text = string(local[:snapped])
+					if ok, _, err := fits([]paragraph{candidate}); err != nil {
+						return nil, nil, err
+					} else if ok {
+						cut = snapped
+					}
 				}
 				piece := raw
 				piece.end = raw.start + cut
@@ -309,7 +336,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	for n, group := range groups {
 		ranges := paragraphRanges(group)
 		body := paragraphText(group)
-		input := c.documentInput(title, body)
+		input := c.documentInput(title, modelBody(body))
 		e, err := encodeOne(ctx, t, input, true)
 		if err != nil {
 			return nil, nil, err

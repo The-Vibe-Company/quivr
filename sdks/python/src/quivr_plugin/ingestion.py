@@ -29,6 +29,8 @@ MAX_LEXICAL_TEXT_CODEPOINTS = 16384
 MAX_PROVENANCE_BYTES = 4 << 10
 MAX_FLOAT32 = 3.4028234663852886e38
 MAX_SOURCE_RANGES = 256
+MAX_SOURCE_RANGE_CODEPOINTS = 4096
+MAX_PACKED_TEXT_CODEPOINTS = 16384
 MAX_SOURCE_SEPARATOR_CODEPOINTS = 16
 MULTI_PART_SEGMENTS_API = FEATURE_SINCE.get("multi_part_segments", "0.17.0")
 
@@ -103,6 +105,7 @@ def _source_ranges_problems(manifest: LoadedManifest, segment: dict[str, Any], p
     seen: dict[tuple[str, int, int], int] = {}
     last_part = -1
     last_end: dict[str, int] = {}
+    packed_codepoints = 0
     for index, source_range in enumerate(ranges):
         range_prefix = f"{prefix}/source_ranges/{index}"
         key = source_range["part_key"]
@@ -115,6 +118,12 @@ def _source_ranges_problems(manifest: LoadedManifest, segment: dict[str, Any], p
             problems.append(f"{range_prefix}: source ranges must be non-empty")
         elif start < 0 or end > lengths[key]:
             problems.append(f"{range_prefix}: offsets [{start}, {end}) are outside the Part text")
+        elif end - start > MAX_SOURCE_RANGE_CODEPOINTS:
+            problems.append(f"{range_prefix}: source range exceeds {MAX_SOURCE_RANGE_CODEPOINTS} code points")
+        else:
+            if packed_codepoints:
+                packed_codepoints += len(separator or "")
+            packed_codepoints += end - start
         identity = (key, start, end)
         if identity in seen:
             problems.append(f"{range_prefix}: source range is duplicated")
@@ -127,6 +136,8 @@ def _source_ranges_problems(manifest: LoadedManifest, segment: dict[str, Any], p
         if order > last_part:
             last_part = order
         last_end[key] = max(last_end.get(key, 0), end)
+    if packed_codepoints > MAX_PACKED_TEXT_CODEPOINTS:
+        problems.append(f"{prefix}/source_ranges: joined source ranges exceed {MAX_PACKED_TEXT_CODEPOINTS} code points")
     return problems
 
 

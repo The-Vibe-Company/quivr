@@ -1524,9 +1524,9 @@
       "file": "responses/ingestion/multi-part-nul-separator.json",
       "schema": "ingestion-segment-and-embed-response.schema.json",
       "valid": false,
-      "schema_valid": true,
+      "schema_valid": false,
       "errors": [
-        "invalid_source_separator"
+        "schema_violation"
       ],
       "manifest": "manifests/valid/ingestion-multi-part.yaml",
       "request": "requests/ingestion/segment-and-embed-multi-part.json",
@@ -1543,6 +1543,30 @@
       "manifest": "manifests/valid/ingestion.yaml",
       "request": "requests/ingestion/segment-and-embed.json",
       "description": "New source fields are refused for a manifest restricted to Plugin API 0.6."
+    },
+    {
+      "file": "responses/ingestion/multi-part-source-range-too-large.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "source_range_too_large"
+      ],
+      "manifest": "manifests/valid/ingestion-multi-part.yaml",
+      "request": "requests/ingestion/segment-and-embed-multi-part-limits.json",
+      "description": "One source range exceeds the 4096-code-point slice bound."
+    },
+    {
+      "file": "responses/ingestion/multi-part-packed-text-too-large.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "packed_text_too_large"
+      ],
+      "manifest": "manifests/valid/ingestion-multi-part.yaml",
+      "request": "requests/ingestion/segment-and-embed-multi-part-limits.json",
+      "description": "The joined source slices and separators exceed the 16384-code-point passage bound."
     },
     {
       "file": "responses/ingestion/segment-only.json",

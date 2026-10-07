@@ -658,6 +658,7 @@
         "source_separator": {
           "type": "string",
           "maxLength": 16,
+          "pattern": "^[^\\x00]*$",
           "description": "Optional Unicode separator used between source_ranges; missing and empty are equivalent."
         },
         "explanation": {

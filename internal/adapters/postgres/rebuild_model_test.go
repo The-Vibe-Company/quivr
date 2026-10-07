@@ -204,7 +204,7 @@ contributions:
 				want = 1
 			}
 			if len(newSeg.Segments) != want || newSeg.ID == oldSeg.ID || publication.vectors != want {
-				t.Fatalf("new segmentation %+v, vectors=%d; want two new cuts", newSeg, publication.vectors)
+				t.Fatalf("new segmentation %+v, vectors=%d; want %d new cuts", newSeg, publication.vectors, want)
 			}
 			if h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: oldSeg.Segments[0].ID, GenerationID: prior.ID}); err != nil || h.EmbeddingID != oldData[0].Artifact.ID {
 				t.Fatalf("served generation changed before activation: %+v %v", h, err)
@@ -216,8 +216,8 @@ contributions:
 				t.Fatalf("rebuild outcome: %+v %v", outcome, err)
 			}
 			if scenario.packed {
-				hydrated, err := contents.Hydrate(ctx, scope, []content.Candidate{{SegmentID: newSeg.Segments[0].ID, GenerationID: op.TargetGenerationID}})
-				if err != nil || hydrated[0].Segment.Text != "één 🌌\n\n第二段" || len(hydrated[0].Segment.SourceExcerpts) != 2 {
+				hydrated, err := contents.Hydrate(ctx, scope, []content.Candidate{{SegmentID: newSeg.Segments[0].ID, GenerationID: op.TargetGenerationID}, {SegmentID: newSeg.Segments[0].ID, GenerationID: op.TargetGenerationID}})
+				if err != nil || hydrated[0].Segment.Text != "één 🌌\n\n第二段" || len(hydrated[0].Segment.SourceExcerpts) != 2 || hydrated[1].Segment.Text != hydrated[0].Segment.Text {
 					t.Fatalf("packed canonical hydration: %+v %v", hydrated, err)
 				}
 				reloaded, err := contents.PluginSegmentationOf(ctx, scope.Organization, v, newSeg.Recipe)

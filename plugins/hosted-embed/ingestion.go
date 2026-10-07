@@ -78,6 +78,15 @@ func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestR
 			if titleErr != nil {
 				return nil, titleErr
 			}
+			// Legacy windows promote the title to body content when no body
+			// exists, so do not also prepend that headline as context.
+			hasBody := false
+			for _, part := range req.Parts {
+				hasBody = hasBody || part.Role == "body" && strings.TrimSpace(part.Text) != ""
+			}
+			if !hasBody {
+				title = ""
+			}
 			legacy.DocumentPrefix = c.documentInput(title, "")
 		}
 		segments, inputs, err = legacy.segments(req.Parts)

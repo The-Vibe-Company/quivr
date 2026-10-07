@@ -94,8 +94,20 @@
         "tail_min_fraction": {
           "const": 0.25
         },
+        "title_context_parts": {
+          "enum": [
+            null,
+            []
+          ]
+        },
         "title_source": {
           "const": "title"
+        },
+        "tokenizer": {
+          "const": null
+        },
+        "usd_per_million_tokens": {
+          "const": null
         }
       },
       "required": [

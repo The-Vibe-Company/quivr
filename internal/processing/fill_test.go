@@ -75,6 +75,7 @@ func TestFillKeepsTheProjectedSegments(t *testing.T) {
 		{"other offsets", []content.SegmentInput{{PartKey: "body", Start: 0, End: 33}}, processing.ErrSegmentsDiffer},
 		{"one segment moved", []content.SegmentInput{projected[0], {PartKey: "body", Start: 16, End: 33}}, processing.ErrSegmentsDiffer},
 		{"the same segments", projected, nil},
+		{"unused separator", []content.SegmentInput{{PartKey: "body", Start: 0, End: 15, SourceSeparator: "\n\n"}, {PartKey: "body", Start: 17, End: 33, SourceSeparator: "\n\n"}}, nil},
 	} {
 		calls := 0
 		store := &memoryArtifacts{byDerivation: map[string]content.Embedding{}, blobs: map[string][]byte{}}

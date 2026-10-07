@@ -63,15 +63,16 @@
                 "end": {
                   "type": "integer",
                   "minimum": 0,
-                  "description": "Code point after the last one in the source slice."
+                  "description": "Code point after the last one in the source slice; each source range spans at most 4096 code points."
                 }
               }
             },
-            "description": "Optional ordered non-empty source slices for a segment spanning Parts. The first range must equal the legacy part_key/start/end anchor."
+            "description": "Optional ordered non-empty source slices for a segment spanning Parts. The first range must equal the legacy part_key/start/end anchor; each range is at most 4096 code points and the joined slices plus separators are at most 16384 code points."
           },
           "source_separator": {
             "type": "string",
             "maxLength": 16,
+            "pattern": "^[^\\x00]*$",
             "description": "Optional Unicode separator used between source ranges when constructing the packed passage. Missing and empty separators are equivalent."
           },
           "vectors": {

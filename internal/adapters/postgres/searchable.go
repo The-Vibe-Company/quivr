@@ -414,7 +414,9 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 	at := map[string][]int{}
 	for n, l := range out {
 		if len(l.Segment.Derivation.SourceRanges) > 0 {
-			ids = append(ids, l.Segment.ID)
+			if _, seen := at[l.Segment.ID]; !seen {
+				ids = append(ids, l.Segment.ID)
+			}
 			at[l.Segment.ID] = append(at[l.Segment.ID], n)
 		}
 	}

@@ -323,6 +323,9 @@ func TestConfigAndContentRefusals(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ raw, reason string }{
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer":{"python":"bad\u0000path","model":"local.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`, "tokenizer requires"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer":{"python":"python3","model":"bad\u0000path","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`, "tokenizer requires"},
+
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":-1}`, "batch_wait_ms must be between 0 and 100"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":101}`, "batch_wait_ms must be between 0 and 100"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":100,"call_budget_ms":100}`, "batch_wait_ms must be less than call_budget_ms"},
@@ -356,9 +359,13 @@ func TestConfigAndContentRefusals(t *testing.T) {
 // The configured package must be admissible for every accepted model/base URL,
 // and must accept the same configuration the operator originally supplied.
 func TestConfiguredManifestAcceptsOriginalConfiguration(t *testing.T) {
-	for _, tc := range []struct{ name, model, url string }{{"numeric deployment", "3-model", "http://127.0.0.1:9/v1"}, {"trailing slash", "test-model", "http://127.0.0.1:9/v1/"}} {
+	for _, tc := range []struct{ name, model, url string }{{"numeric deployment", "3-model", "http://127.0.0.1:9/v1"}, {"trailing slash", "test-model", "http://127.0.0.1:9/v1/"}, {"empty title context", "test-model", "http://127.0.0.1:9/v1"}} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw, _ := json.Marshal(map[string]any{"format": "openai", "auth": "none", "model": tc.model, "dimensions": 8, "base_url": tc.url})
+			settings := map[string]any{"format": "openai", "auth": "none", "model": tc.model, "dimensions": 8, "base_url": tc.url}
+			if tc.name == "empty title context" {
+				settings["title_context_parts"] = []string{}
+			}
+			raw, _ := json.Marshal(settings)
 			c, err := parseConfiguration(raw)
 			if err != nil {
 				t.Fatal(err)
@@ -854,6 +861,17 @@ func TestPackedPassagesKeepParagraphsAndRebalance(t *testing.T) {
 	if len(got[0].SourceRanges) != 1 || len(got[1].SourceRanges) != 2 || got[1].SourceRanges[0].PartKey != "b" {
 		t.Fatalf("tiny tail was not rebalanced with whole paragraphs: %+v", got)
 	}
+	c.BodyTokens = 8
+	c.RebalanceTail = false
+	i = newIngester(c, "", slog.Default())
+	i.tokenizer = wordCounter{}
+	req = ingestRequest(c, "one two\r\n\r\nthree four five six seven eight nine", false)
+	got, err = i.SegmentAndEmbed(t.Context(), req)
+	boundary := utf8.RuneCountInString("one two\r\n\r\n")
+	if err != nil || len(got) != 2 || got[0].End != boundary || got[1].Start != boundary {
+		t.Fatalf("CRLF paragraphs split: %+v %v", got, err)
+	}
+
 }
 
 func TestPackedPassagesSplitOnlyOversizedParagraphAndEnforceCap(t *testing.T) {
@@ -895,7 +913,7 @@ func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
 	c.Packing = "paragraphs"
 	c.DocumentTemplate = "gemma"
 	c.TitleSource = "title"
-	c.BodyTokens = 512
+	c.BodyTokens = 812
 	c.MaxTokens = 2048
 	c.MaxChunks = 4
 	c.DocumentPrefix = ""
@@ -919,4 +937,34 @@ func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
 	if calls = fake.Calls(); len(calls) != 2 || calls[1].Texts[0] != "title: none | text: The library opens downtown." {
 		t.Fatalf("title omission variant: %+v", calls)
 	}
+
+	c.TitleSource = "title"
+	i = newIngester(c, "fake-key", slog.Default())
+	req = ingestRequest(c, "", true)
+	req.Parts = []quivrplugin.IngestPart{{Key: "headline", Role: "title", Text: "Library opens"}}
+	if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if calls = fake.Calls(); len(calls) != 3 || calls[2].Texts[0] != "title: Library opens | text: " {
+		t.Fatalf("title-only duplicated: %+v", calls)
+	}
+	c.Packing = "none"
+	for index, variant := range []struct {
+		template, source, prefix, want string
+	}{
+		{"gemma", "title", "", "title: none | text: Library opens"},
+		{"gemma", "inline", "", "title: none | text: Library opens"},
+		{"prefix", "title", "passage: ", "passage: Library opens"},
+	} {
+		c.DocumentTemplate, c.TitleSource, c.DocumentPrefix = variant.template, variant.source, variant.prefix
+		i = newIngester(c, "fake-key", slog.Default())
+		req.Spaces = []string{c.spaceID()}
+		if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
+			t.Fatal(err)
+		}
+		if calls = fake.Calls(); len(calls) != index+4 || calls[index+3].Texts[0] != variant.want {
+			t.Fatalf("legacy title-only duplicated: %+v", calls)
+		}
+	}
+
 }

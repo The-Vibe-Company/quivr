@@ -8018,7 +8018,7 @@ components:
         passage_text:
           type: string
           maxLength: 16384
-          description: Exact packed passage text used for the hit, when the segment spans multiple source ranges.
+          description: Exact packed passage text used for the hit, when source-range metadata is available.
         source_excerpts:
           type: array
           maxItems: 256

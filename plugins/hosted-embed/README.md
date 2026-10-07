@@ -189,7 +189,7 @@ Set `title_source: "none"` to omit it. Queries keep their configured prefix.
 
 Use `python3 scripts/prepare_tokenizer.py --hosted` to prepare the pinned Gemma
 tokenizer offline before startup. Configure the returned local tokenizer paths
-and checksum. The Railway image prepares this tokenizer and uses a 512-token
+and checksum. The Railway image prepares this tokenizer; its Gemma selection uses a 512-token
 body budget with a 2048-token full window. Other models need their matching
 local tokenizer. Without one, a UTF-8 byte counts as one conservative token,
 plus eight reserved special tokens; this underfills subword models. No model

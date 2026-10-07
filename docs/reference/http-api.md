@@ -10647,7 +10647,7 @@ One authorized segment hit. Rehydrate from canonical storage and recheck Organiz
 | `vector_space_id` | string |  | Minimum length `1`. |
 | `rank` | integer | yes | Minimum `1`. |
 | `excerpt` | [`SearchExcerpt`](#searchexcerpt) | yes |  |
-| `passage_text` | string |  | Exact packed passage text used for the hit, when the segment spans multiple source ranges. Maximum length `16384`. |
+| `passage_text` | string |  | Exact packed passage text used for the hit, when source-range metadata is available. Maximum length `16384`. |
 | `source_excerpts` | array of object |  | At most `256` items. |
 | `source_excerpts[].part_key` | string | yes | Minimum length `1`. |
 | `source_excerpts[].text` | string | yes | Maximum length `4096`. |
@@ -10698,7 +10698,7 @@ properties:
   passage_text:
     type: string
     maxLength: 16384
-    description: Exact packed passage text used for the hit, when the segment spans multiple source ranges.
+    description: Exact packed passage text used for the hit, when source-range metadata is available.
   source_excerpts:
     type: array
     maxItems: 256

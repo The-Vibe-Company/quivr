@@ -46,7 +46,7 @@ func TestHostedEmbeddingPinFindsText(t *testing.T) {
 	}
 	for n, expected := range []string{sentence, second} {
 		source := sources[n].(map[string]any)
-		if source["text"] != expected || source["start"] != float64(0) || source["end"] != float64(utf8.RuneCountInString(expected)) || source["coordinate_system"] != "unicode_codepoint" {
+		if source["part_key"] != []string{"paragraph-1", "paragraph-2"}[n] || source["text"] != expected || source["start"] != float64(0) || source["end"] != float64(utf8.RuneCountInString(expected)) || source["coordinate_system"] != "unicode_codepoint" {
 			t.Fatalf("canonical source %d: %v", n, source)
 		}
 	}

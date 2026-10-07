@@ -48,7 +48,7 @@ def package(binary, directory, endpoint, format):
     directory.mkdir(parents=True, exist_ok=True)
     configuration = {'format': format, 'base_url': endpoint + ('/openai/v1' if format == 'openai' else '/providers/cohere/v2'),
                      'auth': 'api-key' if format == 'cohere' else 'bearer', 'model': 'test-model', 'dimensions': 8,
-                     'query_prefix': 'query: ', 'document_prefix': 'passage: '}
+                     'query_prefix': 'query: ', 'document_prefix': 'passage: ', 'title_context_parts': []}
     config = directory / 'configuration.json'
     config.write_text(json.dumps(configuration))
     manifest = directory / 'quivr-plugin.yaml'

@@ -24,6 +24,8 @@ const (
 	CodeSourceRangeOrder       = "source_range_order"
 	CodeSourceRangeAnchor      = "source_range_anchor_mismatch"
 	CodeSourceRangeEmpty       = "empty_source_range"
+	CodeSourceRangeTooLarge    = "source_range_too_large"
+	CodePackedTextTooLarge     = "packed_text_too_large"
 	CodeTooManySourceRanges    = "too_many_source_ranges"
 	CodeInvalidSourceSeparator = "invalid_source_separator"
 	CodeMultiPartUnsupported   = "multi_part_segments_unsupported"
@@ -43,6 +45,8 @@ const (
 	MaxLexicalTextRunes     = 16384
 	MaxProvenanceBytes      = 4 << 10
 	MaxSourceRanges         = 256
+	MaxSourceRangeRunes     = 4096
+	MaxPackedTextRunes      = 16384
 	MaxSourceSeparatorRunes = 16
 	// EmbedQueryMaxResponseBytes bounds an embed_query answer: one vector of
 	// at most 4096 numbers.
@@ -145,6 +149,12 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 	if err := json.Unmarshal(raw, &answer); err != nil {
 		return []Issue{{Code: CodeSchema, Path: "/segments", Message: err.Error()}}
 	}
+	var wire struct {
+		Segments []map[string]json.RawMessage `json:"segments"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return []Issue{{Code: CodeSchema, Path: "/segments", Message: err.Error()}}
+	}
 	var issues []Issue
 	partOrder := map[string]int{}
 	if limit := IngestionMaxSegments(m); len(answer.Segments) > limit {
@@ -165,7 +175,7 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 	seen := map[string]int{}
 	for i, s := range answer.Segments {
 		path := fmt.Sprintf("/segments/%d", i)
-		rangesPresent, separatorPresent := sourceFieldsPresent(raw, i)
+		rangesPresent, separatorPresent := sourceFieldsPresent(wire.Segments, i)
 		if (rangesPresent || separatorPresent) && !manifestSpeaks(m, FeatureMultiPartSegments) {
 			field := "source_ranges"
 			if !rangesPresent {
@@ -234,15 +244,12 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 // the additive multi-Part fields. The decoded string cannot distinguish an
 // omitted separator from an explicitly empty separator, so inspect the wire
 // object for API admission checks.
-func sourceFieldsPresent(raw []byte, index int) (rangesPresent, separatorPresent bool) {
-	var envelope struct {
-		Segments []map[string]json.RawMessage `json:"segments"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil || index < 0 || index >= len(envelope.Segments) {
+func sourceFieldsPresent(segments []map[string]json.RawMessage, index int) (rangesPresent, separatorPresent bool) {
+	if index < 0 || index >= len(segments) {
 		return false, false
 	}
-	_, rangesPresent = envelope.Segments[index]["source_ranges"]
-	_, separatorPresent = envelope.Segments[index]["source_separator"]
+	_, rangesPresent = segments[index]["source_ranges"]
+	_, separatorPresent = segments[index]["source_separator"]
 	return rangesPresent, separatorPresent
 }
 
@@ -278,6 +285,8 @@ func sourceRangeIssues(path string, segment IngestionSegment, parts map[string]i
 	seen := map[string]int{}
 	lastPart := -1
 	lastEnd := map[string]int{}
+	packedRunes := 0
+	validRanges := 0
 	for i, r := range segment.SourceRanges {
 		rangePath := fmt.Sprintf("%s/%d", path, i)
 		length, known := parts[r.PartKey]
@@ -292,6 +301,15 @@ func sourceRangeIssues(path string, segment IngestionSegment, parts map[string]i
 		} else if r.Start < 0 || r.End > length {
 			issues = append(issues, Issue{Code: CodeOffsetOutOfRange, Path: rangePath,
 				Message: fmt.Sprintf("source range [%d, %d) is outside Part %q, which has %d code points", r.Start, r.End, r.PartKey, length)})
+		} else if r.End-r.Start > MaxSourceRangeRunes {
+			issues = append(issues, Issue{Code: CodeSourceRangeTooLarge, Path: rangePath,
+				Message: fmt.Sprintf("source range spans %d code points; at most %d are allowed", r.End-r.Start, MaxSourceRangeRunes)})
+		} else {
+			if validRanges > 0 {
+				packedRunes += utf8.RuneCountInString(segment.SourceSeparator)
+			}
+			packedRunes += r.End - r.Start
+			validRanges++
 		}
 		identity := fmt.Sprintf("%s\x00%d\x00%d", r.PartKey, r.Start, r.End)
 		if first, duplicate := seen[identity]; duplicate {
@@ -312,6 +330,10 @@ func sourceRangeIssues(path string, segment IngestionSegment, parts map[string]i
 		if r.End > lastEnd[r.PartKey] {
 			lastEnd[r.PartKey] = r.End
 		}
+	}
+	if packedRunes > MaxPackedTextRunes {
+		issues = append(issues, Issue{Code: CodePackedTextTooLarge, Path: path,
+			Message: fmt.Sprintf("joined source ranges span %d code points including separators; at most %d are allowed", packedRunes, MaxPackedTextRunes)})
 	}
 	return issues
 }

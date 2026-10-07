@@ -44,23 +44,40 @@ func validSourceSeparator(s string) bool {
 
 // SourceSlices validates reading order and resolves ranges from immutable Parts.
 func SourceSlices(v Version, ranges []SourceRange) ([]SourceRange, []SourceExcerpt, error) {
+	return newSourceParts(v).resolve(ranges)
+}
+
+type sourceParts struct {
+	texts map[string]string
+	runes map[string][]rune
+	order map[string]int
+}
+
+func newSourceParts(v Version) *sourceParts {
+	p := &sourceParts{texts: map[string]string{}, runes: map[string][]rune{}, order: map[string]int{}}
+	for i, part := range v.Manifest.Parts {
+		if part.Content.Kind == "text" {
+			p.texts[part.Key] = part.Content.Text
+			p.order[part.Key] = i
+		}
+	}
+	return p
+}
+func (p *sourceParts) resolve(ranges []SourceRange) ([]SourceRange, []SourceExcerpt, error) {
 	if len(ranges) == 0 || len(ranges) > 256 {
 		return nil, nil, ErrInvalid
-	}
-	texts := map[string][]rune{}
-	order := map[string]int{}
-	for i, p := range v.Manifest.Parts {
-		if p.Content.Kind == "text" {
-			texts[p.Key] = []rune(p.Content.Text)
-			order[p.Key] = i
-		}
 	}
 	out := make([]SourceExcerpt, len(ranges))
 	previous := -1
 	lastEnd := 0
 	for i, r := range ranges {
-		text, ok := texts[r.PartKey]
-		pos := order[r.PartKey]
+		raw, ok := p.texts[r.PartKey]
+		text, decoded := p.runes[r.PartKey]
+		if ok && !decoded {
+			text = []rune(raw)
+			p.runes[r.PartKey] = text
+		}
+		pos := p.order[r.PartKey]
 		if !ok || r.Start < 0 || r.End <= r.Start || r.End > len(text) || r.End-r.Start > 4096 || pos < previous || pos == previous && r.Start < lastEnd {
 			return nil, nil, ErrInvalid
 		}
@@ -270,6 +287,7 @@ func (s Service) ProcessingVersion(ctx context.Context, org, receiptID string) (
 
 // Validate outputs at the engine boundary even when the contribution runs locally.
 func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, result Segmentation) error {
+	sources := newSourceParts(v)
 	if result.VersionID != v.ID || result.Recipe == "" || len(result.Segments) == 0 {
 		return ErrInvalid
 	}
@@ -285,7 +303,7 @@ func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, re
 		}
 		expectedText := string(text[p.Start:p.End])
 		if len(p.Derivation.SourceRanges) > 0 {
-			ranges, slices, err := SourceSlices(v, p.Derivation.SourceRanges)
+			ranges, slices, err := sources.resolve(p.Derivation.SourceRanges)
 			if err != nil || ranges[0].PartKey != p.PartKey || ranges[0].Start != p.Start || ranges[0].End != p.End || !validSourceSeparator(p.Derivation.SourceSeparator) {
 				return ErrInvalid
 			}
