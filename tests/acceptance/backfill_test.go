@@ -110,7 +110,7 @@ func TestBackfillFillsWindowAndPromotesSpaces(t *testing.T) {
 	if planRoles(back)["ingestion:example.hash_embedder"] != planRoles(both)["ingestion:example.hash_embedder"] {
 		t.Fatalf("the rollback to both spaces: %v", back)
 	}
-	if spaces, _ := vectorSpaces(t, corpusID); len(spaces) != 2 || spaces[pluginServedSpace] == nil || spaces[coreIngestSpace]["role"] != "served" {
+	if spaces, _ := vectorSpaces(t, corpusID); len(spaces) != 1 || spaces[pluginServedSpace]["role"] != "served" || spaces[coreIngestSpace] != nil {
 		t.Fatalf("the Corpus predates the large space: %v", spaces)
 	}
 
