@@ -12,9 +12,14 @@ import (
 // manifest, declared extensions and provenance), never a search-engine field.
 type Field struct {
 	Name          string   `json:"name"`
-	SourcePointer string   `json:"source_pointer"`
+	SourcePointer string   `json:"source_pointer,omitempty"`
 	Type          string   `json:"type"`
 	Roles         []string `json:"roles"`
+	Boost         *int     `json:"boost,omitempty"`
+	Analyzer      string   `json:"analyzer,omitempty"`
+	PartRole      string   `json:"part_role,omitempty"`
+	PartKeyPrefix string   `json:"part_key_prefix,omitempty"`
+	ValuePointer  string   `json:"value_pointer,omitempty"`
 }
 
 // Retrieval is a resolved Corpus retrieval configuration: the pinned profile
@@ -99,6 +104,21 @@ func validField(f Field, declared func(string) bool) bool {
 		}
 		roles[role] = true
 	}
+	if f.Boost != nil && (!f.Searchable() || *f.Boost < 1 || *f.Boost > 100) {
+		return false
+	}
+	if f.Analyzer != "" && (f.Analyzer != "french_light" || !f.Searchable()) {
+		return false
+	}
+	if f.ValuePointer != "" && (f.Type != "string_array" || !validPointer(f.ValuePointer)) {
+		return false
+	}
+	if f.PartRole != "" {
+		return f.SourcePointer == "" && f.ValuePointer == "" && f.Searchable() && (f.PartRole == "title" || f.PartRole == "body" || f.PartRole == "caption" || f.PartRole == "transcript") && len(f.PartKeyPrefix) <= 200
+	}
+	if f.PartKeyPrefix != "" {
+		return false
+	}
 	tokens, ok := PointerTokens(f.SourcePointer)
 	if !ok || len(tokens) < 2 || !sourceRoots[tokens[0]] {
 		return false
@@ -129,4 +149,12 @@ func (f Field) Searchable() bool {
 		}
 	}
 	return false
+}
+
+// EffectiveBoost is the integer BM25F weight; omitted configuration means one.
+func (f Field) EffectiveBoost() int {
+	if f.Boost == nil {
+		return 1
+	}
+	return *f.Boost
 }

@@ -423,6 +423,45 @@ func (e FacetFieldInterval) Valid() bool {
 	}
 }
 
+// Defines values for FieldMappingAnalyzer.
+const (
+	FrenchLight FieldMappingAnalyzer = "french_light"
+)
+
+// Valid indicates whether the value is a known member of the FieldMappingAnalyzer enum.
+func (e FieldMappingAnalyzer) Valid() bool {
+	switch e {
+	case FrenchLight:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FieldMappingPartRole.
+const (
+	Body       FieldMappingPartRole = "body"
+	Caption    FieldMappingPartRole = "caption"
+	Title      FieldMappingPartRole = "title"
+	Transcript FieldMappingPartRole = "transcript"
+)
+
+// Valid indicates whether the value is a known member of the FieldMappingPartRole enum.
+func (e FieldMappingPartRole) Valid() bool {
+	switch e {
+	case Body:
+		return true
+	case Caption:
+		return true
+	case Title:
+		return true
+	case Transcript:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FieldMappingRoles.
 const (
 	Filter FieldMappingRoles = "filter"
@@ -2118,6 +2157,15 @@ type FacetField struct {
 // FacetFieldInterval Required only for datetime fields; bucket start in UTC.
 type FacetFieldInterval string
 
+// FacetFilter Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
+type FacetFilter struct {
+	// Metadata ANDed typed filters. Common fields use metadata.language, metadata.published_at, metadata.source_type, metadata.source, metadata.author, metadata.subjects, metadata.tags, metadata.country and metadata.place. Other names require the filter role in the Corpus's effective retrieval mapping. Corpora missing a requested filter field are excluded and reported. A metadata-capable generation is required; rebuild older Corpora first (422 metadata_filter_unavailable).
+	Metadata *[]MetadataFilter `json:"metadata,omitempty"`
+
+	// SourceNamespaces Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them.
+	SourceNamespaces *[]string `json:"source_namespaces,omitempty"`
+}
+
 // FacetRequest defines model for FacetRequest.
 type FacetRequest struct {
 	// AcceptedAfter Inclusive current-Version acceptance-time lower bound, as in listing.
@@ -2131,7 +2179,7 @@ type FacetRequest struct {
 	Fields []FacetField `json:"fields"`
 
 	// Filter Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
-	Filter *SearchFilter `json:"filter,omitempty"`
+	Filter *FacetFilter `json:"filter,omitempty"`
 }
 
 // FacetResponse defines model for FacetResponse.
@@ -2140,13 +2188,33 @@ type FacetResponse struct {
 	Items           []Facet            `json:"items"`
 }
 
-// FieldMapping v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Core validates role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are validated and preserved; no public filter API consumes them in v0.
+// FieldMapping v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Exactly one of source_pointer and part_role is required; Core validates this as invalid_mapping, along with role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are consumed by SearchFilter.metadata. New generations index each search field once per item with its boost; older generations retain passage scoring until rebuilt.
 type FieldMapping struct {
-	Name          string              `json:"name"`
-	Roles         []FieldMappingRoles `json:"roles"`
-	SourcePointer string              `json:"source_pointer"`
-	Type          FieldMappingType    `json:"type"`
+	// Analyzer Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged.
+	Analyzer *FieldMappingAnalyzer `json:"analyzer,omitempty"`
+
+	// Boost Positive integer BM25F weight, allowed only with the search role. For ratios 3/2/2/1.5/1 use 6/4/4/3/2.
+	Boost *int   `json:"boost,omitempty"`
+	Name  string `json:"name"`
+
+	// PartKeyPrefix Optional key prefix to narrow part_role, for example slugline-.
+	PartKeyPrefix *string `json:"part_key_prefix,omitempty"`
+
+	// PartRole Collect canonical text Parts of this role instead of source_pointer. Requires the search role.
+	PartRole      *FieldMappingPartRole `json:"part_role,omitempty"`
+	Roles         []FieldMappingRoles   `json:"roles"`
+	SourcePointer *string               `json:"source_pointer,omitempty"`
+	Type          FieldMappingType      `json:"type"`
+
+	// ValuePointer For a string_array source, select this JSON Pointer from each array entry and flatten its string or string-array values.
+	ValuePointer *string `json:"value_pointer,omitempty"`
 }
+
+// FieldMappingAnalyzer Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged.
+type FieldMappingAnalyzer string
+
+// FieldMappingPartRole Collect canonical text Parts of this role instead of source_pointer. Requires the search role.
+type FieldMappingPartRole string
 
 // FieldMappingRoles defines model for FieldMapping.Roles.
 type FieldMappingRoles string
@@ -2893,8 +2961,14 @@ type SearchFilter struct {
 	// Metadata ANDed typed filters. Common fields use metadata.language, metadata.published_at, metadata.source_type, metadata.source, metadata.author, metadata.subjects, metadata.tags, metadata.country and metadata.place. Other names require the filter role in the Corpus's effective retrieval mapping. Corpora missing a requested filter field are excluded and reported. A metadata-capable generation is required; rebuild older Corpora first (422 metadata_filter_unavailable).
 	Metadata *[]MetadataFilter `json:"metadata,omitempty"`
 
+	// RecordIds Exact canonical Record identities. Requires an item-keyword generation; rebuild older Corpora first (422 metadata_filter_unavailable).
+	RecordIds *[]string `json:"record_ids,omitempty"`
+
 	// SourceNamespaces Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them.
 	SourceNamespaces *[]string `json:"source_namespaces,omitempty"`
+
+	// VersionIds Exact canonical Version identities; currentness and authorization still apply.
+	VersionIds *[]string `json:"version_ids,omitempty"`
 }
 
 // SearchHit One authorized segment hit. Rehydrate from canonical storage and recheck Organization/Corpus access, currentness, quarantine and Tombstone before returning. Rank is contiguous and one-based after hydration/filtering. Projection Generation, segmentation, segment and optional Embedding Artifact/Vector Space are logical durable IDs, not physical collection names or workflow IDs. Embedding references are omitted when that segment has lexical coverage only. They do not assert that the dense branch contributed to its rank. All hits inherit the response retrieval profile. Raw scores/explainScore stay internal.
@@ -2975,7 +3049,7 @@ type SearchProfileUsage struct {
 	Rounds  int    `json:"rounds"`
 }
 
-// SearchRequest Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. Other metadata filters and pagination are outside this surface.
+// SearchRequest Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. The first-party retrieval plugin returns each Record once, with its best matching passage; custom plugins can request individual passages. Pagination is outside this surface.
 type SearchRequest struct {
 	CorpusIds []string `json:"corpus_ids"`
 

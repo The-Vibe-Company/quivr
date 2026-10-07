@@ -6,6 +6,7 @@ notice list, not a legal review, and it certifies nothing for production.
 | Artifact | Where it comes from | Notice |
 | --- | --- | --- |
 | `quivr` binary (Go modules linked into it) | `go.mod` / `go.sum` | Listed per build in `dependency-inventory.json` (`go version -m`), with the licence read from each module's licence file |
+| French light stemmer linked into `quivr` | Go adaptation of Apache Lucene FrenchLightStemmer (UniNE algorithm) | [french-light/NOTICE.md](french-light/NOTICE.md), [french-light/LICENSE.apache-2.0](french-light/LICENSE.apache-2.0) |
 | E5 model `intfloat/multilingual-e5-small`, revision `614241f6…` | Downloaded and SHA-256-checked by `scripts/prepare_embeddings.py`; never committed | [e5/NOTICE.md](e5/NOTICE.md), [e5/MODEL_CARD.md](e5/MODEL_CARD.md) |
 | Text Embeddings Inference (TEI) image | Pinned by digest in `deploy/compose/compose.yaml` | [e5/LICENSE.tei](e5/LICENSE.tei) |
 | Hugging Face Tokenizers 0.23.2 | Hash-pinned wheels, `tokenizer/requirements-linux-x86_64.txt` and `tokenizer/requirements-macos-arm64.txt` (one per supported host) | [tokenizer/NOTICE.md](tokenizer/NOTICE.md), [tokenizer/LICENSE.tokenizers](tokenizer/LICENSE.tokenizers) |

@@ -91,3 +91,27 @@ func TestResolveRetrievalAcceptsTypedFieldsAndProfileOverrides(t *testing.T) {
 		t.Fatalf("non-deterministic resolution %s %s", a, b)
 	}
 }
+
+// Owns literal configuration keys and omitted-option compatibility for item fields.
+func TestItemFieldConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		body  string
+		valid bool
+	}{
+		{`{"fields":[{"name":"headline","part_role":"title","type":"string","roles":["search"],"boost":6}]}`, true},
+		{`{"fields":[{"name":"slugline","part_role":"body","part_key_prefix":"slugline-","type":"string","roles":["search"],"boost":4,"analyzer":"french_light"}]}`, true},
+		{`{"fields":[{"name":"labels","source_pointer":"/provenance/subjects","value_pointer":"/names","type":"string_array","roles":["search"],"boost":3}]}`, true},
+		{`{"fields":[{"name":"body","source_pointer":"/provenance/body","type":"string","roles":["search"]}]}`, true},
+		{`{"fields":[{"name":"body","part_role":"body","type":"string","roles":["search"],"boost":1.5}]}`, false},
+		{`{"fields":[{"name":"body","part_role":"body","type":"string","roles":["search"],"boost":0}]}`, false},
+		{`{"fields":[{"name":"body","part_role":"body","source_pointer":"/provenance/body","type":"string","roles":["search"]}]}`, false},
+		{`{"fields":[{"name":"body","part_key_prefix":"p-","type":"string","roles":["search"]}]}`, false},
+		{`{"fields":[{"name":"code","source_pointer":"/provenance/code","type":"string","roles":["filter"],"boost":2}]}`, false},
+		{`{"fields":[{"name":"body","part_role":"body","type":"string","roles":["search"],"analyzer":"unknown"}]}`, false},
+	} {
+		_, err := corpus.ResolveRetrieval(raw(t, tc.body), declared)
+		if (err == nil) != tc.valid {
+			t.Errorf("config %s: %v, valid=%v", tc.body, err, tc.valid)
+		}
+	}
+}

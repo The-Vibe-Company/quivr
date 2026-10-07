@@ -79,3 +79,42 @@ func TestProjectionTextSkipsMissingAndMistypedValues(t *testing.T) {
 		t.Fatalf("fallback projection: %+v", texts)
 	}
 }
+
+// Item fields use canonical Parts, not segmentation windows or model inputs.
+func TestItemTextSelectors(t *testing.T) {
+	v, _ := mappedVersion()
+	v.Manifest.Parts = append(v.Manifest.Parts,
+		content.Part{Key: "picture", Role: "caption", Content: content.Text{Kind: "text", Text: "Harbour photograph"}},
+		content.Part{Key: "interview", Role: "transcript", Content: content.Text{Kind: "text", Text: "Recorded interview"}},
+	)
+	v.Provenance["subjects"] = []any{map[string]any{"names": []any{"science", "weather"}}, map[string]any{"names": []any{"culture"}}}
+	fields := []corpus.Field{
+		{Name: "headline", PartRole: "title", Type: "string", Roles: []string{"search"}},
+		{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}},
+		{Name: "labels", SourcePointer: "/provenance/subjects", ValuePointer: "/names", Type: "string_array", Roles: []string{"search"}},
+	}
+	texts := content.ItemText(v, fields)
+	if texts["headline"] != "Plain title" || texts["body"] != "First. Second." || texts["labels"] != "science\nweather\nculture" || texts["caption"] != "Harbour photograph" || texts["transcript"] != "Recorded interview" {
+		t.Fatalf("item fields: %+v", texts)
+	}
+	fields[1].PartKeyPrefix = "missing"
+	if content.ItemText(v, fields)["body"] != "" {
+		t.Fatal("Part prefix ignored")
+	}
+}
+
+func TestFrenchLightKeywordCopy(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"Les élections françaises", "election francais"},
+		{"chevaux cheval", "cheval cheval"},
+		{"actrices acteurs", "acteu acteu"},
+		{"LE port et la mer", "port mer"},
+	} {
+		if got := content.AnalyzeKeywords(tc.in, "french_light"); got != tc.want {
+			t.Errorf("%q: %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	if got := content.AnalyzeKeywords("Élections françaises", ""); got != "Élections françaises" {
+		t.Fatalf("original text changed: %q", got)
+	}
+}

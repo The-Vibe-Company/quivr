@@ -2,7 +2,6 @@ package content
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -75,28 +74,66 @@ func sourceView(v Version) any {
 	return view
 }
 
-func fieldText(view any, f corpus.Field) (string, bool) {
-	tokens, ok := corpus.PointerTokens(f.SourcePointer)
+func fieldValue(view any, f corpus.Field) (any, bool) {
+	var node any
+	var ok bool
+	if f.PartRole != "" {
+		parts, found := pointerValue(view, "/manifest/parts")
+		if !found {
+			return "", false
+		}
+		items, _ := parts.([]any)
+		var values []any
+		for _, item := range items {
+			part, _ := item.(map[string]any)
+			key, _ := part["key"].(string)
+			if part["role"] == f.PartRole && strings.HasPrefix(key, f.PartKeyPrefix) {
+				c, _ := part["content"].(map[string]any)
+				if text, yes := c["text"].(string); yes && text != "" {
+					values = append(values, text)
+				}
+			}
+		}
+		if f.Type == "string_array" {
+			return values, len(values) > 0
+		}
+		texts := make([]string, len(values))
+		for i, value := range values {
+			texts[i] = value.(string)
+		}
+		return strings.Join(texts, "\n\n"), len(values) > 0
+	}
+	node, ok = pointerValue(view, f.SourcePointer)
 	if !ok {
 		return "", false
 	}
-	node := view
-	for _, token := range tokens {
-		switch current := node.(type) {
-		case map[string]any:
-			node, ok = current[token]
-		case []any:
-			i, err := strconv.Atoi(token)
-			ok = err == nil && i >= 0 && i < len(current) && strconv.Itoa(i) == token
-			if ok {
-				node = current[i]
-			}
-		default:
-			ok = false
-		}
-		if !ok {
+	if f.ValuePointer != "" {
+		items, yes := node.([]any)
+		if !yes {
 			return "", false
 		}
+		var values []any
+		for _, item := range items {
+			selected, found := pointerValue(item, f.ValuePointer)
+			if !found {
+				continue
+			}
+			switch value := selected.(type) {
+			case string:
+				values = append(values, value)
+			case []any:
+				values = append(values, value...)
+			}
+		}
+		node = values
+	}
+	return node, true
+}
+
+func fieldText(view any, f corpus.Field) (string, bool) {
+	node, ok := fieldValue(view, f)
+	if !ok {
+		return "", false
 	}
 	switch f.Type {
 	case "string":
@@ -118,4 +155,43 @@ func fieldText(view any, f corpus.Field) (string, bool) {
 		return strings.Join(values, "\n"), true
 	}
 	return "", false
+}
+
+// ItemFields supplies default canonical text mappings unless a configured field
+// replaces them. Text comes from canonical Parts, independently of chunking.
+func ItemFields(fields []corpus.Field) []corpus.Field {
+	two := 2
+	out := []corpus.Field{{Name: "title", PartRole: "title", Type: "string", Roles: []string{"search"}, Boost: &two}}
+	for _, role := range []string{"body", "caption", "transcript"} {
+		out = append(out, corpus.Field{Name: role, PartRole: role, Type: "string", Roles: []string{"search"}})
+	}
+	for _, f := range fields {
+		if !f.Searchable() {
+			continue
+		}
+		replaced := false
+		for i := range out {
+			if out[i].Name == f.Name {
+				out[i] = f
+				replaced = true
+			}
+		}
+		if !replaced {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// ItemText is each logical field's text, indexed once for a Version. Its values never come from embedding/model text.
+func ItemText(v Version, fields []corpus.Field) map[string]string {
+	out := map[string]string{}
+	view := sourceView(v)
+	for _, f := range ItemFields(fields) {
+		if text, ok := fieldText(view, f); ok {
+			out[f.Name] = text
+		}
+	}
+
+	return out
 }

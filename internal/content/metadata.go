@@ -12,7 +12,7 @@ func ProjectionMetadata(v Version, fields []corpus.Field) map[string]any {
 	view := sourceView(v)
 	out := map[string]any{}
 	for _, f := range corpus.FilterFields(fields) {
-		node, ok := pointerValue(view, f.SourcePointer)
+		node, ok := fieldValue(view, f)
 		if !ok {
 			continue
 		}

@@ -43,6 +43,14 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	if wire.Filter != nil && wire.Filter.SourceNamespaces != nil {
 		q.SourceNamespaces = *wire.Filter.SourceNamespaces
 	}
+	if wire.Filter != nil {
+		if wire.Filter.RecordIds != nil {
+			q.RecordIDs = *wire.Filter.RecordIds
+		}
+		if wire.Filter.VersionIds != nil {
+			q.VersionIDs = *wire.Filter.VersionIds
+		}
+	}
 	if wire.EvaluationPlugin != nil {
 		q.EvaluationPlugin = *wire.EvaluationPlugin
 	}

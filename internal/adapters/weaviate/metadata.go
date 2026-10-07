@@ -44,60 +44,29 @@ func (s *Store) ensureMetadata(ctx context.Context, g content.Generation) error 
 	if !g.MetadataProjected {
 		return nil
 	}
-	s.metadataMu.Lock()
-	if s.metadataProperties == nil {
-		s.metadataProperties = map[string]bool{}
-	}
-	missing := []corpus.Field{}
+	var props []map[string]any
 	for _, f := range corpus.FilterFields(g.Fields) {
-		if !s.metadataProperties[g.Collection+"/"+metadataProperty(f)] {
-			missing = append(missing, f)
+		p := metadataSchema(f)
+		p["name"] = metadataPropertyFor(g, f)
+		if g.ItemKeywordsProjected && f.Type == "datetime" {
+			p["indexRangeFilters"] = true
 		}
+		props = append(props, p)
 	}
-	s.metadataMu.Unlock()
-	if len(missing) == 0 {
-		return nil
-	}
-	var class struct {
-		Properties []struct {
-			Name string `json:"name"`
-		} `json:"properties"`
-	}
-	if _, err := s.call(ctx, "GET", "/v1/schema/"+g.Collection, nil, &class); err != nil {
-		return err
-	}
-	present := map[string]bool{}
-	for _, p := range class.Properties {
-		present[p.Name] = true
-	}
-	for _, f := range missing {
-		name := metadataProperty(f)
-		if !present[name] {
-			if _, err := s.call(ctx, "POST", "/v1/schema/"+g.Collection+"/properties", metadataSchema(f), nil); err != nil {
-				class.Properties = nil
-				if _, readErr := s.call(ctx, "GET", "/v1/schema/"+g.Collection, nil, &class); readErr != nil {
-					return readErr
-				}
-				found := false
-				for _, p := range class.Properties {
-					if p.Name == name {
-						found = true
-					}
-				}
-				if !found {
-					return err
-				}
-			}
-		}
-		s.metadataMu.Lock()
-		s.metadataProperties[g.Collection+"/"+name] = true
-		s.metadataMu.Unlock()
-	}
-	return nil
+	return s.ensureProperties(ctx, g.Collection, props)
 }
-func metadataCondition(f corpus.TypedFilter) string {
-	field := corpus.Field{Name: f.Field, Type: f.Type}
-	name := metadataProperty(field)
+func metadataPropertyFor(g content.Generation, f corpus.Field) string {
+	if g.ItemKeywordsProjected && f.Type == "datetime" {
+		// Domain separation cannot collide with a valid legacy logical name.
+		return "m_" + content.Hash([]byte(f.Name + "\x00" + f.Type + "\x00range_v1"))[:32]
+	}
+	return metadataProperty(f)
+}
+func metadataConditionFor(g content.Generation, f corpus.TypedFilter) string {
+	return metadataCondition(f, metadataPropertyFor(g, corpus.Field{Name: f.Field, Type: f.Type}))
+}
+
+func metadataCondition(f corpus.TypedFilter, name string) string {
 	key := map[string]string{"string": "valueText", "string_array": "valueText", "datetime": "valueDate", "number": "valueNumber", "boolean": "valueBoolean"}[f.Type]
 	condition := func(operator string, value any) string {
 		if f.Type == "string" || f.Type == "string_array" {

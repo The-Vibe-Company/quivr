@@ -21,6 +21,12 @@ Read the release notes for required backfills and contract migrations. Historica
 
 Do not run the previous version's migrator during rollback. Rollback switches application binaries; there are no hand-written down migrations. After contracts remove old fields or constraints, restoring the previous application is no longer supported. Recovery then needs a forward fix or your deployment's data recovery procedure.
 
+Existing Corpora keep their keyword generation through an upgrade. Rebuild a
+Corpus to enable item keyword fields and range-indexed dates; a successful
+rebuild activates the new recipe. New Corpora use it immediately. Lexical and
+hybrid searches across both recipes combine their reciprocal ranks before
+applying the result limit, because their keyword scores use different populations.
+
 ## Check it worked
 
 The new API and worker report ready, ingestion resolves new receipts, and search returns the expected records. CI checks the previous version's inline ingestion, authorization and lexical search against the expanded schema, including a restart. Until versioned release artifacts supply the previous binary, CI uses the branch's merge-base commit; this is a focused compatibility check, not a complete release matrix.

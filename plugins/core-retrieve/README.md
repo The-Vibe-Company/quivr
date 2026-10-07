@@ -8,16 +8,14 @@ The engine ranks nothing itself and refuses to start without a retrieval plugin.
 Up to two rounds of candidates, then the ranking:
 
 - **Round 1** asks for `k = candidate_count` (the search limit when unset) per request: `lexical` uses
-  one `bm25` request on the title and body (`field: source`); `semantic` uses
-  `near_vector` in every served space; `hybrid` uses `hybrid` in every served
+  one `bm25` request with `group_by: record` on the title and body (`field: source`); `semantic` uses
+  `near_vector` with `group_by: record` in every served space; `hybrid` uses `hybrid` with `group_by: record` in every served
   space with the configured weight and fusion (defaults: alpha 0.5 and relative score), in batches of at most eight requests. A semantic or hybrid
   search whose Corpora serve no vector space is refused (422
   `unsupported_search`).
 - **Ranking** merges candidates by descending index score and keeps each
-  segment's highest score once, with an explanation naming the primitive and
-  the space. Candidates of equal score, which the index returns in the order
-  their objects were written, rank by segment id, so the same search over the
-  same Records always ranks the same way.
+  Record once across served spaces, with its strongest passage and an explanation
+  naming the primitive and space. Equal scores rank by segment id.
 
 It makes no model call: the engine encodes the query with the owner of the
 space: the ingestion plugin that declares it or, for a Corpus not rebuilt
@@ -31,7 +29,7 @@ Set these keys in the plugin pin's `configuration`; both core profiles use them.
 | --- | --- |
 | `dense_weight` | Hybrid vector weight (Weaviate `alpha`), 0–1; default 0.5. Keyword weight is `1 - dense_weight`. |
 | `candidate_count` | Candidates per served space, or one lexical request, 1–100; default the search limit. A smaller value can return a shorter page. |
-| `hybrid_fusion` | `relative_score` (default) normalizes each side's scores then weights them; `ranked` uses Weaviate RRF with constant 60. |
+| `hybrid_fusion` | `relative_score` (default) normalizes each side's scores then weights them; `ranked` uses reciprocal rank fusion with constant 60. |
 
 Weight and fusion affect hybrid mode only; final ranking remains capped by the
 search limit. Omitting settings preserves default request bytes. See
@@ -47,9 +45,9 @@ for a deployment example, trial mapping and Jev shortlist settings.
 
 ## Parity with the engine
 
-The engine fetches `max(150, 3 * k)` index objects per request, keeps each
-segment's first object, then hydrates readable candidates until it holds `k`.
-With no settings, `k` is the search limit, preserving the index query and order.
+New/rebuilt generations index keyword fields once per Version and fuse item
+BM25 with maximum passage-vector scores. Legacy generations keep their keyword
+recipe until rebuild. Candidates are hydrated and checked for currentness and access.
 The retrieval baseline (`make measure`) records hits of 24 CC0 queries and edge
 cases in all three modes. Score ties may differ between installations because segment ids derive from the Corpus.
 
