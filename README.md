@@ -90,7 +90,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 - Rolling application upgrades use additive schema expansions; destructive cleanup
   runs only with `quivr migrate --contract`. API and worker retry performance-index
-  builds in the background, so a busy index build does not delay startup. CI checks the merge-base binary against
+  builds in the background, so their busy index builds do not delay startup. An
+  older binary's index build can still hold the migration lock until it finishes
+  or is stopped. CI checks the merge-base binary against
   expansions. See [Upgrade Quivr](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-quivr).
 
 - **Release images and build identity.** Release-please manages alpha release PRs, versions and changelogs. Publishing a release builds signed engine and first-party plugin images on GHCR, with signed SPDX inventories and vulnerability scans. `quivr --version`, `GET /v0/version`, startup logs and process metrics report the build. See [Deploy and configure Quivr](https://docs.quivr.thevibecompany.co/run-quivr/deploy) and [release security](https://docs.quivr.thevibecompany.co/run-quivr/security).

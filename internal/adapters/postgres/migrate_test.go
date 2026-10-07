@@ -15,6 +15,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/app"
+	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -137,6 +138,12 @@ AND wait_event_type='Lock' AND pid<>pg_backend_pid() LIMIT 1), 0)`).Scan(&buildP
 			bootstrap()
 			if err := postgres.SchemaReady(ctx, pool); err != nil {
 				t.Fatalf("index build blocked schema readiness: %v", err)
+			}
+			startup, stopStartup := context.WithTimeout(ctx, time.Second)
+			_, err = (postgres.PluginStore{Pool: pool}).ApplyConfiguration(startup, registry.Seed{})
+			stopStartup()
+			if err != nil {
+				t.Fatalf("index build blocked required plugin configuration: %v", err)
 			}
 			if err := postgres.EnsureIndexes(ctx, pool); !errors.Is(err, postgres.ErrIndexBusy) {
 				t.Fatalf("want prompt competing-maintainer contention, got %v", err)

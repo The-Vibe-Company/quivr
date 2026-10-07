@@ -39,7 +39,7 @@ The ingestion path prepares blob and embedding coverage writes before locking th
 
 The new API and worker report ready, ingestion resolves new receipts, and search returns the expected records. CI checks the previous version's inline ingestion, authorization and lexical search against the expanded schema, including a restart. Until versioned release artifacts supply the previous binary, CI uses the branch's merge-base commit; this is a focused compatibility check, not a complete release matrix.
 
-Inspect the `X-Quivr-Index-Setup` header on `/readyz`: `pending`, `building`, `retrying` or `conflict` means performance is degraded while optional indexes are unavailable; `ready` means all expected indexes are valid. These states do not change readiness HTTP 204 when required dependencies are ready. Structured `quivr.postgres.index_setup` events report the state, attempt number and retry delay. Keep an API or worker running so setup can finish.
+Inspect the `X-Quivr-Index-Setup` header on `/readyz` for that process's last index setup state: `pending`, `building`, `retrying` or `conflict` reports degraded performance until the process verifies the indexes; `ready` means it verified all expected indexes as valid. The header is cached: another process may finish setup before this one retries, and later external database changes are not reflected after `ready`. These states do not change readiness HTTP 204 when required dependencies are ready. Structured `quivr.postgres.index_setup` events report the state, attempt number and retry delay. Keep an API or worker running so setup can finish.
 
 ## Troubleshooting
 
@@ -55,21 +55,24 @@ Database writes can wait briefly for additive DDL locks. Compatibility requires 
 
 An interrupted index build restarts from scratch on the next attempt. If index setup consistently exceeds 30 minutes, stop automatic index maintenance by draining the API and worker instances, then build the indexes concurrently in an operator database session with a longer timeout. Use the same index names, columns and predicates; remove a matching invalid index before rebuilding it. Restart the instances afterward to verify and reuse the indexes.
 
-For the document-rebuild index, inspect the existing definition first:
+Inspect both existing definitions first:
 
 ```sql
 SELECT indisvalid, pg_get_indexdef(indexrelid) AS definition
 FROM pg_index
-WHERE indexrelid = to_regclass('segments_by_segmentation');
+WHERE indexrelid IN (to_regclass('segments_by_segmentation'),
+                     to_regclass('records_by_current_version'));
 ```
 
-In a separate database session outside a transaction, if the index is invalid and matches the definition below, run `DROP INDEX CONCURRENTLY segments_by_segmentation` first. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours for the build:
+In a separate database session outside a transaction, drop each invalid index only if it matches its definition below, using `DROP INDEX CONCURRENTLY segments_by_segmentation` or `DROP INDEX CONCURRENTLY records_by_current_version`. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours for the builds:
 
 ```sql
 SET lock_timeout = '0';
 SET statement_timeout = '2h';
 CREATE INDEX CONCURRENTLY IF NOT EXISTS segments_by_segmentation
   ON segments (organization, segmentation_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS records_by_current_version
+  ON records (organization, corpus_id, current_version_id);
 ```
 
 A valid matching index is reused; close this session afterward and restart the API and worker to finish index setup.

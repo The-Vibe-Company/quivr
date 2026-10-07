@@ -33,7 +33,7 @@ var (
 
 // Reserved independently of schema migrations: a build waiting for an older
 // writer must not prevent another process from applying required migrations.
-const indexAdvisoryLock int64 = 642002
+const indexAdvisoryLock int64 = 642004
 
 // EnsureIndexes runs resumable index work after schema migrations commit. Each
 // build preserves concurrent writes, reuses a matching valid index, and repairs
