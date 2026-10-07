@@ -160,7 +160,8 @@ func TestRailwayReplicaAPI(t *testing.T) {
 				t.Fatalf("got replicas %d, want %d", got, tc.want)
 			}
 			if tc.bad {
-				assertError(t, b.SetReplicas(ctx, 5), true)
+				err = b.SetReplicas(ctx, 5)
+				assertError(t, err, true)
 				if tc.name == "multiple regions" && !strings.Contains(err.Error(), "single-region") {
 					t.Fatalf("unclear multi-region refusal: %v", err)
 				}
