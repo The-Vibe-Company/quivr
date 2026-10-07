@@ -314,6 +314,9 @@ jobs:
             .scratch/quivr-verify-*/*-before-lifecycle.log
             .scratch/quivr-verify-*/acceptance.log
             .scratch/quivr-verify-*/adapters*.log
+            .scratch/quivr-verify-*/weaviate-upgrade/report.json
+            .scratch/quivr-verify-*/weaviate-upgrade/snapshot.json
+            .scratch/quivr-verify-*/weaviate-upgrade/*.log
             .scratch/quivr-verify-*/api*.log*
             .scratch/quivr-verify-*/worker*.log*
             .scratch/quivr-verify-*/migrate*.log*

@@ -142,8 +142,8 @@ func TestPluginActivation(t *testing.T) {
 }
 
 // TestPluginActivationDrains runs once the harness let 0.1.0 run again, both
-// versions up: the Record in flight at the activation finishes on 0.1.0,
-// never moved to 0.2.0, and 0.1.0 then has nothing pinned to it.
+// versions up: the original receipt drains 0.1.0 while an independently pinned
+// serving projection uses 0.2.0. The timeline names that served projection.
 func TestPluginActivationDrains(t *testing.T) {
 	operator, _, _, _ := activationSetup(t)
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
@@ -155,8 +155,8 @@ func TestPluginActivationDrains(t *testing.T) {
 			segmentedBy, _ = step["plugin_version"].(string)
 		}
 	}
-	if segmentedBy != "0.1.0" {
-		t.Fatalf("the Record in flight at the activation was segmented by %q, want 0.1.0: %v", segmentedBy, timeline)
+	if segmentedBy != "0.2.0" {
+		t.Fatalf("the current serving projection uses %q, want 0.2.0 after the historical receipt handoff: %v", segmentedBy, timeline)
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for {

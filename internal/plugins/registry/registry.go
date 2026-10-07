@@ -117,6 +117,13 @@ func SettingsOf(pin *plugins.Pin) Settings {
 	return s
 }
 
+// IngestionRecipe identifies immutable cuts and vectors from one installed
+// manifest and configuration. Addresses, registrations and enabled roles do
+// not change the derivation.
+func IngestionRecipe(pin *plugins.Pin) string {
+	return "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", pin.ManifestDigest, string(SettingsOf(pin).Configuration))
+}
+
 // Digest identifies the settings: sha256 over their canonical JSON.
 func (s Settings) Digest() string {
 	b, _ := json.Marshal(s)

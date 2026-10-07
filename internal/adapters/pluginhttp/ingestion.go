@@ -41,8 +41,7 @@ func (i Ingestor) Descriptor() processing.IngestionDescriptor {
 	// Keep both derivations immutable and reusable across projection generations;
 	// endpoints, registration ids and enabled roles do not affect the output.
 	configuration := registry.SettingsOf(i.Pin).Configuration
-	digest := content.StableID("ingestion", i.Pin.ManifestDigest, string(configuration))
-	recipe := "plugin:" + i.Pin.Manifest.ID + "@" + i.Pin.Manifest.Version + "#" + digest
+	recipe := registry.IngestionRecipe(i.Pin)
 	provenance, _ := json.Marshal(map[string]string{"plugin_id": i.Pin.Manifest.ID, "plugin_version": i.Pin.Manifest.Version,
 		"manifest_digest": i.Pin.ManifestDigest, "configuration_digest": content.Hash(configuration)})
 	d := processing.IngestionDescriptor{PluginID: i.Pin.Manifest.ID, PluginVersion: i.Pin.Manifest.Version,
