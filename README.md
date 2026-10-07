@@ -89,7 +89,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - [Bulk worker autoscaling](deploy/railway/autoscaler/README.md) uses a standalone Go controller on Railway; Kubernetes can use KEDA. Live workers keep separate capacity.
 
 - Rolling application upgrades use additive schema expansions; destructive cleanup
-  runs only with `quivr migrate --contract`. CI checks the merge-base binary against
+  runs only with `quivr migrate --contract`. API and worker retry performance-index
+  builds in the background, so a busy index build does not delay startup. CI checks the merge-base binary against
   expansions. See [Upgrade Quivr](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-quivr).
 
 - **Release images and build identity.** Release-please manages alpha release PRs, versions and changelogs. Publishing a release builds signed engine and first-party plugin images on GHCR, with signed SPDX inventories and vulnerability scans. `quivr --version`, `GET /v0/version`, startup logs and process metrics report the build. See [Deploy and configure Quivr](https://docs.quivr.thevibecompany.co/run-quivr/deploy) and [release security](https://docs.quivr.thevibecompany.co/run-quivr/security).

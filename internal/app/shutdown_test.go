@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,7 @@ import (
 func TestDrainMakesReadinessFailWhileAnAdmittedRequestCompletes(t *testing.T) {
 	loops := lifecycle.New()
 	defer loops.Close()
-	probe := httptest.NewServer(readinessProbe(loops, func(context.Context) error { return nil }))
+	probe := httptest.NewServer(readinessProbe(loops, func(context.Context) error { return nil }, &IndexMaintenance{}))
 	t.Cleanup(probe.Close)
 	started, finish := make(chan struct{}), make(chan struct{})
 	public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,5 +68,33 @@ func TestDrainMakesReadinessFailWhileAnAdmittedRequestCompletes(t *testing.T) {
 	case <-done:
 	case <-deadline.Done():
 		t.Fatal("successful drain exceeded its budget")
+	}
+}
+
+// Owns the transport contract: optional index degradation is visible without
+// converting readiness to failure; required dependency failures still fail it.
+func TestReadinessReportsIndexDegradationWithoutFailing(t *testing.T) {
+	loops := lifecycle.New()
+	defer loops.Close()
+	maintenance := &IndexMaintenance{}
+	var required error
+	probe := readinessProbe(loops, func(context.Context) error { return required }, maintenance)
+	for _, state := range []string{"pending", "building", "retrying", "conflict", "ready"} {
+		t.Run(state, func(t *testing.T) {
+			if state != "pending" {
+				maintenance.state.Store(state)
+			}
+			response := httptest.NewRecorder()
+			probe.ServeHTTP(response, httptest.NewRequest("GET", "/readyz", nil))
+			if response.Code != 204 || response.Header().Get("X-Quivr-Index-Setup") != state {
+				t.Fatalf("want 204 with index state %s, got %d header=%q", state, response.Code, response.Header().Get("X-Quivr-Index-Setup"))
+			}
+		})
+	}
+	required = errors.New("migrations pending")
+	response := httptest.NewRecorder()
+	probe.ServeHTTP(response, httptest.NewRequest("GET", "/readyz", nil))
+	if response.Code != 503 {
+		t.Fatalf("required setup failure: want 503, got %d", response.Code)
 	}
 }
