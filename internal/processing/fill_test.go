@@ -94,3 +94,43 @@ func TestFillKeepsTheProjectedSegments(t *testing.T) {
 		}
 	}
 }
+
+// firstWriterArtifacts keeps the first artifact stored for a derivation, as
+// the repository does, and reports a later different one as a conflict.
+type firstWriterArtifacts struct{ *memoryArtifacts }
+
+func (m firstWriterArtifacts) SaveEmbedding(ctx context.Context, e content.Embedding, space content.VectorSpace) error {
+	if old, ok := m.byDerivation[e.DerivationID]; ok && old.ID != e.ID {
+		return content.ErrConflict
+	}
+	return m.memoryArtifacts.SaveEmbedding(ctx, e, space)
+}
+
+// An ingestion running beside a rebuild can store a segment's vector first.
+// The provider is not bitwise deterministic, so the plugin's answer may
+// differ: the stored artifact is adopted instead of refusing the Version.
+func TestFillAdoptsAVectorAnotherDerivationStoredFirst(t *testing.T) {
+	v := content.Version{RecordID: "r", ID: "v", Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "first paragraph\n\nsecond paragraph"}}}}}
+	projected := []content.SegmentInput{{PartKey: "body", Start: 0, End: 15}, {PartKey: "body", Start: 17, End: 33}}
+	seg, err := content.PluginSegmentation("org", v, "plugin:p@1", nil, projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	plugin := fillPlugin{segments: projected, calls: &calls}
+	store := firstWriterArtifacts{&memoryArtifacts{byDerivation: map[string]content.Embedding{}, blobs: map[string][]byte{}}}
+	service := content.Service{Embeddings: store, Blobs: store}
+	space := plugin.Descriptor().VectorSpaces["p.large@1"]
+	// The concurrent ingestion stored only the first segment, with a slightly different vector.
+	if _, err = service.SaveEmbedding(context.Background(), content.EmbeddingInput("org", "corpus", v, seg, seg.Segments[0], space, "plugin:p@2"), space, []float32{1, 0.001}); err != nil {
+		t.Fatal(err)
+	}
+	d := processing.PluginDeriver{Content: service, Plugin: plugin}
+	data, err := d.Fill(context.Background(), "org", "corpus", v, seg, []string{"p.large@1"})
+	if err != nil || calls != 1 {
+		t.Fatalf("fill: %v after %d plugin calls", err, calls)
+	}
+	if len(data) != 2 || data[0].Vector[1] != 0.001 || data[1].Vector[1] != 1 {
+		t.Fatalf("vectors %+v, want the stored first vector and the plugin's second", data)
+	}
+}

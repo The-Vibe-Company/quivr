@@ -273,7 +273,7 @@ func (d PluginDeriver) derive(ctx context.Context, org, corpusID string, v conte
 			space, _ := d.descriptor.VectorSpace(key)
 			vector := segments[i].Vectors[key]
 			input := content.EmbeddingInput(org, corpusID, v, seg, p, space, d.descriptor.Producer)
-			artifact, err := d.Content.SaveEmbedding(ctx, input, space, vector)
+			artifact, vector, err := d.saveOrAdopt(ctx, org, input, space, vector)
 			if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
 				return seg, nil, content.Refused("the ingestion plugin answered a vector that differs from the stored artifact")
 			}
@@ -284,6 +284,23 @@ func (d PluginDeriver) derive(ctx context.Context, org, corpusID string, v conte
 		}
 	}
 	return seg, data, nil
+}
+
+// saveOrAdopt stores a segment's vector, or adopts the artifact another
+// derivation of the same input stored first, for example an ingestion running
+// beside a rebuild. Embedding providers are not bitwise deterministic, so the
+// first stored artifact is canonical; only an unreadable or differently sized
+// stored vector keeps the conflict.
+func (d PluginDeriver) saveOrAdopt(ctx context.Context, org string, input content.Embedding, space content.VectorSpace, vector []float32) (content.Embedding, []float32, error) {
+	artifact, err := d.Content.SaveEmbedding(ctx, input, space, vector)
+	if !errors.Is(err, content.ErrConflict) {
+		return artifact, vector, err
+	}
+	stored, storedVector, loadErr := d.Content.LoadEmbedding(ctx, org, input.DerivationID)
+	if loadErr != nil || len(storedVector) != len(vector) {
+		return artifact, vector, err
+	}
+	return stored, storedVector, nil
 }
 
 // ErrSegmentsDiffer reports that the plugin cuts a Version into other
@@ -330,7 +347,7 @@ func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content
 		for _, key := range spaces {
 			space, _ := d.descriptor.VectorSpace(key)
 			vector := segments[i].Vectors[key]
-			artifact, err := d.Content.SaveEmbedding(ctx, content.EmbeddingInput(org, corpusID, v, seg, p, space, d.descriptor.Producer), space, vector)
+			artifact, vector, err := d.saveOrAdopt(ctx, org, content.EmbeddingInput(org, corpusID, v, seg, p, space, d.descriptor.Producer), space, vector)
 			if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
 				return nil, fmt.Errorf("%w: a vector differs from the stored artifact", content.ErrIngestionRefused)
 			}
