@@ -64,19 +64,30 @@ func TestConfigurationAtHTTPBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		config string
-		valid  bool
+		config  string
+		valid   bool
+		unknown bool
 	}{
-		{`{}`, true},
-		{`{"dense_weight":0,"candidate_count":1,"hybrid_fusion":"relative_score"}`, true},
-		{`{"dense_weight":1,"candidate_count":100,"hybrid_fusion":"ranked"}`, true},
-		{`{"dense_weight":-0.01}`, false}, {`{"dense_weight":1.01}`, false},
-		{`{"dense_weight":"0.5"}`, false}, {`{"dense_weight":null}`, false},
-		{`{"candidate_count":0}`, false}, {`{"candidate_count":101}`, false},
-		{`{"candidate_count":1.5}`, false}, {`{"candidate_count":"30"}`, false},
-		{`{"candidate_count":null}`, false}, {`{"hybrid_fusion":"rrf"}`, false},
-		{`{"hybrid_fusion":null}`, false}, {`{"alpha":0.5}`, false},
+		{`{}`, true, false},
+		{`{}`, true, true},
+		{`{"dense_weight":0,"candidate_count":1,"hybrid_fusion":"relative_score"}`, true, false},
+		{`{"dense_weight":1,"candidate_count":100,"hybrid_fusion":"ranked"}`, true, false},
+		{`{"dense_weight":-0.01}`, false, false}, {`{"dense_weight":1.01}`, false, false},
+		{`{"dense_weight":"0.5"}`, false, false}, {`{"dense_weight":null}`, false, false},
+		{`{"candidate_count":0}`, false, false}, {`{"candidate_count":101}`, false, false},
+		{`{"candidate_count":1.5}`, false, false}, {`{"candidate_count":"30"}`, false, false},
+		{`{"candidate_count":null}`, false, false}, {`{"hybrid_fusion":"rrf"}`, false, false},
+		{`{"hybrid_fusion":null}`, false, false}, {`{"alpha":0.5}`, false, false},
 	} {
+		var spaces []quivrplugin.SearchSpace
+		if err := json.Unmarshal(body["spaces"], &spaces); err != nil {
+			t.Fatal(err)
+		}
+		spaces[0].Coverage.Unknown = tc.unknown
+		if tc.unknown {
+			spaces[0].Coverage.Segments, spaces[0].Coverage.Total = 0, 0
+		}
+		body["spaces"], _ = json.Marshal(spaces)
 		body["configuration"] = json.RawMessage(tc.config)
 		raw, _ := json.Marshal(body)
 		rec := httptest.NewRecorder()
@@ -87,6 +98,9 @@ func TestConfigurationAtHTTPBoundary(t *testing.T) {
 		}
 		if rec.Code != want || (!tc.valid && !bytes.Contains(rec.Body.Bytes(), []byte(`"code":"invalid_configuration"`))) {
 			t.Errorf("configuration %s: %d %s, want status %d and configuration validation", tc.config, rec.Code, rec.Body, want)
+		}
+		if tc.unknown && !bytes.Contains(rec.Body.Bytes(), []byte(`"primitive":"hybrid"`)) {
+			t.Errorf("unknown coverage must still request candidates: %s", rec.Body.Bytes())
 		}
 	}
 }

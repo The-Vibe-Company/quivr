@@ -9,7 +9,7 @@ The HTTP routes a plugin serves, with every field of their JSON bodies, the erro
 
 ## Plugin API versions
 
-Latest Plugin API: `0.15.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`.
+Latest Plugin API: `0.16.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3.1`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, `0.14.0`, `0.15.0`, `0.16.0`.
 
 | Feature | Since |
 | --- | --- |
@@ -32,6 +32,7 @@ Latest Plugin API: `0.15.0`. Supported versions: `0.1.0`, `0.2.0`, `0.3.0`, `0.3
 | Signed engine requests with per-plugin audience and body digest | `0.14.0` |
 | Bounded concurrent connector item submissions | `0.15.0` |
 | Raw connector Blob input through a source attachment | `0.15.0` |
+| Informational coverage snapshots with unknown state and age | `0.16.0` |
 
 ## Trace context
 
@@ -539,9 +540,11 @@ Since Plugin API 0.7. One round of one search: the query, the scope, the profile
 | `spaces[].indexes` | array of string | yes | — |
 | `spaces[].query_modalities` | array of string | yes | — |
 | `spaces[].role` | `served`, `evaluation` | yes | served answers search by default; evaluation is indexed and compared. |
-| `spaces[].coverage` | object | yes | — |
-| `spaces[].coverage.segments` | integer | yes | Current segments holding a vector in this space, over every requested Corpus. |
-| `spaces[].coverage.total` | integer | yes | Current segments of the requested Corpora. |
+| `spaces[].coverage` | object | yes | Informational background coverage. Counts can be stale or zero placeholders before the first snapshot. Candidate eligibility is determined by routing and canonical hydration, never these counts. |
+| `spaces[].coverage.segments` | integer | yes | Snapshot segments holding a vector in this space, over every requested Corpus; zero before coverage is known. |
+| `spaces[].coverage.total` | integer | yes | Snapshot segments of the requested Corpora; zero before coverage is known. |
+| `spaces[].coverage.unknown` | boolean | no | Plugin API 0.16+: no completed coverage snapshot yet. Counts are placeholders and never gate retrieval. |
+| `spaces[].coverage.age_ms` | integer | no | Plugin API 0.16+: age of the oldest coverage snapshot across the requested Corpora. Counts are informational and may be stale. |
 | `served` | array of object | yes | Every candidate request of earlier rounds with the candidates the core served for it, in order. Empty in round 1. At most 24 items. |
 | `served[].round` | integer | yes | 1 to 3. |
 | `served[].request_index` | integer | yes | 0 to 7. |

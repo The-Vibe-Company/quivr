@@ -7538,8 +7538,10 @@ required:
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `projection_generation_id` | string | yes | Minimum length `1`. |
-| `segments` | integer | yes | Current segments the generation projects; a space whose coverage equals it holds a vector for every one. Minimum `0`. |
+| `segments` | integer | yes | Background snapshot of segments the generation projects; zero before coverage is known. Counts may be stale. Minimum `0`. |
 | `items` | array of [`VectorSpace`](#vectorspace) | yes |  |
+| `coverage_unknown` | boolean |  | True until a background coverage snapshot completes; counts are placeholders. |
+| `coverage_age_ms` | integer |  | Age of the background coverage snapshot. Counts may be stale during refresh or dependency failure. Minimum `0`. |
 
 <details>
 <summary>Full schema</summary>
@@ -7554,11 +7556,18 @@ properties:
   segments:
     type: integer
     minimum: 0
-    description: Current segments the generation projects; a space whose coverage equals it holds a vector for every one.
+    description: Background snapshot of segments the generation projects; zero before coverage is known. Counts may be stale.
   items:
     type: array
     items:
       $ref: '#/components/schemas/VectorSpace'
+  coverage_unknown:
+    type: boolean
+    description: True until a background coverage snapshot completes; counts are placeholders.
+  coverage_age_ms:
+    type: integer
+    minimum: 0
+    description: Age of the background coverage snapshot. Counts may be stale during refresh or dependency failure.
 required:
   - projection_generation_id
   - segments
@@ -7586,8 +7595,10 @@ required:
 | `role` | string | yes | One of `served`, `evaluation`. |
 | `coverage` | object | yes |  |
 | `coverage.segments` | integer | yes | Minimum `0`. |
-| `coverage.total_segments` | integer |  | Current segments in this plugin's own projection; different plugins may cut the same Version differently. Minimum `0`. |
-| `coverage.versions_covered` | integer |  | Current eligible Versions whose entire projection has vectors in this space. Minimum `0`. |
+| `coverage.total_segments` | integer |  | Snapshot segments in this plugin's own projection; different plugins may cut the same Version differently. Minimum `0`. |
+| `coverage.versions_covered` | integer |  | Snapshot eligible Versions whose entire projection has vectors in this space. Minimum `0`. |
+| `coverage.unknown` | boolean |  | True until a background snapshot completes; counts are placeholders. |
+| `coverage.age_ms` | integer |  | Age of this space's coverage snapshot. Coverage is informational and may be stale. Minimum `0`. |
 
 <details>
 <summary>Full schema</summary>
@@ -7656,11 +7667,18 @@ properties:
       total_segments:
         type: integer
         minimum: 0
-        description: Current segments in this plugin's own projection; different plugins may cut the same Version differently.
+        description: Snapshot segments in this plugin's own projection; different plugins may cut the same Version differently.
       versions_covered:
         type: integer
         minimum: 0
-        description: Current eligible Versions whose entire projection has vectors in this space.
+        description: Snapshot eligible Versions whose entire projection has vectors in this space.
+      unknown:
+        type: boolean
+        description: True until a background snapshot completes; counts are placeholders.
+      age_ms:
+        type: integer
+        minimum: 0
+        description: Age of this space's coverage snapshot. Coverage is informational and may be stale.
     required:
       - segments
 required:

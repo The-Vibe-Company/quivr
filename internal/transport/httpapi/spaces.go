@@ -45,6 +45,18 @@ func (a *API) listVectorSpaces(w http.ResponseWriter, r *http.Request, scope cor
 			item.Metric = transport.Cosine
 		}
 		item.Coverage.Segments = int(s.Segments)
+		if s.CoverageUnknown {
+			unknown := true
+			item.Coverage.Unknown = &unknown
+			out.CoverageUnknown = &unknown
+		}
+		if s.CoverageAgeMS != nil {
+			age := int(*s.CoverageAgeMS)
+			item.Coverage.AgeMs = &age
+			if out.CoverageAgeMs == nil || age > *out.CoverageAgeMs {
+				out.CoverageAgeMs = &age
+			}
+		}
 		if s.TotalSegments != nil {
 			total := int(*s.TotalSegments)
 			item.Coverage.TotalSegments = &total

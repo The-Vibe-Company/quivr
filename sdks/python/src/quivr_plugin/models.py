@@ -1089,8 +1089,12 @@ class SearchRequestSpacesItemOwner(Model):
 
 @dataclass(kw_only=True)
 class SearchRequestSpacesItemCoverage(Model):
+    "Informational background coverage. Counts can be stale or zero placeholders before the first snapshot. Candidate eligibility is determined by routing and canonical hydration, never these counts."
+
     segments: int
     total: int
+    unknown: bool | None = None
+    age_ms: int | None = None
 
 
 @dataclass(kw_only=True)

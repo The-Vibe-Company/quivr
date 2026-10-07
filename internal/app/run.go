@@ -689,10 +689,11 @@ func Run(command string, args ...string) error {
 		}
 	}
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
-	// Coverage counts read every current segment of a Corpus; a search sees
-	// them at most 10 s old.
+	// Coverage counts refresh independently of search deadlines. The API and
+	// retrieval share snapshots; one count at a time bounds background load.
+	spaceSnapshots := retrieval.NewSpaceSnapshots(lifecycle.WorkContext(ctx), spaces, 10*time.Second)
 	metadataProjection := retrieval.MetadataProjection{Projection: projection, Metadata: records}
-	search := retrieval.Service{Embedder: embedding, Routing: baseline, Registry: spaces, Coverage: &retrieval.CoverageCache{TTL: 10 * time.Second}, Projection: metadataProjection, Content: contents}
+	search := retrieval.Service{Embedder: embedding, Routing: baseline, Registry: spaceSnapshots, Projection: metadataProjection, Content: contents}
 	// External normalization runs in the worker only, before publication.
 	normalizer := normalization.Service{Content: contents, Store: normalizations, Signer: blobs, Pin: live, Plugin: pluginhttp.Normalizer{}}
 	processor := processing.Service{Content: contents, Retrieval: search, Enrichment: search, Normalizer: normalizer, Routing: baseline, LegacySpace: tei.Space().ID}
@@ -770,7 +771,7 @@ func Run(command string, args ...string) error {
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore),
-			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(spaces),
+				httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(spaceSnapshots),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators backfill past Versions and promote vector spaces (plugins:admin).

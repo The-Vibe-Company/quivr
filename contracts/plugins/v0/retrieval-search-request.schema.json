@@ -194,14 +194,24 @@
               "segments": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Current segments holding a vector in this space, over every requested Corpus."
+                "description": "Snapshot segments holding a vector in this space, over every requested Corpus; zero before coverage is known."
               },
               "total": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Current segments of the requested Corpora."
+                "description": "Snapshot segments of the requested Corpora; zero before coverage is known."
+              },
+              "unknown": {
+                "type": "boolean",
+                "description": "Plugin API 0.16+: no completed coverage snapshot yet. Counts are placeholders and never gate retrieval."
+              },
+              "age_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Plugin API 0.16+: age of the oldest coverage snapshot across the requested Corpora. Counts are informational and may be stale."
               }
-            }
+            },
+            "description": "Informational background coverage. Counts can be stale or zero placeholders before the first snapshot. Candidate eligibility is determined by routing and canonical hydration, never these counts."
           }
         }
       },
@@ -377,7 +387,11 @@
               "description": "Optional replacement query text; otherwise inherits the outer query."
             },
             "mode": {
-              "enum": ["lexical", "semantic", "hybrid"],
+              "enum": [
+                "lexical",
+                "semantic",
+                "hybrid"
+              ],
               "description": "Optional search mode override, since the profile-candidate-mode feature; otherwise inherits the outer mode."
             },
             "limit": {

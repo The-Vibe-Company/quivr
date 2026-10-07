@@ -98,8 +98,10 @@ type SearchSpace struct {
 	QueryModalities []string `json:"query_modalities"`
 	Role            string   `json:"role"`
 	Coverage        struct {
-		Segments int64 `json:"segments"`
-		Total    int64 `json:"total"`
+		Segments int64  `json:"segments"`
+		Total    int64  `json:"total"`
+		Unknown  bool   `json:"unknown,omitempty"`
+		AgeMS    *int64 `json:"age_ms,omitempty"`
 	} `json:"coverage"`
 }
 
