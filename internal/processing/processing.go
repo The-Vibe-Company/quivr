@@ -47,9 +47,8 @@ type GenerationRouter interface {
 
 // ErrSpaceUnowned reports a Corpus whose routed generation is served by a
 // space the pinned ingestion plugin does not own, such as the space of a
-// plugin no longer pinned. Its Versions wait, rather than being segmented
-// another way, until the owner is pinned again or the Corpus is rebuilt; a
-// Corpus served by LegacySpace waits for its rebuild for vectors only.
+// plugin no longer pinned. A same-owner recipe switch retains lexical
+// baseline and settles enrichment until a rebuild supplies current vectors.
 var ErrSpaceUnowned = errors.New("served space has no pinned owner")
 
 // ErrPluginDeadline reports a plugin call the engine ended at its deadline:
@@ -74,6 +73,9 @@ type route struct {
 	generation content.Generation
 	// legacy: the routed generation is served by LegacySpace.
 	legacy bool
+	// recipeMismatch permits lexical publication by the same ingestion owner
+	// while the routed generation still serves a retired model.
+	recipeMismatch bool
 }
 
 // route resolves a Version's routed generation: served by one of the pinned
@@ -102,7 +104,22 @@ func (s Service) route(ctx context.Context, org string, v content.Version) (rout
 			}
 		}
 	}
-	return route{corpusID: r.Source.CorpusID, generation: g, legacy: s.LegacySpace != "" && g.SpaceID == s.LegacySpace}, nil
+	driver := s.Plugin.forVersion(ctx, v)
+	mismatch := false
+	if driver.Plugin != nil {
+		owner := content.PluginOfRecipe(driver.descriptor.Recipe)
+		space := g.ServedFor(owner)
+		sameOwner := g.IngestionRouting != nil && g.IngestionRouting.For(v.SourceMediaType) == owner
+		if g.IngestionRouting == nil {
+			for _, sp := range g.Spaces {
+				if sp.OwnerPluginID == owner && sp.Role == content.SpaceServed {
+					sameOwner = true
+				}
+			}
+		}
+		mismatch = owner != "" && sameOwner && space != "" && !driver.owns(space)
+	}
+	return route{corpusID: r.Source.CorpusID, generation: g, legacy: s.LegacySpace != "" && g.SpaceID == s.LegacySpace, recipeMismatch: mismatch}, nil
 }
 
 // Observer is told each processing outcome (bounded stage and outcome names,
@@ -160,7 +177,7 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 	rt, err := s.route(ctx, org, v)
 	var result content.Segmentation
 	if err == nil {
-		out := Derive(ctx, org, s.Plugin, s.Content, DerivationRequest{CorpusID: rt.corpusID, Version: v, Target: rt.generation, Kind: Segments, AllowLegacy: rt.legacy})
+		out := Derive(ctx, org, s.Plugin, s.Content, DerivationRequest{CorpusID: rt.corpusID, Version: v, Target: rt.generation, Kind: Segments, AllowLegacy: rt.legacy || rt.recipeMismatch})
 		result, err = out.Segmentation, out.Retry
 		if out.Terminal != nil {
 			s.outcome(ctx, org, "baseline", "blocked", receiptID, v, started, out.Terminal.Code)

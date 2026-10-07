@@ -105,7 +105,87 @@ func (s EmbeddingStore) BlockEnrichment(ctx context.Context, org, id string, rea
 	if err != nil {
 		return err
 	}
+	if reason.Code == content.CodeRebuildRequired {
+		tx, err := database(ctx, s.Pool).Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		if err = lockProcessingVersion(ctx, tx, org, id); err != nil {
+			return err
+		}
+		serves, err := pinnedOwnerServes(ctx, tx, org, id)
+		if err != nil {
+			return err
+		}
+		if serves {
+			if _, err = tx.Exec(ctx, `UPDATE record_versions SET enrichment_state='blocked',enrichment_error=$3,enrichment_reason=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, org, id, reason.Code, raw); err != nil {
+				return err
+			}
+			if err = queueServingProjection(ctx, tx, org, id); err != nil {
+				return err
+			}
+		}
+		return tx.Commit(ctx)
+	}
 	return updatePinnedVersion(ctx, s.Pool, org, id, `UPDATE record_versions SET enrichment_state='blocked',enrichment_error=$3,enrichment_reason=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, reason.Code, raw)
+}
+
+// ReconcileServingEnrichment prevents historical cuts from becoming vectors
+// of a generation whose canonical serving coverage uses another recipe.
+func (s EmbeddingStore) ReconcileServingEnrichment(ctx context.Context, org string, seg content.Segmentation, g content.Generation) (bool, error) {
+	owner := content.PluginOfRecipe(seg.Recipe)
+	if g.IngestionRouting == nil || g.ServedFor(owner) == "" {
+		return true, nil
+	}
+	var current string
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT COALESCE((SELECT segmentation_id FROM projection_coverage WHERE organization=$1 AND version_id=$2 AND generation_id=$3 AND plugin_id=$4 AND role='served'),'')`, org, seg.VersionID, g.ID, owner).Scan(&current)
+	if err != nil || current == seg.ID {
+		return err == nil, err
+	}
+	tx, err := database(ctx, s.Pool).Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return false, err
+	}
+	var eligible, active, complete bool
+	err = readJournal(ctx, tx, org, `SELECT `+eligibleVersionSQL+` AND r.current_version_id=v.id,
+ $3=`+routedGenerationSQL("r.organization", "r.corpus_id")+`, `+servedVectorsCompleteSQL+`,
+ COALESCE((SELECT segmentation_id FROM projection_coverage WHERE organization=$1 AND version_id=$2 AND generation_id=$3 AND plugin_id=$4 AND role='served'),'')
+ FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
+ WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, []any{org, seg.VersionID, g.ID, owner}, &eligible, &active, &complete, &current)
+	if err != nil {
+		return false, err
+	}
+	if !active {
+		return false, ErrGenerationChanged
+	}
+	if !eligible {
+		if _, err = tx.Exec(ctx, settleWithdrawnEnrichmentSQL, org, seg.VersionID); err != nil {
+			return false, err
+		}
+		return false, tx.Commit(ctx)
+	}
+	if current == seg.ID {
+		return true, tx.Commit(ctx)
+	}
+	if complete {
+		if _, err = tx.Exec(ctx, `UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL,enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
+			return false, err
+		}
+	} else {
+		reason, _ := json.Marshal(content.Diagnostic{Code: content.CodeRebuildRequired, Message: "The serving generation uses another segmentation; its current recipe will finish in an independently pinned projection."})
+		if _, err = tx.Exec(ctx, `UPDATE record_versions SET enrichment_state='blocked',enrichment_error=$3,enrichment_reason=$4 WHERE organization=$1 AND id=$2`, org, seg.VersionID, content.CodeRebuildRequired, reason); err != nil {
+			return false, err
+		}
+		if err = queueServingProjection(ctx, tx, org, seg.VersionID); err != nil {
+			return false, err
+		}
+	}
+	return false, tx.Commit(ctx)
 }
 func (s EmbeddingStore) CountEnrichmentTimeout(ctx context.Context, org, id string) (int, error) {
 	var result0 int

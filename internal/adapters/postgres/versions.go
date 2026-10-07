@@ -11,6 +11,20 @@ import (
 // VersionStore reads canonical Versions, availability and processing diagnostics.
 type VersionStore struct{ Pool *pgxpool.Pool }
 
+// Probe only this Version's served segmentation and its primary vectors. A
+// rebuild can satisfy a settled mismatch without rewriting every Version at
+// cutover. Evaluation vectors and vectors for historical cuts do not count.
+var servedVectorsCompleteSQL = `EXISTS(SELECT 1 FROM projection_coverage pc
+ JOIN projection_generations g ON g.id=pc.generation_id
+ JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
+ WHERE pc.organization=v.organization AND pc.version_id=v.id AND pc.role='served'
+ AND g.id=` + routedGenerationSQL("r.organization", "r.corpus_id") + `
+ AND (g.ingestion_routing IS NULL OR pc.plugin_id=COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default',''))
+ AND EXISTS(SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.segmentation_id=pc.segmentation_id)
+ AND NOT EXISTS(SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.segmentation_id=pc.segmentation_id
+  AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=g.id
+   AND ec.space_id=COALESCE((SELECT sp->>'id' FROM jsonb_array_elements(g.spaces) sp WHERE sp->>'owner_plugin_id'=pc.plugin_id AND sp->>'role'='served' LIMIT 1),g.space_id))))`
+
 var _ content.VersionReader = VersionStore{}
 
 func (s VersionStore) Version(ctx context.Context, org, recordID, id string) (content.StoredVersion, error) {
@@ -133,6 +147,15 @@ func (s VersionStore) VersionStatus(ctx context.Context, org, id string) (conten
 	if baseline && !quarantine {
 		if err = s.Pool.QueryRow(ctx, `SELECT enrichment_state,enrichment_error FROM record_versions WHERE organization=$1 AND id=$2`, org, id).Scan(&p.State, &code); err != nil {
 			return a, p, code, err
+		}
+		if p.State == "blocked" && code == content.CodeRebuildRequired {
+			var complete bool
+			if err = s.Pool.QueryRow(ctx, `SELECT `+servedVectorsCompleteSQL+` FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2`, org, id).Scan(&complete); err != nil {
+				return a, p, code, err
+			}
+			if complete {
+				p.State, code = "idle", ""
+			}
 		}
 		if p.State != "idle" {
 			p.Phase = "enrichment"

@@ -159,7 +159,7 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 // A late embedding commit settles withdrawn work without attaching vectors
 // or claiming that enrichment became available.
 func TestWithdrawnEnrichmentCompletionSettlesProgress(t *testing.T) {
-	for _, completion := range []string{"commit", "discard", "discard after cutover"} {
+	for _, completion := range []string{"commit", "discard", "discard after cutover", "reconcile historical cuts"} {
 		t.Run(completion, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
@@ -243,8 +243,28 @@ SELECT $1,collection,profile_version,space_id,source_namespace_projected,spaces,
 					t.Fatal(err)
 				}
 			}
+			if completion == "reconcile historical cuts" {
+				// The incoming snapshot belongs to the same owner but older cuts;
+				// the record was withdrawn after the caller's eligibility read.
+				g.IngestionRouting = &content.IngestionRouting{Default: "adapter.fixture"}
+				g.Spaces = []content.GenerationSpace{{ID: g.SpaceID, OwnerPluginID: "adapter.fixture", Role: content.SpaceServed}}
+				historical, err := content.PluginSegmentation(org, v, "plugin:adapter.fixture@0", seg.Provenance, []content.SegmentInput{{PartKey: v.Manifest.Parts[0].Key, End: len([]rune(v.Manifest.Parts[0].Content.Text))}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = service.SaveSegmentation(ctx, org, v, historical); err != nil {
+					t.Fatal(err)
+				}
+				seg = historical
+			}
 			for i := 0; i < 2; i++ {
-				if completion == "commit" {
+				if completion == "reconcile historical cuts" {
+					var publish bool
+					publish, err = service.ReconcileServingEnrichment(ctx, org, seg, g)
+					if publish {
+						t.Fatal("withdrawn historical cuts must not publish vectors")
+					}
+				} else if completion == "commit" {
 					err = store.CommitEnrichment(ctx, org, seg, g, []content.Embedding{artifact})
 				} else {
 					err = service.EnrichmentProgress(ctx, org, v.ID, "idle", "")

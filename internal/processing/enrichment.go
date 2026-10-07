@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
 type EnrichmentIndexer interface {
@@ -71,6 +72,22 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 }
 func (s Service) enrich(ctx context.Context, org string, v content.Version) DerivationResult {
 	rt, err := s.route(ctx, org, v)
+	if err == nil && rt.recipeMismatch {
+		// This plan cannot produce the old route's model. Finish the receipt
+		// instead of occupying an activity slot until a rebuild switches it.
+		driver := s.Plugin.forVersion(ctx, v)
+		reason, goneErr := driver.Gone(ctx, ErrSpaceUnowned)
+		if goneErr != nil {
+			return DerivationResult{Retry: goneErr}
+		}
+		if reason == nil {
+			reason = &content.Diagnostic{Code: content.CodeRebuildRequired, Message: "The routed generation serves an earlier embedding recipe; rebuild the Corpus to serve this Version's vectors.", Plugin: driver.descriptor.PluginID, PluginVersion: driver.descriptor.PluginVersion, Contribution: "ingestion"}
+		}
+		if work, ok := plugins.WorkOf(ctx); ok {
+			reason.Plan = work.Plan
+		}
+		return DerivationResult{Terminal: reason, Cause: ErrSpaceUnowned}
+	}
 	if err == nil && rt.legacy {
 		err = ErrSpaceUnowned
 	}

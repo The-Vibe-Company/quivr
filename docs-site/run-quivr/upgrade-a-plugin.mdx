@@ -12,7 +12,7 @@ For a first installation through configuration, use [Pin a plugin](/run-quivr/pi
 
 - [Steps](#steps): register the new version, let Quivr check it, activate it, and stop the old one once it drains. [Roll back](#roll-back) if it misbehaves.
 - [Plugin lifecycle](#plugin-lifecycle) and [work pinned to a version](#work-finishes-on-the-version-it-started-with): when an old version may stop.
-- Other cases: [redeploy a configured build](#redeploy-a-configured-build), [promote an evaluation plugin](#promote-an-evaluation-plugin), [alert rules](#upgrade-an-alert-rule) and [vector spaces](#fill-a-new-vector-space).
+- Other cases: [change a chunking or embedding recipe](#change-a-chunking-or-embedding-recipe), [redeploy a configured build](#redeploy-a-configured-build), [promote an evaluation plugin](#promote-an-evaluation-plugin), [alert rules](#upgrade-an-alert-rule) and [vector spaces](#fill-a-new-vector-space).
 - Background: [restarts](#restarts-during-an-upgrade), [the configuration and the plan](#the-configuration-and-the-plan), and [limits](#limits).
 
 ## Prerequisites
@@ -218,6 +218,12 @@ A plugin in startup configuration can keep an operator activation when its build
 The earlier registration and plans stay exact. Work already started stays on its earlier build; keep that build reachable until its `pinned_work` reaches zero. Use the separate-address upgrade steps above when work must drain during deployment.
 
 A saved rollback plan may name the replaced build, even as an evaluation member. Quivr refuses that rollback with `409 plugin_unreachable` until the exact build runs again at its recorded endpoint. To restore the previous ingestion owner while keeping the new build installed, activate that owner's current evaluation registration from `GET /v0/admin/plugins`: select its `plugin_id` with `state: active`, then use its `registration_id` in the activation call above. Its evaluated source formats become served again, subject to [complete coverage](/run-quivr/backfill-a-vector-space). For example, activating the current `core.ingest` registration reverses a promotion to another embedding owner. The newer owner remains available for evaluation.
+
+## Change a chunking or embedding recipe
+
+When settings or the embedding model change for the same ingestion plugin, [rebuild each affected Corpus](/plugins/write-an-ingestion-plugin) to switch its search data. Imports continue before and during the rebuild: new Versions remain searchable by text through the search index currently serving that Corpus. If the new plugin cannot produce vectors for the current model, enrichment stops once with `rebuild_required`; it does not retry the recipe mismatch. The rebuild catches up new Versions before switching the route, and the diagnostic disappears when the vectors in that serving index are complete.
+
+Receipts already pinned to the previous recipe keep that pin. If their results arrive after the route switches, Quivr automatically starts separate work pinned to the current plan to finish their serving segments and vectors. Keep the old build reachable until its pinned work drains. Versions quarantined by an operator remain quarantined; after the rebuild activates, [reprocess them](/run-quivr/reprocess-quarantined-versions) through the active plan, using their existing quarantine code.
 
 ## Troubleshooting
 

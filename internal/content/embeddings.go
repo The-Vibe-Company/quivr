@@ -234,6 +234,23 @@ type EmbeddingData struct {
 // stopped because the ingestion plugin reached its deadline too many times.
 const CodeEnrichmentTimeout = "enrichment_timeout"
 
+// CodeRebuildRequired settles enrichment whose pinned recipe cannot serve the
+// routed generation. Lexical readiness is retained until compatible coverage
+// becomes serving through a rebuild or an independent serving projection.
+const CodeRebuildRequired = "rebuild_required"
+
+// ReconcileServingEnrichment lets canonical storage settle an old recipe and
+// durably hand off its serving projection before vectors are published. Stores
+// without independent serving work retain ordinary publication.
+func (s Service) ReconcileServingEnrichment(ctx context.Context, org string, seg Segmentation, g Generation) (bool, error) {
+	if store, ok := s.Embeddings.(interface {
+		ReconcileServingEnrichment(context.Context, string, Segmentation, Generation) (bool, error)
+	}); ok {
+		return store.ReconcileServingEnrichment(ctx, org, seg, g)
+	}
+	return true, nil
+}
+
 func (s Service) EnrichmentProgress(ctx context.Context, org, versionID, state, code string) error {
 	if org == "" || versionID == "" {
 		return ErrInvalid

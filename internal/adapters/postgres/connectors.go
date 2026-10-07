@@ -640,12 +640,20 @@ WHERE organization=$1 AND id=$2`, org, id, o.Accepted, o.Carried, class, code, o
 // releases the lease and commits re-evaluated health.
 func (s ConnectorStore) FinishRun(ctx context.Context, org, id string, run int64, failure *connectors.RunError) error {
 	err := retryJournalWrite(ctx, "FinishRun", func(ctx context.Context) error {
-		return s.finishRunAttempt(ctx, org, id, run, failure)
+		return s.finishRunAttempt(ctx, org, id, run, failure, false)
 	})
 	return err
 }
 
-func (s ConnectorStore) finishRunAttempt(ctx context.Context, org, id string, run int64, failure *connectors.RunError) error {
+// ContinueRun ends a successful progressing bounded run using the same fences
+// as FinishRun, but makes its new sequence due immediately for another lease.
+func (s ConnectorStore) ContinueRun(ctx context.Context, org, id string, run int64) error {
+	return retryJournalWrite(ctx, "ContinueRun", func(ctx context.Context) error {
+		return s.finishRunAttempt(ctx, org, id, run, nil, true)
+	})
+}
+
+func (s ConnectorStore) finishRunAttempt(ctx context.Context, org, id string, run int64, failure *connectors.RunError, continuation bool) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
@@ -676,13 +684,13 @@ func (s ConnectorStore) finishRunAttempt(ctx context.Context, org, id string, ru
 		code, class, retry = failure.Code, string(failure.Class), failure.RetryAfter.Seconds()
 	}
 	// Healthy push relaxes pull to the kind's reported poll interval.
-	_, err = tx.Exec(ctx, `UPDATE connector_instances SET run_sequence=run_sequence+1,lease_until=NULL,next_run_at=now()+make_interval(secs => GREATEST(interval_seconds::double precision,$6::double precision,
-  CASE WHEN push_state='active' AND push_error_code IS NULL THEN COALESCE(push_poll_interval_seconds,0) ELSE 0 END::double precision)),
+	_, err = tx.Exec(ctx, `UPDATE connector_instances SET run_sequence=run_sequence+1,lease_until=NULL,next_run_at=CASE WHEN $7 THEN now() ELSE now()+make_interval(secs => GREATEST(interval_seconds::double precision,$6::double precision,
+  CASE WHEN push_state='active' AND push_error_code IS NULL THEN COALESCE(push_poll_interval_seconds,0) ELSE 0 END::double precision)) END,
  last_success_at=CASE WHEN $3 THEN now() ELSE last_success_at END,last_run_at=now(),
  retry_until=CASE WHEN $6::double precision>0 THEN now()+make_interval(secs => $6::double precision) END,
  access_error_at=CASE WHEN $3 THEN NULL WHEN $5='access' THEN now() ELSE access_error_at END,
  last_error_code=COALESCE($4,last_error_code),last_error_class=COALESCE($5,last_error_class),last_error_at=CASE WHEN $4::text IS NULL THEN last_error_at ELSE now() END
-WHERE organization=$1 AND id=$2`, org, id, success, code, class, retry)
+WHERE organization=$1 AND id=$2`, org, id, success, code, class, retry, continuation)
 	if err != nil {
 		return err
 	}
