@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type RefObject,
 } from "react";
 import { Broadcast, Coins, NotePencil, Plus } from "@phosphor-icons/react";
@@ -77,6 +78,10 @@ const SEARCH_LIMIT = 50;
 const DEBOUNCE_MS = 250;
 // A deep search may make a paid call: it waits for a longer pause in typing.
 const DEEP_DEBOUNCE_MS = 800;
+// The read-state counts keep the width of the longest one shown since the page
+// loaded, three digits at least: a filter that drops one from 4205 to 225 does
+// not move the bar after it.
+let countDigits = 3;
 
 const fold = (text: string) =>
   text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
@@ -440,6 +445,7 @@ export function FeedPage({
   if (local) allCount = readable.length;
   else if (inQuivr && facetFree) allCount = day ? days.get(day) || 0 : everyDay;
   const unreadCount = local ? readable.filter((i) => reading.isUnread(i)).length : numbers?.unread;
+  countDigits = Math.max(countDigits, String(allCount ?? "").length, String(unreadCount ?? "").length);
   // The side column's bars: Quivr's day counts without a filter, else the
   // facade's for this filter, else (in a search) the articles found. Reading
   // an article changes them only when unread articles are picked.
@@ -617,6 +623,11 @@ export function FeedPage({
       base.find((r) => r.item.record_id === doc.record)?.item
     : undefined;
 
+  const searchTitle =
+    searching === "ready"
+      ? `${rows.length}${capped && rows.length === dated.length ? "+" : ""} article${rows.length > 1 ? "s" : ""} sur « ${query} »`
+      : `« ${query} »`;
+
   let empty: { title: string; text: string } | null = null;
   if (query && searching === "ready" && !rows.length)
     empty = base.length || searchedSources.length
@@ -684,10 +695,8 @@ export function FeedPage({
       <section className="panel feed-panel" aria-labelledby="feed-title">
         <div className="panel-head feed-head">
           {query ? (
-            <h2 id="feed-title" className="feed-title">
-              {searching === "ready"
-                ? `${rows.length}${capped && rows.length === dated.length ? "+" : ""} article${rows.length > 1 ? "s" : ""} sur « ${query} »`
-                : `« ${query} »`}
+            <h2 id="feed-title" className="feed-title" title={searchTitle}>
+              {searchTitle}
             </h2>
           ) : (
             <h2 id="feed-title" className="visually-hidden">
@@ -779,7 +788,7 @@ export function FeedPage({
             </div>
           )}
           <div className="filters" role="group" aria-label="Filtrer le fil">
-            <span className="segments">
+            <span className="segments" style={{ "--count-digits": countDigits } as CSSProperties}>
               {(
                 [
                   ["all", "Tout", allCount],
