@@ -28,6 +28,7 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /out/quivr /usr/local/bin/quivr
 COPY --from=build /out/plugins /usr/share/quivr/plugins
 COPY --from=build /out/runtime/ /
+COPY third_party/french-light /usr/share/quivr/notices/french-light
 ENV TMPDIR=/tmp
 VOLUME ["/tmp"]
 USER 10001:10001

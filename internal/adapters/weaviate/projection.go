@@ -254,7 +254,7 @@ func enrichedID(org, generation, segment, payloadSHA string) string {
 	return uuidOf(content.StableID("projection-embedding", org, generation, segment, payloadSHA))
 }
 
-var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", projectionPluginProperty, sourceMediaTypeProperty, sourceNamespaceProperty, "body", "title", lexicalProperty}
+var lexicalProperties = []string{"organization", "corpusId", "generationId", "versionId", "segmentationId", "segmentId", projectionPluginProperty, sourceMediaTypeProperty, sourceNamespaceProperty, "body", "title", lexicalProperty, "recordId", itemKind, passageText}
 
 type storedObject struct {
 	Properties map[string]any       `json:"properties"`
@@ -325,14 +325,21 @@ func (s *Store) insertBatch(ctx context.Context, objects []map[string]any) error
 	return nil
 }
 
-// Publish projects each segment's lexical object. The lexical object is the
-// segment's permanent keyword-search anchor: once projected it is never
-// rewritten or deleted. Weaviate re-indexes an updated object under a new
+// insert uses the same checked batch path for a standalone item anchor.
+func (s *Store) insert(ctx context.Context, object map[string]any) error {
+	return s.insertBatch(ctx, []map[string]any{object})
+}
+
+// Publish projects each segment's immutable anchor and, for item-capable
+// generations, a separate keyword anchor for the Version. Weaviate re-indexes an updated object under a new
 // document id, and a BM25 query does not read its index atomically, so an
 // update or a delete of the object serving a segment can hide it.
 func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID, namespace string, v content.Version, seg content.Segmentation) error {
 	if !className.MatchString(g.Collection) {
 		return errors.New("invalid projection route")
+	}
+	if err := s.ensureItemSchema(ctx, g); err != nil {
+		return err
 	}
 	if err := s.ensureMetadata(ctx, g); err != nil {
 		return err
@@ -342,7 +349,7 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 		values := content.ProjectionMetadata(v, g.Fields)
 		for _, f := range corpus.FilterFields(g.Fields) {
 			if value, ok := values[f.Name]; ok {
-				metadata[metadataProperty(f)] = metadataValue(value, f.Type)
+				metadata[metadataPropertyFor(g, f)] = metadataValue(value, f.Type)
 			}
 		}
 	}
@@ -371,6 +378,13 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 	for i, p := range seg.Segments {
 		id := objectID(org, g.ID, p.ID)
 		properties := map[string]any{"organization": org, "corpusId": corpusID, "generationId": g.ID, "versionId": v.ID, "segmentationId": seg.ID, "segmentId": p.ID, sourceNamespaceProperty: namespace, "body": texts[i].Body, "title": texts[i].Title}
+		if g.ItemKeywordsProjected {
+			delete(properties, "body")
+			delete(properties, "title")
+			properties[itemKind] = "passage"
+			properties[passageText] = p.Text
+			properties["recordId"] = v.RecordID
+		}
 		for key, value := range metadata {
 			properties[key] = value
 		}
@@ -411,7 +425,13 @@ func (s *Store) Publish(ctx context.Context, g content.Generation, org, corpusID
 			}
 		}
 	}
-	return flush()
+	if err := flush(); err != nil {
+		return err
+	}
+	if g.ItemKeywordsProjected {
+		return s.publishItem(ctx, g, org, corpusID, namespace, v, metadata)
+	}
+	return nil
 }
 
 func quote(v string) string { b, _ := json.Marshal(v); return string(b) }
@@ -501,7 +521,7 @@ func projectionOwnerFilter(g content.Generation, evaluationPlugin string) string
 
 // Search queries every routed (Corpus, generation) pair in one request so hybrid
 // fusion sees a single candidate set. Routes must share one physical collection.
-func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
+func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
 	if len(routes) == 0 {
 		return nil, errors.New("projection route missing")
 	}
@@ -530,7 +550,7 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 			}
 		}
 		for _, f := range typed {
-			routeFilters = append(routeFilters, metadataCondition(f))
+			routeFilters = append(routeFilters, metadataConditionFor(r.Generation, f))
 		}
 		filters = append(filters, and(routeFilters...))
 	}
@@ -547,6 +567,7 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 		}
 		operands = append(operands, "{operator:Or,operands:["+strings.Join(sources, ",")+"]}")
 	}
+	operands = append(operands, identityConditions(q)...)
 	where := "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
 	// Every route names the space's vectors the same way, or the query
 	// cannot rank them together.
@@ -745,6 +766,9 @@ func (s *Store) PublishEmbeddings(ctx context.Context, g content.Generation, org
 				if value, ok := anchor.Properties[key]; ok {
 					lexical[key] = value
 				}
+			}
+			if g.ItemKeywordsProjected {
+				lexical[itemKind] = "vector"
 			}
 			for key, value := range anchor.Properties {
 				if strings.HasPrefix(key, "m_") {

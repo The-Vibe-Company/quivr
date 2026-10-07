@@ -14,16 +14,16 @@ import (
 func TestMetadataFiltersExcludeRoutesAndSurvivePluginRounds(t *testing.T) {
 	p := &fakeProjection{}
 	s := service(p, &fakeEmbeddings{})
-	a := content.Generation{ID: "gen", Collection: "Shared", ProfileVersion: retrieval.ProfileVersion, SpaceID: "space", MetadataProjected: true, Fields: []corpus.Field{{Name: "urgency", Type: "number", Roles: []string{"filter"}}}}
+	a := content.Generation{ID: "gen", Collection: "Shared", ProfileVersion: retrieval.ProfileVersion, SpaceID: "space", MetadataProjected: true, ItemKeywordsProjected: true, Fields: []corpus.Field{{Name: "urgency", Type: "number", Roles: []string{"filter"}}}}
 	b := a
 	b.Fields = nil
 	s.Routing = spaceRouting{"a": a, "b": b}
-	q := retrieval.Request{Query: "lanterne", Mode: "lexical", CorpusIDs: []string{"a", "b"}, Metadata: []corpus.MetadataFilter{{Field: "urgency", AnyOf: []any{2.0}}}}
+	q := retrieval.Request{Query: "lanterne", Mode: "lexical", CorpusIDs: []string{"a", "b"}, RecordIDs: []string{"r1"}, VersionIDs: []string{"v1"}, Metadata: []corpus.MetadataFilter{{Field: "urgency", AnyOf: []any{2.0}}}}
 	got, err := s.Search(context.Background(), searchScope, q)
 	if err != nil || len(got.ExcludedCorpora) != 1 || got.ExcludedCorpora[0].CorpusID != "b" {
 		t.Fatalf("exclusions %v %v", got.ExcludedCorpora, err)
 	}
-	if len(p.searched) != 1 || len(p.searched[0].Metadata) != 1 || p.searched[0].Metadata[0].Field != "urgency" || len(p.searched[0].CorpusIDs) != 1 || p.searched[0].CorpusIDs[0] != "a" {
+	if len(p.searched) != 1 || len(p.searched[0].Metadata) != 1 || p.searched[0].Metadata[0].Field != "urgency" || len(p.searched[0].RecordIDs) != 1 || p.searched[0].RecordIDs[0] != "r1" || len(p.searched[0].VersionIDs) != 1 || p.searched[0].VersionIDs[0] != "v1" || len(p.searched[0].CorpusIDs) != 1 || p.searched[0].CorpusIDs[0] != "a" {
 		t.Fatalf("plugin candidate request lost scope/filter: %+v", p.searched)
 	}
 	a.MetadataProjected = false

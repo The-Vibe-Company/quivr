@@ -28,6 +28,10 @@ func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error)
 		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil
 	}
 	switch {
+	case r.Method == "GET" && r.URL.Path == "/v1/schema/BatchObjects":
+		return reply(200, map[string]any{"properties": []any{}})
+	case r.Method == "POST" && r.URL.Path == "/v1/schema/BatchObjects/properties":
+		return reply(200, nil)
 	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/objects/"):
 		parts := strings.Split(r.URL.Path, "/")
 		object, ok := h.objects[parts[len(parts)-1]]
@@ -81,13 +85,14 @@ func (h *batchProjectionHTTP) RoundTrip(r *http.Request) (*http.Response, error)
 // Both publication paths must batch, fail on an individual object/result, and
 // reconcile interrupted writes without rewriting already verified identities.
 func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
-	for _, embedding := range []bool{false, true} {
+	for _, mode := range []struct{ embedding, item bool }{{}, {embedding: true}, {item: true}, {embedding: true, item: true}} {
+		embedding := mode.embedding
 		for _, fault := range []string{"", "object error", "lost response", "incomplete response"} {
-			t.Run(fmt.Sprintf("embeddings=%v/%s", embedding, fault), func(t *testing.T) {
+			t.Run(fmt.Sprintf("embeddings=%v/items=%v/%s", embedding, mode.item, fault), func(t *testing.T) {
 				h := &batchProjectionHTTP{objects: map[string]map[string]any{}}
 				s := weaviate.New("http://projection.invalid")
 				s.Client = &http.Client{Transport: h}
-				g := content.Generation{ID: "generation", Collection: "BatchObjects", SpaceID: "space"}
+				g := content.Generation{ID: "generation", Collection: "BatchObjects", SpaceID: "space", ItemKeywordsProjected: mode.item}
 				seg := content.Segmentation{ID: "segmentation", VersionID: "version"}
 				var data []content.EmbeddingData
 				for i := range 101 {
@@ -130,6 +135,9 @@ func TestProjectionBatchesCheckObjectFailuresAndRetry(t *testing.T) {
 				wantObjects := 101
 				if embedding {
 					wantObjects = 202
+				}
+				if mode.item {
+					wantObjects++
 				}
 				if len(h.objects) != wantObjects {
 					t.Fatalf("stored objects=%d want %d", len(h.objects), wantObjects)

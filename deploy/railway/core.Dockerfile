@@ -33,7 +33,7 @@ WORKDIR /app
 COPY scripts/prepare_tokenizer.py ./scripts/
 COPY third_party/tokenizer ./third_party/tokenizer
 COPY plugins/core-ingest/profile.json ./plugins/core-ingest/profile.json
-RUN python scripts/prepare_tokenizer.py
+RUN python scripts/prepare_tokenizer.py --hosted
 
 # First-party Python sidecars: newsml-g2 always runs for archive ingestion;
 # alerts/pdf-text use QUIVR_DEMO_PLUGINS=1;
@@ -60,5 +60,6 @@ COPY --from=plugins /app/plugins /app/plugins
 COPY --from=connectors /out/bin/ /usr/local/bin/
 COPY --from=connectors /out/plugins/ /app/plugins/
 COPY deploy/railway/core-entrypoint.py /app/core-entrypoint.py
+COPY third_party/french-light /usr/share/quivr/notices/french-light
 USER 10001:10001
 ENTRYPOINT ["python", "/app/core-entrypoint.py"]

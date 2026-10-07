@@ -149,7 +149,11 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 		for id, vector := range s.Vectors {
 			vectors[byID[id]] = plugins.Float32s(vector)
 		}
-		out[n] = processing.PluginSegment{SegmentInput: content.SegmentInput{PartKey: s.PartKey, Start: s.Start, End: s.End, LexicalText: s.LexicalText, Provenance: s.Provenance}, Vectors: vectors}
+		ranges := make([]content.SourceRange, len(s.SourceRanges))
+		for k, r := range s.SourceRanges {
+			ranges[k] = content.SourceRange{PartKey: r.PartKey, Start: r.Start, End: r.End}
+		}
+		out[n] = processing.PluginSegment{SegmentInput: content.SegmentInput{PartKey: s.PartKey, Start: s.Start, End: s.End, LexicalText: s.LexicalText, Provenance: s.Provenance, SourceRanges: ranges, SourceSeparator: s.SourceSeparator}, Vectors: vectors}
 	}
 	return out, nil
 }

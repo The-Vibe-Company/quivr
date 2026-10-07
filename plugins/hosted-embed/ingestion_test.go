@@ -3,6 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +19,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
@@ -133,10 +138,27 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 	req.Configuration, _ = json.Marshal(changed)
 	body, _ := json.Marshal(req)
 	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, httptest.NewRequest(http.MethodPost, "/v0/contributions/ingestion/segment_and_embed", bytes.NewReader(body)))
+	request := httptest.NewRequest(http.MethodPost, "/v0/contributions/ingestion/segment_and_embed", bytes.NewReader(body))
+	signTestRequest(t, c.PluginID, request, body)
+	handler.ServeHTTP(result, request)
 	if result.Code != 400 || !strings.Contains(result.Body.String(), "invalid_configuration") {
 		t.Fatalf("drift accepted: %d %s", result.Code, result.Body.String())
 	}
+}
+
+func signTestRequest(t *testing.T, pluginID string, request *http.Request, body []byte) {
+	t.Helper()
+	secret := []byte("fixture-signing-secret-for-hosted-contract")
+	ring, _ := json.Marshal(map[string]any{"active": "test", "keys": []any{map[string]string{"id": "test", "secret": base64.RawURLEncoding.EncodeToString(secret)}}})
+	t.Setenv(quivrplugin.EnvSigningKeys, string(ring))
+	digest := sha256.Sum256(body)
+	now := time.Now().Unix()
+	header, _ := json.Marshal(map[string]string{"alg": "HS256", "typ": "quivr-engine+jwt", "kid": "test"})
+	claims, _ := json.Marshal(map[string]any{"aud": pluginID, "plugin_id": pluginID, "contribution": "ingestion", "method": request.Method, "target": request.URL.RequestURI(), "iat": now, "exp": now + 60, "body_sha256": hex.EncodeToString(digest[:])})
+	encoded := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(claims)
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write([]byte(encoded))
+	request.Header.Set("Authorization", "Bearer "+encoded+"."+base64.RawURLEncoding.EncodeToString(mac.Sum(nil)))
 }
 
 // Independently configured owners must coexist in one ingestion routing plan.
@@ -224,7 +246,7 @@ func TestMalformedProviderAnswers(t *testing.T) {
 }
 
 func testConfig(format, url string) configuration {
-	c, err := parseConfiguration([]byte(`{"format":"` + format + `","base_url":"` + url + `","auth":"bearer","model":"test-model","dimensions":8}`))
+	c, err := parseConfiguration([]byte(`{"packing":"none","plugin_version":"1.0.0","format":"` + format + `","base_url":"` + url + `","auth":"bearer","model":"test-model","dimensions":8}`))
 	if err != nil {
 		panic(err)
 	}
@@ -301,6 +323,9 @@ func TestConfigAndContentRefusals(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ raw, reason string }{
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer":{"python":"bad\u0000path","model":"local.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`, "tokenizer requires"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer":{"python":"python3","model":"bad\u0000path","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`, "tokenizer requires"},
+
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":-1}`, "batch_wait_ms must be between 0 and 100"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":101}`, "batch_wait_ms must be between 0 and 100"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":100,"call_budget_ms":100}`, "batch_wait_ms must be less than call_budget_ms"},
@@ -334,9 +359,13 @@ func TestConfigAndContentRefusals(t *testing.T) {
 // The configured package must be admissible for every accepted model/base URL,
 // and must accept the same configuration the operator originally supplied.
 func TestConfiguredManifestAcceptsOriginalConfiguration(t *testing.T) {
-	for _, tc := range []struct{ name, model, url string }{{"numeric deployment", "3-model", "http://127.0.0.1:9/v1"}, {"trailing slash", "test-model", "http://127.0.0.1:9/v1/"}} {
+	for _, tc := range []struct{ name, model, url string }{{"numeric deployment", "3-model", "http://127.0.0.1:9/v1"}, {"trailing slash", "test-model", "http://127.0.0.1:9/v1/"}, {"empty title context", "test-model", "http://127.0.0.1:9/v1"}} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw, _ := json.Marshal(map[string]any{"format": "openai", "auth": "none", "model": tc.model, "dimensions": 8, "base_url": tc.url})
+			settings := map[string]any{"format": "openai", "auth": "none", "model": tc.model, "dimensions": 8, "base_url": tc.url}
+			if tc.name == "empty title context" {
+				settings["title_context_parts"] = []string{}
+			}
+			raw, _ := json.Marshal(settings)
 			c, err := parseConfiguration(raw)
 			if err != nil {
 				t.Fatal(err)
@@ -362,7 +391,9 @@ func TestConfiguredManifestAcceptsOriginalConfiguration(t *testing.T) {
 			req.Configuration = raw
 			request, _ := json.Marshal(req)
 			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, httptest.NewRequest("POST", "/v0/contributions/ingestion/segment_and_embed", bytes.NewReader(request)))
+			signed := httptest.NewRequest("POST", "/v0/contributions/ingestion/segment_and_embed", bytes.NewReader(request))
+			signTestRequest(t, c.PluginID, signed, request)
+			handler.ServeHTTP(response, signed)
 			if response.Code != 200 {
 				t.Fatalf("original accepted config rejected: %d %s", response.Code, response.Body.String())
 			}
@@ -779,4 +810,180 @@ func TestDocumentBatchDropsCancellationBeforeRefusalProbe(t *testing.T) {
 	if len(calls) != 2 || len(calls[1]) != 1 || calls[1][0] != "deny" {
 		t.Fatalf("canceled input retried in provider calls: %v", calls)
 	}
+}
+
+// This dependency counts words independently of the production packing rules.
+type wordCounter struct{}
+
+func (wordCounter) Encode(_ context.Context, inputs []tokenInput) ([]tokenEncoding, error) {
+	out := make([]tokenEncoding, len(inputs))
+	for i, in := range inputs {
+		r := []rune(in.Text)
+		start := -1
+		for j := 0; j <= len(r); j++ {
+			if j < len(r) && !unicode.IsSpace(r[j]) {
+				if start < 0 {
+					start = j
+				}
+				continue
+			}
+			if start >= 0 {
+				out[i].Offsets = append(out[i].Offsets, [2]int{start, j})
+				start = -1
+			}
+		}
+		out[i].Tokens = len(out[i].Offsets)
+		if in.Special {
+			out[i].Tokens += 2
+		}
+	}
+	return out, nil
+}
+func TestPackedPassagesKeepParagraphsAndRebalance(t *testing.T) {
+	c := testConfig("openai", "http://127.0.0.1:9")
+	c.Packing = "paragraphs"
+	c.BodyTokens = 10
+	c.MaxChunks = 4
+	c.RebalanceTail = true
+	c.TailMinFraction = 0.25
+	i := newIngester(c, "", slog.Default())
+	i.tokenizer = wordCounter{}
+	req := ingestRequest(c, "", false)
+	req.Parts = []quivrplugin.IngestPart{
+		{Key: "a", Role: "body", Text: "one two three four five six"},
+		{Key: "b", Role: "body", Text: "seven eight nine"},
+		{Key: "c", Role: "body", Text: "ten eleven"},
+	}
+	got, err := i.SegmentAndEmbed(t.Context(), req)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("packed passages=%+v err=%v", got, err)
+	}
+	if len(got[0].SourceRanges) != 1 || len(got[1].SourceRanges) != 2 || got[1].SourceRanges[0].PartKey != "b" {
+		t.Fatalf("tiny tail was not rebalanced with whole paragraphs: %+v", got)
+	}
+	c.BodyTokens = 8
+	c.RebalanceTail = false
+	i = newIngester(c, "", slog.Default())
+	i.tokenizer = wordCounter{}
+	req = ingestRequest(c, "one two\r\n\r\nthree four five six seven eight nine", false)
+	got, err = i.SegmentAndEmbed(t.Context(), req)
+	boundary := utf8.RuneCountInString("one two\r\n\r\n")
+	if err != nil || len(got) != 2 || got[0].End != boundary || got[1].Start != boundary {
+		t.Fatalf("CRLF paragraphs split: %+v %v", got, err)
+	}
+
+}
+
+func TestPackedPassagesSplitOnlyOversizedParagraphAndEnforceCap(t *testing.T) {
+	c := testConfig("openai", "http://127.0.0.1:9")
+	c.Packing = "paragraphs"
+	c.BodyTokens = 8
+	c.MaxChunks = 4
+	c.RebalanceTail = false
+	i := newIngester(c, "", slog.Default())
+	i.tokenizer = wordCounter{}
+	req := ingestRequest(c, "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty", false)
+	got, err := i.SegmentAndEmbed(t.Context(), req)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("oversized paragraph: got %d chunks, err=%v", len(got), err)
+	}
+	previous := 0
+	for _, s := range got {
+		if s.Start != previous {
+			t.Fatalf("gap or overlap at %d, want %d", s.Start, previous)
+		}
+		previous = s.End
+	}
+	if previous != utf8.RuneCountInString(req.Parts[0].Text) {
+		t.Fatal("lost paragraph tail")
+	}
+	c.MaxChunks = 2
+	i = newIngester(c, "", slog.Default())
+	i.tokenizer = wordCounter{}
+	if _, err = i.SegmentAndEmbed(t.Context(), req); err == nil {
+		t.Fatal("accepted item above hard chunk cap")
+	}
+}
+
+func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
+	fake := embedding.New()
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	c := testConfig("openai", server.URL)
+	c.Packing = "paragraphs"
+	c.DocumentTemplate = "gemma"
+	c.TitleSource = "title"
+	c.BodyTokens = 812
+	c.MaxTokens = 2048
+	c.MaxChunks = 4
+	c.DocumentPrefix = ""
+	req := ingestRequest(c, "The library opens downtown.", true)
+	req.Parts = append([]quivrplugin.IngestPart{{Key: "headline", Role: "title", Text: "Library opens"}, {Key: "date", Role: "date", Text: "2026-10-01"}, {Key: "code", Role: "category", Text: "12345"}}, req.Parts...)
+	i := newIngester(c, "fake-key", slog.Default())
+	got, err := i.SegmentAndEmbed(t.Context(), req)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("headline passage: %+v %v", got, err)
+	}
+	calls := fake.Calls()
+	if len(calls) != 1 || calls[0].Texts[0] != "title: Library opens | text: The library opens downtown." {
+		t.Fatalf("unexpected Gemma prompt: %+v", calls)
+	}
+	c.TitleSource = "none"
+	i = newIngester(c, "fake-key", slog.Default())
+	req.Spaces = []string{c.spaceID()}
+	if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if calls = fake.Calls(); len(calls) != 2 || calls[1].Texts[0] != "title: none | text: The library opens downtown." {
+		t.Fatalf("title omission variant: %+v", calls)
+	}
+
+	c.TitleSource = "title"
+	i = newIngester(c, "fake-key", slog.Default())
+	req = ingestRequest(c, "", true)
+	req.Parts = []quivrplugin.IngestPart{{Key: "headline", Role: "title", Text: "Library opens"}}
+	if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if calls = fake.Calls(); len(calls) != 3 || calls[2].Texts[0] != "title: Library opens | text: " {
+		t.Fatalf("title-only duplicated: %+v", calls)
+	}
+	c.Packing = "none"
+	for index, variant := range []struct {
+		template, source, prefix, want string
+	}{
+		{"gemma", "title", "", "title: none | text: Library opens"},
+		{"gemma", "inline", "", "title: none | text: Library opens"},
+		{"prefix", "title", "passage: ", "passage: Library opens"},
+	} {
+		c.DocumentTemplate, c.TitleSource, c.DocumentPrefix = variant.template, variant.source, variant.prefix
+		i = newIngester(c, "fake-key", slog.Default())
+		req.Spaces = []string{c.spaceID()}
+		if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
+			t.Fatal(err)
+		}
+		if calls = fake.Calls(); len(calls) != index+4 || calls[index+3].Texts[0] != variant.want {
+			t.Fatalf("legacy title-only duplicated: %+v", calls)
+		}
+	}
+	c.TitleContextParts = []string{"place"}
+	req.Parts = append(req.Parts, quivrplugin.IngestPart{Key: "place", Role: "place", Text: "Riverside"})
+	for index, variant := range []struct {
+		template, source, prefix, want string
+	}{
+		{"gemma", "title", "", "title: Riverside | text: Library opens"},
+		{"gemma", "inline", "", "title: none | text: Riverside\n\nLibrary opens"},
+		{"prefix", "title", "passage: ", "passage: Riverside\n\nLibrary opens"},
+	} {
+		c.DocumentTemplate, c.TitleSource, c.DocumentPrefix = variant.template, variant.source, variant.prefix
+		i = newIngester(c, "fake-key", slog.Default())
+		req.Spaces = []string{c.spaceID()}
+		if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
+			t.Fatal(err)
+		}
+		if calls = fake.Calls(); len(calls) != index+7 || calls[index+6].Texts[0] != variant.want {
+			t.Fatalf("legacy title context lost: %+v", calls)
+		}
+	}
+
 }

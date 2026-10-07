@@ -4,7 +4,7 @@ description: "Find articles by keyword or by meaning, narrow results to some sou
 keywords: ["search", "lexical", "semantic", "hybrid", "profile", "excerpt", "quivr search"]
 ---
 
-`POST /v0/search` returns the passages that best answer a query, across up to 16 Corpora, with the exact excerpt of each. This page covers the options you will use; the [API reference](/api-reference/overview) lists every endpoint and field.
+`POST /v0/search` returns each matching document once with its best passage through the default retrieval plugin, across up to 16 Corpora, with the exact excerpt of each. This page covers the options you will use; the [API reference](/api-reference/overview) lists every endpoint and field.
 
 ## Prerequisites
 
@@ -90,6 +90,54 @@ EOF
 ["The harbour festival returns with boat races and music."]
 ```
 
+## Search one item at a time
+
+The default retrieval plugin groups matching passages by document (Record in the API).
+Three matching passages still produce one result. Hybrid scoring combines one
+keyword score with the strongest passage-vector score. It highlights that vector
+passage; lexical search highlights the passage covering the most query terms.
+Highlights come from a bounded candidate window; exceptionally long documents
+can limit passage selection.
+Custom retrieval plugins can request individual passages.
+
+New Corpora index keyword fields once per document. Existing Corpora keep their
+keyword index until you [rebuild them](/run-quivr/switch-a-vector-model).
+Configure field weights through [configureRetrieval](https://docs.quivr.thevibecompany.co/api-reference/corpora/configure-retrieval),
+which builds a replacement index and activates it when ready; a separate rebuild
+is unnecessary. Call `PUT /v0/corpora/{corpus_id}/retrieval` with `corpora:write`
+and `operations:write` on that Corpus. The linked reference describes the full
+request and the Operation returned for monitoring progress.
+
+For example (not run), these retrieval fields favor titles and add a French body copy:
+
+```json
+{"fields": [
+  {"name": "title", "part_role": "title", "type": "string",
+   "roles": ["search"], "boost": 6},
+  {"name": "body", "part_role": "body", "type": "string",
+   "roles": ["search"], "boost": 2, "analyzer": "french_light"}
+]}
+```
+
+Weights are integers from 1 to 100. To express headline/slugline/keywords/subject
+labels/body ratios of 3/2/2/1.5/1, use 6/4/4/3/2. A Part selector collects text
+by `part_role`; `part_key_prefix` narrows it, such as `slugline-` or `paragraph-`.
+A `source_pointer` instead selects declared metadata. For a structured metadata
+array, use `type: "string_array"`; `value_pointer` selects labels from each member,
+for example `/names` (a string or array of strings).
+Use the roles, keys and metadata namespaces your normalizer emits.
+
+`french_light` lowercases, folds accents, removes French stopwords and lightly
+stems a separate keyword copy at ingestion and query time. Canonical excerpts
+and vector input keep their original text. Exact and normalized matches contribute
+one keyword score; hybrid search combines it with the strongest passage-vector score.
+
+You can narrow search to known identities using `filter.record_ids` and
+`filter.version_ids`, each a nonempty array of up to 50 distinct IDs. Both conditions must hold;
+a Version filter still returns only current, authorized content. Record identity
+filters require rebuilding older Corpora; otherwise search returns
+`422 metadata_filter_unavailable`.
+
 ## Filter by document metadata
 
 Sources can fill the common `quivr.metadata` extension, schema version `"1"`.
@@ -109,7 +157,8 @@ own extensions alongside these common fields.
 
 Each predicate names a `field` and an `any_of` array. One value means equality;
 several mean any-of equality. Array fields match any element. You can also set
-inclusive `gte` and `lte` datetime bounds. All predicates and all conditions
+inclusive `gte` and `lte` datetime bounds. New or rebuilt indexes use a range
+index for dates. All predicates and all conditions
 inside one predicate must hold. Datetimes use UTC millisecond precision;
 submillisecond digits are truncated. Strings compare exactly, including case
 and whitespace. A request has at most 16 predicates, 50 values per predicate,

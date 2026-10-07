@@ -1,6 +1,9 @@
 """Fake-only certification and local-stack pin/search of hosted.embed."""
 import plugin_environment
 import argparse
+import base64
+from contextlib import contextmanager
+import secrets
 import json
 import os
 import pathlib
@@ -16,6 +19,24 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / 'plugins' / 'hosted-embed'
 
 
+@contextmanager
+def signing():
+    """Share one ephemeral ring with this plugin and its local engine callers."""
+    previous = os.environ.get('QUIVR_ENGINE_PLUGIN_KEYS')
+    ring = {'active': 'local', 'keys': [{'id': 'local',
+            'secret': base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('=')}]}
+    keys = json.loads(previous or '{}')
+    keys['hosted.embed'] = ring
+    os.environ['QUIVR_ENGINE_PLUGIN_KEYS'] = json.dumps(keys)
+    try:
+        yield json.dumps(ring)
+    finally:
+        if previous is None:
+            os.environ.pop('QUIVR_ENGINE_PLUGIN_KEYS', None)
+        else:
+            os.environ['QUIVR_ENGINE_PLUGIN_KEYS'] = previous
+
+
 def build(directory):
     directory.mkdir(parents=True, exist_ok=True)
     binary = directory.resolve() / 'hosted-embed'
@@ -27,7 +48,7 @@ def package(binary, directory, endpoint, format):
     directory.mkdir(parents=True, exist_ok=True)
     configuration = {'format': format, 'base_url': endpoint + ('/openai/v1' if format == 'openai' else '/providers/cohere/v2'),
                      'auth': 'api-key' if format == 'cohere' else 'bearer', 'model': 'test-model', 'dimensions': 8,
-                     'query_prefix': 'query: ', 'document_prefix': 'passage: '}
+                     'query_prefix': 'query: ', 'document_prefix': 'passage: ', 'title_context_parts': []}
     config = directory / 'configuration.json'
     config.write_text(json.dumps(configuration))
     manifest = directory / 'quivr-plugin.yaml'
@@ -68,7 +89,7 @@ def verify(stack):
     configs = {name: (stack.directory / name).read_text() for name in ['config.json', 'worker.json']}
     plugin = None
     try:
-        with Fake('embedding') as fake:
+        with signing() as signing_ring, Fake('embedding') as fake:
             for format in ['openai', 'cohere']:
                 manifest, config, space = package(binary, directory / format, fake.url, format)
                 # Each configured manifest is an immutable registration. Distinct
@@ -81,7 +102,7 @@ def verify(stack):
                         subprocess.run([str(binary), 'configure', str(config_path)], stdout=output, check=True)
                 port = ports.allocate()
                 env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port),
-                       'QUIVR_PLUGIN_MANIFEST': str(manifest), 'AZURE_FOUNDRY_KEY': 'fake-key'}
+                       'QUIVR_PLUGIN_MANIFEST': str(manifest), 'QUIVR_PLUGIN_SIGNING_KEYS': signing_ring, 'AZURE_FOUNDRY_KEY': 'fake-key'}
                 log = directory / f'{format}.log'
                 with log.open('w') as output:
                     plugin = subprocess.Popen([str(binary)], env=env, stdout=output, stderr=output, start_new_session=True)
@@ -129,13 +150,13 @@ def verify_redeploy(stack):
     plugin = None
     retained_plugin = None
     try:
-        with Fake('embedding') as fake:
+        with signing() as signing_ring, Fake('embedding') as fake:
             manifest, config, space = package(binary, directory / 'old', fake.url, 'cohere')
             port = ports.allocate()
 
             def start(executable, declaration, name):
                 env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port),
-                       'QUIVR_PLUGIN_MANIFEST': str(declaration), 'AZURE_FOUNDRY_KEY': 'fake-key'}
+                       'QUIVR_PLUGIN_MANIFEST': str(declaration), 'QUIVR_PLUGIN_SIGNING_KEYS': signing_ring, 'AZURE_FOUNDRY_KEY': 'fake-key'}
                 log = directory / (name + '.log')
                 with log.open('w') as output:
                     process = subprocess.Popen([str(executable)], env=env, stdout=output, stderr=output, start_new_session=True)

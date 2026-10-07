@@ -1,0 +1,19 @@
+{
+  "segments": [
+    {
+      "part_key": "title",
+      "start": 0,
+      "end": 1,
+      "source_ranges": [
+        {"part_key": "title", "start": 0, "end": 1},
+        {"part_key": "body", "start": 0, "end": 4096},
+        {"part_key": "body", "start": 4096, "end": 8192},
+        {"part_key": "body", "start": 8192, "end": 12288},
+        {"part_key": "body", "start": 12288, "end": 16384}
+      ],
+      "source_separator": "\n\n",
+      "vectors": {"example.multi.small": [1, 0, 0, 0]}
+    }
+  ]
+}
+

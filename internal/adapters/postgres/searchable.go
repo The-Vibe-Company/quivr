@@ -18,8 +18,8 @@ import (
 // already has an active default keeps it; AlignDefaultGeneration moves it
 // onto the registry's spaces.
 func (s ProjectionStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
-	_, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected)
-SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true,true
+	_, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected)
+SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true,true,true
 WHERE NOT EXISTS(SELECT 1 FROM projection_generations WHERE active) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
 	return err
 }
@@ -41,8 +41,9 @@ type DefaultMove struct {
 // it is rebuilt. That default is then marked former, and a new default in the
 // same collection and profile, carrying the registry's spaces, takes over.
 // No existing Corpus changes generation, so in-flight work keeps the one it
-// read. A default that already matches, or a database with no default or no
-// served space yet, is left as it is. It runs after RegisterSpaces, in
+// read. A default that already matches, or a database with no default, is left
+// as it is. Missing projection capabilities rotate the default even before a
+// served space is registered, retaining its prior spaces. It runs after RegisterSpaces, in
 // migrate and at api and worker startup.
 func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMove, error) {
 	var move DefaultMove
@@ -57,11 +58,11 @@ func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMov
 	}
 	// A default built before named spaces carries its one space.
 	var matches bool
-	err = tx.QueryRow(ctx, `SELECT d.id,d.metadata_projected AND d.space_id=`+servedSpaceSQL+` AND
+	err = tx.QueryRow(ctx, `SELECT d.id,d.metadata_projected AND d.item_keywords_projected AND (`+servedSpaceSQL+` IS NULL OR (d.space_id=`+servedSpaceSQL+` AND
  (SELECT array_agg(e->>'id' ORDER BY e->>'id') FROM jsonb_array_elements(CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id)) END) e)
  =(SELECT array_agg(vs.id ORDER BY vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation')) AND (NOT d.spaces_projected OR NOT EXISTS
- (SELECT 1 FROM vector_spaces vs WHERE vs.role IN ('served','evaluation') AND NOT d.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id))))
-FROM projection_generations d WHERE d.active AND `+servedSpaceSQL+` IS NOT NULL`).Scan(&move.Previous, &matches)
+ (SELECT 1 FROM vector_spaces vs WHERE vs.role IN ('served','evaluation') AND NOT d.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id))))))
+FROM projection_generations d WHERE d.active`).Scan(&move.Previous, &matches)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && matches) {
 		return DefaultMove{}, nil
 	}
@@ -84,8 +85,8 @@ SELECT c.organization,c.id,$1 FROM corpora c WHERE NOT EXISTS(SELECT 1 FROM corp
 		return move, err
 	}
 	move.Current = content.StableID("generation", collection, profile, move.Previous)
-	if _, err = tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected)
-SELECT $1,$2,$3,true,`+servedSpaceSQL+`,true,`+deploymentSpacesSQL+`,true,true`, move.Current, collection, profile); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected)
+SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,d.space_id),true,COALESCE(`+deploymentSpacesSQL+`,CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id,'metric','cosine')) END),true,true,true FROM projection_generations d WHERE d.id=$4`, move.Current, collection, profile, move.Previous); err != nil {
 		return move, err
 	}
 	return move, tx.Commit(ctx)
@@ -96,7 +97,7 @@ func (s ProjectionStore) Generation(ctx context.Context, org, corpusID string) (
 	var g content.Generation
 	var cfg []byte
 	var spaces []byte
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &cfg)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &g.ItemKeywordsProjected, &cfg)
 	if err != nil {
 		return g, err
 	}
@@ -369,7 +370,7 @@ func (s ProjectionStore) promoteAttempt(ctx context.Context, org string, seg con
 // for each of its Versions, and with the Organization as a constant it picked
 // any index that starts with it. The Organization therefore comes from the
 // candidate row, a value the planner cannot see.
-var hydrateSQL = `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,'')
+var hydrateSQL = `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,''),sg.derivation
 FROM unnest($1::text[],$2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS c(organization,segment_id,generation_id,evaluation_plugin,evaluation_space,n)
 CROSS JOIN LATERAL (SELECT sg.* FROM segments sg WHERE sg.organization=c.organization AND sg.id=c.segment_id OFFSET 0) sg
 CROSS JOIN LATERAL (SELECT v.* FROM record_versions v WHERE v.organization=c.organization AND v.id=sg.version_id OFFSET 0) v
@@ -402,9 +403,13 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		var n int
 		var l content.Located
 		var corpusID string
+		var derivation []byte
 		h := &l.Hydrated
 		if err = rows.Scan(&n, &h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256,
-			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &h.EmbeddingID, &h.SpaceID); err != nil {
+			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &h.EmbeddingID, &h.SpaceID, &derivation); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(derivation, &h.Segment.Derivation); err != nil {
 			return nil, err
 		}
 		if !scope.Contains(corpusID) {
@@ -414,7 +419,57 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		h.Availability = content.Availability{State: "retrieval_ready", Current: true, Searchable: true}
 		out[n-1] = l
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	// Resolve only already-authorized candidates, by segment and Part primary
+	// keys. No scan of the Organization's canonical text is introduced.
+	ids := []string{}
+	at := map[string][]int{}
+	for n, l := range out {
+		if len(l.Segment.Derivation.SourceRanges) > 0 {
+			if _, seen := at[l.Segment.ID]; !seen {
+				ids = append(ids, l.Segment.ID)
+			}
+			at[l.Segment.ID] = append(at[l.Segment.ID], n)
+		}
+	}
+	if len(ids) > 0 {
+		sourceRows, err := database(ctx, s.Pool).Query(ctx, `SELECT sg.id,r.part_key,r.start,r.end,b.object_key,b.sha256,b.byte_length
+FROM unnest($2::text[]) AS selected(id)
+JOIN segments sg ON sg.organization=$1 AND sg.id=selected.id
+CROSS JOIN LATERAL jsonb_array_elements(sg.derivation->'source_ranges') WITH ORDINALITY AS item(value,ordinality)
+CROSS JOIN LATERAL (SELECT item.value->>'part_key' AS part_key,(item.value->>'start')::integer AS start,(item.value->>'end')::integer AS end,item.ordinality) r
+JOIN version_parts p ON p.organization=sg.organization AND p.version_id=sg.version_id AND p.part_key=r.part_key
+JOIN content_blobs b ON b.organization=p.organization AND b.blob_id=p.blob_id
+ORDER BY sg.id,r.ordinality`, scope.Organization, ids)
+		if err != nil {
+			return nil, err
+		}
+		defer sourceRows.Close()
+		for sourceRows.Next() {
+			var id string
+			var source content.LocatedSource
+			if err = sourceRows.Scan(&id, &source.Range.PartKey, &source.Range.Start, &source.Range.End, &source.Blob.Key, &source.Blob.SHA256, &source.Blob.Size); err != nil {
+				return nil, err
+			}
+			for _, n := range at[id] {
+				l := out[n]
+				l.Sources = append(l.Sources, source)
+				out[n] = l
+			}
+		}
+		if err = sourceRows.Err(); err != nil {
+			return nil, err
+		}
+		for _, l := range out {
+			if len(l.Sources) != len(l.Segment.Derivation.SourceRanges) {
+				return nil, content.ErrConflict
+			}
+		}
+	}
+	return out, nil
 }
 
 // ProjectionStore persists baseline projection artifacts and Corpus routing.

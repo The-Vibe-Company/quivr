@@ -4342,13 +4342,18 @@ then:
 
 ### `FieldMapping`
 
-v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Core validates role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are validated and preserved; no public filter API consumes them in v0.
+v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Exactly one of source_pointer and part_role is required; Core validates this as invalid_mapping, along with role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are consumed by SearchFilter.metadata. New generations index each search field once per item with its boost; older generations retain passage scoring until rebuilt.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `name` | string | yes | Minimum length `1`. |
-| `source_pointer` | string | yes | Minimum length `1`. |
+| `source_pointer` | string |  | Minimum length `1`. |
 | `type` | string | yes | One of `string`, `number`, `boolean`, `datetime`, `string_array`. |
+| `boost` | integer |  | Positive integer BM25F weight, allowed only with the search role. For ratios 3/2/2/1.5/1 use 6/4/4/3/2. Default `1`. Minimum `1`. Maximum `100`. |
+| `analyzer` | string |  | Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged. One of `french_light`. |
+| `part_role` | string |  | Collect canonical text Parts of this role instead of source_pointer. Requires the search role. One of `title`, `body`, `caption`, `transcript`. |
+| `part_key_prefix` | string |  | Optional key prefix to narrow part_role, for example slugline-. Maximum length `200`. |
+| `value_pointer` | string |  | For a string_array source, select this JSON Pointer from each array entry and flatten its string or string-array values. Minimum length `1`. |
 | `roles` | array of string | yes | At least `1` items. Each item: One of `search`, `filter`. |
 
 <details>
@@ -4372,6 +4377,28 @@ properties:
       - boolean
       - datetime
       - string_array
+  boost:
+    type: integer
+    minimum: 1
+    maximum: 100
+    default: 1
+    description: Positive integer BM25F weight, allowed only with the search role. For ratios 3/2/2/1.5/1 use 6/4/4/3/2.
+  analyzer:
+    type: string
+    enum: [french_light]
+    description: Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged.
+  part_role:
+    type: string
+    enum: [title, body, caption, transcript]
+    description: Collect canonical text Parts of this role instead of source_pointer. Requires the search role.
+  part_key_prefix:
+    type: string
+    maxLength: 200
+    description: Optional key prefix to narrow part_role, for example slugline-.
+  value_pointer:
+    type: string
+    minLength: 1
+    description: For a string_array source, select this JSON Pointer from each array entry and flatten its string or string-array values.
   roles:
     type: array
     items:
@@ -4382,10 +4409,9 @@ properties:
     minItems: 1
 required:
   - name
-  - source_pointer
   - type
   - roles
-description: v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Core validates role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are validated and preserved; no public filter API consumes them in v0.
+description: v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Exactly one of source_pointer and part_role is required; Core validates this as invalid_mapping, along with role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are consumed by SearchFilter.metadata. New generations index each search field once per item with its boost; older generations retain passage scoring until rebuilt.
 ```
 
 </details>
@@ -9838,7 +9864,7 @@ required:
 | --- | --- | --- | --- |
 | `corpus_ids` | array of string | yes | At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
 | `fields` | array of [`FacetField`](#facetfield) | yes | Distinct logical metadata field names, in response order. At least `1` items. At most `16` items. |
-| `filter` | [`SearchFilter`](#searchfilter) |  |  |
+| `filter` | [`FacetFilter`](#facetfilter) |  |  |
 | `accepted_after` | string (date-time) |  | Inclusive current-Version acceptance-time lower bound, as in listing. |
 | `accepted_before` | string (date-time) |  | Exclusive current-Version acceptance-time upper bound, as in listing. |
 
@@ -9901,7 +9927,7 @@ properties:
       $ref: '#/components/schemas/FacetField'
     description: Distinct logical metadata field names, in response order.
   filter:
-    $ref: '#/components/schemas/SearchFilter'
+    $ref: '#/components/schemas/FacetFilter'
   accepted_after:
     type: string
     format: date-time
@@ -10095,7 +10121,7 @@ properties:
 
 ### `SearchRequest`
 
-Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. Other metadata filters and pagination are outside this surface.
+Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. The first-party retrieval plugin returns each Record once, with its best matching passage; custom plugins can request individual passages. Pagination is outside this surface.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -10172,12 +10198,12 @@ properties:
 required:
   - query
   - corpus_ids
-description: Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. Other metadata filters and pagination are outside this surface.
+description: Text-only top-k query. Resolve all Corpora in the authenticated Organization and require read/search permission for every requested Corpus before querying. Never silently drop an unauthorized Corpus. Unknown/unsupported profile or mode returns 422; a dependency outage is an error, not an empty successful result. Query token limits are checked against the resolved profile; no silent truncation. An optional filter narrows candidates inside the engine query, before ranking and the limit, in every mode. The first-party retrieval plugin returns each Record once, with its best matching passage; custom plugins can request individual passages. Pagination is outside this surface.
 ```
 
 </details>
 
-### `SearchFilter`
+### `FacetFilter`
 
 Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
 
@@ -10204,6 +10230,61 @@ properties:
     maxItems: 50
     uniqueItems: true
     description: Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them.
+  metadata:
+    type: array
+    minItems: 1
+    maxItems: 16
+    items:
+      $ref: '#/components/schemas/MetadataFilter'
+    description: ANDed typed filters. Common fields use metadata.language, metadata.published_at, metadata.source_type, metadata.source, metadata.author, metadata.subjects, metadata.tags, metadata.country and metadata.place. Other names require the filter role in the Corpus's effective retrieval mapping. Corpora missing a requested filter field are excluded and reported. A metadata-capable generation is required; rebuild older Corpora first (422 metadata_filter_unavailable).
+description: Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
+```
+
+</details>
+
+### `SearchFilter`
+
+Candidate filter applied before ranking. Every present condition must hold. A requested Corpus served by a Projection Generation built before source filtering existed returns 422 source_filter_unavailable; rebuild that Corpus once (rebuildCorpusProjection) to enable it. Unfiltered search is unaffected.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `source_namespaces` | array of string |  | Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them. At least `1` items. At most `50` items. Items are unique. Each item: Minimum length `1`. Maximum length `200`. |
+| `record_ids` | array of string |  | Exact canonical Record identities. Requires an item-keyword generation; rebuild older Corpora first (422 metadata_filter_unavailable). At least `1` items. At most `50` items. Items are unique. Each item: Minimum length `1`. Maximum length `200`. |
+| `version_ids` | array of string |  | Exact canonical Version identities; currentness and authorization still apply. At least `1` items. At most `50` items. Items are unique. Each item: Minimum length `1`. Maximum length `200`. |
+| `metadata` | array of [`MetadataFilter`](#metadatafilter) |  | ANDed typed filters. Common fields use metadata.language, metadata.published_at, metadata.source_type, metadata.source, metadata.author, metadata.subjects, metadata.tags, metadata.country and metadata.place. Other names require the filter role in the Corpus's effective retrieval mapping. Corpora missing a requested filter field are excluded and reported. A metadata-capable generation is required; rebuild older Corpora first (422 metadata_filter_unavailable). At least `1` items. At most `16` items. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+minProperties: 1
+properties:
+  source_namespaces:
+    type: array
+    items:
+      type: string
+      minLength: 1
+      maxLength: 200
+    minItems: 1
+    maxItems: 50
+    uniqueItems: true
+    description: Keep only Records whose Source Namespace is one of these values. Ranking and the limit apply within the filtered set, so a source's best matches are returned even when other sources outrank them.
+  record_ids:
+    type: array
+    minItems: 1
+    maxItems: 50
+    uniqueItems: true
+    items: {type: string, minLength: 1, maxLength: 200}
+    description: Exact canonical Record identities. Requires an item-keyword generation; rebuild older Corpora first (422 metadata_filter_unavailable).
+  version_ids:
+    type: array
+    minItems: 1
+    maxItems: 50
+    uniqueItems: true
+    items: {type: string, minLength: 1, maxLength: 200}
+    description: Exact canonical Version identities; currentness and authorization still apply.
   metadata:
     type: array
     minItems: 1
@@ -10647,6 +10728,13 @@ One authorized segment hit. Rehydrate from canonical storage and recheck Organiz
 | `vector_space_id` | string |  | Minimum length `1`. |
 | `rank` | integer | yes | Minimum `1`. |
 | `excerpt` | [`SearchExcerpt`](#searchexcerpt) | yes |  |
+| `passage_text` | string |  | Exact packed passage text used for the hit, when source-range metadata is available. Maximum length `16384`. |
+| `source_excerpts` | array of object |  | At most `256` items. |
+| `source_excerpts[].part_key` | string | yes | Minimum length `1`. |
+| `source_excerpts[].text` | string | yes | Maximum length `4096`. |
+| `source_excerpts[].start` | integer | yes | Minimum `0`. |
+| `source_excerpts[].end` | integer | yes | Minimum `0`. |
+| `source_excerpts[].coordinate_system` | string | yes | One of `unicode_codepoint`. |
 | `availability` | [`Availability`](#availability) | yes |  |
 | `explanation` | string |  | Why the retrieval plugin ranked this hit here, when it says so. Minimum length `1`. Maximum length `1024`. |
 
@@ -10688,6 +10776,39 @@ properties:
     minimum: 1
   excerpt:
     $ref: '#/components/schemas/SearchExcerpt'
+  passage_text:
+    type: string
+    maxLength: 16384
+    description: Exact packed passage text used for the hit, when source-range metadata is available.
+  source_excerpts:
+    type: array
+    maxItems: 256
+    items:
+      type: object
+      additionalProperties: false
+      properties:
+        part_key:
+          type: string
+          minLength: 1
+        text:
+          type: string
+          maxLength: 4096
+        start:
+          type: integer
+          minimum: 0
+        end:
+          type: integer
+          minimum: 0
+        coordinate_system:
+          type: string
+          enum:
+            - unicode_codepoint
+      required:
+        - part_key
+        - text
+        - start
+        - end
+        - coordinate_system
   availability:
     $ref: '#/components/schemas/Availability'
   explanation:

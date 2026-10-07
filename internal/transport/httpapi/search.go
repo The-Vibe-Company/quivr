@@ -43,6 +43,14 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	if wire.Filter != nil && wire.Filter.SourceNamespaces != nil {
 		q.SourceNamespaces = *wire.Filter.SourceNamespaces
 	}
+	if wire.Filter != nil {
+		if wire.Filter.RecordIds != nil {
+			q.RecordIDs = *wire.Filter.RecordIds
+		}
+		if wire.Filter.VersionIds != nil {
+			q.VersionIDs = *wire.Filter.VersionIds
+		}
+	}
 	if wire.EvaluationPlugin != nil {
 		q.EvaluationPlugin = *wire.EvaluationPlugin
 	}
@@ -74,7 +82,28 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	}
 	response := transport.SearchResponse{ExcludedCorpora: exclusionsToTransport(result.ExcludedCorpora), Items: []transport.SearchHit{}, RetrievalProfile: transport.SearchProfile{Name: result.Profile, Version: result.ProfileVersion}}
 	for i, h := range result.Hits {
-		response.Items = append(response.Items, transport.SearchHit{EmbeddingArtifactId: optionalString(h.EmbeddingID), VectorSpaceId: optionalString(h.SpaceID), RecordId: h.RecordID, VersionId: h.VersionID, PartKey: h.Segment.PartKey, SegmentId: h.Segment.ID, SegmentationId: h.SegmentationID, ProjectionGenerationId: h.GenerationID, Rank: i + 1, Excerpt: transport.SearchExcerpt{Text: h.Segment.Text, Start: h.Segment.Start, End: h.Segment.End, CoordinateSystem: "unicode_codepoint"}, Availability: availabilityToTransport(h.Availability), Explanation: optionalString(h.Explanation)})
+		hit := transport.SearchHit{EmbeddingArtifactId: optionalString(h.EmbeddingID), VectorSpaceId: optionalString(h.SpaceID), RecordId: h.RecordID, VersionId: h.VersionID, PartKey: h.Segment.PartKey, SegmentId: h.Segment.ID, SegmentationId: h.SegmentationID, ProjectionGenerationId: h.GenerationID, Rank: i + 1, Excerpt: transport.SearchExcerpt{Text: h.Segment.AnchorText(), Start: h.Segment.Start, End: h.Segment.End, CoordinateSystem: "unicode_codepoint"}, Availability: availabilityToTransport(h.Availability), Explanation: optionalString(h.Explanation)}
+		if len(h.Segment.SourceExcerpts) > 0 {
+			hit.PassageText = optionalString(h.Segment.Text)
+			excerpts := []struct {
+				CoordinateSystem transport.SearchHitSourceExcerptsCoordinateSystem `json:"coordinate_system"`
+				End              int                                               `json:"end"`
+				PartKey          string                                            `json:"part_key"`
+				Start            int                                               `json:"start"`
+				Text             string                                            `json:"text"`
+			}{}
+			for _, source := range h.Segment.SourceExcerpts {
+				excerpts = append(excerpts, struct {
+					CoordinateSystem transport.SearchHitSourceExcerptsCoordinateSystem `json:"coordinate_system"`
+					End              int                                               `json:"end"`
+					PartKey          string                                            `json:"part_key"`
+					Start            int                                               `json:"start"`
+					Text             string                                            `json:"text"`
+				}{"unicode_codepoint", source.End, source.PartKey, source.Start, source.Text})
+			}
+			hit.SourceExcerpts = &excerpts
+		}
+		response.Items = append(response.Items, hit)
 	}
 	if u := result.Usage; u != nil {
 		response.Usage = usageToTransport(*u)

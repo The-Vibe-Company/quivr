@@ -29,5 +29,23 @@ def prepare():
         if hashlib.sha256(data).hexdigest()!=PROFILE['tokenizer_sha256']:raise RuntimeError('tokenizer checksum mismatch')
         staged=work/'tokenizer.download';staged.write_bytes(data);staged.replace(target)
     return dict(python=str(python),model=str(target))
+GEMMA = dict(model_repository='google/embeddinggemma-2',
+             model_revision='914f7f89142e33e77833254d9c9b90c3cef7303b',
+             tokenizer_sha256='4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4')
+
+def prepare_hosted():
+    config = prepare()
+    target = ROOT / '.scratch/tokenizer/embeddinggemma-2.json'
+    if not target.exists() or hashlib.sha256(target.read_bytes()).hexdigest() != GEMMA['tokenizer_sha256']:
+        url = f"https://huggingface.co/{GEMMA['model_repository']}/resolve/{GEMMA['model_revision']}/tokenizer.json"
+        with urllib.request.urlopen(url, timeout=60) as response:
+            data = response.read(64 * 1024 * 1024)
+        if hashlib.sha256(data).hexdigest() != GEMMA['tokenizer_sha256']:
+            raise RuntimeError('hosted tokenizer checksum mismatch')
+        staged = target.with_suffix('.download')
+        staged.write_bytes(data)
+        staged.replace(target)
+    return dict(python=config['python'], model=str(target), sha256=GEMMA['tokenizer_sha256'])
+
 if __name__=='__main__':
-    print(json.dumps(prepare()))
+    print(json.dumps(prepare_hosted() if '--hosted' in sys.argv else prepare()))

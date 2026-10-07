@@ -31,6 +31,7 @@ func TestPluginAPIFeatureIntroductions(t *testing.T) {
 		{plugins.FeatureProfileCandidateMode, "0.12.0", "0.13.0"},
 		{plugins.FeatureConnectorSubmissionConcurrency, "0.14.0", "0.15.0"},
 		{plugins.FeatureConnectorAttachmentOnly, "0.14.0", "0.15.0"},
+		{plugins.FeatureMultiPartSegments, "0.16.0", "0.17.0"},
 	} {
 		t.Run(string(tc.feature), func(t *testing.T) {
 			if got := plugins.FeatureSince(tc.feature); got != tc.since {
@@ -50,6 +51,26 @@ func TestPluginAPIFeatureIntroductions(t *testing.T) {
 				if old.Speaks(tc.feature) {
 					t.Fatalf("pin speaking %s enables newer feature", tc.before)
 				}
+			}
+		})
+	}
+}
+
+func TestManifestSupportsMultiPartSegmentsOnlyForStrictNewRanges(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		apiRange string
+		want     bool
+	}{
+		{name: "new range", apiRange: ">=0.17.0 <0.18.0", want: true},
+		{name: "old range", apiRange: ">=0.6.0 <0.17.0", want: false},
+		{name: "wide range", apiRange: ">=0.6.0 <0.18.0", want: false},
+		{name: "malformed range", apiRange: "not-a-range", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &plugins.Manifest{Compatibility: plugins.Compatibility{PluginAPI: tc.apiRange}}
+			if got := m.SupportsMultiPartSegments(); got != tc.want {
+				t.Fatalf("SupportsMultiPartSegments() = %v, want %v for %q", got, tc.want, tc.apiRange)
 			}
 		})
 	}

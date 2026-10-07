@@ -28,22 +28,24 @@ func TestRebuildAfterIngestionSettingsChange(t *testing.T) {
 	for _, scenario := range []struct {
 		name, nextSpace string
 		legacy          bool
+		packed          bool
 	}{
-		{"legacy segmentation and new model", "2", true},
-		{"new model", "2", false},
-		{"segment settings only", "1", false},
+		{"legacy segmentation and new model", "2", true, false},
+		{"new model", "2", false, false},
+		{"segment settings only", "1", false, false},
+		{"pack canonical Parts", "1", false, true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			pool := scratchDatabase(t, ctx)
-			makePins := func(spaceVersion string, limit int) *plugins.PinSet {
+			makePins := func(spaceVersion string, limit int, packed bool) *plugins.PinSet {
 				t.Helper()
 				manifest := []byte(fmt.Sprintf(`id: example.rebuild_embedder
 version: 0.1.0
 compatibility:
   engine: ">=0.1.0 <0.3.0"
-  plugin_api: ">=0.6.0 <0.9.0"
+  plugin_api: ">=0.8.0 <0.18.0"
 contributions:
   ingestion:
     spaces:
@@ -55,6 +57,12 @@ contributions:
         indexes: [text]
         query_modalities: [text]
 `, spaceVersion, spaceVersion))
+				ring, err := plugins.NewSigningKeys()
+				if err != nil {
+					t.Fatal(err)
+				}
+				keys, _ := json.Marshal(map[string]plugins.SigningKeys{"example.rebuild_embedder": ring})
+				t.Setenv(plugins.EnvSigningKeys, string(keys))
 				var pin *plugins.Pin
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
@@ -72,13 +80,26 @@ contributions:
 						return
 					}
 					var settings struct {
-						Limit int `json:"segment_limit"`
+						Limit  int  `json:"segment_limit"`
+						Packed bool `json:"packed"`
 					}
 					if err := json.Unmarshal(request.Configuration, &settings); err != nil || settings.Limit < 1 {
 						http.Error(w, "invalid segment_limit", 400)
 						return
 					}
 					segments := []any{}
+					if settings.Packed {
+						ranges := []plugins.SourceRange{}
+						for _, part := range request.Parts {
+							ranges = append(ranges, plugins.SourceRange{PartKey: part.Key, End: len([]rune(part.Text))})
+						}
+						vectors := map[string][]float32{}
+						for _, space := range request.Spaces {
+							vectors[space] = []float32{1, 0}
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"segments": []any{map[string]any{"part_key": ranges[0].PartKey, "start": 0, "end": ranges[0].End, "source_ranges": ranges, "source_separator": "\n\n", "vectors": vectors}}})
+						return
+					}
 					for _, part := range request.Parts {
 						runes := []rune(part.Text)
 						for start := 0; start < len(runes); start += settings.Limit {
@@ -93,8 +114,7 @@ contributions:
 					_ = json.NewEncoder(w).Encode(map[string]any{"segments": segments})
 				}))
 				t.Cleanup(server.Close)
-				var err error
-				pin, err = plugins.LoadPinManifest(manifest, "rebuild embedder", plugins.PinConfig{Endpoint: server.URL, Configuration: json.RawMessage(fmt.Sprintf(`{"segment_limit":%d}`, limit))})
+				pin, err = plugins.LoadPinManifest(manifest, "rebuild embedder", plugins.PinConfig{Endpoint: server.URL, Configuration: json.RawMessage(fmt.Sprintf(`{"segment_limit":%d,"packed":%t}`, limit, packed))})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -104,7 +124,7 @@ contributions:
 				}
 				return set
 			}
-			original := makePins("1", 12)
+			original := makePins("1", 12, false)
 			if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(original)); err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +139,12 @@ contributions:
 			if err != nil {
 				t.Fatal(err)
 			}
-			receipt, err := contents.Accept(ctx, scope, content.Command{Key: "one", Source: content.Source{CorpusID: c.ID, Namespace: "docs", RecordKey: "one"}, Content: content.Text{Kind: "text", Text: "alpha beta!!"}})
+			command := content.Command{Key: "one", Source: content.Source{CorpusID: c.ID, Namespace: "docs", RecordKey: "one"}, Content: content.Text{Kind: "text", Text: "alpha beta!!"}}
+			if scenario.packed {
+				command.Content = content.Text{Kind: "manifest"}
+				command.Manifest = &content.Manifest{Kind: "manifest", Parts: []content.Part{{Key: "first", Role: "body", Content: content.Text{Kind: "text", Text: "één 🌌"}}, {Key: "second", Role: "body", Content: content.Text{Kind: "text", Text: "第二段"}}}}
+			}
+			receipt, err := contents.Accept(ctx, scope, command)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -149,10 +174,10 @@ contributions:
 			if err = store.Promote(ctx, scope.Organization, oldSeg, prior); err != nil {
 				t.Fatal(err)
 			}
-			if err = store.CommitEnrichment(ctx, scope.Organization, oldSeg, prior, []content.Embedding{oldData[0].Artifact}); err != nil {
+			if err = store.CommitEnrichment(ctx, scope.Organization, oldSeg, prior, rebuildArtifacts(oldData)); err != nil {
 				t.Fatal(err)
 			}
-			next := makePins(scenario.nextSpace, 6)
+			next := makePins(scenario.nextSpace, 6, scenario.packed)
 			if _, err = pluginStore.ApplyConfiguration(ctx, registry.FromPins(next)); err != nil {
 				t.Fatal(err)
 			}
@@ -174,8 +199,12 @@ contributions:
 				t.Fatalf("build target: done=%v err=%v operation=%+v", done, err, outcome)
 			}
 			newSeg := publication.segmentation
-			if len(newSeg.Segments) != 2 || newSeg.ID == oldSeg.ID || publication.vectors != 2 {
-				t.Fatalf("new segmentation %+v, vectors=%d; want two new cuts", newSeg, publication.vectors)
+			want := 2
+			if scenario.packed {
+				want = 1
+			}
+			if len(newSeg.Segments) != want || newSeg.ID == oldSeg.ID || publication.vectors != want {
+				t.Fatalf("new segmentation %+v, vectors=%d; want %d new cuts", newSeg, publication.vectors, want)
 			}
 			if h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: oldSeg.Segments[0].ID, GenerationID: prior.ID}); err != nil || h.EmbeddingID != oldData[0].Artifact.ID {
 				t.Fatalf("served generation changed before activation: %+v %v", h, err)
@@ -185,6 +214,16 @@ contributions:
 			}
 			if outcome, err := store.Operation(ctx, scope.Organization, op.ID); err != nil || outcome.State != operations.StateSucceeded {
 				t.Fatalf("rebuild outcome: %+v %v", outcome, err)
+			}
+			if scenario.packed {
+				hydrated, err := contents.Hydrate(ctx, scope, []content.Candidate{{SegmentID: newSeg.Segments[0].ID, GenerationID: op.TargetGenerationID}, {SegmentID: newSeg.Segments[0].ID, GenerationID: op.TargetGenerationID}})
+				if err != nil || hydrated[0].Segment.Text != "één 🌌\n\n第二段" || len(hydrated[0].Segment.SourceExcerpts) != 2 || hydrated[1].Segment.Text != hydrated[0].Segment.Text {
+					t.Fatalf("packed canonical hydration: %+v %v", hydrated, err)
+				}
+				reloaded, err := contents.PluginSegmentationOf(ctx, scope.Organization, v, newSeg.Recipe)
+				if err != nil || len(reloaded.Segments) != 1 || reloaded.Segments[0].Text != "één 🌌\n\n第二段" {
+					t.Fatalf("packed recipe round trip: %+v %v", reloaded, err)
+				}
 			}
 			for n, segment := range newSeg.Segments {
 				h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: segment.ID, GenerationID: op.TargetGenerationID})
@@ -213,4 +252,12 @@ func (i legacyRebuildIngestor) Descriptor() processing.IngestionDescriptor {
 	d.Recipe = "plugin:" + d.PluginID + "@" + d.PluginVersion
 	d.Producer = d.Recipe
 	return d
+}
+
+func rebuildArtifacts(data []content.EmbeddingData) []content.Embedding {
+	out := make([]content.Embedding, len(data))
+	for i, d := range data {
+		out[i] = d.Artifact
+	}
+	return out
 }
