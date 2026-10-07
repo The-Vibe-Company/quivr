@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -333,17 +334,39 @@ func TestAttachmentsNeedAnExchangingConnector(t *testing.T) {
 
 // A run keeps starting pages only until its soft time limit; the page that
 // crosses it is committed and the next run continues.
+type slowCheckpointRuns struct {
+	*fakeRuns
+	advance func()
+}
+
+func (s slowCheckpointRuns) CommitCheckpoint(ctx context.Context, org, id string, run int64, progress Progress) (bool, error) {
+	s.advance()
+	return s.fakeRuns.CommitCheckpoint(ctx, org, id, run, progress)
+}
 func TestARunStopsStartingPagesAfterItsSoftLimit(t *testing.T) {
-	a, runs, _, _ := exchangingAcquirer(t, func() []Item { return nil })
-	registry, _ := NewRegistry(exchangingConnector{items: func() []Item { return nil }, src: &fakeSource{}, more: true})
-	clock := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
-	a.Registry, a.MaxPages = registry, 10
-	a.Now = func() time.Time { clock = clock.Add(50 * time.Second); return clock }
-	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
-		t.Fatal(err)
-	}
-	if n := len(runs.checkpoints); n < 1 || n > 3 || runs.finished[0] != nil {
-		t.Fatalf("%d pages committed, finished %+v; a run past its soft limit must stop starting pages", n, runs.finished)
+	for _, stage := range []string{"fetch", "checkpoint"} {
+		t.Run(stage, func(t *testing.T) {
+			a, runs, _, _ := exchangingAcquirer(t, func() []Item { return nil })
+			clock := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+			advance := func() { clock = clock.Add(150 * time.Second) }
+			registry, _ := NewRegistry(exchangingConnector{items: func() []Item {
+				if stage == "fetch" {
+					advance()
+				}
+				return nil
+			}, src: &fakeSource{}, more: true})
+			a.Registry, a.MaxPages = registry, 10
+			a.Now = func() time.Time { return clock }
+			if stage == "checkpoint" {
+				a.Store = slowCheckpointRuns{runs, advance}
+			}
+			if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+				t.Fatal(err)
+			}
+			if len(runs.checkpoints) != 1 || runs.finished[0] != nil {
+				t.Fatalf("%d pages committed, finished %+v; no next page may start after fetch or checkpoint crosses the soft limit", len(runs.checkpoints), runs.finished)
+			}
+		})
 	}
 }
 
@@ -371,4 +394,245 @@ func (c plainConnector) Descriptor() Descriptor {
 	d.CredentialSchema = nil
 	d.DefaultInterval = time.Minute
 	return d
+}
+
+// Owns stage attribution at the acquisition boundary. The clock advances only
+// when a boundary is crossed; a missing/misattributed stage loses literal time.
+type timedExchange struct {
+	exchangingConnector
+	advance func(time.Duration)
+}
+
+func (c timedExchange) Fetch(ctx context.Context, req FetchRequest) (Page, error) {
+	c.advance(2 * time.Millisecond)
+	p, err := c.exchangingConnector.Fetch(ctx, req)
+	p.Diagnostics = json.RawMessage(`{"members_done":1}`)
+	return p, err
+}
+func (c timedExchange) Descriptor() Descriptor {
+	d := c.exchangingConnector.Descriptor()
+	d.Attachments = c
+	return d
+}
+func (c timedExchange) UploadAttachment(ctx context.Context, req AttachmentRequest, grant UploadGrant) error {
+	c.advance(5 * time.Millisecond)
+	return c.exchangingConnector.UploadAttachment(ctx, req, grant)
+}
+
+type timedGrants struct {
+	*fakeGrants
+	advance func(time.Duration)
+}
+
+func (g timedGrants) Grant(ctx context.Context, org string, req uploads.Request) (uploads.Session, error) {
+	g.advance(3 * time.Millisecond)
+	return g.fakeGrants.Grant(ctx, org, req)
+}
+func (g timedGrants) Confirm(ctx context.Context, org, id string) (uploads.Session, error) {
+	g.advance(7 * time.Millisecond)
+	return g.fakeGrants.Confirm(ctx, org, id)
+}
+
+type timedIngest struct {
+	*fakeIngest
+	advance func(time.Duration)
+}
+
+func (f timedIngest) TrustedAccept(ctx context.Context, org, corpus string, command content.Command) (content.Receipt, error) {
+	f.advance(11 * time.Millisecond)
+	return f.fakeIngest.TrustedAccept(ctx, org, corpus, command)
+}
+
+type timedReceipts struct {
+	advance func(time.Duration)
+}
+
+func (f timedReceipts) HasReceipt(context.Context, string, string) (bool, error) {
+	f.advance(17 * time.Millisecond)
+	return false, nil
+}
+
+func TestPageDiagnosticsAttributeAcquisitionStages(t *testing.T) {
+	item := mailItem("r1")
+	a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{item} })
+	clock := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	advance := func(d time.Duration) { clock = clock.Add(d) }
+	connector := timedExchange{exchangingConnector: exchangingConnector{items: func() []Item { return []Item{item} }, src: src}, advance: advance}
+	registry, err := NewRegistry(connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Registry, a.Now = registry, func() time.Time { return clock }
+	a.Blobs = timedGrants{src.storage, advance}
+	a.Ingest = timedIngest{ingest, advance}
+	a.Receipts = timedReceipts{advance}
+	src.onDescribe = func() { advance(13 * time.Millisecond) }
+	runs.target.Interval = 30 * time.Second
+	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs.progress) != 1 {
+		t.Fatalf("progress=%+v", runs.progress)
+	}
+	var diagnostics struct {
+		MembersDone int `json:"members_done"`
+		Acquisition struct {
+			Items      int     `json:"items"`
+			FetchMS    float64 `json:"fetch_ms"`
+			UploadMS   float64 `json:"upload_ms"`
+			GrantMS    float64 `json:"grant_ms"`
+			VerifyMS   float64 `json:"verify_ms"`
+			AcceptMS   float64 `json:"accept_ms"`
+			ReceiptMS  float64 `json:"receipt_ms"`
+			DescribeMS float64 `json:"describe_ms"`
+			PageMS     float64 `json:"page_ms"`
+			RunMS      float64 `json:"run_ms"`
+			More       bool    `json:"more"`
+			StopReason string  `json:"stop_reason"`
+			IntervalMS float64 `json:"interval_ms"`
+		} `json:"acquisition"`
+	}
+	if err := json.Unmarshal(runs.progress[0].Diagnostics, &diagnostics); err != nil {
+		t.Fatal(err)
+	}
+	d := diagnostics.Acquisition
+	if diagnostics.MembersDone != 1 || d.Items != 1 || d.FetchMS != 2 || d.GrantMS != 6 || d.UploadMS != 10 || d.VerifyMS != 14 || d.AcceptMS != 11 || d.ReceiptMS != 17 || d.DescribeMS != 13 || d.PageMS != 73 || d.RunMS != 73 || d.More || d.StopReason != "source_drained" || d.IntervalMS != 30000 {
+		t.Fatalf("stage timing or source progress lost: %s", runs.progress[0].Diagnostics)
+	}
+	if len(runs.progress[0].Diagnostics) > 16<<10 || strings.Contains(string(runs.progress[0].Diagnostics), "storage.invalid") {
+		t.Fatal("diagnostics exceeded bound or exposed a transfer URL")
+	}
+}
+
+// Continuation is a scheduling decision after committed progress; the store
+// fake records that decision, while PostgreSQL owns actual lease claimability.
+type continuingRuns struct {
+	*fakeRuns
+	continued       int
+	afterCheckpoint func()
+}
+
+func (f *continuingRuns) CommitCheckpoint(ctx context.Context, org, id string, run int64, p Progress) (bool, error) {
+	ok, err := f.fakeRuns.CommitCheckpoint(ctx, org, id, run, p)
+	if ok && f.afterCheckpoint != nil {
+		f.afterCheckpoint()
+	}
+	return ok, err
+}
+
+func (f *continuingRuns) ContinueRun(context.Context, string, string, int64) error {
+	f.continued++
+	return nil
+}
+
+type pagedExchange struct {
+	exchangingConnector
+	pages   []Page
+	advance func()
+}
+
+func (c pagedExchange) Fetch(_ context.Context, req FetchRequest) (Page, error) {
+	if c.advance != nil {
+		c.advance()
+	}
+	return c.pages[min(req.PageInRun, len(c.pages)-1)], nil
+}
+
+func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		bound     string
+		empty     bool
+		unchanged bool
+		drained   bool
+		notice    string
+		replay    bool
+		legacy    bool
+		stalled   bool
+		cycled    bool
+		want      bool
+	}{
+		{name: "page bound", bound: "page", want: true},
+		{name: "time bound", bound: "time", want: true},
+		{name: "time bound crossed by checkpoint", bound: "checkpoint", want: true},
+		{name: "byte bound", bound: "byte", want: true},
+		{name: "receipt replay advances cursor", bound: "page", replay: true, want: true},
+		{name: "source drained", bound: "page", drained: true},
+		{name: "empty pages", bound: "page", empty: true},
+		{name: "unchanged checkpoint formatting", bound: "page", unchanged: true},
+		{name: "final page stalls after earlier progress", bound: "page", stalled: true},
+		{name: "final page returns to run start", bound: "page", cycled: true},
+		{name: "notice", bound: "page", notice: "source_notice"},
+		{name: "store without continuation", bound: "page", legacy: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := mailItem("r1")
+			a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{item} })
+			runs.target.Checkpoint = json.RawMessage(`{"step":0,"large":9007199254740993}`)
+			page := Page{Items: []Item{item}, Checkpoint: json.RawMessage(`{"step":1,"large":9007199254740993}`), More: !tc.drained, Notice: tc.notice, Diagnostics: json.RawMessage(`{"members_done":1}`)}
+			if tc.unchanged {
+				page.Checkpoint = json.RawMessage(`{ "large": 9007199254740993, "step": 0 }`)
+			}
+			if tc.empty {
+				page.Items = nil
+			}
+			clock := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+			connector := pagedExchange{exchangingConnector: exchangingConnector{src: src}, pages: []Page{page}}
+			a.MaxPages = 1
+			wantCheckpoints := 1
+			if tc.stalled || tc.cycled {
+				a.MaxPages, wantCheckpoints = 2, 2
+				last := page
+				if tc.cycled {
+					last.Checkpoint = runs.target.Checkpoint
+				}
+				connector.pages = []Page{page, last}
+			}
+			if tc.bound == "time" {
+				a.MaxPages = 10
+				connector.advance = func() { clock = clock.Add(150 * time.Second) }
+			}
+			if tc.bound == "byte" {
+				a.MaxPages, a.AttachmentBudget = 10, 1
+			}
+			if tc.replay {
+				key := KeyPrefix + content.StableID("item", runs.target.ID, item.RecordKey, item.Revision)
+				a.Receipts = fakeReceipts{keys: map[string]bool{key: true}}
+			}
+			registry, err := NewRegistry(connector)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.Registry, a.Now = registry, func() time.Time { return clock }
+			observed := &continuingRuns{fakeRuns: runs}
+			if tc.bound == "checkpoint" {
+				a.MaxPages = 10
+				observed.afterCheckpoint = func() { clock = clock.Add(150 * time.Second) }
+			}
+			if !tc.legacy {
+				a.Store = observed
+			}
+			if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+				t.Fatal(err)
+			}
+			wantContinue, wantFinish := 0, 1
+			if tc.want {
+				wantContinue, wantFinish = 1, 0
+			}
+			if observed.continued != wantContinue || len(runs.finished) != wantFinish || len(runs.checkpoints) != wantCheckpoints {
+				t.Fatalf("continued=%d finished=%d checkpoints=%v; want continue=%d finish=%d after committed progress", observed.continued, len(runs.finished), runs.checkpoints, wantContinue, wantFinish)
+			}
+			if tc.replay && (len(ingest.accepted) != 0 || runs.items[0]) {
+				t.Fatal("replayed cursor progress must continue without a fresh acceptance")
+			}
+			var diagnostic struct {
+				Acquisition struct {
+					Continuation bool `json:"continuation"`
+				} `json:"acquisition"`
+			}
+			if err := json.Unmarshal(runs.progress[len(runs.progress)-1].Diagnostics, &diagnostic); err != nil || diagnostic.Acquisition.Continuation != (tc.want && tc.bound != "checkpoint") {
+				t.Fatalf("continuation diagnostic=%s err=%v", runs.progress[len(runs.progress)-1].Diagnostics, err)
+			}
+		})
+	}
 }

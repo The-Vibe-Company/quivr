@@ -28,6 +28,39 @@ Only `web` is exposed publicly; bulk workers can [scale on backlog](autoscaler/R
 This evaluation deployment uses the Temporal dev server and single-replica dependencies without high availability.
 Redeploying a volume-backed service can interrupt requests. No public dependency domains are needed.
 
+## Upgrade the search database
+
+The template pins Weaviate 1.39.10 by digest. Existing 1.37.15 data needs no
+Quivr rebuild or re-ingestion when following the [upstream upgrade route](https://docs.weaviate.io/deploy/migration):
+back up the volume, pause writes, upgrade one minor at a time, then resume writes.
+Keep the same `/var/lib/weaviate` volume and `CLUSTER_HOSTNAME` at every step.
+Before each clean shutdown, check `/v1/.well-known/ready` and
+`/v1/cluster/statistics`: there must be one node and top-level `synchronized: true`.
+Stop if a deployment is killed or runs out of memory instead of shutting down cleanly.
+
+For a 1.37 deployment, temporarily set the service image to
+`cr.weaviate.io/semitechnologies/weaviate:1.38.20@sha256:d23d7bb6242026106ee1ec5aefdbb6a867e260ff171cedc9c3af55c9688e30f6`
+and redeploy. Wait for readiness and synchronized metadata, then deploy the
+1.39.10 image from `services.json` on that same volume. Check `/v1/meta` for the
+expected version and exercise lexical, semantic and hybrid search before resuming
+writes. Recover from the pre-upgrade backup if needed; do not assume a newer
+volume can be downgraded safely. Preview drop-vector-index functionality in
+1.39 is not enabled by this template. Index types and compression are unchanged.
+
+Set startup variables on the **weaviate** service for the installation's resources:
+
+| Variable | Purpose |
+| --- | --- |
+| `RAFT_BOOTSTRAP_TIMEOUT` | Seconds allowed to bootstrap/rejoin while loading the database. The pinned 1.39.10 default is **600 s**; increase it if index loading needs longer, and allow the deployment's startup deadline to cover it. |
+| `GOMEMLIMIT` | Go runtime soft memory limit, for example `3GiB` on a 4 GiB service. Choose about 80–90% of the service memory to leave headroom; this does not bound total RSS or make an oversized index fit. |
+
+The [pinned configuration source](https://github.com/weaviate/weaviate/blob/v1.39.10/usecases/config/environment.go)
+still honors deprecated `HNSW_STARTUP_WAIT_FOR_VECTOR_CACHE`; leave it unset so
+shard loading determines prefill behavior. `ASYNC_INDEXING_BATCH_SIZE` was removed.
+The 1.38–1.39 release-note review found no required Quivr schema migration:
+1.39.1's auto-schema named-vector default does not apply because Quivr disables
+auto-schema and declares named vectors explicitly. See [memory sizing](https://docs.weaviate.io/weaviate/concepts/resources).
+
 Webhook delivery and the RSS connector refuse private and internal addresses
 (checked after DNS resolution, so Railway's private network is unreachable
 through them). The generated configuration never sets
