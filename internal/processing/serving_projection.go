@@ -43,9 +43,6 @@ func (e Evaluator) RunServing(ctx context.Context, org, id string) error {
 		if err != nil {
 			return err
 		}
-		if v.Steps.Enriched != nil && v.Availability.Current {
-			return e.Serving.CompleteServingProjection(ctx, j, "succeeded", nil)
-		}
 		g, err := e.Store.PrepareEvaluation(ctx, org, record.Source.CorpusID, j.Spaces)
 		if err != nil {
 			return err

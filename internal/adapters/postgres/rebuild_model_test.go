@@ -19,6 +19,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
@@ -129,7 +130,12 @@ contributions:
 				t.Fatal(err)
 			}
 			pluginStore := postgres.PluginStore{Pool: pool}
-			if _, err := pluginStore.ApplyConfiguration(ctx, registry.FromPins(original)); err != nil {
+			originalPlan, err := pluginStore.ApplyConfiguration(ctx, registry.FromPins(original))
+			if err != nil {
+				t.Fatal(err)
+			}
+			live, err := plugins.NewLive(originalPlan.Plan, original)
+			if err != nil {
 				t.Fatal(err)
 			}
 			store := contentStores(pool)
@@ -177,8 +183,43 @@ contributions:
 			if err = store.CommitEnrichment(ctx, scope.Organization, oldSeg, prior, rebuildArtifacts(oldData)); err != nil {
 				t.Fatal(err)
 			}
+			accept := func(key string) content.Receipt {
+				t.Helper()
+				cmd := command
+				cmd.Key, cmd.Source.RecordKey = key, key
+				r, err := contents.Accept(ctx, scope, cmd)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return r
+			}
+			pinWork := func(r content.Receipt, plan string) context.Context {
+				t.Helper()
+				if _, _, err := pluginStore.PinWork(ctx, plugins.WorkIngestion, scope.Organization, r.ID, plan); err != nil {
+					t.Fatal(err)
+				}
+				pinned, err := live.Pin(ctx, plugins.Work{Kind: plugins.WorkIngestion, Organization: scope.Organization, ID: r.ID, Plan: plan}, nil, 3)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return pinned
+			}
+			oldPublication := &rebuildPublication{}
+			oldIndex := retrieval.Service{Routing: store, Content: contents, Projection: oldPublication}
+			oldPipeline := processing.Service{Content: contents, Retrieval: oldIndex, Enrichment: oldIndex, Routing: store, Plugin: &processing.PluginDeriver{Content: contents, Plugin: oldPlugin}}
+			delayedEnrichment := accept("old-enrichment")
+			delayedCtx := pinWork(delayedEnrichment, originalPlan.Plan)
+			if err := oldPipeline.Run(delayedCtx, scope.Organization, delayedEnrichment.ID); err != nil {
+				t.Fatal(err)
+			}
+			delayedBaseline := accept("old-baseline")
+			baselineCtx := pinWork(delayedBaseline, originalPlan.Plan)
 			next := makePins(scenario.nextSpace, 6, scenario.packed)
-			if _, err = pluginStore.ApplyConfiguration(ctx, registry.FromPins(next)); err != nil {
+			nextPlan, err := pluginStore.ApplyConfiguration(ctx, registry.FromPins(next))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = live.Store(nextPlan.Plan, next); err != nil {
 				t.Fatal(err)
 			}
 			if err = store.RegisterSpaces(ctx, app.DeploymentSpaces(next)); err != nil {
@@ -187,33 +228,187 @@ contributions:
 			if _, err = store.AlignDefaultGeneration(ctx); err != nil {
 				t.Fatal(err)
 			}
+			publication := &rebuildPublication{}
+			newPlugin := pluginhttp.Ingestor{Pin: next.IngestionFor("text/plain")}
+			livePublication := &rebuildPublication{}
+			index := retrieval.Service{Routing: store, Content: contents, Projection: livePublication}
+			pipeline := processing.Service{Content: contents, Retrieval: index, Enrichment: index, Routing: store, Plugin: &processing.PluginDeriver{Content: contents, Plugin: newPlugin}}
+			before := accept("before")
+			beforeCtx := pinWork(before, nextPlan.Plan)
+			if err := pipeline.Run(beforeCtx, scope.Organization, before.ID); err != nil {
+				t.Fatalf("live baseline before rebuild starts: %v", err)
+			}
+			beforeSeg := livePublication.segmentation
+			if h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: beforeSeg.Segments[0].ID, GenerationID: prior.ID}); err != nil || h.VersionID != beforeSeg.VersionID {
+				t.Fatalf("lexical search before rebuild starts: %+v %v", h, err)
+			}
+			if err := pipeline.Enrich(beforeCtx, scope.Organization, before.ID); err != nil {
+				t.Fatalf("enrichment before rebuild must settle: %v", err)
+			}
+			held := accept("held")
+			if err := contents.Materialize(ctx, scope.Organization, held.ID); err != nil {
+				t.Fatal(err)
+			}
+			held, err = store.Receipt(ctx, scope.Organization, held.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := contents.QuarantineVersion(ctx, scope.Organization, held.VersionID, content.Diagnostic{Code: "operator_hold", Message: "An operator paused this Version during a recipe change."}); err != nil {
+				t.Fatal(err)
+			}
 			op, err := store.AcceptRebuild(ctx, scope.Organization, c.ID, "settings", []byte(`{}`))
 			if err != nil {
 				t.Fatal(err)
 			}
-			publication := &rebuildPublication{}
-			newPlugin := pluginhttp.Ingestor{Pin: next.IngestionFor("text/plain")}
-			runner := retrieval.Rebuilder{Store: store, Cancellation: store, Content: contents, Projection: publication, Plugin: processing.PluginDeriver{Content: contents, Plugin: newPlugin}, Routing: store}
+			runner := retrieval.Rebuilder{Concurrency: 1, Store: store, Cancellation: store, Content: contents, Projection: publication, Plugin: processing.PluginDeriver{Content: contents, Plugin: newPlugin}, Routing: store}
 			if done, err := runner.Step(ctx, scope.Organization, op.ID); err != nil || done {
 				outcome, _ := store.Operation(ctx, scope.Organization, op.ID)
 				t.Fatalf("build target: done=%v err=%v operation=%+v", done, err, outcome)
 			}
-			newSeg := publication.segmentation
+			newSeg, err := contents.PluginSegmentationOf(ctx, scope.Organization, v, newPlugin.Descriptor().Recipe)
+			if err != nil {
+				t.Fatal(err)
+			}
 			want := 2
 			if scenario.packed {
 				want = 1
 			}
-			if len(newSeg.Segments) != want || newSeg.ID == oldSeg.ID || publication.vectors != want {
-				t.Fatalf("new segmentation %+v, vectors=%d; want %d new cuts", newSeg, publication.vectors, want)
+			if len(newSeg.Segments) != want || newSeg.ID == oldSeg.ID {
+				t.Fatalf("new segmentation %+v; want %d new cuts", newSeg, want)
 			}
 			if h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: oldSeg.Segments[0].ID, GenerationID: prior.ID}); err != nil || h.EmbeddingID != oldData[0].Artifact.ID {
 				t.Fatalf("served generation changed before activation: %+v %v", h, err)
 			}
-			if done, err := runner.Step(ctx, scope.Organization, op.ID); err != nil || !done {
-				t.Fatalf("activate target: done=%v err=%v", done, err)
+			// A live arrival must finish on the old route while this rebuild runs.
+			arrival := accept("during")
+			arrivalCtx := pinWork(arrival, nextPlan.Plan)
+			if err = pipeline.Run(arrivalCtx, scope.Organization, arrival.ID); err != nil {
+				t.Fatalf("live baseline during recipe rebuild: %v", err)
+			}
+			liveSeg := livePublication.segmentation
+			if h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: liveSeg.Segments[0].ID, GenerationID: prior.ID}); err != nil || h.VersionID != liveSeg.VersionID {
+				t.Fatalf("live lexical search before cutover: %+v %v", h, err)
+			}
+			if err = pipeline.Enrich(arrivalCtx, scope.Organization, arrival.ID); err != nil {
+				t.Fatalf("incompatible enrichment must settle without retry: %v", err)
+			}
+			pending := accept("pending-enrichment")
+			pendingCtx := pinWork(pending, nextPlan.Plan)
+			if err := pipeline.Run(pendingCtx, scope.Organization, pending.ID); err != nil {
+				t.Fatal(err)
+			}
+			pendingSeg := livePublication.segmentation
+			// Arrivals can land on either side of the durable rebuild cursor.
+			// Finish the bounded forward pass and final gap sweep without sleeps.
+			activated := false
+			for step := 0; step < 4 && !activated; step++ {
+				activated, err = runner.Step(ctx, scope.Organization, op.ID)
+				if err != nil {
+					t.Fatalf("catch up and activate target: %v", err)
+				}
+			}
+			if !activated {
+				t.Fatal("rebuild did not finish after catching up live arrivals")
 			}
 			if outcome, err := store.Operation(ctx, scope.Organization, op.ID); err != nil || outcome.State != operations.StateSucceeded {
 				t.Fatalf("rebuild outcome: %+v %v", outcome, err)
+			}
+			if err := pipeline.Enrich(pendingCtx, scope.Organization, pending.ID); err != nil {
+				t.Fatalf("delayed current-plan enrichment after cutover: %v", err)
+			}
+			if err = oldPipeline.Enrich(delayedCtx, scope.Organization, delayedEnrichment.ID); err != nil {
+				t.Fatalf("delayed old-plan enrichment must settle: %v", err)
+			}
+			if err = oldPipeline.Run(baselineCtx, scope.Organization, delayedBaseline.ID); err != nil {
+				t.Fatalf("delayed old-plan baseline must settle: %v", err)
+			}
+			jobs, err := store.ClaimServingProjections(ctx, 10)
+			if err != nil || len(jobs) == 0 {
+				t.Fatalf("historical work needs a bounded current-plan handoff: %+v %v", jobs, err)
+			}
+			for _, job := range jobs {
+				jobCtx, err := live.Pin(ctx, plugins.Work{Kind: "serving_projection", Organization: scope.Organization, ID: job.ID, Plan: job.PlanID}, nil, 3)
+				if err != nil {
+					t.Fatal(err)
+				}
+				evaluator := processing.Evaluator{Store: store, Serving: store, Content: contents, Plugin: &processing.PluginDeriver{Content: contents, Plugin: newPlugin}, Projection: publication}
+				if err := evaluator.RunServing(jobCtx, scope.Organization, job.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, historical := range []content.Receipt{delayedEnrichment, delayedBaseline} {
+				r, err := store.Receipt(ctx, scope.Organization, historical.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				hv, err := contents.Version(ctx, scope, r.RecordID, r.VersionID)
+				if err != nil || !hv.Availability.Searchable || hv.Processing.State != "idle" {
+					t.Fatalf("historical receipt settled in serving recipe: %+v %v", hv, err)
+				}
+				hseg, err := contents.PluginSegmentationOf(ctx, scope.Organization, hv, newPlugin.Descriptor().Recipe)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, segment := range hseg.Segments {
+					if h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: segment.ID, GenerationID: op.TargetGenerationID}); err != nil || h.EmbeddingID == "" || h.SpaceID != "example.rebuild_embedder.text@"+scenario.nextSpace {
+						t.Fatalf("historical receipt serves current cuts and vectors: %+v %v", h, err)
+					}
+				}
+			}
+			if scenario.nextSpace != "1" {
+				arrival, err = store.Receipt(ctx, scope.Organization, arrival.ID)
+				if err != nil || arrival.Processing.State != "idle" || len(arrival.Diagnostics) != 0 {
+					t.Fatalf("rebuilt receipt: %+v %v", arrival, err)
+				}
+				ready, err := contents.Version(ctx, scope, arrival.RecordID, arrival.VersionID)
+				if err != nil || ready.Processing.State != "idle" || len(ready.Diagnostics) != 0 {
+					t.Fatalf("target vectors must settle the rebuild-required outcome: %+v %v", ready, err)
+				}
+			}
+			for _, live := range []content.Segmentation{beforeSeg, liveSeg, pendingSeg} {
+				for _, segment := range live.Segments {
+					if h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: segment.ID, GenerationID: op.TargetGenerationID}); err != nil || h.EmbeddingID == "" || h.SpaceID != "example.rebuild_embedder.text@"+scenario.nextSpace {
+						t.Fatalf("live arrival covered in target: %+v %v", h, err)
+					}
+				}
+			}
+			// Arbitrary operator quarantine codes remain reprocessable under the
+			// active recipe after cutover, without editing historical artifacts.
+			operator := scope
+			operator.Actions = append(append([]string(nil), scope.Actions...), registry.Action)
+			request := quarantine.Request{Key: "recover", Filter: quarantine.Filter{CorpusID: c.ID, Code: "operator_hold"}, DryRun: true}
+			quarantines := quarantine.Service{Store: store}
+			if _, _, err := quarantines.Request(ctx, operator, request); err != nil {
+				t.Fatal(err)
+			}
+			request.DryRun = false
+			_, recovery, err := quarantines.Request(ctx, operator, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reprocessCtx, err := live.Pin(ctx, plugins.Work{Kind: plugins.WorkOperation, Organization: scope.Organization, ID: recovery.ID, Plan: nextPlan.Plan}, nil, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reprocessor := quarantine.Reprocessor{Store: store, Cancellation: store, Processor: pipeline}
+			if progress, err := reprocessor.Step(reprocessCtx, scope.Organization, recovery.ID); err != nil || !progress.Done {
+				t.Fatalf("operator quarantine recovery: %+v %v", progress, err)
+			}
+			if r, err := store.Receipt(ctx, scope.Organization, held.ID); err != nil || r.Availability == nil || !r.Availability.Searchable || len(r.Diagnostics) != 0 {
+				t.Fatalf("reprocessed receipt: %+v %v", r, err)
+			}
+			after := accept("after")
+			afterCtx := pinWork(after, nextPlan.Plan)
+			if err := pipeline.Run(afterCtx, scope.Organization, after.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := pipeline.Enrich(afterCtx, scope.Organization, after.ID); err != nil {
+				t.Fatal(err)
+			}
+			for _, segment := range livePublication.segmentation.Segments {
+				if h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: segment.ID, GenerationID: op.TargetGenerationID}); err != nil || h.EmbeddingID == "" {
+					t.Fatalf("arrival after cutover: %+v %v", h, err)
+				}
 			}
 			if scenario.packed {
 				hydrated, err := contents.Hydrate(ctx, scope, []content.Candidate{{SegmentID: newSeg.Segments[0].ID, GenerationID: op.TargetGenerationID}, {SegmentID: newSeg.Segments[0].ID, GenerationID: op.TargetGenerationID}})
@@ -225,9 +420,9 @@ contributions:
 					t.Fatalf("packed recipe round trip: %+v %v", reloaded, err)
 				}
 			}
-			for n, segment := range newSeg.Segments {
+			for _, segment := range newSeg.Segments {
 				h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: segment.ID, GenerationID: op.TargetGenerationID})
-				if err != nil || h.VersionID != v.ID || h.EmbeddingID != publication.artifacts[n].ID {
+				if err != nil || h.VersionID != v.ID || h.EmbeddingID == "" || h.SpaceID != "example.rebuild_embedder.text@"+scenario.nextSpace {
 					t.Fatalf("target search hydration: %+v %v", h, err)
 				}
 			}
