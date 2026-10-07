@@ -118,20 +118,29 @@ func TestPersistedProjectionAcrossWeaviateUpgrade(t *testing.T) {
 	}
 	vector := make([]float32, 384)
 	vector[0] = 1
-	for _, mode := range []string{"lexical", "semantic", "hybrid"} {
-		query := "cobalt"
-		if mode == "semantic" {
-			query = "meadow"
-		} // The vector must beat the opposite lexical match.
-		q := retrieval.Request{Query: query, Mode: mode, Profile: "default", Limit: 10, CorpusIDs: []string{f.corpusID}, Vector: vector}
+	for _, check := range []struct {
+		mode, query, want string
+		alpha             float64
+	}{
+		{"lexical", "cobalt", "beacon", 0},
+		{"semantic", "meadow", "beacon", 0},
+		{"hybrid", "meadow", "beacon", 0.9},
+		{"hybrid", "meadow", "meadow", 0.1},
+	} {
+		// Opposing sparse/dense matches require both hybrid contributions to survive.
+		q := retrieval.Request{Query: check.query, Mode: check.mode, Profile: "default", Limit: 10, CorpusIDs: []string{f.corpusID}, Vector: vector}
+		if check.mode == "hybrid" {
+			q.Hybrid = &retrieval.HybridOptions{Alpha: check.alpha, Fusion: retrieval.FusionRelativeScore}
+		}
 		got, err := f.store.Search(ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: f.gen}}, corpus.Scope{Organization: f.org, Corpora: []string{"*"}}, q)
 		if err != nil {
-			t.Fatalf("%s persisted search: %v", mode, err)
+			t.Fatalf("%s persisted search: %v", check.mode, err)
 		}
-		if len(got) == 0 || got[0].SegmentID != "beacon" || got[0].GenerationID != f.gen.ID {
-			t.Fatalf("%s: want original beacon first in generation %s, got %v", mode, f.gen.ID, got)
+		if len(got) == 0 || got[0].SegmentID != check.want || got[0].GenerationID != f.gen.ID {
+			t.Fatalf("%s alpha %g: want original %s first in generation %s, got %v", check.mode, check.alpha, check.want, f.gen.ID, got)
 		}
 	}
+
 	if phase == "seed" {
 		b, err := json.Marshal(snapshot)
 		if err != nil {
