@@ -344,6 +344,48 @@ test("la recherche passe des mots exacts aux idées proches et devient une alert
   await expect(rows(page).first()).toBeVisible();
 });
 
+test("les commandes du fil restent en place quand la recherche s’allonge ou qu’un compteur perd un chiffre", async ({
+  page,
+}) => {
+  // A large corpus: 4205 unread articles in all, 225 from one source.
+  await page.route("**/demo/feed/stats", (route) => {
+    const body = route.request().postDataJSON();
+    const n = body.sources?.length ? 225 : 4205;
+    const buckets = (body.buckets || []).slice(1).map(() => 0);
+    return route.fulfill({
+      json: { total: n, all: n, unread: n, sources: {}, alerts: {}, any_alert: 0, buckets, building: false },
+    });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const place = (locator: ReturnType<Page["locator"]>) =>
+    locator.evaluate((e) => {
+      const r = e.getBoundingClientRect();
+      return [Math.round(r.left), Math.round(r.top)];
+    });
+
+  // The search's options stay where they are, however long the search.
+  const box = page.getByRole("searchbox", { name: "Rechercher dans le fil" });
+  await box.fill("grêle");
+  await expect(page.getByRole("heading", { name: /articles sur « grêle »/ })).toBeVisible();
+  const near = page.getByRole("switch", { name: "Idées proches" });
+  const follow = page.getByRole("button", { name: "Créer une alerte" });
+  const at = [await place(near), await place(follow)];
+  await box.fill("grêle sur les vergers de la vallée après les orages de la nuit");
+  await expect(page.getByRole("heading", { name: /sur « grêle sur les vergers/ })).toBeVisible();
+  expect([await place(near), await place(follow)]).toEqual(at);
+  await box.fill("");
+
+  // A source that drops Non lus from four digits to three leaves the menus in place.
+  const unread = chips(page).getByRole("button", { name: /^Non lus/ });
+  await expect(unread).toContainText("4205");
+  const date = chips(page).getByRole("button", { name: /^Date/ });
+  const before = await place(date);
+  await pick(page, "Sources", /^Météo locale/);
+  await expect(unread).toContainText("225");
+  expect(await place(date)).toEqual(before);
+});
+
 test("le lecteur dit pourquoi l’article est attrapé, propose le même sujet et se pilote au clavier", async ({
   page,
 }) => {
