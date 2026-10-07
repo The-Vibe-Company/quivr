@@ -6,13 +6,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // mailSource holds attachment bytes by ref and counts how often it is read.
@@ -185,5 +189,95 @@ func TestAttachmentsNeedTheManifestBlock(t *testing.T) {
 	}
 	if status, _, _ := call(h, describeRoute, attachmentBody("r", "2026-09-29T09:00:00Z", nil)); status != 404 && status != 405 {
 		t.Fatalf("describe_attachment is served only when the manifest declares attachments: %d", status)
+	}
+}
+
+// Owns connection reuse and overlap at the grant HTTP boundary. Holding each
+// PUT proves a whole burst can run together; a second burst must reuse its
+// connections instead of reconnecting for all but two uploads.
+func TestUploadBurstsReuseConnections(t *testing.T) {
+	const parallel = 8
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	entered := make(chan struct{}, parallel)
+	releases := []chan struct{}{make(chan struct{}), make(chan struct{})}
+	defer func() {
+		for _, release := range releases {
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+		}
+	}()
+	store := &storage{stored: map[string]string{}}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wave := 0
+		if strings.HasPrefix(r.URL.Path, "/1/") {
+			wave = 1
+		}
+		entered <- struct{}{}
+		select {
+		case <-releases[wave]:
+		case <-ctx.Done():
+			w.WriteHeader(500)
+			return
+		}
+		store.ServeHTTP(w, r)
+	}))
+	var connections atomic.Int32
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+	src := &mailSource{bytes: map[string]string{}}
+	for wave := range 2 {
+		for i := range parallel {
+			src.bytes[fmt.Sprintf("%d/%d", wave, i)] = "sample bytes"
+		}
+	}
+	h, _ := mailPlugin(t, src)
+	for wave := range 2 {
+		results := make(chan string, parallel)
+		for i := range parallel {
+			ref := fmt.Sprintf("%d/%d", wave, i)
+			go func() {
+				status, _, raw := call(h, uploadRoute, attachmentBody(ref, "2026-09-29T09:00:00Z", grantFor(server.URL+"/"+ref, "sample bytes")))
+				if status != 200 {
+					results <- fmt.Sprintf("HTTP %d: %s", status, raw)
+				} else {
+					results <- ""
+				}
+			}()
+		}
+		for range parallel {
+			select {
+			case <-entered:
+			case message := <-results:
+				t.Fatalf("burst did not overlap: %s", message)
+			case <-ctx.Done():
+				t.Fatal("concurrent upload burst stalled")
+			}
+		}
+		close(releases[wave])
+		for range parallel {
+			select {
+			case message := <-results:
+				if message != "" {
+					t.Fatal(message)
+				}
+			case <-ctx.Done():
+				t.Fatal("released uploads did not finish")
+			}
+		}
+	}
+	if got := connections.Load(); got != parallel {
+		t.Fatalf("two %d-way upload bursts opened %d storage connections; want reuse of the first burst", parallel, got)
+	}
+	if len(store.stored) != 2*parallel || src.opens != 2*parallel {
+		t.Fatalf("stored=%d source reads=%d", len(store.stored), src.opens)
 	}
 }

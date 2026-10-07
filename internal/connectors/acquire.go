@@ -242,7 +242,18 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	var rejected string
 	var notice string
 	reads := target.ReadsToday
+	var activeTiming *pageTimings
+	var activePage int
+	var activeMore bool
+	defer func() {
+		if activeTiming != nil {
+			logPageTiming(id, run, activePage, "incomplete", activeTiming.diagnostic(a.now(), started, activeMore, "incomplete", target.Interval))
+		}
+	}()
 	for i := 0; i < pages; i++ {
+		activeTiming = &pageTimings{started: a.now()}
+		activePage, activeMore = i, false
+		rc.timing = activeTiming
 		release, active, err := a.beginPoll(ctx, org, id, run)
 		if err != nil {
 			return err
@@ -254,6 +265,8 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			defer release()
 			return connector.Fetch(ctx, FetchRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace, WebhookURL: receiverWebhookURL(connector, a.PublicURL, id), Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now(), PageInRun: i, ReadsToday: reads})
 		}()
+		activeTiming.fetch = a.now().Sub(activeTiming.started)
+		activeTiming.items, activeMore = len(page.Items), page.More
 		if errors.Is(err, ErrNotDue) && i == 0 {
 			slog.Info("connector run skipped", "connector_id", id, "reason", "not_due")
 			return a.Store.FinishRun(ctx, org, id, run, &RunError{Skipped: true, At: a.now()})
@@ -307,19 +320,41 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		// Push active since before this run should have delivered anything
 		// new; a push kind holds back what is too recent to have arrived.
 		missed := fresh && target.Health.Push != nil && target.Health.Push.Healthy()
-		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, Progress{Checkpoint: page.Checkpoint, Items: fresh, Reads: page.Reads, Diagnostics: page.Diagnostics, Push: page.Push, Missed: missed})
+		now := a.now()
+		reason := ""
+		switch {
+		case !page.More:
+			reason = "source_drained"
+		case stored >= budget:
+			reason = "attachment_budget"
+		case now.Sub(started) >= soft:
+			reason = "soft_limit"
+		case i+1 == pages:
+			reason = "page_limit"
+		}
+		timing := activeTiming.diagnostic(now, started, page.More, reason, target.Interval)
+		ok, err := a.Store.CommitCheckpoint(ctx, org, id, run, Progress{Checkpoint: page.Checkpoint, Items: fresh, Reads: page.Reads, Diagnostics: acquisitionDiagnostics(page.Diagnostics, timing), Push: page.Push, Missed: missed})
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return nil
 		}
+		// Checkpoint persistence also counts toward the soft run limit. The
+		// committed diagnostic is a pre-commit snapshot; logs include this wait.
+		now = a.now()
+		if reason == "" && now.Sub(started) >= soft {
+			reason = "soft_limit"
+		}
+		timing = activeTiming.diagnostic(now, started, page.More, reason, target.Interval)
+		logPageTiming(id, run, i, "committed", timing)
+		activeTiming = nil
 		checkpoint = page.Checkpoint
 		reads += page.Reads
 		if page.Notice != "" {
 			notice = page.Notice
 		}
-		if !page.More || stored >= budget || a.now().Sub(started) >= soft {
+		if reason != "" {
 			break
 		}
 	}
@@ -406,6 +441,7 @@ type runContext struct {
 	descriptor Descriptor
 	target     Target
 	credential json.RawMessage
+	timing     *pageTimings
 }
 
 // submit sends one item through the ingestion command path. It returns the
@@ -429,6 +465,8 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 		revision = "sha256:" + content.Hash(b)
 	}
 	if item.Withdraw {
+		done := a.measure(rc.timing, stageAccept)
+		defer done()
 		receipt, err := a.Ingest.TrustedWithdraw(ctx, org, inst.CorpusID, content.Withdrawal{Key: KeyPrefix + content.StableID("withdraw", inst.ID, item.RecordKey, revision), Source: source, Reason: "source_withdrawn"})
 		receipt.NewRevision = false
 		return 0, receipt, err
@@ -461,7 +499,9 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 		// The key embeds the revision, so only this exact revision is skipped;
 		// a changed item still becomes a correction.
 		if a.Receipts != nil {
+			done := a.measure(rc.timing, stageReceipt)
 			known, err := a.Receipts.HasReceipt(ctx, org, key)
+			done()
 			if err != nil {
 				return 0, content.Receipt{}, err
 			}
@@ -481,7 +521,7 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 		for _, at := range item.Attachments {
 			req := AttachmentRequest{Organization: org, InstanceID: inst.ID, Config: inst.Config, Credential: rc.credential, Now: a.now(),
 				RecordKey: item.RecordKey, Revision: revision, Extensions: item.Extensions, Attachment: at}
-			blobID, size, skip, err := a.transfer(ctx, exchanger, rc.descriptor.MaxAttachmentBytes, rc.target.RunSequence, key, req)
+			blobID, size, skip, err := a.transfer(ctx, exchanger, rc.descriptor.MaxAttachmentBytes, rc.target.RunSequence, key, req, rc.timing)
 			if err != nil {
 				return 0, content.Receipt{}, err
 			}
@@ -509,6 +549,8 @@ func (a Acquirer) submit(ctx context.Context, org string, rc runContext, item It
 	if c.Manifest != nil {
 		c.Content = content.Text{Kind: "manifest"}
 	}
+	done := a.measure(rc.timing, stageAccept)
+	defer done()
 	receipt, err := a.Ingest.TrustedAccept(ctx, org, inst.CorpusID, c)
 	return stored, receipt, err
 }
@@ -523,7 +565,7 @@ var errAttachmentInvalid = fmt.Errorf("%w: attachment cannot be stored", content
 // storage holds. Bytes that changed between describe and upload are
 // described again once. It returns the Blob and its size, or the skip the
 // source asked for.
-func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes int64, run int64, itemKey string, req AttachmentRequest) (string, int64, *AttachmentDescription, error) {
+func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes int64, run int64, itemKey string, req AttachmentRequest, timing *pageTimings) (string, int64, *AttachmentDescription, error) {
 	at := req.Attachment
 	limit := MaxAttachmentBytes
 	if own := maxBytes; own > 0 && own < limit {
@@ -543,6 +585,8 @@ func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes
 			}
 			d, err = func() (AttachmentDescription, error) {
 				defer release()
+				done := a.measure(timing, stageDescribe)
+				defer done()
 				return ex.DescribeAttachment(ctx, req)
 			}()
 			if err != nil {
@@ -555,9 +599,11 @@ func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes
 		if d.SizeBytes < 1 || d.SizeBytes > limit {
 			return "", 0, nil, errAttachmentInvalid
 		}
+		done := a.measure(timing, stageGrant)
 		session, err := a.Blobs.Grant(ctx, req.Organization, uploads.Request{
 			Key:       KeyPrefix + content.StableID("attachment", itemKey, at.Key, d.SHA256, strconv.FormatInt(run, 10), strconv.Itoa(attempt)),
 			SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType})
+		done()
 		if errors.Is(err, uploads.ErrInvalid) {
 			return "", 0, nil, errAttachmentInvalid
 		}
@@ -576,6 +622,8 @@ func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes
 		}
 		err = func() error {
 			defer release()
+			done := a.measure(timing, stageUpload)
+			defer done()
 			return ex.UploadAttachment(ctx, req, UploadGrant{URL: session.UploadURL, Headers: session.UploadHeaders, SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType, ExpiresAt: session.ExpiresAt})
 		}()
 		var typed *Error
@@ -585,7 +633,9 @@ func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes
 		if err != nil {
 			return "", 0, nil, err
 		}
+		done = a.measure(timing, stageVerify)
 		verified, err := a.Blobs.Confirm(ctx, req.Organization, session.ID)
+		done()
 		switch {
 		case err != nil:
 			return "", 0, nil, err

@@ -288,8 +288,16 @@ func (p *Plugin) serveDescribeAttachment(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, 200, out)
 }
 
-// uploadClient never follows a redirect: a grant is one storage object.
-var uploadClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+// Retain a full 32-way connector burst between pages. The default transport
+// keeps only two idle connections per host, reconnecting for most later PUTs.
+// This is an idle-pool bound, not a limit on active uploads. Grants never follow
+// redirects and never share the engine's authenticated plugin-call transport.
+var uploadClient = func() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConnsPerHost = 32
+	transport.MaxIdleConns = 128
+	return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}()
 
 func (p *Plugin) serveUploadAttachment(w http.ResponseWriter, r *http.Request) {
 	req, impl, redact, ctx, cancel := p.attachmentHandler(w, r, "plugins/v0/connector-upload-attachment-request.schema.json")

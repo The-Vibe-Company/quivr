@@ -111,6 +111,34 @@ Its diagnostics report:
 | `compressed_bytes_read`, `object_size_bytes` | Compressed source bytes read and current object size |
 | `progress_percent` | Compressed byte reads divided by object size, capped at 100; buffered or repeated ranged reads can reach 100 before every member is submitted |
 | `archive_complete` | All members of the current archive were traversed |
+| `acquisition` | Engine timing for this committed page; fields below |
+
+`acquisition.items` counts page members. `fetch_ms` is elapsed fetch time,
+including source admission. `grant_ms`, `upload_ms`, `verify_ms`, `accept_ms`,
+`receipt_ms` and `describe_ms` sum time across workers for upload grants,
+plugin uploads, stored-byte verification, durable submission, replay checks
+and attachment descriptions. These sums overlap when submissions run in
+parallel; compare them with `page_ms` (elapsed fetch and submission time),
+rather than adding them to estimate elapsed time. Upload time includes the
+plugin's invocation, source/cache access, spooling and PUT. `run_ms` is elapsed
+time since the run began acquiring pages. Times are milliseconds.
+
+`more` reports whether acquisition can continue. `stop_reason` is empty for
+an intermediate page, or `source_drained`, `page_limit`, `soft_limit` or
+`attachment_budget` for the last page. `interval_ms` is the configured minimum
+wait after a run; retries or healthy push can make the wait longer. For a
+limited run with `more: true`, estimate the schedule's idle share as
+`interval_ms / (run_ms + interval_ms)`; logs and successive committed pages
+show any additional dispatch delay. Runs remain bounded to ten pages, two
+minutes before starting another page, and a 200 MiB attachment budget.
+
+Diagnostics capture timing before checkpoint persistence. The `connector
+acquisition page` log includes that persistence in elapsed page/run time and
+reports a soft limit crossed during the commit. An incomplete page is logged
+without advancing its checkpoint. If kind diagnostics are omitted or null,
+already use `acquisition`, or adding timing would exceed the 16 KiB diagnostics
+bound, the engine preserves their existing behavior and reports timings in the
+log only.
 
 For a known total across the prefix, set optional `members_total`. Tar archives
 are never scanned once just to count members. ZIP's directory supplies its

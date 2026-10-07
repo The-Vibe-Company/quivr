@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -279,23 +280,55 @@ func TestARateLimitedSourceDefersTheNextRunUntilItsReset(t *testing.T) {
 }
 
 func TestPagesReportReadsAndDiagnosticsWithTheirCheckpoint(t *testing.T) {
-	stub := &stubConnector{pages: []Page{
-		{Checkpoint: json.RawMessage(`{"n":1}`), Reads: 40, Diagnostics: json.RawMessage(`{"d":1}`), More: true},
-		{Checkpoint: json.RawMessage(`{"n":2}`), Reads: 2, Diagnostics: json.RawMessage(`{"d":2}`)},
-	}}
-	a, runs := stubAcquirer(t, stub, 100)
-	if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
-		t.Fatal(err)
-	}
-	if len(runs.progress) != 2 || runs.progress[0].Reads != 40 || runs.progress[1].Reads != 2 || string(runs.progress[1].Diagnostics) != `{"d":2}` {
-		t.Fatalf("progress %+v", runs.progress)
-	}
-	// Each page sees the reads already spent today, including earlier pages of this run.
-	if stub.requests[0].ReadsToday != 100 || stub.requests[1].ReadsToday != 140 || stub.requests[0].PageInRun != 0 || stub.requests[1].PageInRun != 1 {
-		t.Fatalf("requests %+v", stub.requests)
-	}
-	if runs.finished[0] != nil {
-		t.Fatalf("finish %+v", runs.finished[0])
+	for _, tc := range []struct {
+		name, diagnostic string
+		timing           bool
+	}{
+		{"progress", `{"d":2}`, true},
+		{"omitted diagnostics", "", false},
+		{"null diagnostics", "null", false},
+		{"kind owns acquisition", `{"d":2,"acquisition":{"source":"retained"}}`, false},
+		{"full object", `{"d":2,"padding":"` + strings.Repeat("x", 16*1024-30) + `"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubConnector{pages: []Page{
+				{Checkpoint: json.RawMessage(`{"n":1}`), Reads: 40, Diagnostics: json.RawMessage(`{"d":1}`), More: true},
+				{Checkpoint: json.RawMessage(`{"n":2}`), Reads: 2, Diagnostics: json.RawMessage(tc.diagnostic)},
+			}}
+			a, runs := stubAcquirer(t, stub, 100)
+			if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+				t.Fatal(err)
+			}
+			if len(runs.progress) != 2 {
+				t.Fatalf("progress %+v", runs.progress)
+			}
+			var diagnostics map[string]json.RawMessage
+			if tc.diagnostic == "" || tc.diagnostic == "null" {
+				if string(runs.progress[1].Diagnostics) != tc.diagnostic {
+					t.Fatal("omitted diagnostics must retain prior kind progress")
+				}
+				return
+			}
+			if err := json.Unmarshal(runs.progress[1].Diagnostics, &diagnostics); err != nil {
+				t.Fatal(err)
+			}
+			if runs.progress[0].Reads != 40 || runs.progress[1].Reads != 2 || string(diagnostics["d"]) != "2" || len(runs.progress[1].Diagnostics) > 16<<10 {
+				t.Fatalf("progress %+v", runs.progress)
+			}
+			if tc.timing {
+				if diagnostics["acquisition"] == nil {
+					t.Fatal("engine timing missing")
+				}
+			} else if string(runs.progress[1].Diagnostics) != tc.diagnostic {
+				t.Fatal("kind diagnostics changed when timing would overwrite or exceed its bound")
+			}
+			if stub.requests[0].ReadsToday != 100 || stub.requests[1].ReadsToday != 140 || stub.requests[0].PageInRun != 0 || stub.requests[1].PageInRun != 1 {
+				t.Fatalf("requests %+v", stub.requests)
+			}
+			if runs.finished[0] != nil {
+				t.Fatalf("finish %+v", runs.finished)
+			}
+		})
 	}
 }
 

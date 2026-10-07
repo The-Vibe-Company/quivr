@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -333,17 +334,39 @@ func TestAttachmentsNeedAnExchangingConnector(t *testing.T) {
 
 // A run keeps starting pages only until its soft time limit; the page that
 // crosses it is committed and the next run continues.
+type slowCheckpointRuns struct {
+	*fakeRuns
+	advance func()
+}
+
+func (s slowCheckpointRuns) CommitCheckpoint(ctx context.Context, org, id string, run int64, progress Progress) (bool, error) {
+	s.advance()
+	return s.fakeRuns.CommitCheckpoint(ctx, org, id, run, progress)
+}
 func TestARunStopsStartingPagesAfterItsSoftLimit(t *testing.T) {
-	a, runs, _, _ := exchangingAcquirer(t, func() []Item { return nil })
-	registry, _ := NewRegistry(exchangingConnector{items: func() []Item { return nil }, src: &fakeSource{}, more: true})
-	clock := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
-	a.Registry, a.MaxPages = registry, 10
-	a.Now = func() time.Time { clock = clock.Add(50 * time.Second); return clock }
-	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
-		t.Fatal(err)
-	}
-	if n := len(runs.checkpoints); n < 1 || n > 3 || runs.finished[0] != nil {
-		t.Fatalf("%d pages committed, finished %+v; a run past its soft limit must stop starting pages", n, runs.finished)
+	for _, stage := range []string{"fetch", "checkpoint"} {
+		t.Run(stage, func(t *testing.T) {
+			a, runs, _, _ := exchangingAcquirer(t, func() []Item { return nil })
+			clock := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+			advance := func() { clock = clock.Add(150 * time.Second) }
+			registry, _ := NewRegistry(exchangingConnector{items: func() []Item {
+				if stage == "fetch" {
+					advance()
+				}
+				return nil
+			}, src: &fakeSource{}, more: true})
+			a.Registry, a.MaxPages = registry, 10
+			a.Now = func() time.Time { return clock }
+			if stage == "checkpoint" {
+				a.Store = slowCheckpointRuns{runs, advance}
+			}
+			if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+				t.Fatal(err)
+			}
+			if len(runs.checkpoints) != 1 || runs.finished[0] != nil {
+				t.Fatalf("%d pages committed, finished %+v; no next page may start after fetch or checkpoint crosses the soft limit", len(runs.checkpoints), runs.finished)
+			}
+		})
 	}
 }
 
@@ -371,4 +394,112 @@ func (c plainConnector) Descriptor() Descriptor {
 	d.CredentialSchema = nil
 	d.DefaultInterval = time.Minute
 	return d
+}
+
+// Owns stage attribution at the acquisition boundary. The clock advances only
+// when a boundary is crossed; a missing/misattributed stage loses literal time.
+type timedExchange struct {
+	exchangingConnector
+	advance func(time.Duration)
+}
+
+func (c timedExchange) Fetch(ctx context.Context, req FetchRequest) (Page, error) {
+	c.advance(2 * time.Millisecond)
+	p, err := c.exchangingConnector.Fetch(ctx, req)
+	p.Diagnostics = json.RawMessage(`{"members_done":1}`)
+	return p, err
+}
+func (c timedExchange) Descriptor() Descriptor {
+	d := c.exchangingConnector.Descriptor()
+	d.Attachments = c
+	return d
+}
+func (c timedExchange) UploadAttachment(ctx context.Context, req AttachmentRequest, grant UploadGrant) error {
+	c.advance(5 * time.Millisecond)
+	return c.exchangingConnector.UploadAttachment(ctx, req, grant)
+}
+
+type timedGrants struct {
+	*fakeGrants
+	advance func(time.Duration)
+}
+
+func (g timedGrants) Grant(ctx context.Context, org string, req uploads.Request) (uploads.Session, error) {
+	g.advance(3 * time.Millisecond)
+	return g.fakeGrants.Grant(ctx, org, req)
+}
+func (g timedGrants) Confirm(ctx context.Context, org, id string) (uploads.Session, error) {
+	g.advance(7 * time.Millisecond)
+	return g.fakeGrants.Confirm(ctx, org, id)
+}
+
+type timedIngest struct {
+	*fakeIngest
+	advance func(time.Duration)
+}
+
+func (f timedIngest) TrustedAccept(ctx context.Context, org, corpus string, command content.Command) (content.Receipt, error) {
+	f.advance(11 * time.Millisecond)
+	return f.fakeIngest.TrustedAccept(ctx, org, corpus, command)
+}
+
+type timedReceipts struct {
+	advance func(time.Duration)
+}
+
+func (f timedReceipts) HasReceipt(context.Context, string, string) (bool, error) {
+	f.advance(17 * time.Millisecond)
+	return false, nil
+}
+
+func TestPageDiagnosticsAttributeAcquisitionStages(t *testing.T) {
+	item := mailItem("r1")
+	a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{item} })
+	clock := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	advance := func(d time.Duration) { clock = clock.Add(d) }
+	connector := timedExchange{exchangingConnector: exchangingConnector{items: func() []Item { return []Item{item} }, src: src}, advance: advance}
+	registry, err := NewRegistry(connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Registry, a.Now = registry, func() time.Time { return clock }
+	a.Blobs = timedGrants{src.storage, advance}
+	a.Ingest = timedIngest{ingest, advance}
+	a.Receipts = timedReceipts{advance}
+	src.onDescribe = func() { advance(13 * time.Millisecond) }
+	runs.target.Interval = 30 * time.Second
+	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs.progress) != 1 {
+		t.Fatalf("progress=%+v", runs.progress)
+	}
+	var diagnostics struct {
+		MembersDone int `json:"members_done"`
+		Acquisition struct {
+			Items      int     `json:"items"`
+			FetchMS    float64 `json:"fetch_ms"`
+			UploadMS   float64 `json:"upload_ms"`
+			GrantMS    float64 `json:"grant_ms"`
+			VerifyMS   float64 `json:"verify_ms"`
+			AcceptMS   float64 `json:"accept_ms"`
+			ReceiptMS  float64 `json:"receipt_ms"`
+			DescribeMS float64 `json:"describe_ms"`
+			PageMS     float64 `json:"page_ms"`
+			RunMS      float64 `json:"run_ms"`
+			More       bool    `json:"more"`
+			StopReason string  `json:"stop_reason"`
+			IntervalMS float64 `json:"interval_ms"`
+		} `json:"acquisition"`
+	}
+	if err := json.Unmarshal(runs.progress[0].Diagnostics, &diagnostics); err != nil {
+		t.Fatal(err)
+	}
+	d := diagnostics.Acquisition
+	if diagnostics.MembersDone != 1 || d.Items != 1 || d.FetchMS != 2 || d.GrantMS != 6 || d.UploadMS != 10 || d.VerifyMS != 14 || d.AcceptMS != 11 || d.ReceiptMS != 17 || d.DescribeMS != 13 || d.PageMS != 73 || d.RunMS != 73 || d.More || d.StopReason != "source_drained" || d.IntervalMS != 30000 {
+		t.Fatalf("stage timing or source progress lost: %s", runs.progress[0].Diagnostics)
+	}
+	if len(runs.progress[0].Diagnostics) > 16<<10 || strings.Contains(string(runs.progress[0].Diagnostics), "storage.invalid") {
+		t.Fatal("diagnostics exceeded bound or exposed a transfer URL")
+	}
 }
