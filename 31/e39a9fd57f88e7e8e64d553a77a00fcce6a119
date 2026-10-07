@@ -1,0 +1,63 @@
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_1504631d15b150 364-366
+  s_54b80c92daa9cb::t_a9c9c17de55945 238,242,265-290
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_1504631d15b150 284-288
+  s_54b80c92daa9cb::t_cbc3fead4d3c9b 235-263
+README.md
+  s_54b80c92daa9cb::t_93af0429c9eda7 89-90
+cmd/quivr-autoscaler/main.go
+  s_54b80c92daa9cb::t_b29e218b12f547 1-130
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_9be6a171d9f391 13-14,20-21,28-29,70,73,214,238,245
+deploy/railway/autoscaler.Dockerfile
+  s_54b80c92daa9cb::t_3745220dc6de57 1-11
+deploy/railway/autoscaler/README.md
+  s_54b80c92daa9cb::t_ccec9a0f5757cb 1-68
+deploy/railway/autoscaler/backend.go
+  s_54b80c92daa9cb::t_fb8996c5b92b2a 1-80
+deploy/railway/autoscaler/backend_test.go
+  s_54b80c92daa9cb::t_6bea7ccf38a694 1-84
+deploy/railway/provision.py
+  s_54b80c92daa9cb::t_c81511b93075b7 79,86-87,96
+deploy/railway/services.json
+  s_54b80c92daa9cb::t_cf7142b9298ef0 17-18
+docs-site/run-quivr/deploy.mdx
+  s_54b80c92daa9cb::t_96dab0edb2b55a 192,215-221,228,234,246,255
+docs/inventory.toml
+  s_54b80c92daa9cb::t_579c06981d5b2a 73,140
+docs/start/functional.md
+  s_54b80c92daa9cb::t_906bfeaaf306be 17
+internal/autoscaling/controller.go
+  s_54b80c92daa9cb::t_ca44d11ad559c6 1-77
+internal/autoscaling/controller_test.go
+  s_54b80c92daa9cb::t_fc65ed56694f35 1-91
+internal/autoscaling/http.go
+  s_54b80c92daa9cb::t_1bf2db7a7dd60d 1-68
+internal/autoscaling/policy.go
+  s_54b80c92daa9cb::t_449dd3fedb29d7 1-82
+internal/autoscaling/policy_test.go
+  s_54b80c92daa9cb::t_19cc3de716fa6d 1-76
+internal/autoscaling/queues_test.go
+  s_54b80c92daa9cb::t_aa85ecd5c3fb84 1-62
+scripts/local.py
+  s_54b80c92daa9cb::t_8172f72d775dc5 19,206-215,217,221,265,268-274,302,305,309-316
+scripts/test_local.py
+  s_54b80c92daa9cb::t_8cb7f7aea2ffee 7,49-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "31e39a9fd57f88e7e8e64d553a77a00fcce6a119",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
