@@ -23,6 +23,7 @@ type ingester struct {
 	cache     map[[32]byte]*list.Element
 	order     *list.List
 	bytes     int
+	tokenizer tokenCounter
 }
 type cachedVector struct {
 	key    [32]byte
@@ -31,6 +32,11 @@ type cachedVector struct {
 
 func newIngester(c configuration, key string, log *slog.Logger) *ingester {
 	i := &ingester{config: c, provider: provider{config: c, key: key, log: log, gate: &providerGate{slots: make(chan struct{}, c.MaxConcurrentRequests)}}, cache: map[[32]byte]*list.Element{}, order: list.New()}
+	i.tokenizer = byteCounter{}
+	if c.Tokenizer != nil {
+		i.tokenizer = &localTokenizer{config: *c.Tokenizer}
+		i.provider.counter = i.tokenizer
+	}
 	i.documents = &documentBatcher{provider: i.provider, slots: make(chan struct{}, min(256, c.MaxConcurrentRequests*c.BatchSize)), pending: map[string]*documentBatch{}}
 	return i
 }
@@ -61,7 +67,28 @@ func (i *ingester) put(key [32]byte, v []float32) {
 }
 func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestRequest) ([]quivrplugin.Segment, error) {
 	c := i.config
-	segments, inputs, err := c.segments(req.Parts)
+	var segments []quivrplugin.Segment
+	var inputs []string
+	var err error
+	if c.Packing == "paragraphs" {
+		segments, inputs, err = c.packedSegments(ctx, req.Parts, i.tokenizer)
+	} else {
+		legacy := c
+		if c.gemmaTemplate() || c.TitleSource != "none" {
+			// Legacy windows promote the title to body content when no body
+			// exists. Preserve explicit context without repeating the headline.
+			hasBody := false
+			for _, part := range req.Parts {
+				hasBody = hasBody || part.Role == "body" && strings.TrimSpace(part.Text) != ""
+			}
+			title, titleErr := c.documentTitle(req.Parts, hasBody)
+			if titleErr != nil {
+				return nil, titleErr
+			}
+			legacy.DocumentPrefix = c.documentInput(title, "")
+		}
+		segments, inputs, err = legacy.segments(req.Parts)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -88,13 +115,19 @@ func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestR
 		batch := []string{}
 		for end < len(missing) && end-start < c.BatchSize {
 			input := inputs[missing[end]]
-			cost := len(input) + specialTokens
+			cost, costErr := i.provider.inputCost(ctx, input)
+			if costErr != nil {
+				return nil, costErr
+			}
 			if tokens+cost > c.BatchTokens {
 				break
 			}
 			tokens += cost
 			batch = append(batch, input)
 			end++
+		}
+		if end == start {
+			return nil, quivrplugin.TerminalIngestError("segmentation_limit", "model input exceeds max_batch_tokens")
 		}
 		var v [][]float32
 		var err error
@@ -136,7 +169,11 @@ func (i *ingester) EmbedQuery(ctx context.Context, req *quivrplugin.QueryRequest
 	if req.Query.Modality != "text" || !utf8.ValidString(input) || strings.ContainsRune(input, 0) || strings.TrimSpace(req.Query.Text) == "" {
 		return nil, quivrplugin.TerminalIngestError("invalid_query", "query must contain valid text")
 	}
-	if len(input)+specialTokens > c.MaxTokens {
+	cost, err := i.provider.inputCost(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	if cost > c.MaxTokens {
 		return nil, quivrplugin.TerminalIngestError("query_limit", "query exceeds max_tokens_per_segment including its prefix and special token reserve")
 	}
 	encoder := &i.provider

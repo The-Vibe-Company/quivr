@@ -33,7 +33,7 @@ WORKDIR /app
 COPY scripts/prepare_tokenizer.py ./scripts/
 COPY third_party/tokenizer ./third_party/tokenizer
 COPY plugins/core-ingest/profile.json ./plugins/core-ingest/profile.json
-RUN python scripts/prepare_tokenizer.py
+RUN python scripts/prepare_tokenizer.py --hosted
 
 # Optional offline text runtime. The default image contains neither CPU wheels
 # nor model weights; deployment builders opt in before enabling query routing.

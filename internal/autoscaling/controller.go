@@ -16,18 +16,21 @@ type Backend interface {
 }
 
 type Decision struct {
-	Waiting         int64
-	Current, Target int
-	Outcome         string
+	Waiting                  int64
+	Current, Target, Applied int
+	Outcome                  string
 }
 
 // Controller reconciles the provider's observed count, never a guessed count.
 // One instance must own a target; it is called serially, once per poll.
 type Controller struct {
-	policy   *Policy
-	backlog  Backlog
-	backend  Backend
-	previous int
+	// MinScaleInterval spaces successful actions; zero disables spacing.
+	MinScaleInterval time.Duration
+	policy           *Policy
+	backlog          Backlog
+	backend          Backend
+	previous         int
+	lastScale        *time.Time
 }
 
 func NewController(policy *Policy, backlog Backlog, backend Backend) *Controller {
@@ -37,13 +40,14 @@ func NewController(policy *Policy, backlog Backlog, backend Backend) *Controller
 // Step returns unknown counts as -1. Failed reads never trigger a write; a
 // failed write keeps the last observed count and clears downscale evidence.
 func (c *Controller) Step(ctx context.Context, now time.Time) (Decision, error) {
-	d := Decision{Waiting: -1, Current: -1, Target: -1, Outcome: "replicas_error"}
+	d := Decision{Waiting: -1, Current: -1, Target: -1, Applied: -1, Outcome: "replicas_error"}
 	current, err := c.backend.Replicas(ctx)
 	if err != nil {
 		c.policy.Reset()
 		return d, fmt.Errorf("read replicas: %w", err)
 	}
 	d.Current = current
+	d.Applied = current
 	d.Target = current
 	if c.previous != current {
 		c.policy.Reset()
@@ -66,12 +70,19 @@ func (c *Controller) Step(ctx context.Context, now time.Time) (Decision, error) 
 	if desired == current {
 		return d, nil
 	}
+	if c.lastScale != nil && now.Sub(*c.lastScale) < c.MinScaleInterval {
+		d.Outcome = "cooldown"
+		return d, nil
+	}
+
 	d.Outcome = "update_error"
 	if err = c.backend.SetReplicas(ctx, desired); err != nil {
 		c.policy.Reset()
 		return d, fmt.Errorf("set replicas: %w", err)
 	}
+	c.lastScale = &now
 	c.previous = desired
+	d.Applied = desired
 	d.Outcome = "scaled"
 	return d, nil
 }

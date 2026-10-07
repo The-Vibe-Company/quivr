@@ -1,0 +1,21 @@
+id: example.multi
+version: 0.1.0
+description: Normative ingestion plugin with multi-Part segment support.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.17.0 <0.18.0"
+contributions:
+  ingestion:
+    spaces:
+      example.multi.small:
+        version: "1"
+        model: example/words-4
+        dimensions: 4
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+    timeout_ms: 10000
+    query_timeout_ms: 500
+    limits:
+      max_segments: 4
+      max_response_bytes: 65536

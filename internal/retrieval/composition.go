@@ -109,7 +109,7 @@ func (sv *server) serveProfile(ctx context.Context, q Request, c plugins.Candida
 	out := make([]plugins.Candidate, 0, len(result.Hits))
 	for _, h := range result.Hits {
 		sv.hydrated[h.Segment.ID] = h.Hydrated
-		out = append(out, plugins.Candidate{SegmentID: h.Segment.ID, RecordID: h.RecordID, VersionID: h.VersionID, PartKey: h.Segment.PartKey, Text: h.Segment.Text, Start: h.Segment.Start, End: h.Segment.End, Score: h.Score, Explanation: h.Explanation})
+		out = append(out, sv.candidate(h.Hydrated, h.Score, h.Explanation))
 	}
 	return out, nil
 }

@@ -234,8 +234,13 @@ class CoreEntrypointTest(unittest.TestCase):
             'auth': 'bearer', 'model': 'google/embeddinggemma-2', 'dimensions': 768,
             'model_revision': '914f7f89142e33e7',
             'query_prefix': 'task: search result | query: ',
-            'document_prefix': 'title: none | text: ',
-            'max_tokens_per_segment': 2048, 'overlap': 64,
+             'document_template': 'gemma', 'title_source': 'title',
+            'packing': 'paragraphs', 'body_tokens': 512, 'max_chunks': 4,
+            'rebalance_tail': True, 'tail_min_fraction': 0.25,
+            'tokenizer': {'python': '/app/.scratch/tokenizer/venv/bin/python',
+                          'model': '/app/.scratch/tokenizer/embeddinggemma-2.json',
+                          'sha256': '4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4'},
+            'max_tokens_per_segment': 2048, 'overlap': 0,
             'batch_size': 32, 'max_batch_tokens': 65536, 'max_concurrent_requests': 4,
             'request_timeout_ms': 10000, 'call_budget_ms': 90000, 'usd_per_million_tokens': 0,
         })
@@ -245,6 +250,8 @@ class CoreEntrypointTest(unittest.TestCase):
                          if name == 'hosted-embed')
             self.assertEqual(child['AZURE_FOUNDRY_KEY'], 'fixture-modal-token')
             self.assertNotIn('EMBED_API_KEY', child)
+            engine_ring = json.loads(core_entrypoint.engine_signing_environment(env)['QUIVR_ENGINE_PLUGIN_KEYS'])['hosted.embed']
+            self.assertEqual(json.loads(child['QUIVR_PLUGIN_SIGNING_KEYS']), engine_ring)
         for selection, endpoint in [('typo', env['EMBED_URL']), ('gemma', ''),
                                     ('gemma', 'http://example--embeddings.modal.run'),
                                     ('gemma', 'https://user:pass@example--embeddings.modal.run'),

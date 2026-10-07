@@ -577,7 +577,15 @@ def plugin_protocol(root):
                 if not name:
                     continue
                 schema = _load(root, name)
-                rows = list(_fields(schema, schema.get('$defs', {}), max_depth=2))
+                # Candidate source ranges sit below served[].candidates[]; keep
+                # enough depth for their part_key/start/end fields to remain
+                # visible in the generated protocol reference without making
+                # every contribution table recursively expand.
+                depth = 4 if name in {
+                    'retrieval-search-request.schema.json',
+                    'retrieval-search-response.schema.json',
+                } else 2
+                rows = list(_fields(schema, schema.get('$defs', {}), max_depth=depth))
                 body += [f'**{label}** (`{name}`)', '', *(_table(rows) if rows else ['No fields.']), '']
     error = _load(root, 'error.schema.json')
     body += ['## Errors', '', _cell(error.get('description', '')), '',

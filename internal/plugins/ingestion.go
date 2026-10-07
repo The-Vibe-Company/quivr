@@ -17,24 +17,37 @@ const (
 
 // Issue codes for ingestion answers.
 const (
-	CodeOffsetOutOfRange    = "offset_out_of_range"
-	CodeEmptySegment        = "empty_segment"
-	CodeDuplicateSegment    = "duplicate_segment"
-	CodeTooManySegments     = "too_many_segments"
-	CodeMissingVector       = "missing_vector"
-	CodeUnrequestedSpace    = "unrequested_space"
-	CodeDimensionMismatch   = "dimension_mismatch"
-	CodeInvalidVector       = "invalid_vector"
-	CodeInvalidLexicalText  = "invalid_lexical_text"
-	CodeLexicalTextTooLarge = "lexical_text_too_large"
-	CodeProvenanceTooLarge  = "provenance_too_large"
-	CodeInvalidProvenance   = "invalid_provenance"
+	CodeOffsetOutOfRange       = "offset_out_of_range"
+	CodeEmptySegment           = "empty_segment"
+	CodeDuplicateSegment       = "duplicate_segment"
+	CodeDuplicateSourceRange   = "duplicate_source_range"
+	CodeSourceRangeOrder       = "source_range_order"
+	CodeSourceRangeAnchor      = "source_range_anchor_mismatch"
+	CodeSourceRangeEmpty       = "empty_source_range"
+	CodeSourceRangeTooLarge    = "source_range_too_large"
+	CodePackedTextTooLarge     = "packed_text_too_large"
+	CodeTooManySourceRanges    = "too_many_source_ranges"
+	CodeInvalidSourceSeparator = "invalid_source_separator"
+	CodeMultiPartUnsupported   = "multi_part_segments_unsupported"
+	CodeTooManySegments        = "too_many_segments"
+	CodeMissingVector          = "missing_vector"
+	CodeUnrequestedSpace       = "unrequested_space"
+	CodeDimensionMismatch      = "dimension_mismatch"
+	CodeInvalidVector          = "invalid_vector"
+	CodeInvalidLexicalText     = "invalid_lexical_text"
+	CodeLexicalTextTooLarge    = "lexical_text_too_large"
+	CodeProvenanceTooLarge     = "provenance_too_large"
+	CodeInvalidProvenance      = "invalid_provenance"
 )
 
 // Bounds of one segment of a segment_and_embed answer.
 const (
-	MaxLexicalTextRunes = 16384
-	MaxProvenanceBytes  = 4 << 10
+	MaxLexicalTextRunes     = 16384
+	MaxProvenanceBytes      = 4 << 10
+	MaxSourceRanges         = 256
+	MaxSourceRangeRunes     = 4096
+	MaxPackedTextRunes      = 16384
+	MaxSourceSeparatorRunes = 16
 	// EmbedQueryMaxResponseBytes bounds an embed_query answer: one vector of
 	// at most 4096 numbers.
 	EmbedQueryMaxResponseBytes = 1 << 20
@@ -78,6 +91,14 @@ type IngestionPart struct {
 	Text string `json:"text"`
 }
 
+// SourceRange identifies one non-empty Unicode code point slice of a request
+// Part. Ranges in one segment are listed in the request's reading order.
+type SourceRange struct {
+	PartKey string `json:"part_key"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+}
+
 // IngestionRequestView is what output validation needs from a
 // segment_and_embed request: the Parts and the requested spaces.
 type IngestionRequestView struct {
@@ -95,12 +116,14 @@ func ViewIngestionRequest(request []byte) (IngestionRequestView, error) {
 // IngestionSegment is one decoded segment of a valid answer. Offsets are
 // Unicode code points in the Part text.
 type IngestionSegment struct {
-	PartKey     string               `json:"part_key"`
-	Start       int                  `json:"start"`
-	End         int                  `json:"end"`
-	Vectors     map[string][]float64 `json:"vectors"`
-	LexicalText string               `json:"lexical_text,omitempty"`
-	Provenance  json.RawMessage      `json:"provenance,omitempty"`
+	PartKey         string               `json:"part_key"`
+	Start           int                  `json:"start"`
+	End             int                  `json:"end"`
+	SourceRanges    []SourceRange        `json:"source_ranges,omitempty"`
+	SourceSeparator string               `json:"source_separator,omitempty"`
+	Vectors         map[string][]float64 `json:"vectors"`
+	LexicalText     string               `json:"lexical_text,omitempty"`
+	Provenance      json.RawMessage      `json:"provenance,omitempty"`
 }
 
 // IngestionAnswer is a decoded segment_and_embed answer.
@@ -126,7 +149,14 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 	if err := json.Unmarshal(raw, &answer); err != nil {
 		return []Issue{{Code: CodeSchema, Path: "/segments", Message: err.Error()}}
 	}
+	var wire struct {
+		Segments []map[string]json.RawMessage `json:"segments"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return []Issue{{Code: CodeSchema, Path: "/segments", Message: err.Error()}}
+	}
 	var issues []Issue
+	partOrder := map[string]int{}
 	if limit := IngestionMaxSegments(m); len(answer.Segments) > limit {
 		issues = append(issues, Issue{Code: CodeTooManySegments, Path: "/segments",
 			Message: fmt.Sprintf("%d segments; the manifest declares at most %d (limits.max_segments)", len(answer.Segments), limit)})
@@ -134,8 +164,9 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 	parts := map[string]int{}
 	hasTitle := false
 	keys := make([]string, 0, len(request.Parts))
-	for _, p := range request.Parts {
+	for i, p := range request.Parts {
 		parts[p.Key] = utf8.RuneCountInString(p.Text)
+		partOrder[p.Key] = i
 		keys = append(keys, p.Key)
 		if p.Role == "title" {
 			hasTitle = true
@@ -144,6 +175,15 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 	seen := map[string]int{}
 	for i, s := range answer.Segments {
 		path := fmt.Sprintf("/segments/%d", i)
+		rangesPresent, separatorPresent := sourceFieldsPresent(wire.Segments, i)
+		if (rangesPresent || separatorPresent) && !manifestSpeaks(m, FeatureMultiPartSegments) {
+			field := "source_ranges"
+			if !rangesPresent {
+				field = "source_separator"
+			}
+			issues = append(issues, Issue{Code: CodeMultiPartUnsupported, Path: path + "/" + field,
+				Message: fmt.Sprintf("%s requires Plugin API %s or later", field, FeatureSince(FeatureMultiPartSegments))})
+		}
 		length, known := parts[s.PartKey]
 		switch {
 		case !known:
@@ -156,7 +196,21 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 			issues = append(issues, Issue{Code: CodeEmptySegment, Path: path,
 				Message: fmt.Sprintf("segment [%d, %d) of Part %q is empty; an empty segment stands for the title alone, so it needs a Part with the role title", s.Start, s.End, s.PartKey)})
 		}
-		identity := fmt.Sprintf("%s\x00%d\x00%d", s.PartKey, s.Start, s.End)
+		if len(s.SourceRanges) > MaxSourceRanges {
+			issues = append(issues, Issue{Code: CodeTooManySourceRanges, Path: path + "/source_ranges",
+				Message: fmt.Sprintf("%d source ranges; at most %d are allowed", len(s.SourceRanges), MaxSourceRanges)})
+		}
+		if strings.ContainsRune(s.SourceSeparator, 0) || !utf8.ValidString(s.SourceSeparator) {
+			issues = append(issues, Issue{Code: CodeInvalidSourceSeparator, Path: path + "/source_separator",
+				Message: "the source separator contains a NUL character or invalid UTF-8"})
+		} else if n := utf8.RuneCountInString(s.SourceSeparator); n > MaxSourceSeparatorRunes {
+			issues = append(issues, Issue{Code: CodeInvalidSourceSeparator, Path: path + "/source_separator",
+				Message: fmt.Sprintf("the source separator has %d code points; at most %d are allowed", n, MaxSourceSeparatorRunes)})
+		}
+		if len(s.SourceRanges) > 0 {
+			issues = append(issues, sourceRangeIssues(path+"/source_ranges", s, parts, partOrder)...)
+		}
+		identity := sourceSegmentIdentity(s)
 		if first, dup := seen[identity]; dup {
 			issues = append(issues, Issue{Code: CodeDuplicateSegment, Path: path,
 				Message: fmt.Sprintf("segment [%d, %d) of Part %q repeats /segments/%d; return each segment once", s.Start, s.End, s.PartKey, first)})
@@ -182,6 +236,104 @@ func CheckSegmentAndEmbedOutput(raw []byte, request IngestionRequestView, m *Man
 				issues = append(issues, Issue{Code: CodeInvalidProvenance, Path: path + "/provenance", Message: "the provenance contains a NUL character, which the engine cannot store"})
 			}
 		}
+	}
+	return issues
+}
+
+// sourceFieldsPresent reports whether an answer explicitly carries either of
+// the additive multi-Part fields. The decoded string cannot distinguish an
+// omitted separator from an explicitly empty separator, so inspect the wire
+// object for API admission checks.
+func sourceFieldsPresent(segments []map[string]json.RawMessage, index int) (rangesPresent, separatorPresent bool) {
+	if index < 0 || index >= len(segments) {
+		return false, false
+	}
+	_, rangesPresent = segments[index]["source_ranges"]
+	_, separatorPresent = segments[index]["source_separator"]
+	return rangesPresent, separatorPresent
+}
+
+func manifestSpeaks(m *Manifest, feature Feature) bool {
+	if m == nil || m.Compatibility.PluginAPI == "" {
+		return true
+	}
+	r, err := ParseRange(m.Compatibility.PluginAPI)
+	if err != nil {
+		return true
+	}
+	_, admitted := admitsFeature(r, feature)
+	return admitted
+}
+
+func sourceSegmentIdentity(s IngestionSegment) string {
+	if len(s.SourceRanges) == 0 {
+		return fmt.Sprintf("%s\x00%d\x00%d", s.PartKey, s.Start, s.End)
+	}
+	var b strings.Builder
+	for _, r := range s.SourceRanges {
+		fmt.Fprintf(&b, "%s\x00%d\x00%d\x00", r.PartKey, r.Start, r.End)
+	}
+	return b.String()
+}
+
+func sourceRangeIssues(path string, segment IngestionSegment, parts map[string]int, partOrder map[string]int) []Issue {
+	var issues []Issue
+	if segment.SourceRanges[0].PartKey != segment.PartKey || segment.SourceRanges[0].Start != segment.Start || segment.SourceRanges[0].End != segment.End {
+		issues = append(issues, Issue{Code: CodeSourceRangeAnchor, Path: path + "/0",
+			Message: fmt.Sprintf("the legacy anchor [%d, %d) of Part %q must equal the first source range", segment.Start, segment.End, segment.PartKey)})
+	}
+	seen := map[string]int{}
+	lastPart := -1
+	lastEnd := map[string]int{}
+	packedRunes := 0
+	validRanges := 0
+	for i, r := range segment.SourceRanges {
+		rangePath := fmt.Sprintf("%s/%d", path, i)
+		length, known := parts[r.PartKey]
+		if !known {
+			issues = append(issues, Issue{Code: CodeUnknownPartKey, Path: rangePath + "/part_key",
+				Message: fmt.Sprintf("Part key %q is not a Part of the request", r.PartKey)})
+			continue
+		}
+		if r.Start >= r.End {
+			issues = append(issues, Issue{Code: CodeSourceRangeEmpty, Path: rangePath,
+				Message: fmt.Sprintf("source range [%d, %d) of Part %q must be non-empty", r.Start, r.End, r.PartKey)})
+		} else if r.Start < 0 || r.End > length {
+			issues = append(issues, Issue{Code: CodeOffsetOutOfRange, Path: rangePath,
+				Message: fmt.Sprintf("source range [%d, %d) is outside Part %q, which has %d code points", r.Start, r.End, r.PartKey, length)})
+		} else if r.End-r.Start > MaxSourceRangeRunes {
+			issues = append(issues, Issue{Code: CodeSourceRangeTooLarge, Path: rangePath,
+				Message: fmt.Sprintf("source range spans %d code points; at most %d are allowed", r.End-r.Start, MaxSourceRangeRunes)})
+		} else {
+			if validRanges > 0 {
+				packedRunes += utf8.RuneCountInString(segment.SourceSeparator)
+			}
+			packedRunes += r.End - r.Start
+			validRanges++
+		}
+		identity := fmt.Sprintf("%s\x00%d\x00%d", r.PartKey, r.Start, r.End)
+		if first, duplicate := seen[identity]; duplicate {
+			issues = append(issues, Issue{Code: CodeDuplicateSourceRange, Path: rangePath,
+				Message: fmt.Sprintf("source range repeats /%s/%d", path, first)})
+			continue
+		} else {
+			seen[identity] = i
+		}
+		order := partOrder[r.PartKey]
+		if order < lastPart || (order == lastPart && r.Start < lastEnd[r.PartKey]) {
+			issues = append(issues, Issue{Code: CodeSourceRangeOrder, Path: rangePath,
+				Message: "source ranges must follow request Part order and be increasing without overlap within a Part"})
+		}
+		if order > lastPart {
+			lastPart = order
+		}
+		if r.End > lastEnd[r.PartKey] {
+			lastEnd[r.PartKey] = r.End
+		}
+	}
+	if packedRunes > MaxPackedTextRunes {
+		issues = append(issues, Issue{Code: CodePackedTextTooLarge, Path: path,
+			Message: fmt.Sprintf("joined source ranges span %d code points including separators; at most %d are allowed", packedRunes, MaxPackedTextRunes)})
 	}
 	return issues
 }

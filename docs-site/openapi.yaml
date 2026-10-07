@@ -9432,6 +9432,39 @@ components:
           minimum: 1
         excerpt:
           $ref: '#/components/schemas/SearchExcerpt'
+        passage_text:
+          type: string
+          maxLength: 16384
+          description: Exact packed passage text used for the hit, when source-range metadata is available.
+        source_excerpts:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              part_key:
+                type: string
+                minLength: 1
+              text:
+                type: string
+                maxLength: 4096
+              start:
+                type: integer
+                minimum: 0
+              end:
+                type: integer
+                minimum: 0
+              coordinate_system:
+                type: string
+                enum:
+                - unicode_codepoint
+            required:
+            - part_key
+            - text
+            - start
+            - end
+            - coordinate_system
         availability:
           $ref: '#/components/schemas/Availability'
         explanation:

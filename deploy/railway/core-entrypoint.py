@@ -57,7 +57,7 @@ CONNECTORS = [
 # The configure command emits a model-locked manifest without a provider call.
 # /app is read-only to the runtime user; both files belong in private /tmp.
 HOSTED_MANIFEST = '/tmp/hosted-embed/quivr-plugin.yaml'
-HOSTED_EMBED = {'id': 'hosted-embed', 'port': 9980, 'api': True,
+HOSTED_EMBED = {'id': 'hosted-embed', 'signing_id': 'hosted.embed', 'port': 9980, 'api': True,
                 'manifest': HOSTED_MANIFEST, 'secrets': ['AZURE_FOUNDRY_KEY']}
 ENCODER_PYTHON = '/opt/query-encoder/venv/bin/python'
 ENCODER_MODEL = '/opt/query-encoder/model'
@@ -154,9 +154,14 @@ def gemma_configuration(env):
             # The plugin revision field is bounded to 32 bytes; the image pins the full SHA.
             'model_revision': '914f7f89142e33e7',
             'query_prefix': 'task: search result | query: ',
-            'document_prefix': 'title: none | text: ',
-            # UTF-8 bytes conservatively bound tokens; stay below the model's 8K window.
-            'max_tokens_per_segment': 2048, 'overlap': 64,
+             'document_template': 'gemma', 'title_source': 'title',
+            'packing': 'paragraphs', 'body_tokens': 512, 'max_chunks': 4,
+            'rebalance_tail': True, 'tail_min_fraction': 0.25,
+            'tokenizer': {'python': TOKENIZER['python'],
+                          'model': '/app/.scratch/tokenizer/embeddinggemma-2.json',
+                          'sha256': '4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4'},
+            # Exact model-tokenized body budget is separate from the full input window.
+            'max_tokens_per_segment': 2048, 'overlap': 0,
             'batch_size': 32, 'max_batch_tokens': 65536, 'max_concurrent_requests': 4,
             'request_timeout_ms': 10000, 'call_budget_ms': 90000,
             'usd_per_million_tokens': 0}

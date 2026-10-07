@@ -20,11 +20,12 @@ import (
 )
 
 type provider struct {
-	config configuration
-	key    string
-	log    *slog.Logger
-	gate   *providerGate
-	local  bool
+	config  configuration
+	key     string
+	log     *slog.Logger
+	gate    *providerGate
+	local   bool
+	counter tokenCounter
 }
 
 // localQueries is process execution tuning, outside immutable pin configuration.
@@ -66,7 +67,7 @@ func (i *ingester) localQueries(ctx context.Context, endpoint string) error {
 	c := i.config
 	c.BaseURL, c.Auth = strings.TrimRight(endpoint, "/"), "none"
 	c.RequestTimeoutMS, c.MaxRetries = 1000, 0
-	i.queries = &provider{config: c, log: i.provider.log, local: true, gate: &providerGate{slots: make(chan struct{}, 4)}}
+	i.queries = &provider{config: c, log: i.provider.log, local: true, counter: i.provider.counter, gate: &providerGate{slots: make(chan struct{}, 4)}}
 	return nil
 }
 
@@ -114,7 +115,14 @@ func (p provider) request(ctx context.Context, inputs []string, mode string, inv
 	encoded, _ := json.Marshal(body)
 	estimate := 0
 	for _, s := range inputs {
-		estimate += len(s) + specialTokens
+		cost, err := p.inputCost(ctx, s)
+		if err != nil {
+			if admitted {
+				p.gate.release()
+			}
+			return nil, err
+		}
+		estimate += cost
 	}
 	client := &http.Client{Timeout: time.Duration(c.RequestTimeoutMS) * time.Millisecond, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for attempt := 0; attempt <= c.MaxRetries; attempt++ {
@@ -309,4 +317,12 @@ func decodeVectors(raw []byte, c configuration, count int) ([][]float32, int, bo
 		}
 	}
 	return vectors, n, known, nil
+}
+
+func (p provider) inputCost(ctx context.Context, input string) (int, error) {
+	if p.counter == nil {
+		return len(input) + specialTokens, nil
+	}
+	e, err := encodeOne(ctx, p.counter, input, true)
+	return e.Tokens, err
 }

@@ -44,7 +44,10 @@ func duration(name string, fallback time.Duration, zero bool) (time.Duration, er
 	}
 	parsed, err := time.ParseDuration(value)
 	if err != nil || parsed < 0 || (!zero && parsed < time.Second) {
-		return 0, errors.New(name + " must be a duration of at least one second (or zero for downscale window)")
+		if zero {
+			return 0, errors.New(name + " must be a non-negative duration")
+		}
+		return 0, errors.New(name + " must be a duration of at least one second")
 	}
 	return parsed, nil
 }
@@ -92,6 +95,10 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	minScaleInterval, err := duration("QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL", 2*time.Minute, true)
+	if err != nil {
+		return err
+	}
 	timeout, err := duration("QUIVR_AUTOSCALER_REQUEST_TIMEOUT", 10*time.Second, false)
 	if err != nil {
 		return err
@@ -104,15 +111,16 @@ func run(logger *slog.Logger) error {
 	source := autoscaling.QueueSource{URL: endpoint.String(), Key: os.Getenv("QUIVR_QUEUE_KEY"), Client: client}
 	backend := railway.Backend{Token: os.Getenv("RAILWAY_TOKEN"), ServiceID: os.Getenv("RAILWAY_BULK_SERVICE_ID"), EnvironmentID: os.Getenv("RAILWAY_ENVIRONMENT_ID"), Client: client}
 	controller := autoscaling.NewController(policy, source, backend)
+	controller.MinScaleInterval = minScaleInterval
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	logger.Info("autoscaler started", "min", minimum, "max", maximum, "documents_per_replica", documents, "downscale_window", window.String(), "interval", interval.String())
+	logger.Info("autoscaler started", "min", minimum, "max", maximum, "documents_per_replica", documents, "downscale_window", window.String(), "interval", interval.String(), "min_scale_interval", minScaleInterval.String())
 	for {
 		decision, err := controller.Step(ctx, time.Now())
 		if ctx.Err() != nil {
 			return nil
 		}
-		attrs := []any{"outcome", decision.Outcome, "waiting", decision.Waiting, "current", decision.Current, "target", decision.Target}
+		attrs := []any{"outcome", decision.Outcome, "waiting", decision.Waiting, "current", decision.Current, "target", decision.Target, "applied", decision.Applied}
 		if err != nil {
 			logger.Warn("autoscaling decision", append(attrs, "error", err)...)
 		} else {

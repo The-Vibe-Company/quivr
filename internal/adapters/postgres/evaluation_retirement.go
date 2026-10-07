@@ -51,6 +51,16 @@ type retirementRequest struct {
 }
 
 func (s MonitoringStore) RetireEvaluations(ctx context.Context, org string, corpora []string, in monitoring.EvaluationRetirementInput) (monitoring.EvaluationRetirement, error) {
+	var result0 monitoring.EvaluationRetirement
+	err := retryJournalWrite(ctx, "RetireEvaluations", func(ctx context.Context) error {
+		var err error
+		result0, err = s.retireEvaluationsAttempt(ctx, org, corpora, in)
+		return err
+	})
+	return result0, err
+}
+
+func (s MonitoringStore) retireEvaluationsAttempt(ctx context.Context, org string, corpora []string, in monitoring.EvaluationRetirementInput) (monitoring.EvaluationRetirement, error) {
 	out := monitoring.EvaluationRetirement{EvaluationRetirementInput: in, ID: content.StableID("evaluation_retirement", org, in.Key), Outcome: monitoring.OutcomeEvaluatorRetired, Items: []monitoring.RetiredEvaluation{}}
 	canonical, err := json.Marshal(retirementRequest{Input: in, Corpora: corpora})
 	if err != nil {
