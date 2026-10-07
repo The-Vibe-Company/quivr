@@ -2,13 +2,14 @@ package acceptance
 
 import (
 	"os"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestLongTextExactSegments(t *testing.T) {
+// The ingestion plugin owns window coverage; public search owns the exact
+// canonical passage and stable identity after item-level ranking and replay.
+func TestLongTextExactPassage(t *testing.T) {
 	if os.Getenv("QUIVR_TEST_URL") == "" {
 		t.Skip("make verify")
 	}
@@ -35,18 +36,20 @@ func TestLongTextExactSegments(t *testing.T) {
 	q := map[string]any{"query": "constellation", "corpus_ids": []string{c}, "mode": "lexical", "limit": 50}
 	result := request(t, "POST", "/v0/search", admin, q, 200)
 	items := result["items"].([]any)
-	if len(items) < 3 {
-		t.Fatal("long text not segmented", result)
+	if len(items) != 1 {
+		t.Fatal("long document should appear once", result)
 	}
 	runes := []rune(text)
 	ids := map[string]bool{}
-	ranges := [][2]int{}
 	for _, item := range items {
 		h := item.(map[string]any)
 		ex := h["excerpt"].(map[string]any)
 		start, end := int(ex["start"].(float64)), int(ex["end"].(float64))
 		if start < 0 || end > len(runes) || end <= start || string(runes[start:end]) != ex["text"] {
 			t.Fatal("noncanonical slice", h)
+		}
+		if end-start >= len(runes) {
+			t.Fatal("long document returned without a passage", h)
 		}
 		if h["version_id"] != r["version_id"] || h["part_key"] != "body" {
 			t.Fatal("source identity changed", h)
@@ -56,16 +59,6 @@ func TestLongTextExactSegments(t *testing.T) {
 			t.Fatal("duplicate segment")
 		}
 		ids[id] = true
-		ranges = append(ranges, [2]int{start, end})
-	}
-	sort.Slice(ranges, func(i, j int) bool { return ranges[i][0] < ranges[j][0] })
-	if ranges[0][0] != 0 || ranges[len(ranges)-1][1] != len(runes) {
-		t.Fatal("source ends truncated", ranges)
-	}
-	for i := 1; i < len(ranges); i++ {
-		if ranges[i][0] >= ranges[i-1][1] || ranges[i][1] <= ranges[i-1][1] {
-			t.Fatal("missing overlap or contained segment", ranges)
-		}
 	}
 	cmd["idempotency_key"] = "long-replay"
 	replay := request(t, "POST", "/v0/records", admin, cmd, 202)

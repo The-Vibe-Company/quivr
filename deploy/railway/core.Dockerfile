@@ -84,5 +84,6 @@ COPY --from=plugins /app/plugins /app/plugins
 COPY --from=connectors /out/bin/ /usr/local/bin/
 COPY --from=connectors /out/plugins/ /app/plugins/
 COPY deploy/railway/core-entrypoint.py /app/core-entrypoint.py
+COPY third_party/french-light /usr/share/quivr/notices/french-light
 USER 10001:10001
 ENTRYPOINT ["python", "/app/core-entrypoint.py"]

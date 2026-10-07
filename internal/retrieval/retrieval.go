@@ -79,11 +79,13 @@ type Request struct {
 	EvaluationPlugin string
 	// SourceNamespaces, when set, keeps only Records from these Source
 	// Namespaces. The projection applies it before ranking.
-	SourceNamespaces []string
-	Metadata         []corpus.MetadataFilter
-	Mode, Profile    string
-	Limit            int
-	Vector           []float32
+	SourceNamespaces      []string
+	Metadata              []corpus.MetadataFilter
+	RecordIDs, VersionIDs []string
+	GroupBy               string
+	Mode, Profile         string
+	Limit                 int
+	Vector                []float32
 	// Space names the vector space a projection query ranks in; empty is the
 	// routed generations' served space.
 	Space string
@@ -255,6 +257,18 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		namespaces[ns] = true
 	}
+	for _, ids := range [][]string{q.RecordIDs, q.VersionIDs} {
+		if ids != nil && len(ids) == 0 || len(ids) > 50 {
+			return out, publicerr.InvalidQuery
+		}
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if id == "" || utf8.RuneCountInString(id) > 200 || seen[id] {
+				return out, publicerr.InvalidQuery
+			}
+			seen[id] = true
+		}
+	}
 	if err := corpus.ValidateFilters(q.Metadata); err != nil {
 		return out, err
 	}
@@ -271,6 +285,9 @@ func (s Service) Search(ctx context.Context, scope corpus.Scope, q Request) (Res
 		}
 		if g.ProfileVersion != ProfileVersion {
 			return out, ErrUnsupported
+		}
+		if len(q.RecordIDs) > 0 && !g.ItemKeywordsProjected {
+			return out, ErrMetadataFilterUnavailable
 		}
 		if len(q.Metadata) > 0 {
 			_, missing, resolveErr := corpus.ResolveFilters(q.Metadata, g.Fields)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/app"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
@@ -22,7 +23,10 @@ import (
 func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pool := rebuildAdapterPool(t, ctx)
+	pool := scratchDatabase(t, ctx)
+	if err := app.BootstrapDatabase(ctx, pool, nil); err != nil {
+		t.Fatal(err)
+	}
 	org := fmt.Sprintf("adapter-rebuild-%d", time.Now().UnixNano())
 	scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write", "content:write", "content:read", "search:query"}, Corpora: []string{"*"}}
 	corpora := corpus.Service{Store: postgres.Store{Pool: pool}}
@@ -72,6 +76,11 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	if err = promote(b.ID, y1); err != nil {
 		t.Fatal(err)
 	}
+	// Model an already serving pre-upgrade generation; rebuilding, not an
+	// ALTER default, is the only way this Corpus gains item keyword semantics.
+	if _, err := pool.Exec(ctx, `UPDATE projection_generations SET item_keywords_projected=false WHERE id=(SELECT id FROM projection_generations WHERE active)`); err != nil {
+		t.Fatal(err)
+	}
 	prior, err := store.Generation(ctx, org, a.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +93,7 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 		t.Fatalf("queued Operation activated: %v", err)
 	}
 	target, err := rebuild.BeginRebuild(ctx, org, op.ID)
-	if err != nil || target.Operation.State != operations.StateRunning || target.Generation.ID != op.TargetGenerationID || target.Generation.Collection != prior.Collection || target.Generation.SpaceID != prior.SpaceID {
+	if err != nil || target.Operation.State != operations.StateRunning || target.Generation.ID != op.TargetGenerationID || target.Generation.Collection != prior.Collection || target.Generation.SpaceID != prior.SpaceID || !target.Generation.ItemKeywordsProjected || prior.ItemKeywordsProjected {
 		t.Fatalf("begin %+v %v", target, err)
 	}
 	candidates := func(want ...string) []retrieval.RebuildCandidate {
