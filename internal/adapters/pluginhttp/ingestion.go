@@ -52,6 +52,7 @@ func (i Ingestor) Descriptor() processing.IngestionDescriptor {
 		d.Spaces = append(d.Spaces, space.Key)
 	}
 	if in := i.contribution(); in != nil {
+		d.Paged = in.Paging && i.Pin.Speaks(plugins.FeatureIngestionPages)
 		for id, space := range in.Spaces {
 			key := plugins.SpaceKey(id, space.Version)
 			var price *float64

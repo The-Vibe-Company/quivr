@@ -93,6 +93,18 @@ class Ingestion(unittest.TestCase):
                 if not case["valid"]:
                     self.assertEqual(reply.body["code"], "invalid_response", reply.body)
 
+    def test_pages_require_manifest_opt_in_before_dispatch(self):
+        manifest = yaml.safe_load((REPO / "contracts/plugins/v0/fixtures/manifests/valid/ingestion-paged.yaml").read_text())
+        manifest["contributions"]["ingestion"]["paging"] = False
+        self.path.write_text(yaml.safe_dump(manifest))
+        plugin = Plugin(self.path)
+        @plugin.segment_and_embed
+        def segment(_request):
+            self.fail("undeclared paging reached the handler")
+        request = json.loads((REPO / "contracts/plugins/v0/fixtures/requests/ingestion/page.json").read_text())
+        reply = plugin.handle("POST", SEGMENT, json.dumps(request).encode())
+        self.assertEqual((reply.status, reply.body["code"]), (400, "invalid_request"), reply.body)
+
     def test_unknown_space_is_rejected_before_the_handler_runs(self):
         @self.plugin.embed_query
         def query(request):

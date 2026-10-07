@@ -27,6 +27,21 @@ type Ingester interface {
 	EmbedQuery(ctx context.Context, req *QueryRequest) ([]float32, error)
 }
 
+// PagedIngester implements bounded full-text processing (Plugin API 0.18).
+// The host durably records each page, including provider-negotiated cuts, before
+// asking for the next. Every source code point from Page.Start must be covered.
+type PagedIngester interface {
+	SegmentAndEmbedPage(context.Context, *IngestRequest) (IngestPage, error)
+}
+type IngestPageRequest struct {
+	Start       int `json:"start"`
+	MaxSegments int `json:"max_segments"`
+}
+type IngestPage struct {
+	Segments  []Segment `json:"segments"`
+	NextStart *int      `json:"next_start,omitempty"`
+}
+
 // IngestPart is one text Part of a Record Version.
 type IngestPart struct {
 	Key  string `json:"key"`
@@ -51,7 +66,8 @@ type IngestRequest struct {
 	Parts    []IngestPart `json:"parts"`
 	// Spaces are the declared spaces to embed: every segment carries one
 	// vector for each. Empty (Plugin API 0.8) asks for the segments only.
-	Spaces []string `json:"spaces"`
+	Spaces []string           `json:"spaces"`
+	Page   *IngestPageRequest `json:"page,omitempty"`
 	logger *slog.Logger
 }
 
@@ -203,12 +219,34 @@ func (p *Plugin) serveSegmentAndEmbed(w http.ResponseWriter, r *http.Request) {
 	defer p.ingestPanic(w, req.logger)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(p.m.Ingestion.TimeoutMS)*time.Millisecond)
 	defer cancel()
-	segments, err := p.ingester.SegmentAndEmbed(ctx, &req)
+	var segments []Segment
+	var next *int
+	var err error
+	if req.Page != nil {
+		paged, ok := p.ingester.(PagedIngester)
+		if !ok || !p.m.Ingestion.Paging || compareVersions(p.m.pluginAPI, "0.18.0") < 0 {
+			refuse(w, 400, "invalid_request", "ingestion pages require a Plugin API 0.18 paged ingester and manifest paging: true", Credential{})
+			return
+		}
+		page, cause := paged.SegmentAndEmbedPage(ctx, &req)
+		segments, next, err = page.Segments, page.NextStart, cause
+	} else {
+		segments, err = p.ingester.SegmentAndEmbed(ctx, &req)
+	}
 	if err != nil {
 		p.ingestFail(w, req.logger, err)
 		return
 	}
 	body, problem := p.encodeSegments(&req, segments)
+	if problem == "" && req.Page != nil {
+		problem = ingestionPageProblem(&req, segments, next)
+		if problem == "" {
+			body, err = json.Marshal(IngestPage{Segments: segments, NextStart: next})
+			if err != nil || len(body) > p.m.Ingestion.Limits.MaxResponseBytes {
+				problem = "ingestion page exceeds max_response_bytes"
+			}
+		}
+	}
 	if problem != "" {
 		req.logger.Error("the ingester returned invalid segments", "problem", problem)
 		writeJSON(w, 500, envelope{Code: "invalid_response", Message: truncate(problem), Retryable: false})
@@ -217,6 +255,35 @@ func (p *Plugin) serveSegmentAndEmbed(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 	_, _ = w.Write(body)
+}
+
+func ingestionPageProblem(req *IngestRequest, segments []Segment, next *int) string {
+	if len(req.Parts) != 1 || req.Page.Start < 0 || req.Page.MaxSegments < 1 || len(segments) > req.Page.MaxSegments {
+		return "a page must respect its work bound and have one Part"
+	}
+	part := req.Parts[0]
+	end := req.Page.Start
+	for _, s := range segments {
+		ranges := s.SourceRanges
+		if len(ranges) == 0 {
+			ranges = []SourceRange{{PartKey: s.PartKey, Start: s.Start, End: s.End}}
+		}
+		for _, r := range ranges {
+			if r.PartKey != part.Key || r.Start != end || r.End <= r.Start {
+				return "paged source ranges must cover every code point once"
+			}
+			end = r.End
+		}
+	}
+	length := utf8.RuneCountInString(part.Text)
+	if next != nil {
+		if *next != end || end <= req.Page.Start || end >= length {
+			return "next_start must advance to the first uncovered code point"
+		}
+	} else if end != length {
+		return "a final page must cover the entire remaining source"
+	}
+	return ""
 }
 
 // encodeSegments encodes segments and checks them the way the engine will:
@@ -299,7 +366,7 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		return nil, "the segments are not JSON-encodable: " + err.Error()
 	}
 	body := buf.Bytes()
-	if len(body) > in.Limits.MaxResponseBytes {
+	if req.Page == nil && len(body) > in.Limits.MaxResponseBytes {
 		return nil, fmt.Sprintf("the response is %d bytes; max_response_bytes is %d", len(body), in.Limits.MaxResponseBytes)
 	}
 	if err := validate("plugins/v0/ingestion-segment-and-embed-response.schema.json", body); err != nil {

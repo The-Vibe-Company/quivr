@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"slices"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -50,6 +50,9 @@ type RebuildStore interface {
 	ActivateRebuild(ctx context.Context, org, operationID string) (bool, error)
 	// FailRebuild records a terminal failure for a queued or running Operation.
 	FailRebuild(ctx context.Context, org, operationID string, failure operations.Error) error
+	// QuarantineRebuild atomically holds a terminal per-Version failure and
+	// records bounded diagnostics. Cancellation fences it like coverage.
+	QuarantineRebuild(ctx context.Context, org, operationID, versionID string, reason content.Diagnostic) error
 }
 
 // RebuildContent reads canonical Versions.
@@ -114,7 +117,10 @@ type Rebuilder struct {
 }
 
 // terminal is a deterministic failure that retrying cannot repair.
-type terminal struct{ failure operations.Error }
+type terminal struct {
+	failure operations.Error
+	reason  *content.Diagnostic
+}
 
 func (t terminal) Error() string { return t.failure.Code }
 
@@ -154,6 +160,17 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 				return err
 			}
 			outcomes[i] = r.cover(work, org, target, c)
+			var item terminal
+			if errors.As(outcomes[i], &item) {
+				reason := content.Diagnostic{Code: item.failure.Code, Message: item.failure.Message}
+				if item.reason != nil {
+					reason = *item.reason
+					reason.Code = item.failure.Code
+				}
+				// An item failure does not cancel healthy siblings. Use the
+				// parent context if another sibling encountered an outage.
+				outcomes[i] = r.Store.QuarantineRebuild(ctx, org, operationID, c.VersionID, reason)
+			}
 			return outcomes[i]
 		})
 	}
@@ -167,18 +184,6 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 			return r.stop(ctx, org, operationID)
 		}
 	}
-	for _, outcome := range outcomes {
-		var failure terminal
-		if errors.As(outcome, &failure) {
-			// Use the parent context: the group context is canceled after Wait.
-			// The store preserves an earlier cancellation request over this failure.
-			if err = r.Store.FailRebuild(ctx, org, operationID, failure.failure); err != nil {
-				return false, err
-			}
-			return r.stop(ctx, org, operationID)
-		}
-	}
-
 	if err != nil {
 		return false, err
 	}
@@ -189,10 +194,7 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 			return false, err
 		}
 		if slices.Equal(candidates, remaining) {
-			if err = r.Store.FailRebuild(ctx, org, operationID, operations.Error{Code: "rebuild_no_progress", Message: "a successful rebuild batch left the same coverage gaps; verify canonical content and target vector coverage"}); err != nil {
-				return false, err
-			}
-			return r.stop(ctx, org, operationID)
+			return false, errors.New("rebuild coverage did not advance; retry after storage or routing recovers")
 		}
 		if err := r.Store.CheckpointRebuild(ctx, org, operationID, candidates[len(candidates)-1].VersionID); err != nil {
 			if errors.Is(err, operations.ErrNotRunning) {
@@ -247,7 +249,7 @@ func (r Rebuilder) coverDocument(ctx context.Context, org string, target Rebuild
 		return err
 	}
 	if r.Plugin == nil || !r.Plugin.Owns(ctx, target.Generation.SpaceID) {
-		return terminal{failure: operations.Error{Code: "unsupported_vector_space", Message: "the pinned ingestion plugin does not own the target generation's vector space"}}
+		return processing.ErrSpaceUnowned
 	}
 	req := processing.DerivationRequest{CorpusID: corpusID, Version: v, Target: target.Generation, Kind: processing.Vectors}
 	if !c.VectorsRequired {
@@ -280,7 +282,7 @@ func (r Rebuilder) coverDocument(ctx context.Context, org string, target Rebuild
 		if code == "derivation_conflict" {
 			code = "segmentation_mismatch"
 		}
-		return terminal{failure: operations.Error{Code: code, Message: out.Terminal.Message}}
+		return terminal{failure: operations.Error{Code: code, Message: out.Terminal.Message}, reason: out.Terminal}
 	}
 	if out.Retry != nil {
 		return out.Retry

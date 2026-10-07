@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"strings"
 	"unicode/utf8"
@@ -329,9 +328,6 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 				groups[last] = append(append([]paragraph(nil), left[bestCut:]...), right...)
 			}
 		}
-	}
-	if len(groups) > c.MaxChunks {
-		return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", fmt.Sprintf("item needs %d chunks; recipe permits %d (raise body_tokens or max_chunks)", len(groups), c.MaxChunks))
 	}
 	segments := make([]quivrplugin.Segment, len(groups))
 	inputs := make([]string, len(groups))

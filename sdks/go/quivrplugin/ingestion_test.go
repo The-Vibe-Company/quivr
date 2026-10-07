@@ -9,13 +9,81 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 type ingestionAnswer struct {
-	segments []Segment
-	vector   []float32
+	segments  []Segment
+	vector    []float32
+	nextStart *int
+}
+
+func (a ingestionAnswer) SegmentAndEmbedPage(context.Context, *IngestRequest) (IngestPage, error) {
+	return IngestPage{Segments: a.segments, NextStart: a.nextStart}, nil
+}
+
+type pagedAnswer struct{ ingestionAnswer }
+
+func (a pagedAnswer) SegmentAndEmbedPage(context.Context, *IngestRequest) (IngestPage, error) {
+	next := 4
+	return IngestPage{Segments: []Segment{{PartKey: "body", Start: 0, End: 4}}, NextStart: &next}, nil
+}
+
+// SDK dispatch must preserve a page's cursor and bound; the host owns the
+// normative coverage oracle, while this guards the typed HTTP adapter.
+func TestIngestionPageDispatch(t *testing.T) {
+	if _, err := New(filepath.Join(fixtures, "manifests/invalid/ingestion-pages-old-api.yaml")); err == nil {
+		t.Fatal("paging accepted below Plugin API 0.18")
+	}
+	if _, err := New(filepath.Join(fixtures, "manifests/valid/ingestion-paging-disabled.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	p, err := New(filepath.Join(fixtures, "manifests/valid/ingestion-paged.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Ingestion(pagedAnswer{}); err != nil {
+		t.Fatal(err)
+	}
+	h, err := p.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"invocation_id":"page","idempotency_key":"page","contribution":"ingestion","organization_id":"org","configuration":{},"version":{"corpus_id":"c","record_id":"r","record_version_id":"v"},"parts":[{"key":"body","role":"body","text":"abcdefgh"}],"spaces":[],"page":{"start":0,"max_segments":2}}`)
+	status, out, raw := callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 200 || out["next_start"] != float64(4) {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	segments := out["segments"].([]any)
+	if len(segments) != 1 || segments[0].(map[string]any)["part_key"] != "body" || segments[0].(map[string]any)["start"] != float64(0) || segments[0].(map[string]any)["end"] != float64(4) {
+		t.Fatalf("typed page segments lost: %s", raw)
+	}
+	// A current SDK must not dispatch a page without manifest opt-in.
+	p.m.Ingestion.Paging = false
+	status, out, raw = callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 400 || out["code"] != "invalid_request" {
+		t.Fatalf("undeclared paging status=%d body=%s", status, raw)
+	}
+	p.m.Ingestion.Paging = true
+	lexical := strings.Repeat("x", 1100)
+	if err = p.Ingestion(ingestionAnswer{segments: []Segment{{PartKey: "body", Start: 0, End: 8, LexicalText: lexical}}}); err != nil {
+		t.Fatal(err)
+	}
+	// Literal wire bytes pin the actual page envelope at its declared bound.
+	wire := `{"segments":[{"part_key":"body","start":0,"end":8,"vectors":{},"lexical_text":"` + lexical + `"}]}`
+	p.m.Ingestion.Limits.MaxResponseBytes = len(wire)
+	status, _, raw = callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 200 || len(raw) != len(wire) {
+		t.Fatalf("exact page byte boundary status=%d len=%d want=%d body=%s", status, len(raw), len(wire), raw)
+	}
+	p.m.Ingestion.Limits.MaxResponseBytes--
+	status, out, raw = callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 500 || out["code"] != "invalid_response" {
+		t.Fatalf("over-bound page accepted: status=%d body=%s", status, raw)
+	}
+
 }
 
 func (a ingestionAnswer) SegmentAndEmbed(context.Context, *IngestRequest) ([]Segment, error) {
@@ -70,8 +138,9 @@ func TestIngestionNormativeResponses(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out struct {
-				Segments []Segment `json:"segments"`
-				Vector   []float32 `json:"vector"`
+				Segments  []Segment `json:"segments"`
+				Vector    []float32 `json:"vector"`
+				NextStart *int      `json:"next_start,omitempty"`
 			}
 			if err := json.Unmarshal(response, &out); err != nil {
 				if c.File != "responses/ingestion/float32-overflow.json" {
@@ -79,7 +148,7 @@ func TestIngestionNormativeResponses(t *testing.T) {
 				}
 				return // float32 overflow is unrepresentable in the SDK's vector type.
 			}
-			_ = p.Ingestion(ingestionAnswer{segments: out.Segments, vector: out.Vector})
+			_ = p.Ingestion(ingestionAnswer{segments: out.Segments, vector: out.Vector, nextStart: out.NextStart})
 			h, err := p.Handler()
 			if err != nil {
 				t.Fatal(err)

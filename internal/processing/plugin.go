@@ -39,6 +39,18 @@ type IngestionDescriptor struct {
 	Spaces       []string
 	VectorSpaces map[string]content.VectorSpace
 	SegmentsOnly bool
+	// Paged derives and durably records vectors before publishing negotiated cuts.
+	Paged bool
+}
+
+type PluginPage struct {
+	Segments []PluginSegment
+	Next     json.RawMessage
+}
+
+// PagedIngestionPlugin bounds each provider/transport call, never total coverage.
+type PagedIngestionPlugin interface {
+	SegmentAndEmbedPage(context.Context, string, string, content.Version, []string, json.RawMessage) (PluginPage, error)
 }
 
 func (d IngestionDescriptor) Owns(space string) bool {
@@ -202,7 +214,7 @@ func (d PluginDeriver) Segment(ctx context.Context, org, corpusID string, v cont
 	if !errors.Is(err, corpus.ErrNotFound) {
 		return seg, err
 	}
-	if !d.descriptor.SegmentsOnly {
+	if !d.descriptor.SegmentsOnly || d.descriptor.Paged {
 		spaces := d.owned(g)
 		if len(spaces) == 0 {
 			spaces = d.descriptor.Spaces
@@ -210,7 +222,7 @@ func (d PluginDeriver) Segment(ctx context.Context, org, corpusID string, v cont
 		seg, _, err = d.derive(ctx, org, corpusID, v, spaces)
 		return seg, err
 	}
-	segments, err := d.Plugin.SegmentAndEmbed(ctx, org, corpusID, v, nil)
+	segments, err := d.segmentAndEmbed(ctx, org, corpusID, v, nil)
 	if err != nil {
 		return seg, err
 	}
@@ -260,7 +272,7 @@ func (d PluginDeriver) derive(ctx context.Context, org, corpusID string, v conte
 	case !errors.Is(err, corpus.ErrNotFound):
 		return seg, nil, err
 	}
-	segments, err := d.Plugin.SegmentAndEmbed(ctx, org, corpusID, v, spaces)
+	segments, err := d.segmentAndEmbed(ctx, org, corpusID, v, spaces)
 	if err != nil {
 		return seg, nil, err
 	}
@@ -320,7 +332,7 @@ func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content
 	if err != nil || complete {
 		return data, err
 	}
-	segments, err := d.Plugin.SegmentAndEmbed(ctx, org, corpusID, v, spaces)
+	segments, err := d.segmentAndEmbed(ctx, org, corpusID, v, spaces)
 	if err != nil {
 		return nil, err
 	}

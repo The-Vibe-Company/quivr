@@ -99,6 +99,9 @@ func (p provider) requestWithCost(ctx context.Context, inputs []string, mode str
 		if admitted {
 			p.gate.release()
 		}
+		if mode == "document" {
+			return nil, quivrplugin.RetryableIngestError("provider_credentials", "provider credentials unavailable")
+		}
 		return nil, quivrplugin.TerminalIngestError("provider_credentials", "AZURE_FOUNDRY_KEY is required")
 	}
 	body := map[string]any{"model": c.Model}
@@ -148,6 +151,9 @@ func (p provider) requestWithCost(ctx context.Context, inputs []string, mode str
 		req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(c.BaseURL, "/")+path, bytes.NewReader(encoded))
 		if err != nil {
 			p.gate.release()
+			if mode == "document" {
+				return nil, quivrplugin.RetryableIngestError("provider_unavailable", "invalid provider URL")
+			}
 			return nil, quivrplugin.TerminalIngestError("invalid_configuration", "invalid provider URL")
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -197,6 +203,9 @@ func (p provider) requestWithCost(ctx context.Context, inputs []string, mode str
 			if mode == "document" && isInputRefusal(res.StatusCode, data) {
 				return nil, &inputRefusal{refusal}
 			}
+			if mode == "document" {
+				return nil, quivrplugin.RetryableIngestError("provider_unavailable", "shared provider request failed (HTTP "+strconv.Itoa(res.StatusCode)+")")
+			}
 			return nil, refusal
 		}
 		if attempt == c.MaxRetries {
@@ -229,24 +238,68 @@ func isInputRefusal(status int, body []byte) bool {
 		return false
 	}
 	var payload struct {
-		Error struct {
-			Param string `json:"param"`
-			Code  string `json:"code"`
-		} `json:"error"`
+		Error   json.RawMessage `json:"error"`
+		Detail  json.RawMessage `json:"detail"`
+		Message string          `json:"message"`
 	}
 	if json.Unmarshal(body, &payload) != nil {
 		return false
 	}
-	param := payload.Error.Param
+	var attribution struct {
+		Param   string `json:"param"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if len(payload.Error) > 0 && json.Unmarshal(payload.Error, &attribution) != nil {
+		if json.Unmarshal(payload.Error, &attribution.Message) != nil {
+			return false
+		}
+	}
+	param := attribution.Param
 	if param != "" {
 		return param == "input" || param == "texts" || strings.HasPrefix(param, "input[") || strings.HasPrefix(param, "texts[") || strings.HasPrefix(param, "input.") || strings.HasPrefix(param, "texts.")
 	}
-	switch payload.Error.Code {
+	switch attribution.Code {
 	case "invalid_input", "invalid_text", "input_too_long", "text_too_long", "context_length_exceeded", "input_validation_error":
 		return true
 	}
+	// Some compatible providers attribute length errors only in a message.
+	// Inspect safe categories locally; never log or retain the provider body.
+	message := strings.ToLower(attribution.Message + " " + providerDetailMessage(payload.Detail) + " " + payload.Message)
+	for _, category := range []string{"maximum context length", "input is too long", "input too long", "too many tokens", "exceeds the token limit", "input length exceeds"} {
+		if strings.Contains(message, category) {
+			return true
+		}
+	}
 	return false
 }
+
+// Compatible providers use either a string or validation-message objects.
+// Read message fields only; source input echoed in other fields is irrelevant.
+func providerDetailMessage(raw json.RawMessage) string {
+	var message string
+	if json.Unmarshal(raw, &message) == nil {
+		return message
+	}
+	type detail struct {
+		Message string `json:"message"`
+		Msg     string `json:"msg"`
+	}
+	var object detail
+	if json.Unmarshal(raw, &object) == nil {
+		return object.Message + " " + object.Msg
+	}
+	var list []detail
+	if json.Unmarshal(raw, &list) == nil {
+		var messages []string
+		for _, entry := range list {
+			messages = append(messages, entry.Message, entry.Msg)
+		}
+		return strings.Join(messages, " ")
+	}
+	return ""
+}
+
 func (p provider) usage(invocations []string, items int, mode string, attempt, status, tokens int, estimated bool) {
 	attrs := []any{"event", "hosted_embedding_usage", "space", p.config.spaceID(), "mode", mode, "attempt", attempt + 1, "status", status, "input_tokens", tokens, "input_count", items, "estimated", estimated}
 	if p.local {

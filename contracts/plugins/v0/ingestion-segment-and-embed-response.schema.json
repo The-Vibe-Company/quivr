@@ -103,6 +103,11 @@
           }
         }
       }
+    },
+    "next_start": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "First uncovered Unicode code point in the request Part. When present it equals the last segment range end, strictly advances past page.start, and remains below the Part length. Omit only when the entire suffix is covered."
     }
   }
 }

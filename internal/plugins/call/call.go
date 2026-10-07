@@ -277,7 +277,17 @@ func identify(pin *plugins.Pin, operation string, body []byte) ([]byte, error) {
 		if err := json.Unmarshal(body, &r); err != nil {
 			return nil, err
 		}
-		r.IdempotencyKey = plugins.IngestionKey(pin.Generation(), r.OrganizationID, r.Version.RecordVersionID, r.Spaces)
+		key := plugins.IngestionKey(pin.Generation(), r.OrganizationID, r.Version.RecordVersionID, r.Spaces)
+		if r.Page != nil {
+			// The host's opaque continuation distinguishes identical windows
+			// at different source positions. Bind it to this owner and input.
+			page, err := json.Marshal([]any{r.IdempotencyKey, r.Parts, r.Page})
+			if err != nil {
+				return nil, err
+			}
+			key = content.StableID("ingestion_page", key, content.Hash(page))
+		}
+		r.IdempotencyKey = key
 		return plugins.BuildSegmentAndEmbedRequest(r)
 	case EvaluateSubscription:
 		var r plugins.SubscriptionRequest
