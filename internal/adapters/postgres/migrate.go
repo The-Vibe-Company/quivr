@@ -7,8 +7,11 @@ import (
 	"io/fs"
 
 	"github.com/The-Vibe-Company/quivr/migrations"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const migrationAdvisoryLock int64 = 642001
 
 // Migrate applies pending expand migrations, leaving contracts for the operator.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
@@ -48,7 +51,11 @@ func migrateFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, includeContr
 	if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout = '2s'; SET LOCAL statement_timeout = '5s'"); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(642001)"); err != nil {
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationAdvisoryLock); err != nil {
+		var databaseError *pgconn.PgError
+		if errors.As(err, &databaseError) && databaseError.Code == "55P03" {
+			return fmt.Errorf("%w: %w", ErrIndexBusy, err)
+		}
 		return err
 	}
 	if _, err = tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY)"); err != nil {
