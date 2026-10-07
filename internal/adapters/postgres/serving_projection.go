@@ -146,6 +146,16 @@ func (s ServingProjectionStore) ServingProjectionEligible(ctx context.Context, j
 }
 
 func (s ServingProjectionStore) CountServingProjectionTimeout(ctx context.Context, j content.IngestionEvaluation) (int, error) {
+	var result0 int
+	err := retryJournalWrite(ctx, "CountServingProjectionTimeout", func(ctx context.Context) error {
+		var err error
+		result0, err = s.countServingProjectionTimeoutAttempt(ctx, j)
+		return err
+	})
+	return result0, err
+}
+
+func (s ServingProjectionStore) countServingProjectionTimeoutAttempt(ctx context.Context, j content.IngestionEvaluation) (int, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -169,6 +179,13 @@ func (s ServingProjectionStore) CountServingProjectionTimeout(ctx context.Contex
 }
 
 func (s ServingProjectionStore) CompleteServingProjection(ctx context.Context, j content.IngestionEvaluation, state string, reason *content.Diagnostic) error {
+	err := retryJournalWrite(ctx, "CompleteServingProjection", func(ctx context.Context) error {
+		return s.completeServingProjectionAttempt(ctx, j, state, reason)
+	})
+	return err
+}
+
+func (s ServingProjectionStore) completeServingProjectionAttempt(ctx context.Context, j content.IngestionEvaluation, state string, reason *content.Diagnostic) error {
 	if state != "succeeded" && state != "failed" && state != "skipped" {
 		return content.ErrInvalid
 	}
@@ -226,11 +243,34 @@ func (s ServingProjectionStore) CompleteServingProjection(ctx context.Context, j
 // CoverServingProjection publishes readiness and currentness only after the
 // current routed owner has its own complete projection and primary vectors.
 func (s ServingProjectionStore) CoverServingProjection(ctx context.Context, j content.IngestionEvaluation, g content.Generation, seg content.Segmentation, artifacts []content.Embedding) error {
-	tx, err := s.Pool.Begin(ctx)
+	err := retryJournalWrite(ctx, "CoverServingProjection", func(ctx context.Context) error {
+		return s.coverServingProjectionAttempt(ctx, j, g, seg, artifacts)
+	})
+	return err
+}
+
+func (s ServingProjectionStore) coverServingProjectionAttempt(ctx context.Context, j content.IngestionEvaluation, g content.Generation, seg content.Segmentation, artifacts []content.Embedding) error {
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return err
+	}
+	hint, err := servingProjectionEligible(ctx, tx, j)
+	if err != nil {
+		return err
+	}
+	prepared := hint && len(artifacts) > 0
+	if prepared {
+		if seg.VersionID != j.VersionID || content.PluginOfRecipe(seg.Recipe) != j.PluginID || g.ID != j.GenerationID {
+			return content.ErrInvalid
+		}
+		if _, err = prepareJournal(ctx, tx, func(stage pgx.Tx) error { return coverOwnerProjection(ctx, stage, j.Organization, g, seg, artifacts) }); err != nil {
+			return err
+		}
+	}
 	if err = lockJournal(ctx, tx, j.Organization); err != nil {
 		return err
 	}
@@ -239,7 +279,7 @@ func (s ServingProjectionStore) CoverServingProjection(ctx context.Context, j co
 		return err
 	}
 	if !eligible {
-		return tx.Commit(ctx)
+		return nil
 	}
 	var carriesPrimary bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jsonb_array_elements(spaces) sp WHERE sp->>'owner_plugin_id'=$2 AND sp->>'role'='served' AND sp->>'id'=ANY($3::text[])) FROM projection_generations WHERE id=$1`, j.GenerationID, j.PluginID, j.Spaces).Scan(&carriesPrimary); err != nil {
@@ -251,8 +291,8 @@ func (s ServingProjectionStore) CoverServingProjection(ctx context.Context, j co
 	if seg.VersionID != j.VersionID || content.PluginOfRecipe(seg.Recipe) != j.PluginID || g.ID != j.GenerationID || len(artifacts) == 0 {
 		return content.ErrInvalid
 	}
-	if err = coverOwnerProjection(ctx, tx, j.Organization, g, seg, artifacts); err != nil {
-		return err
+	if !prepared {
+		return ErrGenerationChanged
 	}
 	var complete bool
 	err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM segments sg CROSS JOIN unnest($4::text[]) sp(id) WHERE sg.organization=$1 AND sg.segmentation_id=$2 AND NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=$1 AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=sp.id))`, j.Organization, seg.ID, g.ID, j.Spaces).Scan(&complete)

@@ -39,9 +39,9 @@ SELECT x.ordinal,coalesce(sv.saved_query_id,''),coalesce(sv.saved_query_version_
   CASE WHEN i.state='done' AND i.outcome='evaluator_retired' THEN 'evaluator_retired'
     WHEN s.id IS NULL OR sv.id IS NULL OR q.id IS NULL THEN 'ineligible'
     WHEN NOT s.enabled OR x.sequence<=coalesce(s.enabled_position,0) THEN 'subscription_disabled'
-    WHEN ` + supersededSQL("sv", "x.sequence") + ` THEN 'subscription_version_superseded'
+    WHEN ` + supersededPointSQL("sv", "x.sequence") + ` THEN 'subscription_version_superseded'
     WHEN r.id IS NULL OR v.id IS NULL OR NOT coalesce(r.current_version_id IS NOT DISTINCT FROM v.id
-      AND ` + eligibleVersionSQL + ` AND r.corpus_id=ANY(q.corpus_ids),false) THEN 'ineligible'
+      AND ` + eligibleVersionPointSQL + ` AND r.corpus_id=ANY(q.corpus_ids),false) THEN 'ineligible'
     ELSE '' END,
   EXISTS(SELECT 1 FROM matches m WHERE m.organization=$1 AND m.record_id=$2
     AND m.subscription_id=x.subscription_id AND m.record_version_id=$3)
@@ -65,6 +65,16 @@ ORDER BY x.ordinal`
 // Repeated positives share their first eligible Match; corrections keep the
 // established decision path so their predecessor and ordering rules hold.
 func (s EvaluationStore) CommitMatches(ctx context.Context, matches []monitoring.MatchCommit) ([]string, error) {
+	var result0 []string
+	err := retryJournalWrite(ctx, "CommitMatches", func(ctx context.Context) error {
+		var err error
+		result0, err = s.commitMatchesAttempt(ctx, matches)
+		return err
+	})
+	return result0, err
+}
+
+func (s EvaluationStore) commitMatchesAttempt(ctx context.Context, matches []monitoring.MatchCommit) ([]string, error) {
 	if len(matches) == 0 {
 		return []string{}, nil
 	}

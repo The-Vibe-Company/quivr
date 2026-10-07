@@ -239,6 +239,16 @@ func (s BackfillStore) BackfillEstimate(ctx context.Context, org, corpusID, key 
 // intent and journal event. Its target generation is the Corpus's routed
 // one at acceptance; each step follows the route.
 func (s BackfillStore) AcceptBackfill(ctx context.Context, org, corpusID, key string, canonical []byte, spec operations.Backfill) (operations.Operation, error) {
+	var result0 operations.Operation
+	err := retryJournalWrite(ctx, "AcceptBackfill", func(ctx context.Context) error {
+		var err error
+		result0, err = s.acceptBackfillAttempt(ctx, org, corpusID, key, canonical, spec)
+		return err
+	})
+	return result0, err
+}
+
+func (s BackfillStore) acceptBackfillAttempt(ctx context.Context, org, corpusID, key string, canonical []byte, spec operations.Backfill) (operations.Operation, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -323,6 +333,16 @@ func insertBackfill(ctx context.Context, tx pgx.Tx, org, id, corpusID, key strin
 
 // BeginBackfill starts a backfill step: see backfill.RunStore.
 func (s BackfillStore) BeginBackfill(ctx context.Context, org, id, plan string) (backfill.Target, error) {
+	var result0 backfill.Target
+	err := retryJournalWrite(ctx, "BeginBackfill", func(ctx context.Context) error {
+		var err error
+		result0, err = s.beginBackfillAttempt(ctx, org, id, plan)
+		return err
+	})
+	return result0, err
+}
+
+func (s BackfillStore) beginBackfillAttempt(ctx context.Context, org, id, plan string) (backfill.Target, error) {
 	var out backfill.Target
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
@@ -714,6 +734,13 @@ func (s BackfillStore) SkipBackfill(ctx context.Context, org, id, versionID, cod
 // CompleteBackfill records a backfill's success; its result names the
 // generation it filled.
 func (s BackfillStore) CompleteBackfill(ctx context.Context, org, id, generationID string) error {
+	err := retryJournalWrite(ctx, "CompleteBackfill", func(ctx context.Context) error {
+		return s.completeBackfillAttempt(ctx, org, id, generationID)
+	})
+	return err
+}
+
+func (s BackfillStore) completeBackfillAttempt(ctx context.Context, org, id, generationID string) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
@@ -741,6 +768,13 @@ func (s BackfillStore) CompleteBackfill(ctx context.Context, org, id, generation
 
 // FailBackfill records a terminal failure of a queued or running backfill.
 func (s BackfillStore) FailBackfill(ctx context.Context, org, id string, failure operations.Error) error {
+	err := retryJournalWrite(ctx, "FailBackfill", func(ctx context.Context) error {
+		return s.failBackfillAttempt(ctx, org, id, failure)
+	})
+	return err
+}
+
+func (s BackfillStore) failBackfillAttempt(ctx context.Context, org, id string, failure operations.Error) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err

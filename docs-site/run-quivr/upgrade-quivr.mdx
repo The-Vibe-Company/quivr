@@ -33,6 +33,8 @@ even though they can continue serving historical generations.
 Use your platform's rollout status to confirm that every old API and worker
 process has stopped before enabling those writes.
 
+The ingestion path prepares blob and embedding coverage writes before locking the organization's change journal. Upgrade every API instance and every live and bulk worker that writes to the database as one deployment. Wait until all previous processes finish draining and stop before relying on the improved import throughput. Previous writers acquire these locks in a different order and lack the bounded deadlock retries. New writers make at most three transaction attempts, including the first attempt, for a PostgreSQL deadlock. The third failed attempt returns the storage error to the caller; the `quivr.postgres.journal_deadlock` log event records `operation`, `attempt`, `retry_count` and `retry_exhausted`.
+
 ## Check it worked
 
 The new API and worker report ready, ingestion resolves new receipts, and search returns the expected records. CI checks the previous version's inline ingestion, authorization and lexical search against the expanded schema, including a restart. Until versioned release artifacts supply the previous binary, CI uses the branch's merge-base commit; this is a focused compatibility check, not a complete release matrix.

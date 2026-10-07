@@ -35,6 +35,16 @@ func lockOperation(ctx context.Context, tx pgx.Tx, org, id string) (operations.O
 }
 
 func (s RebuildStore) BeginRebuild(ctx context.Context, org, id string) (retrieval.RebuildTarget, error) {
+	var result0 retrieval.RebuildTarget
+	err := retryJournalWrite(ctx, "BeginRebuild", func(ctx context.Context) error {
+		var err error
+		result0, err = s.beginRebuildAttempt(ctx, org, id)
+		return err
+	})
+	return result0, err
+}
+
+func (s RebuildStore) beginRebuildAttempt(ctx context.Context, org, id string) (retrieval.RebuildTarget, error) {
 	var out retrieval.RebuildTarget
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -126,11 +136,70 @@ FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+` ORDER BY v.id LIMIT $4`, org
 }
 
 func (s RebuildStore) CoverRebuild(ctx context.Context, org, id string, seg content.Segmentation, artifacts []content.Embedding) (bool, error) {
-	tx, err := s.Pool.Begin(ctx)
+	var result0 bool
+	err := retryJournalWrite(ctx, "CoverRebuild", func(ctx context.Context) error {
+		var err error
+		result0, err = s.coverRebuildAttempt(ctx, org, id, seg, artifacts)
+		return err
+	})
+	return result0, err
+}
+
+func (s RebuildStore) coverRebuildAttempt(ctx context.Context, org, id string, seg content.Segmentation, artifacts []content.Embedding) (bool, error) {
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback(ctx)
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return false, err
+	}
+	var hintOp operations.Operation
+	hintOp, err = scanOperation(tx.QueryRow(ctx, `SELECT `+operationColumns+` FROM operations WHERE organization=$1 AND id=$2`, org, id))
+	if err != nil {
+		return false, err
+	}
+	var hint bool
+	if err = tx.QueryRow(ctx, `SELECT `+eligibleVersionSQL+` AND r.corpus_id=$3 AND r.current_version_id=v.id FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2`, org, seg.VersionID, hintOp.CorpusID).Scan(&hint); err != nil {
+		return false, notFound(err)
+	}
+	prepared := hint && hintOp.State == operations.StateRunning
+	var indexed, reused int64
+	if prepared {
+		if _, err = prepareJournal(ctx, tx, func(tx pgx.Tx) error {
+			op := hintOp
+			var digest string
+			if err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2 AND version_id=$3`, org, seg.ID, seg.VersionID).Scan(&digest); err != nil {
+				if err == pgx.ErrNoRows {
+					return content.ErrConflict
+				}
+				return err
+			}
+			if digest != content.SegmentationDigest(seg) {
+				return content.ErrConflict
+			}
+			target := content.Generation{ID: op.TargetGenerationID}
+			var spaces []byte
+			if err = tx.QueryRow(ctx, `SELECT space_id,spaces,spaces_projected FROM projection_generations WHERE id=$1`, op.TargetGenerationID).Scan(&target.SpaceID, &spaces, &target.SpacesProjected); err != nil {
+				return err
+			}
+			if target.Spaces, err = scanSpaces(spaces); err != nil {
+				return err
+			}
+			tag, err := tx.Exec(ctx, `INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, op.TargetGenerationID, seg.ID)
+			if err != nil {
+				return err
+			}
+			indexed = tag.RowsAffected()
+			reused, err = insertEmbeddingCoverage(ctx, tx, org, seg, target, artifacts)
+			if err == pgx.ErrNoRows {
+				return content.ErrConflict
+			}
+			return err
+		}); err != nil {
+			return false, err
+		}
+	}
 	if err = lockJournal(ctx, tx, org); err != nil {
 		return false, err
 	}
@@ -148,54 +217,10 @@ func (s RebuildStore) CoverRebuild(ctx context.Context, org, id string, seg cont
 	}
 	if !eligible {
 		// Withdrawn or superseded meanwhile; canonical hydration already hides it.
-		return false, tx.Commit(ctx)
+		return false, nil
 	}
-	var digest string
-	if err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2 AND version_id=$3`, org, seg.ID, seg.VersionID).Scan(&digest); err != nil {
-		if err == pgx.ErrNoRows {
-			return false, content.ErrConflict
-		}
-		return false, err
-	}
-	if digest != content.SegmentationDigest(seg) {
-		return false, content.ErrConflict
-	}
-	target := content.Generation{ID: op.TargetGenerationID}
-	var spaces []byte
-	if err = tx.QueryRow(ctx, `SELECT space_id,spaces,spaces_projected FROM projection_generations WHERE id=$1`, op.TargetGenerationID).Scan(&target.SpaceID, &spaces, &target.SpacesProjected); err != nil {
-		return false, err
-	}
-	if target.Spaces, err = scanSpaces(spaces); err != nil {
-		return false, err
-	}
-	tag, err := tx.Exec(ctx, `INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, op.TargetGenerationID, seg.ID)
-	if err != nil {
-		return false, err
-	}
-	indexed, reused := tag.RowsAffected(), int64(0)
-	segments := map[string]bool{}
-	for _, p := range seg.Segments {
-		segments[p.ID] = true
-	}
-	for _, e := range artifacts {
-		if e.Organization != org || !segments[e.SegmentID] || !target.Carries(e.SpaceID) {
-			return false, content.ErrInvalid
-		}
-		var stored string
-		if err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2 AND segment_id=$3 AND space_id=$4`, org, e.DerivationID, e.SegmentID, e.SpaceID).Scan(&stored); err != nil {
-			if err == pgx.ErrNoRows {
-				return false, content.ErrConflict
-			}
-			return false, err
-		}
-		if stored != e.ID {
-			return false, content.ErrConflict
-		}
-		tag, err = tx.Exec(ctx, `INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, op.TargetGenerationID, e.ID, e.SpaceID)
-		if err != nil {
-			return false, err
-		}
-		reused += tag.RowsAffected()
+	if !prepared {
+		return false, ErrGenerationChanged
 	}
 	if _, err = tx.Exec(ctx, `UPDATE operations SET counters=jsonb_build_object('indexed',coalesce((counters->>'indexed')::bigint,0)+$3,'vectors_reused',coalesce((counters->>'vectors_reused')::bigint,0)+$4),updated_at=now() WHERE organization=$1 AND id=$2`, org, id, indexed, reused); err != nil {
 		return false, err
@@ -204,6 +229,16 @@ func (s RebuildStore) CoverRebuild(ctx context.Context, org, id string, seg cont
 }
 
 func (s RebuildStore) ActivateRebuild(ctx context.Context, org, id string) (bool, error) {
+	var result0 bool
+	err := retryJournalWrite(ctx, "ActivateRebuild", func(ctx context.Context) error {
+		var err error
+		result0, err = s.activateRebuildAttempt(ctx, org, id)
+		return err
+	})
+	return result0, err
+}
+
+func (s RebuildStore) activateRebuildAttempt(ctx context.Context, org, id string) (bool, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -348,6 +383,13 @@ func succeed(ctx context.Context, tx pgx.Tx, op operations.Operation, result []b
 }
 
 func (s RebuildStore) FailRebuild(ctx context.Context, org, id string, failure operations.Error) error {
+	err := retryJournalWrite(ctx, "FailRebuild", func(ctx context.Context) error {
+		return s.failRebuildAttempt(ctx, org, id, failure)
+	})
+	return err
+}
+
+func (s RebuildStore) failRebuildAttempt(ctx context.Context, org, id string, failure operations.Error) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err

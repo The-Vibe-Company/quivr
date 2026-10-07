@@ -63,6 +63,16 @@ func (s OperationStore) AcceptRetrievalConfiguration(ctx context.Context, org, c
 // acceptCommand commits an originating Operation command, or returns the one
 // already accepted for Organization + kind + Corpus + key + canonical request.
 func (s OperationStore) acceptCommand(ctx context.Context, org, kind, corpusID, key string, canonical, resolved []byte) (operations.Operation, error) {
+	var result0 operations.Operation
+	err := retryJournalWrite(ctx, "acceptCommand", func(ctx context.Context) error {
+		var err error
+		result0, err = s.acceptCommandAttempt(ctx, org, kind, corpusID, key, canonical, resolved)
+		return err
+	})
+	return result0, err
+}
+
+func (s OperationStore) acceptCommandAttempt(ctx context.Context, org, kind, corpusID, key string, canonical, resolved []byte) (operations.Operation, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -195,6 +205,16 @@ WHERE d.active AND c.organization=$2 AND c.id=$3 AND r.id=`+routedGenerationSQL(
 // CancelOperation applies an operator cancellation under the journal lock and
 // Operation row lock that every effect-committing transition also holds.
 func (s OperationStore) CancelOperation(ctx context.Context, org, id string) (operations.Operation, error) {
+	var result0 operations.Operation
+	err := retryJournalWrite(ctx, "CancelOperation", func(ctx context.Context) error {
+		var err error
+		result0, err = s.cancelOperationAttempt(ctx, org, id)
+		return err
+	})
+	return result0, err
+}
+
+func (s OperationStore) cancelOperationAttempt(ctx context.Context, org, id string) (operations.Operation, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -233,6 +253,13 @@ func (s OperationStore) CancelOperation(ctx context.Context, org, id string) (op
 
 // ConfirmCancel settles a cancellation request once the worker has stopped.
 func (s OperationStore) ConfirmCancel(ctx context.Context, org, id string) error {
+	err := retryJournalWrite(ctx, "ConfirmCancel", func(ctx context.Context) error {
+		return s.confirmCancelAttempt(ctx, org, id)
+	})
+	return err
+}
+
+func (s OperationStore) confirmCancelAttempt(ctx context.Context, org, id string) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
@@ -263,6 +290,16 @@ func transition(ctx context.Context, tx pgx.Tx, op operations.Operation, state s
 // AcceptRerun links a new Operation to a terminal source. Replays are resolved
 // before the terminal check, so they return the same rerun forever.
 func (s OperationStore) AcceptRerun(ctx context.Context, org, sourceID, key string, canonical []byte) (operations.Operation, error) {
+	var result0 operations.Operation
+	err := retryJournalWrite(ctx, "AcceptRerun", func(ctx context.Context) error {
+		var err error
+		result0, err = s.acceptRerunAttempt(ctx, org, sourceID, key, canonical)
+		return err
+	})
+	return result0, err
+}
+
+func (s OperationStore) acceptRerunAttempt(ctx context.Context, org, sourceID, key string, canonical []byte) (operations.Operation, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err
@@ -383,6 +420,16 @@ func (s OperationStore) ResumeOperation(ctx context.Context, org, id string) (op
 // Operation row lock that every effect also takes; other states are
 // returned unchanged.
 func (s OperationStore) control(ctx context.Context, org, id string, next map[string]string) (operations.Operation, error) {
+	var result0 operations.Operation
+	err := retryJournalWrite(ctx, "control", func(ctx context.Context) error {
+		var err error
+		result0, err = s.controlAttempt(ctx, org, id, next)
+		return err
+	})
+	return result0, err
+}
+
+func (s OperationStore) controlAttempt(ctx context.Context, org, id string, next map[string]string) (operations.Operation, error) {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return operations.Operation{}, err

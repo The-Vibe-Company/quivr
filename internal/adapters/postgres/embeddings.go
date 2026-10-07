@@ -64,6 +64,13 @@ var settleWithdrawnEnrichmentSQL = `UPDATE record_versions v SET enrichment_stat
 FROM records r WHERE (r.organization,r.id)=(v.organization,v.record_id) AND v.organization=$1 AND v.id=$2 AND v.baseline_ready AND NOT v.quarantined AND ` + recordGoneSQL
 
 func (s EmbeddingStore) EnrichmentProgress(ctx context.Context, org, id, state, code string) error {
+	err := retryJournalWrite(ctx, "EnrichmentProgress", func(ctx context.Context) error {
+		return s.enrichmentProgressAttempt(ctx, org, id, state, code)
+	})
+	return err
+}
+
+func (s EmbeddingStore) enrichmentProgressAttempt(ctx context.Context, org, id, state, code string) error {
 	if state == "idle" {
 		// Withdrawn work settles even if its pinned owner stopped serving.
 		tx, err := s.Pool.Begin(ctx)
@@ -92,6 +99,16 @@ func (s EmbeddingStore) BlockEnrichment(ctx context.Context, org, id string, rea
 	return updatePinnedVersion(ctx, s.Pool, org, id, `UPDATE record_versions SET enrichment_state='blocked',enrichment_error=$3,enrichment_reason=$4 WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, reason.Code, raw)
 }
 func (s EmbeddingStore) CountEnrichmentTimeout(ctx context.Context, org, id string) (int, error) {
+	var result0 int
+	err := retryJournalWrite(ctx, "CountEnrichmentTimeout", func(ctx context.Context) error {
+		var err error
+		result0, err = s.countEnrichmentTimeoutAttempt(ctx, org, id)
+		return err
+	})
+	return result0, err
+}
+
+func (s EmbeddingStore) countEnrichmentTimeoutAttempt(ctx context.Context, org, id string) (int, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -124,7 +141,14 @@ func (s EmbeddingStore) EnrichmentEligible(ctx context.Context, org, id string) 
 	return eligible, err
 }
 func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg content.Segmentation, g content.Generation, artifacts []content.Embedding) error {
-	tx, err := s.Pool.Begin(ctx)
+	err := retryJournalWrite(ctx, "CommitEnrichment", func(ctx context.Context) error {
+		return s.commitEnrichmentAttempt(ctx, org, seg, g, artifacts)
+	})
+	return err
+}
+
+func (s EmbeddingStore) commitEnrichmentAttempt(ctx context.Context, org string, seg content.Segmentation, g content.Generation, artifacts []content.Embedding) error {
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -134,15 +158,59 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 	var eligible bool
 	var routing []byte
 	var sourceMediaType *string
-	err = readJournal(ctx, tx, org, `SELECT r.id,r.corpus_id,`+eligibleVersionSQL+`,
+	guard := `SELECT r.id,r.corpus_id,` + eligibleVersionSQL + `,
  (SELECT ingestion_routing FROM projection_generations WHERE id=$3),
  (SELECT coalesce(nullif(ar.source_media_type,''),'text/plain') FROM accepted_revisions ar WHERE (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot))
  FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
- WHERE v.organization=$1 AND v.id=$2 FOR UPDATE OF r,v`, []any{org, seg.VersionID, g.ID}, &recordID, &corpusID, &eligible, &routing, &sourceMediaType)
+ WHERE v.organization=$1 AND v.id=$2`
+	args := []any{org, seg.VersionID, g.ID}
+	read := func(fence bool) error {
+		if fence {
+			return readJournal(ctx, tx, org, guard+" FOR UPDATE OF r,v", args, &recordID, &corpusID, &eligible, &routing, &sourceMediaType)
+		}
+		return tx.QueryRow(ctx, guard, args...).Scan(&recordID, &corpusID, &eligible, &routing, &sourceMediaType)
+	}
+	if err = lockProjectionRouting(ctx, tx); err != nil {
+		return err
+	}
+	if err = read(false); err != nil {
+		return err
+	}
+	if len(routing) > 0 {
+		if err = json.Unmarshal(routing, &g.IngestionRouting); err != nil {
+			return err
+		}
+	}
+	ownerPrepared := sourceMediaType != nil && g.IngestionRouting != nil && g.IngestionRouting.For(*sourceMediaType) != "" && g.IngestionRouting.For(*sourceMediaType) != content.PluginOfRecipe(seg.Recipe)
+	var stage pgx.Tx
+	if eligible && len(artifacts) > 0 {
+		stage, err = prepareJournal(ctx, tx, func(stage pgx.Tx) error {
+			if ownerPrepared {
+				return coverOwnerProjection(ctx, stage, org, g, seg, artifacts)
+			}
+			_, err := insertEmbeddingCoverage(ctx, stage, org, seg, g, artifacts)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	err = read(true)
 	if err != nil {
 		return err
 	}
 	if !eligible {
+		if stage != nil {
+			if err = stage.Rollback(ctx); err != nil {
+				return err
+			}
+			if err = read(true); err != nil {
+				return err
+			}
+		}
+		if eligible {
+			return ErrGenerationChanged
+		}
 		if _, err = tx.Exec(ctx, settleWithdrawnEnrichmentSQL, org, seg.VersionID); err != nil {
 			return err
 		}
@@ -167,8 +235,8 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 		if len(artifacts) == 0 {
 			return content.ErrInvalid
 		}
-		if err = coverOwnerProjection(ctx, tx, org, g, seg, artifacts); err != nil {
-			return err
+		if !ownerPrepared || stage == nil {
+			return ErrGenerationChanged
 		}
 		return tx.Commit(ctx)
 	}
@@ -198,24 +266,15 @@ func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg co
 	if len(artifacts) == 0 {
 		return content.ErrInvalid
 	}
-	segments := map[string]bool{}
-	for _, p := range seg.Segments {
-		segments[p.ID] = true
-	}
-	writes := &pgx.Batch{}
-	for _, e := range artifacts {
-		if e.Organization != org || !segments[e.SegmentID] || !g.Carries(e.SpaceID) {
-			return content.ErrInvalid
-		}
-		var stored string
-		if err = tx.QueryRow(ctx, `SELECT id FROM embedding_artifacts WHERE organization=$1 AND derivation_id=$2 AND segment_id=$3 AND space_id=$4`, org, e.DerivationID, e.SegmentID, e.SpaceID).Scan(&stored); err != nil {
+	if stage == nil {
+		// Eligibility changed after the speculative read. Let the caller repeat
+		// preparation without doing hash inserts while holding the journal.
+		if err = tx.Rollback(ctx); err != nil {
 			return err
 		}
-		if stored != e.ID {
-			return content.ErrConflict
-		}
-		writes.Queue(`INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, g.ID, e.ID, e.SpaceID)
+		return ErrGenerationChanged
 	}
+	writes := &pgx.Batch{}
 	writes.Queue(`UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL,enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID)
 	mutation := content.StableID("enrichment", seg.ID, g.ID)
 	var emitted bool

@@ -217,6 +217,13 @@ func (s ProjectionStore) QuarantineVersion(ctx context.Context, org, id string, 
 // quarantine holds a Version that is not searchable yet, announced by
 // record.quarantined; a reason is listed in its diagnostics.
 func (s ProjectionStore) quarantine(ctx context.Context, org, id, state, code string, reason *content.Diagnostic) error {
+	err := retryJournalWrite(ctx, "quarantine", func(ctx context.Context) error {
+		return s.quarantineAttempt(ctx, org, id, state, code, reason)
+	})
+	return err
+}
+
+func (s ProjectionStore) quarantineAttempt(ctx context.Context, org, id, state, code string, reason *content.Diagnostic) error {
 	var raw []byte
 	if reason != nil {
 		var err error
@@ -269,6 +276,13 @@ func quarantinedEvent(ctx context.Context, tx pgx.Tx, org, corpusID, recordID, v
 	return appendEvent(ctx, tx, event)
 }
 func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Segmentation, g content.Generation) error {
+	err := retryJournalWrite(ctx, "Promote", func(ctx context.Context) error {
+		return s.promoteAttempt(ctx, org, seg, g)
+	})
+	return err
+}
+
+func (s ProjectionStore) promoteAttempt(ctx context.Context, org string, seg content.Segmentation, g content.Generation) error {
 	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
