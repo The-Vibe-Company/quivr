@@ -16,7 +16,7 @@ import core_ingest_plugin
 import queue_workers
 import ingestion_plugin
 import retrieval_plugin
-import argparse, base64, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request, uuid
+import argparse, base64, json, math, os, pathlib, re, secrets, signal, subprocess, sys, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 GO=os.environ.get('GO','go')
 
@@ -201,10 +201,22 @@ class Stack:
         self.config()
         with (self.directory/'migrate-startup.log').open('w') as log:
             run([str(self.directory/'quivr'),'migrate'],env={**os.environ,'QUIVR_CONFIG':str(self.directory/'config.json')},stdout=log,stderr=log)
+    def shutdown_grace(self,config):
+        # Match positive Go duration units and env precedence used by processSettings.
+        value=os.environ.get('QUIVR_SHUTDOWN_GRACE') or json.loads((self.directory/config).read_text()).get('shutdown_grace') or '60s'
+        if not isinstance(value,str):raise RuntimeError('invalid shutdown_grace')
+        units={'ns':1e-9,'us':1e-6,'µs':1e-6,'μs':1e-6,'ms':.001,'s':1,'m':60,'h':3600}
+        parts=re.findall(r'(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:ns|us|µs|μs|ms|s|m|h)',value.removeprefix('+'))
+        if not parts or ''.join(parts)!=value.removeprefix('+'):raise RuntimeError('invalid shutdown_grace')
+        seconds=sum(float(re.match(r'[0-9.]+',part)[0])*units[re.search(r'[^0-9.]+',part)[0]] for part in parts)
+        if not math.isfinite(seconds) or seconds<=0:raise RuntimeError('invalid shutdown_grace')
+        return seconds
     def spawn(self,command,config):
+        grace=self.shutdown_grace(config)
         with (self.directory/(command+'-startup.log')).open('a') as log:
             p=subprocess.Popen([str(self.directory/'quivr'),command],cwd=ROOT,env={**os.environ,**connector_plugin.engine_environment(self,push_plugin.engine_environment(self)),'QUIVR_CONFIG':str(self.directory/config)},stdout=log,stderr=log,start_new_session=True)
         self.state['pids'].append(p.pid)
+        self.state.setdefault('shutdown_graces',{})[str(p.pid)]=grace
         if command in ('api','worker'):self.state[command+'_pid']=p.pid
         self.save()
     def await_ready(self,key,timeout=20):
@@ -248,12 +260,16 @@ class Stack:
         self.start_fake_graph()
         for command,config in [('api','keyless.json' if keyless else 'config.json'),('worker','keyless-worker.json' if keyless else 'worker.json')]:self.spawn(command,config)
         for key in ['probe_port','worker_probe_port']:self.await_ready(key)
-    def signal_owned(self,pid,sig):
+    def owns_process(self,pid):
         try:
-            # Refuse to signal a reused PID belonging to any unrelated program.
             cmd=ps(pid,'comm').encode() if MACOS else pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0]
-            if cmd==str(self.directory/'quivr').encode():os.kill(pid,sig)
-        except (FileNotFoundError,ProcessLookupError):pass
+            return cmd==str(self.directory/'quivr').encode()
+        except (FileNotFoundError,ProcessLookupError):return False
+    def signal_owned(self,pid,sig):
+        # Refuse to signal a reused PID belonging to any unrelated program.
+        try:
+            if self.owns_process(pid):os.kill(pid,sig)
+        except ProcessLookupError:pass
     def stop_worker(self):
         """Stop only the worker; the API keeps accepting durable commands."""
         pid=self.state.pop('worker_pid',None)
@@ -281,19 +297,21 @@ class Stack:
         # processes follow (THE-781).
         cfg=json.loads((self.directory/'config.json').read_text());s=self.state
         short=self.directory/'short-retention.json';short.write_text(json.dumps({**cfg,'listen':f"127.0.0.1:{s['short_api_port']}",'probe_listen':f"127.0.0.1:{s['short_probe_port']}",'change_retention':SHORT_CHANGE_RETENTION}));short.chmod(0o600)
+        grace=self.shutdown_grace('short-retention.json')
         with (self.directory/'short-api-startup.log').open('w') as log:
             p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,**connector_plugin.engine_environment(self,push_plugin.engine_environment(self)),'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
-        self.state['pids'].append(p.pid);self.save()
+        self.state['pids'].append(p.pid);self.state.setdefault('shutdown_graces',{})[str(p.pid)]=grace;self.save()
         self.await_ready('short_probe_port')
     def stop_processes(self):
         for pid in self.state['pids']:self.signal_owned(pid,signal.SIGTERM)
-        # The core can drain for 60s; release its listeners before a replacement binds.
-        # Keep ownership on timeout so cleanup can still find the outstanding children.
-        deadline=time.monotonic()+70
-        while any(alive(pid) for pid in self.state['pids']):
+        # Honor launch-time grace even after reload; ignore unrelated reused PIDs.
+        # Keep ownership on timeout so cleanup can still find outstanding children.
+        graces=self.state.get('shutdown_graces',{})
+        deadline=time.monotonic()+max([60]+[graces.get(str(pid),60) for pid in self.state['pids'] if self.owns_process(pid)])+10
+        while any(self.owns_process(pid) and alive(pid) for pid in self.state['pids']):
             if time.monotonic()>=deadline:raise RuntimeError('process shutdown timed out; tracked children still alive')
             time.sleep(.05)
-        self.state['pids']=[];self.state.pop('worker_pid',None);self.state.pop('api_pid',None);self.save()
+        self.state['pids']=[];self.state.pop('worker_pid',None);self.state.pop('api_pid',None);self.state.pop('shutdown_graces',None);self.save()
     def check_disk(self):
         disk=docker_disk()
         if disk is None:return
