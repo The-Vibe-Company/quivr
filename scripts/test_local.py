@@ -4,7 +4,7 @@ These run without Docker: they exercise the pieces `make verify` relies on to
 stay isolated and to explain a failed run. The live proof of stop/migrate/reset
 is scripts/lifecycle.py inside `make verify`.
 """
-import json, os, pathlib, shutil, signal, stat, subprocess, sys, tempfile, time, unittest, uuid
+import json, os, pathlib, shutil, signal, socket, stat, subprocess, sys, tempfile, time, unittest, uuid
 from unittest import mock
 
 import local
@@ -45,6 +45,63 @@ class Isolation(unittest.TestCase):
         reloaded = local.Stack(self.names[0])
         self.assertNotIn('scoped_id', reloaded.state)
         self.assertEqual(reloaded.state['admin'], stack.state['admin'])
+
+    def test_stopped_process_releases_its_probe_before_restart(self):
+        # THE-1230: real listeners, stale ownership and longer configured drains.
+        for index, (config, environment, elapsed, stale) in enumerate([
+            ({}, {'QUIVR_SHUTDOWN_GRACE': ''}, 0, True),
+            ({'shutdown_grace': '1m30s'}, {'QUIVR_SHUTDOWN_GRACE': ''}, 71, False),
+            ({'shutdown_grace': '1s'}, {'QUIVR_SHUTDOWN_GRACE': '90s'}, 71, False),
+        ]):
+            with self.subTest(config=config, environment=environment):
+                name = self.names[0] + str(index)
+                self.names.append(name)
+                stack = local.Stack(name)
+                executable = stack.directory / 'quivr'
+                shutil.copy2(sys.executable, executable)
+                (stack.directory / 'worker.json').write_text(json.dumps(config))
+                child = subprocess.Popen([str(executable), '-c', """
+import signal, socket, sys
+listener = socket.socket()
+listener.bind(('127.0.0.1', 0))
+listener.listen()
+def stop(*_):
+    sys.stdin.readline()  # The external poll observer releases this drain gate.
+    listener.close()
+    sys.exit(0)
+signal.signal(signal.SIGTERM, stop)
+print(listener.getsockname()[1], flush=True)
+while True: signal.pause()
+"""], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                self.addCleanup(child.stdout.close)
+                self.addCleanup(child.stdin.close)
+                self.addCleanup(child.wait, timeout=5)
+                self.addCleanup(lambda child=child: child.kill() if child.poll() is None else None)
+                probe_port = int(child.stdout.readline())
+                # Start through the harness config boundary; the external launch is a real child.
+                with mock.patch.dict(os.environ, environment), mock.patch('local.subprocess.Popen', return_value=child):
+                    stack.spawn('worker', 'worker.json')
+                if stale: stack.state['pids'].append(os.getpid()); stack.save()
+                # Reload proves the launch-time grace survives a later cleanup command/environment.
+                stack = local.Stack(name)
+                released, observed = False, False
+                real_alive = local.alive
+                def observe_exit(pid):
+                    nonlocal observed
+                    observed = True
+                    return real_alive(pid)
+                def finish_drain(_):
+                    nonlocal released
+                    if observed and not released:
+                        child.stdin.write('finish drain\n'); child.stdin.flush()
+                        released = True
+                clock = iter([0])
+                with mock.patch('local.time.monotonic', side_effect=lambda: next(clock, 71 if stale and child.poll() is not None else elapsed)), mock.patch('local.time.sleep', side_effect=finish_drain), mock.patch('local.alive', side_effect=observe_exit):
+                    stack.stop_processes()
+                with socket.socket() as replacement:
+                    replacement.bind(('127.0.0.1', probe_port))
+                self.assertEqual(json.loads(stack.statefile.read_text())['pids'], [])
+                self.assertTrue(local.alive(os.getpid()))
 
     def test_down_keeps_volumes(self):
         stack = local.Stack(self.names[0])
