@@ -189,7 +189,7 @@ During an upgrade, keep at least one worker serving both classes until queued le
 {"queues":{"live":{"waiting":0,"in_progress":1,"oldest_waiting_age_seconds":0},"bulk":{"waiting":123,"in_progress":2,"oldest_waiting_age_seconds":45}}}
 ```
 
-For Kubernetes with KEDA installed, create a Deployment named `quivr-bulk` running `quivr worker` with `worker.queues: ["bulk"]`. Mount its configuration and supply plugin secrets as for any worker. Put the operator API key in the `token` entry of a Secret named `quivr-queue-reader`. Give KEDA HTTPS access to the API service. This example scales between one and ten workers, targeting fifty waiting documents per replica. Choose the target from measured document throughput and your provider's capacity.
+For Kubernetes with KEDA installed, create a Deployment named `quivr-bulk` running `quivr worker` with `worker.queues: ["bulk"]`. Mount its configuration and supply plugin secrets as for any worker. Put the operator API key in the `token` entry of a Secret named `quivr-queue-reader`. Give KEDA HTTPS access to the API service. This example uses the Railway autoscaler defaults: one to eight workers, 20,000 waiting documents per replica, and five-minute downscale stabilization. Choose the target from measured document throughput and your provider's capacity.
 
 For example, not run; substitute your API service URL:
 
@@ -212,22 +212,26 @@ spec:
   scaleTargetRef:
     name: quivr-bulk
   minReplicaCount: 1
-  maxReplicaCount: 10
-  pollingInterval: 15
-  cooldownPeriod: 60
+  maxReplicaCount: 8
+  pollingInterval: 30
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
   triggers:
     - type: metrics-api
       metadata:
         url: https://quivr-api.example.org/v0/admin/queues
         format: json
         valueLocation: queues.bulk.waiting
-        targetValue: "50"
+        targetValue: "20000"
         authMode: bearer
       authenticationRef:
         name: quivr-queue-reader
 ```
 
-KEDA's [metrics-api scaler](https://keda.sh/docs/2.20/scalers/metrics-api/) reads that numeric path and sends the Secret as `Authorization: Bearer …`. Counts are installation-wide, so a request to any healthy API replica is sufficient. Keep at least one bulk worker while scaling on waiting documents so admitted work continues when waiting reaches zero. Set the Deployment's termination grace period longer than Quivr's `shutdown_grace`.
+KEDA's [metrics-api scaler](https://keda.sh/docs/2.20/scalers/metrics-api/) reads that numeric path and sends the Secret as `Authorization: Bearer …`. HPA stabilization controls scale-down between positive replica counts; KEDA's `cooldownPeriod` applies to scaling to zero. HPA tolerance can change exact decisions near a threshold. Counts are installation-wide, so a request to any healthy API replica is sufficient. Keep at least one bulk worker while scaling on waiting documents so admitted work continues when waiting reaches zero. Set the Deployment's termination grace period longer than Quivr's `shutdown_grace`.
 
 Alternatively, scrape Quivr's private probe endpoint `/metrics` and replace the trigger with KEDA's [Prometheus scaler](https://keda.sh/docs/2.20/scalers/prometheus/). The example `job` selector must identify only this Quivr installation. `max` avoids adding the same database count once per scraped replica. Configure Prometheus authentication separately when required.
 
@@ -239,7 +243,7 @@ triggers:
     metadata:
       serverAddress: http://prometheus.monitoring.svc:9090
       query: max(quivr_queue_waiting_documents{queue="bulk",job="quivr"})
-      threshold: "50"
+      threshold: "20000"
       ignoreNullValues: "false"
 ```
 
@@ -248,7 +252,7 @@ The same gauges expose `in_progress` and `oldest_waiting_age_seconds` for dashbo
 ## Example deployments
 
 - **Local:** `make dev`, in the [Quickstart](/quickstart).
-- **Hosted, single node:** the repository's [Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/README.md) runs the demo app and Quivr as single-replica services, without high availability.
+- **Hosted, single node:** the repository's [Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/README.md) runs the demo app and Quivr with separate live/bulk workers and an optional [Go autoscaler](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/autoscaler/README.md), without high availability.
 
 ## Next
 

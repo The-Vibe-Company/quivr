@@ -86,6 +86,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What works today
 
+- [Bulk worker autoscaling](deploy/railway/autoscaler/README.md) uses a standalone Go controller on Railway; Kubernetes can use KEDA. Live workers keep separate capacity.
+
 - Rolling application upgrades use additive schema expansions; destructive cleanup
   runs only with `quivr migrate --contract`. CI checks the merge-base binary against
   expansions. See [Upgrade Quivr](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-quivr).
