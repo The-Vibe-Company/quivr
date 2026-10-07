@@ -224,7 +224,33 @@ def _output_problems(manifest: LoadedManifest, request: SegmentAndEmbedRequest,
                     problems.append(f"{prefix}/provenance: provenance exceeds {MAX_PROVENANCE_BYTES} bytes")
                 if _contains_nul(provenance):
                     problems.append(f"{prefix}/provenance: provenance contains NUL")
+    problems.extend(_page_problems(manifest, request, document))
     return problems
+
+
+def _page_problems(manifest: LoadedManifest, request: SegmentAndEmbedRequest,
+                   document: dict[str, Any]) -> list[str]:
+    next_start = document.get("next_start")
+    if request.page is None:
+        return ["next_start requires a paged request"] if next_start is not None else []
+    if _version_tuple(manifest.plugin_api) < (0, 18, 0):
+        return ["ingestion pages require Plugin API 0.18"]
+    if len(request.parts) != 1 or len(document["segments"]) > request.page.max_segments:
+        return ["a page must respect its work bound and have one Part"]
+    part = request.parts[0]
+    end = request.page.start
+    for segment in document["segments"]:
+        ranges = segment.get("source_ranges") or [segment]
+        for source in ranges:
+            if source["part_key"] != part.key or source["start"] != end or source["end"] <= end:
+                return ["paged source ranges must cover every code point once"]
+            end = source["end"]
+    if next_start is not None:
+        if next_start != end or end <= request.page.start or end >= len(part.text):
+            return ["next_start must advance to the first uncovered code point"]
+    elif end != len(part.text):
+        return ["a final page must cover the entire remaining source"]
+    return []
 
 
 def _query_output_problems(manifest: LoadedManifest, request: EmbedQueryRequest,
@@ -293,6 +319,8 @@ def invoke_ingestion(manifest: LoadedManifest, handlers: dict[str, Callable[...,
         return _failure(400, error.code, "; ".join(error.problems))
 
     requested_spaces = request.spaces if segment else [request.space]
+    if segment and request.page is not None and _version_tuple(manifest.plugin_api) < (0, 18, 0):
+        return _failure(400, "invalid_request", "ingestion pages require Plugin API 0.18")
     for space in requested_spaces:
         if space not in contribution.spaces:
             return _failure(400, "unknown_space", f"the ingestion space {space!r} is not declared")

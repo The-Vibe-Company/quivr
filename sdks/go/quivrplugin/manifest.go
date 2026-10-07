@@ -70,6 +70,7 @@ type RetrievalProfile struct {
 
 // IngestionContribution is the ingestion Contribution of a manifest.
 type IngestionContribution struct {
+	Paging         bool             `json:"paging,omitempty"`
 	Spaces         map[string]Space `json:"spaces"`
 	TimeoutMS      int              `json:"timeout_ms"`
 	QueryTimeoutMS int              `json:"query_timeout_ms"`

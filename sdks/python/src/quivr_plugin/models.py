@@ -340,6 +340,7 @@ class Ingestion(Model):
     timeout_ms: int | None = None
     query_timeout_ms: int | None = None
     limits: IngestionLimits | None = None
+    paging: bool | None = None
 
 
 @dataclass(kw_only=True)
@@ -981,6 +982,14 @@ class SegmentAndEmbedRequestPartsItem(Model):
 
 
 @dataclass(kw_only=True)
+class SegmentAndEmbedRequestPage(Model):
+    "Since Plugin API 0.18. Bounded ingestion of exactly one source window. Offsets remain in that request Part. The host durably records each negotiated page before requesting the next."
+
+    start: int
+    max_segments: int
+
+
+@dataclass(kw_only=True)
 class SegmentAndEmbedRequest(Model):
     "POST /v0/contributions/ingestion/segment_and_embed, since Plugin API 0.6. One Record Version's text Parts and the enabled vector spaces to embed each segment in."
 
@@ -993,6 +1002,7 @@ class SegmentAndEmbedRequest(Model):
     language: str | None = None
     parts: list[SegmentAndEmbedRequestPartsItem]
     spaces: list[str]
+    page: SegmentAndEmbedRequestPage | None = None
 
 
 @dataclass(kw_only=True)
@@ -1019,6 +1029,7 @@ class SegmentAndEmbedResponse(Model):
     "200 answer of segment_and_embed. Segments are listed in reading order; the core numbers them in that order."
 
     segments: list[SegmentAndEmbedResponseSegmentsItem]
+    next_start: int | None = None
 
 
 @dataclass(kw_only=True)
@@ -1407,6 +1418,7 @@ __all__ = [
     "SearchResponseUsage",
     "Secret",
     "SegmentAndEmbedRequest",
+    "SegmentAndEmbedRequestPage",
     "SegmentAndEmbedRequestPartsItem",
     "SegmentAndEmbedRequestVersion",
     "SegmentAndEmbedResponse",

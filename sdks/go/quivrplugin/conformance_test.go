@@ -38,9 +38,7 @@ func TestModelsCarryEveryContractField(t *testing.T) {
 		"subscription-response.schema.json":               func() any { return &SubscriptionResponse{} },
 		"ingestion-segment-and-embed-request.schema.json": func() any { return &IngestRequest{} },
 		"ingestion-segment-and-embed-response.schema.json": func() any {
-			return &struct {
-				Segments []Segment `json:"segments"`
-			}{}
+			return &IngestPage{}
 		},
 		"ingestion-embed-query-request.schema.json": func() any { return &QueryRequest{} },
 		"ingestion-embed-query-response.schema.json": func() any {

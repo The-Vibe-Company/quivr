@@ -16,6 +16,39 @@ import (
 type ingestionAnswer struct {
 	segments []Segment
 	vector   []float32
+	nextStart *int
+}
+
+func (a ingestionAnswer) SegmentAndEmbedPage(context.Context, *IngestRequest) (IngestPage, error) {
+	return IngestPage{Segments: a.segments, NextStart: a.nextStart}, nil
+}
+
+type pagedAnswer struct{ ingestionAnswer }
+
+func (a pagedAnswer) SegmentAndEmbedPage(context.Context, *IngestRequest) (IngestPage, error) {
+	next := 4
+	return IngestPage{Segments: []Segment{{PartKey: "body", Start: 0, End: 4}}, NextStart: &next}, nil
+}
+
+// SDK dispatch must preserve a page's cursor and bound; the host owns the
+// normative coverage oracle, while this guards the typed HTTP adapter.
+func TestIngestionPageDispatch(t *testing.T) {
+	p, err := New(filepath.Join(fixtures, "manifests/valid/ingestion-paged.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Ingestion(pagedAnswer{}); err != nil {
+		t.Fatal(err)
+	}
+	h, err := p.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"invocation_id":"page","idempotency_key":"page","contribution":"ingestion","organization_id":"org","configuration":{},"version":{"corpus_id":"c","record_id":"r","record_version_id":"v"},"parts":[{"key":"body","role":"body","text":"abcdefgh"}],"spaces":[],"page":{"start":0,"max_segments":2}}`)
+	status, out, raw := callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 200 || out["next_start"] != float64(4) {
+		t.Fatalf("status=%d body=%s", status, raw)
+	}
 }
 
 func (a ingestionAnswer) SegmentAndEmbed(context.Context, *IngestRequest) ([]Segment, error) {
@@ -72,6 +105,7 @@ func TestIngestionNormativeResponses(t *testing.T) {
 			var out struct {
 				Segments []Segment `json:"segments"`
 				Vector   []float32 `json:"vector"`
+				NextStart *int `json:"next_start,omitempty"`
 			}
 			if err := json.Unmarshal(response, &out); err != nil {
 				if c.File != "responses/ingestion/float32-overflow.json" {
@@ -79,7 +113,7 @@ func TestIngestionNormativeResponses(t *testing.T) {
 				}
 				return // float32 overflow is unrepresentable in the SDK's vector type.
 			}
-			_ = p.Ingestion(ingestionAnswer{segments: out.Segments, vector: out.Vector})
+			_ = p.Ingestion(ingestionAnswer{segments: out.Segments, vector: out.Vector, nextStart: out.NextStart})
 			h, err := p.Handler()
 			if err != nil {
 				t.Fatal(err)

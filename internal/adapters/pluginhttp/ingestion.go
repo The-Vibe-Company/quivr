@@ -53,6 +53,7 @@ func (i Ingestor) Descriptor() processing.IngestionDescriptor {
 		d.Spaces = append(d.Spaces, space.Key)
 	}
 	if in := i.contribution(); in != nil {
+		d.Paged = in.Paging && i.Pin.Speaks(plugins.FeatureIngestionPages)
 		for id, space := range in.Spaces {
 			key := plugins.SpaceKey(id, space.Version)
 			var price *float64
@@ -162,6 +163,11 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 // only when the plugin was unreachable, or no longer owns the space the work
 // needs, and has left the active plan (plugins.Unreachable).
 func (i Ingestor) Gone(ctx context.Context, cause error) (*content.Diagnostic, error) {
+	// An unavailable ingestion dependency keeps retrying, even after its
+	// owner left the active plan. Explicit rollback cancellation still wins.
+	if errors.Is(cause, ErrUnavailable) && !plugins.Stopped(ctx, i.Pin) {
+		return nil, nil
+	}
 	if !errors.Is(cause, ErrUnavailable) && !errors.Is(cause, processing.ErrSpaceUnowned) {
 		return nil, nil
 	}

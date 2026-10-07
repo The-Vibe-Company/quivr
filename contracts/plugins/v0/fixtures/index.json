@@ -2588,6 +2588,82 @@
       "request": "requests/connector/fetch.json",
       "manifest": "manifests/valid/connector-concurrency.yaml",
       "description": "Raw input needs exactly one source attachment, without relations, a parent or Part extensions."
+    },
+    {
+      "file": "responses/ingestion/page-continued.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion-paged.yaml",
+      "request": "requests/ingestion/page.json",
+      "description": "Bounded ingestion page: page-continued."
+    },
+    {
+      "file": "responses/ingestion/page-complete.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion-paged.yaml",
+      "request": "requests/ingestion/page.json",
+      "description": "Bounded ingestion page: page-complete."
+    },
+    {
+      "file": "responses/ingestion/page-lost-tail.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_ingestion_page"
+      ],
+      "manifest": "manifests/valid/ingestion-paged.yaml",
+      "request": "requests/ingestion/page.json",
+      "description": "Bounded ingestion page: page-lost-tail."
+    },
+    {
+      "file": "responses/ingestion/page-skips-text.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_ingestion_page"
+      ],
+      "manifest": "manifests/valid/ingestion-paged.yaml",
+      "request": "requests/ingestion/page.json",
+      "description": "Bounded ingestion page: page-skips-text."
+    },
+    {
+      "file": "responses/ingestion/page-repeats-text.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_ingestion_page"
+      ],
+      "manifest": "manifests/valid/ingestion-paged.yaml",
+      "request": "requests/ingestion/page.json",
+      "description": "Bounded ingestion page: page-repeats-text."
+    },
+    {
+      "file": "responses/ingestion/page-gap.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "invalid_ingestion_page"
+      ],
+      "manifest": "manifests/valid/ingestion-paged.yaml",
+      "request": "requests/ingestion/page.json",
+      "description": "Bounded ingestion page: page-gap."
+    },
+    {
+      "file": "manifests/valid/ingestion-paged.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Ingestion pages since Plugin API 0.18."
     }
   ]
 }

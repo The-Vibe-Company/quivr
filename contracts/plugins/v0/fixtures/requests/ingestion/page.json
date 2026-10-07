@@ -1,0 +1,24 @@
+{
+  "invocation_id": "page",
+  "idempotency_key": "page",
+  "contribution": "ingestion",
+  "organization_id": "org",
+  "configuration": {},
+  "version": {
+    "corpus_id": "c",
+    "record_id": "r",
+    "record_version_id": "v"
+  },
+  "parts": [
+    {
+      "key": "body",
+      "role": "body",
+      "text": "abcdefgh"
+    }
+  ],
+  "spaces": [],
+  "page": {
+    "start": 0,
+    "max_segments": 2
+  }
+}

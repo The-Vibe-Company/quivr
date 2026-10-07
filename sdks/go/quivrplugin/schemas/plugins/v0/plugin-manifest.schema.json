@@ -619,7 +619,7 @@
               "minimum": 1,
               "maximum": 1024,
               "default": 256,
-              "description": "Most segments one Record Version yields."
+              "description": "Most segments in one answer. With paging, this bounds each page, never the total passages of a Record Version."
             },
             "max_response_bytes": {
               "type": "integer",
@@ -628,6 +628,10 @@
               "default": 16777216
             }
           }
+        },
+        "paging": {
+          "type": "boolean",
+          "description": "Since Plugin API 0.18. Opt in to bounded source windows and paged segment_and_embed responses. Limits apply per page; the host persists provider-negotiated cuts and vectors before advancing."
         }
       }
     },

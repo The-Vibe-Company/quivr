@@ -52,7 +52,7 @@ type configuration struct {
 }
 
 func parseConfiguration(raw []byte) (configuration, error) {
-	c := configuration{PluginID: pluginID, SendDimensions: true, Metric: "cosine", Revision: "1", PluginVersion: "1.1.0", QueryInputType: "search_query", DocumentInputType: "search_document", MaxTokens: 512, Overlap: 48, BatchSize: 16, BatchWaitMS: 25, BatchTokens: 8192, RequestTimeoutMS: 4000, CallBudgetMS: 30000, MaxRetries: 2, MaxConcurrentRequests: 4, Packing: "paragraphs", BodyTokens: 512, MaxChunks: 4, RebalanceTail: true, TailMinFraction: 0.25, TitleSource: "title", DocumentTemplate: "auto"}
+	c := configuration{PluginID: pluginID, SendDimensions: true, Metric: "cosine", Revision: "1", PluginVersion: "1.2.0", QueryInputType: "search_query", DocumentInputType: "search_document", MaxTokens: 512, Overlap: 48, BatchSize: 16, BatchWaitMS: 25, BatchTokens: 8192, RequestTimeoutMS: 4000, CallBudgetMS: 30000, MaxRetries: 2, MaxConcurrentRequests: 4, Packing: "paragraphs", BodyTokens: 512, MaxChunks: 4, RebalanceTail: true, TailMinFraction: 0.25, TitleSource: "title", DocumentTemplate: "auto"}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
@@ -146,7 +146,7 @@ func (c configuration) spaceID() string {
 	if len(contextParts) == 0 {
 		contextParts = nil
 	}
-	semantics := []any{c.Format, c.Model, c.Dimensions, c.Metric, c.Revision, c.QueryPrefix, c.DocumentPrefix, c.QueryInputType, c.DocumentInputType, c.DocumentTemplate, c.TitleSource, contextParts}
+	semantics := []any{c.Format, c.Model, c.Dimensions, c.Metric, c.Revision, c.QueryPrefix, c.DocumentPrefix, c.QueryInputType, c.DocumentInputType, c.DocumentTemplate, c.TitleSource, contextParts, "separate_passages:v1"}
 	raw, _ := json.Marshal(semantics)
 	sum := sha256.Sum256(raw)
 	slug := strings.Trim(regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(c.Model), "-"), "-")
@@ -192,6 +192,6 @@ func (c configuration) manifest(command []string) ([]byte, error) {
 	if c.InputPrice != nil {
 		space["input_price"] = map[string]any{"usd_per_million_tokens": *c.InputPrice}
 	}
-	m := map[string]any{"id": c.PluginID, "version": c.PluginVersion, "description": "Text windows embedded with a configured hosted or OpenAI-compatible model.", "compatibility": map[string]string{"engine": ">=0.1.0 <0.3.0", "plugin_api": ">=0.17.0 <0.18.0"}, "contributions": map[string]any{"ingestion": map[string]any{"spaces": map[string]any{c.spaceID(): space}, "timeout_ms": 120000, "query_timeout_ms": 10000, "limits": map[string]int{"max_segments": 256}}}, "configuration": map[string]any{"schema": schema}, "secrets": []any{map[string]any{"name": "AZURE_FOUNDRY_KEY", "required": c.Auth != "none", "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration."}}, "run": map[string]any{"command": command}}
+	m := map[string]any{"id": c.PluginID, "version": c.PluginVersion, "description": "Text windows embedded with a configured hosted or OpenAI-compatible model.", "compatibility": map[string]string{"engine": ">=0.1.0 <0.3.0", "plugin_api": ">=0.18.0 <0.19.0"}, "contributions": map[string]any{"ingestion": map[string]any{"paging": true, "spaces": map[string]any{c.spaceID(): space}, "timeout_ms": 120000, "query_timeout_ms": 10000, "limits": map[string]int{"max_segments": 256}}}, "configuration": map[string]any{"schema": schema}, "secrets": []any{map[string]any{"name": "AZURE_FOUNDRY_KEY", "required": c.Auth != "none", "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration."}}, "run": map[string]any{"command": command}}
 	return json.MarshalIndent(m, "", "  ")
 }

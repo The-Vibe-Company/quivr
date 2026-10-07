@@ -99,6 +99,9 @@ func (p provider) requestWithCost(ctx context.Context, inputs []string, mode str
 		if admitted {
 			p.gate.release()
 		}
+		if mode == "document" {
+			return nil, quivrplugin.RetryableIngestError("provider_credentials", "provider credentials unavailable")
+		}
 		return nil, quivrplugin.TerminalIngestError("provider_credentials", "AZURE_FOUNDRY_KEY is required")
 	}
 	body := map[string]any{"model": c.Model}
@@ -148,6 +151,9 @@ func (p provider) requestWithCost(ctx context.Context, inputs []string, mode str
 		req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(c.BaseURL, "/")+path, bytes.NewReader(encoded))
 		if err != nil {
 			p.gate.release()
+			if mode == "document" {
+				return nil, quivrplugin.RetryableIngestError("provider_unavailable", "invalid provider URL")
+			}
 			return nil, quivrplugin.TerminalIngestError("invalid_configuration", "invalid provider URL")
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -197,6 +203,9 @@ func (p provider) requestWithCost(ctx context.Context, inputs []string, mode str
 			if mode == "document" && isInputRefusal(res.StatusCode, data) {
 				return nil, &inputRefusal{refusal}
 			}
+			if mode == "document" {
+				return nil, quivrplugin.RetryableIngestError("provider_unavailable", "shared provider request failed (HTTP "+strconv.Itoa(res.StatusCode)+")")
+			}
 			return nil, refusal
 		}
 		if attempt == c.MaxRetries {
@@ -230,9 +239,11 @@ func isInputRefusal(status int, body []byte) bool {
 	}
 	var payload struct {
 		Error struct {
-			Param string `json:"param"`
-			Code  string `json:"code"`
+			Param   string `json:"param"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
 		} `json:"error"`
+		Detail string `json:"detail"`
 	}
 	if json.Unmarshal(body, &payload) != nil {
 		return false
@@ -244,6 +255,14 @@ func isInputRefusal(status int, body []byte) bool {
 	switch payload.Error.Code {
 	case "invalid_input", "invalid_text", "input_too_long", "text_too_long", "context_length_exceeded", "input_validation_error":
 		return true
+	}
+	// Some compatible providers attribute length errors only in a message.
+	// Inspect safe categories locally; never log or retain the provider body.
+	message := strings.ToLower(payload.Error.Message + " " + payload.Detail)
+	for _, category := range []string{"maximum context length", "input is too long", "input too long", "too many tokens", "exceeds the token limit", "input length exceeds"} {
+		if strings.Contains(message, category) {
+			return true
+		}
 	}
 	return false
 }

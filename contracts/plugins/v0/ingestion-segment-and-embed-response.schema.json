@@ -103,6 +103,11 @@
           }
         }
       }
+    },
+    "next_start": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Since Plugin API 0.18, only for paged requests. First unprocessed source code point. Omitted only when all source text through the end of the request Part is covered."
     }
   }
 }

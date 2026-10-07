@@ -173,6 +173,7 @@ type SubscriptionVectors struct {
 // text Parts of one Version into segments, embeds each in the vector spaces
 // the plugin owns, and encodes queries into one of them.
 type Ingestion struct {
+	Paging bool `json:"paging,omitempty"`
 	// Spaces are the vector spaces the plugin owns, by space id.
 	Spaces         map[string]VectorSpace `json:"spaces"`
 	TimeoutMS      int                    `json:"timeout_ms"`

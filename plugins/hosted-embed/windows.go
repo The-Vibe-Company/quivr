@@ -53,9 +53,6 @@ func (c configuration) segments(parts []quivrplugin.IngestPart) ([]quivrplugin.S
 			input := c.DocumentPrefix + string(runes[start:end])
 			segments = append(segments, quivrplugin.Segment{PartKey: p.Key, Start: start, End: end, Vectors: map[string][]float32{}, Provenance: map[string]any{"token_estimate": len(input) + specialTokens, "hard_cut": hard, "model": c.Model}})
 			inputs = append(inputs, input)
-			if len(segments) > 256 {
-				return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "more than 256 windows")
-			}
 			if end == len(runes) {
 				break
 			}
