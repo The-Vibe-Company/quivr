@@ -116,14 +116,32 @@
       "properties": {
         "start": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Unicode code-point offset into the request Part at which this bounded page begins."
         },
         "max_segments": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 1024
+          "maximum": 1024,
+          "description": "Upper bound on the number of segments returned in this page; remaining source continues in later pages."
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "page"
+        ]
+      },
+      "then": {
+        "properties": {
+          "parts": {
+            "maxItems": 1
+          }
+        }
+      }
+    }
+  ]
 }

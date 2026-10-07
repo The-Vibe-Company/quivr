@@ -34,6 +34,7 @@ func (i *ingester) SegmentAndEmbedPage(ctx context.Context, req *quivrplugin.Ing
 		segments, inputs, err = c.packedSegments(ctx, []quivrplugin.IngestPart{window}, i.tokenizer)
 	} else {
 		c.Overlap = 0
+		c.DocumentPrefix = c.documentInput("", "")
 		segments, inputs, err = c.segments([]quivrplugin.IngestPart{window})
 	}
 	if err != nil {
@@ -79,7 +80,7 @@ func (i *ingester) SegmentAndEmbedPage(ctx context.Context, req *quivrplugin.Ing
 			if vector == nil {
 				cost, costErr := i.provider.inputCost(ctx, p.input)
 				if costErr != nil {
-					return quivrplugin.IngestPage{}, costErr
+					return quivrplugin.IngestPage{}, pageEmbeddingError(costErr)
 				}
 				var vectors [][]float32
 				if cost > c.BatchTokens && p.segment.End-p.segment.Start > 1 {
@@ -117,7 +118,7 @@ func (i *ingester) SegmentAndEmbedPage(ctx context.Context, req *quivrplugin.Ing
 						i.provider.log.Info("embedding_split", "event", "hosted_embedding_split", "invocation_id", req.InvocationID, "source_codepoints", p.segment.End-p.segment.Start)
 						continue
 					}
-					return quivrplugin.IngestPage{}, err
+					return quivrplugin.IngestPage{}, pageEmbeddingError(err)
 				}
 				vector = vectors[0]
 				i.put(key, vector)
@@ -135,3 +136,10 @@ func (i *ingester) SegmentAndEmbedPage(ctx context.Context, req *quivrplugin.Ing
 }
 
 var _ quivrplugin.PagedIngester = (*ingester)(nil)
+
+func pageEmbeddingError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return quivrplugin.RetryableIngestError("embedding_incomplete", "page interrupted; committed pages are retained")
+	}
+	return err
+}

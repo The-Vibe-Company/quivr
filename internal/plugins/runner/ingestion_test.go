@@ -42,6 +42,11 @@ func TestIngestionCertificationExercisesPaging(t *testing.T) {
 				}
 				var r plugins.SegmentAndEmbedRequest
 				_ = json.Unmarshal(body, &r)
+				if r.Page == nil {
+					w.WriteHeader(400)
+					_ = json.NewEncoder(w).Encode(map[string]any{"code": "invalid_request", "message": "this plugin requires bounded pages", "retryable": false})
+					return
+				}
 				segments := []any{}
 				response := map[string]any{"segments": segments}
 				for _, p := range r.Parts {

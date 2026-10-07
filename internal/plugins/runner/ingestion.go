@@ -38,9 +38,10 @@ type ingestionRun struct {
 func (r *run) ingestion(ctx context.Context, own []ownFixture) {
 	runs := r.ingestionFixtures(own)
 	for _, ir := range runs {
-		r.invokeIngestion(ctx, ir)
 		if r.m.Contributions.Ingestion.Paging && r.api.Speaks(plugins.FeatureIngestionPages) {
 			r.ingestionPages(ctx, ir)
+		} else {
+			r.invokeIngestion(ctx, ir)
 		}
 		r.embedQueries(ctx, ir)
 	}

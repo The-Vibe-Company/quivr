@@ -495,8 +495,8 @@ Since Plugin API 0.6. One Record Version's text Parts and the enabled vector spa
 | `parts[].text` | string | yes | — |
 | `spaces` | array of `SpaceId` (shared Manifest schema) | yes | The declared spaces to embed, among those this deployment enables. Every segment carries exactly one vector for each of them. Empty (since Plugin API 0.8) asks for the segments only, without vectors: the core segments a Version first and embeds it later, and the segments must then be the same. 0 to 8 items. |
 | `page` | object | no | Since Plugin API 0.18. Bounded ingestion of exactly one source window. Offsets remain in that request Part. The host durably records each negotiated page before requesting the next. |
-| `page.start` | integer | yes | — |
-| `page.max_segments` | integer | yes | 1 to 1024. |
+| `page.start` | integer | yes | Unicode code-point offset into the request Part at which this bounded page begins. |
+| `page.max_segments` | integer | yes | Upper bound on the number of segments returned in this page; remaining source continues in later pages. 1 to 1024. |
 
 **Response body (200)** (`ingestion-segment-and-embed-response.schema.json`)
 
@@ -514,7 +514,7 @@ Since Plugin API 0.6. One Record Version's text Parts and the enabled vector spa
 | `segments[].vectors` | map of array of number | yes | One vector per requested space, by space id; empty when the request asks for no space (since Plugin API 0.8). 0 to 8 entries. |
 | `segments[].lexical_text` | string | no | Optional keyword-search text for the segment (for example lower-cased, folded or stemmed words). The core indexes it in a separate keyword field; excerpts always come from the source text. At most 16384 code points, no NUL. |
 | `segments[].provenance` | object | no | Optional details of how the segment was made (token counts, the embedded text's template), at most 4 KiB once serialized. Stored with the segmentation, never interpreted. |
-| `next_start` | integer | no | Since Plugin API 0.18, only for paged requests. First unprocessed source code point. Omitted only when all source text through the end of the request Part is covered. |
+| `next_start` | integer | no | First uncovered Unicode code point in the request Part. When present it equals the last segment range end, strictly advances past page.start, and remains below the Part length. Omit only when the entire suffix is covered. |
 
 ## Retrieval
 

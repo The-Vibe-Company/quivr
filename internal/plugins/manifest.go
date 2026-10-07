@@ -714,6 +714,12 @@ func contributionVersionIssues(root map[string]any, r Range) []Issue {
 		if row.Field == "" || !pointerPresent(root, row.Field) {
 			continue
 		}
+		if row.Feature == FeatureIngestionPages {
+			ingestion, _ := contributions["ingestion"].(map[string]any)
+			if ingestion["paging"] != true {
+				continue
+			}
+		}
 		if minimum, admitted := admitsFeature(r, row.Feature); !admitted {
 			issues = append(issues, Issue{Code: CodeIncompatiblePluginAPI, Path: row.Field,
 				Message: fmt.Sprintf(`%s exists since Plugin API %s, which the declared plugin_api range %q excludes; widen it, for example to ">=%s <%d.%d.0"`, row.Field, row.Since, r.String(), row.Since, minimum.Major, minimum.Minor+1)})

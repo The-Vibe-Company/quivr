@@ -238,27 +238,34 @@ func isInputRefusal(status int, body []byte) bool {
 		return false
 	}
 	var payload struct {
-		Error struct {
-			Param   string `json:"param"`
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-		Detail string `json:"detail"`
+		Error   json.RawMessage `json:"error"`
+		Detail  string          `json:"detail"`
+		Message string          `json:"message"`
 	}
 	if json.Unmarshal(body, &payload) != nil {
 		return false
 	}
-	param := payload.Error.Param
+	var attribution struct {
+		Param   string `json:"param"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if len(payload.Error) > 0 && json.Unmarshal(payload.Error, &attribution) != nil {
+		if json.Unmarshal(payload.Error, &attribution.Message) != nil {
+			return false
+		}
+	}
+	param := attribution.Param
 	if param != "" {
 		return param == "input" || param == "texts" || strings.HasPrefix(param, "input[") || strings.HasPrefix(param, "texts[") || strings.HasPrefix(param, "input.") || strings.HasPrefix(param, "texts.")
 	}
-	switch payload.Error.Code {
+	switch attribution.Code {
 	case "invalid_input", "invalid_text", "input_too_long", "text_too_long", "context_length_exceeded", "input_validation_error":
 		return true
 	}
 	// Some compatible providers attribute length errors only in a message.
 	// Inspect safe categories locally; never log or retain the provider body.
-	message := strings.ToLower(payload.Error.Message + " " + payload.Detail)
+	message := strings.ToLower(attribution.Message + " " + payload.Detail + " " + payload.Message)
 	for _, category := range []string{"maximum context length", "input is too long", "input too long", "too many tokens", "exceeds the token limit", "input length exceeds"} {
 		if strings.Contains(message, category) {
 			return true

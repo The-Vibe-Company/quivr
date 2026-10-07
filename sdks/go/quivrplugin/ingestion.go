@@ -224,7 +224,7 @@ func (p *Plugin) serveSegmentAndEmbed(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if req.Page != nil {
 		paged, ok := p.ingester.(PagedIngester)
-		if !ok || compareVersions(p.m.pluginAPI, "0.18.0") < 0 {
+		if !ok || !p.m.Ingestion.Paging || compareVersions(p.m.pluginAPI, "0.18.0") < 0 {
 			refuse(w, 400, "invalid_request", "ingestion pages require a Plugin API 0.18 paged ingester", Credential{})
 			return
 		}

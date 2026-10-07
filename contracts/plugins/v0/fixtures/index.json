@@ -2664,6 +2664,34 @@
       "schema_valid": true,
       "errors": [],
       "description": "Ingestion pages since Plugin API 0.18."
+    },
+    {
+      "file": "manifests/valid/ingestion-paging-disabled.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "description": "Disabled paging preserves legacy admission."
+    },
+    {
+      "file": "manifests/invalid/ingestion-pages-old-api.yaml",
+      "schema": "plugin-manifest.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "incompatible_plugin_api"
+      ],
+      "description": "Paging requires Plugin API 0.18."
+    },
+    {
+      "file": "requests/ingestion/page-multipart.json",
+      "schema": "ingestion-segment-and-embed-request.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "description": "A bounded page contains exactly one source window."
     }
   ]
 }

@@ -286,6 +286,9 @@ func loadManifest(path string) (*loadedManifest, error) {
 		if err := json.Unmarshal(raw, in); err != nil {
 			return nil, err
 		}
+		if in.Paging && !features.speaks("ingestion_pages") {
+			return nil, fmt.Errorf("ingestion pages require Plugin API %s", FeatureSince["ingestion_pages"])
+		}
 		if in.TimeoutMS == 0 {
 			in.TimeoutMS = 30000
 		}

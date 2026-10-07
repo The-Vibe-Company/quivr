@@ -51,6 +51,9 @@ func (i Ingestor) SegmentAndEmbedPage(ctx context.Context, org, corpusID string,
 			return processing.PluginPage{}, i.refused("source continuation is not a Unicode boundary")
 		}
 		window := sourceWindow(part.Content.Text[pos.ByteStart:])
+		if pos.PageStart >= utf8.RuneCountInString(window) {
+			return processing.PluginPage{}, i.refused("ingestion page position is outside its source window")
+		}
 		ids := []string{}
 		byID := map[string]string{}
 		for _, key := range keys {

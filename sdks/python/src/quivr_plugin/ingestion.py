@@ -319,8 +319,8 @@ def invoke_ingestion(manifest: LoadedManifest, handlers: dict[str, Callable[...,
         return _failure(400, error.code, "; ".join(error.problems))
 
     requested_spaces = request.spaces if segment else [request.space]
-    if segment and request.page is not None and _version_tuple(manifest.plugin_api) < (0, 18, 0):
-        return _failure(400, "invalid_request", "ingestion pages require Plugin API 0.18")
+    if segment and request.page is not None and (not contribution.paging or _version_tuple(manifest.plugin_api) < (0, 18, 0)):
+        return _failure(400, "invalid_request", "ingestion pages require declared paging and Plugin API 0.18")
     for space in requested_spaces:
         if space not in contribution.spaces:
             return _failure(400, "unknown_space", f"the ingestion space {space!r} is not declared")

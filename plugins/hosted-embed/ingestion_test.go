@@ -1181,12 +1181,15 @@ func TestPackedPassagesSplitOnlyOversizedParagraphAndKeepEveryPassage(t *testing
 // and continuation must retain the tail even when one page is already full.
 func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 	for _, variant := range []struct {
-		name, text string
-		maxTokens  int
+		name, text, refusal, prefix, template string
+		maxTokens                             int
 	}{
-		{"unicode", "αβγδεζηθ", 512},
-		{"whitespace window", "        ", 512},
-		{"conservative budget", "αβγδεζηθ", 2},
+		{"unicode", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 512},
+		{"top-level message", "αβγδεζηθ", `{"message":"input is too long"}`, "", "", 512},
+		{"string error", "αβγδεζηθ", `{"error":"input is too long"}`, "", "", 512},
+		{"Gemma window template", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "title: none | text: ", "gemma", 512},
+		{"whitespace window", "        ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 512},
+		{"conservative budget", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 2},
 	} {
 		t.Run(variant.name, func(t *testing.T) {
 			var accepted []string
@@ -1199,9 +1202,9 @@ func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 					return
 				}
 				for _, input := range request.Input {
-					if utf8.RuneCountInString(input) > 4 {
+					if utf8.RuneCountInString(strings.TrimPrefix(input, variant.prefix)) > 4 {
 						w.WriteHeader(400)
-						_, _ = w.Write([]byte(`{"error":{"code":"context_length_exceeded"}}`))
+						_, _ = w.Write([]byte(variant.refusal))
 						return
 					}
 				}
@@ -1220,6 +1223,10 @@ func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 			c.BatchWaitMS = 0
 			c.TitleSource = "none"
 			c.MaxTokens = variant.maxTokens
+			c.DocumentTemplate = variant.template
+			if variant.template != "" {
+				c.Packing = "none"
+			}
 			i := newIngester(c, "", slog.Default())
 			i.tokenizer = wordCounter{}
 			req := ingestRequest(c, variant.text, true)
@@ -1242,7 +1249,7 @@ func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 			if len(last.Segments) != 1 || last.NextStart != nil || last.Segments[0].Start != 4 || last.Segments[0].End != 8 {
 				t.Fatalf("tail page=%+v", last)
 			}
-			want := []string{string([]rune(variant.text)[:4]), string([]rune(variant.text)[4:])}
+			want := []string{variant.prefix + string([]rune(variant.text)[:4]), variant.prefix + string([]rune(variant.text)[4:])}
 			if want[0] == want[1] {
 				want = want[:1]
 			} // Identical inputs reuse the vector cache.

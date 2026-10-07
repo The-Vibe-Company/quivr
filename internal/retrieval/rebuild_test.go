@@ -608,7 +608,6 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		cause       error
-		code        string
 		afterCancel error
 		canceled    bool
 	}{
@@ -681,10 +680,6 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 				if err != nil || store.state != operations.StateCanceled || store.confirms != 1 || len(store.failed) != 0 {
 					t.Fatalf("cancellation err=%v state=%s confirms=%d failures=%v", err, store.state, store.confirms, store.failed)
 				}
-			} else if tc.code != "" {
-				if err != nil || len(store.failed) != 1 || store.failed[0].Code != tc.code {
-					t.Fatalf("terminal err=%v failures=%v", err, store.failed)
-				}
 			} else {
 				want := tc.cause
 				if want == nil {
@@ -693,6 +688,9 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 				if !errors.Is(err, want) || len(store.failed) != 0 {
 					t.Fatalf("retry err=%v failures=%v, want %v", err, store.failed, want)
 				}
+			}
+			if tc.afterCancel == content.ErrIngestionRefused && store.quarantined["1"].Code != "ingestion_refused" {
+				t.Fatalf("terminal sibling was not quarantined: %v", store.quarantined)
 			}
 			if len(d.entered) != 0 || len(store.covered) != 0 || store.activated || store.checkpoints != 0 {
 				t.Fatalf("remaining calls=%d covered=%v activated=%v", len(d.entered), store.covered, store.activated)

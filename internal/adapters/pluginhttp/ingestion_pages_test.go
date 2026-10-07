@@ -2,6 +2,7 @@ package pluginhttp_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,11 @@ func TestIngestionPagesCoverLargeMultipartText(t *testing.T) {
 				}
 				if req.Page == nil || len(req.Parts) != 1 || req.Parts[0].Role != "body" || len([]rune(req.Parts[0].Text)) > 4096 {
 					t.Errorf("unbounded page: %+v", req.Page)
+					return
+				}
+				if req.Page.Start >= len([]rune(req.Parts[0].Text)) {
+					w.WriteHeader(422)
+					_, _ = w.Write([]byte(`{"code":"response_too_large","message":"smaller page required","retryable":false}`))
 					return
 				}
 				calls++
@@ -86,6 +92,10 @@ func TestIngestionPagesCoverLargeMultipartText(t *testing.T) {
 				v.Manifest.Parts = append(v.Manifest.Parts, content.Part{Key: strings.Repeat("x", n+1), Role: "context", Content: content.Text{Kind: "text", Text: "tail"}})
 			}
 			v.Manifest.Parts = append(v.Manifest.Parts, content.Part{Key: "space", Role: "body", Content: content.Text{Kind: "text", Text: " \n "}})
+			_, err = ingestor.SegmentAndEmbedPage(t.Context(), "org", "corpus", v, nil, json.RawMessage(`{"page_start":5000}`))
+			if !errors.Is(err, content.ErrIngestionRefused) {
+				t.Fatalf("corrupt source cursor err=%v", err)
+			}
 			texts := map[string][]rune{}
 			for _, part := range v.Manifest.Parts {
 				texts[part.Key] = []rune(part.Content.Text)

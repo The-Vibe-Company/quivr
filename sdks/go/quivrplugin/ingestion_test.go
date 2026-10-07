@@ -14,8 +14,8 @@ import (
 )
 
 type ingestionAnswer struct {
-	segments []Segment
-	vector   []float32
+	segments  []Segment
+	vector    []float32
 	nextStart *int
 }
 
@@ -33,6 +33,12 @@ func (a pagedAnswer) SegmentAndEmbedPage(context.Context, *IngestRequest) (Inges
 // SDK dispatch must preserve a page's cursor and bound; the host owns the
 // normative coverage oracle, while this guards the typed HTTP adapter.
 func TestIngestionPageDispatch(t *testing.T) {
+	if _, err := New(filepath.Join(fixtures, "manifests/invalid/ingestion-pages-old-api.yaml")); err == nil {
+		t.Fatal("paging accepted below Plugin API 0.18")
+	}
+	if _, err := New(filepath.Join(fixtures, "manifests/valid/ingestion-paging-disabled.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	p, err := New(filepath.Join(fixtures, "manifests/valid/ingestion-paged.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +54,12 @@ func TestIngestionPageDispatch(t *testing.T) {
 	status, out, raw := callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
 	if status != 200 || out["next_start"] != float64(4) {
 		t.Fatalf("status=%d body=%s", status, raw)
+	}
+	// A current SDK must not dispatch a page without manifest opt-in.
+	p.m.Ingestion.Paging = false
+	status, out, raw = callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 400 || out["code"] != "invalid_request" {
+		t.Fatalf("undeclared paging status=%d body=%s", status, raw)
 	}
 }
 
@@ -103,9 +115,9 @@ func TestIngestionNormativeResponses(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out struct {
-				Segments []Segment `json:"segments"`
-				Vector   []float32 `json:"vector"`
-				NextStart *int `json:"next_start,omitempty"`
+				Segments  []Segment `json:"segments"`
+				Vector    []float32 `json:"vector"`
+				NextStart *int      `json:"next_start,omitempty"`
 			}
 			if err := json.Unmarshal(response, &out); err != nil {
 				if c.File != "responses/ingestion/float32-overflow.json" {
