@@ -59,13 +59,15 @@ import (
 	"unicode"
 )
 
+var frenchLigatures = strings.NewReplacer("œ", "oe", "æ", "ae")
+
 // AnalyzeKeywords leaves source text unchanged unless the configured analyzer
 // asks for a separate French keyword copy. Both ingest and query use this path.
 func AnalyzeKeywords(text, analyzer string) string {
 	if analyzer != "french_light" {
 		return text
 	}
-	text = strings.NewReplacer("œ", "oe", "æ", "ae").Replace(strings.ToLower(text))
+	text = frenchLigatures.Replace(strings.ToLower(text))
 	folded := strings.Map(func(r rune) rune {
 		if unicode.Is(unicode.Mn, r) {
 			return -1
