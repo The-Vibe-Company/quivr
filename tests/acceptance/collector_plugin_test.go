@@ -92,6 +92,11 @@ func TestCollectorPluginCollectsAndResumes(t *testing.T) {
 	if len(byKey) != 10 {
 		t.Fatalf("the first run collected %d Records, want 10: %v", len(byKey), byKey)
 	}
+	// Materialization precedes indexing; wait for each Record's searchable
+	// publication, replaying the original cursor so earlier events stay visible.
+	for _, recordID := range byKey {
+		awaitChange(t, token, corpusID, cursor, "record.retrieval_ready", recordID)
+	}
 	hits := request(t, "POST", "/v0/search", token, map[string]any{"query": "Harbourlight", "corpus_ids": []string{corpusID}, "mode": "lexical"}, 200)["items"].([]any)
 	if len(hits) == 0 {
 		t.Fatal("collected Records are not searchable")

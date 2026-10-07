@@ -63,6 +63,9 @@ def main():
                'QUIVR_DEMO_DESTINATION_ID': DEMO_DESTINATION, 'QUIVR_DEMO_ALERTS_EVALUATOR': subscription_plugin.KEYWORD_EVALUATOR,
                'DEMO_DESCRIBED_ALERTS': 'true' if described != 'off' else ''}
         feeds_url = None
+        if verify:
+            # The Admin tab rereads the engine's rollups as often as the stack writes them (OBSERVABILITY_OVERRIDES).
+            env['DEMO_STATS_MS'] = '200'
         if isolated:
             # Browser tests and the performance corpus use feeds from a local test site, never the internet.
             feeds_server, feeds_url = fake_feeds.start(port=port())
