@@ -252,6 +252,9 @@ def build_config(env):
     # address (x_list webhook mode); without it they only poll.
     if env.get('QUIVR_PUBLIC_URL', '').strip():
         config['public_url'] = env['QUIVR_PUBLIC_URL'].strip()
+    # Optional: Versions a rebuild step covers in parallel (1-32, engine default 8).
+    if env.get('QUIVR_REBUILD_CONCURRENCY', '').strip():
+        config['rebuild'] = {'concurrency': int(env['QUIVR_REBUILD_CONCURRENCY'])}
     return config
 
 

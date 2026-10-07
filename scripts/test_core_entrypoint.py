@@ -331,6 +331,11 @@ class CoreEntrypointTest(unittest.TestCase):
         config = core_entrypoint.build_config({**ENV, 'QUIVR_PUBLIC_URL': 'https://quivr.example.com'})
         self.assertEqual(config['public_url'], 'https://quivr.example.com')
 
+    def test_rebuild_concurrency_is_passed_when_set(self):
+        self.assertNotIn('rebuild', core_entrypoint.build_config(ENV))
+        config = core_entrypoint.build_config({**ENV, 'QUIVR_REBUILD_CONCURRENCY': '32'})
+        self.assertEqual(config['rebuild'], {'concurrency': 32})
+
     def test_pinned_manifests_are_the_repository_plugins(self):
         # The pins name image paths; each must be a first-party plugin the image copies, with the same id.
         dockerfile = (ROOT / 'deploy' / 'railway' / 'core.Dockerfile').read_text()
