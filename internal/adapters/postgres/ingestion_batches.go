@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -40,11 +41,12 @@ func (s MaterializationStore) claimIngestionBatch(ctx context.Context) (content.
 	}
 	defer tx.Rollback(ctx)
 	var b content.DispatchBatch
+	q, _ := workqueue.Selected(ctx)
 	var raw []byte
 	var incoming time.Time
 	err = tx.QueryRow(ctx, `SELECT enqueued_at FROM ingestion_outbox
-WHERE NOT dispatched AND (NOT legacy_workflow OR lease_until<now())
-ORDER BY enqueued_at,organization,receipt_id FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&incoming)
+WHERE ($1='' OR work_queue=$1 OR (work_queue='' AND $1='live')) AND NOT dispatched AND (NOT legacy_workflow OR lease_until<now())
+ORDER BY enqueued_at,organization,receipt_id FOR UPDATE SKIP LOCKED LIMIT 1`, q).Scan(&incoming)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return b, err
 	}
@@ -55,11 +57,11 @@ ORDER BY enqueued_at,organization,receipt_id FOR UPDATE SKIP LOCKED LIMIT 1`).Sc
 	// Retry persisted groups before handing off newer arrivals. SKIP LOCKED
 	// and leases let other dispatchers keep progressing independently.
 	err = tx.QueryRow(ctx, `WITH pending AS (
- SELECT id FROM ingestion_batches WHERE lease_until<now()
+ SELECT id FROM ingestion_batches WHERE lease_until<now() AND ($2='' OR work_queue=$2 OR (work_queue='' AND $2='live'))
  AND enqueued_at <= COALESCE($1::timestamptz,'infinity'::timestamptz)
  ORDER BY enqueued_at,id FOR UPDATE SKIP LOCKED LIMIT 1
 ) UPDATE ingestion_batches b SET lease_until=now()+interval '5 seconds'
-FROM pending p WHERE b.id=p.id RETURNING b.id,b.receipts,b.legacy_workflow`, before).Scan(&b.ID, &raw, &b.Legacy)
+FROM pending p WHERE b.id=p.id RETURNING b.id,b.receipts,b.legacy_workflow,b.work_queue`, before, q).Scan(&b.ID, &raw, &b.Legacy, &b.WorkQueue)
 	if err == nil {
 		if err = json.Unmarshal(raw, &b.Receipts); err != nil {
 			return b, err
@@ -70,20 +72,20 @@ FROM pending p WHERE b.id=p.id RETURNING b.id,b.receipts,b.legacy_workflow`, bef
 		return b, err
 	}
 	rows, err := tx.Query(ctx, `WITH pending AS MATERIALIZED (
- SELECT organization,receipt_id,enqueued_at,legacy_workflow FROM ingestion_outbox
- WHERE NOT dispatched AND (NOT legacy_workflow OR lease_until<now())
+ SELECT organization,receipt_id,enqueued_at,legacy_workflow,work_queue FROM ingestion_outbox
+ WHERE ($1='' OR work_queue=$1 OR (work_queue='' AND $1='live')) AND NOT dispatched AND (NOT legacy_workflow OR lease_until<now())
  ORDER BY enqueued_at,organization,receipt_id FOR UPDATE SKIP LOCKED LIMIT 32
 ), numbered AS (
  SELECT *,row_number() OVER (ORDER BY enqueued_at,organization,receipt_id) AS ordinal FROM pending
 ), chosen AS (
  SELECT * FROM numbered WHERE ordinal < COALESCE(
-   (SELECT min(n.ordinal) FROM numbered n WHERE n.legacy_workflow<>(SELECT legacy_workflow FROM numbered ORDER BY ordinal LIMIT 1)),33)
+   (SELECT min(n.ordinal) FROM numbered n WHERE (n.legacy_workflow,n.work_queue)<>(SELECT legacy_workflow,work_queue FROM numbered ORDER BY ordinal LIMIT 1)),33)
  AND (NOT legacy_workflow OR ordinal=1)
 ), moved AS (
  DELETE FROM ingestion_outbox o USING chosen p
  WHERE (o.organization,o.receipt_id)=(p.organization,p.receipt_id)
- RETURNING o.organization,o.receipt_id,o.enqueued_at,o.legacy_workflow,o.trace_context
-) SELECT organization,receipt_id,enqueued_at,legacy_workflow,trace_context FROM moved ORDER BY enqueued_at,organization,receipt_id`)
+ RETURNING o.organization,o.receipt_id,o.enqueued_at,o.legacy_workflow,o.trace_context,o.work_queue
+) SELECT organization,receipt_id,enqueued_at,legacy_workflow,trace_context,work_queue FROM moved ORDER BY enqueued_at,organization,receipt_id`, q)
 	if err != nil {
 		return b, err
 	}
@@ -92,7 +94,7 @@ FROM pending p WHERE b.id=p.id RETURNING b.id,b.receipts,b.legacy_workflow`, bef
 	for rows.Next() {
 		var d content.Dispatch
 		var arrived time.Time
-		if err = rows.Scan(&d.Organization, &d.ReceiptID, &arrived, &b.Legacy, &d.TraceContext); err != nil {
+		if err = rows.Scan(&d.Organization, &d.ReceiptID, &arrived, &b.Legacy, &d.TraceContext, &b.WorkQueue); err != nil {
 			rows.Close()
 			return b, err
 		}
@@ -118,7 +120,7 @@ FROM pending p WHERE b.id=p.id RETURNING b.id,b.receipts,b.legacy_workflow`, bef
 	if err != nil {
 		return b, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO ingestion_batches(id,receipts,enqueued_at,lease_until,legacy_workflow) VALUES($1,$2,$3,now()+interval '5 seconds',$4)`, b.ID, raw, oldest, b.Legacy); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO ingestion_batches(id,receipts,enqueued_at,lease_until,legacy_workflow,work_queue) VALUES($1,$2,$3,now()+interval '5 seconds',$4,$5)`, b.ID, raw, oldest, b.Legacy, b.WorkQueue); err != nil {
 		return b, err
 	}
 	return b, tx.Commit(ctx)

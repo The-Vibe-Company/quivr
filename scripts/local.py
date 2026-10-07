@@ -13,6 +13,7 @@ import connector_plugin
 import archive_source
 import fixture_plugin
 import core_ingest_plugin
+import queue_workers
 import ingestion_plugin
 import retrieval_plugin
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request, uuid
@@ -130,7 +131,7 @@ class Stack:
             # Push connector instances (x_list webhook mode) register webhooks here; the fake X calls it on loopback.
             public_url=f"http://127.0.0.1:{s['api_port']}",
             keys={
-            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','observability:read'],['*']),
+            s['admin']:scope('org_a',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','observability:read','queues:read'],['*']),
             s['other']:scope('org_b',['corpora:read','corpora:write','content:read','content:write','search:query','blobs:read','blobs:write','changes:read','monitoring:read','monitoring:write','projections:rebuild','operations:read','operations:write','connectors:read','connectors:write','connectors:admin','connector:push'],['*']),
             # Connector acceptance owns org_c so its scheduled load cannot skew org_a/org_b scenarios.
             s['connector']:scope('org_c',['corpora:read','corpora:write','content:read','content:write','search:query','changes:read','connectors:read','connectors:write','blobs:read'],['*']),
@@ -637,6 +638,7 @@ def parts():
             step('connectors',connectors),
             # Connector kinds from a pinned plugin: collect and resume, then a plugin outage and its recovery.
             step('collector_plugin',connector_plugin.verify),
+            step('queue_workers',queue_workers.verify),
             step('archive_source',archive_source.verify),
             step('connector_restart',verify_connector_restart),
             step('m365_restart',verify_m365_restart),

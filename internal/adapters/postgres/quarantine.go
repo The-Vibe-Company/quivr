@@ -313,6 +313,10 @@ func settle(ctx context.Context, tx pgx.Tx, org, id, versionID, phase, code stri
 // release lifts a Version's quarantine so its baseline runs like a new
 // Version's; quarantined_at is cleared, and set again by a new quarantine.
 func release(ctx context.Context, tx pgx.Tx, org, versionID string) error {
+	// Reprocessing owns the released pipeline and its follow-on jobs as bulk.
+	if _, err := tx.Exec(ctx, `UPDATE ingestion_receipts SET work_queue='bulk' WHERE organization=$1 AND version_id=$2`, org, versionID); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, `UPDATE record_versions SET quarantined=false,quarantine=NULL,quarantine_stage=NULL,quarantined_at=NULL,processing='queued',error_code='' WHERE organization=$1 AND id=$2`, org, versionID)
 	return err
 }

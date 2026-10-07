@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"strconv"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -132,11 +133,11 @@ func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c conte
 			return content.Receipt{}, err
 		}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, scope.Organization, receiptID, c.Key, canonical, canonical, c.Source.CorpusID, recordID, order, slot, digest)
+	_, err = tx.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,work_queue) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, scope.Organization, receiptID, c.Key, canonical, canonical, c.Source.CorpusID, recordID, order, slot, digest, workqueue.Class(ctx))
 	if err != nil {
 		return content.Receipt{}, err
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context) VALUES($1,$2,false,'infinity',$3)", scope.Organization, receiptID, telemetry.Encode(ctx)); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue) VALUES($1,$2,false,'infinity',$3,$4)", scope.Organization, receiptID, telemetry.Encode(ctx), workqueue.Class(ctx)); err != nil {
 		return content.Receipt{}, err
 	}
 	if err = appendEvent(ctx, tx, eventInput{Organization: scope.Organization, CorpusID: c.Source.CorpusID, Kind: "receipt.pending", Resource: "receipt", ResourceID: receiptID}); err != nil {

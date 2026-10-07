@@ -6,6 +6,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
@@ -35,16 +36,23 @@ func registerServingProjection(w worker.Worker, e processing.Evaluator, pins Pin
 	}, activity.RegisterOptions{Name: "publish-serving-projection"})
 }
 
-func (r *Runtime) servingProjectionIntents() IntentSource {
+func (r *Runtime) servingProjectionIntents(classes ...string) IntentSource {
 	return intentSource(func(ctx context.Context) ([]Intent, error) {
+		if len(classes) > 0 {
+			ctx = workqueue.WithClass(ctx, classes[0])
+		}
 		jobs, err := r.Evaluation.Serving.ClaimServingProjections(ctx, 32)
 		if err != nil {
 			return nil, err
 		}
 		intents := make([]Intent, 0, len(jobs))
 		for _, j := range jobs {
+			queue := taskQueue
+			if workqueue.Valid(j.WorkQueue) {
+				queue = workqueue.TaskQueue(j.WorkQueue)
+			}
 			intents = append(intents, dispatchIntent{
-				options: client.StartWorkflowOptions{ID: content.StableID("serving-projection-workflow", j.Organization, j.ID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
+				options: client.StartWorkflowOptions{ID: content.StableID("serving-projection-workflow", j.Organization, j.ID), TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
 				name:    "publish-serving-projection-v0", input: Input{Organization: j.Organization, ReceiptID: j.ID},
 				complete: func(ctx context.Context) error { return r.Evaluation.Serving.ServingProjectionDispatched(ctx, j) },
 				retry:    func(context.Context) error { return nil },

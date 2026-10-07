@@ -16,9 +16,11 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/quarantine"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
@@ -130,6 +132,8 @@ func (unpinned) Pin(ctx context.Context, _, _, _ string) (context.Context, error
 func (unpinned) Release(context.Context, string, string, string) error            { return nil }
 
 type Runtime struct {
+	Queues               workqueue.Config
+	QueueWorkers         []worker.Worker
 	dispatchDone         <-chan struct{}
 	IngestionBatchWorker worker.Worker
 	EvaluationWorker     worker.Worker
@@ -173,85 +177,103 @@ func Start(ctx context.Context, address string, service processing.Service, rebu
 	if err != nil {
 		return nil, err
 	}
-	w := worker.New(c, taskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
-	w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-e5-v3"})
-	registerIngestion(w, service, pins)
-	registerRebuild(w, rebuilder, pins)
-	var cw worker.Worker
-	if conns != nil {
-		cw = worker.New(c, connectorTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
-		registerConnectors(cw, conns, pins)
-		if err = cw.Start(); err != nil {
-			c.Close()
-			return nil, err
-		}
+	settings := workqueue.Config{}
+	if len(options) > 0 {
+		settings = options[0].Queues
 	}
-	var bw worker.Worker
-	if backfiller != nil || reprocessor != nil {
-		bw = worker.New(c, backfillTaskQueue, worker.Options{MaxConcurrentActivityExecutionSize: 1, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
+	settings, err = settings.Resolve()
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+	background := lifecycle.WorkContext(ctx)
+	if len(options) > 0 && options[0].Tracker != nil {
+		background = workqueue.WithTracker(background, options[0].Tracker)
+	}
+	runtime := &Runtime{Evaluation: service.Evaluation, Client: c, Store: store, Connectors: conns, Queues: settings}
+	startWorker := func(queue string, slots int, gate *capacityGate, register func(worker.Worker)) error {
+		w := worker.New(c, queue, worker.Options{MaxConcurrentActivityExecutionSize: slots, WorkerStopTimeout: grace, BackgroundActivityContext: background, Interceptors: []interceptor.WorkerInterceptor{gate}})
+		register(w)
+		if err := w.Start(); err != nil {
+			return err
+		}
+		runtime.QueueWorkers = append(runtime.QueueWorkers, w)
+		return nil
+	}
+	registerCore := func(w worker.Worker) {
+		w.RegisterWorkflowWithOptions(materializeWorkflow, workflow.RegisterOptions{Name: "process-e5-v3"})
+		registerIngestion(w, service, pins)
+		registerIngestionBatches(w, service, pins)
+		registerRebuild(w, rebuilder, pins)
+		if conns != nil {
+			registerConnectors(w, conns, pins)
+		}
 		if backfiller != nil {
-			registerBackfill(bw, *backfiller, pins)
+			registerBackfill(w, *backfiller, pins)
 		}
 		if reprocessor != nil {
-			registerReprocess(bw, *reprocessor, pins)
+			registerReprocess(w, *reprocessor, pins)
 		}
-		if err = bw.Start(); err != nil {
-			if cw != nil {
-				cw.Stop()
-			}
-			c.Close()
-			return nil, err
-		}
-	}
-	var ew worker.Worker
-	if service.Evaluation != nil {
-		if service.Evaluation.Serving != nil {
+		if service.Evaluation != nil && service.Evaluation.Serving != nil {
 			registerServingProjection(w, *service.Evaluation, pins)
 		}
-		ew = worker.New(c, ingestionEvaluationQueue, worker.Options{MaxConcurrentActivityExecutionSize: evaluationConcurrency, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
-		registerIngestionEvaluation(ew, *service.Evaluation, pins)
-		if err = ew.Start(); err != nil {
-			if cw != nil {
-				cw.Stop()
+	}
+	gates := map[string]*capacityGate{}
+	for _, q := range settings.Queues {
+		gates[q] = newCapacityGate(q, settings.Capacity(q))
+	}
+	for _, q := range settings.Queues {
+		gate := gates[q]
+		if err = startWorker(workqueue.TaskQueue(q), settings.Capacity(q), gate, registerCore); err != nil {
+			break
+		}
+		// Legacy queues retain their recorded names and inherited activity routing.
+		// Their activity bodies share the class gate, so upgrade drain does not
+		// multiply the configured execution capacity.
+		legacy := []string{}
+		if q == workqueue.Live {
+			legacy = []string{connectorTaskQueue, ingestionBatchQueue}
+			// The oldest queue mixed live ingestion and bulk rebuild histories.
+			// Only a process serving both classes drains it.
+			if settings.Serves(workqueue.Bulk) {
+				legacy = append(legacy, taskQueue)
 			}
-			if bw != nil {
-				bw.Stop()
+		}
+		if q == workqueue.Bulk {
+			legacy = []string{backfillTaskQueue}
+		}
+		for _, queue := range legacy {
+			legacyGate := gate
+			if queue == taskQueue {
+				legacyGate = &capacityGate{class: workqueue.Live, slots: gate.slots, bulk: gates[workqueue.Bulk]}
 			}
-			c.Close()
-			return nil, err
+			if err = startWorker(queue, settings.Capacity(q), legacyGate, registerCore); err != nil {
+				break
+			}
+		}
+		if err != nil {
+			break
+		}
+		if service.Evaluation != nil {
+			evaluationGate := newCapacityGate(q, evaluationConcurrency)
+			register := func(w worker.Worker) { registerIngestionEvaluation(w, *service.Evaluation, pins) }
+			if err = startWorker(workqueue.TaskQueue(q)+"-evaluation", evaluationConcurrency, evaluationGate, register); err != nil {
+				break
+			}
+			if q == workqueue.Live {
+				if err = startWorker(ingestionEvaluationQueue, evaluationConcurrency, evaluationGate, register); err != nil {
+					break
+				}
+			}
 		}
 	}
-	// Start retries are bounded per attempt; the caller can retry startup without losing accepted work.
-	if err = w.Start(); err != nil {
-		if ew != nil {
-			ew.Stop()
-		}
-		if cw != nil {
-			cw.Stop()
-		}
-		if bw != nil {
-			bw.Stop()
+	if err != nil {
+		for _, w := range runtime.QueueWorkers {
+			w.Stop()
 		}
 		c.Close()
 		return nil, err
 	}
-	batchWorker := worker.New(c, ingestionBatchQueue, worker.Options{MaxConcurrentActivityExecutionSize: 4, WorkerStopTimeout: grace, BackgroundActivityContext: lifecycle.WorkContext(ctx)})
-	registerIngestionBatches(batchWorker, service, pins)
-	if err = batchWorker.Start(); err != nil {
-		w.Stop()
-		if ew != nil {
-			ew.Stop()
-		}
-		if cw != nil {
-			cw.Stop()
-		}
-		if bw != nil {
-			bw.Stop()
-		}
-		c.Close()
-		return nil, err
-	}
-	runtime := &Runtime{IngestionBatchWorker: batchWorker, EvaluationWorker: ew, Evaluation: service.Evaluation, Client: c, Worker: w, ConnectorWorker: cw, BackfillWorker: bw, Store: store, Connectors: conns}
 	done := make(chan struct{})
 	runtime.dispatchDone = done
 	go func() { defer close(done); runtime.dispatch(ctx) }()
@@ -339,14 +361,18 @@ func heartbeating(ctx context.Context, interval time.Duration, run func() error)
 }
 
 // RuntimeOptions carries the process grace budget to all activity workers.
-type RuntimeOptions struct{ ShutdownGrace time.Duration }
+type RuntimeOptions struct {
+	ShutdownGrace time.Duration
+	Queues        workqueue.Config
+	Tracker       workqueue.Tracker
+}
 
 // Close joins workers and dispatcher while the process budget allows it. At
 // expiry, closing the client aborts remaining RPCs and durable leases recover.
 func (r *Runtime) Close(ctx context.Context) {
 	defer r.Client.Close()
 	var wg sync.WaitGroup
-	for _, w := range []worker.Worker{r.IngestionBatchWorker, r.EvaluationWorker, r.Worker, r.ConnectorWorker, r.BackfillWorker} {
+	for _, w := range append([]worker.Worker{r.IngestionBatchWorker, r.EvaluationWorker, r.Worker, r.ConnectorWorker, r.BackfillWorker}, r.QueueWorkers...) {
 		if w != nil {
 			wg.Add(1)
 			go func() { defer wg.Done(); w.Stop() }()

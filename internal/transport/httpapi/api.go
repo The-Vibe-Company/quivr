@@ -35,11 +35,13 @@ import (
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr/internal/transport/routing"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
+"github.com/The-Vibe-Company/quivr/internal/workqueue"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type API struct {
+ Queues workqueue.Reader
 	Audit          audit.Store
 	draining       func() bool
 	processWork    context.Context

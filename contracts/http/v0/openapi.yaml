@@ -2936,6 +2936,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v0/admin/queues:
+    get:
+      operationId: getQueueBacklog
+      description: Installation-wide document backlog for live and bulk workers. Requires the operator grant queues:read and all-Corpora scope. Stable numeric queues.live.waiting and queues.bulk.waiting paths support external autoscalers. Counts come from PostgreSQL, including undispatched work, and exclude terminal work. Bearer authentication uses the configured API key.
+      x-required-permissions: [queues:read]
+      responses:
+        '200':
+          description: Current queue backlog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueBacklog'
+        default:
+          description: Structured error; 401 unauthenticated, 403 without installation operator grant, 503 storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v0/admin/quarantine:
     get:
       operationId: listQuarantinedVersions
@@ -6039,6 +6057,26 @@ components:
           maxItems: 256
           items: {type: string, minLength: 1}
           description: Allowed IPv4/IPv6 CIDRs; absent or empty permits every address.
+    QueueStatus:
+      type: object
+      additionalProperties: false
+      properties:
+        waiting: {type: integer, format: int64, minimum: 0}
+        in_progress: {type: integer, format: int64, minimum: 0}
+        oldest_waiting_age_seconds: {type: number, format: double, minimum: 0}
+      required: [waiting, in_progress, oldest_waiting_age_seconds]
+    QueueBacklog:
+      type: object
+      additionalProperties: false
+      properties:
+        queues:
+          type: object
+          additionalProperties: false
+          properties:
+            live: {$ref: '#/components/schemas/QueueStatus'}
+            bulk: {$ref: '#/components/schemas/QueueStatus'}
+          required: [live, bulk]
+      required: [queues]
     ConnectorCreate:
       type: object
       additionalProperties: false
@@ -6057,6 +6095,10 @@ components:
           $ref: '#/components/schemas/ConnectorKind'
         push_policy:
           $ref: '#/components/schemas/ConnectorPushPolicy'
+        work_queue:
+          type: string
+          enum: [live, bulk]
+          description: Workload class for scheduled acquisition and its documents. Push deliveries always use live.
         config:
           type: object
           description: Kind-specific configuration validated by the kind's JSON Schema. Holds no secret.
@@ -6229,6 +6271,10 @@ components:
           $ref: '#/components/schemas/ConnectorKind'
         push_policy:
           $ref: '#/components/schemas/ConnectorPushPolicy'
+        work_queue:
+          type: string
+          enum: [live, bulk]
+          description: Workload class for scheduled acquisition; push deliveries stay live.
         config:
           type: object
         schedule:

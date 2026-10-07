@@ -7,6 +7,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -99,7 +100,7 @@ func TestIngestionDispatchRestartAcknowledgesExistingWorkflow(t *testing.T) {
 				return o.ID == id && o.WorkflowIDReusePolicy == enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE && o.TaskQueue == queue
 			})
 			tc.On("ExecuteWorkflow", propagated, options, name, input).Return(nil, nil).Once()
-			r := Runtime{Client: tc, Store: store}
+			r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
 			r.dispatchBatch(context.Background(), r.ingestionIntents(), 1)
 			if len(store.acknowledged) != 0 || len(store.feedback) != 1 {
 				t.Fatalf("lost acknowledgement: ack=%v feedback=%v", store.acknowledged, store.feedback)
@@ -136,7 +137,7 @@ func TestIngestionDispatchFailureKeepsUnstartedWorkRecoverable(t *testing.T) {
 			if !stop {
 				tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, ingestionBatchWorkflow, testDispatchBatch(second)).Return(nil, nil).Once()
 			}
-			r := Runtime{Client: tc, Store: store}
+			r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
 			r.dispatchBatch(ctx, r.ingestionIntents(), 1)
 			want := 0
 			if !stop {
@@ -173,15 +174,15 @@ func TestBackgroundDispatchKeepsLegacyOperationIdentities(t *testing.T) {
 			d := operations.Dispatch{Organization: "org_a", OperationID: "operation_1", Kind: kind}
 			store := &dispatchStore{operations: []operations.Dispatch{d}, acknowledgementError: errors.New("acknowledgement lost")}
 			tc := &mocks.Client{}
-			wantID, name, queue := "", rebuildWorkflowName, taskQueue
+			wantID, name, queue := "", rebuildWorkflowName, "quivr-bulk-v1"
 			switch kind {
 			case operations.KindProjectionRebuild:
 				wantID = "projection-rebuild-v1_a9ee87bc3d2099318ff511e1fd4eb6e347ee25f5fea95a71b325c37374b457f9"
 			case operations.KindBackfill:
-				name, queue = backfillWorkflowName, backfillTaskQueue
+				name = backfillWorkflowName
 				wantID = "backfill-v1_a9ee87bc3d2099318ff511e1fd4eb6e347ee25f5fea95a71b325c37374b457f9"
 			case operations.KindQuarantineReprocess:
-				name, queue = reprocessWorkflowName, backfillTaskQueue
+				name = reprocessWorkflowName
 				wantID = "quarantine-reprocess-v1_a9ee87bc3d2099318ff511e1fd4eb6e347ee25f5fea95a71b325c37374b457f9"
 			}
 			options := mock.MatchedBy(func(o client.StartWorkflowOptions) bool {
@@ -189,7 +190,7 @@ func TestBackgroundDispatchKeepsLegacyOperationIdentities(t *testing.T) {
 			})
 			in := RebuildInput{Organization: d.Organization, OperationID: d.OperationID}
 			tc.On("ExecuteWorkflow", mock.Anything, options, name, in).Return(nil, nil).Once()
-			r := Runtime{Client: tc, Store: store}
+			r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
 			r.dispatchBatch(context.Background(), r.operationIntents(), 1)
 			if len(store.operationsAcknowledged) != 0 {
 				t.Fatal("lost acknowledgement was recorded")
@@ -243,7 +244,7 @@ func TestBackgroundDispatcherDoesNotBlockReceiptsBehindConnectors(t *testing.T) 
 	}}
 	tc := &mocks.Client{}
 	tc.On("ExecuteWorkflow", mock.Anything, mock.Anything, ingestionBatchWorkflow, testDispatchBatch(receipt)).Return(nil, nil).Run(func(mock.Arguments) { cancel() }).Once()
-	r := Runtime{Client: tc, Store: store, Connectors: &Connectors{Scheduler: s}}
+	r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store, Connectors: &Connectors{Scheduler: s}}
 	done := make(chan struct{})
 	go func() { r.dispatch(ctx); close(done) }()
 	select {
@@ -281,7 +282,7 @@ func TestReceiptDispatchStartsABoundedBurst(t *testing.T) {
 			return ctx.Err()
 		}
 	}}
-	r := Runtime{Client: tc, Store: store}
+	r := Runtime{Queues: workqueue.Config{Queues: []string{workqueue.Live}}, Client: tc, Store: store}
 	done := make(chan struct{})
 	go func() { r.dispatch(ctx); close(done) }()
 	defer func() { cancel(); <-done }()

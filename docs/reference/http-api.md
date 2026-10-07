@@ -93,6 +93,7 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/admin/plugins/plans`](#get-v0adminpluginsplans) | `listPipelinePlans` | `plugins:admin` |
 | [`POST /v0/admin/backfills`](#post-v0adminbackfills) | `requestBackfill` | `plugins:admin` |
 | [`POST /v0/admin/spaces/{vector_space_id}/promote`](#post-v0adminspacesvector_space_idpromote) | `promoteVectorSpace` | `plugins:admin` |
+| [`GET /v0/admin/queues`](#get-v0adminqueues) | `getQueueBacklog` | `queues:read` |
 | [`GET /v0/admin/quarantine`](#get-v0adminquarantine) | `listQuarantinedVersions` | `plugins:admin` |
 | [`POST /v0/admin/quarantine/reprocess`](#post-v0adminquarantinereprocess) | `reprocessQuarantine` | `plugins:admin` |
 | [`POST /v0/admin/subscriptions/evaluator-migrations`](#post-v0adminsubscriptionsevaluator-migrations) | `migrateSubscriptionEvaluators` | `plugins:admin` |
@@ -1560,6 +1561,19 @@ Make a registered evaluation space the one search uses, in one call, for the who
 | --- | --- | --- |
 | `200` | `application/json` [`VectorSpacePromotion`](#vectorspacepromotion) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; 400 malformed, 401 unauthenticated, 403 without plugins:admin, 404 unknown space, 409 coverage_incomplete, 422 invalid_schema or not_evaluation_space (a retired space), 503 storage unavailable. |
+
+#### `GET /v0/admin/queues`
+
+Operation `getQueueBacklog`. Requires `queues:read`.
+
+Installation-wide document backlog for live and bulk workers. Requires the operator grant queues:read and all-Corpora scope. Stable numeric queues.live.waiting and queues.bulk.waiting paths support external autoscalers. Counts come from PostgreSQL, including undispatched work, and exclude terminal work. Bearer authentication uses the configured API key.
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`QueueBacklog`](#queuebacklog) | Current queue backlog. |
+| `default` | `application/json` [`Error`](#error) | Structured error; 401 unauthenticated, 403 without installation operator grant, 503 storage unavailable. |
 
 #### `GET /v0/admin/quarantine`
 
@@ -6932,6 +6946,56 @@ properties:
 
 </details>
 
+### `QueueStatus`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `waiting` | integer (int64) | yes | Minimum `0`. |
+| `in_progress` | integer (int64) | yes | Minimum `0`. |
+| `oldest_waiting_age_seconds` | number (double) | yes | Minimum `0`. |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  waiting: {type: integer, format: int64, minimum: 0}
+  in_progress: {type: integer, format: int64, minimum: 0}
+  oldest_waiting_age_seconds: {type: number, format: double, minimum: 0}
+required: [waiting, in_progress, oldest_waiting_age_seconds]
+```
+
+</details>
+
+### `QueueBacklog`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `queues` | object | yes |  |
+| `queues.live` | [`QueueStatus`](#queuestatus) | yes |  |
+| `queues.bulk` | [`QueueStatus`](#queuestatus) | yes |  |
+
+<details>
+<summary>Full schema</summary>
+
+```yaml
+type: object
+additionalProperties: false
+properties:
+  queues:
+    type: object
+    additionalProperties: false
+    properties:
+      live: {$ref: '#/components/schemas/QueueStatus'}
+      bulk: {$ref: '#/components/schemas/QueueStatus'}
+    required: [live, bulk]
+required: [queues]
+```
+
+</details>
+
 ### `ConnectorCreate`
 
 | Field | Type | Required | Description |
@@ -6941,6 +7005,7 @@ properties:
 | `source_namespace` | string | yes | Minimum length `1`. Maximum length `200`. |
 | `kind` | [`ConnectorKind`](#connectorkind) | yes |  |
 | `push_policy` | [`ConnectorPushPolicy`](#connectorpushpolicy) |  |  |
+| `work_queue` | string |  | Workload class for scheduled acquisition and its documents. Push deliveries always use live. One of `live`, `bulk`. |
 | `config` | object | yes | Kind-specific configuration validated by the kind's JSON Schema. Holds no secret. |
 | `schedule` | [`ConnectorSchedule`](#connectorschedule) |  |  |
 | `health_policy` | [`ConnectorHealthPolicy`](#connectorhealthpolicy) |  |  |
@@ -7001,6 +7066,10 @@ properties:
     $ref: '#/components/schemas/ConnectorKind'
   push_policy:
     $ref: '#/components/schemas/ConnectorPushPolicy'
+  work_queue:
+    type: string
+    enum: [live, bulk]
+    description: Workload class for scheduled acquisition and its documents. Push deliveries always use live.
   config:
     type: object
     description: Kind-specific configuration validated by the kind's JSON Schema. Holds no secret.
@@ -7261,6 +7330,7 @@ required:
 | `source_namespace` | string | yes | Minimum length `1`. |
 | `kind` | [`ConnectorKind`](#connectorkind) | yes |  |
 | `push_policy` | [`ConnectorPushPolicy`](#connectorpushpolicy) |  |  |
+| `work_queue` | string |  | Workload class for scheduled acquisition; push deliveries stay live. One of `live`, `bulk`. |
 | `config` | object | yes |  |
 | `schedule` | object | yes |  |
 | `schedule.interval_seconds` | integer | yes | Minimum `1`. |
@@ -7390,6 +7460,10 @@ properties:
     $ref: '#/components/schemas/ConnectorKind'
   push_policy:
     $ref: '#/components/schemas/ConnectorPushPolicy'
+  work_queue:
+    type: string
+    enum: [live, bulk]
+    description: Workload class for scheduled acquisition; push deliveries stay live.
   config:
     type: object
   schedule:
