@@ -104,6 +104,44 @@
         "$ref": "plugin-manifest.schema.json#/$defs/SpaceId"
       },
       "description": "The declared spaces to embed, among those this deployment enables. Every segment carries exactly one vector for each of them. Empty (since Plugin API 0.8) asks for the segments only, without vectors: the core segments a Version first and embeds it later, and the segments must then be the same."
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "max_segments"
+      ],
+      "description": "Since Plugin API 0.18. Bounded ingestion of exactly one source window. Offsets remain in that request Part. The host durably records each negotiated page before requesting the next.",
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Unicode code-point offset into the request Part at which this bounded page begins."
+        },
+        "max_segments": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024,
+          "description": "Upper bound on the number of segments returned in this page; remaining source continues in later pages."
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "page"
+        ]
+      },
+      "then": {
+        "properties": {
+          "parts": {
+            "maxItems": 1
+          }
+        }
+      }
+    }
+  ]
 }

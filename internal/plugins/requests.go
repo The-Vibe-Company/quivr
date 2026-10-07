@@ -72,15 +72,16 @@ type IngestionVersion struct {
 
 // SegmentAndEmbedRequest is the ingestion segment_and_embed wire request.
 type SegmentAndEmbedRequest struct {
-	InvocationID   string           `json:"invocation_id"`
-	IdempotencyKey string           `json:"idempotency_key"`
-	Contribution   string           `json:"contribution"`
-	OrganizationID string           `json:"organization_id"`
-	Configuration  json.RawMessage  `json:"configuration"`
-	Version        IngestionVersion `json:"version"`
-	Language       string           `json:"language,omitempty"`
-	Parts          []IngestionPart  `json:"parts"`
-	Spaces         []string         `json:"spaces"`
+	InvocationID   string                `json:"invocation_id"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	Contribution   string                `json:"contribution"`
+	OrganizationID string                `json:"organization_id"`
+	Configuration  json.RawMessage       `json:"configuration"`
+	Version        IngestionVersion      `json:"version"`
+	Language       string                `json:"language,omitempty"`
+	Parts          []IngestionPart       `json:"parts"`
+	Spaces         []string              `json:"spaces"`
+	Page           *IngestionPageRequest `json:"page,omitempty"`
 }
 
 // BuildSegmentAndEmbedRequest applies the ingestion Contribution and shared

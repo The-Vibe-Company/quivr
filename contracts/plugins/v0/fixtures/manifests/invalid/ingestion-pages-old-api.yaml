@@ -1,0 +1,20 @@
+id: example.paged
+version: 0.1.0
+description: Bounded full-text ingestion pages.
+compatibility:
+  engine: ">=0.1.0 <0.3.0"
+  plugin_api: ">=0.17.0 <0.18.0"
+contributions:
+  ingestion:
+    paging: true
+    spaces:
+      example.paged.text:
+        version: "1"
+        model: example/words-4
+        dimensions: 4
+        metric: cosine
+        indexes: [text]
+        query_modalities: [text]
+    limits:
+      max_segments: 2
+      max_response_bytes: 65536

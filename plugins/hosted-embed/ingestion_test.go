@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -360,6 +361,19 @@ func TestWindowsBoundInputsAndPreserveUnicodeOffsets(t *testing.T) {
 }
 
 func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
+	rawExample, err := os.ReadFile("examples/tei.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	example, err := parseConfiguration(rawExample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This released identity included title text in each passage. Full-text
+	// pages embed titles separately and must never share its vector namespace.
+	if example.spaceID() == "hosted.embed.intfloat-multilingual-e5-sma-384-96f19d0e4243e08b" {
+		t.Fatal("new passage semantics reused the released space")
+	}
 	c := testConfig("openai", "http://127.0.0.1:9")
 	original := c.spaceID()
 	for _, change := range []func(*configuration){func(c *configuration) { c.Model = "other" }, func(c *configuration) { c.Dimensions = 16 }, func(c *configuration) { c.QueryPrefix = "query: " }, func(c *configuration) { c.Revision = "2" }, func(c *configuration) { c.Metric = "dot" }} {
@@ -944,7 +958,7 @@ func TestDocumentBatchQueueIsolatesCancellationAndRefusal(t *testing.T) {
 
 // Shared credential/endpoint failures belong to the provider boundary: one
 // collected batch must fail once, without replaying its inputs through splits.
-func TestDocumentBatchPropagatesGlobalProviderRefusalOnce(t *testing.T) {
+func TestDocumentBatchRetriesSharedProviderFailureWithoutSplitting(t *testing.T) {
 	for _, status := range []int{400, 401, 403, 404, 422} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			var calls atomic.Int32
@@ -978,7 +992,7 @@ func TestDocumentBatchPropagatesGlobalProviderRefusalOnce(t *testing.T) {
 				select {
 				case out := <-result:
 					var refusal *quivrplugin.IngestError
-					if !errors.As(out.err, &refusal) || refusal.Retryable || refusal.Code != "inference_refused" {
+					if !errors.As(out.err, &refusal) || !refusal.Retryable || refusal.Code != "provider_unavailable" {
 						t.Fatalf("global refusal: %v", out.err)
 					}
 				case <-ctx.Done():
@@ -1128,7 +1142,7 @@ func TestPackedPassagesKeepParagraphsAndRebalance(t *testing.T) {
 
 }
 
-func TestPackedPassagesSplitOnlyOversizedParagraphAndEnforceCap(t *testing.T) {
+func TestPackedPassagesSplitOnlyOversizedParagraphAndKeepEveryPassage(t *testing.T) {
 	c := testConfig("openai", "http://127.0.0.1:9")
 	c.Packing = "paragraphs"
 	c.BodyTokens = 8
@@ -1154,8 +1168,104 @@ func TestPackedPassagesSplitOnlyOversizedParagraphAndEnforceCap(t *testing.T) {
 	c.MaxChunks = 2
 	i = newIngester(c, "", slog.Default())
 	i.tokenizer = wordCounter{}
-	if _, err = i.SegmentAndEmbed(t.Context(), req); err == nil {
-		t.Fatal("accepted item above hard chunk cap")
+	got, err = i.SegmentAndEmbed(t.Context(), req)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("work group size dropped passages: got %d, err=%v", len(got), err)
+	}
+	if got[2].End != 131 {
+		t.Fatalf("last passage ends at %d; want full text end 131", got[2].End)
+	}
+}
+
+// Provider negotiation must create real independently embedded child passages,
+// and continuation must retain the tail even when one page is already full.
+func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
+	for _, variant := range []struct {
+		name, text, refusal, prefix, template string
+		maxTokens                             int
+	}{
+		{"unicode", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 512},
+		{"top-level message", "αβγδεζηθ", `{"message":"input is too long"}`, "", "", 512},
+		{"string error", "αβγδεζηθ", `{"error":"input is too long"}`, "", "", 512},
+		{"structured detail", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"},"detail":{"message":"input is too long"}}`, "", "", 512},
+		{"validation detail", "αβγδεζηθ", `{"detail":[{"msg":"input is too long"}]}`, "", "", 512},
+		{"Gemma window template", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "title: none | text: ", "gemma", 512},
+		{"whitespace window", "        ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 512},
+		{"conservative budget", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 2},
+	} {
+		t.Run(variant.name, func(t *testing.T) {
+			var accepted []string
+			var acceptedMu sync.Mutex
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					Input []string `json:"input"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				for _, input := range request.Input {
+					if utf8.RuneCountInString(strings.TrimPrefix(input, variant.prefix)) > 4 {
+						w.WriteHeader(400)
+						_, _ = w.Write([]byte(variant.refusal))
+						return
+					}
+				}
+				data := []any{}
+				for n, input := range request.Input {
+					acceptedMu.Lock()
+					accepted = append(accepted, input)
+					acceptedMu.Unlock()
+					data = append(data, map[string]any{"index": n, "embedding": []float32{1, 2}})
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+			}))
+			defer server.Close()
+			c := testConfig("openai", server.URL)
+			c.Auth = "none"
+			c.Dimensions = 2
+			c.MaxChunks = 1
+			c.BatchWaitMS = 0
+			c.TitleSource = "none"
+			c.MaxTokens = variant.maxTokens
+			c.DocumentTemplate = variant.template
+			if variant.template != "" {
+				c.Packing = "none"
+			}
+			i := newIngester(c, "", slog.Default())
+			i.tokenizer = wordCounter{}
+			req := ingestRequest(c, variant.text, true)
+			req.Page = &quivrplugin.IngestPageRequest{Start: 0, MaxSegments: 1}
+			first, err := i.SegmentAndEmbedPage(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(first.Segments) != 1 || first.NextStart == nil || *first.NextStart != 4 || first.Segments[0].End != 4 || len(first.Segments[0].Vectors[c.spaceID()]) != 2 {
+				t.Fatalf("first page=%+v", first)
+			}
+			if first.Segments[0].Provenance["provider_split"] != true {
+				t.Fatalf("missing split diagnostic: %+v", first.Segments[0].Provenance)
+			}
+			req.Page.Start = *first.NextStart
+			last, err := i.SegmentAndEmbedPage(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(last.Segments) != 1 || last.NextStart != nil || last.Segments[0].Start != 4 || last.Segments[0].End != 8 {
+				t.Fatalf("tail page=%+v", last)
+			}
+			want := []string{variant.prefix + string([]rune(variant.text)[:4]), variant.prefix + string([]rune(variant.text)[4:])}
+			if want[0] == want[1] {
+				want = want[:1]
+			} // Identical inputs reuse the vector cache.
+			acceptedMu.Lock()
+			acceptedInputs := slices.Clone(accepted)
+			acceptedMu.Unlock()
+			if !slices.Equal(acceptedInputs, want) || len(last.Segments[0].Vectors[c.spaceID()]) != 2 {
+				t.Fatalf("provider accepted %v; want both complete halves", acceptedInputs)
+			}
+
+		})
 	}
 }
 

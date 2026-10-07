@@ -27,27 +27,31 @@ func TestHostedEmbeddingPinFindsText(t *testing.T) {
 	receipt := awaitRetrievalReady(t, accepted["receipt_id"].(string))
 	awaitEnriched(t, admin, corpus, start, receipt["record_id"].(string))
 	ready := receipt["version_id"].(string)
-	result := request(t, "POST", "/v0/search", admin, map[string]any{"query": sentence, "corpus_ids": []string{corpus}, "mode": "semantic"}, 200)
-	items := result["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("configured space %s returned %v", space, result)
-	}
-	hit := items[0].(map[string]any)
-	if hit["version_id"] != ready || hit["vector_space_id"] != space+"@1" || hit["embedding_artifact_id"] == nil {
-		t.Fatalf("search did not use configured embedding: %v", hit)
-	}
-	excerpt := hit["excerpt"].(map[string]any)
-	if hit["part_key"] != "paragraph-1" || excerpt["text"] != sentence || excerpt["start"] != float64(0) || excerpt["end"] != float64(utf8.RuneCountInString(sentence)) || hit["passage_text"] != sentence+"\n\n"+second {
-		t.Fatalf("packed passage or legacy anchor changed: %v", hit)
-	}
-	sources := hit["source_excerpts"].([]any)
-	if len(sources) != 2 {
-		t.Fatalf("source excerpts: %v", sources)
-	}
-	for n, expected := range []string{sentence, second} {
-		source := sources[n].(map[string]any)
-		if source["part_key"] != []string{"paragraph-1", "paragraph-2"}[n] || source["text"] != expected || source["start"] != float64(0) || source["end"] != float64(utf8.RuneCountInString(expected)) || source["coordinate_system"] != "unicode_codepoint" {
-			t.Fatalf("canonical source %d: %v", n, source)
+	// Bounded continuation embeds each source Part independently. Queries for
+	// the headline and final Part must resolve to their own complete vectors.
+	for _, passage := range []struct{ key, text string }{
+		{"headline", "Library"}, {"paragraph-1", sentence}, {"paragraph-2", second},
+	} {
+		result := request(t, "POST", "/v0/search", admin, map[string]any{"query": passage.text, "corpus_ids": []string{corpus}, "mode": "semantic"}, 200)
+		items := result["items"].([]any)
+		if len(items) != 1 {
+			t.Fatalf("configured space %s returned %v", space, result)
+		}
+		hit := items[0].(map[string]any)
+		if hit["version_id"] != ready || hit["vector_space_id"] != space+"@1" || hit["embedding_artifact_id"] == nil {
+			t.Fatalf("search did not use configured embedding: %v", hit)
+		}
+		excerpt := hit["excerpt"].(map[string]any)
+		if hit["part_key"] != passage.key || excerpt["text"] != passage.text || excerpt["start"] != float64(0) || excerpt["end"] != float64(utf8.RuneCountInString(passage.text)) || hit["passage_text"] != passage.text {
+			t.Fatalf("source passage %s changed: %v", passage.key, hit)
+		}
+		sources := hit["source_excerpts"].([]any)
+		if len(sources) != 1 {
+			t.Fatalf("source excerpts: %v", sources)
+		}
+		source := sources[0].(map[string]any)
+		if source["part_key"] != passage.key || source["text"] != passage.text || source["start"] != float64(0) || source["end"] != float64(utf8.RuneCountInString(passage.text)) || source["coordinate_system"] != "unicode_codepoint" {
+			t.Fatalf("canonical source %s: %v", passage.key, source)
 		}
 	}
 }

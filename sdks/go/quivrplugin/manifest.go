@@ -70,6 +70,7 @@ type RetrievalProfile struct {
 
 // IngestionContribution is the ingestion Contribution of a manifest.
 type IngestionContribution struct {
+	Paging         bool             `json:"paging,omitempty"`
 	Spaces         map[string]Space `json:"spaces"`
 	TimeoutMS      int              `json:"timeout_ms"`
 	QueryTimeoutMS int              `json:"query_timeout_ms"`
@@ -284,6 +285,9 @@ func loadManifest(path string) (*loadedManifest, error) {
 		in := &IngestionContribution{}
 		if err := json.Unmarshal(raw, in); err != nil {
 			return nil, err
+		}
+		if in.Paging && !features.speaks("ingestion_pages") {
+			return nil, fmt.Errorf("ingestion pages require Plugin API %s", FeatureSince["ingestion_pages"])
 		}
 		if in.TimeoutMS == 0 {
 			in.TimeoutMS = 30000
