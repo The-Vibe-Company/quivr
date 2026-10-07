@@ -80,6 +80,18 @@ func (c *queryCostCounter) Encode(_ context.Context, inputs []tokenInput) ([]tok
 	return []tokenEncoding{{Tokens: len(inputs[0].Text) + specialTokens}}, nil
 }
 
+// Observe a running query's budget setup while all tokenizer slots stay held.
+type queryWaitContext struct {
+	context.Context
+	started chan struct{}
+	once    sync.Once
+}
+
+func (c *queryWaitContext) Deadline() (time.Time, bool) {
+	c.once.Do(func() { close(c.started) })
+	return c.Context.Deadline()
+}
+
 type queryBudgetCounter struct {
 	t       *testing.T
 	started chan struct{}
@@ -129,9 +141,23 @@ func TestLocalQueryTokenizationSharesDeadlineAndAdmission(t *testing.T) {
 		}
 	}
 	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	waiting := &queryWaitContext{Context: ctx, started: make(chan struct{})}
+	queued := make(chan error, 1)
+	go func() { _, err := i.EmbedQuery(waiting, queryRequest(c, "A library opens.")); queued <- err }()
+	select {
+	case <-waiting.started:
+	case <-t.Context().Done():
+		t.Fatal("queued query did not start")
+	}
 	cancel()
-	if _, err := i.EmbedQuery(ctx, queryRequest(c, "A library opens.")); err == nil {
-		t.Fatal("cancelled waiting query accepted")
+	select {
+	case err := <-queued:
+		if err == nil {
+			t.Fatal("cancelled waiting query accepted")
+		}
+	case <-t.Context().Done():
+		t.Fatal("queued query did not cancel before slots released")
 	}
 	if counter.calls.Load() != 4 {
 		t.Fatalf("tokenization exceeded four admitted queries: %d", counter.calls.Load())

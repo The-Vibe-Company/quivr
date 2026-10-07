@@ -134,6 +134,7 @@ measurement through the hosted plugin, also include `plugin.configuration` and
 `plugin.space`, taken from that deployment's installed pin. Supply that plugin's
 verification ring privately as `QUIVR_PLUGIN_SIGNING_KEYS`; the CLI signs each
 request with a fresh invocation ID and never writes keys or tokens to reports.
+Use a numeric loopback HTTP origin or HTTPS for remote plugin calls.
 
 Install the CLI numerical dependency with `python3 -m pip install numpy==2.5.3`.
 Candidate vectors are normalized once and ranked with float64 matrix operations.

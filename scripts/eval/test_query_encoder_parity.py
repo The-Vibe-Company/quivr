@@ -22,10 +22,14 @@ class QueryEncoderParityTest(unittest.TestCase):
                 'secret': base64.urlsafe_b64encode(secret).decode().rstrip('=')}]}
         with patch.object(parity.urllib.request, 'build_opener') as opener, \
              patch.dict(os.environ, {'QUIVR_PLUGIN_SIGNING_KEYS': json.dumps(ring)}):
-            opener.return_value.open.side_effect = [io.BytesIO(json.dumps({'vector': vector}).encode()) for _ in range(2)]
+            opener.return_value.open.side_effect = [io.BytesIO(json.dumps({'vector': vector}).encode()) for _ in range(3)]
             for _ in range(2):
-                parity.encode('http://local', 'A library opens.',
+                parity.encode('http://127.0.0.1', 'A library opens.',
                               plugin={'configuration': {'plugin_id': 'hosted.embed.evaluation'}, 'space': 'evaluation'})
+            with self.assertRaises(ValueError):
+                parity.encode('http://192.0.2.1', 'A library opens.',
+                              plugin={'configuration': {}, 'space': 'evaluation'})
+            self.assertEqual(opener.return_value.open.call_count, 2)
         attempts = []
         for call in opener.return_value.open.call_args_list:
             request = call.args[0]

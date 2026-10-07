@@ -10,6 +10,7 @@ import base64
 import concurrent.futures
 import hashlib
 import hmac
+import ipaddress
 import json
 import math
 import multiprocessing
@@ -36,6 +37,20 @@ PREFIX = 'task: search result | query: '
 class RefuseRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def validate_plugin_url(url):
+    parsed = urllib.parse.urlsplit(url)
+    if (parsed.scheme not in ('http', 'https') or not parsed.hostname
+            or parsed.username or parsed.password or parsed.query or parsed.fragment):
+        raise ValueError('invalid plugin endpoint')
+    if parsed.scheme == 'http':
+        try:
+            loopback = ipaddress.ip_address(parsed.hostname).is_loopback
+        except ValueError:
+            loopback = False
+        if not loopback:
+            raise ValueError('remote plugin endpoint requires HTTPS')
 
 
 def engine_token(raw, url, audience):
@@ -71,6 +86,7 @@ def request_json(url, body=None, token='', timeout=10, signing_audience=''):
     headers = {'Content-Type': 'application/json'}
     raw = json.dumps(body).encode() if body is not None else None
     if signing_audience:
+        validate_plugin_url(url)
         token = engine_token(raw, url, signing_audience)
     if token:
         headers['Authorization'] = 'Bearer ' + token
@@ -203,7 +219,7 @@ def arguments(argv):
     parser.add_argument('--output', type=pathlib.Path, required=True)
     parser.add_argument('--local-url', required=True, help='loopback encoder base ending /v1')
     parser.add_argument('--remote-url', required=True, help='remote OpenAI base ending /v1')
-    parser.add_argument('--plugin-url', help='optional hosted.embed SDK HTTP origin; input includes plugin.configuration and plugin.space')
+    parser.add_argument('--plugin-url', help='optional hosted.embed origin: loopback HTTP or HTTPS; input includes plugin.configuration and plugin.space')
     parser.add_argument('--cpu-cores', type=int, required=True, help='allocated service CPU cores, not machine count')
     parser.add_argument('--threads', type=int, required=True)
     parser.add_argument('--concurrency', type=int, default=4)
@@ -224,6 +240,8 @@ def main(argv=None):
             parsed = urllib.parse.urlsplit(value)
             if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
                 raise ValueError('endpoint must be an HTTP(S) URL without credentials, query or fragment')
+        if args.plugin_url:
+            validate_plugin_url(args.plugin_url)
         if urllib.parse.urlsplit(args.remote_url).scheme != 'https':
             raise ValueError('remote endpoint must use HTTPS')
         if args.input.stat().st_size > 128 * 1024 * 1024:
