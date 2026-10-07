@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from urllib.parse import urlsplit
+from urllib.request import build_opener, ProxyHandler, HTTPRedirectHandler
 
 # First-party plugins baked into the core image (core.Dockerfile), pinned when
 # QUIVR_DEMO_PLUGINS=1, except newsml-g2, which is always pinned alongside
@@ -58,6 +59,28 @@ CONNECTORS = [
 HOSTED_MANIFEST = '/tmp/hosted-embed/quivr-plugin.yaml'
 HOSTED_EMBED = {'id': 'hosted-embed', 'port': 9980, 'api': True,
                 'manifest': HOSTED_MANIFEST, 'secrets': ['AZURE_FOUNDRY_KEY']}
+ENCODER_PYTHON = '/opt/query-encoder/venv/bin/python'
+ENCODER_MODEL = '/opt/query-encoder/model'
+ENCODER_URL = 'http://127.0.0.1:9995'
+ENCODER_IDENTITY = {'model': 'google/embeddinggemma-2',
+                    'model_revision': '914f7f89142e33e7',
+                    'source_revision': '914f7f89142e33e77833254d9c9b90c3cef7303b',
+                    'dimensions': 768}
+
+
+def encoder_settings(env):
+    if env.get('QUIVR_LOCAL_QUERY_ENCODER') != '1':
+        return None
+    if embedding_selection(env) != 'gemma':
+        raise ValueError('QUIVR_LOCAL_QUERY_ENCODER requires QUIVR_DEMO_EMBEDDING=gemma')
+    values = {}
+    for name, default, limit in (('QUIVR_QUERY_ENCODER_THREADS', 4, 32),
+                                  ('QUIVR_QUERY_ENCODER_STARTUP_SECONDS', 120, 600)):
+        raw = env.get(name, str(default))
+        if not raw.isascii() or not raw.isdigit() or not 1 <= int(raw) <= limit:
+            raise ValueError(name + ' must be an integer from 1 to ' + str(limit))
+        values[name] = int(raw)
+    return values
 # The demo Organization's webhook destination. The web facade reads Matches
 # through the API, so nothing needs the webhook: the reserved .invalid name never
 # resolves and every delivery attempt fails without leaving the container. The
@@ -332,6 +355,17 @@ def sidecar_commands(env, role='worker'):
     The plugins are first-party code under the same user as the worker, not an isolation boundary.
     """
     commands = []
+    settings = encoder_settings(env)
+    if role == 'migrate':
+        return commands
+    if settings and role == 'api':
+        commands.append(('text-encoder', [ENCODER_PYTHON, '-m', 'deploy.cpu.text_encoder',
+                         '--model-dir', ENCODER_MODEL, '--port', '9995',
+                         '--threads', str(settings['QUIVR_QUERY_ENCODER_THREADS'])], '/app',
+                         {'PATH': env.get('PATH', '/usr/local/bin:/usr/bin:/bin'),
+                          'PYTHONUNBUFFERED': '1', 'HF_HUB_OFFLINE': '1',
+                          'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',
+                          'TOKENIZERS_PARALLELISM': 'false'}))
     for connector in runtime_connectors(env):
         if role == 'api' and not (connector.get('push') or connector.get('api')):
             continue
@@ -346,6 +380,8 @@ def sidecar_commands(env, role='worker'):
             child['QUIVR_PLUGIN_SIGNING_KEYS'] = json.dumps(rings[connector['signing_id']])
         child.update({connector.get('secret_names', {}).get(name, name): env[name]
                       for name in connector.get('secrets', []) if env.get(name, '').strip()})
+        if settings and role == 'api' and connector['id'] == 'hosted-embed':
+            child['QUIVR_HOSTED_QUERY_URL'] = ENCODER_URL + '/v1'
         if 'module' in connector:
             child['PYTHONUNBUFFERED'] = '1'
             argv = [PLUGIN_PYTHON, '-m', connector['module']]
@@ -366,7 +402,38 @@ def sidecar_commands(env, role='worker'):
     return commands
 
 
-def supervise(commands, grace=10.0, poll=0.2):
+class RefuseRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def read_encoder_health(url, timeout):
+    # Loopback readiness must never inherit proxy credentials or follow redirects.
+    return build_opener(ProxyHandler({}), RefuseRedirect()).open(url, timeout=timeout)
+
+
+def wait_for_encoder(child, readiness, stopping, poll):
+    deadline = time.monotonic() + readiness['timeout']
+    while not stopping:
+        if child.poll() is not None:
+            raise ValueError('local text encoder exited before readiness')
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError('local text encoder readiness timed out')
+        try:
+            with read_encoder_health(readiness['url'], min(1.0, remaining)) as response:
+                body = response.read(4097)
+            metadata = json.loads(body) if len(body) <= 4096 else {}
+        except (OSError, ValueError):
+            time.sleep(min(poll, max(0, deadline - time.monotonic())))
+            continue
+        if not isinstance(metadata, dict) or metadata.get('status') != 'ok' or any(
+                metadata.get(key) != readiness[key] for key in ENCODER_IDENTITY):
+            raise ValueError('local text encoder identity differs from the pinned model')
+        return
+
+
+def supervise(commands, grace=10.0, poll=0.2, readiness=None):
     """Run the processes together; when one exits or SIGTERM arrives, stop the others.
 
     Returns 0 after a requested stop. Otherwise it returns the status of the
@@ -385,13 +452,23 @@ def supervise(commands, grace=10.0, poll=0.2):
         for name, argv, cwd, env in commands:
             children.append((name, subprocess.Popen(argv, cwd=cwd, env=env)))
             print(f'started {name}', file=sys.stderr, flush=True)
-        while not stopping:
-            exited = [(name, child.returncode) for name, child in children if child.poll() is not None]
-            if exited:
-                name, code = exited[0]
-                print(f'{name} exited with status {code}; stopping the container', file=sys.stderr, flush=True)
+            if readiness and name == readiness['name']:
+                try:
+                    wait_for_encoder(children[-1][1], readiness, stopping, poll)
+                except ValueError as error:
+                    print(str(error), file=sys.stderr, flush=True)
+                    break
+            if stopping:
                 break
-            time.sleep(poll)
+        else:
+            # All children started. A failed readiness barrier skips this loop.
+            while not stopping:
+                exited = [(name, child.returncode) for name, child in children if child.poll() is not None]
+                if exited:
+                    name, code = exited[0]
+                    print(f'{name} exited with status {code}; stopping the container', file=sys.stderr, flush=True)
+                    break
+                time.sleep(poll)
         for _, child in children:
             if child.poll() is None:
                 child.send_signal(signal.SIGTERM)
@@ -413,6 +490,13 @@ def main():
     if mode not in ('api', 'worker', 'migrate'):
         raise SystemExit('QUIVR_ROLE must be api, worker or migrate')
     config = build_config(os.environ)
+    settings = encoder_settings(os.environ)
+    readiness = None
+    if mode == 'api' and settings:
+        if not pathlib.Path(ENCODER_PYTHON).is_file() or not pathlib.Path(ENCODER_MODEL + '/model.safetensors').is_file():
+            raise ValueError('QUIVR_LOCAL_QUERY_ENCODER requires an image built with QUIVR_BUILD_LOCAL_QUERY_ENCODER=1')
+        readiness = {'name': 'text-encoder', 'url': ENCODER_URL + '/health',
+                     'timeout': settings['QUIVR_QUERY_ENCODER_STARTUP_SECONDS'], **ENCODER_IDENTITY}
     os.umask(0o077)
     prepare_hosted_manifest(os.environ)
     path = pathlib.Path('/tmp/quivr-runtime.json')
@@ -433,7 +517,8 @@ def main():
     # beside itself.
     sidecars = sidecar_commands(os.environ, mode) if mode in ('api', 'worker') else []
     if sidecars:
-        sys.exit(supervise(sidecars + [('quivr ' + mode, ['quivr', mode], None, core_env)]))
+        commands = sidecars + [('quivr ' + mode, ['quivr', mode], None, core_env)]
+        sys.exit(supervise(commands, readiness=readiness) if readiness else supervise(commands))
     os.execvpe('quivr', ['quivr', mode], core_env)
 
 

@@ -65,6 +65,133 @@ func TestProviderModesAndUsage(t *testing.T) {
 	}
 }
 
+// Owns local query routing through the plugin HTTP boundary. The remote mapping
+// keeper above owns provider formats; these dependencies only supply HTTP vectors.
+func TestLocalQueryRouting(t *testing.T) {
+	const revision = "914f7f89142e33e7"
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			remote := embedding.New()
+			remoteServer := httptest.NewServer(remote)
+			defer remoteServer.Close()
+			var localCalls atomic.Int32
+			var unavailable atomic.Bool
+			local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/health" {
+					_, _ = w.Write([]byte(`{"status":"ok","model":"test-model","model_revision":"914f7f89142e33e7","source_revision":"914f7f89142e33e77833254d9c9b90c3cef7303b","dimensions":8}`))
+					return
+				}
+				localCalls.Add(1)
+				if r.URL.Path != "/v1/embeddings" || r.Header.Get("Authorization") != "" || r.Header.Get("api-key") != "" || r.Header.Get("X-Quivr-Timeout-Ms") == "" {
+					t.Errorf("wrong local path, credential or deadline: %s", r.URL.Path)
+				}
+				var body struct {
+					Model      string
+					Input      []string
+					Dimensions int
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Model != "test-model" || body.Dimensions != 8 || len(body.Input) != 1 || body.Input[0] != "query: A library opens downtown." {
+					t.Errorf("wrong local model input: %+v, %v", body, err)
+				}
+				if unavailable.Load() {
+					w.WriteHeader(503)
+					return
+				}
+				_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[1,0,0,0,0,0,0,0]}]}`))
+			}))
+			defer local.Close()
+			c := testConfig("openai", remoteServer.URL)
+			c.Revision, c.QueryPrefix, c.DocumentPrefix = revision, "query: ", "passage: "
+			manifest, _ := c.manifest([]string{"hosted-embed"})
+			path := t.TempDir() + "/quivr-plugin.yaml"
+			if err := os.WriteFile(path, manifest, 0600); err != nil {
+				t.Fatal(err)
+			}
+			p, err := quivrplugin.New(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			i := newIngester(c, "fake-key", slog.New(slog.DiscardHandler))
+			url := ""
+			if enabled {
+				url = local.URL + "/v1"
+			}
+			if err := i.localQueries(t.Context(), url); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.Ingestion(i); err != nil {
+				t.Fatal(err)
+			}
+			handler, err := p.Handler()
+			if err != nil {
+				t.Fatal(err)
+			}
+			invoke := func(method string, request any) *httptest.ResponseRecorder {
+				t.Helper()
+				body, _ := json.Marshal(request)
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, httptest.NewRequest("POST", "/v0/contributions/ingestion/"+method, bytes.NewReader(body)))
+				return response
+			}
+			if got := invoke("segment_and_embed", ingestRequest(c, "A library opens downtown.", true)); got.Code != 200 {
+				t.Fatalf("document: %d %s", got.Code, got.Body.String())
+			}
+			if got := invoke("embed_query", queryRequest(c, "A library opens downtown.")); got.Code != 200 {
+				t.Fatalf("query: %d %s", got.Code, got.Body.String())
+			}
+			wantRemote, wantLocal := 2, int32(0)
+			if enabled {
+				wantRemote, wantLocal = 1, 1
+			}
+			calls := remote.Calls()
+			if len(calls) != wantRemote || localCalls.Load() != wantLocal || calls[0].Auth != "bearer" || calls[0].Texts[0] != "passage: A library opens downtown." {
+				t.Fatalf("routing: remote %+v, local %d", calls, localCalls.Load())
+			}
+			if enabled {
+				unavailable.Store(true)
+				if got := invoke("embed_query", queryRequest(c, "A library opens downtown.")); got.Code != 503 {
+					t.Fatalf("local outage: %d %s", got.Code, got.Body.String())
+				}
+				if len(remote.Calls()) != 1 || localCalls.Load() != 2 {
+					t.Fatal("local failure retried or fell back remotely")
+				}
+			}
+			if after, _ := i.config.manifest([]string{"hosted-embed"}); !bytes.Equal(manifest, after) {
+				t.Fatal("runtime routing changed the pinned manifest")
+			}
+		})
+	}
+}
+
+func TestLocalQueryRefusesIdentityAndEndpointDrift(t *testing.T) {
+	for _, field := range []string{"model", "model_revision", "source_revision", "dimensions", "status"} {
+		t.Run(field, func(t *testing.T) {
+			metadata := map[string]any{"status": "ok", "model": "test-model", "model_revision": "914f7f89142e33e7", "source_revision": "914f7f89142e33e77833254d9c9b90c3cef7303b", "dimensions": 8}
+			metadata[field] = "other"
+			if field == "source_revision" {
+				metadata[field] = "014f7f89142e33e77833254d9c9b90c3cef7303b"
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _ = json.NewEncoder(w).Encode(metadata) }))
+			defer server.Close()
+			c := testConfig("openai", "http://127.0.0.1:9")
+			c.Revision = "914f7f89142e33e7"
+			if err := newIngester(c, "fake-key", slog.New(slog.DiscardHandler)).localQueries(t.Context(), server.URL+"/v1"); err == nil {
+				t.Fatalf("accepted %s drift", field)
+			}
+		})
+	}
+	c := testConfig("openai", "http://127.0.0.1:9")
+	for _, url := range []string{"https://127.0.0.1/v1", "http://example.org/v1", "http://localhost/v1", "http://key@127.0.0.1/v1", "http://127.0.0.1/v1?token=value", "http://127.0.0.1/v1#fragment", "http://127.0.0.1/other"} {
+		if err := newIngester(c, "", slog.New(slog.DiscardHandler)).localQueries(t.Context(), url); err == nil {
+			t.Fatalf("accepted invalid local endpoint")
+		}
+	}
+	c.Format = "cohere"
+	if err := newIngester(c, "", slog.New(slog.DiscardHandler)).localQueries(t.Context(), "http://127.0.0.1:9/v1"); err == nil {
+		t.Fatal("accepted unsupported provider format")
+	}
+}
+
 func TestWindowsBoundInputsAndPreserveUnicodeOffsets(t *testing.T) {
 	c := testConfig("openai", "http://127.0.0.1:9")
 	c.MaxTokens = 60

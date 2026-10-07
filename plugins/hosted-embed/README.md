@@ -55,6 +55,30 @@ returned vectors must still match the declared size. Cohere normally receives
 `output_dimension` instead. For an instruction model, use a `query_prefix`
 such as `Instruct: Find relevant passages.\nQuery: ` and its document template.
 
+## Optional local CPU queries
+
+An OpenAI-format deployment can run a pinned local text encoder beside the API
+and set `QUIVR_HOSTED_QUERY_URL=http://127.0.0.1:9995/v1` in the **plugin process**.
+Leave the variable unset on workers. Query requests then use that loopback
+endpoint without the remote bearer key; documents still use `base_url` and its
+existing authentication. A local outage returns a bounded query error.
+
+The local `/health` response must advertise `status: "ok"`, the configured
+`model`, `model_revision` and `dimensions`, and a full 40-character hexadecimal
+`source_revision` starting with `model_revision` (at least 16 characters).
+The plugin refuses mismatches, redirects, non-loopback addresses and Cohere
+format. The encoder receives the configured prefix once and must not add its
+own prompt. Its OpenAI text interface can accept document-prefixed input too;
+this option routes only queries.
+
+This process setting leaves the manifest, installed configuration and vector
+space identity unchanged. Before enabling it, compare at least 200 distinct
+queries with the remote model: cosine similarity must be at least 0.999 and
+ordered evaluation top-10 results must match. Measure query latency under your
+CPU allocation and concurrent traffic. The
+[Railway instructions](../../deploy/railway/README.md#optional-cpu-query-encoding)
+cover the offline image, resource settings, parity CLI and rollback.
+
 ## Generate and pin a package
 
 Run from the repository root. Build a persistent executable before generating

@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +24,50 @@ type provider struct {
 	key    string
 	log    *slog.Logger
 	gate   *providerGate
+	local  bool
+}
+
+// localQueries is process execution tuning, outside immutable pin configuration.
+// Readiness binds the local runtime to the same model revision and dimensions;
+// routing never changes document derivations or the declared vector space.
+func (i *ingester) localQueries(ctx context.Context, endpoint string) error {
+	if endpoint == "" {
+		return nil
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "http" || !net.ParseIP(u.Hostname()).IsLoopback() || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.TrimRight(u.Path, "/") != "/v1" || i.config.Format != "openai" {
+		return fmt.Errorf("QUIVR_HOSTED_QUERY_URL requires an OpenAI loopback HTTP /v1 base without credentials, query or fragment")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	ready := *u
+	ready.Path = "/health"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ready.String(), nil)
+	if err != nil {
+		return fmt.Errorf("invalid local encoder readiness URL")
+	}
+	client := &http.Client{Timeout: 2 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	res, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("local encoder is not ready")
+	}
+	defer res.Body.Close()
+	var metadata struct {
+		Status     string `json:"status"`
+		Model      string `json:"model"`
+		Revision   string `json:"model_revision"`
+		Source     string `json:"source_revision"`
+		Dimensions int    `json:"dimensions"`
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, 4097))
+	if err != nil || len(data) > 4096 || res.StatusCode != 200 || json.Unmarshal(data, &metadata) != nil || metadata.Status != "ok" || metadata.Model != i.config.Model || metadata.Revision != i.config.Revision || metadata.Dimensions != i.config.Dimensions || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(metadata.Source) || len(i.config.Revision) < 16 || !strings.HasPrefix(metadata.Source, i.config.Revision) {
+		return fmt.Errorf("local encoder readiness does not match the configured model, immutable revision and dimensions")
+	}
+	c := i.config
+	c.BaseURL, c.Auth = strings.TrimRight(endpoint, "/"), "none"
+	c.RequestTimeoutMS, c.MaxRetries = 1000, 0
+	i.queries = &provider{config: c, log: i.provider.log, local: true, gate: &providerGate{slots: make(chan struct{}, 4)}}
+	return nil
 }
 
 // inputRefusal retains the failure class internally while preserving the
@@ -82,6 +130,13 @@ func (p provider) request(ctx context.Context, inputs []string, mode string, inv
 			return nil, quivrplugin.TerminalIngestError("invalid_configuration", "invalid provider URL")
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if p.local {
+			remaining := time.Duration(c.RequestTimeoutMS) * time.Millisecond
+			if deadline, ok := ctx.Deadline(); ok {
+				remaining = min(remaining, time.Until(deadline))
+			}
+			req.Header.Set("X-Quivr-Timeout-Ms", strconv.FormatInt(max(1, remaining.Milliseconds()), 10))
+		}
 		if c.Auth == "bearer" {
 			req.Header.Set("Authorization", "Bearer "+p.key)
 		} else if c.Auth == "api-key" {
@@ -173,6 +228,9 @@ func isInputRefusal(status int, body []byte) bool {
 }
 func (p provider) usage(invocations []string, items int, mode string, attempt, status, tokens int, estimated bool) {
 	attrs := []any{"event", "hosted_embedding_usage", "space", p.config.spaceID(), "mode", mode, "attempt", attempt + 1, "status", status, "input_tokens", tokens, "input_count", items, "estimated", estimated}
+	if p.local {
+		attrs = append(attrs, "backend", "local_cpu")
+	}
 	if len(invocations) == 1 {
 		attrs = append(attrs, "invocation_id", invocations[0])
 	} else {

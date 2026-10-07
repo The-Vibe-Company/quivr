@@ -17,6 +17,7 @@ import (
 type ingester struct {
 	config    configuration
 	provider  provider
+	queries   *provider
 	documents *documentBatcher
 	mu        sync.Mutex
 	cache     map[[32]byte]*list.Element
@@ -138,7 +139,14 @@ func (i *ingester) EmbedQuery(ctx context.Context, req *quivrplugin.QueryRequest
 	if len(input)+specialTokens > c.MaxTokens {
 		return nil, quivrplugin.TerminalIngestError("query_limit", "query exceeds max_tokens_per_segment including its prefix and special token reserve")
 	}
-	vectors, err := i.provider.embed(ctx, []string{input}, "query", req.InvocationID)
+	encoder := &i.provider
+	if i.queries != nil {
+		encoder = i.queries
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(encoder.config.RequestTimeoutMS)*time.Millisecond)
+		defer cancel()
+	}
+	vectors, err := encoder.embed(ctx, []string{input}, "query", req.InvocationID)
 	if err != nil {
 		return nil, err
 	}
