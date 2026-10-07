@@ -107,6 +107,10 @@ def runtime_connectors(env):
     """Keep core.ingest reachable and optionally select hosted embeddings and Jev."""
     connectors = CONNECTORS
     selection = embedding_selection(env)
+    # Opt-out of core.ingest (E5 through TEI) once hosted embeddings serve every
+    # Corpus: new generations then carry only the hosted space.
+    if selection and env.get('QUIVR_DEMO_CORE_INGEST', '').strip() == '0':
+        connectors = [c for c in connectors if c['id'] != 'core-ingest']
     if selection:
         connectors = connectors + [{**HOSTED_EMBED, 'configuration': selected_hosted_configuration(env),
                                     'secrets': HOSTED_EMBED['secrets'] if selection == 'cohere' else ['EMBED_API_KEY'],
