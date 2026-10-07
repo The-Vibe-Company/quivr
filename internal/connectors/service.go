@@ -11,6 +11,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/publicerr"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 )
 
 var (
@@ -33,6 +34,7 @@ const DefaultMinInterval = 30 * time.Second
 // Instance is a Connector Instance as seen by authorized readers. It never
 // carries a secret.
 type Instance struct {
+	WorkQueue         string
 	Organization      string
 	ID                string
 	CorpusID          string
@@ -138,6 +140,7 @@ func (s Service) WebhookURL(in Instance) string {
 
 // CreateInput is a creation command. Secret is the raw kind-specific secret.
 type CreateInput struct {
+	WorkQueue                string          `json:"work_queue,omitempty"`
 	Key                      string          `json:"idempotency_key"`
 	CorpusID                 string          `json:"corpus_id"`
 	Namespace                string          `json:"source_namespace"`
@@ -190,6 +193,9 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput,
 	if in.PushPolicy != nil && in.PushPolicy.Validate() != nil {
 		return Instance{}, WithField(ErrInvalidConfig, "/push_policy")
 	}
+	if in.WorkQueue != "" && !workqueue.Valid(in.WorkQueue) {
+		return Instance{}, WithField(ErrInvalidConfig, "/work_queue")
+	}
 	if err := connector.validate(in.Config, in.Secret, "/credential/secret"); err != nil {
 		return Instance{}, err
 	}
@@ -226,7 +232,11 @@ func (s Service) Create(ctx context.Context, scope corpus.Scope, in CreateInput,
 	if _, err = rand.Read(id[:]); err != nil {
 		return Instance{}, err
 	}
-	n := NewInstance{Instance: Instance{Organization: scope.Organization, ID: "connector_" + hex.EncodeToString(id[:]), CorpusID: in.CorpusID, Namespace: in.Namespace, Kind: in.Kind, Config: in.Config, PushPolicy: in.PushPolicy, Interval: interval, SilentAfter: silent, CredentialWarning: warning, Enabled: true}, RequestKey: in.Key, RequestDigest: digest}
+	q := in.WorkQueue
+	if q == "" {
+		q = workqueue.Live
+	}
+	n := NewInstance{Instance: Instance{Organization: scope.Organization, ID: "connector_" + hex.EncodeToString(id[:]), CorpusID: in.CorpusID, Namespace: in.Namespace, Kind: in.Kind, Config: in.Config, WorkQueue: q, PushPolicy: in.PushPolicy, Interval: interval, SilentAfter: silent, CredentialWarning: warning, Enabled: true}, RequestKey: in.Key, RequestDigest: digest}
 	if in.Secret != nil {
 		sealed, err := s.Sealer.Seal(scope.Organization, n.ID, in.Secret)
 		if err != nil {

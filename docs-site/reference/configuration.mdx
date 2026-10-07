@@ -4,7 +4,7 @@ description: "Every field of the JSON file that configures Quivr's api, worker a
 keywords: ["QUIVR_CONFIG", "configuration", "keys", "destinations", "plugins", "deployment"]
 ---
 
-`quivr api`, `quivr worker` and `quivr migrate` read one JSON file, whose path is in the `QUIVR_CONFIG` environment variable. Give every process the same file, except for addresses such as `probe_listen`. `make dev` writes one for the local stack; this page lists every field. `make docs` fails when a field of the engine's configuration is missing here.
+`quivr api`, `quivr worker` and `quivr migrate` read one JSON file, whose path is in the `QUIVR_CONFIG` environment variable. Give every process the same file, except for addresses such as `probe_listen` and the queues each worker serves. `make dev` writes one for the local stack; this page lists every field. `make docs` fails when a field of the engine's configuration is missing here.
 
 In the [release image](/run-quivr/deploy#run-the-image), mount the file read-only and make it readable by UID/GID `10001`. Set `listen` and `probe_listen` to `0.0.0.0` addresses to use published container ports. `QUIVR_CONFIG` selects a file; only the dedicated environment overrides listed below override its fields. The image declares `/tmp` for temporary files; a configured `log_directory` also needs a writable mount.
 
@@ -12,6 +12,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 
 | Field | Required | Meaning |
 | --- | --- | --- |
+| `worker` | no | Queues and processing slots per worker process. See [Worker queues](#worker-queues). |
 | `database_url` | yes | PostgreSQL connection URL, such as `postgres://quivr:…@db:5432/quivr?sslmode=verify-full` |
 | `cursor_key` | yes | A secret of at least 32 bytes that signs change-feed cursors. Keep it stable. |
 | `keys` | yes | The API keys, by bearer token. See [API keys](#api-keys). |
@@ -148,7 +149,7 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 
 | Field | Meaning |
 | --- | --- |
-| `organization` | The Organization the key acts for. Nothing crosses Organizations. |
+| `organization` | The Organization the key acts for. Ordinary requests stay within it; explicit operator grants can expose installation-wide counts. |
 | `actions` | What the key may do, from the list below |
 | `corpora` | The Corpus ids it may reach, or `["*"]` for all of its Organization's Corpora. Creating a Corpus needs `*`. |
 
@@ -165,6 +166,7 @@ Unreadable or malformed certificate files, incomplete or mismatched client ident
 | `connector:push` | calling a source plugin’s declared API routes on authorized Corpora |
 | `operations:read`, `operations:write` | reading, cancelling and rerunning Operations |
 | `projections:rebuild` | starting a Corpus rebuild |
+| `queues:read` | reading installation-wide document backlog (`GET /v0/admin/queues`); requires all-Corpora scope; give it only to an operator key |
 | `plugins:admin` | reading the plugin registry and registering and activating plugins (`/v0/admin/plugins`), backfilling a Corpus (`/v0/admin/backfills`) and promoting a vector space (`/v0/admin/spaces/{id}/promote`); give it only to an operator key |
 | `audit:read` | Reading sensitive-action audit entries in the key's organization (`/v0/admin/audit`); requires `corpora: ["*"]`. |
 | `observability:read` | following documents through their processing steps (`/v0/admin/documents`) and reading the counters of plugin calls, searches, steps, documents received and Matches (`/v0/admin/stats/*`) |
@@ -286,11 +288,12 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 | `concurrency` | `8` | Versions in flight inside one rebuild step, range `1`–`32`; `0` selects the default. `1` restores serial work. Worker only. |
 
 Each step covers at most 25 Versions, then saves progress before a 200 ms pause.
-New rebuild histories run their activities on `quivr-rebuild-v0`, with one
-activity at a time per worker. The four `quivr-content-v0` activity slots remain
-available to live ingestion. Existing histories keep `quivr-content-v0` until
-their next history rollover, after at most 400 steps; their Version work uses
-the configured concurrency immediately.
+Rebuild and backfill activities use the [bulk worker queue](#worker-queues),
+whose activity budget is separate from live ingestion. Each active rebuild
+step can run `concurrency` Versions; the process-wide upper bound is
+`worker.slots.bulk × rebuild.concurrency` when every bulk slot runs a rebuild.
+Backfills share the bulk activity budget and advance between rebuild steps.
+Legacy queue pollers share that budget while existing histories drain.
 
 The ingestion plugin still enforces its own batching and provider concurrency
 limits. Live ingestion and rebuilds share those limits, storage and indexing
@@ -324,3 +327,23 @@ Backfill concurrency controls overlap; `rate` still paces each batch. These limi
 | --- | --- | --- |
 | `flush_interval` | `5s` | How often each process writes its counts; a process that crashes loses at most this much |
 | `record_query_text` | `false` | Also count searches by their normalized query text, so the most frequent queries can be listed. The text is kept in PostgreSQL for 7 days and may hold personal or confidential information. |
+
+## Worker queues
+
+`worker.queues` selects `live`, `bulk`, or both. Omit `worker` to serve both queues with four activity slots each. `worker.slots.live` and `worker.slots.bulk` each accept 1–1024; omitted or zero values use four. An explicit empty queue list, duplicates, unknown queue names, negative slots and slots above 1024 refuse startup.
+
+For example, not run; this fragment selects a bulk worker:
+
+```json
+{"worker":{"queues":["bulk"],"slots":{"live":4,"bulk":2}}}
+```
+
+Each process has its own capacity. Multiple processes may serve the same queue: durable claims and stable Temporal workflow identities prevent duplicate dispatch. Current and legacy pollers share the configured slots. An ingestion activity processes up to sixteen documents concurrently within its slot; `backfill.concurrency` bounds preparation within a backfill slot. Optional ingestion evaluations retain their own `ingestion_evaluation_concurrency` slots per selected queue. Search requests run in API processes; alerts and webhook delivery run in live workers on their existing leased loops.
+
+Direct submissions and pushes use live. Scheduled connector acquisition defaults to live; set an instance's `work_queue` to `bulk` when creating an archive-scale source. The class is recorded on each run and accepted document, including serving publication and optional ingestion evaluation. Rebuilds, backfills and quarantine reprocessing use bulk. `backfill.rate` still paces background batches.
+
+During an upgrade, keep at least one worker with `queues: ["live", "bulk"]` until older workflows finish. It drains `quivr-content-v0`, whose recorded histories mix ingestion and rebuilds, using the appropriate class's capacity. Other legacy ingestion queues are drained by live workers; the legacy backfill queue is drained by bulk workers. Existing workflow identities and inputs stay valid.
+
+The operator endpoint `GET /v0/admin/queues` requires an API key with `queues:read` and `corpora: ["*"]`. It reports installation-wide counts from PostgreSQL, including accepted documents before publication and remaining rebuild, backfill and quarantine work. Documents are counted once per queue across processing stages. `waiting` excludes active execution leases; `in_progress` counts live attempts, whose leases expire within 15 seconds after a dead process. Completed attempt rows are removed; expired abandoned rows are pruned in bounded batches. Paused or terminal operations, withdrawn documents and alert retries scheduled in the future are excluded. `oldest_waiting_age_seconds` is zero when no document waits. API and worker processes refresh one shared PostgreSQL snapshot, at most once per second, using an advisory lock. Refresh failures back off to 15 seconds and log once per outage. Large operation scans run in that background refresh, so API requests and metrics scrapes read only two rows. Counts describe the last completed observation; refreshes have a 30-second budget. A missing snapshot, one older than a minute, or unavailable storage makes the queue API return 503 instead of a false zero. Metrics omit unavailable queue series while preserving other metric families; configure the scaler to fail on an empty result. Oldest waiting age continues to advance between observations.
+
+API and worker probe addresses export these Prometheus gauges with `queue="live"` or `queue="bulk"`: `quivr_queue_waiting_documents`, `quivr_queue_in_progress_documents`, `quivr_queue_oldest_waiting_age_seconds`. OpenTelemetry exports the same observations when enabled. Every process reads the same installation-wide snapshot; aggregate replicas with `max`, not `sum`. Keep probe addresses private. See [Scale workers on backlog](/run-quivr/deploy#scale-workers-on-backlog) for a KEDA example.

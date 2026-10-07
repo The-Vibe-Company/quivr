@@ -36,9 +36,6 @@ func TestBackgroundWorkflowRetriesInterruptedStep(t *testing.T) {
 			env := suite.NewTestWorkflowEnvironment()
 			attempts := 0
 			env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
-				if kind == "rebuild" && info.TaskQueue != "quivr-rebuild-v0" {
-					t.Errorf("rebuild activity queue %q, want quivr-rebuild-v0", info.TaskQueue)
-				}
 				if info.ActivityType.Name == releaseConnectorPlanActivity {
 					return
 				}

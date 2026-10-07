@@ -6,6 +6,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
@@ -39,16 +40,23 @@ func registerIngestionEvaluation(w worker.Worker, e processing.Evaluator, pins P
 
 // The shared dispatcher polls this source in an independent lane. Optional
 // start failures cannot occupy served receipt dispatch or activity capacity.
-func (r *Runtime) ingestionEvaluationIntents() IntentSource {
+func (r *Runtime) ingestionEvaluationIntents(classes ...string) IntentSource {
 	return intentSource(func(ctx context.Context) ([]Intent, error) {
+		if len(classes) > 0 {
+			ctx = workqueue.WithClass(ctx, classes[0])
+		}
 		jobs, err := r.Evaluation.Store.ClaimIngestionEvaluations(ctx, 32)
 		if err != nil {
 			return nil, err
 		}
 		intents := make([]Intent, 0, len(jobs))
 		for _, job := range jobs {
+			queue := ingestionEvaluationQueue
+			if workqueue.Valid(job.WorkQueue) {
+				queue = workqueue.TaskQueue(job.WorkQueue) + "-evaluation"
+			}
 			intents = append(intents, dispatchIntent{
-				options: client.StartWorkflowOptions{ID: content.StableID("ingestion-evaluation-workflow", job.Organization, job.ID), TaskQueue: ingestionEvaluationQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
+				options: client.StartWorkflowOptions{ID: content.StableID("ingestion-evaluation-workflow", job.Organization, job.ID), TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
 				name:    "evaluate-ingestion-plugin-v0", input: Input{Organization: job.Organization, ReceiptID: job.ID},
 				complete: func(ctx context.Context) error { return r.Evaluation.Store.IngestionEvaluationDispatched(ctx, job) },
 				retry:    func(context.Context) error { return nil }, // Lease expiry recovers it.

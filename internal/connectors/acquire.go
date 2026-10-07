@@ -87,6 +87,7 @@ type Progress struct {
 // ConnectorRun identifies one scheduled acquisition run. Its identity stays
 // stable across dispatcher leases and worker restarts.
 type ConnectorRun struct {
+	WorkQueue    string
 	Organization string
 	ConnectorID  string
 	Run          int64

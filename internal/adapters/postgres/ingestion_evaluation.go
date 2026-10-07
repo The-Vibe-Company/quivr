@@ -6,6 +6,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/plugins/registry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -207,7 +208,7 @@ func queueIngestionEvaluations(ctx context.Context, tx pgx.Tx, org, recordID, ve
 	}
 	for _, t := range targets {
 		id := content.StableID("ingestion-evaluation", org, versionID, generationID, t.registration)
-		tag, err := tx.Exec(ctx, `INSERT INTO ingestion_evaluations(organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, org, id, recordID, versionID, generationID, t.plugin, t.registration, planID, t.spaces)
+		tag, err := tx.Exec(ctx, `INSERT INTO ingestion_evaluations(organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,work_queue) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE(NULLIF($10,''),(SELECT work_queue FROM ingestion_receipts WHERE organization=$1 AND version_id=$4 ORDER BY accepted_at LIMIT 1),'live')) ON CONFLICT DO NOTHING`, org, id, recordID, versionID, generationID, t.plugin, t.registration, planID, t.spaces, selectedQueue(ctx))
 		if err != nil {
 			return err
 		}
@@ -221,7 +222,8 @@ func queueIngestionEvaluations(ctx context.Context, tx pgx.Tx, org, recordID, ve
 }
 
 func (s IngestionEvaluationStore) ClaimIngestionEvaluations(ctx context.Context, limit int) ([]content.IngestionEvaluation, error) {
-	rows, err := s.Pool.Query(ctx, `UPDATE ingestion_evaluations SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM ingestion_evaluations WHERE NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state`, limit)
+	q, _ := workqueue.Selected(ctx)
+	rows, err := s.Pool.Query(ctx, `UPDATE ingestion_evaluations SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM ingestion_evaluations WHERE ($2='' OR work_queue=$2 OR (work_queue='' AND $2='live')) AND NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue`, limit, q)
 	if err != nil {
 		return nil, err
 	}
@@ -237,11 +239,11 @@ func (s IngestionEvaluationStore) ClaimIngestionEvaluations(ctx context.Context,
 	return jobs, rows.Err()
 }
 func scanIngestionEvaluation(row interface{ Scan(...any) error }) (j content.IngestionEvaluation, err error) {
-	err = row.Scan(&j.Organization, &j.ID, &j.RecordID, &j.VersionID, &j.GenerationID, &j.PluginID, &j.RegistrationID, &j.PlanID, &j.Spaces, &j.State)
+	err = row.Scan(&j.Organization, &j.ID, &j.RecordID, &j.VersionID, &j.GenerationID, &j.PluginID, &j.RegistrationID, &j.PlanID, &j.Spaces, &j.State, &j.WorkQueue)
 	return
 }
 func (s IngestionEvaluationStore) IngestionEvaluation(ctx context.Context, org, id string) (content.IngestionEvaluation, error) {
-	j, err := scanIngestionEvaluation(s.Pool.QueryRow(ctx, `SELECT organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state FROM ingestion_evaluations WHERE organization=$1 AND id=$2`, org, id))
+	j, err := scanIngestionEvaluation(s.Pool.QueryRow(ctx, `SELECT organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue FROM ingestion_evaluations WHERE organization=$1 AND id=$2`, org, id))
 	return j, notFound(err)
 }
 func (s IngestionEvaluationStore) IngestionEvaluationDispatched(ctx context.Context, j content.IngestionEvaluation) error {
@@ -266,3 +268,5 @@ func (s IngestionEvaluationStore) CompleteIngestionEvaluation(ctx context.Contex
 
 // IngestionEvaluationStore persists evaluation-owner ingestion jobs.
 type IngestionEvaluationStore struct{ Pool *pgxpool.Pool }
+
+func selectedQueue(ctx context.Context) string { q, _ := workqueue.Selected(ctx); return q }
