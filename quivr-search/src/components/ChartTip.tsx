@@ -49,13 +49,20 @@ export function ChartTip() {
           : next,
       );
     };
-    // A refresh may change the bar's words or height, move it within its
-    // chart, or remove it; other changes of the page leave the tip where it is.
-    const watch = new MutationObserver((records) => {
-      const bar = shown.current;
-      if (!bar?.isConnected) return show(null);
-      const chart = bar.closest("[data-tips]") || bar;
-      if (records.some((record) => chart.contains(record.target))) place(bar);
+    // A change anywhere may move the bar (its own words or height, its chart,
+    // content above it, a resized window reflowing the grid) or remove it: the
+    // bar is measured again, once a frame at most, however many changes come.
+    let frame = 0;
+    const measure = () => {
+      if (!shown.current || frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (shown.current?.isConnected) place(shown.current);
+      });
+    };
+    const watch = new MutationObserver(() => {
+      if (!shown.current?.isConnected) return show(null);
+      measure();
     });
     function show(bar: Element | null) {
       if (bar === shown.current) return;
@@ -63,6 +70,8 @@ export function ChartTip() {
       shown.current = bar;
       if (!bar) {
         watch.disconnect();
+        cancelAnimationFrame(frame);
+        frame = 0;
         return setTip(null);
       }
       bar.setAttribute("data-hover", "");
@@ -140,8 +149,10 @@ export function ChartTip() {
     document.addEventListener("focusout", hide);
     document.addEventListener("keydown", key);
     document.addEventListener("scroll", scroll, true);
+    window.addEventListener("resize", measure);
     return () => {
       watch.disconnect();
+      cancelAnimationFrame(frame);
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerdown", hide);
       document.documentElement.removeEventListener("pointerleave", hide);
@@ -149,6 +160,7 @@ export function ChartTip() {
       document.removeEventListener("focusout", hide);
       document.removeEventListener("keydown", key);
       document.removeEventListener("scroll", scroll, true);
+      window.removeEventListener("resize", measure);
     };
   }, []);
 
