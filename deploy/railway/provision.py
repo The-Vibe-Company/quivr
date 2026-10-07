@@ -76,13 +76,15 @@ def main():
             variables['POSTGRES_PASSWORD'] = values['database_password']
         elif name == 'seaweed':
             variables.update({k: common[k] for k in ['S3_ACCESS_KEY', 'S3_SECRET_KEY']})
-        elif name in ('api', 'worker'):
+        elif name in ('api', 'worker', 'worker-bulk'):
             variables.update(common)
         elif name == 'web':
             variables.update(QUIVR_API_KEY=values['api_key'], DEMO_PASSWORD=values['demo_password'])
         for key, value in variables.items():
             cli('variable', 'set', key, '--stdin', '--skip-deploys', '--service', sid, stdin=value)
         config = {'restartPolicyType': 'ON_FAILURE', 'restartPolicyMaxRetries': 10}
+        if 'replicas' in spec:
+            config['numReplicas'] = spec['replicas']
         if 'dockerfile' in spec:
             config.update(dockerfilePath=f"deploy/railway/{spec['dockerfile']}.Dockerfile")
         if 'healthcheck' in spec:
@@ -91,7 +93,7 @@ def main():
         cli('api', query, '--variables', json.dumps({'id': sid, 'input': config}))
         print('Configured', name, sid, flush=True)
     (directory / 'services.json').write_text(json.dumps(state, indent=2))
-    print('Credentials retained only in', secretfile, '(0600). Deploy dependencies, then API, worker and web.')
+    print('Credentials retained only in', secretfile, '(0600). Deploy dependencies, then API, workers and web.')
 
 
 if __name__ == '__main__':

@@ -14,6 +14,7 @@
   },
   "tei": {"dockerfile": "tei", "healthcheck": "/health", "variables": {"PORT": "80", "HF_HUB_OFFLINE": "1"}},
   "api": {"dockerfile": "core", "healthcheck": "/readyz", "variables": {"PORT": "8081", "QUIVR_ROLE": "api"}},
-  "worker": {"dockerfile": "core", "healthcheck": "/readyz", "variables": {"PORT": "8081", "QUIVR_ROLE": "worker"}},
+  "worker": {"dockerfile": "core", "healthcheck": "/readyz", "replicas": 1, "variables": {"PORT": "8081", "QUIVR_ROLE": "worker", "QUIVR_WORKER_QUEUES": "live"}},
+  "worker-bulk": {"dockerfile": "core", "healthcheck": "/readyz", "replicas": 1, "variables": {"PORT": "8081", "QUIVR_ROLE": "worker", "QUIVR_WORKER_QUEUES": "bulk"}},
   "web": {"dockerfile": "web", "healthcheck": "/healthz", "variables": {"PORT": "3000", "HOST": "0.0.0.0", "DEMO_SECURE_COOKIE": "true", "QUIVR_API_URL": "http://api.railway.internal:8080"}}
 }

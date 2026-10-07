@@ -235,11 +235,11 @@ class CoreEntrypointTest(unittest.TestCase):
     def test_operator_key_is_separate_and_opt_in(self):
         self.assertEqual(len(core_entrypoint.build_config(ENV)['keys']), 1)
         keys = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']
-        for action in ('projections:rebuild', 'plugins:admin', 'operations:write'):
+        for action in ('projections:rebuild', 'plugins:admin', 'operations:write', 'queues:read'):
             self.assertIn(action, keys['placeholder-operator-key']['actions'])
         # The web app's key never administers plugins, whatever else is enabled.
         everything = {**ENV, 'QUIVR_DEMO_CONNECTORS': '1', 'QUIVR_DEMO_PLUGINS': '1', 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'}
-        for action in ('projections:rebuild', 'plugins:admin', 'operations:write'):
+        for action in ('projections:rebuild', 'plugins:admin', 'operations:write', 'queues:read'):
             self.assertNotIn(action, core_entrypoint.build_config(everything)['keys'][ENV['QUIVR_API_KEY']]['actions'])
 
     def test_connector_permissions_are_opt_in(self):
@@ -261,6 +261,23 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertEqual(set(enabled) - set(base), {'observability:read'})
         operator = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']['placeholder-operator-key']
         self.assertIn('observability:read', operator['actions'])
+
+    def test_worker_queue_environment_translation(self):
+        # Literal external keys and omitted config preserve existing mixed workers.
+        self.assertNotIn('worker', core_entrypoint.build_config(ENV))
+        for queue in ('live', 'bulk', 'live,bulk'):
+            config = core_entrypoint.build_config({**ENV, 'QUIVR_WORKER_QUEUES': queue,
+                         'QUIVR_WORKER_LIVE_SLOTS': '3', 'QUIVR_WORKER_BULK_SLOTS': '7'})
+            self.assertEqual(config['worker'], {'queues': queue.split(','),
+                                               'slots': {'live': 3, 'bulk': 7}})
+        for name, values in {
+            'QUIVR_WORKER_QUEUES': ('', 'other', 'live,live', 'live,'),
+            'QUIVR_WORKER_LIVE_SLOTS': ('0', '-1', '1025', 'many'),
+            'QUIVR_WORKER_BULK_SLOTS': ('0', '-1', '1025', 'many'),
+        }.items():
+            for value in values:
+                with self.subTest(name=name, value=value), self.assertRaises(ValueError):
+                    core_entrypoint.build_config({**ENV, name: value})
 
     def test_required_variables_still_fail_fast(self):
         env = dict(ENV)
