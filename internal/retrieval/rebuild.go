@@ -38,6 +38,9 @@ type RebuildStore interface {
 	// RebuildCandidates lists current eligible Versions of the Corpus missing
 	// target projection or vector coverage, in stable order.
 	RebuildCandidates(ctx context.Context, org, operationID string, limit int) ([]RebuildCandidate, error)
+	// CheckpointRebuild persists the last version of a successfully joined page.
+	// Call only after checking progress; failed pages leave the cursor unchanged.
+	CheckpointRebuild(ctx context.Context, org, operationID, after string) error
 	// CoverRebuild records target coverage for a verified segmentation and its
 	// reused artifacts. It returns false when the Version is no longer eligible.
 	CoverRebuild(ctx context.Context, org, operationID string, seg content.Segmentation, artifacts []content.Embedding) (bool, error)
@@ -133,7 +136,7 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 	if target.Operation.State != operations.StateRunning {
 		return r.stop(ctx, org, operationID)
 	}
-	candidates, err := r.Store.RebuildCandidates(ctx, org, operationID, rebuildBatch)
+	candidates, err := r.Store.RebuildCandidates(ctx, org, operationID, max(rebuildBatch, r.Concurrency))
 	if err != nil {
 		return false, err
 	}
@@ -181,7 +184,7 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 	}
 
 	if len(candidates) > 0 {
-		remaining, err := r.Store.RebuildCandidates(ctx, org, operationID, rebuildBatch)
+		remaining, err := r.Store.RebuildCandidates(ctx, org, operationID, max(rebuildBatch, r.Concurrency))
 		if err != nil {
 			return false, err
 		}
@@ -190,6 +193,12 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 				return false, err
 			}
 			return r.stop(ctx, org, operationID)
+		}
+		if err := r.Store.CheckpointRebuild(ctx, org, operationID, candidates[len(candidates)-1].VersionID); err != nil {
+			if errors.Is(err, operations.ErrNotRunning) {
+				return r.stop(ctx, org, operationID)
+			}
+			return false, err
 		}
 		return false, nil
 	}
@@ -220,7 +229,7 @@ func (r Rebuilder) coverDocument(ctx context.Context, org string, target Rebuild
 		// Hydration can also miss canonical metadata for a still-eligible
 		// Version. Only ignore it if a fresh listing confirms it left the
 		// batch; otherwise the stable head would be selected forever.
-		candidates, listErr := r.Store.RebuildCandidates(ctx, org, target.Operation.ID, rebuildBatch)
+		candidates, listErr := r.Store.RebuildCandidates(ctx, org, target.Operation.ID, max(rebuildBatch, r.Concurrency))
 		if listErr != nil {
 			return listErr
 		}

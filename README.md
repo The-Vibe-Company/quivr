@@ -89,7 +89,10 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 - [Bulk worker autoscaling](deploy/railway/autoscaler/README.md) uses a standalone Go controller on Railway; Kubernetes can use KEDA. Live workers keep separate capacity.
 
 - Rolling application upgrades use additive schema expansions; destructive cleanup
-  runs only with `quivr migrate --contract`. CI checks the merge-base binary against
+  runs only with `quivr migrate --contract`. API and worker retry performance-index
+  builds in the background, so their busy index builds do not delay startup. An
+  older binary's index build can still hold the migration lock until it finishes
+  or is stopped. CI checks the merge-base binary against
   expansions. See [Upgrade Quivr](https://docs.quivr.thevibecompany.co/run-quivr/upgrade-quivr).
 
 - **Release images and build identity.** Release-please manages alpha release PRs, versions and changelogs. Publishing a release builds signed engine and first-party plugin images on GHCR, with signed SPDX inventories and vulnerability scans. `quivr --version`, `GET /v0/version`, startup logs and process metrics report the build. See [Deploy and configure Quivr](https://docs.quivr.thevibecompany.co/run-quivr/deploy) and [release security](https://docs.quivr.thevibecompany.co/run-quivr/security).
@@ -346,6 +349,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   E5) is pinned by default; the engine segments and embeds nothing itself.
   Optional [hosted.embed](plugins/hosted-embed/README.md) selects a hosted model
   or OpenAI-compatible server by configuration, with OpenAI and Cohere v2 formats.
+  An optional pinned [CPU text encoder](deploy/railway/README.md#optional-cpu-query-encoding)
+  answers queries beside the API while documents keep using the remote provider.
 - **Search ranked by a plugin** (Plugin API 0.7, the `retrieval` Contribution): a
   selected plugin answers each search in up to three rounds, asking the engine for
   keyword, vector or hybrid candidates it has already authorized, then ranking them

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -40,27 +41,8 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	}
 	store := contentStores(pool)
 	var rebuild retrieval.RebuildStore = store
-	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
 	segmented := func(corpusID, key string) content.Segmentation {
-		t.Helper()
-		cmd := content.Command{Key: key, Source: content.Source{CorpusID: corpusID, Namespace: "rebuild", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Rebuild " + key}}
-		r, err := service.Accept(ctx, scope, cmd)
-		if err != nil {
-			t.Fatal(err)
-		}
-		work, _, err := store.Work(ctx, org, r.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		text := content.Blob{Key: "fixture/" + key, SHA256: "rebuild-text-" + key, Size: int64(len("Rebuild " + key))}
-		if err = store.Publish(ctx, work, publication(text, content.Blob{Key: "fixture/m-" + key, SHA256: "rebuild-manifest-" + key, Size: 2})); err != nil {
-			t.Fatal(err)
-		}
-		seg := content.Segmentation{ID: content.StableID("segmentation", org, work.VersionID, "fixture"), VersionID: work.VersionID, Recipe: "fixture", Provenance: json.RawMessage(`{}`), Segments: []content.Segment{{ID: content.StableID("segment", work.VersionID), PartKey: "body", Start: 0, End: len([]rune("Rebuild " + key)), Text: "Rebuild " + key}}}
-		if err = store.SaveSegmentation(ctx, org, seg); err != nil {
-			t.Fatal(err)
-		}
-		return seg
+		return rebuildSegmentation(t, ctx, store, scope, corpusID, key)
 	}
 	promote := func(corpusID string, seg content.Segmentation) error {
 		g, err := store.Generation(ctx, org, corpusID)
@@ -234,5 +216,122 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	}
 	if g, _ := store.Generation(ctx, org, b.ID); g.ID != prior.ID {
 		t.Fatalf("failed rebuild rerouted Corpus B to %s", g.ID)
+	}
+}
+
+func rebuildSegmentation(t *testing.T, ctx context.Context, store fixtureContentStores, scope corpus.Scope, corpusID, key string) content.Segmentation {
+	org := scope.Organization
+	service := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store}
+	t.Helper()
+	cmd := content.Command{Key: key, Source: content.Source{CorpusID: corpusID, Namespace: "rebuild", RecordKey: key}, Content: content.Text{Kind: "text", Text: "Rebuild " + key}}
+	r, err := service.Accept(ctx, scope, cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, _, err := store.Work(ctx, org, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := content.Blob{Key: "fixture/" + key, SHA256: "rebuild-text-" + key, Size: int64(len("Rebuild " + key))}
+	if err = store.Publish(ctx, work, publication(text, content.Blob{Key: "fixture/m-" + key, SHA256: "rebuild-manifest-" + key, Size: 2})); err != nil {
+		t.Fatal(err)
+	}
+	seg := content.Segmentation{ID: content.StableID("segmentation", org, work.VersionID, "fixture"), VersionID: work.VersionID, Recipe: "fixture", Provenance: json.RawMessage(`{}`), Segments: []content.Segment{{ID: content.StableID("segment", work.VersionID), PartKey: "body", Start: 0, End: len([]rune("Rebuild " + key)), Text: "Rebuild " + key}}}
+	if err = store.SaveSegmentation(ctx, org, seg); err != nil {
+		t.Fatal(err)
+	}
+	return seg
+}
+
+// Progress survives a new store instance; changes behind it wait for the final
+// reconciliation pass rather than slowing every forward candidate lookup.
+func TestRebuildCursorResumesAndSweepsNewVersions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+		t.Fatal(err)
+	}
+	// Fixed domain identities in a fresh database make ordering reproducible.
+	f := controlFixture{t: t, ctx: ctx, pool: pool, org: "adapter-rebuild-cursor", store: contentStores(pool)}
+	corpusID := f.corpus("cursor")
+	scope := corpus.Scope{Organization: f.org, Actions: []string{"content:write"}, Corpora: []string{"*"}}
+	var versions []content.Segmentation
+	for i := range 4 {
+		versions = append(versions, rebuildSegmentation(t, f.ctx, f.store, scope, corpusID, fmt.Sprint(i)))
+	}
+	sort.Slice(versions, func(i, j int) bool { return versions[i].VersionID < versions[j].VersionID })
+	prior, err := f.store.Generation(f.ctx, f.org, corpusID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seg := range versions[1:] {
+		if err := f.store.Promote(f.ctx, f.org, seg, prior); err != nil {
+			t.Fatal(err)
+		}
+	}
+	op := f.rebuild(corpusID, "cursor")
+	if _, err := f.store.BeginRebuild(f.ctx, f.org, op.ID); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := f.store.RebuildStore
+	page, err := f.store.RebuildCandidates(f.ctx, f.org, op.ID, 2)
+	if err != nil || len(page) != 2 || page[0].VersionID != versions[1].VersionID || page[1].VersionID != versions[2].VersionID {
+		t.Fatalf("first page=%+v err=%v", page, err)
+	}
+	for _, seg := range versions[1:3] {
+		if _, err := f.store.CoverRebuild(f.ctx, f.org, op.ID, seg, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := checkpoint.CheckpointRebuild(f.ctx, f.org, op.ID, page[1].VersionID); err != nil {
+		t.Fatal(err)
+	}
+	// Accept and promote a new Version behind the durable cursor. IDs are opaque
+	// hashes, so select a lower one through bounded real acceptance attempts.
+	var late content.Segmentation
+	for i := range 64 {
+		candidate := rebuildSegmentation(t, f.ctx, f.store, scope, corpusID, fmt.Sprintf("late-%d", i))
+		if candidate.VersionID < page[1].VersionID {
+			late = candidate
+			break
+		}
+	}
+	if late.ID == "" {
+		t.Fatal("no newly accepted Version sorted behind the checkpoint")
+	}
+	versions[0] = late
+	if err := f.store.Promote(f.ctx, f.org, versions[0], prior); err != nil {
+		t.Fatal(err)
+	}
+	resumed := postgres.RebuildStore{Pool: f.pool}
+	page, err = resumed.RebuildCandidates(f.ctx, f.org, op.ID, 2)
+	if err != nil || len(page) != 1 || page[0].VersionID != versions[3].VersionID {
+		t.Fatalf("resumed forward page=%+v err=%v; must exclude new Version behind cursor", page, err)
+	}
+	if done, err := resumed.ActivateRebuild(f.ctx, f.org, op.ID); err != nil || done {
+		t.Fatalf("partial activation=%v err=%v", done, err)
+	}
+	if _, err := resumed.CoverRebuild(f.ctx, f.org, op.ID, versions[3], nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkpoint.CheckpointRebuild(f.ctx, f.org, op.ID, versions[3].VersionID); err != nil {
+		t.Fatal(err)
+	}
+	page, err = resumed.RebuildCandidates(f.ctx, f.org, op.ID, 2)
+	if err != nil || len(page) != 1 || page[0].VersionID != versions[0].VersionID {
+		t.Fatalf("final sweep=%+v err=%v", page, err)
+	}
+	if _, err := resumed.CoverRebuild(f.ctx, f.org, op.ID, versions[0], nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkpoint.CheckpointRebuild(f.ctx, f.org, op.ID, versions[0].VersionID); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := resumed.ActivateRebuild(f.ctx, f.org, op.ID); err != nil || !done {
+		t.Fatalf("complete activation=%v err=%v", done, err)
+	}
+	if err := checkpoint.CheckpointRebuild(f.ctx, f.org, op.ID, versions[3].VersionID); !errors.Is(err, operations.ErrNotRunning) {
+		t.Fatalf("terminal checkpoint=%v", err)
 	}
 }

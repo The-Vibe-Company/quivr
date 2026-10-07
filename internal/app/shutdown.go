@@ -10,8 +10,9 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 )
 
-func readinessProbe(loops *lifecycle.Group, ready func(context.Context) error) http.Handler {
+func readinessProbe(loops *lifecycle.Group, ready func(context.Context) error, indexes *IndexMaintenance) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Quivr-Index-Setup", indexes.State())
 		if loops.Draining() {
 			http.Error(w, "process draining", http.StatusServiceUnavailable)
 			return
