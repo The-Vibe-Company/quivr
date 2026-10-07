@@ -87,6 +87,7 @@ type Progress struct {
 // ConnectorRun identifies one scheduled acquisition run. Its identity stays
 // stable across dispatcher leases and worker restarts.
 type ConnectorRun struct {
+	WorkQueue    string
 	Organization string
 	ConnectorID  string
 	Run          int64
@@ -283,6 +284,8 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 			if err != nil {
 				var typed *Error
 				switch {
+				case errors.Is(err, corpus.ErrArchived):
+					return nil
 				case errors.As(err, &typed):
 					return deferred(typed)
 				case errors.Is(err, errSkipped):
@@ -531,8 +534,18 @@ func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes
 		if attempt == 0 && at.SHA256 != "" && at.SizeBytes != nil {
 			d = AttachmentDescription{SizeBytes: *at.SizeBytes, SHA256: at.SHA256}
 		} else {
-			var err error
-			if d, err = ex.DescribeAttachment(ctx, req); err != nil {
+			release, active, err := a.beginPoll(ctx, req.Organization, req.InstanceID, run)
+			if err != nil {
+				return "", 0, nil, err
+			}
+			if !active {
+				return "", 0, nil, corpus.ErrArchived
+			}
+			d, err = func() (AttachmentDescription, error) {
+				defer release()
+				return ex.DescribeAttachment(ctx, req)
+			}()
+			if err != nil {
 				return "", 0, nil, err
 			}
 		}
@@ -554,7 +567,17 @@ func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes
 		if session.State == "verified" {
 			return session.BlobID, d.SizeBytes, nil, nil
 		}
-		err = ex.UploadAttachment(ctx, req, UploadGrant{URL: session.UploadURL, Headers: session.UploadHeaders, SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType, ExpiresAt: session.ExpiresAt})
+		release, active, err := a.beginPoll(ctx, req.Organization, req.InstanceID, run)
+		if err != nil {
+			return "", 0, nil, err
+		}
+		if !active {
+			return "", 0, nil, corpus.ErrArchived
+		}
+		err = func() error {
+			defer release()
+			return ex.UploadAttachment(ctx, req, UploadGrant{URL: session.UploadURL, Headers: session.UploadHeaders, SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType, ExpiresAt: session.ExpiresAt})
+		}()
 		var typed *Error
 		if errors.As(err, &typed) && typed.Class == ClassSource && typed.Code == CodeAttachmentChanged {
 			continue

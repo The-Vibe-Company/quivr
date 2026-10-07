@@ -13,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,7 +32,7 @@ CASE WHEN c.usage_day IS NULL THEN NULL ELSE ` + utcToday + ` END,
 CASE WHEN c.usage_day=` + utcToday + ` THEN c.usage_items ELSE 0 END,
 CASE WHEN c.usage_day=` + utcToday + ` THEN c.usage_previous_items WHEN c.usage_day=` + utcToday + `-1 THEN c.usage_items ELSE 0 END,
 c.diagnostics,
-c.push_state,c.push_setup_class,c.push_setup_code,c.push_setup_at,c.push_poll_interval_seconds,c.push_error_class,c.push_error_code,c.push_error_at,c.push_last_delivery_at,c.push_policy`
+c.push_state,c.push_setup_class,c.push_setup_code,c.push_setup_at,c.push_poll_interval_seconds,c.push_error_class,c.push_error_code,c.push_error_at,c.push_last_delivery_at,c.push_policy,c.work_queue`
 
 // utcToday is the current UTC calendar day, the window of usage counters.
 const utcToday = `(now() AT TIME ZONE 'UTC')::date`
@@ -55,7 +56,7 @@ func scanConnector(row pgx.Row) (connectors.Instance, error) {
 	err := row.Scan(&in.Organization, &in.ID, &in.CorpusID, &in.Namespace, &in.Kind, &in.Config, &interval, &silent, &warning, &in.Enabled, &in.CreatedAt, &in.DisabledAt,
 		&in.Health.State, &in.Health.EvaluatedAt, &in.Health.LastSuccessAt, &in.Health.LastItemAt, &code, &class, &errorAt, &in.Health.AccessErrorAt, &version, &deposited, &expires,
 		&usageDay, &usageToday, &usagePrevious, &diagnostics,
-		&pushState, &setupClass, &setupCode, &setupAt, &pollInterval, &pushClass, &pushCode, &pushAt, &lastDelivery, &pushPolicy)
+		&pushState, &setupClass, &setupCode, &setupAt, &pollInterval, &pushClass, &pushCode, &pushAt, &lastDelivery, &pushPolicy, &in.WorkQueue)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return in, corpus.ErrNotFound
 	}
@@ -187,8 +188,8 @@ func (s ConnectorStore) CreateConnector(ctx context.Context, n connectors.NewIns
 	if inUse {
 		return connectors.Instance{}, connectors.ErrNamespaceInUse
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO connector_instances(organization,id,corpus_id,source_namespace,kind,config,interval_seconds,silent_after_seconds,credential_warning_seconds,request_key,request_digest,health_state,push_policy)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12)`, n.Organization, n.ID, n.CorpusID, n.Namespace, n.Kind, []byte(n.Config), int64(n.Interval/time.Second), int64(n.SilentAfter/time.Second), int64(n.CredentialWarning/time.Second), n.RequestKey, n.RequestDigest, n.PushPolicy)
+	_, err = tx.Exec(ctx, `INSERT INTO connector_instances(organization,id,corpus_id,source_namespace,kind,config,interval_seconds,silent_after_seconds,credential_warning_seconds,request_key,request_digest,health_state,push_policy,work_queue)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12,$13)`, n.Organization, n.ID, n.CorpusID, n.Namespace, n.Kind, []byte(n.Config), int64(n.Interval/time.Second), int64(n.SilentAfter/time.Second), int64(n.CredentialWarning/time.Second), n.RequestKey, n.RequestDigest, n.PushPolicy, n.WorkQueue)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "connector_instances_enabled_namespace" {
 		return connectors.Instance{}, connectors.ErrNamespaceInUse
@@ -390,9 +391,10 @@ func (s ConnectorStore) ReplaceCredential(ctx context.Context, org, id string, d
 // hides an instance from other dispatchers until it expires or the run ends;
 // the run sequence stays stable so a re-dispatch targets the same run.
 func (s ConnectorStore) ClaimConnectorRuns(ctx context.Context, lease time.Duration, limit int) ([]connectors.ConnectorRun, error) {
+	q, _ := workqueue.Selected(ctx)
 	rows, err := database(ctx, s.Pool).Query(ctx, `UPDATE connector_instances c SET lease_until=now()+make_interval(secs => $1::double precision)
-FROM (SELECT organization,id FROM connector_instances ci WHERE enabled AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=ci.organization AND cp.id=ci.corpus_id AND cp.archived) AND next_run_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at LIMIT $2 FOR UPDATE SKIP LOCKED) d
-WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,c.run_sequence`, lease.Seconds(), limit)
+FROM (SELECT organization,id FROM connector_instances ci WHERE ($3='' OR work_queue=$3) AND enabled AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=ci.organization AND cp.id=ci.corpus_id AND cp.archived) AND next_run_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at LIMIT $2 FOR UPDATE SKIP LOCKED) d
+WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,c.run_sequence,c.work_queue`, lease.Seconds(), limit, q)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +402,7 @@ WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,
 	var runs []connectors.ConnectorRun
 	for rows.Next() {
 		var r connectors.ConnectorRun
-		if err = rows.Scan(&r.Organization, &r.ConnectorID, &r.Run); err != nil {
+		if err = rows.Scan(&r.Organization, &r.ConnectorID, &r.Run, &r.WorkQueue); err != nil {
 			return nil, err
 		}
 		runs = append(runs, r)

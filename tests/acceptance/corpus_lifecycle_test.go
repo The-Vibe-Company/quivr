@@ -40,6 +40,7 @@ func TestCorpusLifecycle(t *testing.T) {
 		t.Fatal(got)
 	}
 	request(t, "PATCH", path, token, map[string]any{"name": "   "}, 422)
+	request(t, "PATCH", path, token, map[string]any{"name": "invalid\x00name"}, 422)
 	request(t, "POST", path+"/archive", token, nil, 200)
 	contains := func(page map[string]any, key, value string) bool {
 		for _, item := range page["items"].([]any) {
@@ -71,8 +72,20 @@ func TestCorpusLifecycle(t *testing.T) {
 	// enriches retained work. Restoring must expose this document too.
 	hidden := manifestCommandBody(c, "lifecycle-hidden-"+run, "example", "hidden", []any{manifestPart("body", "body", "text", text+" hidden")}, nil, nil)
 	hiddenReceipt := request(t, "POST", "/v0/records", token, hidden, 202)
-	hiddenRecord := awaitRetrievalReady(t, hiddenReceipt["receipt_id"].(string))["record_id"].(string)
+	hiddenReady := awaitRetrievalReady(t, hiddenReceipt["receipt_id"].(string))
+	deadline := time.Now().Add(monitoringWait)
+	for hiddenReady["processing"].(map[string]any)["state"] != "idle" {
+		if time.Now().After(deadline) {
+			t.Fatalf("retained processing stalled while archived: %v", hiddenReady)
+		}
+		time.Sleep(200 * time.Millisecond)
+		hiddenReady = request(t, "GET", "/v0/ingestion-receipts/"+hiddenReceipt["receipt_id"].(string), token, nil, 200)
+	}
+	hiddenRecord := hiddenReady["record_id"].(string)
 	request(t, "POST", path+"/unarchive", token, nil, 200)
+	if got := request(t, "GET", "/v0/records/"+hiddenRecord+"/versions/"+hiddenReady["version_id"].(string), token, nil, 200); got["steps"].(map[string]any)["enriched_at"] == nil {
+		t.Fatal("retained work finished without enrichment", got)
+	}
 	awaitEnriched(t, token, c, cursor, hiddenRecord)
 	request(t, "GET", "/v0/admin/documents/"+version+"/timeline", token, nil, 200)
 	request(t, "GET", "/v0/records/"+record, token, nil, 200)
@@ -93,7 +106,7 @@ func TestCorpusLifecycle(t *testing.T) {
 	actions := map[string]bool{}
 	for _, raw := range audit["items"].([]any) {
 		item := raw.(map[string]any)
-		if strings.Contains(fmt.Sprint(item), c) {
+		if item["outcome"] == "accepted" && strings.Contains(fmt.Sprint(item), c) {
 			actions[fmt.Sprint(item["action"])] = true
 		}
 	}

@@ -35,7 +35,7 @@ func (s Service) Rename(ctx context.Context, scope Scope, id, name string) (Corp
 	if !scope.Contains(id) {
 		return Corpus{}, ErrNotFound
 	}
-	if strings.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 256 {
+	if strings.TrimSpace(name) == "" || strings.ContainsRune(name, 0) || utf8.RuneCountInString(name) > 256 {
 		return Corpus{}, publicerr.InvalidInput
 	}
 	store, ok := s.Store.(LifecycleStore)

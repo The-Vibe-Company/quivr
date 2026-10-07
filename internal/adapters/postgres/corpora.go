@@ -52,9 +52,13 @@ func retrievalFields(data []byte) ([]corpus.Field, error) {
 }
 
 func (s Store) Read(ctx context.Context, org, id string) (corpus.Corpus, error) {
+	return readCorpus(ctx, database(ctx, s.Pool), org, id)
+}
+
+func readCorpus(ctx context.Context, db querier, org, id string) (corpus.Corpus, error) {
 	c := corpus.Corpus{}
 	var data []byte
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT c.id,c.name,c.archived,`+effectiveRetrievalSQL+` FROM corpora c WHERE c.organization=$1 AND c.id=$2`, org, id).Scan(&c.ID, &c.Name, &c.Archived, &data)
+	err := db.QueryRow(ctx, `SELECT c.id,c.name,c.archived,`+effectiveRetrievalSQL+` FROM corpora c WHERE c.organization=$1 AND c.id=$2`, org, id).Scan(&c.ID, &c.Name, &c.Archived, &data)
 	if err == nil {
 		err = json.Unmarshal(data, &c.Retrieval)
 	}

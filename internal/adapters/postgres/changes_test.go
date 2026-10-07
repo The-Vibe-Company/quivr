@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -77,6 +78,20 @@ func TestChangeJournalWindowsAndRetention(t *testing.T) {
 	}
 	if all.Events[1].Type != "record.accepted" || all.Events[1].ResourceKind != "record" {
 		t.Fatal("missing Record invalidation", all.Events[1])
+	}
+	// A caller authorized before archive must not receive a cursor that skips
+	// the hidden window. The archive flag and event window share one snapshot.
+	if _, err = (postgres.Store{Pool: pool}).Archive(ctx, scope.Organization, a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if hidden, err := store.ReadChanges(ctx, scope.Organization, a.ID, 0, 10, week); !errors.Is(err, corpus.ErrArchived) || hidden.Through != 0 {
+		t.Fatalf("archive advanced feed cursor: %+v %v", hidden, err)
+	}
+	if _, err = (postgres.Store{Pool: pool}).Archive(ctx, scope.Organization, a.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if restored, err := store.ReadChanges(ctx, scope.Organization, a.ID, 0, 10, week); err != nil || len(restored.Events) != len(all.Events) {
+		t.Fatalf("restore skipped feed events: %+v %v", restored, err)
 	}
 	page, err := store.ReadChanges(ctx, scope.Organization, a.ID, 0, 3, week)
 	if err != nil || len(page.Events) != 3 || page.Through != page.Events[2].Position || page.Head != 6 {

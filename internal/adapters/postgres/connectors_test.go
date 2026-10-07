@@ -145,6 +145,13 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 		t.Fatalf("archived run continued: %v %v", ok, err)
 	}
 	var beforeSchedule time.Time
+	var archivedSequence int64
+	if err = pool.QueryRow(ctx, `SELECT run_sequence FROM connector_instances WHERE organization=$1 AND id=$2`, scope.Organization, created.ID).Scan(&archivedSequence); err != nil || archivedSequence <= run[0].Run {
+		t.Fatalf("archive did not invalidate completed workflow identity: %d %v", archivedSequence, err)
+	}
+	if _, err = corpora.Archive(ctx, scope.Organization, c.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	if err = pool.QueryRow(ctx, `SELECT next_run_at FROM connector_instances WHERE organization=$1 AND id=$2`, scope.Organization, created.ID).Scan(&beforeSchedule); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +164,7 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 		if err = pool.QueryRow(ctx, `SELECT run_sequence,next_run_at FROM connector_instances WHERE organization=$1 AND id=$2`, scope.Organization, created.ID).Scan(&sequence, &schedule); err != nil {
 			t.Fatal(err)
 		}
-		if sequence != run[0].Run || !schedule.Equal(beforeSchedule) {
+		if sequence != archivedSequence || !schedule.Equal(beforeSchedule) {
 			t.Fatalf("archived finish changed schedule: sequence=%d at=%v", sequence, schedule)
 		}
 	}
@@ -171,7 +178,7 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 		t.Fatal(err)
 	}
 	run = claim()
-	if len(run) != 1 {
+	if len(run) != 1 || run[0].Run != archivedSequence {
 		t.Fatalf("restored connector did not resume: %+v", run)
 	}
 	target, err := store.LoadRun(ctx, scope.Organization, created.ID)

@@ -969,8 +969,9 @@ type Dispatch struct{ Organization, ReceiptID, TraceContext string }
 // DispatchBatch is an immutable, durable group of receipt intents. Its ID
 // survives a lost workflow-start acknowledgement and worker restarts.
 type DispatchBatch struct {
-	ID       string
-	Receipts []Dispatch
+	ID        string
+	WorkQueue string `json:",omitempty"`
+	Receipts  []Dispatch
 	// Legacy preserves an old receipt's workflow identity after a lost start
 	// acknowledgement, including receipts accepted by an older API process.
 	Legacy bool

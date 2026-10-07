@@ -3,6 +3,7 @@ package monitoring
 import (
 	"context"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"go.opentelemetry.io/otel/trace"
 
 	"encoding/json"
@@ -144,6 +145,14 @@ func (e Engine) Step(ctx context.Context) (worked bool, stepErr error) {
 	if err != nil {
 		return false, err
 	}
+	if in.VersionID == "" {
+		return e.processIntent(ctx, in)
+	}
+	err = workqueue.Track(ctx, in.Organization, "alert", fmt.Sprintf("%s:%d", in.SubscriptionVersionID, in.Sequence), in.VersionID, func(ctx context.Context) error { var err error; worked, err = e.processIntent(ctx, in); return err })
+	return worked, err
+}
+
+func (e Engine) processIntent(ctx context.Context, in Intent) (worked bool, stepErr error) {
 	ctx = telemetry.Restore(ctx, in.TraceContext)
 	ctx, span := telemetry.Start(ctx, "monitoring.evaluate")
 	defer func() { telemetry.Fail(span, stepErr); span.End() }()

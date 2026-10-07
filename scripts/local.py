@@ -13,6 +13,7 @@ import connector_plugin
 import archive_source
 import fixture_plugin
 import core_ingest_plugin
+import queue_workers
 import ingestion_plugin
 import retrieval_plugin
 import argparse, base64, json, os, pathlib, secrets, signal, subprocess, sys, time, urllib.request, uuid
@@ -144,7 +145,7 @@ class Stack:
             s['reader']:scope('org_a',['corpora:read'],['*']),
             # The deployment operator: reads the plugin registry (plugins:admin), which no Organization key gets,
             # and the admin views (observability:read).
-            s['operator']:scope('org_ops',['plugins:admin','observability:read'],['*']),
+            s['operator']:scope('org_ops',['plugins:admin','observability:read','queues:read'],['*']),
             # An operator of org_a: backfills its Corpora and promotes vector spaces (THE-784).
             s['backfiller']:scope('org_a',['plugins:admin','operations:read','operations:write'],['*']),
             # Observability acceptance owns org_o: its stats reads see only its own ingestion and searches.
@@ -208,7 +209,7 @@ class Stack:
         self.save()
     def await_ready(self,key,timeout=20):
         """Bounded readiness wait; a timeout names the probe, its last answer and the logs to read."""
-        probe={'probe_port':'api','worker_probe_port':'worker','short_probe_port':'short-api'}.get(key,key)
+        probe={'probe_port':'api','worker_probe_port':'worker','short_probe_port':'short-api','queue_bulk_probe_port':'worker'}.get(key,key)
         url=f"http://127.0.0.1:{self.state[key]}/readyz";start=time.monotonic();last='no answer'
         while True:
             try:
@@ -638,6 +639,7 @@ def parts():
             step('connectors',connectors),
             # Connector kinds from a pinned plugin: collect and resume, then a plugin outage and its recovery.
             step('collector_plugin',connector_plugin.verify),
+            step('queue_workers',queue_workers.verify),
             step('archive_source',archive_source.verify),
             step('connector_restart',verify_connector_restart),
             step('m365_restart',verify_m365_restart),
