@@ -58,7 +58,11 @@ const ExplorerView = lazy(() =>
 );
 const AddText = lazy(() => loaders.addText().then((m) => ({ default: m.AddText })));
 function prefetchTabs() {
-  const load = () => Object.values(loaders).forEach((load) => void load().catch(() => {}));
+  // The Explorer, opened from its address only, is not fetched ahead.
+  const load = () => {
+    for (const [name, load] of Object.entries(loaders))
+      if (name !== "explorer") void load().catch(() => {});
+  };
   if ("requestIdleCallback" in window) {
     const id = requestIdleCallback(load, { timeout: 4000 });
     return () => cancelIdleCallback(id);
@@ -71,11 +75,12 @@ type Auth = "loading" | "login" | "ready" | "error";
 type View = "feed" | "explorer" | "alerts" | "sources" | "admin";
 export type Doc = { record: string; version: string };
 
-// Fil, Explorer, Alertes, Sources and the read-only Admin; search lives in
-// the top bar.
-const TABS: { view: View; label: string; href: string }[] = [
+// Fil, Alertes, Sources and the read-only Admin; search lives in the top
+// bar. The Explorer is a test page for now: it has no tab and opens from its
+// address (/?view=explorer).
+type Tab = Exclude<View, "explorer">;
+const TABS: { view: Tab; label: string; href: string }[] = [
   { view: "feed", label: "Fil", href: "/" },
-  { view: "explorer", label: "Explorer", href: "/?view=explorer" },
   { view: "alerts", label: "Alertes", href: "/?view=alerts" },
   { view: "sources", label: "Sources", href: "/?view=sources" },
   { view: "admin", label: "Admin", href: "/?view=admin" },
@@ -443,16 +448,14 @@ function Dashboard({
   const toCheck = groupSources(sources.connectors).filter((c) =>
     needsCheck(displayState(c)),
   ).length;
-  const badges: Record<View, string> = {
+  const badges: Record<Tab, string> = {
     feed: "",
-    explorer: "",
     alerts: alertCount ? String(alertCount) : "",
     sources: toCheck ? String(toCheck) : "",
     admin: "",
   };
-  const badgeLabels: Record<View, string> = {
+  const badgeLabels: Record<Tab, string> = {
     feed: "",
-    explorer: "",
     admin: "",
     alerts: `${alertCount} article${alertCount > 1 ? "s" : ""} non lu${alertCount > 1 ? "s" : ""} attrapé${alertCount > 1 ? "s" : ""} par vos alertes`,
     sources: `${toCheck} source${toCheck > 1 ? "s" : ""} à vérifier`,
@@ -498,8 +501,6 @@ function Dashboard({
               onClick={(event) => {
                 event.preventDefault();
                 if (target === "alerts") setAlert(null);
-                // The Explorer's tab, clicked on a document, goes back to the list.
-                if (target === "explorer") setRecord(null);
                 if (target !== view) setDoc(null);
                 setView(target);
               }}
