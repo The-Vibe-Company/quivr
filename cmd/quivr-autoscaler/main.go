@@ -58,7 +58,7 @@ func run(logger *slog.Logger) error {
 	if enabled != "" && enabled != "true" {
 		return errors.New("QUIVR_AUTOSCALER_ENABLED must be true or false")
 	}
-	required := []string{"QUIVR_QUEUE_URL", "QUIVR_OPERATOR_KEY", "RAILWAY_TOKEN", "RAILWAY_BULK_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID"}
+	required := []string{"QUIVR_QUEUE_URL", "QUIVR_QUEUE_KEY", "RAILWAY_TOKEN", "RAILWAY_BULK_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID"}
 	for _, name := range required {
 		if strings.TrimSpace(os.Getenv(name)) == "" {
 			return errors.New(name + " is required")
@@ -101,7 +101,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	client := autoscaling.NewHTTPClient(timeout)
-	source := autoscaling.QueueSource{URL: endpoint.String(), Key: os.Getenv("QUIVR_OPERATOR_KEY"), Client: client}
+	source := autoscaling.QueueSource{URL: endpoint.String(), Key: os.Getenv("QUIVR_QUEUE_KEY"), Client: client}
 	backend := railway.Backend{Token: os.Getenv("RAILWAY_TOKEN"), ServiceID: os.Getenv("RAILWAY_BULK_SERVICE_ID"), EnvironmentID: os.Getenv("RAILWAY_ENVIRONMENT_ID"), Client: client}
 	controller := autoscaling.NewController(policy, source, backend)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

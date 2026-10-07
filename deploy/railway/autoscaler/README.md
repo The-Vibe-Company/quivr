@@ -6,16 +6,26 @@ Run `quivr-autoscaler` as one small, always-on service. It reads waiting bulk do
 
 You need a Railway project with the API and worker deployed from a release that provides `GET /v0/admin/queues`. You also need permission to create services and secrets, and an environment-scoped Railway **project token** from project settings. This token uses `Project-Access-Token`, as described in [Railway's API authentication](https://docs.railway.com/integrations/api).
 
-Set `QUIVR_OPERATOR_KEY` in the API service's Railway variables to a randomly generated secret (for example, from your password manager), or reuse its existing value. Redeploy the API after adding it. The generated configuration grants that key `queues:read` and all-corpus scope (`corpora: ["*"]`); the web app never receives it. A separately configured Quivr installation can use a dedicated key with only that grant. Give the autoscaler the same key as a secret.
+Set `QUIVR_QUEUE_KEY` in the API service's Railway variables to a randomly generated secret (for example, from your password manager), distinct from the API and operator keys. Redeploy the API after adding it. The generated configuration grants this dedicated key only `queues:read` with all-corpus scope (`corpora: ["*"]`); the web app never receives it. Give the autoscaler the same queue key as a secret.
 
 The steps below are operator examples, not run against a live Railway project. The Go policy, controller and HTTP adapters have offline tests with fake APIs; real throughput and capacity measurements belong to your deployment.
 
 ## Create the workers
 
-1. For an existing installation, first deploy the queue-capable core image with the existing `worker` serving both queues: omit `QUIVR_WORKER_QUEUES` or set it to `live,bulk`. In Temporal's workflow list, query `TaskQueue = 'quivr-content-v0' AND ExecutionStatus = 'Running'` and wait until no executions remain before switching to live-only. Those older histories mix live and bulk work. Keep a mixed worker until they drain.
+1. For an existing installation, upgrade every API and worker that can write dispatch state to the queue-capable release. Keep the existing `worker` serving both queues: omit `QUIVR_WORKER_QUEUES` or set it to `live,bulk`. Older writers must stop before the drain can complete. Check both pending legacy dispatch tables with the SQL below, then query Temporal's workflow list for `TaskQueue = 'quivr-content-v0' AND ExecutionStatus = 'Running'`. Keep a mixed worker until both SQL counts and running executions remain zero after dispatch and Temporal visibility catch up; pending legacy rows can still start old mixed histories.
 2. Run the existing [provisioning procedure](../README.md#provision-and-deploy), after that drain. `services.json` keeps the existing service named `worker` as the live worker and adds `worker-bulk`. Both start at one replica, use `core.Dockerfile`, and probe `/readyz`. The provisioner sets `QUIVR_WORKER_QUEUES=live` on `worker` and `bulk` on `worker-bulk`. On a fresh installation there are no older histories to drain.
 3. Before deploying `worker-bulk`, copy the existing worker's additional plugin/provider variables and secrets to it. All workers must share database, Temporal namespace, storage, cursor/credential/signing keys, active plugin settings and embedding endpoints. Keep each service's queue selector. Do not add a volume: each replica runs its own loopback plugin sidecars and temporary files. Both slot counts default to four; override with `QUIVR_WORKER_LIVE_SLOTS` and `QUIVR_WORKER_BULK_SLOTS` (1–1024).
 4. Deploy API, `worker` and `worker-bulk` with the existing deploy helper. Verify readiness and a live document becoming searchable while bulk work is pending. The API and workers must agree on plugin pins before scaling.
+
+Run this read-only query against the deployment's PostgreSQL database before switching to separate workers. `ingestion_batches` rows disappear only after durable workflow acceptance; they have no `dispatched` column.
+
+```sql
+SELECT 'outbox' AS source, count(*) AS pending
+FROM ingestion_outbox WHERE legacy_workflow AND NOT dispatched
+UNION ALL
+SELECT 'batches', count(*)
+FROM ingestion_batches WHERE legacy_workflow;
+```
 
 ## Create the autoscaler
 
@@ -26,7 +36,7 @@ The steps below are operator examples, not run against a live Railway project. T
 | Required variable | Value |
 | --- | --- |
 | `QUIVR_QUEUE_URL` | Full queue endpoint, e.g. `http://api.railway.internal:8080/v0/admin/queues`; use HTTPS outside the private network |
-| `QUIVR_OPERATOR_KEY` | Secret Quivr key with `queues:read` and all-corpus scope |
+| `QUIVR_QUEUE_KEY` | Secret Quivr key with `queues:read` and all-corpus scope |
 | `RAILWAY_TOKEN` | Secret project token scoped to the target environment |
 | `RAILWAY_BULK_SERVICE_ID` | ID of the bulk worker service, never the live worker |
 | `RAILWAY_ENVIRONMENT_ID` | ID of that service's environment |

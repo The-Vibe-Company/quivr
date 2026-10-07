@@ -262,6 +262,15 @@ class CoreEntrypointTest(unittest.TestCase):
         operator = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']['placeholder-operator-key']
         self.assertIn('observability:read', operator['actions'])
 
+    def test_queue_reader_key_is_read_only_and_separate(self):
+        config = core_entrypoint.build_config({**ENV, 'QUIVR_QUEUE_KEY': 'fixture-queue-key'})
+        self.assertEqual(config['keys']['fixture-queue-key'], {
+            'organization': 'quivr-demo', 'actions': ['queues:read'], 'corpora': ['*']})
+        for existing in ('placeholder-api-key', 'placeholder-operator-key'):
+            with self.subTest(existing=existing), self.assertRaises(ValueError):
+                core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key',
+                                             'QUIVR_QUEUE_KEY': existing})
+
     def test_worker_queue_environment_translation(self):
         # Literal external keys and omitted config preserve existing mixed workers.
         self.assertNotIn('worker', core_entrypoint.build_config(ENV))

@@ -86,5 +86,6 @@ func TestControllerHoldsCapacityOnErrors(t *testing.T) {
 	r.current = 4
 	b.waiting = 0
 	step(202, 4, false)
+	step(261, 4, false)
 	step(262, 1, false)
 }
