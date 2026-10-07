@@ -173,6 +173,13 @@ func (s ConnectorStore) takePushToken(ctx context.Context, in connectors.PushAtt
 // RecordPush commits the journal event and all three rollup resolutions
 // together. No payload, client IP, raw key or credential enters the journal.
 func (s ConnectorStore) RecordPush(ctx context.Context, id string, received bool) error {
+	err := retryJournalWrite(ctx, "RecordPush", func(ctx context.Context) error {
+		return s.recordPushAttempt(ctx, id, received)
+	})
+	return err
+}
+
+func (s ConnectorStore) recordPushAttempt(ctx context.Context, id string, received bool) error {
 	var org, corpusID string
 	err := s.Pool.QueryRow(ctx, `SELECT organization,corpus_id FROM connector_instances WHERE id=$1`, id).Scan(&org, &corpusID)
 	if errors.Is(err, pgx.ErrNoRows) {

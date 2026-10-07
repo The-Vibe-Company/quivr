@@ -14,21 +14,38 @@ import (
 // CoverEvaluation publishes coverage for another owner's independent segments.
 // It never changes Version readiness, the current Version or enrichment state.
 func (s IngestionEvaluationStore) CoverEvaluation(ctx context.Context, org string, g content.Generation, seg content.Segmentation, artifacts []content.Embedding) error {
-	tx, err := s.Pool.Begin(ctx)
+	err := retryJournalWrite(ctx, "CoverEvaluation", func(ctx context.Context) error {
+		return s.coverEvaluationAttempt(ctx, org, g, seg, artifacts)
+	})
+	return err
+}
+
+func (s IngestionEvaluationStore) coverEvaluationAttempt(ctx context.Context, org string, g content.Generation, seg content.Segmentation, artifacts []content.Embedding) error {
+	tx, err := database(ctx, s.Pool).Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockJournal(ctx, tx, org); err != nil {
+	var eligible, routed bool
+	guard := `SELECT r.current_version_id=v.id AND ` + eligibleVersionSQL + `,` + routedGenerationSQL("r.organization", "r.corpus_id") + `=$3 FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2`
+	if err = lockProjectionRouting(ctx, tx); err != nil {
 		return err
 	}
-	var eligible, routed bool
-	err = tx.QueryRow(ctx, `SELECT r.current_version_id=v.id AND `+eligibleVersionSQL+`,`+routedGenerationSQL("r.organization", "r.corpus_id")+`=$3 FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) WHERE v.organization=$1 AND v.id=$2 FOR SHARE OF r,v`, org, seg.VersionID, g.ID).Scan(&eligible, &routed)
+	if err = tx.QueryRow(ctx, guard, org, seg.VersionID, g.ID).Scan(&eligible, &routed); err != nil {
+		return notFound(err)
+	}
+	prepared := eligible && routed && len(artifacts) > 0
+	if prepared {
+		if _, err = prepareJournal(ctx, tx, func(stage pgx.Tx) error { return coverOwnerProjection(ctx, stage, org, g, seg, artifacts) }); err != nil {
+			return err
+		}
+	}
+	err = readJournal(ctx, tx, org, guard+" FOR SHARE OF r,v", []any{org, seg.VersionID, g.ID}, &eligible, &routed)
 	if err != nil {
 		return notFound(err)
 	}
 	if !eligible {
-		return tx.Commit(ctx)
+		return nil
 	}
 	if !routed {
 		return ErrGenerationChanged
@@ -36,8 +53,8 @@ func (s IngestionEvaluationStore) CoverEvaluation(ctx context.Context, org strin
 	if len(artifacts) == 0 {
 		return content.ErrInvalid
 	}
-	if err = coverOwnerProjection(ctx, tx, org, g, seg, artifacts); err != nil {
-		return err
+	if !prepared {
+		return ErrGenerationChanged
 	}
 	return tx.Commit(ctx)
 }
@@ -92,6 +109,16 @@ func coverOwnerProjection(ctx context.Context, tx pgx.Tx, org string, g content.
 // PrepareEvaluation adds an owner's spaces to the routed generation before
 // publication. The serving route is recorded without changing existing coverage.
 func (s IngestionEvaluationStore) PrepareEvaluation(ctx context.Context, org, corpusID string, spaces []string) (content.Generation, error) {
+	var result0 content.Generation
+	err := retryJournalWrite(ctx, "PrepareEvaluation", func(ctx context.Context) error {
+		var err error
+		result0, err = s.prepareEvaluationAttempt(ctx, org, corpusID, spaces)
+		return err
+	})
+	return result0, err
+}
+
+func (s IngestionEvaluationStore) prepareEvaluationAttempt(ctx context.Context, org, corpusID string, spaces []string) (content.Generation, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return content.Generation{}, err

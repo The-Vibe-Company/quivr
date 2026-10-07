@@ -524,21 +524,28 @@ func Run(command string, args ...string) error {
 	}
 	projection.LegacySpace = tei.Space().ID
 	if command == "migrate" {
-		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
 		if contract {
-			if err = postgres.MigrateContracts(ctx, pool); err != nil {
+			contractCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			err = postgres.MigrateContracts(contractCtx, pool)
+			cancel()
+			if err != nil {
+				if errors.Is(err, postgres.ErrIndexBusy) {
+					return err
+				}
 				return errors.New("contract migration failed; check database connectivity and schema")
 			}
 		}
 		// The PostgreSQL part runs first and alone needs no other dependency;
-		// rerunning migrate completes the S3 and Weaviate steps.
+		// concurrent index work has its own budget after SQL migrations commit.
 		if err = BootstrapDatabase(ctx, pool, DeploymentSpaces(cfg.migrationPins())); err != nil {
-			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) {
+			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrIndexBusy) {
 				return err
 			}
 			return errors.New("migration failed; check database connectivity and schema")
 		}
+		// Keep dependency setup bounded independently of large index builds.
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 		for {
 			if err = blobs.Bootstrap(ctx); err == nil {
 				break
