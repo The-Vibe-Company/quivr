@@ -363,6 +363,10 @@ func (s Service) IndexEmbeddings(ctx context.Context, org string, v content.Vers
 		// Derived for a generation of other spaces: routing moved meanwhile.
 		return ErrRouteChanged
 	}
+	publish, err := s.Content.ReconcileServingEnrichment(ctx, org, seg, g)
+	if err != nil || !publish {
+		return err
+	}
 	if err = s.Projection.PublishEmbeddings(ctx, g, org, data); err != nil {
 		if errors.Is(err, ErrProjectionMissing) {
 			// Withdrawn or superseded since the check above: end, else retry.

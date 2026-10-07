@@ -56,7 +56,7 @@ func (o processingObserver) Outcome(org, stage, outcome, code string, d time.Dur
 // observation rather than guessing.
 func (o processingObserver) Searchable(ctx context.Context, org, receiptID string) {
 	steps, age, ok := o.read(ctx, org, receiptID)
-	if !ok {
+	if !ok || steps.RetrievalReady == nil || steps.Accepted == nil {
 		return
 	}
 	o.metrics.Searchable(age)

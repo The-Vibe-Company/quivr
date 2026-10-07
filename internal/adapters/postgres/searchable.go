@@ -7,6 +7,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -333,7 +334,15 @@ func (s ProjectionStore) promoteAttempt(ctx context.Context, org string, seg con
 	if sourceMediaType == nil {
 		return pgx.ErrNoRows
 	}
-	if g.IngestionRouting != nil && g.IngestionRouting.For(*sourceMediaType) != "" && g.IngestionRouting.For(*sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
+	historicalRecipe := false
+	if w, ok := plugins.WorkOf(ctx); ok && w.Kind == plugins.WorkIngestion {
+		recipe, recipeErr := currentServingRecipe(ctx, tx, org, seg.VersionID, g)
+		if recipeErr != nil {
+			return recipeErr
+		}
+		historicalRecipe = recipe != "" && content.PluginOfRecipe(recipe) == content.PluginOfRecipe(seg.Recipe) && recipe != seg.Recipe
+	}
+	if historicalRecipe || (g.IngestionRouting != nil && g.IngestionRouting.For(*sourceMediaType) != "" && g.IngestionRouting.For(*sourceMediaType) != content.PluginOfRecipe(seg.Recipe)) {
 		if err = coverOwnerProjection(ctx, tx, org, g, seg, nil); err != nil {
 			return err
 		}

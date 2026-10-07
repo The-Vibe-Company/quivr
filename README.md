@@ -181,7 +181,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   The worker exposes delivery metrics on its probe listener (`/metrics`).
 - **Projection rebuilds** from durable artifacts as recoverable Operations, with cancel
   and rerun. Re-embedding runs concurrently with configurable `rebuild.concurrency`
-  (default 8), while new rebuild activities have separate worker capacity.
+  (default 8), while new rebuild activities have separate worker capacity. Imports
+  remain lexically searchable through embedding recipe changes; incompatible
+  enrichment settles with `rebuild_required` until rebuilt vectors are served.
 - **Document step times**: each Version reports when it was accepted, materialized, cut
   into segments, made searchable, given vectors, evaluated by alerts, quarantined or
   withdrawn (`steps`). A key with `observability:read` lists the latest documents with

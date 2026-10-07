@@ -95,6 +95,10 @@ func TestProcessingObserverRecordsPipelineSteps(t *testing.T) {
 	processingObserver{metrics: m, store: fakeSteps{steps: enriched, age: 17 * time.Second}, steps: recorder}.Enriched(context.Background(), "org", "receipt", 2*time.Second)
 	// A re-run on a Version enriched long before its 2 s run counts nothing.
 	processingObserver{metrics: m, store: fakeSteps{steps: enriched, age: time.Minute}, steps: recorder}.Enriched(context.Background(), "org", "receipt", 2*time.Second)
+	// A historical baseline handed off its serving work: no readiness time yet.
+	pending := baseline
+	pending.RetrievalReady = nil
+	processingObserver{metrics: m, store: fakeSteps{steps: pending}, steps: recorder}.Searchable(context.Background(), "org", "receipt")
 	// A failed read records nothing rather than guessing.
 	failed := processingObserver{metrics: m, store: fakeSteps{err: errors.New("gone")}, steps: recorder}
 	failed.Searchable(context.Background(), "org", "receipt")
