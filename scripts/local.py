@@ -287,8 +287,13 @@ class Stack:
         self.await_ready('short_probe_port')
     def stop_processes(self):
         for pid in self.state['pids']:self.signal_owned(pid,signal.SIGTERM)
+        # The core can drain for 60s; release its listeners before a replacement binds.
+        # Keep ownership on timeout so cleanup can still find the outstanding children.
+        deadline=time.monotonic()+70
+        while any(alive(pid) for pid in self.state['pids']):
+            if time.monotonic()>=deadline:raise RuntimeError('process shutdown timed out; tracked children still alive')
+            time.sleep(.05)
         self.state['pids']=[];self.state.pop('worker_pid',None);self.state.pop('api_pid',None);self.save()
-        time.sleep(.15)
     def check_disk(self):
         disk=docker_disk()
         if disk is None:return

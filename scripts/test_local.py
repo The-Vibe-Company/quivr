@@ -4,7 +4,7 @@ These run without Docker: they exercise the pieces `make verify` relies on to
 stay isolated and to explain a failed run. The live proof of stop/migrate/reset
 is scripts/lifecycle.py inside `make verify`.
 """
-import json, os, pathlib, shutil, signal, stat, subprocess, sys, tempfile, time, unittest, uuid
+import json, os, pathlib, shutil, signal, socket, stat, subprocess, sys, tempfile, time, unittest, uuid
 from unittest import mock
 
 import local
@@ -45,6 +45,43 @@ class Isolation(unittest.TestCase):
         reloaded = local.Stack(self.names[0])
         self.assertNotIn('scoped_id', reloaded.state)
         self.assertEqual(reloaded.state['admin'], stack.state['admin'])
+
+    def test_stopped_process_releases_its_probe_before_restart(self):
+        # THE-1230: a slow drain must not race the next worker's probe bind.
+        stack = local.Stack(self.names[0])
+        executable = stack.directory / 'quivr'
+        shutil.copy2(sys.executable, executable)
+        child = subprocess.Popen([str(executable), '-c', """
+import signal, socket, sys
+listener = socket.socket()
+listener.bind(('127.0.0.1', 0))
+listener.listen()
+def stop(*_):
+    sys.stdin.readline()  # The external liveness observer releases this drain gate.
+    listener.close()
+    sys.exit(0)
+signal.signal(signal.SIGTERM, stop)
+print(listener.getsockname()[1], flush=True)
+while True: signal.pause()
+"""], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.addCleanup(child.stdout.close)
+        self.addCleanup(child.stdin.close)
+        self.addCleanup(child.wait, timeout=5)
+        self.addCleanup(lambda: child.kill() if child.poll() is None else None)
+        probe_port = int(child.stdout.readline())
+        stack.state.update(pids=[child.pid], worker_pid=child.pid)
+        real_alive, released = local.alive, False
+        def observe_exit(pid):
+            nonlocal released
+            if pid == child.pid and not released:
+                child.stdin.write('finish drain\n'); child.stdin.flush()
+                released = True
+            return real_alive(pid)
+        with mock.patch('local.alive', side_effect=observe_exit):
+            stack.stop_processes()
+        # Exercise the next startup's actual OS bind, rather than asserting poll calls.
+        with socket.socket() as replacement:
+            replacement.bind(('127.0.0.1', probe_port))
 
     def test_down_keeps_volumes(self):
         stack = local.Stack(self.names[0])
