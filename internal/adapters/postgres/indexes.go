@@ -58,7 +58,7 @@ func EnsureIndexes(ctx context.Context, pool *pgxpool.Pool) (err error) {
 	var locked bool
 	// Share the SQL migrator's lock identity, but fail promptly instead of
 	// waiting behind another installer for the duration of its index work.
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(642001)").Scan(&locked); err != nil {
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", migrationAdvisoryLock).Scan(&locked); err != nil {
 		return err
 	}
 	if !locked {
@@ -69,6 +69,10 @@ func EnsureIndexes(ctx context.Context, pool *pgxpool.Pool) (err error) {
 			err = conn.QueryRow(ctx, `SELECT COALESCE(i.indisvalid, false), COALESCE(
  i.indrelid=to_regclass($2) AND am.amname='btree' AND NOT i.indisunique
  AND i.indexprs IS NULL AND i.indnatts=i.indnkeyatts
+ AND NOT EXISTS(SELECT FROM unnest(i.indkey) WITH ORDINALITY k(attnum, ordinal)
+                JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum
+                JOIN pg_opclass opc ON opc.oid=i.indclass[k.ordinal::int-1]
+                WHERE i.indcollation[k.ordinal::int-1]<>a.attcollation OR NOT opc.opcdefault)
  AND ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY k(attnum, ordinal)
            JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum
            ORDER BY k.ordinal)=$3::text[]

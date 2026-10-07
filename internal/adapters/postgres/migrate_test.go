@@ -104,17 +104,36 @@ FROM pg_index i WHERE i.indexrelid=to_regclass('segments_by_segmentation')`).Sca
 			}
 			bootstrap()
 			index()
-
-			// A same-name index with different keys must survive a failed setup.
-			if _, err := pool.Exec(ctx, "DROP INDEX segments_by_segmentation; CREATE INDEX segments_by_segmentation ON segments(version_id)"); err != nil {
+			// Exercise the actual two-second migrator lock timeout while another
+			// installer holds the shared lock; do not delay on the test clock.
+			installer, err := pool.Begin(ctx)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err == nil || !strings.Contains(err.Error(), "incompatible definition") {
-				t.Fatalf("want actionable index conflict, got %v", err)
+			defer installer.Rollback(ctx)
+			if _, err := installer.Exec(ctx, "SELECT pg_advisory_xact_lock(642001)"); err != nil {
+				t.Fatal(err)
 			}
-			var definition string
-			if err := pool.QueryRow(ctx, "SELECT pg_get_indexdef('segments_by_segmentation'::regclass)").Scan(&definition); err != nil || definition != "CREATE INDEX segments_by_segmentation ON public.segments USING btree (version_id)" {
-				t.Fatalf("conflicting index changed: %s, %v", definition, err)
+			if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); !errors.Is(err, postgres.ErrIndexBusy) {
+				t.Fatalf("want retryable setup contention, got %v", err)
+			}
+			if err := installer.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+
+			// Reuse must preserve the equality query's columns, collations and
+			// default operator classes. Conflicting objects remain untouched.
+			for _, keys := range []string{"version_id", `organization COLLATE "C", segmentation_id`, "organization text_pattern_ops, segmentation_id"} {
+				if _, err := pool.Exec(ctx, "DROP INDEX segments_by_segmentation; CREATE INDEX segments_by_segmentation ON segments("+keys+")"); err != nil {
+					t.Fatal(err)
+				}
+				if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err == nil || !strings.Contains(err.Error(), "incompatible definition") {
+					t.Fatalf("want actionable index conflict for %s, got %v", keys, err)
+				}
+				var definition string
+				if err := pool.QueryRow(ctx, "SELECT pg_get_indexdef('segments_by_segmentation'::regclass)").Scan(&definition); err != nil || definition != "CREATE INDEX segments_by_segmentation ON public.segments USING btree ("+keys+")" {
+					t.Fatalf("conflicting index changed: %s, %v", definition, err)
+				}
 			}
 		})
 	}
