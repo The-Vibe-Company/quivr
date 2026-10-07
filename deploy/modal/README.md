@@ -38,8 +38,8 @@ Copy the HTTPS origin printed for the `web` function, without a trailing path,
 into `EMBED_URL` on both api and worker. Also set `QUIVR_DEMO_EMBEDDING=gemma`.
 The entrypoint appends `/v1` as `base_url`, uses bearer authentication, 768
 dimensions, query prefix `task: search result | query: ` and document prefix
-`title: none | text: `. Its conservative 2048 UTF-8 byte/token segment bound,
-64-byte overlap, batch size 32 and four concurrent provider calls stay within
+`title: {headline} | text: `. Packed passages of 512 body tokens, counted with the
+pinned tokenizer, batch size 32 and four concurrent provider calls stay within
 the service's request limits. The full checkpoint is pinned in the image; the
 plugin's bounded `model_revision` uses `914f7f89142e33e7` so model meaning has a
 distinct vector-space identity. The token reaches only the hosted sidecar through
@@ -51,7 +51,7 @@ text. Require a 768-value vector and reject an absent or wrong bearer token with
 401. Health checks the gateway without starting the GPU; the embedding request
 is the GPU readiness check. A public URL alone grants no access: both routes
 require the bearer token. The endpoint accepts strings or batches of 1–32
-strings, each at most 2048 UTF-8 bytes. It rejects invalid input before GPU work.
+strings, each at most 32 KiB of UTF-8 (8 MiB per request). It rejects invalid input before GPU work.
 
 ## Switch, rebuild and check
 
