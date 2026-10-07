@@ -15,9 +15,9 @@ func TestRebuildConcurrencyConfiguration(t *testing.T) {
 		{`{}`, 8, true},
 		{`{"rebuild":{"concurrency":0}}`, 8, true},
 		{`{"rebuild":{"concurrency":1}}`, 1, true},
-		{`{"rebuild":{"concurrency":32}}`, 32, true},
+		{`{"rebuild":{"concurrency":256}}`, 256, true},
 		{`{"rebuild":{"concurrency":-1}}`, 0, false},
-		{`{"rebuild":{"concurrency":33}}`, 0, false},
+		{`{"rebuild":{"concurrency":257}}`, 0, false},
 	} {
 		var cfg Config
 		if err := json.Unmarshal([]byte(tc.input), &cfg); err != nil {

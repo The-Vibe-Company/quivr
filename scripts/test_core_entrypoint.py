@@ -422,9 +422,9 @@ class CoreEntrypointTest(unittest.TestCase):
 
     def test_rebuild_concurrency_is_passed_when_set(self):
         self.assertNotIn('rebuild', core_entrypoint.build_config(ENV))
-        config = core_entrypoint.build_config({**ENV, 'QUIVR_REBUILD_CONCURRENCY': '32'})
-        self.assertEqual(config['rebuild'], {'concurrency': 32})
-        for bad in ('abc', '0', '33'):
+        config = core_entrypoint.build_config({**ENV, 'QUIVR_REBUILD_CONCURRENCY': '256'})
+        self.assertEqual(config['rebuild'], {'concurrency': 256})
+        for bad in ('abc', '0', '257'):
             with self.assertRaisesRegex(ValueError, 'QUIVR_REBUILD_CONCURRENCY'):
                 core_entrypoint.build_config({**ENV, 'QUIVR_REBUILD_CONCURRENCY': bad})
 
