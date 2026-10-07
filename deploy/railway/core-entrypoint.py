@@ -226,12 +226,13 @@ def build_config(env):
     }
     # Optional operator key, never given to the web app: rebuilds a Corpus projection
     # (for example after a migration adds a projected field), reads the plugin
-    # registry (plugins:admin) and the admin views (observability:read) from inside the deployment.
+    # registry (plugins:admin), the admin views (observability:read) and archives (corpora:archive) or renames (corpora:rename)
+    # Corpora from inside the deployment.
     operator = env.get('QUIVR_OPERATOR_KEY', '').strip()
     if operator:
         config['keys'][operator] = {'organization': 'quivr-demo', 'corpora': ['*'],
                                     'actions': ['corpora:read', 'projections:rebuild', 'operations:read', 'operations:write',
-                                                'plugins:admin', 'observability:read', 'queues:read']}
+                                                'plugins:admin', 'observability:read', 'queues:read', 'corpora:archive', 'corpora:rename']}
     queue_key = env.get('QUIVR_QUEUE_KEY', '').strip()
     if queue_key:
         if queue_key in config['keys']:
