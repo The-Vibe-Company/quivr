@@ -42,6 +42,10 @@ CPU_CORES, MEMORY_GIB = 4, 8
 # PyTorch 2.6 raises on accelerator-less hosts; 2.8 passes the offline import check.
 TORCH_PACKAGE = 'torch==2.8.0'
 TEXT_PACKAGES = ['transformers==5.19.0', 'sentence-transformers==6.1.0']
+# EmbeddingGemma2Processor imports pillow and torchvision even for text-only use.
+GEMMA_PACKAGES = TEXT_PACKAGES + ['pillow==11.3.0']
+# Installed from the torch index beside torch, so CUDA builds match.
+GEMMA_TORCH_EXTRAS = ['torchvision==0.23.0']
 
 
 def image_for(hardware, label=None):
@@ -49,7 +53,7 @@ def image_for(hardware, label=None):
         requirements = ['requirements-oss.txt', 'requirements-direct.txt', 'requirements.txt']
         return {'base': 'debian_slim', 'python': '3.12', 'torch': TORCH_PACKAGE,
                 'torch_index_url': 'https://download.pytorch.org/whl/' + ('cpu' if hardware == 'cpu' else 'cu126'),
-                'packages': TEXT_PACKAGES,
+                'packages': GEMMA_PACKAGES, 'torch_extras': GEMMA_TORCH_EXTRAS,
                 'requirements': {name: hashlib.sha256((ROOT / 'scripts/eval' / name).read_bytes()).hexdigest()
                                  for name in requirements}}
     return TEI + ('cpu-1.9.3' if hardware == 'cpu' else '1.9.3')

@@ -38,6 +38,55 @@ contributions:
         query_modalities: [text]
 `
 
+// Installed derivation identity must survive JSONB formatting and deployment
+// relocation, while changes to configuration or the model declaration split it.
+func TestIngestionDerivationIdentity(t *testing.T) {
+	base, err := plugins.LoadPinManifest([]byte(embedderManifest), "embedder", plugins.PinConfig{Endpoint: "http://127.0.0.1:9900", Configuration: json.RawMessage(`{"limit":6,"model":{"name":"small","revision":9007199254740993}}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := (pluginhttp.Ingestor{Pin: base}).Descriptor()
+	for _, c := range []struct {
+		name, config, manifest string
+		same                   bool
+	}{
+		{"JSONB formatting", `{"model": {"revision": 9007199254740993.0, "name": "small"}, "limit": 6.0}`, embedderManifest, true},
+		{"segment limit", `{"limit":3,"model":{"name":"small","revision":9007199254740993}}`, embedderManifest, false},
+		{"model setting", `{"limit":6,"model":{"name":"large","revision":9007199254740993}}`, embedderManifest, false},
+		{"adjacent large number", `{"limit":6,"model":{"name":"small","revision":9007199254740992}}`, embedderManifest, false},
+		{"model declaration", string(base.Configuration), strings.ReplaceAll(embedderManifest, "model: acme/small", "model: acme/large"), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			pin, err := plugins.LoadPinManifest([]byte(c.manifest), "embedder", plugins.PinConfig{Endpoint: "http://127.0.0.1:9901", Configuration: json.RawMessage(c.config)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pin.Registration = "another-registration"
+			pin.Spaces = map[string]string{"acme.embedder.small": "evaluation"}
+			after := (pluginhttp.Ingestor{Pin: pin}).Descriptor()
+			if (before.Recipe == after.Recipe) != c.same || (before.Producer == after.Producer) != c.same {
+				t.Fatalf("recipe/producer identity equal: %v/%v, want %v", before.Recipe == after.Recipe, before.Producer == after.Producer, c.same)
+			}
+			if owner := content.PluginOfRecipe(after.Recipe); owner != "acme.embedder" {
+				t.Fatalf("recipe owner %q, want acme.embedder", owner)
+			}
+		})
+	}
+	// An omitted configuration and its resolved empty object converge too.
+	var emptyRecipe string
+	for _, config := range []json.RawMessage{nil, json.RawMessage(`{}`)} {
+		pin, err := plugins.LoadPinManifest([]byte(embedderManifest), "embedder", plugins.PinConfig{Endpoint: "http://127.0.0.1:9900", Configuration: config})
+		if err != nil {
+			t.Fatal(err)
+		}
+		recipe := (pluginhttp.Ingestor{Pin: pin}).Descriptor().Recipe
+		if emptyRecipe != "" && recipe != emptyRecipe {
+			t.Fatal("omitted configuration and empty object produced different recipes")
+		}
+		emptyRecipe = recipe
+	}
+}
+
 // A plugin refuses a query terminally: query_too_long names its limit to the
 // caller, any other code is a refusal of the query without detail.
 func TestEncodeQueryPassesOnTheLimitAPluginNames(t *testing.T) {

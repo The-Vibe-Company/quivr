@@ -63,9 +63,12 @@ class ModalTransport(unittest.TestCase):
         self.assertEqual(mounts, granite_mounts)
         # CPU E5 and CUDA Gemma share the ST/Transformers-compatible version.
         self.assertIn((('torch==2.8.0',), 'https://download.pytorch.org/whl/cpu'), wheels)
-        self.assertIn((('torch==2.8.0',), 'https://download.pytorch.org/whl/cu126'), wheels)
+        # EmbeddingGemma2Processor imports torchvision and pillow even for text-only use.
+        self.assertIn((('torch==2.8.0', 'torchvision==0.23.0'), 'https://download.pytorch.org/whl/cu126'), wheels)
+        self.assertIn((('transformers==5.19.0', 'sentence-transformers==6.1.0', 'pillow==11.3.0'), None), wheels)
         self.assertEqual(commands.count('python -m pip install -r /workspace/scripts/eval/requirements-oss.txt'), 2)
-        self.assertEqual(commands.count('HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python /workspace/scripts/eval/oss_image_check.py'), 2)
+        self.assertEqual(commands.count('HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python /workspace/scripts/eval/oss_image_check.py'), 1)
+        self.assertEqual(commands.count('QUIVR_GEMMA_IMAGE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python /workspace/scripts/eval/oss_image_check.py'), 1)
         self.assertIn((('transformers==5.19.0', 'sentence-transformers==6.1.0'), None), wheels)
 
         with tempfile.TemporaryDirectory() as temporary:
