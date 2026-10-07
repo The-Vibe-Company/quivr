@@ -278,9 +278,9 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	// Fresh bulk indexing can leave planner statistics far behind actual rows.
 	// Clone this valid independent-owner fixture without ANALYZE, then check
 	// real coverage at its serving budget rather than a wall-clock sleep.
-	// At least one million segments: this is a fixed-budget regression for
-	// THE-1231, not an optional load test. Bulk setup exceeds the usual small
-	// adapter fixture because the bug only appears at segment scale.
+	// PRs keep the 6,003-segment stale-planner regression fast (THE-1231).
+	// Nightly/manual QUIVR_MEASURE=1 also seeds at least one million segments;
+	// both modes keep the same cold-search and completed-snapshot assertions.
 	cuts := 1
 	copies := 2000
 	if os.Getenv("QUIVR_MEASURE") == "1" {
