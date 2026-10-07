@@ -369,7 +369,7 @@ func (s ProjectionStore) promoteAttempt(ctx context.Context, org string, seg con
 // for each of its Versions, and with the Organization as a constant it picked
 // any index that starts with it. The Organization therefore comes from the
 // candidate row, a value the planner cannot see.
-var hydrateSQL = `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,'')
+var hydrateSQL = `SELECT c.n,r.id,v.id,r.corpus_id,sg.segmentation_id,sg.id,sg.part_key,sg.start_offset,sg.end_offset,sg.text_sha256,b.object_key,b.sha256,b.byte_length,coalesce(e.id,''),coalesce(e.space_id,''),sg.derivation
 FROM unnest($1::text[],$2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS c(organization,segment_id,generation_id,evaluation_plugin,evaluation_space,n)
 CROSS JOIN LATERAL (SELECT sg.* FROM segments sg WHERE sg.organization=c.organization AND sg.id=c.segment_id OFFSET 0) sg
 CROSS JOIN LATERAL (SELECT v.* FROM record_versions v WHERE v.organization=c.organization AND v.id=sg.version_id OFFSET 0) v
@@ -402,9 +402,13 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		var n int
 		var l content.Located
 		var corpusID string
+		var derivation []byte
 		h := &l.Hydrated
 		if err = rows.Scan(&n, &h.RecordID, &h.VersionID, &corpusID, &h.SegmentationID, &h.Segment.ID, &h.Segment.PartKey, &h.Segment.Start, &h.Segment.End, &h.TextSHA256,
-			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &h.EmbeddingID, &h.SpaceID); err != nil {
+			&l.Blob.Key, &l.Blob.SHA256, &l.Blob.Size, &h.EmbeddingID, &h.SpaceID, &derivation); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(derivation, &h.Segment.Derivation); err != nil {
 			return nil, err
 		}
 		if !scope.Contains(corpusID) {
@@ -414,7 +418,57 @@ func (s ProjectionStore) Hydrate(ctx context.Context, scope corpus.Scope, cs []c
 		h.Availability = content.Availability{State: "retrieval_ready", Current: true, Searchable: true}
 		out[n-1] = l
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	// Resolve only already-authorized candidates, by segment and Part primary
+	// keys. No scan of the Organization's canonical text is introduced.
+	ids := []string{}
+	at := map[string][]int{}
+	for n, l := range out {
+		if len(l.Segment.Derivation.SourceRanges) > 0 {
+			if _, seen := at[l.Segment.ID]; !seen {
+				ids = append(ids, l.Segment.ID)
+			}
+			at[l.Segment.ID] = append(at[l.Segment.ID], n)
+		}
+	}
+	if len(ids) > 0 {
+		sourceRows, err := database(ctx, s.Pool).Query(ctx, `SELECT sg.id,r.part_key,r.start,r.end,b.object_key,b.sha256,b.byte_length
+FROM unnest($2::text[]) AS selected(id)
+JOIN segments sg ON sg.organization=$1 AND sg.id=selected.id
+CROSS JOIN LATERAL jsonb_array_elements(sg.derivation->'source_ranges') WITH ORDINALITY AS item(value,ordinality)
+CROSS JOIN LATERAL (SELECT item.value->>'part_key' AS part_key,(item.value->>'start')::integer AS start,(item.value->>'end')::integer AS end,item.ordinality) r
+JOIN version_parts p ON p.organization=sg.organization AND p.version_id=sg.version_id AND p.part_key=r.part_key
+JOIN content_blobs b ON b.organization=p.organization AND b.blob_id=p.blob_id
+ORDER BY sg.id,r.ordinality`, scope.Organization, ids)
+		if err != nil {
+			return nil, err
+		}
+		defer sourceRows.Close()
+		for sourceRows.Next() {
+			var id string
+			var source content.LocatedSource
+			if err = sourceRows.Scan(&id, &source.Range.PartKey, &source.Range.Start, &source.Range.End, &source.Blob.Key, &source.Blob.SHA256, &source.Blob.Size); err != nil {
+				return nil, err
+			}
+			for _, n := range at[id] {
+				l := out[n]
+				l.Sources = append(l.Sources, source)
+				out[n] = l
+			}
+		}
+		if err = sourceRows.Err(); err != nil {
+			return nil, err
+		}
+		for _, l := range out {
+			if len(l.Sources) != len(l.Segment.Derivation.SourceRanges) {
+				return nil, content.ErrConflict
+			}
+		}
+	}
+	return out, nil
 }
 
 // ProjectionStore persists baseline projection artifacts and Corpus routing.

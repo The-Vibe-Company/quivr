@@ -68,3 +68,30 @@ func TestHydrationRechecksTheBatchAfterReadingIt(t *testing.T) {
 		t.Fatalf("%d lookups and %d blob reads; want one lookup, one read of the shared blob, one recheck", baseline.lookups, reads.Load())
 	}
 }
+
+// Packed passages retain independent Unicode source ranges and never pretend
+// the joined excerpt belongs to only the first Part.
+func TestPackedPassageUsesExactCanonicalRanges(t *testing.T) {
+	v := content.Version{ID: "v", Manifest: content.Manifest{Parts: []content.Part{
+		{Key: "a", Role: "body", Content: content.Text{Kind: "text", Text: "één 🌌"}},
+		{Key: "b", Role: "body", Content: content.Text{Kind: "text", Text: "第二段"}},
+	}}}
+	input := content.SegmentInput{PartKey: "a", End: 5, SourceRanges: []content.SourceRange{{PartKey: "a", End: 5}, {PartKey: "b", End: 3}}, SourceSeparator: "\n\n"}
+	seg, err := content.PluginSegmentation("org", v, "plugin:p@1", nil, []content.SegmentInput{input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seg.Segments[0].Text != "één 🌌\n\n第二段" {
+		t.Fatalf("packed text = %q", seg.Segments[0].Text)
+	}
+	changed := input
+	changed.SourceSeparator = " "
+	other, err := content.PluginSegmentation("org", v, "plugin:p@1", nil, []content.SegmentInput{changed})
+	if err != nil || other.Segments[0].ID == seg.Segments[0].ID {
+		t.Fatalf("separator must change immutable identity: %v", err)
+	}
+	input.SourceRanges[1].End = 4
+	if _, err = content.PluginSegmentation("org", v, "plugin:p@1", nil, []content.SegmentInput{input}); err == nil {
+		t.Fatal("accepted range beyond canonical Part")
+	}
+}

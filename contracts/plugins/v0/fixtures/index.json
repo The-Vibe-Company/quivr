@@ -1475,6 +1475,100 @@
       "description": "Two segments, a vector per requested space, lexical text and provenance."
     },
     {
+      "file": "responses/ingestion/multi-part.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": true,
+      "schema_valid": true,
+      "errors": [],
+      "manifest": "manifests/valid/ingestion-multi-part.yaml",
+      "request": "requests/ingestion/segment-and-embed-multi-part.json",
+      "description": "One segment joins ordered slices from a title Part and a body Part."
+    },
+    {
+      "file": "responses/ingestion/multi-part-unknown-range.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "unknown_part_key"
+      ],
+      "manifest": "manifests/valid/ingestion-multi-part.yaml",
+      "request": "requests/ingestion/segment-and-embed-multi-part.json",
+      "description": "A source range names a Part absent from the request."
+    },
+    {
+      "file": "responses/ingestion/multi-part-out-of-order.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "source_range_order"
+      ],
+      "manifest": "manifests/valid/ingestion-multi-part.yaml",
+      "request": "requests/ingestion/segment-and-embed-multi-part.json",
+      "description": "Ranges from one Part overlap by appearing in reverse reading order."
+    },
+    {
+      "file": "responses/ingestion/multi-part-anchor-mismatch.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "source_range_anchor_mismatch"
+      ],
+      "manifest": "manifests/valid/ingestion-multi-part.yaml",
+      "request": "requests/ingestion/segment-and-embed-multi-part.json",
+      "description": "The legacy anchor does not equal the first source range."
+    },
+    {
+      "file": "responses/ingestion/multi-part-nul-separator.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": false,
+      "errors": [
+        "schema_violation"
+      ],
+      "manifest": "manifests/valid/ingestion-multi-part.yaml",
+      "request": "requests/ingestion/segment-and-embed-multi-part.json",
+      "description": "A source separator cannot contain NUL."
+    },
+    {
+      "file": "responses/ingestion/multi-part-old-api.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "multi_part_segments_unsupported"
+      ],
+      "manifest": "manifests/valid/ingestion.yaml",
+      "request": "requests/ingestion/segment-and-embed.json",
+      "description": "New source fields are refused for a manifest restricted to Plugin API 0.6."
+    },
+    {
+      "file": "responses/ingestion/multi-part-source-range-too-large.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "source_range_too_large"
+      ],
+      "manifest": "manifests/valid/ingestion-multi-part.yaml",
+      "request": "requests/ingestion/segment-and-embed-multi-part-limits.json",
+      "description": "One source range exceeds the 4096-code-point slice bound."
+    },
+    {
+      "file": "responses/ingestion/multi-part-packed-text-too-large.json",
+      "schema": "ingestion-segment-and-embed-response.schema.json",
+      "valid": false,
+      "schema_valid": true,
+      "errors": [
+        "packed_text_too_large"
+      ],
+      "manifest": "manifests/valid/ingestion-multi-part.yaml",
+      "request": "requests/ingestion/segment-and-embed-multi-part-limits.json",
+      "description": "The joined source slices and separators exceed the 16384-code-point passage bound."
+    },
+    {
       "file": "responses/ingestion/segment-only.json",
       "schema": "ingestion-segment-and-embed-response.schema.json",
       "valid": true,
