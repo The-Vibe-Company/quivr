@@ -3,6 +3,7 @@ package processing
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
@@ -38,61 +39,64 @@ func (e Evaluator) Run(ctx context.Context, org, id string) error {
 	if err != nil || job.State != "queued" {
 		return err
 	}
-	record, err := e.Content.TrustedRecord(ctx, org, job.RecordID)
-	if errors.Is(err, corpus.ErrNotFound) {
-		return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
-	}
-	if err != nil {
-		return err
-	}
-	v, err := e.Content.TrustedVersion(ctx, org, record.Source.CorpusID, job.RecordID, job.VersionID)
-	if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrArtifactMissing) || errors.Is(err, content.ErrArtifactCorrupt) {
-		return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
-	}
-	if err != nil {
-		return err
-	}
-	if !v.Availability.Current || !v.Availability.Searchable || v.Steps.Enriched == nil {
-		return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
-	}
-	g, err := e.Store.PrepareEvaluation(ctx, org, record.Source.CorpusID, job.Spaces)
-	if err != nil {
-		return err
-	}
-	if g.ID != job.GenerationID {
-		return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
-	}
-	if e.Plugin == nil || len(job.Spaces) == 0 {
-		return e.fail(ctx, job, ErrSpaceUnowned)
-	}
-	driver := e.Plugin.forSpace(ctx, job.Spaces[0])
-	if driver.Plugin == nil {
-		return e.fail(ctx, job, ErrSpaceUnowned)
-	}
-	if err = driver.bind(ctx); err != nil {
-		return err
-	}
-	seg, data, err := driver.derive(ctx, org, record.Source.CorpusID, v, job.Spaces)
-	if err != nil {
-		return e.fail(ctx, job, err)
-	}
-	if err = e.Projection.Publish(ctx, g, org, record.Source.CorpusID, record.Source.Namespace, v, seg); err != nil {
-		return err
-	}
-	if err = e.Projection.PublishEmbeddings(ctx, g, org, data); err != nil {
-		return err
-	}
-	artifacts := make([]content.Embedding, len(data))
-	for i, d := range data {
-		artifacts[i] = d.Artifact
-	}
-	if err = e.Store.CoverEvaluation(ctx, org, g, seg, artifacts); err != nil {
-		if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
+	return workqueue.Track(ctx, org, "evaluation", id, job.VersionID, func(ctx context.Context) error {
+
+		record, err := e.Content.TrustedRecord(ctx, org, job.RecordID)
+		if errors.Is(err, corpus.ErrNotFound) {
+			return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
+		}
+		if err != nil {
+			return err
+		}
+		v, err := e.Content.TrustedVersion(ctx, org, record.Source.CorpusID, job.RecordID, job.VersionID)
+		if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrArtifactMissing) || errors.Is(err, content.ErrArtifactCorrupt) {
+			return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
+		}
+		if err != nil {
+			return err
+		}
+		if !v.Availability.Current || !v.Availability.Searchable || v.Steps.Enriched == nil {
+			return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
+		}
+		g, err := e.Store.PrepareEvaluation(ctx, org, record.Source.CorpusID, job.Spaces)
+		if err != nil {
+			return err
+		}
+		if g.ID != job.GenerationID {
+			return e.Store.CompleteIngestionEvaluation(ctx, org, id, "skipped", nil)
+		}
+		if e.Plugin == nil || len(job.Spaces) == 0 {
+			return e.fail(ctx, job, ErrSpaceUnowned)
+		}
+		driver := e.Plugin.forSpace(ctx, job.Spaces[0])
+		if driver.Plugin == nil {
+			return e.fail(ctx, job, ErrSpaceUnowned)
+		}
+		if err = driver.bind(ctx); err != nil {
+			return err
+		}
+		seg, data, err := driver.derive(ctx, org, record.Source.CorpusID, v, job.Spaces)
+		if err != nil {
 			return e.fail(ctx, job, err)
 		}
-		return err
-	}
-	return e.Store.CompleteIngestionEvaluation(ctx, org, id, "succeeded", nil)
+		if err = e.Projection.Publish(ctx, g, org, record.Source.CorpusID, record.Source.Namespace, v, seg); err != nil {
+			return err
+		}
+		if err = e.Projection.PublishEmbeddings(ctx, g, org, data); err != nil {
+			return err
+		}
+		artifacts := make([]content.Embedding, len(data))
+		for i, d := range data {
+			artifacts[i] = d.Artifact
+		}
+		if err = e.Store.CoverEvaluation(ctx, org, g, seg, artifacts); err != nil {
+			if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
+				return e.fail(ctx, job, err)
+			}
+			return err
+		}
+		return e.Store.CompleteIngestionEvaluation(ctx, org, id, "succeeded", nil)
+	})
 }
 
 func (e Evaluator) fail(ctx context.Context, job content.IngestionEvaluation, cause error) error {

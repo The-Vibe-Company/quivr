@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"log/slog"
 	"sync"
 	"time"
@@ -64,15 +65,23 @@ func (r *Runtime) dispatch(ctx context.Context) {
 		lanes.Add(1)
 		go func() { defer lanes.Done(); r.pollIntents(ctx, period, source, starts) }()
 	}
-	poll(200*time.Millisecond, r.ingestionIntents(), ingestionStartConcurrency)
-	poll(200*time.Millisecond, r.operationIntents(), 1)
-	if r.Connectors != nil {
-		poll(500*time.Millisecond, r.connectorIntents(), 1)
+	classes := r.Queues.Queues
+	if classes == nil {
+		classes = []string{workqueue.Live, workqueue.Bulk}
 	}
-	if r.Evaluation != nil {
-		poll(time.Second, r.ingestionEvaluationIntents(), 1)
-		if r.Evaluation.Serving != nil {
-			poll(200*time.Millisecond, r.servingProjectionIntents(), 1)
+	for _, q := range classes {
+		poll(200*time.Millisecond, r.ingestionIntents(q), ingestionStartConcurrency)
+		if q == workqueue.Bulk {
+			poll(200*time.Millisecond, r.operationIntents(), 1)
+		}
+		if r.Connectors != nil {
+			poll(500*time.Millisecond, r.connectorIntents(q), 1)
+		}
+		if r.Evaluation != nil {
+			poll(time.Second, r.ingestionEvaluationIntents(q), 1)
+			if r.Evaluation.Serving != nil {
+				poll(200*time.Millisecond, r.servingProjectionIntents(q), 1)
+			}
 		}
 	}
 	lanes.Wait()
@@ -148,8 +157,11 @@ func (r *Runtime) dispatchIntent(ctx context.Context, intent Intent) {
 	}
 }
 
-func (r *Runtime) ingestionIntents() IntentSource {
+func (r *Runtime) ingestionIntents(classes ...string) IntentSource {
 	return intentSource(func(ctx context.Context) ([]Intent, error) {
+		if len(classes) > 0 {
+			ctx = workqueue.WithClass(ctx, classes[0])
+		}
 		batch, err := r.Store.ClaimIngestionBatches(ctx, ingestionDispatchBatch)
 		if err != nil {
 			return nil, err
@@ -157,6 +169,9 @@ func (r *Runtime) ingestionIntents() IntentSource {
 		intents := make([]Intent, 0, len(batch))
 		for _, b := range batch {
 			queue, name := ingestionBatchQueue, ingestionBatchWorkflow
+			if workqueue.Valid(b.WorkQueue) {
+				queue = workqueue.TaskQueue(b.WorkQueue)
+			}
 			var input any = b
 			if b.Legacy {
 				// A pre-upgrade start may already exist, even when its outbox
@@ -169,7 +184,13 @@ func (r *Runtime) ingestionIntents() IntentSource {
 				traceContext: b.Receipts[0].TraceContext,
 				options:      client.StartWorkflowOptions{ID: b.ID, TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
 				name:         name, input: input,
-				complete: func(ctx context.Context) error { return r.Store.IngestionBatchDispatched(ctx, b.ID) },
+				complete: func(ctx context.Context) error {
+					class := b.WorkQueue
+					if !workqueue.Valid(class) {
+						class = workqueue.Live
+					}
+					return r.Store.IngestionBatchDispatched(workqueue.WithClass(ctx, class), b.ID)
+				},
 				retry: func(ctx context.Context) error {
 					for _, d := range b.Receipts {
 						if err := r.Store.Progress(ctx, d.Organization, d.ReceiptID, "retrying", "dispatch_unavailable"); err != nil {
@@ -192,12 +213,12 @@ func (r *Runtime) operationIntents() IntentSource {
 		}
 		intents := make([]Intent, 0, len(batch))
 		for _, d := range batch {
-			name, queue := rebuildWorkflowName, taskQueue
+			name, queue := rebuildWorkflowName, workqueue.TaskQueue(workqueue.Bulk)
 			switch d.Kind {
 			case operations.KindBackfill:
-				name, queue = backfillWorkflowName, backfillTaskQueue
+				name = backfillWorkflowName
 			case operations.KindQuarantineReprocess:
-				name, queue = reprocessWorkflowName, backfillTaskQueue
+				name = reprocessWorkflowName
 			}
 			intents = append(intents, dispatchIntent{traceContext: d.TraceContext,
 				// IDs deliberately retain the legacy per-kind name, independent of the
@@ -212,17 +233,24 @@ func (r *Runtime) operationIntents() IntentSource {
 	})
 }
 
-func (r *Runtime) connectorIntents() IntentSource {
+func (r *Runtime) connectorIntents(classes ...string) IntentSource {
 	return intentSource(func(ctx context.Context) ([]Intent, error) {
+		if len(classes) > 0 {
+			ctx = workqueue.WithClass(ctx, classes[0])
+		}
 		runs, err := r.Connectors.Scheduler.ClaimConnectorRuns(ctx, connectorLease, 20)
 		if err != nil {
 			return nil, err
 		}
 		intents := make([]Intent, 0, len(runs))
 		for _, run := range runs {
+			queue := connectorTaskQueue
+			if workqueue.Valid(run.WorkQueue) {
+				queue = workqueue.TaskQueue(run.WorkQueue)
+			}
 			intents = append(intents, dispatchIntent{
-				options: client.StartWorkflowOptions{ID: acquisitionWorkflowID(run), TaskQueue: connectorTaskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY},
-				name:    acquireWorkflow, input: AcquireInput{Organization: run.Organization, ConnectorID: run.ConnectorID, Run: run.Run},
+				options: client.StartWorkflowOptions{ID: acquisitionWorkflowID(run), TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY},
+				name:    acquireWorkflow, input: AcquireInput{Organization: run.Organization, ConnectorID: run.ConnectorID, Run: run.Run, WorkQueue: run.WorkQueue},
 				complete: func(context.Context) error { return nil }, // Run completion advances its schedule.
 				retry: func(ctx context.Context) error {
 					release, cancel := lifecycle.CleanupContext(ctx, time.Second)
