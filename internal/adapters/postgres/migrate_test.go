@@ -21,7 +21,7 @@ import (
 
 // Database bootstrap owns concurrent index setup: schema migration alone cannot
 // build an index on a large existing table within its five-second SQL budget.
-func TestDatabaseBootstrapBuildsSegmentLookupIndex(t *testing.T) {
+func TestDatabaseBootstrapBuildsLookupIndexes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	for _, upgraded := range []bool{false, true} {
@@ -38,25 +38,34 @@ func TestDatabaseBootstrapBuildsSegmentLookupIndex(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			index := func() uint32 {
+			index := func(name, want string) uint32 {
 				t.Helper()
 				var oid uint32
 				var valid bool
 				var definition string
 				if err := pool.QueryRow(ctx, `SELECT i.indexrelid, i.indisvalid, pg_get_indexdef(i.indexrelid)
-FROM pg_index i WHERE i.indexrelid=to_regclass('segments_by_segmentation')`).Scan(&oid, &valid, &definition); err != nil {
-					t.Fatalf("segment lookup index missing: %v", err)
+FROM pg_index i WHERE i.indexrelid=to_regclass($1)`, name).Scan(&oid, &valid, &definition); err != nil {
+					t.Fatalf("lookup index %s missing: %v", name, err)
 				}
-				if !valid || definition != "CREATE INDEX segments_by_segmentation ON public.segments USING btree (organization, segmentation_id)" {
-					t.Fatalf("want valid organization/segmentation index, got valid=%v definition=%s", valid, definition)
+				if !valid || definition != want {
+					t.Fatalf("want valid index %s, got valid=%v definition=%s", name, valid, definition)
 				}
 				return oid
 			}
+			segmentIndex := func() uint32 {
+				return index("segments_by_segmentation", "CREATE INDEX segments_by_segmentation ON public.segments USING btree (organization, segmentation_id)")
+			}
+			rebuildIndex := func() uint32 {
+				return index("records_by_current_version", "CREATE INDEX records_by_current_version ON public.records USING btree (organization, corpus_id, current_version_id)")
+			}
 			bootstrap()
-			oid := index()
+			oid, rebuildOID := segmentIndex(), rebuildIndex()
 			bootstrap()
-			if got := index(); got != oid {
-				t.Fatalf("rerun rebuilt valid index: OID %d became %d", oid, got)
+			if got := segmentIndex(); got != oid {
+				t.Fatalf("rerun rebuilt segment index: OID %d became %d", oid, got)
+			}
+			if got := rebuildIndex(); got != rebuildOID {
+				t.Fatalf("rerun rebuilt current-version index: OID %d became %d", rebuildOID, got)
 			}
 			if !upgraded {
 				return
@@ -103,7 +112,7 @@ FROM pg_index i WHERE i.indexrelid=to_regclass('segments_by_segmentation')`).Sca
 				t.Fatal(err)
 			}
 			bootstrap()
-			index()
+			segmentIndex()
 			// Exercise the actual two-second migrator lock timeout while another
 			// installer holds the shared lock; do not delay on the test clock.
 			installer, err := pool.Begin(ctx)
