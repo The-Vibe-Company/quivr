@@ -33,6 +33,11 @@ func (s QueueSnapshots) Refresh(ctx context.Context) error {
 	if err = tx.QueryRow(ctx, `SELECT count(*)=2 AND min(observed_at)>clock_timestamp()-interval '1 second' FROM queue_backlog_snapshots WHERE queue IN ('live','bulk')`).Scan(&fresh); err != nil || fresh {
 		return err
 	}
+	// Existing installations retain the legacy branch during initialization.
+	// Bounded repair also discovers writes made by a preceding binary.
+	if err = advanceQueueObservations(ctx, tx, 1000); err != nil {
+		return err
+	}
 	// Unique fencing tokens allow bounded cleanup even while an old process
 	// still holds an expired token. Ordinary completed attempts are deleted.
 	if _, err = tx.Exec(ctx, `DELETE FROM queue_document_attempts WHERE (organization,kind,work_id,document_id) IN (

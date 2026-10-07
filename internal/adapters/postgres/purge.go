@@ -29,8 +29,32 @@ SELECT cr.organization,cr.corpus_id,dg.id FROM corpus_projection_routes cr JOIN 
 const deadVersionSQL = `(` + recordGoneSQL + `
  OR (v.id IS DISTINCT FROM r.current_version_id AND v.id IS DISTINCT FROM r.desired_version_id))`
 
+// Materialize a bounded batch before point-reading canonical state. LIMIT 1
+// on unique-key lookups prevents a planner alternative that pre-hashes all
+// Versions/Records. The candidate deletion and ledger insert share one atomic
+// statement; concurrent application upserts wait and enqueue again after commit.
+const noticeVersionPurgesSQL = `WITH candidates AS MATERIALIZED (
+ SELECT organization,version_id FROM projection_purge_candidates
+ ORDER BY organization,version_id LIMIT $1 FOR UPDATE SKIP LOCKED
+), consumed AS (
+ DELETE FROM projection_purge_candidates q USING candidates c
+ WHERE (q.organization,q.version_id)=(c.organization,c.version_id)
+ RETURNING q.organization,q.version_id
+)
+INSERT INTO projection_purges(organization,kind,version_id)
+SELECT v.organization,'version',v.id FROM consumed c
+JOIN LATERAL (SELECT * FROM record_versions v WHERE (v.organization,v.id)=(c.organization,c.version_id) LIMIT 1) v ON true
+JOIN LATERAL (SELECT * FROM records r WHERE (r.organization,r.id)=(v.organization,v.record_id) LIMIT 1) r ON true
+WHERE (r.withdrawn OR COALESCE((SELECT true FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),false)
+ OR (v.id IS DISTINCT FROM r.current_version_id AND v.id IS DISTINCT FROM r.desired_version_id))
+ AND COALESCE((SELECT true FROM segmentations sg WHERE sg.organization=v.organization AND sg.version_id=v.id LIMIT 1),false)
+ON CONFLICT DO NOTHING`
+
 // NoticePurges records up to limit newly dead items; their grace period starts now.
 func (s PurgeStore) NoticePurges(ctx context.Context, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
 	tag, err := s.Pool.Exec(ctx, `INSERT INTO projection_purges(organization,kind,corpus_id,generation_id)
 SELECT d.organization,'generation',d.corpus_id,d.target_generation_id FROM (`+abandonedGenerationsSQL+`) d
 WHERE NOT EXISTS(SELECT 1 FROM projection_purges p WHERE p.organization=d.organization AND p.kind='generation' AND p.corpus_id=d.corpus_id AND p.generation_id=d.target_generation_id AND p.version_id='')
@@ -39,14 +63,21 @@ LIMIT $1 ON CONFLICT DO NOTHING`, limit)
 		return 0, err
 	}
 	noticed := int(tag.RowsAffected())
-	// Only Versions that were segmented can have been projected.
-	tag, err = s.Pool.Exec(ctx, `INSERT INTO projection_purges(organization,kind,version_id)
-SELECT v.organization,'version',v.id FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
-WHERE `+deadVersionSQL+`
- AND EXISTS(SELECT 1 FROM segmentations sg WHERE sg.organization=v.organization AND sg.version_id=v.id)
- AND NOT EXISTS(SELECT 1 FROM projection_purges p WHERE p.organization=v.organization AND p.kind='version' AND p.corpus_id='' AND p.generation_id='' AND p.version_id=v.id)
-LIMIT $1 ON CONFLICT DO NOTHING`, limit)
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
+		return noticed, err
+	}
+	defer tx.Rollback(ctx)
+	// Repair advances by scanned segmentations, even if none are dead. It
+	// revisits bounded key ranges to catch previous-binary and late writes.
+	if err = advancePurgeCandidates(ctx, tx, limit); err != nil {
+		return noticed, err
+	}
+	tag, err = tx.Exec(ctx, noticeVersionPurgesSQL, limit)
+	if err != nil {
+		return noticed, err
+	}
+	if err = tx.Commit(ctx); err != nil {
 		return noticed, err
 	}
 	return noticed + int(tag.RowsAffected()), nil

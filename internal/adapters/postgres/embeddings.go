@@ -84,6 +84,9 @@ func (s EmbeddingStore) enrichmentProgressAttempt(ctx context.Context, org, id, 
 		if _, err = tx.Exec(ctx, settleWithdrawnEnrichmentSQL, org, id); err != nil {
 			return err
 		}
+		if err = observeQueueVersion(ctx, tx, org, id); err != nil {
+			return err
+		}
 		return tx.Commit(ctx)
 	}
 	return updatePinnedVersion(ctx, s.Pool, org, id, `UPDATE record_versions SET enrichment_state=$3,enrichment_error=$4,enrichment_reason=NULL WHERE organization=$1 AND id=$2 AND baseline_ready AND NOT quarantined AND enrichment_state!='idle'`, state, code)
@@ -114,6 +117,9 @@ func (s EmbeddingStore) BlockEnrichment(ctx context.Context, org, id string, rea
 				return err
 			}
 			if err = queueServingProjection(ctx, tx, org, id); err != nil {
+				return err
+			}
+			if err = observeQueueVersion(ctx, tx, org, id); err != nil {
 				return err
 			}
 		}
@@ -158,6 +164,9 @@ func (s EmbeddingStore) ReconcileServingEnrichment(ctx context.Context, org stri
 		if _, err = tx.Exec(ctx, settleWithdrawnEnrichmentSQL, org, seg.VersionID); err != nil {
 			return false, err
 		}
+		if err = observeQueueVersion(ctx, tx, org, seg.VersionID); err != nil {
+			return false, err
+		}
 		return false, tx.Commit(ctx)
 	}
 	if current == seg.ID {
@@ -175,6 +184,9 @@ func (s EmbeddingStore) ReconcileServingEnrichment(ctx context.Context, org stri
 		if err = queueServingProjection(ctx, tx, org, seg.VersionID); err != nil {
 			return false, err
 		}
+	}
+	if err = observeQueueVersion(ctx, tx, org, seg.VersionID); err != nil {
+		return false, err
 	}
 	return false, tx.Commit(ctx)
 }
@@ -367,6 +379,11 @@ func (s EmbeddingStore) commitEnrichmentAttempt(ctx context.Context, org string,
 
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return err
+	}
+	if emitted {
+		if err = observeQueueRecords(ctx, tx, []string{org}, []string{recordID}); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }
