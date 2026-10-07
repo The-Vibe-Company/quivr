@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -13,6 +14,51 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// currentServingRecipe returns the active registration's recipe only when it
+// can serve this generation's primary. A retired model waits for rebuild;
+// dispatching a current-plan job into that old space would recreate retries.
+func currentServingRecipe(ctx context.Context, q querier, org, versionID string, g content.Generation) (string, error) {
+	var r registry.Registration
+	var settings []byte
+	err := q.QueryRow(ctx, `SELECT pr.id,pr.plugin_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings
+ FROM record_versions v JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
+ JOIN projection_generations g ON g.id=$3 JOIN active_pipeline_plan a ON true
+ JOIN plugin_registrations pr ON pr.plugin_id=COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')
+ AND EXISTS(SELECT 1 FROM pipeline_plan_roles rr WHERE rr.plan_id=a.plan_id AND rr.registration_id=pr.id AND rr.role='ingestion:'||pr.plugin_id)
+ WHERE v.organization=$1 AND v.id=$2`, org, versionID, g.ID).Scan(&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.Manifest, &settings)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if err = json.Unmarshal(settings, &r.Settings); err != nil {
+		return "", err
+	}
+	pin, err := r.Pin()
+	if err != nil {
+		return "", err
+	}
+	// Serving jobs require recorded owner/space metadata for eligibility.
+	// A legacy primary alone cannot authorize a historical handoff.
+	primary := g.ServedFor(r.PluginID)
+	known := false
+	for _, sp := range g.Spaces {
+		if sp.ID == primary && sp.OwnerPluginID == r.PluginID && sp.Role == content.SpaceServed {
+			known = true
+		}
+	}
+	if !known {
+		return "", nil
+	}
+	for _, space := range pin.EnabledSpaces() {
+		if space.Key == primary {
+			return registry.IngestionRecipe(pin), nil
+		}
+	}
+	return "", nil
+}
 
 // queueServingProjection is called only after canonical Parts exist. The
 // target gets a separate durable plan pin; the original work is never rebound.
@@ -27,7 +73,7 @@ func queueServingProjection(ctx context.Context, tx pgx.Tx, org, versionID strin
  JOIN projection_generations g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`
  JOIN active_pipeline_plan a ON true JOIN plugin_registrations pr ON pr.plugin_id=COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')
  AND EXISTS(SELECT 1 FROM pipeline_plan_roles rr WHERE rr.plan_id=a.plan_id AND rr.registration_id=pr.id AND rr.role='ingestion:'||pr.plugin_id)
- WHERE v.organization=$1 AND v.id=$2 AND r.desired_version_id=v.id AND NOT v.baseline_ready AND NOT v.quarantined AND NOT r.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)`, org, versionID).Scan(&job.RecordID, &job.GenerationID, &job.PluginID, &job.RegistrationID, &job.PlanID, &registration.Version, &registration.Endpoint, &registration.ManifestDigest, &registration.Manifest, &settings, &generationSpaces, &modelSelection)
+ WHERE v.organization=$1 AND v.id=$2 AND r.desired_version_id=v.id AND (NOT v.baseline_ready OR v.enrichment_error=$3) AND NOT v.quarantined AND NOT r.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)`, org, versionID, content.CodeRebuildRequired).Scan(&job.RecordID, &job.GenerationID, &job.PluginID, &job.RegistrationID, &job.PlanID, &registration.Version, &registration.Endpoint, &registration.ManifestDigest, &registration.Manifest, &settings, &generationSpaces, &modelSelection)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -64,6 +110,9 @@ func queueServingProjection(ctx context.Context, tx pgx.Tx, org, versionID strin
 	}
 	if len(spaces) == 0 {
 		return content.ErrInvalid
+	}
+	if primary == "" || !slices.Contains(spaces, primary) {
+		return nil
 	}
 	job.ID = content.StableID("serving-projection", org, versionID, job.GenerationID, job.PlanID, strings.Join(spaces, ","), modelSelection)
 	// A retry with the same effective target waits for generation compatibility.
