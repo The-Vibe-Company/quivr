@@ -34,10 +34,26 @@ import (
 // The source media type comes only from accepted_revisions. The empty value is
 // normalized to text/plain, matching the value recorded at acceptance; no
 // normalizer output is consulted.
-const backfillScopeSQL = `(
-WITH selected AS (
- SELECT r.id AS record_id,r.namespace,v.id AS version_id,
-   COALESCE(NULLIF(ar.source_media_type,''),'text/plain') AS source_media_type,
+// Materialize the scoped current Versions before projection joins: immediately
+// after bulk acceptance, stale statistics can otherwise turn those joins into
+// repeated full scans. Push the caller's fixed Version predicate into this CTE
+// so checkpoint batches and single-Version authorization retain their bounds.
+func backfillScopeSQL(versionPredicate string) string {
+	return `(
+WITH current_versions AS MATERIALIZED (
+ SELECT r.id AS record_id,r.namespace,v.id AS version_id,v.organization,
+ COALESCE(NULLIF(ar.source_media_type,''),'text/plain') AS source_media_type
+ FROM records r
+ JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
+ JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
+ LEFT JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order
+ WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + `
+ AND ($4::timestamptz IS NULL OR rc.accepted_at>=$4)
+ AND ($5::timestamptz IS NULL OR rc.accepted_at<$5)
+ ` + versionPredicate + `
+), selected AS (
+ SELECT cv.record_id,cv.namespace,cv.version_id,
+   cv.source_media_type,
    selected_pr.plugin_id AS plugin_id,
    served_pc.segmentation_id AS served_segmentation_id,
    owner_pc.segmentation_id AS owner_segmentation_id,
@@ -47,20 +63,14 @@ WITH selected AS (
      FROM pipeline_plan_roles er
      WHERE er.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
        AND er.registration_id=$8
-       AND er.role='ingestion-evaluation:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')||':'||selected_pr.plugin_id
+       AND er.role='ingestion-evaluation:'||cv.source_media_type||':'||selected_pr.plugin_id
    ) AS evaluation_match
- FROM records r
- JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)
- JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
- JOIN projection_coverage served_pc ON served_pc.organization=v.organization AND served_pc.version_id=v.id AND served_pc.generation_id=$3 AND served_pc.role='served'
+ FROM current_versions cv
+ JOIN projection_coverage served_pc ON served_pc.organization=cv.organization AND served_pc.version_id=cv.version_id AND served_pc.generation_id=$3 AND served_pc.role='served'
  JOIN plugin_registrations selected_pr ON selected_pr.id=$8
- LEFT JOIN projection_coverage owner_pc ON owner_pc.organization=v.organization AND owner_pc.version_id=v.id AND owner_pc.generation_id=$3 AND owner_pc.plugin_id=selected_pr.plugin_id
+ LEFT JOIN projection_coverage owner_pc ON owner_pc.organization=cv.organization AND owner_pc.version_id=cv.version_id AND owner_pc.generation_id=$3 AND owner_pc.plugin_id=selected_pr.plugin_id
  LEFT JOIN segmentations owner_s ON owner_s.organization=owner_pc.organization AND owner_s.id=owner_pc.segmentation_id
- LEFT JOIN ingestion_receipts rc ON rc.organization=v.organization AND rc.record_id=v.record_id AND rc.acceptance_order=v.acceptance_order
- WHERE r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + `
-   AND ($4::timestamptz IS NULL OR rc.accepted_at>=$4)
-   AND ($5::timestamptz IS NULL OR rc.accepted_at<$5)
-   AND NOT EXISTS(
+ WHERE NOT EXISTS(
      SELECT 1
      FROM vector_spaces target_vs
      WHERE target_vs.id=ANY($7::text[])
@@ -72,14 +82,14 @@ WITH selected AS (
        FROM pipeline_plan_roles er
        WHERE er.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
          AND er.registration_id=$8
-         AND er.role='ingestion-evaluation:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')||':'||selected_pr.plugin_id
+         AND er.role='ingestion-evaluation:'||cv.source_media_type||':'||selected_pr.plugin_id
      )
      OR EXISTS(
        SELECT 1
      FROM pipeline_plan_roles rr
        WHERE rr.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
          AND rr.registration_id=$8
-         AND rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')
+         AND rr.role='ingestion-route:'||cv.source_media_type
          AND served_pc.plugin_id=selected_pr.plugin_id
      )
      OR (
@@ -87,7 +97,7 @@ WITH selected AS (
          SELECT 1
          FROM pipeline_plan_roles rr
          WHERE rr.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
-           AND rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')
+           AND rr.role='ingestion-route:'||cv.source_media_type
        )
        AND served_pc.plugin_id=selected_pr.plugin_id
        AND EXISTS(
@@ -104,7 +114,7 @@ WITH selected AS (
          SELECT 1
          FROM pipeline_plan_roles rr
          WHERE rr.plan_id=COALESCE(NULLIF($9,''),(SELECT plan_id FROM active_pipeline_plan))
-           AND rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')
+           AND rr.role='ingestion-route:'||cv.source_media_type
        )
        AND served_pc.plugin_id=selected_pr.plugin_id
        AND EXISTS(
@@ -178,6 +188,7 @@ WHERE $10::bool OR (
   )
 )
 )`
+}
 
 // BackfillSize measures a backfill scope in the Corpus's routed generation.
 func (s BackfillStore) BackfillSize(ctx context.Context, org string, spec operations.Backfill, corpusID string) (backfill.Size, error) {
@@ -190,7 +201,7 @@ func (s BackfillStore) BackfillSize(ctx context.Context, org string, spec operat
 		return size, backfill.ErrRebuildRequired
 	}
 	err = database(ctx, s.Pool).QueryRow(ctx, `SELECT count(DISTINCT scope.version_id),count(*),COALESCE(sum(sg.end_offset-sg.start_offset),0)
-FROM `+backfillScopeSQL+` scope
+FROM `+backfillScopeSQL("")+` scope
 JOIN segments sg ON sg.organization=$1 AND sg.version_id=scope.version_id AND sg.segmentation_id=scope.segmentation_id`,
 		org, corpusID, g.ID, spec.AcceptedAfter, spec.AcceptedBefore, g.SpaceID, spec.Spaces, spec.RegistrationID, spec.PlanID, false).Scan(&size.Versions, &size.Segments, &size.CodePoints)
 	return size, err
@@ -376,7 +387,7 @@ func (s BackfillStore) CarryBackfillSpaces(ctx context.Context, org, id string) 
 	}
 	if _, counted := op.Counters["versions_in_scope"]; !counted {
 		var size int64
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM `+backfillScopeSQL+` scope`, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.PlanID, false).Scan(&size); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM `+backfillScopeSQL("")+` scope`, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.PlanID, false).Scan(&size); err != nil {
 			return g, err
 		}
 		if err = addCounters(ctx, tx, org, id, map[string]int64{"versions_in_scope": size}); err != nil {
@@ -469,7 +480,7 @@ func (s BackfillStore) BackfillCandidates(ctx context.Context, org, id string, g
 		return nil, operations.ErrUnsupportedKind
 	}
 	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT scope.record_id,scope.version_id,scope.namespace,scope.source_media_type,scope.owner_recipe,scope.plugin_id,scope.independent
-FROM `+backfillScopeSQL+` scope
+FROM `+backfillScopeSQL("AND v.id>$11")+` scope
 WHERE scope.version_id>$11
 ORDER BY scope.version_id
 LIMIT $12`,
@@ -619,7 +630,7 @@ FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v
 		}
 		var owner string
 		err = tx.QueryRow(ctx, `SELECT scope.plugin_id
-FROM `+backfillScopeSQL+` scope
+FROM `+backfillScopeSQL("AND v.id=$11")+` scope
 WHERE scope.version_id=$11`, org, op.CorpusID, g.ID, op.Backfill.AcceptedAfter, op.Backfill.AcceptedBefore, g.SpaceID, op.Backfill.Spaces, op.Backfill.RegistrationID, op.Backfill.PlanID, true, versionID).Scan(&owner)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return backfill.ErrInvalid
