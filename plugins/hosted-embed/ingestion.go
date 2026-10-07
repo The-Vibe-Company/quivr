@@ -17,6 +17,7 @@ import (
 type ingester struct {
 	config    configuration
 	provider  provider
+	queries   *provider
 	documents *documentBatcher
 	mu        sync.Mutex
 	cache     map[[32]byte]*list.Element
@@ -168,14 +169,38 @@ func (i *ingester) EmbedQuery(ctx context.Context, req *quivrplugin.QueryRequest
 	if req.Query.Modality != "text" || !utf8.ValidString(input) || strings.ContainsRune(input, 0) || strings.TrimSpace(req.Query.Text) == "" {
 		return nil, quivrplugin.TerminalIngestError("invalid_query", "query must contain valid text")
 	}
-	cost, err := i.provider.inputCost(ctx, input)
+	encoder := &i.provider
+	admitted := false
+	if i.queries != nil {
+		encoder = i.queries
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(encoder.config.RequestTimeoutMS)*time.Millisecond)
+		defer cancel()
+		if err := encoder.gate.acquire(ctx); err != nil {
+			return nil, quivrplugin.RetryableIngestError("provider_unavailable", "query admission cancelled")
+		}
+		admitted = true
+	}
+	cost, err := encoder.inputCost(ctx, input)
 	if err != nil {
+		if admitted {
+			encoder.gate.release()
+			return nil, quivrplugin.RetryableIngestError("provider_unavailable", "query tokenization failed or timed out")
+		}
 		return nil, err
 	}
 	if cost > c.MaxTokens {
+		if admitted {
+			encoder.gate.release()
+		}
 		return nil, quivrplugin.TerminalIngestError("query_limit", "query exceeds max_tokens_per_segment including its prefix and special token reserve")
 	}
-	vectors, err := i.provider.embed(ctx, []string{input}, "query", req.InvocationID)
+	var vectors [][]float32
+	if admitted {
+		vectors, err = encoder.requestWithCost(ctx, []string{input}, "query", []string{req.InvocationID}, true, &cost)
+	} else {
+		vectors, err = encoder.embed(ctx, []string{input}, "query", req.InvocationID)
+	}
 	if err != nil {
 		return nil, err
 	}

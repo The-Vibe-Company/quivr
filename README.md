@@ -346,6 +346,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   E5) is pinned by default; the engine segments and embeds nothing itself.
   Optional [hosted.embed](plugins/hosted-embed/README.md) selects a hosted model
   or OpenAI-compatible server by configuration, with OpenAI and Cohere v2 formats.
+  An optional pinned [CPU text encoder](deploy/railway/README.md#optional-cpu-query-encoding)
+  answers queries beside the API while documents keep using the remote provider.
 - **Search ranked by a plugin** (Plugin API 0.7, the `retrieval` Contribution): a
   selected plugin answers each search in up to three rounds, asking the engine for
   keyword, vector or hybrid candidates it has already authorized, then ranking them

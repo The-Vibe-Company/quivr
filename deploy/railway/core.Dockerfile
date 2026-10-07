@@ -35,6 +35,23 @@ COPY third_party/tokenizer ./third_party/tokenizer
 COPY plugins/core-ingest/profile.json ./plugins/core-ingest/profile.json
 RUN python scripts/prepare_tokenizer.py --hosted
 
+# Optional offline text runtime. The default image contains neither CPU wheels
+# nor model weights; deployment builders opt in before enabling query routing.
+FROM python:3.12-slim-bookworm AS query-encoder
+ARG QUIVR_BUILD_LOCAL_QUERY_ENCODER=0
+WORKDIR /app
+COPY scripts/prepare_query_encoder.py ./scripts/
+COPY third_party/query-encoder ./third_party/query-encoder
+RUN mkdir -p /opt/query-encoder/model /opt/query-encoder/venv \
+ && case "$QUIVR_BUILD_LOCAL_QUERY_ENCODER" in \
+      0) ;; \
+      1) python -m venv /opt/query-encoder/venv \
+         && /opt/query-encoder/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
+              --require-hashes -r third_party/query-encoder/requirements.txt \
+         && python scripts/prepare_query_encoder.py --output /opt/query-encoder/model ;; \
+      *) echo 'QUIVR_BUILD_LOCAL_QUERY_ENCODER must be 0 or 1' >&2; exit 1 ;; \
+    esac
+
 # First-party Python sidecars: newsml-g2 always runs for archive ingestion;
 # alerts/pdf-text use QUIVR_DEMO_PLUGINS=1;
 # API retrieval uses QUIVR_DEMO_JEV_RERANK=1 and TYPESAFE_API_KEY
@@ -55,6 +72,11 @@ FROM python:3.12-slim-bookworm
 WORKDIR /app
 COPY --from=build /quivr /usr/local/bin/quivr
 COPY --from=tokenizer /app /app
+COPY --from=query-encoder /opt/query-encoder /opt/query-encoder
+COPY --from=query-encoder /app/scripts/prepare_query_encoder.py /app/scripts/prepare_query_encoder.py
+COPY --from=query-encoder /app/third_party/query-encoder /app/third_party/query-encoder
+COPY deploy/cpu /app/deploy/cpu
+COPY deploy/modal/embedding_api.py /app/deploy/modal/embedding_api.py
 COPY --from=plugins /opt/quivr-plugins /opt/quivr-plugins
 COPY --from=plugins /app/plugins /app/plugins
 COPY --from=connectors /out/bin/ /usr/local/bin/
