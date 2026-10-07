@@ -44,6 +44,22 @@ def check(schema, value, valid=True):
 for case in cases:
     check(case["schema"], case["value"])
 
+# Successful normalization may omit optional audit detail. The deterministic
+# digest remains mandatory, and a retained invocation ID must be non-empty.
+normalization = {
+    "plugin_id": "example.markdown", "plugin_version": "1.0.0",
+    "plugin_api": "0.1.0", "contribution": "normalizer",
+    "idempotency_key": "nk_example", "input_sha256": "a" * 64,
+}
+check("NormalizationProvenance", normalization)
+check("NormalizationProvenance", {**normalization, "invocation_id": "inv_1"})
+check("NormalizationProvenance", {**normalization, "invocation_id": ""}, False)
+check("NormalizationProvenance", {k: v for k, v in normalization.items() if k != "idempotency_key"}, False)
+fallback = {**normalization, "fallback": {"code": "plugin_unavailable", "message": "The normalizer is unavailable."}}
+check("NormalizationProvenance", {**fallback, "invocation_id": "inv_failed"})
+check("NormalizationProvenance", fallback, False)
+
+
 pending = examples["pending_receipt"]
 resolved = examples["resolved_receipt"]
 unavailable = examples["version_relations"]["relations"][1]

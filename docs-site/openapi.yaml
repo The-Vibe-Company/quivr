@@ -5469,6 +5469,8 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+          description: Present when import audit detail is retained, or when it identifies a failed invocation. Omitted for
+            successful normalization without audit detail.
         idempotency_key:
           type: string
           minLength: 1
@@ -5498,9 +5500,15 @@ components:
       - plugin_version
       - plugin_api
       - contribution
-      - invocation_id
       - idempotency_key
       - input_sha256
+      allOf:
+      - if:
+          required:
+          - fallback
+        then:
+          required:
+          - invocation_id
     IngestCommand:
       type: object
       additionalProperties: false

@@ -2768,12 +2768,14 @@ Engine-owned record of the external normalizer invocation whose output a Record 
 | `plugin_version` | string | yes | Minimum length `1`. Maximum length `64`. |
 | `plugin_api` | string | yes | Plugin API version the engine invoked. Minimum length `1`. Maximum length `32`. |
 | `contribution` | string | yes | One of `normalizer`. |
-| `invocation_id` | string | yes | Minimum length `1`. Maximum length `128`. |
+| `invocation_id` | string |  | Present when import audit detail is retained, or when it identifies a failed invocation. Omitted for successful normalization without audit detail. Minimum length `1`. Maximum length `128`. |
 | `idempotency_key` | string | yes | Minimum length `1`. Maximum length `256`. |
 | `input_sha256` | string | yes | Pattern `^[0-9a-f]{64}$`. |
 | `fallback` | object |  | Present when the route is optional and the normalizer failed: the published Manifest comes from the built-in text path, and invocation_id names the failed invocation. |
 | `fallback.code` | string | yes | Minimum length `1`. Maximum length `64`. |
 | `fallback.message` | string | yes | Minimum length `1`. Maximum length `1000`. |
+
+Further rules (conditional requirements or combinations) are in the full schema below.
 
 <details>
 <summary>Full schema</summary>
@@ -2804,6 +2806,7 @@ properties:
     type: string
     minLength: 1
     maxLength: 128
+    description: Present when import audit detail is retained, or when it identifies a failed invocation. Omitted for successful normalization without audit detail.
   idempotency_key:
     type: string
     minLength: 1
@@ -2832,9 +2835,15 @@ required:
   - plugin_version
   - plugin_api
   - contribution
-  - invocation_id
   - idempotency_key
   - input_sha256
+allOf:
+  - if:
+      required:
+        - fallback
+    then:
+      required:
+        - invocation_id
 ```
 
 </details>
