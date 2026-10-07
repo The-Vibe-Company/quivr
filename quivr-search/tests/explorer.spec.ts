@@ -39,8 +39,10 @@ const listed = (page: Page) =>
 test("l’Explorer passe d’un corpus à l’autre, filtre par facettes comptées et dit quels corpus il exclut", async ({
   page,
 }) => {
+  // A test page for now: no tab leads to it, its address opens it.
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Sections" }).getByRole("link", { name: "Explorer" }).click();
+  await expect(page.getByRole("navigation", { name: "Sections" }).getByRole("link", { name: "Explorer" })).toHaveCount(0);
+  await page.goto("/?view=explorer");
   // The demo corpus first; each corpus says how many documents it holds.
   await expect(headlines(page).first()).toHaveText("Orages : la grêle frappe les vergers de la vallée");
   await expect(corpus(page, "Espace démo")).toHaveAttribute("aria-pressed", "true");
