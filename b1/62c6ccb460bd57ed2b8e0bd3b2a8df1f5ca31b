@@ -1,0 +1,29 @@
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_06e5b9b005af9c 425-427
+internal/app/rebuild.go
+  s_54b80c92daa9cb::t_06e5b9b005af9c 12
+deploy/railway/core-entrypoint.py
+  s_54b80c92daa9cb::t_06e5b9b005af9c 315,318-319
+deploy/railway/README.md
+  s_54b80c92daa9cb::t_06e5b9b005af9c 105
+internal/app/rebuild_config_test.go
+  s_54b80c92daa9cb::t_10ccc595b8a10d 18,20
+internal/retrieval/rebuild.go
+  s_54b80c92daa9cb::t_06e5b9b005af9c 94,106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b162c6ccb460bd57ed2b8e0bd3b2a8df1f5ca31b",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
