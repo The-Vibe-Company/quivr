@@ -91,7 +91,7 @@ const rebuildBatch = 25
 // limits remain authoritative; activity slots are configured independently.
 const (
 	DefaultRebuildConcurrency = 8
-	MaxRebuildConcurrency     = 32
+	MaxRebuildConcurrency     = 256
 )
 
 // Cancellation settles a stopped worker's cancellation request.
@@ -103,7 +103,7 @@ type Cancellation interface {
 // vectors, then activates it through canonical PostgreSQL routing.
 type Rebuilder struct {
 	// Concurrency bounds Versions in flight per Step; zero selects 8.
-	// The supported range is 1–32; 1 restores serial coverage.
+	// The supported range is 1–256; 1 restores serial coverage.
 	Concurrency  int
 	Cancellation Cancellation
 	Store        RebuildStore
