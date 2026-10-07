@@ -6,8 +6,10 @@ import math
 MODEL = 'google/embeddinggemma-2'
 REVISION = '914f7f89142e33e77833254d9c9b90c3cef7303b'
 DIMENSIONS = 768
-MAX_BODY = 512 * 1024  # Fits 32 maximum-size texts even with sixfold JSON escaping.
-MAX_TEXT_BYTES = 2048  # Matches hosted.embed's conservative byte/token window.
+MAX_BODY = 8 * 1024 * 1024  # Fits 32 maximum-size texts even with sixfold JSON escaping.
+# Packed passages (512 body tokens plus a title) exceed 2 KiB in UTF-8; the
+# model's own 2,048-token window and hosted.embed's token budget bound the input.
+MAX_TEXT_BYTES = 32 * 1024
 
 
 class InvalidRequest(ValueError):
