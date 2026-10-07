@@ -78,10 +78,12 @@ class CoreCandidateCorrespondence(unittest.TestCase):
                             'role': 'served', 'coverage': {'segments': 35, 'total': 35}}]
                         primitive = core(normal)['requests'][0]
                         # Frozen legacy Jev request: one space, K=30, alpha=.5,
-                        # relative-score hybrid fusion even for non-hybrid callers.
+                        # relative-score hybrid fusion even for non-hybrid callers,
+                        # with the default core profile now selecting one hit per Record.
                         self.assertEqual(primitive, {'primitive': 'hybrid', 'query_text': fixture['query'],
                             'space': fixture['space'], 'field': 'source', 'alpha': 0.5,
-                            'fusion': 'relative_score', 'k': fixture['candidate_count']})
+                            'fusion': 'relative_score', 'k': fixture['candidate_count'],
+                            'group_by': 'record'})
                         catalogue = fixture['candidates'][:primitive['k']]
                         normal.update(round=2, served=[{'round': 1, 'request_index': 0,
                             'request': primitive, 'candidates': catalogue}])

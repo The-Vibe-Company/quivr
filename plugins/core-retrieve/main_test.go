@@ -19,14 +19,14 @@ func TestConfiguredCandidateRequests(t *testing.T) {
 	for _, tc := range []struct {
 		mode, config, query, space, want string
 	}{
-		{"lexical", `{}`, "grève du port", "core.ingest.e5-small@1", `{"primitive":"bm25","query_text":"grève du port","field":"source","k":7}`},
-		{"semantic", `{}`, "grève du port", "core.ingest.e5-small@1", `{"primitive":"near_vector","query_text":"grève du port","space":"core.ingest.e5-small@1","k":7}`},
-		{"hybrid", `{}`, "grève du port", "core.ingest.e5-small@1", `{"primitive":"hybrid","query_text":"grève du port","space":"core.ingest.e5-small@1","field":"source","alpha":0.5,"fusion":"relative_score","k":7}`},
-		{"lexical", `{"candidate_count":100}`, "harbour", "text@1", `{"primitive":"bm25","query_text":"harbour","field":"source","k":100}`},
-		{"semantic", `{"candidate_count":1}`, "harbour", "text@1", `{"primitive":"near_vector","query_text":"harbour","space":"text@1","k":1}`},
-		{"hybrid", `{"dense_weight":0}`, "harbour", "text@1", `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":0,"fusion":"relative_score","k":7}`},
-		{"hybrid", `{"dense_weight":1,"candidate_count":100,"hybrid_fusion":"ranked"}`, "harbour", "text@1", `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":1,"fusion":"ranked","k":100}`},
-		{"hybrid", `{"dense_weight":0.7,"candidate_count":30,"hybrid_fusion":"relative_score"}`, "harbour", "text@1", `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":0.7,"fusion":"relative_score","k":30}`},
+		{"lexical", `{}`, "grève du port", "core.ingest.e5-small@1", `{"primitive":"bm25","query_text":"grève du port","field":"source","k":7,"group_by":"record"}`},
+		{"semantic", `{}`, "grève du port", "core.ingest.e5-small@1", `{"primitive":"near_vector","query_text":"grève du port","space":"core.ingest.e5-small@1","k":7,"group_by":"record"}`},
+		{"hybrid", `{}`, "grève du port", "core.ingest.e5-small@1", `{"primitive":"hybrid","query_text":"grève du port","space":"core.ingest.e5-small@1","field":"source","alpha":0.5,"fusion":"relative_score","k":7,"group_by":"record"}`},
+		{"lexical", `{"candidate_count":100}`, "harbour", "text@1", `{"primitive":"bm25","query_text":"harbour","field":"source","k":100,"group_by":"record"}`},
+		{"semantic", `{"candidate_count":1}`, "harbour", "text@1", `{"primitive":"near_vector","query_text":"harbour","space":"text@1","k":1,"group_by":"record"}`},
+		{"hybrid", `{"dense_weight":0}`, "harbour", "text@1", `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":0,"fusion":"relative_score","k":7,"group_by":"record"}`},
+		{"hybrid", `{"dense_weight":1,"candidate_count":100,"hybrid_fusion":"ranked"}`, "harbour", "text@1", `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":1,"fusion":"ranked","k":100,"group_by":"record"}`},
+		{"hybrid", `{"dense_weight":0.7,"candidate_count":30,"hybrid_fusion":"relative_score"}`, "harbour", "text@1", `{"primitive":"hybrid","query_text":"harbour","space":"text@1","field":"source","alpha":0.7,"fusion":"relative_score","k":30,"group_by":"record"}`},
 	} {
 		req := &quivrplugin.SearchRequest{Round: 1, Limit: 7, Configuration: json.RawMessage(tc.config), Spaces: []quivrplugin.SearchSpace{{ID: "other@1", Role: "evaluation"}, {ID: tc.space, Role: "served"}}}
 		req.Query.Text, req.Query.Mode = tc.query, tc.mode
@@ -156,18 +156,18 @@ func TestSearchesEveryServedSpaceAndDeduplicatesHits(t *testing.T) {
 		t.Fatalf("candidate requests = %+v (%v), want text and PDF served spaces", answer, err)
 	}
 	for _, c := range answer.Requests {
-		if c.K != 30 || c.Alpha == nil || *c.Alpha != .7 || c.Fusion != "ranked" {
+		if c.GroupBy != "record" || c.K != 30 || c.Alpha == nil || *c.Alpha != .7 || c.Fusion != "ranked" {
 			t.Fatalf("space %s request = %+v, want configured depth, weight and fusion", c.Space, c)
 		}
 	}
 	req.Round = 2
 	req.Served = []quivrplugin.ServedRequest{
-		{Request: answer.Requests[0], Candidates: []quivrplugin.Candidate{{SegmentID: "text", Score: .9}, {SegmentID: "pdf", Score: .1}}},
-		{Request: answer.Requests[1], Candidates: []quivrplugin.Candidate{{SegmentID: "pdf", Score: .8}, {SegmentID: "text", Score: .2}}},
+		{Request: answer.Requests[0], Candidates: []quivrplugin.Candidate{{SegmentID: "text", RecordID: "a", Score: .9}, {SegmentID: "other-passage", RecordID: "a", Score: .1}}},
+		{Request: answer.Requests[1], Candidates: []quivrplugin.Candidate{{SegmentID: "pdf", RecordID: "b", Score: .8}, {SegmentID: "another-pdf", RecordID: "b", Score: .2}, {SegmentID: "cross-space", RecordID: "a", Score: .95}}},
 	}
 	answer, err = (retriever{}).Search(t.Context(), req)
-	if err != nil || len(answer.Ranking) != 2 || answer.Ranking[0].SegmentID != "text" || answer.Ranking[1].SegmentID != "pdf" || answer.Ranking[1].Score != .8 {
-		t.Fatalf("ranking = %+v (%v), want each segment once with its best score", answer, err)
+	if err != nil || len(answer.Ranking) != 2 || answer.Ranking[0].SegmentID != "cross-space" || answer.Ranking[0].Score != .95 || answer.Ranking[1].SegmentID != "pdf" || answer.Ranking[1].Score != .8 {
+		t.Fatalf("ranking = %+v (%v), want each Record once with its best passage across spaces", answer, err)
 	}
 	if answer.Ranking[1].Explanation != "keywords and vectors in pdf@1, alpha 0.7, ranked fusion (RRF)" {
 		t.Fatalf("explanation = %q, want configured weight and fusion", answer.Ranking[1].Explanation)

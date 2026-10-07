@@ -128,6 +128,8 @@ type Generation struct {
 	// carries its Record's Source Namespace, so search can filter on it.
 	SourceNamespaceProjected bool
 	MetadataProjected        bool
+	// ItemKeywordsProjected pins item BM25 independently of legacy passage indexes.
+	ItemKeywordsProjected bool
 	// Spaces are the vector spaces whose named vectors the generation's
 	// objects carry, the served one first. SpacesProjected is false for a
 	// generation built before named spaces: it serves SpaceID only and
@@ -226,6 +228,7 @@ func (g Generation) Carries(space string) bool {
 // for that query (higher is better).
 type Candidate struct {
 	SegmentID, GenerationID string
+	VersionID               string
 	Score                   float64
 	// EvaluationPlugin explicitly selects a separate owner's projection.
 	EvaluationPlugin string

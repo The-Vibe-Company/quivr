@@ -18,8 +18,8 @@ import (
 // already has an active default keeps it; AlignDefaultGeneration moves it
 // onto the registry's spaces.
 func (s ProjectionStore) BootstrapGeneration(ctx context.Context, collection, spaceID string) error {
-	_, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected)
-SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true,true
+	_, err := database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected)
+SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,$4),true,COALESCE(`+deploymentSpacesSQL+`,jsonb_build_array(jsonb_build_object('id',$4::text,'metric','cosine'))),true,true,true
 WHERE NOT EXISTS(SELECT 1 FROM projection_generations WHERE active) ON CONFLICT DO NOTHING`, content.StableID("generation", collection, retrieval.ProfileVersion), collection, retrieval.ProfileVersion, spaceID)
 	return err
 }
@@ -41,8 +41,9 @@ type DefaultMove struct {
 // it is rebuilt. That default is then marked former, and a new default in the
 // same collection and profile, carrying the registry's spaces, takes over.
 // No existing Corpus changes generation, so in-flight work keeps the one it
-// read. A default that already matches, or a database with no default or no
-// served space yet, is left as it is. It runs after RegisterSpaces, in
+// read. A default that already matches, or a database with no default, is left
+// as it is. Missing projection capabilities rotate the default even before a
+// served space is registered, retaining its prior spaces. It runs after RegisterSpaces, in
 // migrate and at api and worker startup.
 func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMove, error) {
 	var move DefaultMove
@@ -57,11 +58,11 @@ func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMov
 	}
 	// A default built before named spaces carries its one space.
 	var matches bool
-	err = tx.QueryRow(ctx, `SELECT d.id,d.metadata_projected AND d.space_id=`+servedSpaceSQL+` AND
+	err = tx.QueryRow(ctx, `SELECT d.id,d.metadata_projected AND d.item_keywords_projected AND (`+servedSpaceSQL+` IS NULL OR (d.space_id=`+servedSpaceSQL+` AND
  (SELECT array_agg(e->>'id' ORDER BY e->>'id') FROM jsonb_array_elements(CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id)) END) e)
  =(SELECT array_agg(vs.id ORDER BY vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation')) AND (NOT d.spaces_projected OR NOT EXISTS
- (SELECT 1 FROM vector_spaces vs WHERE vs.role IN ('served','evaluation') AND NOT d.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id))))
-FROM projection_generations d WHERE d.active AND `+servedSpaceSQL+` IS NOT NULL`).Scan(&move.Previous, &matches)
+ (SELECT 1 FROM vector_spaces vs WHERE vs.role IN ('served','evaluation') AND NOT d.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id))))))
+FROM projection_generations d WHERE d.active`).Scan(&move.Previous, &matches)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && matches) {
 		return DefaultMove{}, nil
 	}
@@ -84,8 +85,8 @@ SELECT c.organization,c.id,$1 FROM corpora c WHERE NOT EXISTS(SELECT 1 FROM corp
 		return move, err
 	}
 	move.Current = content.StableID("generation", collection, profile, move.Previous)
-	if _, err = tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected)
-SELECT $1,$2,$3,true,`+servedSpaceSQL+`,true,`+deploymentSpacesSQL+`,true,true`, move.Current, collection, profile); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO projection_generations(id,collection,profile_version,active,space_id,source_namespace_projected,spaces,spaces_projected,metadata_projected,item_keywords_projected)
+SELECT $1,$2,$3,true,COALESCE(`+servedSpaceSQL+`,d.space_id),true,COALESCE(`+deploymentSpacesSQL+`,CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id,'metric','cosine')) END),true,true,true FROM projection_generations d WHERE d.id=$4`, move.Current, collection, profile, move.Previous); err != nil {
 		return move, err
 	}
 	return move, tx.Commit(ctx)
@@ -96,7 +97,7 @@ func (s ProjectionStore) Generation(ctx context.Context, org, corpusID string) (
 	var g content.Generation
 	var cfg []byte
 	var spaces []byte
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &cfg)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT g.id,g.collection,g.profile_version,g.space_id,g.source_namespace_projected,g.spaces,g.spaces_projected,g.metadata_projected,g.item_keywords_projected,COALESCE(g.retrieval,c.retrieval) FROM projection_generations g, corpora c WHERE c.organization=$1 AND c.id=$2 AND g.id=`+routedGenerationSQL("$1", "$2"), org, corpusID).Scan(&g.ID, &g.Collection, &g.ProfileVersion, &g.SpaceID, &g.SourceNamespaceProjected, &spaces, &g.SpacesProjected, &g.MetadataProjected, &g.ItemKeywordsProjected, &cfg)
 	if err != nil {
 		return g, err
 	}

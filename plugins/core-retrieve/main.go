@@ -61,9 +61,11 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 	// The served order is the ranking: the index ranked it, and the engine
 	// kept each segment's first object, as the engine's own search did.
 	hits := []quivrplugin.RankedHit{}
+	segmentRecords := map[string]string{}
 	for _, s := range req.Served {
 		explanation := explain(s.Request)
 		for _, c := range s.Candidates {
+			segmentRecords[c.SegmentID] = c.RecordID
 			hits = append(hits, quivrplugin.RankedHit{SegmentID: c.SegmentID, Score: c.Score, Explanation: explanation})
 		}
 	}
@@ -79,8 +81,12 @@ func (retriever) Search(_ context.Context, req *quivrplugin.SearchRequest) (*qui
 	unique := hits[:0]
 	seen := map[string]bool{}
 	for _, h := range hits {
-		if !seen[h.SegmentID] {
-			seen[h.SegmentID] = true
+		key := segmentRecords[h.SegmentID]
+		if key == "" {
+			key = h.SegmentID
+		}
+		if !seen[key] {
+			seen[key] = true
 			unique = append(unique, h)
 		}
 	}
@@ -96,7 +102,7 @@ func request(req *quivrplugin.SearchRequest) (quivrplugin.CandidateRequest, erro
 			return quivrplugin.CandidateRequest{}, quivrplugin.TerminalSearchError("invalid_configuration", err.Error())
 		}
 	}
-	c := quivrplugin.CandidateRequest{QueryText: req.Query.Text, K: config.CandidateCount}
+	c := quivrplugin.CandidateRequest{QueryText: req.Query.Text, K: config.CandidateCount, GroupBy: "record"}
 	if req.Query.Mode == "lexical" {
 		c.Primitive, c.Field = quivrplugin.PrimitiveBM25, quivrplugin.FieldSource
 		return c, nil
