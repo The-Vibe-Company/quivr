@@ -235,11 +235,11 @@ class CoreEntrypointTest(unittest.TestCase):
     def test_operator_key_is_separate_and_opt_in(self):
         self.assertEqual(len(core_entrypoint.build_config(ENV)['keys']), 1)
         keys = core_entrypoint.build_config({**ENV, 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'})['keys']
-        for action in ('projections:rebuild', 'plugins:admin', 'operations:write'):
+        for action in ('projections:rebuild', 'plugins:admin', 'operations:write', 'corpora:archive', 'corpora:rename'):
             self.assertIn(action, keys['placeholder-operator-key']['actions'])
         # The web app's key never administers plugins, whatever else is enabled.
         everything = {**ENV, 'QUIVR_DEMO_CONNECTORS': '1', 'QUIVR_DEMO_PLUGINS': '1', 'QUIVR_OPERATOR_KEY': 'placeholder-operator-key'}
-        for action in ('projections:rebuild', 'plugins:admin', 'operations:write'):
+        for action in ('projections:rebuild', 'plugins:admin', 'operations:write', 'corpora:archive', 'corpora:rename'):
             self.assertNotIn(action, core_entrypoint.build_config(everything)['keys'][ENV['QUIVR_API_KEY']]['actions'])
 
     def test_connector_permissions_are_opt_in(self):
