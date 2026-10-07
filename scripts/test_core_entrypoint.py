@@ -263,7 +263,7 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertIn('observability:read', operator['actions'])
 
     def test_queue_reader_key_is_read_only_and_separate(self):
-        config = core_entrypoint.build_config({**ENV, 'QUIVR_QUEUE_KEY': 'fixture-queue-key'})
+        config = core_entrypoint.build_config({**ENV, 'QUIVR_QUEUE_KEY': ' fixture-queue-key '})
         self.assertEqual(config['keys']['fixture-queue-key'], {
             'organization': 'quivr-demo', 'actions': ['queues:read'], 'corpora': ['*']})
         for existing in ('placeholder-api-key', 'placeholder-operator-key'):

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -48,7 +49,7 @@ func (q QueueSource) Waiting(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, errors.New("invalid queue URL")
 	}
-	req.Header.Set("Authorization", "Bearer "+q.Key)
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(q.Key))
 	var response struct {
 		Queues struct {
 			Bulk struct {

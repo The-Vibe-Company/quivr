@@ -42,7 +42,7 @@ func TestQueueSourceRequiresNumericBulkWaiting(t *testing.T) {
 				}
 				return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
 			})}
-			source := autoscaling.QueueSource{URL: "http://api.example.org/v0/admin/queues", Key: "fixture-key", Client: client}
+			source := autoscaling.QueueSource{URL: "http://api.example.org/v0/admin/queues", Key: " fixture-key ", Client: client}
 			got, err := source.Waiting(context.Background())
 			if (err != nil) != tc.bad || (!tc.bad && got != tc.want) {
 				t.Fatalf("want count %d/error %v, got %d/%v", tc.want, tc.bad, got, err)
