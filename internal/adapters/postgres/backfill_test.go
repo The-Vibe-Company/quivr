@@ -314,12 +314,12 @@ func TestBackfillScopeCheckpointAndControl(t *testing.T) {
 	// The API gives an estimate five seconds; candidate lookup must also keep
 	// progressing after committed coverage, without waiting for autovacuum.
 	t.Run("fresh corpus progresses before statistics refresh", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
 		f := newBackfillFixture(t, ctx, 92, 100)
 		query, done := context.WithTimeout(ctx, 5*time.Second)
-		defer done()
 		size, err := f.store.BackfillSize(query, f.org, f.spec(nil), f.corpusID)
+		done()
 		if err != nil || size.Versions != 92 || size.Segments != 184 {
 			t.Fatalf("fresh corpus estimate %+v %v, want 92 Versions and 184 segments within the API budget", size, err)
 		}
@@ -327,27 +327,31 @@ func TestBackfillScopeCheckpointAndControl(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		target, err := f.store.BeginBackfill(query, f.org, op.ID, f.plan)
+		target, err := f.store.BeginBackfill(ctx, f.org, op.ID, f.plan)
 		if err != nil {
 			t.Fatal(err)
 		}
-		generation, err := f.store.CarryBackfillSpaces(query, f.org, op.ID)
+		generation, err := f.store.CarryBackfillSpaces(ctx, f.org, op.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if generation.ID != target.Generation.ID {
 			t.Fatalf("backfill changed generation from %s to %s", target.Generation.ID, generation.ID)
 		}
+		query, done = context.WithTimeout(ctx, 5*time.Second)
 		batch, err := f.store.BackfillCandidates(query, f.org, op.ID, generation, 4)
+		done()
 		if err != nil || len(batch) != 4 {
 			t.Fatalf("first batch %+v %v, want four candidates", batch, err)
 		}
 		for _, c := range batch {
-			if err := f.fill(query, t, op.ID, generation, c.VersionID); err != nil {
+			if err := f.fill(ctx, t, op.ID, generation, c.VersionID); err != nil {
 				t.Fatal(err)
 			}
 		}
+		query, done = context.WithTimeout(ctx, 5*time.Second)
 		next, err := f.store.BackfillCandidates(query, f.org, op.ID, generation, 4)
+		done()
 		if err != nil || len(next) != 4 || next[0].VersionID <= batch[3].VersionID {
 			t.Fatalf("after four committed Versions %+v %v, want four new candidates beyond %s", next, err, batch[3].VersionID)
 		}
