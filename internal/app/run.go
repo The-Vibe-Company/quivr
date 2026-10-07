@@ -540,15 +540,14 @@ func Run(command string, args ...string) error {
 				return errors.New("contract migration failed; check database connectivity and schema")
 			}
 		}
-		// The PostgreSQL part runs first and alone needs no other dependency;
-		// concurrent index work has its own budget after SQL migrations commit.
+		// Required PostgreSQL setup runs first and needs no other dependency.
 		if err = BootstrapDatabase(ctx, pool, DeploymentSpaces(cfg.migrationPins())); err != nil {
 			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrIndexBusy) {
 				return err
 			}
 			return errors.New("migration failed; check database connectivity and schema")
 		}
-		// Keep dependency setup bounded independently of large index builds.
+		// Keep required dependency setup bounded.
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		for {
@@ -611,6 +610,8 @@ func Run(command string, args ...string) error {
 		}
 		return err
 	}
+	indexes := &IndexMaintenance{Pool: pool}
+	loops.Go(indexes.Run)
 	queueSnapshots := postgres.QueueSnapshots{Pool: pool}
 	loops.Go(func(ctx context.Context) {
 		delay := time.Second
@@ -804,7 +805,7 @@ func Run(command string, args ...string) error {
 	loops.Go(func(ctx context.Context) { follower.Run(ctx, planPoll) })
 	probes := http.NewServeMux()
 	probes.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
-	probes.Handle("GET /readyz", readinessProbe(loops, ready))
+	probes.Handle("GET /readyz", readinessProbe(loops, ready, indexes))
 
 	deliveryStore := postgres.DeliveryStore{Pool: pool}
 	deliveryMetrics := &monitoring.DeliveryMetrics{}
