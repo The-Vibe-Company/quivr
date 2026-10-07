@@ -13,7 +13,14 @@ const recordGoneSQL = `(r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t
 // currentness add "r.current_version_id = v.id" explicitly.
 // Separate the two absorbing fences so PostgreSQL can use an anti join for
 // Tombstones and parallelize large reads. This is the negation of recordGoneSQL.
-const eligibleVersionSQL = `v.baseline_ready AND NOT v.quarantined AND NOT r.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)`
+const eligibleVersionStateSQL = `v.baseline_ready AND NOT v.quarantined AND NOT r.withdrawn AND NOT `
+const eligibleVersionSQL = eligibleVersionStateSQL + `EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)`
+
+// A bounded journal guard must probe the Tombstone key instead of letting
+// PostgreSQL pre-hash the whole table as an alternative EXISTS subplan.
+// The primary key makes this scalar lookup equivalent; large reads retain
+// eligibleVersionSQL's anti-join and parallel-planning opportunities.
+const eligibleVersionPointSQL = eligibleVersionStateSQL + `COALESCE((SELECT true FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id),false)`
 
 // routedGenerationSQL is the canonical routing predicate: the logical Projection
 // Generation serving a Corpus is its installed route, else the default active

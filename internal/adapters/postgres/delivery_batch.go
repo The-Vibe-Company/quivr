@@ -146,6 +146,17 @@ func (s DeliveryStore) AdmitDeliveries(ctx context.Context, works []monitoring.D
 }
 
 func (s DeliveryStore) admitDeliveryGroup(ctx context.Context, works []monitoring.DeliveryWork, window time.Duration, configured func(string, string) bool, ids []string, leases []time.Time) (bool, []monitoring.AdmittedAttempt, error) {
+	var result0 bool
+	var result1 []monitoring.AdmittedAttempt
+	err := retryJournalWrite(ctx, "admitDeliveryGroup", func(ctx context.Context) error {
+		var err error
+		result0, result1, err = s.admitDeliveryGroupAttempt(ctx, works, window, configured, ids, leases)
+		return err
+	})
+	return result0, result1, err
+}
+
+func (s DeliveryStore) admitDeliveryGroupAttempt(ctx context.Context, works []monitoring.DeliveryWork, window time.Duration, configured func(string, string) bool, ids []string, leases []time.Time) (bool, []monitoring.AdmittedAttempt, error) {
 	org := works[0].Organization
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -273,6 +284,16 @@ func (s DeliveryStore) RecordDeliveries(ctx context.Context, attempts []monitori
 }
 
 func (s DeliveryStore) recordDeliveryGroup(ctx context.Context, attempts []monitoring.AdmittedAttempt, outcomes []monitoring.AttemptOutcome, ids, attemptIDs []string, numbers []int) (bool, error) {
+	var result0 bool
+	err := retryJournalWrite(ctx, "recordDeliveryGroup", func(ctx context.Context) error {
+		var err error
+		result0, err = s.recordDeliveryGroupAttempt(ctx, attempts, outcomes, ids, attemptIDs, numbers)
+		return err
+	})
+	return result0, err
+}
+
+func (s DeliveryStore) recordDeliveryGroupAttempt(ctx context.Context, attempts []monitoring.AdmittedAttempt, outcomes []monitoring.AttemptOutcome, ids, attemptIDs []string, numbers []int) (bool, error) {
 	org := attempts[0].Organization
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {

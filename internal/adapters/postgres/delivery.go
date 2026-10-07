@@ -75,6 +75,17 @@ func (s DeliveryStore) Admit(ctx context.Context, w monitoring.DeliveryWork, win
 }
 
 func (s DeliveryStore) admit(ctx context.Context, w monitoring.DeliveryWork, window time.Duration, configured func(org, destinationID string) bool) (monitoring.AdmittedAttempt, string, error) {
+	var result0 monitoring.AdmittedAttempt
+	var result1 string
+	err := retryJournalWrite(ctx, "admit", func(ctx context.Context) error {
+		var err error
+		result0, result1, err = s.admitAttempt(ctx, w, window, configured)
+		return err
+	})
+	return result0, result1, err
+}
+
+func (s DeliveryStore) admitAttempt(ctx context.Context, w monitoring.DeliveryWork, window time.Duration, configured func(org, destinationID string) bool) (monitoring.AdmittedAttempt, string, error) {
 	org := w.Organization
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -173,6 +184,13 @@ func (s DeliveryStore) Record(ctx context.Context, a monitoring.AdmittedAttempt,
 }
 
 func (s DeliveryStore) record(ctx context.Context, a monitoring.AdmittedAttempt, o monitoring.AttemptOutcome, r monitoring.Retry) error {
+	err := retryJournalWrite(ctx, "record", func(ctx context.Context) error {
+		return s.recordAttempt(ctx, a, o, r)
+	})
+	return err
+}
+
+func (s DeliveryStore) recordAttempt(ctx context.Context, a monitoring.AdmittedAttempt, o monitoring.AttemptOutcome, r monitoring.Retry) error {
 	org := a.Organization
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {

@@ -38,6 +38,16 @@ func claimRequest(ctx context.Context, tx pgx.Tx, org, family, key string, canon
 // Organization journal lock. apply runs only for a new command; any error
 // rolls the claim back with it. It returns the claimed resource ID.
 func (s MonitoringStore) monitoringCommand(ctx context.Context, org, family, key string, canonical any, resourceID string, apply func(pgx.Tx) error) (string, error) {
+	var result0 string
+	err := retryJournalWrite(ctx, "monitoringCommand:"+family, func(ctx context.Context) error {
+		var err error
+		result0, err = s.monitoringCommandAttempt(ctx, org, family, key, canonical, resourceID, apply)
+		return err
+	})
+	return result0, err
+}
+
+func (s MonitoringStore) monitoringCommandAttempt(ctx context.Context, org, family, key string, canonical any, resourceID string, apply func(pgx.Tx) error) (string, error) {
 	request, err := json.Marshal(canonical)
 	if err != nil {
 		return "", err
@@ -642,6 +652,16 @@ ORDER BY s.id LIMIT $6`, org, after, pluginID, version, corpora, limit)
 // Version that produced them. Its id derives from from and evaluator, so a
 // replay converges; from must still be current.
 func (s MonitoringStore) MoveEvaluator(ctx context.Context, org string, from monitoring.SubscriptionVersion, evaluator monitoring.Evaluator) (monitoring.SubscriptionVersion, error) {
+	var result0 monitoring.SubscriptionVersion
+	err := retryJournalWrite(ctx, "MoveEvaluator", func(ctx context.Context) error {
+		var err error
+		result0, err = s.moveEvaluatorAttempt(ctx, org, from, evaluator)
+		return err
+	})
+	return result0, err
+}
+
+func (s MonitoringStore) moveEvaluatorAttempt(ctx context.Context, org string, from monitoring.SubscriptionVersion, evaluator monitoring.Evaluator) (monitoring.SubscriptionVersion, error) {
 	pinned, err := json.Marshal(evaluator)
 	if err != nil {
 		return monitoring.SubscriptionVersion{}, err

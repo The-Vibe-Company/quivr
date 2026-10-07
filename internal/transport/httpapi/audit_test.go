@@ -28,12 +28,21 @@ import (
 type auditSink struct {
 	events []audit.Event
 	fail   bool
+	replay bool
 	filter audit.Filter
 	org    string
 	page   []audit.Event
 }
 
 func (s *auditSink) Record(ctx context.Context, e *audit.Event, command func(context.Context) error) error {
+	if s.replay {
+		initial := *e
+		if err := command(ctx); err != nil {
+			return err
+		}
+		*e = initial
+	}
+
 	if err := command(ctx); err != nil {
 		if errors.Is(err, audit.ErrReadOnly) {
 			return nil
@@ -311,5 +320,39 @@ func TestAuditReadAuthorizationAndFilterBoundPaging(t *testing.T) {
 	}
 	if len(sink.events) != 0 {
 		t.Fatal("audit reads were audited")
+	}
+}
+
+// Transport replay owns request/response buffering independently of the SQL
+// retry owner: the discarded attempt must not consume the next request body.
+type replayWithdrawal struct {
+	content.SubmissionStore
+	calls   int
+	sources []content.Source
+}
+
+func (s *replayWithdrawal) Withdraw(ctx context.Context, scope corpus.Scope, w content.Withdrawal) (content.Receipt, error) {
+	s.calls++
+	s.sources = append(s.sources, w.Source)
+	if s.calls == 1 {
+		return content.Receipt{}, errors.New("storage unavailable")
+	}
+	return (auditWithdrawals{}).Withdraw(ctx, scope, w)
+}
+func TestAuditReplayRestoresRequestAndDiscardsFailedResponse(t *testing.T) {
+	sink := &auditSink{replay: true}
+	store := &replayWithdrawal{}
+	keys := map[string]corpus.Scope{"fixture-key": {Organization: "org_a", Actions: []string{"content:write"}, Corpora: []string{"*"}}}
+	handler, err := httpapi.New(knownCorpora{}, content.Service{Submissions: store}, retrieval.Service{}, uploads.Service{}, keys, catalogCursorKey, httpapi.WithAudit(sink))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("POST", "/v0/records/withdrawals", strings.NewReader(`{"idempotency_key":"withdraw","source":{"corpus_id":"corpus_a","namespace":"audit","record_key":"source-a"}}`))
+	request.Header.Set("Authorization", "Bearer fixture-key")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != 202 || store.calls != 2 || len(store.sources) != 2 || store.sources[0] != store.sources[1] || len(sink.events) != 1 || sink.events[0].Outcome != "accepted" || sink.events[0].Detail.ErrorCode != "" || strings.Contains(response.Body.String(), "storage_unavailable") || !json.Valid(response.Body.Bytes()) {
+		t.Fatalf("replayed HTTP command: status=%d calls=%d sources=%+v audit=%+v body=%s", response.Code, store.calls, store.sources, sink.events, response.Body.String())
 	}
 }

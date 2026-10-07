@@ -45,6 +45,16 @@ WHERE a.organization=$1 AND a.record_id=$2 AND a.digest=$3 AND (a.slot=$4 OR a.s
 }
 
 func (s SubmissionStore) Accept(ctx context.Context, scope corpus.Scope, c content.Command) (content.Receipt, error) {
+	var result0 content.Receipt
+	err := retryJournalWrite(ctx, "Accept", func(ctx context.Context) error {
+		var err error
+		result0, err = s.acceptAttempt(ctx, scope, c)
+		return err
+	})
+	return result0, err
+}
+
+func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, c content.Command) (content.Receipt, error) {
 	canonical, err := json.Marshal(c)
 	if err != nil {
 		return content.Receipt{}, err
@@ -169,6 +179,16 @@ func pendingReceipt(receiptID, recordID string, source content.Source, newRevisi
 // withdrawal_applied Receipt is stored. No projection work is dispatched; stale
 // projection objects are hidden by canonical hydration.
 func (s SubmissionStore) Withdraw(ctx context.Context, scope corpus.Scope, w content.Withdrawal) (content.Receipt, error) {
+	var result0 content.Receipt
+	err := retryJournalWrite(ctx, "Withdraw", func(ctx context.Context) error {
+		var err error
+		result0, err = s.withdrawAttempt(ctx, scope, w)
+		return err
+	})
+	return result0, err
+}
+
+func (s SubmissionStore) withdrawAttempt(ctx context.Context, scope corpus.Scope, w content.Withdrawal) (content.Receipt, error) {
 	canonical, err := json.Marshal(w)
 	if err != nil {
 		return content.Receipt{}, err

@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // The storage owner proves request-wide atomicity over a single-statement
@@ -182,4 +184,79 @@ func TestAuditTransactionAndAppendOnlyRetention(t *testing.T) {
 	if err != nil || len(events) != 6 {
 		t.Fatalf("retention removed live entries: %+v %v", events, err)
 	}
+	// A real PostgreSQL transaction abort, after the nested command wrote its
+	// Record, must replay the parent and its hooks. HTTP-like callbacks can
+	// translate that storage error into a refusal instead of returning it.
+	sequence := pgx.Identifier{"audit_retry_" + fmt.Sprint(time.Now().UnixNano())}.Sanitize()
+	function := pgx.Identifier{"audit_fail_" + fmt.Sprint(time.Now().UnixNano())}.Sanitize()
+	trigger := pgx.Identifier{"audit_trigger_" + fmt.Sprint(time.Now().UnixNano())}.Sanitize()
+	if _, err = pool.Exec(ctx, "CREATE SEQUENCE "+sequence); err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Exec(context.Background(), "DROP SEQUENCE "+sequence)
+	defer pool.Exec(context.Background(), "DROP FUNCTION "+function+"() CASCADE")
+	for _, tc := range []struct {
+		name               string
+		failures, attempts int
+		code               string
+		swallow, succeeds  bool
+	}{
+		{"translated", 2, 3, "40P01", true, true},
+		{"exhausted", 9, 3, "40P01", true, false},
+		{"other-error", 1, 1, "P0001", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, "ALTER SEQUENCE "+sequence+" RESTART WITH 1"); err != nil {
+				t.Fatal(err)
+			}
+			sql := fmt.Sprintf(`CREATE OR REPLACE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF NEW.organization='%s' AND NEW.request_key='retry-%s' AND nextval('%s')<=%d
+ THEN RAISE EXCEPTION 'fixture transaction abort' USING ERRCODE='%s'; END IF; RETURN NEW; END $$;
+ CREATE TRIGGER %s BEFORE INSERT ON ingestion_receipts FOR EACH ROW EXECUTE FUNCTION %s()`, function, org, tc.name, sequence, tc.failures, tc.code, trigger, function)
+			if _, err := pool.Exec(ctx, sql); err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Exec(context.Background(), "DROP TRIGGER "+trigger+" ON ingestion_receipts")
+			event := audit.Event{Action: "record.withdraw", TargetType: "record", Organization: org, Outcome: "accepted"}
+			attempts, committedHooks := 0, 0
+			err := store.Record(ctx, &event, func(work context.Context) error {
+				attempts++
+				audit.AfterCommit(work, func(context.Context) { committedHooks++ })
+				_, err := (postgres.SubmissionStore{Pool: pool}).Withdraw(work, corpus.Scope{Organization: org}, content.Withdrawal{Key: "retry-" + tc.name, Source: content.Source{CorpusID: id, Namespace: "audit", RecordKey: "retry-" + tc.name}})
+				if err != nil && tc.swallow {
+					event.Outcome = "refused"
+					event.Detail.ErrorCode = "storage_unavailable"
+					return nil
+				}
+				return err
+			})
+			if attempts != tc.attempts || (err == nil) != tc.succeeds || committedHooks != boolInt(tc.succeeds) {
+				t.Fatalf("attempts=%d hooks=%d success=%v: %v", attempts, committedHooks, err == nil, err)
+			}
+			if err != nil {
+				var pgErr *pgconn.PgError
+				if !errors.As(err, &pgErr) || pgErr.Code != tc.code {
+					t.Fatalf("unexpected terminal error: %v", err)
+				}
+			}
+			var receipts, records, auditRows int
+			if err = pool.QueryRow(ctx, `SELECT
+ (SELECT count(*) FROM ingestion_receipts WHERE organization=$1 AND request_key=$2),
+ (SELECT count(*) FROM records WHERE organization=$1 AND record_key=$2),
+ (SELECT count(*) FROM audit_events WHERE id=$3)`, org, "retry-"+tc.name, event.ID).Scan(&receipts, &records, &auditRows); err != nil {
+				t.Fatal(err)
+			}
+			want := boolInt(tc.succeeds)
+			if receipts != want || records != want || auditRows != want || (tc.succeeds && event.Detail.ErrorCode != "") {
+				t.Fatalf("retry leaked command/audit state: receipts=%d records=%d audit=%d event=%+v", receipts, records, auditRows, event)
+			}
+		})
+	}
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
