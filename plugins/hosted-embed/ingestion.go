@@ -74,18 +74,15 @@ func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestR
 	} else {
 		legacy := c
 		if c.gemmaTemplate() || c.TitleSource != "none" {
-			title, titleErr := c.headline(req.Parts)
-			if titleErr != nil {
-				return nil, titleErr
-			}
 			// Legacy windows promote the title to body content when no body
-			// exists, so do not also prepend that headline as context.
+			// exists. Preserve explicit context without repeating the headline.
 			hasBody := false
 			for _, part := range req.Parts {
 				hasBody = hasBody || part.Role == "body" && strings.TrimSpace(part.Text) != ""
 			}
-			if !hasBody {
-				title = ""
+			title, titleErr := c.documentTitle(req.Parts, hasBody)
+			if titleErr != nil {
+				return nil, titleErr
 			}
 			legacy.DocumentPrefix = c.documentInput(title, "")
 		}

@@ -22,7 +22,7 @@ type paragraph struct {
 func (c configuration) gemmaTemplate() bool {
 	return c.DocumentTemplate == "gemma" || c.DocumentTemplate == "auto" && strings.Contains(strings.ToLower(c.Model), "embeddinggemma")
 }
-func (c configuration) headline(parts []quivrplugin.IngestPart) (string, error) {
+func (c configuration) documentTitle(parts []quivrplugin.IngestPart, includeHeadline bool) (string, error) {
 	title := ""
 	titles := 0
 	byKey := map[string]string{}
@@ -30,7 +30,9 @@ func (c configuration) headline(parts []quivrplugin.IngestPart) (string, error) 
 		byKey[p.Key] = p.Text
 		if p.Role == "title" {
 			titles++
-			title = strings.TrimSpace(p.Text)
+			if includeHeadline {
+				title = strings.TrimSpace(p.Text)
+			}
 		}
 	}
 	if titles > 1 {
@@ -138,7 +140,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		}
 		return body
 	}
-	title, err := c.headline(parts)
+	title, err := c.documentTitle(parts, true)
 	if err != nil {
 		return nil, nil, err
 	}
