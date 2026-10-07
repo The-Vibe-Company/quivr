@@ -377,6 +377,34 @@ For a same-owner space switch, promote the returned `previous_space_id` back wit
 
 Compatible redeploys preserve activated serving and evaluation routes; see [Redeploy a configured build](/run-quivr/upgrade-a-plugin#redeploy-a-configured-build) for the compatibility conditions. Earlier plans and pinned work still require their original builds. If a redeploy makes the saved plan unreachable, restore that build or follow the linked procedure to activate the returning owner's current evaluation registration, then [move meaning alerts](/run-quivr/move-meaning-alerts) again.
 
+## Encode queries on a local CPU
+
+If you use `hosted.embed` with an OpenAI-compatible model, you can keep documents
+on the remote service and encode search questions beside the API. The optional
+local text encoder must use the same model revision, dimensions and input prefix.
+Changing where that computation runs leaves the vector space unchanged, so this
+execution change needs no Corpus rebuild or alert migration.
+
+Before enabling local routing, compare at least 200 distinct queries: cosine
+similarity must be at least `0.999`, and the ordered top-10 evaluation results must
+match. Measure the encoder and deployed search under representative concurrency;
+local query-encoding p95 must be well below `100 ms` before rollout.
+
+For the Railway reference deployment, build the image with
+`QUIVR_BUILD_LOCAL_QUERY_ENCODER=1`, then set `QUIVR_LOCAL_QUERY_ENCODER=1` on the
+API. Start with four CPU cores and 4 GB RAM, and measure actual memory use.
+Documents continue remotely. The API refuses startup without the offline assets
+or matching encoder readiness. A local outage returns a bounded query error,
+without automatically falling back to the remote provider.
+Unset `QUIVR_LOCAL_QUERY_ENCODER` and redeploy the API to restore remote queries.
+The [deployment instructions](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/README.md#optional-cpu-query-encoding)
+list the pinned runtime, thread/startup variables, parity CLI and validation gates.
+
+For other deployments, set `QUIVR_HOSTED_QUERY_URL` only in the API's hosted
+plugin process. Use a loopback HTTP `/v1` base, and keep the API and worker plugin
+pins identical. The same [plugin reference](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#optional-local-cpu-queries)
+describes the required readiness metadata and supported format.
+
 ## Clean up
 
 Retaining an evaluation owner is useful for rollback but continues provider calls. Once you no longer need that rollback option:

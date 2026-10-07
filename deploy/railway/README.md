@@ -94,6 +94,72 @@ with `QUIVR_DEMO_EMBEDDING=cohere` and retained Foundry endpoint/key variables.
 Model changes need a maintenance window while old generations rebuild. Real GPU latency/throughput remain for coordinator
 validation; this change's measurements use fake inference only.
 
+## Optional CPU query encoding
+
+Build the core image with Docker build argument `QUIVR_BUILD_LOCAL_QUERY_ENCODER=1`
+to include the pinned fp32 Sentence Transformers text runtime. The default `0`
+includes neither CPU wheels nor model weights. The build verifies every file
+against `third_party/query-encoder/model-lock.json`; runtime loading stays offline.
+The model revision, 768 dimensions, input prefixes and stored vector space stay
+unchanged. No Corpus rebuild is needed for this execution change.
+
+Start with an API allocation of **4 CPU cores and 4 GB RAM**, then measure actual
+memory and latency. Text-only fp32 weights occupy about 1.1 GB of RAM, with
+additional runtime, tokenizer and activation memory. The baked snapshot is about
+1.5 GB because its weight file includes disabled modality encoders. Workers do
+not load the model.
+
+Set `QUIVR_LOCAL_QUERY_ENCODER=1` on the API only, while retaining
+`QUIVR_DEMO_EMBEDDING=gemma`, `EMBED_URL` and `EMBED_API_KEY` on API and workers.
+`QUIVR_QUERY_ENCODER_THREADS` defaults to `4` (range `1..32`).
+`QUIVR_QUERY_ENCODER_STARTUP_SECONDS` defaults to `120` (range `1..600`). The API
+waits for offline loading, warm-up and matching readiness metadata before starting
+its other processes. A missing optional image, mismatched model, early encoder
+exit or startup timeout refuses startup. Termination also stops the encoder.
+
+The encoder binds `127.0.0.1:9995`, runs one inference at a time and bounds queued
+work. Queries receive a one-second total plugin deadline, no remote retry or
+fallback, and no remote bearer credential. Saturation or an expired request returns
+an error. Document requests still use the remote provider, batching and retries.
+API and worker pins remain identical; the local URL exists only in the API's
+hosted plugin environment. The text service accepts already-prefixed document
+input for future reuse, but this deployment option never routes documents locally.
+
+Before rollout, the coordinator runs `scripts/eval/query_encoder_parity.py` through
+its bounded job runner, with the remote bearer key supplied as `EMBED_API_KEY`.
+The input JSON contains `queries` (at least 200 distinct `{id, text}` objects)
+and `candidates` (at least ten frozen `{id, vector}` document vectors from the
+remote model). Keep private data and reports in an ignored directory. For a
+measurement through the hosted plugin, also include `plugin.configuration` and
+`plugin.space`, taken from that deployment's installed pin. Supply that plugin's
+verification ring privately as `QUIVR_PLUGIN_SIGNING_KEYS`; the CLI signs each
+request with a fresh invocation ID and never writes keys or tokens to reports.
+Use a numeric loopback HTTP origin or HTTPS for remote plugin calls.
+
+Install the CLI numerical dependency with `python3 -m pip install numpy==2.5.3`.
+Candidate vectors are normalized once and ranked with float64 matrix operations.
+
+Example command, not run against a live provider here:
+
+```sh
+python3 scripts/eval/query_encoder_parity.py \
+  --input .scratch/query-parity/input.json --output .scratch/query-parity/report.json \
+  --local-url http://127.0.0.1:9995/v1 --remote-url "$EMBED_URL/v1" \
+  --plugin-url http://127.0.0.1:9980 --cpu-cores 4 --threads 4 --concurrency 4
+```
+
+The CLI records input digest, query length distribution, CPU/thread/concurrency
+settings, first-query timing, cosine similarity, ordered top-10 agreement, and
+sequential/concurrent p50/p95. It exits unsuccessfully for cosine below `0.999`,
+a ranking mismatch, incomplete evidence, errors or local/plugin p95 of `100 ms`
+or more. A passing direct-encoder report leaves demo acceptance unmeasured:
+require the plugin-boundary comparison and record the deployed demo's
+`query_encoding` p50/p95 and cold-start/error observations on the ticket too.
+If fp32 misses the latency target, stop activation and report the numbers; do not
+substitute a quantized model or fp16. Unset `QUIVR_LOCAL_QUERY_ENCODER` and redeploy
+the API to restore remote queries. Keep the remote document service available
+throughout rollout and rollback.
+
 ## Hosted Azure embeddings for every source (optional)
 
 Set `QUIVR_DEMO_HOSTED_EMBED=1`, `AZURE_FOUNDRY_ENDPOINT` (Foundry resource root)
