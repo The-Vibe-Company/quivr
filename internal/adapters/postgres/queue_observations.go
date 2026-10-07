@@ -208,7 +208,7 @@ func repairQueueJournal(ctx context.Context, tx pgx.Tx, budget int) error {
 	rows, err := tx.Query(ctx, `SELECT j.organization,j.last_sequence,coalesce(q.position,0),coalesce(p.pruned_through,0)
  FROM organization_journals j LEFT JOIN queue_observation_journals q USING(organization)
  LEFT JOIN change_journal_prunes p USING(organization)
- WHERE j.last_sequence>coalesce(q.position,0) ORDER BY j.organization`)
+ WHERE j.last_sequence>coalesce(q.position,0) ORDER BY j.organization LIMIT $1`, budget)
 	if err != nil {
 		return err
 	}
@@ -230,6 +230,9 @@ func repairQueueJournal(ctx context.Context, tx pgx.Tx, budget int) error {
 		return err
 	}
 	for _, h := range heads {
+		if budget <= 0 {
+			break
+		}
 		if h.position < h.pruned {
 			if _, err = tx.Exec(ctx, `UPDATE queue_enrichment_bootstrap SET organization='',record_id='',initialized=false WHERE singleton`); err != nil {
 				return err
@@ -237,10 +240,8 @@ func repairQueueJournal(ctx context.Context, tx pgx.Tx, budget int) error {
 			if _, err = tx.Exec(ctx, repairQueueCheckpointSQL, h.organization, h.last); err != nil {
 				return err
 			}
+			budget--
 			continue
-		}
-		if budget <= 0 {
-			break
 		}
 		upper := min(h.last, h.position+int64(budget))
 		events, err := tx.Query(ctx, `SELECT DISTINCT resource_id FROM change_events WHERE organization=$1 AND sequence>$2 AND sequence<=$3 AND resource_type='record' ORDER BY resource_id`, h.organization, h.position, upper)

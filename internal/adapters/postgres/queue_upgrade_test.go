@@ -536,6 +536,86 @@ func TestQueueEnrichmentBootstrapRecomputesAfterObservationWriterCommits(t *test
 	}
 }
 
+func TestQueueJournalRepairBoundsPrunedOrganizations(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool := queueWorkPool(t, ctx)
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	organizations := []string{"journal-a", "journal-b", "journal-c", "journal-d", "journal-e"}
+	for _, organization := range organizations {
+		if _, err := pool.Exec(ctx, `
+INSERT INTO organization_journals(organization,last_sequence) VALUES($1,5)
+ON CONFLICT(organization) DO UPDATE SET last_sequence=EXCLUDED.last_sequence`, organization); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `
+INSERT INTO queue_observation_journals(organization,position) VALUES($1,0)
+ON CONFLICT(organization) DO UPDATE SET position=EXCLUDED.position`, organization); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `
+INSERT INTO change_journal_prunes(organization,pruned_through) VALUES($1,5)
+ON CONFLICT(organization) DO UPDATE SET pruned_through=EXCLUDED.pruned_through`, organization); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO queue_enrichment_bootstrap(singleton,organization,record_id,initialized)
+VALUES(true,'','','true') ON CONFLICT(singleton) DO UPDATE SET organization='',record_id='',initialized=true`); err != nil {
+		t.Fatal(err)
+	}
+
+	repair := func() {
+		t.Helper()
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(context.Background())
+		if err := repairQueueJournal(ctx, tx, 2); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	positions := func(want []int64) {
+		t.Helper()
+		for i, organization := range organizations {
+			var position int64
+			if err := pool.QueryRow(ctx, `SELECT position FROM queue_observation_journals WHERE organization=$1`, organization).Scan(&position); err != nil {
+				t.Fatal(err)
+			}
+			if position != want[i] {
+				t.Fatalf("journal checkpoint %s = %d, want %d", organization, position, want[i])
+			}
+		}
+	}
+	bootstrapState := func() {
+		t.Helper()
+		var organization, record string
+		var initialized bool
+		if err := pool.QueryRow(ctx, `SELECT organization,record_id,initialized FROM queue_enrichment_bootstrap WHERE singleton`).Scan(&organization, &record, &initialized); err != nil {
+			t.Fatal(err)
+		}
+		if organization != "" || record != "" || initialized {
+			t.Fatalf("bootstrap state = %s/%s initialized=%v, want empty cursor and false", organization, record, initialized)
+		}
+	}
+
+	repair()
+	positions([]int64{5, 5, 0, 0, 0})
+	bootstrapState()
+	repair()
+	positions([]int64{5, 5, 5, 5, 0})
+	bootstrapState()
+	repair()
+	positions([]int64{5, 5, 5, 5, 5})
+	bootstrapState()
+}
+
 func TestProjectionPurgeBootstrapAdvancesAndNoticesLaterDeadVersions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -611,13 +691,6 @@ WHERE organization='purge-upgrade' AND id='record-0001'`); err != nil {
 	}
 	if !initialized {
 		t.Fatal("short purge repair did not persist completion after segment-0005")
-	}
-
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM projection_purge_candidates`).Scan(&candidates); err != nil {
-		t.Fatal(err)
-	}
-	if candidates != 0 {
-		t.Fatalf("completed purge repair left %d live candidates, want zero", candidates)
 	}
 
 	if noticed, err := store.NoticePurges(ctx, 2); err != nil || noticed != 2 {

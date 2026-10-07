@@ -291,8 +291,10 @@ func (s EmbeddingStore) commitEnrichmentAttempt(ctx context.Context, org string,
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return err
 	}
-	if err = observeQueueRecords(ctx, tx, []string{org}, []string{recordID}); err != nil {
-		return err
+	if emitted {
+		if err = observeQueueRecords(ctx, tx, []string{org}, []string{recordID}); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }

@@ -18,7 +18,7 @@ import (
 // notice records every dead item in the shared adapter database.
 func notice(t *testing.T, ctx context.Context, store fixtureContentStores) {
 	t.Helper()
-	for {
+	for batch := 0; batch < 100; batch++ {
 		n, err := store.NoticePurges(ctx, 1000)
 		if err != nil {
 			t.Fatal(err)
@@ -37,6 +37,7 @@ FROM projection_purge_bootstrap WHERE singleton`).Scan(&drained); err != nil {
 			}
 		}
 	}
+	t.Fatal("purge discovery did not drain after 100 bounded batches")
 }
 
 // noticed lists an Organization's recorded purge items as kind:corpus:generation:version.
