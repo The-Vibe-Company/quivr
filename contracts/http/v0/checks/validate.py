@@ -55,7 +55,8 @@ check("NormalizationProvenance", normalization)
 check("NormalizationProvenance", {**normalization, "invocation_id": "inv_1"})
 check("NormalizationProvenance", {**normalization, "invocation_id": ""}, False)
 check("NormalizationProvenance", {k: v for k, v in normalization.items() if k != "idempotency_key"}, False)
-fallback = {**normalization, "fallback": {"code": "plugin_unavailable", "message": "The normalizer is unavailable."}}
+check("NormalizationProvenance", {k: v for k, v in normalization.items() if k != "input_sha256"}, False)
+fallback = {**normalization, "fallback": {"code": "normalizer_failed", "message": "The normalizer failed."}}
 check("NormalizationProvenance", {**fallback, "invocation_id": "inv_failed"})
 check("NormalizationProvenance", fallback, False)
 

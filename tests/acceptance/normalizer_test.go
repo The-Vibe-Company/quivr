@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,8 @@ import (
 const normalizerMarkdown = "# Harbour guide\n\nTides turn twice a day.\n\n## Night watch\n\nThe keeper trims the phosphorescent wick at dusk.\n"
 
 type normalizerState struct {
-	Corpus, Record, Version, Invocation, PartKey string
+	Corpus, Record, Version, PartKey string
+	Normalization                    map[string]any
 }
 
 func normalizerStatePath() string {
@@ -100,7 +102,6 @@ func TestNormalizerMakesRoutedBlobsSearchable(t *testing.T) {
 	}
 	provenance := version["provenance"].(map[string]any)
 	normalization, _ := provenance["normalization"].(map[string]any)
-	invocation, _ := normalization["invocation_id"].(string)
 	// Successful invocation IDs are optional audit detail; the deterministic
 	// digest and input/plugin provenance remain required for reuse.
 	key, _ := normalization["idempotency_key"].(string)
@@ -139,7 +140,7 @@ func TestNormalizerMakesRoutedBlobsSearchable(t *testing.T) {
 		t.Fatal(rejected)
 	}
 
-	state, _ := json.Marshal(normalizerState{Corpus: corpusID, Record: ready["record_id"].(string), Version: ready["version_id"].(string), Invocation: invocation, PartKey: partKey})
+	state, _ := json.Marshal(normalizerState{Corpus: corpusID, Record: ready["record_id"].(string), Version: ready["version_id"].(string), Normalization: normalization, PartKey: partKey})
 	if err := os.WriteFile(normalizerStatePath(), state, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +234,7 @@ func TestNormalizerRebuildWithoutPlugin(t *testing.T) {
 		t.Fatalf("hit after rebuild %v", hit)
 	}
 	version := request(t, "GET", "/v0/records/"+state.Record+"/versions/"+state.Version, admin, nil, 200)
-	if n := version["provenance"].(map[string]any)["normalization"].(map[string]any); n["invocation_id"] != state.Invocation {
+	if n := version["provenance"].(map[string]any)["normalization"].(map[string]any); !reflect.DeepEqual(n, state.Normalization) {
 		t.Fatalf("provenance changed after rebuild: %v", n)
 	}
 }
