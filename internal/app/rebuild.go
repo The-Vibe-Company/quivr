@@ -9,7 +9,7 @@ type RebuildConfig struct {
 
 func (c RebuildConfig) concurrency() (int, error) {
 	if c.Concurrency < 0 || c.Concurrency > retrieval.MaxRebuildConcurrency {
-		return 0, badConfig(configInvalid, "rebuild.concurrency", "rebuild.concurrency must be between 1 and 32 (or 0 for the default 8)")
+		return 0, badConfig(configInvalid, "rebuild.concurrency", "rebuild.concurrency must be between 1 and 256 (or 0 for the default 8)")
 	}
 	if c.Concurrency == 0 {
 		return retrieval.DefaultRebuildConcurrency, nil
