@@ -1,7 +1,7 @@
 {
   "compatibility": {
     "engine": ">=0.1.0 <0.3.0",
-    "plugin_api": ">=0.13.0 <0.14.0"
+    "plugin_api": ">=0.17.0 <0.18.0"
   },
   "configuration": {
     "schema": {
@@ -16,6 +16,12 @@
         "batch_size": {
           "const": 16
         },
+        "batch_wait_ms": {
+          "const": 25
+        },
+        "body_tokens": {
+          "const": 512
+        },
         "call_budget_ms": {
           "const": 30000
         },
@@ -26,13 +32,22 @@
           "const": "search_document"
         },
         "document_prefix": {
-          "const": ""
+          "const": "passage: "
+        },
+        "document_template": {
+          "const": "auto"
         },
         "format": {
           "const": "openai"
         },
         "max_batch_tokens": {
           "const": 8192
+        },
+        "max_chunks": {
+          "const": 4
+        },
+        "max_concurrent_requests": {
+          "const": 4
         },
         "max_retries": {
           "const": 2
@@ -44,7 +59,7 @@
           "const": "cosine"
         },
         "model": {
-          "const": "embedding-model"
+          "const": "intfloat/multilingual-e5-small"
         },
         "model_revision": {
           "const": "1"
@@ -52,20 +67,47 @@
         "overlap": {
           "const": 48
         },
+        "packing": {
+          "const": "paragraphs"
+        },
+        "plugin_id": {
+          "const": "hosted.embed"
+        },
         "plugin_version": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "query_input_type": {
           "const": "search_query"
         },
         "query_prefix": {
-          "const": ""
+          "const": "query: "
+        },
+        "rebalance_tail": {
+          "const": true
         },
         "request_timeout_ms": {
           "const": 4000
         },
         "send_dimensions": {
-          "const": true
+          "const": false
+        },
+        "tail_min_fraction": {
+          "const": 0.25
+        },
+        "title_context_parts": {
+          "enum": [
+            null,
+            []
+          ]
+        },
+        "title_source": {
+          "const": "title"
+        },
+        "tokenizer": {
+          "const": null
+        },
+        "usd_per_million_tokens": {
+          "const": null
         }
       },
       "required": [
@@ -85,13 +127,13 @@
       },
       "query_timeout_ms": 10000,
       "spaces": {
-        "hosted.embed.embedding-model-384-af75b432c5e7aea0": {
+        "hosted.embed.intfloat-multilingual-e5-sma-384-96f19d0e4243e08b": {
           "dimensions": 384,
           "indexes": [
             "text"
           ],
           "metric": "cosine",
-          "model": "embedding-model",
+          "model": "intfloat/multilingual-e5-small",
           "query_modalities": [
             "text"
           ],
@@ -117,5 +159,5 @@
       "required": false
     }
   ],
-  "version": "1.0.0"
+  "version": "1.1.0"
 }

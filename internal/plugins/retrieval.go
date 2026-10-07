@@ -213,15 +213,18 @@ func (c CandidateRequest) EffectiveFusion() string {
 
 // Candidate is one served candidate: an authorized, current segment.
 type Candidate struct {
-	SegmentID   string  `json:"segment_id"`
-	RecordID    string  `json:"record_id"`
-	VersionID   string  `json:"version_id"`
-	PartKey     string  `json:"part_key"`
-	Text        string  `json:"text"`
-	Start       int     `json:"start"`
-	End         int     `json:"end"`
-	Score       float64 `json:"score"`
-	Explanation string  `json:"explanation,omitempty"`
+	SegmentID       string        `json:"segment_id"`
+	RecordID        string        `json:"record_id"`
+	VersionID       string        `json:"version_id"`
+	PartKey         string        `json:"part_key"`
+	Text            string        `json:"text"`
+	Start           int           `json:"start"`
+	End             int           `json:"end"`
+	PassageText     string        `json:"passage_text,omitempty"`
+	SourceRanges    []SourceRange `json:"source_ranges,omitempty"`
+	SourceSeparator string        `json:"source_separator,omitempty"`
+	Score           float64       `json:"score"`
+	Explanation     string        `json:"explanation,omitempty"`
 }
 
 // ServedRequest is a candidate request of an earlier round with what the core

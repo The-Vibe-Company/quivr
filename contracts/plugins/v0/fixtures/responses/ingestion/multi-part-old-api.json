@@ -1,0 +1,38 @@
+{
+  "segments": [
+    {
+      "part_key": "title",
+      "start": 0,
+      "end": 14,
+      "source_ranges": [
+        {
+          "part_key": "title",
+          "start": 0,
+          "end": 14
+        },
+        {
+          "part_key": "body",
+          "start": 0,
+          "end": 8
+        }
+      ],
+      "source_separator": "\n\n",
+      "vectors": {
+        "example.words.small": [
+          1,
+          0,
+          0,
+          0
+        ],
+        "example.words.large": [
+          0.1,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.6
+        ]
+      }
+    }
+  ]
+}

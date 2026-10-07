@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 )
@@ -17,24 +18,95 @@ type Segment struct {
 	Start, End        int
 	TitleKey, Title   string
 	Derivation        SegmentDerivation
+	SourceExcerpts    []SourceExcerpt `json:"-"`
 }
+
+// SourceRange addresses an exact canonical Part slice using Unicode code points.
+type SourceRange struct {
+	PartKey string `json:"part_key"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+}
+type SourceExcerpt struct {
+	SourceRange
+	Text string `json:"text"`
+}
+
+func (p Segment) AnchorText() string {
+	if len(p.SourceExcerpts) > 0 {
+		return p.SourceExcerpts[0].Text
+	}
+	return p.Text
+}
+func validSourceSeparator(s string) bool {
+	return utf8.ValidString(s) && !strings.ContainsRune(s, 0) && utf8.RuneCountInString(s) <= 16
+}
+
+// SourceSlices validates reading order and resolves ranges from immutable Parts.
+func SourceSlices(v Version, ranges []SourceRange) ([]SourceRange, []SourceExcerpt, error) {
+	return newSourceParts(v).resolve(ranges)
+}
+
+type sourceParts struct {
+	texts map[string]string
+	runes map[string][]rune
+	order map[string]int
+}
+
+func newSourceParts(v Version) *sourceParts {
+	p := &sourceParts{texts: map[string]string{}, runes: map[string][]rune{}, order: map[string]int{}}
+	for i, part := range v.Manifest.Parts {
+		if part.Content.Kind == "text" {
+			p.texts[part.Key] = part.Content.Text
+			p.order[part.Key] = i
+		}
+	}
+	return p
+}
+func (p *sourceParts) resolve(ranges []SourceRange) ([]SourceRange, []SourceExcerpt, error) {
+	if len(ranges) == 0 || len(ranges) > 256 {
+		return nil, nil, ErrInvalid
+	}
+	out := make([]SourceExcerpt, len(ranges))
+	previous := -1
+	lastEnd := 0
+	for i, r := range ranges {
+		raw, ok := p.texts[r.PartKey]
+		text, decoded := p.runes[r.PartKey]
+		if ok && !decoded {
+			text = []rune(raw)
+			p.runes[r.PartKey] = text
+		}
+		pos := p.order[r.PartKey]
+		if !ok || r.Start < 0 || r.End <= r.Start || r.End > len(text) || r.End-r.Start > 4096 || pos < previous || pos == previous && r.Start < lastEnd {
+			return nil, nil, ErrInvalid
+		}
+		out[i] = SourceExcerpt{SourceRange: r, Text: string(text[r.Start:r.End])}
+		previous = pos
+		lastEnd = r.End
+	}
+	return append([]SourceRange(nil), ranges...), out, nil
+}
+
 type SegmentDerivation struct {
-	Ordinal          int    `json:"ordinal"`
-	UTF8Start        int    `json:"utf8_start"`
-	UTF8End          int    `json:"utf8_end"`
-	TokenStart       int    `json:"token_start"`
-	TokenEnd         int    `json:"token_end"`
-	Overlap          int    `json:"overlap_tokens"`
-	HardStart        bool   `json:"hard_start"`
-	HardEnd          bool   `json:"hard_end"`
-	NormalizedSHA256 string `json:"normalized_content_sha256"`
-	TitleFullSHA256  string `json:"full_title_sha256,omitempty"`
-	TitleUsedSHA256  string `json:"title_used_sha256,omitempty"`
-	TitleTokens      int    `json:"title_tokens"`
-	TitleTruncated   bool   `json:"title_truncated"`
-	ModelInput       string `json:"model_input"`
-	ModelInputSHA256 string `json:"model_input_sha256"`
-	ModelTokens      int    `json:"model_tokens"`
+	SourceRanges     []SourceRange `json:"source_ranges,omitempty"`
+	SourceSeparator  string        `json:"source_separator,omitempty"`
+	Ordinal          int           `json:"ordinal"`
+	UTF8Start        int           `json:"utf8_start"`
+	UTF8End          int           `json:"utf8_end"`
+	TokenStart       int           `json:"token_start"`
+	TokenEnd         int           `json:"token_end"`
+	Overlap          int           `json:"overlap_tokens"`
+	HardStart        bool          `json:"hard_start"`
+	HardEnd          bool          `json:"hard_end"`
+	NormalizedSHA256 string        `json:"normalized_content_sha256"`
+	TitleFullSHA256  string        `json:"full_title_sha256,omitempty"`
+	TitleUsedSHA256  string        `json:"title_used_sha256,omitempty"`
+	TitleTokens      int           `json:"title_tokens"`
+	TitleTruncated   bool          `json:"title_truncated"`
+	ModelInput       string        `json:"model_input"`
+	ModelInputSHA256 string        `json:"model_input_sha256"`
+	ModelTokens      int           `json:"model_tokens"`
 	// LexicalText is the keyword-search text an ingestion plugin returned
 	// for the segment, indexed apart from the source text.
 	LexicalText string `json:"lexical_text,omitempty"`
@@ -197,7 +269,12 @@ type BaselineRepository interface {
 // immutable blob holding its Part text.
 type Located struct {
 	Hydrated
-	Blob Blob
+	Blob    Blob
+	Sources []LocatedSource
+}
+type LocatedSource struct {
+	Range SourceRange
+	Blob  Blob
 }
 
 func (s Service) ProcessingVersion(ctx context.Context, org, receiptID string) (Version, error) {
@@ -213,6 +290,7 @@ func (s Service) ProcessingVersion(ctx context.Context, org, receiptID string) (
 
 // Validate outputs at the engine boundary even when the contribution runs locally.
 func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, result Segmentation) error {
+	sources := newSourceParts(v)
 	if result.VersionID != v.ID || result.Recipe == "" || len(result.Segments) == 0 {
 		return ErrInvalid
 	}
@@ -223,7 +301,22 @@ func (s Service) SaveSegmentation(ctx context.Context, org string, v Version, re
 	for i := range result.Segments {
 		p := &result.Segments[i]
 		text, ok := parts[p.PartKey]
-		if !ok || p.Start < 0 || p.End < p.Start || p.End > len(text) || string(text[p.Start:p.End]) != p.Text {
+		if !ok || p.Start < 0 || p.End < p.Start || p.End > len(text) {
+			return ErrInvalid
+		}
+		expectedText := string(text[p.Start:p.End])
+		if len(p.Derivation.SourceRanges) > 0 {
+			ranges, slices, err := sources.resolve(p.Derivation.SourceRanges)
+			if err != nil || ranges[0].PartKey != p.PartKey || ranges[0].Start != p.Start || ranges[0].End != p.End || !validSourceSeparator(p.Derivation.SourceSeparator) {
+				return ErrInvalid
+			}
+			texts := make([]string, len(slices))
+			for k, slice := range slices {
+				texts[k] = slice.Text
+			}
+			expectedText = strings.Join(texts, p.Derivation.SourceSeparator)
+		}
+		if p.Text != expectedText {
 			return ErrInvalid
 		}
 		if p.Start == p.End && p.Title == "" {
@@ -322,60 +415,89 @@ func (s Service) Hydrate(ctx context.Context, scope corpus.Scope, cs []Candidate
 // cuts from it the excerpts of its candidates, each checked against the
 // segment's checksum. Only the excerpts outlive a read.
 func (s Service) excerpts(ctx context.Context, located map[int]Located) (map[int]string, error) {
-	byBlob := map[string][]int{}
-	for i, l := range located {
-		byBlob[l.Blob.Key] = append(byBlob[l.Blob.Key], i)
+	type request struct {
+		candidate, index int
+		source           LocatedSource
 	}
-	out := make(map[int]string, len(located))
+	byBlob := map[string][]request{}
+	for i, l := range located {
+		sources := l.Sources
+		if len(sources) == 0 {
+			sources = []LocatedSource{{Range: SourceRange{PartKey: l.Segment.PartKey, Start: l.Segment.Start, End: l.Segment.End}, Blob: l.Blob}}
+		}
+		for k, source := range sources {
+			byBlob[source.Blob.Key] = append(byBlob[source.Blob.Key], request{i, k, source})
+		}
+	}
+	slices := map[int][]SourceExcerpt{}
+	for i, l := range located {
+		n := len(l.Sources)
+		if n == 0 {
+			n = 1
+		}
+		slices[i] = make([]SourceExcerpt, n)
+	}
 	var mu sync.Mutex
 	var failure error
 	var wg sync.WaitGroup
 	slots := make(chan struct{}, blobReadParallelism)
-	for _, at := range byBlob {
+	for _, requests := range byBlob {
 		wg.Add(1)
 		slots <- struct{}{}
-		go func(at []int) {
+		go func(requests []request) {
 			defer func() { <-slots; wg.Done() }()
-			cut, err := s.cut(ctx, located, at)
-			mu.Lock()
-			defer mu.Unlock()
+			data, err := s.Blobs.Read(ctx, requests[0].source.Blob)
 			if err != nil {
+				mu.Lock()
 				failure = err
+				mu.Unlock()
 				return
 			}
-			for i, excerpt := range cut {
-				out[i] = excerpt
+			runes := []rune(string(data))
+			for _, req := range requests {
+				r := req.source.Range
+				if r.Start < 0 || r.End < r.Start || r.End > len(runes) {
+					mu.Lock()
+					failure = errors.New("invalid canonical excerpt")
+					mu.Unlock()
+					return
+				}
+				excerpt := SourceExcerpt{SourceRange: r, Text: string(runes[r.Start:r.End])}
+				mu.Lock()
+				slices[req.candidate][req.index] = excerpt
+				mu.Unlock()
 			}
-		}(at)
+		}(requests)
 	}
 	wg.Wait()
-	return out, failure
-}
-
-// cut reads the blob the candidates at the given indexes share and returns
-// their excerpts.
-func (s Service) cut(ctx context.Context, located map[int]Located, at []int) (map[int]string, error) {
-	data, err := s.Blobs.Read(ctx, located[at[0]].Blob)
-	if err != nil {
-		return nil, err
+	if failure != nil {
+		return nil, failure
 	}
-	runes := []rune(string(data))
-	out := make(map[int]string, len(at))
-	for _, i := range at {
-		seg := located[i].Segment
-		if seg.Start < 0 || seg.End > len(runes) || seg.End < seg.Start {
-			return nil, errors.New("invalid canonical excerpt")
+	out := map[int]string{}
+	for i, pieces := range slices {
+		texts := make([]string, len(pieces))
+		for k, p := range pieces {
+			texts[k] = p.Text
 		}
-		excerpt := string(runes[seg.Start:seg.End])
-		// Repository supplies the checksum of the segment, not a projection excerpt.
-		if Hash([]byte(excerpt)) != located[i].TextSHA256 {
+		text := strings.Join(texts, located[i].Segment.Derivation.SourceSeparator)
+		if Hash([]byte(text)) != located[i].TextSHA256 {
 			return nil, errors.New("canonical excerpt mismatch")
 		}
-		out[i] = excerpt
+		out[i] = text
+		l := located[i]
+		if len(l.Sources) > 0 {
+			l.Segment.SourceExcerpts = pieces
+			located[i] = l
+		}
 	}
 	return out, nil
 }
 
 func SegmentID(org, segmentation string, p Segment) string {
-	return StableID("segment", org, segmentation, p.PartKey, strconv.Itoa(p.Derivation.Ordinal), strconv.Itoa(p.Start), strconv.Itoa(p.End), strconv.Itoa(p.Derivation.UTF8Start), strconv.Itoa(p.Derivation.UTF8End), p.Derivation.NormalizedSHA256, Hash([]byte(p.Text)))
+	base := StableID("segment", org, segmentation, p.PartKey, strconv.Itoa(p.Derivation.Ordinal), strconv.Itoa(p.Start), strconv.Itoa(p.End), strconv.Itoa(p.Derivation.UTF8Start), strconv.Itoa(p.Derivation.UTF8End), p.Derivation.NormalizedSHA256, Hash([]byte(p.Text)))
+	if len(p.Derivation.SourceRanges) == 0 {
+		return base
+	}
+	raw, _ := json.Marshal(p.Derivation.SourceRanges)
+	return StableID("packed-segment", base, string(raw), p.Derivation.SourceSeparator)
 }

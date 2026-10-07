@@ -500,8 +500,7 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 				}
 				records[h.RecordID] = true
 			}
-			out = append(out, plugins.Candidate{SegmentID: h.Segment.ID, RecordID: h.RecordID, VersionID: h.VersionID, PartKey: h.Segment.PartKey,
-				Text: h.Segment.Text, Start: h.Segment.Start, End: h.Segment.End, Score: f.Score})
+			out = append(out, sv.candidate(h, f.Score, ""))
 			if len(out) == c.K {
 				break
 			}
@@ -596,4 +595,18 @@ func ownerTotal(c content.SpaceCoverage, legacy int64) int64 {
 		return *c.TotalSegments
 	}
 	return legacy
+}
+
+// candidate preserves the single-Part text/offset contract for older rankers.
+func (sv *server) candidate(h content.Hydrated, score float64, explanation string) plugins.Candidate {
+	c := plugins.Candidate{SegmentID: h.Segment.ID, RecordID: h.RecordID, VersionID: h.VersionID, PartKey: h.Segment.PartKey,
+		Text: h.Segment.AnchorText(), Start: h.Segment.Start, End: h.Segment.End, Score: score, Explanation: explanation}
+	if len(h.Segment.Derivation.SourceRanges) > 0 && sv.s.Ranker.Manifest().SupportsMultiPartSegments() {
+		c.PassageText = h.Segment.Text
+		c.SourceSeparator = h.Segment.Derivation.SourceSeparator
+		for _, r := range h.Segment.Derivation.SourceRanges {
+			c.SourceRanges = append(c.SourceRanges, plugins.SourceRange{PartKey: r.PartKey, Start: r.Start, End: r.End})
+		}
+	}
+	return c
 }

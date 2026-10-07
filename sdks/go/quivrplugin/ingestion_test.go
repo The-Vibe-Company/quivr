@@ -1,12 +1,16 @@
 package quivrplugin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type ingestionAnswer struct {
@@ -19,6 +23,21 @@ func (a ingestionAnswer) SegmentAndEmbed(context.Context, *IngestRequest) ([]Seg
 }
 func (a ingestionAnswer) EmbedQuery(context.Context, *QueryRequest) ([]float32, error) {
 	return a.vector, nil
+}
+
+func callIngestion(t *testing.T, p *Plugin, h http.Handler, route string, body []byte) (int, map[string]any, string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, route, bytes.NewReader(body))
+	if compareVersions(p.m.pluginAPI, "0.14.0") >= 0 {
+		t.Setenv(EnvSigningKeys, signingRing(t, "current", signingKey("current", currentSigningSecret, nil, nil)))
+		now := time.Now().Unix()
+		req.Header.Set("Authorization", engineToken(t, currentSigningSecret, "current", p.m.ID, p.m.ID, http.MethodPost, route, body, now-1, now+59))
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	return rec.Code, out, rec.Body.String()
 }
 
 // The normative response oracle owns SDK ingestion semantics at the HTTP boundary.
@@ -73,7 +92,7 @@ func TestIngestionNormativeResponses(t *testing.T) {
 			if c.Schema == "ingestion-embed-query-response.schema.json" {
 				route = "/v0/contributions/ingestion/embed_query"
 			}
-			status, doc, got := call(h, route, body)
+			status, doc, got := callIngestion(t, p, h, route, body)
 			if (status == 200) != c.Valid || (!c.Valid && doc["code"] != "invalid_response") {
 				t.Fatalf("valid=%t, status=%d: %s", c.Valid, status, got)
 			}

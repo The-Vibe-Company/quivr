@@ -911,13 +911,28 @@ func (e SavedQueryDefinitionTemporalPolicy) Valid() bool {
 
 // Defines values for SearchExcerptCoordinateSystem.
 const (
-	UnicodeCodepoint SearchExcerptCoordinateSystem = "unicode_codepoint"
+	SearchExcerptCoordinateSystemUnicodeCodepoint SearchExcerptCoordinateSystem = "unicode_codepoint"
 )
 
 // Valid indicates whether the value is a known member of the SearchExcerptCoordinateSystem enum.
 func (e SearchExcerptCoordinateSystem) Valid() bool {
 	switch e {
-	case UnicodeCodepoint:
+	case SearchExcerptCoordinateSystemUnicodeCodepoint:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SearchHitSourceExcerptsCoordinateSystem.
+const (
+	SearchHitSourceExcerptsCoordinateSystemUnicodeCodepoint SearchHitSourceExcerptsCoordinateSystem = "unicode_codepoint"
+)
+
+// Valid indicates whether the value is a known member of the SearchHitSourceExcerptsCoordinateSystem enum.
+func (e SearchHitSourceExcerptsCoordinateSystem) Valid() bool {
+	switch e {
+	case SearchHitSourceExcerptsCoordinateSystemUnicodeCodepoint:
 		return true
 	default:
 		return false
@@ -2980,16 +2995,29 @@ type SearchHit struct {
 	Excerpt SearchExcerpt `json:"excerpt"`
 
 	// Explanation Why the retrieval plugin ranked this hit here, when it says so.
-	Explanation            *string `json:"explanation,omitempty"`
-	PartKey                string  `json:"part_key"`
+	Explanation *string `json:"explanation,omitempty"`
+	PartKey     string  `json:"part_key"`
+
+	// PassageText Exact packed passage text used for the hit, when source-range metadata is available.
+	PassageText            *string `json:"passage_text,omitempty"`
 	ProjectionGenerationId string  `json:"projection_generation_id"`
 	Rank                   int     `json:"rank"`
 	RecordId               string  `json:"record_id"`
 	SegmentId              string  `json:"segment_id"`
 	SegmentationId         string  `json:"segmentation_id"`
-	VectorSpaceId          *string `json:"vector_space_id,omitempty"`
-	VersionId              string  `json:"version_id"`
+	SourceExcerpts         *[]struct {
+		CoordinateSystem SearchHitSourceExcerptsCoordinateSystem `json:"coordinate_system"`
+		End              int                                     `json:"end"`
+		PartKey          string                                  `json:"part_key"`
+		Start            int                                     `json:"start"`
+		Text             string                                  `json:"text"`
+	} `json:"source_excerpts,omitempty"`
+	VectorSpaceId *string `json:"vector_space_id,omitempty"`
+	VersionId     string  `json:"version_id"`
 }
+
+// SearchHitSourceExcerptsCoordinateSystem defines model for SearchHit.SourceExcerpts.CoordinateSystem.
+type SearchHitSourceExcerptsCoordinateSystem string
 
 // SearchPhases Milliseconds a search spent in each phase. routing_ms authorizes the request and routes it to projection generations; coverage_ms reads the vector spaces and their coverage; plugin_rounds_ms waits for the retrieval plugin's rounds; query_encoding_ms encodes the query with the plugin that owns each vector space, 0 when no candidate request needs a vector; index_query_ms queries the index; hydration_ms rechecks and reads candidates from canonical storage. The phases do not add up to elapsed_ms, which also counts the engine's own work between them.
 type SearchPhases struct {
