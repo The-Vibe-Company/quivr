@@ -123,8 +123,8 @@ class Stack:
         cfg=dict(tei_url='http://'+tei,weaviate_url='http://'+weaviate,temporal_address=temporal,s3=dict(endpoint='http://'+seaweed,access_key=s['s3_access'],secret_key=s['s3_secret'],bucket='quivr-content'),log_directory=str(self.directory),database_url=f"postgres://quivr:{s['password']}@{address}/quivr?sslmode=disable",listen=f"127.0.0.1:{s['api_port']}",probe_listen=f"127.0.0.1:{s['probe_port']}",cursor_key=s['cursor_key'],credential_key=s['credential_key'],connector_min_interval='1s',
             # api and worker follow a plugin activation within this delay (THE-781).
             plugin_plan_poll='200ms',
-            # Informational coverage refreshes use the real snapshot path without a ten-second test wait.
-            retrieval=dict(coverage_refresh='100ms'),
+            # Verification exercises snapshots promptly; dev keeps deployment pacing.
+            retrieval=dict(coverage_refresh='100ms' if self.verifying else '10s'),
             change_stream_poll=CHANGE_STREAM_POLL,
             # Work pinned to a plan whose plugin left it and cannot be reached stops after two attempts (THE-782).
             pinned_plugin_attempts=2,
