@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/pluginhttp"
@@ -27,6 +29,8 @@ func TestIngestionPagesCoverLargeMultipartText(t *testing.T) {
 			signing, _ := json.Marshal(map[string]plugins.SigningKeys{"example.paged": ring})
 			t.Setenv(plugins.EnvSigningKeys, string(signing))
 			var pin *plugins.Pin
+			var captureMu sync.Mutex
+			var requestKeys []string
 			calls := 0
 			cached := map[string][]byte{}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,11 +46,15 @@ func TestIngestionPagesCoverLargeMultipartText(t *testing.T) {
 					t.Errorf("unbounded page: %+v", req.Page)
 					return
 				}
+				// Negative control: removing the host guard reaches the old oversize-slice panic.
 				if req.Page.Start >= len([]rune(req.Parts[0].Text)) {
 					w.WriteHeader(422)
 					_, _ = w.Write([]byte(`{"code":"response_too_large","message":"smaller page required","retryable":false}`))
 					return
 				}
+				captureMu.Lock()
+				defer captureMu.Unlock()
+				requestKeys = append(requestKeys, req.IdempotencyKey)
 				calls++
 				if body, ok := cached[req.IdempotencyKey]; ok {
 					_, _ = w.Write(body)
@@ -108,6 +116,22 @@ func TestIngestionPagesCoverLargeMultipartText(t *testing.T) {
 				page, err := ingestor.SegmentAndEmbedPage(t.Context(), "org", "corpus", v, []string{plugins.SpaceKey("example.paged.text", "1")}, cursor)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if count == 0 {
+					captureMu.Lock()
+					firstKeys := slices.Clone(requestKeys)
+					captureMu.Unlock()
+					// jsonb reorders keys and adds spaces on durable round trips.
+					_, err = ingestor.SegmentAndEmbedPage(t.Context(), "org", "corpus", v, []string{plugins.SpaceKey("example.paged.text", "1")}, json.RawMessage(`{"part": 0, "page_start": 0, "rune_start": 0, "byte_start": 0}`))
+					if err != nil {
+						t.Fatal(err)
+					}
+					captureMu.Lock()
+					retryKeys := slices.Clone(requestKeys[len(firstKeys):])
+					captureMu.Unlock()
+					if !slices.Equal(firstKeys, retryKeys) {
+						t.Fatalf("equivalent durable cursor changed page identity: %v vs %v", firstKeys, retryKeys)
+					}
 				}
 				for _, seg := range page.Segments {
 					if seg.Start != ends[seg.PartKey] || len(seg.SourceRanges) != 1 || seg.SourceRanges[0].Start != seg.Start || seg.SourceRanges[0].End != seg.End {

@@ -58,10 +58,14 @@ register a type with two methods, `SegmentAndEmbed` (segments of the Version's
 text Parts, each with a vector per requested space) and `EmbedQuery`, through
 `plugin.Ingestion(impl)`. The SDK refuses undeclared spaces and checks offsets,
 dimensions and `max_segments` before answering; a `RetryableIngestError` delays
-the Version, a `TerminalIngestError` blocks it.
+the Version, a `TerminalIngestError` quarantines it for later reprocessing.
 [`examples/hash-embedder`](examples/hash-embedder/) is certified in CI, and
 [Write an ingestion plugin](https://docs.quivr.thevibecompany.co/plugins/write-an-ingestion-plugin)
 covers pinning it.
+
+For bounded continuation, declare API `0.18.0` and `contributions.ingestion.paging: true`.
+Implement `PagedIngester.SegmentAndEmbedPage` with contiguous coverage, honoring
+`request.Page.Start` and `MaxSegments`; return `NextStart` until complete. Legacy ingesters keep using `SegmentAndEmbed` without a page request.
 
 ## A retrieval plugin
 

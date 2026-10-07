@@ -239,7 +239,7 @@ func isInputRefusal(status int, body []byte) bool {
 	}
 	var payload struct {
 		Error   json.RawMessage `json:"error"`
-		Detail  string          `json:"detail"`
+		Detail  json.RawMessage `json:"detail"`
 		Message string          `json:"message"`
 	}
 	if json.Unmarshal(body, &payload) != nil {
@@ -265,7 +265,7 @@ func isInputRefusal(status int, body []byte) bool {
 	}
 	// Some compatible providers attribute length errors only in a message.
 	// Inspect safe categories locally; never log or retain the provider body.
-	message := strings.ToLower(attribution.Message + " " + payload.Detail + " " + payload.Message)
+	message := strings.ToLower(attribution.Message + " " + providerDetailMessage(payload.Detail) + " " + payload.Message)
 	for _, category := range []string{"maximum context length", "input is too long", "input too long", "too many tokens", "exceeds the token limit", "input length exceeds"} {
 		if strings.Contains(message, category) {
 			return true
@@ -273,6 +273,33 @@ func isInputRefusal(status int, body []byte) bool {
 	}
 	return false
 }
+
+// Compatible providers use either a string or validation-message objects.
+// Read message fields only; source input echoed in other fields is irrelevant.
+func providerDetailMessage(raw json.RawMessage) string {
+	var message string
+	if json.Unmarshal(raw, &message) == nil {
+		return message
+	}
+	type detail struct {
+		Message string `json:"message"`
+		Msg     string `json:"msg"`
+	}
+	var object detail
+	if json.Unmarshal(raw, &object) == nil {
+		return object.Message + " " + object.Msg
+	}
+	var list []detail
+	if json.Unmarshal(raw, &list) == nil {
+		var messages []string
+		for _, entry := range list {
+			messages = append(messages, entry.Message, entry.Msg)
+		}
+		return strings.Join(messages, " ")
+	}
+	return ""
+}
+
 func (p provider) usage(invocations []string, items int, mode string, attempt, status, tokens int, estimated bool) {
 	attrs := []any{"event", "hosted_embedding_usage", "space", p.config.spaceID(), "mode", mode, "attempt", attempt + 1, "status", status, "input_tokens", tokens, "input_count", items, "estimated", estimated}
 	if p.local {

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -197,7 +198,8 @@ func (r *run) ingestionPages(ctx context.Context, ir ingestionRun) {
 		request := base
 		request.Parts = []plugins.IngestionPart{part}
 		request.Page = &plugins.IngestionPageRequest{Start: start, MaxSegments: 1}
-		request.IdempotencyKey = fmt.Sprintf("%s:page:%s:%d:%d", base.IdempotencyKey, part.Key, window, start)
+		pageIdentity, _ := json.Marshal([]any{base.IdempotencyKey, part.Key, window, start})
+		request.IdempotencyKey = fmt.Sprintf("page-%x", sha256.Sum256(pageIdentity))
 		request.InvocationID = request.IdempotencyKey
 		body, _ := plugins.BuildSegmentAndEmbedRequest(request)
 		first, problem := r.callSegmentAndEmbed(ctx, body)

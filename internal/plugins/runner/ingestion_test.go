@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -21,6 +22,11 @@ func TestIngestionCertificationExercisesPaging(t *testing.T) {
 	}
 	pin, err := plugins.LoadPinManifest(raw, "paged", plugins.PinConfig{Endpoint: "http://127.0.0.1:9"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	fixturePath := filepath.Join(t.TempDir(), "long-part.json")
+	fixture := `{"ingestion":{"parts":[{"key":"` + strings.Repeat("p", 100) + `","role":"body","text":"tail"}]}}`
+	if err := os.WriteFile(fixturePath, []byte(fixture), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, ignoresCursor := range []bool{false, true} {
@@ -73,7 +79,7 @@ func TestIngestionCertificationExercisesPaging(t *testing.T) {
 			}))
 			defer server.Close()
 			r := &run{m: &pin.Manifest, api: plugins.ResolveAPI(pin.PluginAPI()), baseURL: server.URL}
-			r.ingestion(t.Context(), nil)
+			r.ingestion(t.Context(), []ownFixture{{label: "long-part", path: fixturePath, contribution: ContributionIngestion}})
 			found := false
 			for _, check := range r.report.Checks {
 				if check.ID == "ingestion_pages" {

@@ -225,7 +225,7 @@ func (p *Plugin) serveSegmentAndEmbed(w http.ResponseWriter, r *http.Request) {
 	if req.Page != nil {
 		paged, ok := p.ingester.(PagedIngester)
 		if !ok || !p.m.Ingestion.Paging || compareVersions(p.m.pluginAPI, "0.18.0") < 0 {
-			refuse(w, 400, "invalid_request", "ingestion pages require a Plugin API 0.18 paged ingester", Credential{})
+			refuse(w, 400, "invalid_request", "ingestion pages require a Plugin API 0.18 paged ingester and manifest paging: true", Credential{})
 			return
 		}
 		page, cause := paged.SegmentAndEmbedPage(ctx, &req)
@@ -366,7 +366,7 @@ func (p *Plugin) encodeSegments(req *IngestRequest, segments []Segment) ([]byte,
 		return nil, "the segments are not JSON-encodable: " + err.Error()
 	}
 	body := buf.Bytes()
-	if len(body) > in.Limits.MaxResponseBytes {
+	if req.Page == nil && len(body) > in.Limits.MaxResponseBytes {
 		return nil, fmt.Sprintf("the response is %d bytes; max_response_bytes is %d", len(body), in.Limits.MaxResponseBytes)
 	}
 	if err := validate("plugins/v0/ingestion-segment-and-embed-response.schema.json", body); err != nil {

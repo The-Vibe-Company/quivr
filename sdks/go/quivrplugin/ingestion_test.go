@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,12 +56,34 @@ func TestIngestionPageDispatch(t *testing.T) {
 	if status != 200 || out["next_start"] != float64(4) {
 		t.Fatalf("status=%d body=%s", status, raw)
 	}
+	segments := out["segments"].([]any)
+	if len(segments) != 1 || segments[0].(map[string]any)["part_key"] != "body" || segments[0].(map[string]any)["start"] != float64(0) || segments[0].(map[string]any)["end"] != float64(4) {
+		t.Fatalf("typed page segments lost: %s", raw)
+	}
 	// A current SDK must not dispatch a page without manifest opt-in.
 	p.m.Ingestion.Paging = false
 	status, out, raw = callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
 	if status != 400 || out["code"] != "invalid_request" {
 		t.Fatalf("undeclared paging status=%d body=%s", status, raw)
 	}
+	p.m.Ingestion.Paging = true
+	lexical := strings.Repeat("x", 1100)
+	if err = p.Ingestion(ingestionAnswer{segments: []Segment{{PartKey: "body", Start: 0, End: 8, LexicalText: lexical}}}); err != nil {
+		t.Fatal(err)
+	}
+	// Literal wire bytes pin the actual page envelope at its declared bound.
+	wire := `{"segments":[{"part_key":"body","start":0,"end":8,"vectors":{},"lexical_text":"` + lexical + `"}]}`
+	p.m.Ingestion.Limits.MaxResponseBytes = len(wire)
+	status, _, raw = callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 200 || len(raw) != len(wire) {
+		t.Fatalf("exact page byte boundary status=%d len=%d want=%d body=%s", status, len(raw), len(wire), raw)
+	}
+	p.m.Ingestion.Limits.MaxResponseBytes--
+	status, out, raw = callIngestion(t, p, h, "/v0/contributions/ingestion/segment_and_embed", body)
+	if status != 500 || out["code"] != "invalid_response" {
+		t.Fatalf("over-bound page accepted: status=%d body=%s", status, raw)
+	}
+
 }
 
 func (a ingestionAnswer) SegmentAndEmbed(context.Context, *IngestRequest) ([]Segment, error) {

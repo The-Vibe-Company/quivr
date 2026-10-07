@@ -70,7 +70,8 @@ func (i Ingestor) SegmentAndEmbedPage(ctx context.Context, org, corpusID string,
 		var answer plugins.IngestionAnswer
 		for {
 			parts := []plugins.IngestionPart{{Key: part.Key, Role: "body", Text: window}}
-			request := plugins.SegmentAndEmbedRequest{InvocationID: plugins.InvocationID(), IdempotencyKey: plugins.IngestionKey(i.Pin.Generation(), org, v.ID, ids) + "-" + content.Hash(cursor), OrganizationID: org, Configuration: i.Pin.Configuration, Version: plugins.IngestionVersion{CorpusID: corpusID, RecordID: v.RecordID, RecordVersionID: v.ID}, Parts: parts, Spaces: ids, Page: &plugins.IngestionPageRequest{Start: pos.PageStart, MaxSegments: i.pageSegmentBound(ids)}}
+			position, _ := json.Marshal(pos)
+			request := plugins.SegmentAndEmbedRequest{InvocationID: plugins.InvocationID(), IdempotencyKey: plugins.IngestionKey(i.Pin.Generation(), org, v.ID, ids) + "-" + content.Hash(position), OrganizationID: org, Configuration: i.Pin.Configuration, Version: plugins.IngestionVersion{CorpusID: corpusID, RecordID: v.RecordID, RecordVersionID: v.ID}, Parts: parts, Spaces: ids, Page: &plugins.IngestionPageRequest{Start: pos.PageStart, MaxSegments: i.pageSegmentBound(ids)}}
 			body, err := plugins.BuildSegmentAndEmbedRequest(request)
 			if err != nil {
 				return processing.PluginPage{}, err

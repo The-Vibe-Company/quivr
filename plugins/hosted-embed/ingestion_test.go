@@ -1187,12 +1187,15 @@ func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 		{"unicode", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 512},
 		{"top-level message", "αβγδεζηθ", `{"message":"input is too long"}`, "", "", 512},
 		{"string error", "αβγδεζηθ", `{"error":"input is too long"}`, "", "", 512},
+		{"structured detail", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"},"detail":{"message":"input is too long"}}`, "", "", 512},
+		{"validation detail", "αβγδεζηθ", `{"detail":[{"msg":"input is too long"}]}`, "", "", 512},
 		{"Gemma window template", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "title: none | text: ", "gemma", 512},
 		{"whitespace window", "        ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 512},
 		{"conservative budget", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 2},
 	} {
 		t.Run(variant.name, func(t *testing.T) {
 			var accepted []string
+			var acceptedMu sync.Mutex
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var request struct {
 					Input []string `json:"input"`
@@ -1210,7 +1213,9 @@ func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 				}
 				data := []any{}
 				for n, input := range request.Input {
+					acceptedMu.Lock()
 					accepted = append(accepted, input)
+					acceptedMu.Unlock()
 					data = append(data, map[string]any{"index": n, "embedding": []float32{1, 2}})
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
@@ -1253,8 +1258,11 @@ func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 			if want[0] == want[1] {
 				want = want[:1]
 			} // Identical inputs reuse the vector cache.
-			if !slices.Equal(accepted, want) || len(last.Segments[0].Vectors[c.spaceID()]) != 2 {
-				t.Fatalf("provider accepted %v; want both complete halves", accepted)
+			acceptedMu.Lock()
+			acceptedInputs := slices.Clone(accepted)
+			acceptedMu.Unlock()
+			if !slices.Equal(acceptedInputs, want) || len(last.Segments[0].Vectors[c.spaceID()]) != 2 {
+				t.Fatalf("provider accepted %v; want both complete halves", acceptedInputs)
 			}
 
 		})
