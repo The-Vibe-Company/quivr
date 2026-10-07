@@ -453,6 +453,11 @@ def scenario(stack, report, clock):
             # in the redacted worker log before teardown cancels the call.
             if worker_pid := stack.state.get('worker_pid'):
                 stack.signal_owned(worker_pid, signal.SIGQUIT)
+                # Wait for the dump before teardown; zombies have already exited.
+                from local import alive
+                end = time.monotonic() + 10
+                while alive(worker_pid) and time.monotonic() < end:
+                    time.sleep(.05)
             raise
         report['backfill'] = {'state': done['state'], 'counters': done['counters'], 'estimated_versions': estimate['versions'], 'window_records': len(window),
                               'estimate': estimate, 'seconds': round(clock.now() - started, 3), 'state_at_restart': state_at_restart}
