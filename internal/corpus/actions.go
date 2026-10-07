@@ -4,6 +4,7 @@ package corpus
 type Action string
 
 const (
+	ActionQueuesRead                          Action = "queues.read"
 	ActionAuditRead                           Action = "audit.read"
 	ActionMonitoringAttempts                  Action = "monitoring.attempts"
 	ActionMonitoringSubscriptionVersion       Action = "monitoring.subscriptionversion"
@@ -103,6 +104,7 @@ type requirement struct {
 
 // actionRequirements is the single permission policy for service operations.
 var actionRequirements = map[Action]requirement{
+	ActionQueuesRead:                          {permissions: []string{"queues:read"}, allCorpora: true},
 	ActionAuditRead:                           {permissions: []string{"audit:read"}, allCorpora: true},
 	ActionMonitoringAttempts:                  {permissions: []string{"monitoring:read"}},
 	ActionMonitoringSubscriptionVersion:       {permissions: []string{"monitoring:read"}},

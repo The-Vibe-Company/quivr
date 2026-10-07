@@ -141,6 +141,42 @@ func (e BuildVersionApiVersion) Valid() bool {
 	}
 }
 
+// Defines values for ConnectorWorkQueue.
+const (
+	ConnectorWorkQueueBulk ConnectorWorkQueue = "bulk"
+	ConnectorWorkQueueLive ConnectorWorkQueue = "live"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorWorkQueue enum.
+func (e ConnectorWorkQueue) Valid() bool {
+	switch e {
+	case ConnectorWorkQueueBulk:
+		return true
+	case ConnectorWorkQueueLive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConnectorCreateWorkQueue.
+const (
+	ConnectorCreateWorkQueueBulk ConnectorCreateWorkQueue = "bulk"
+	ConnectorCreateWorkQueueLive ConnectorCreateWorkQueue = "live"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorCreateWorkQueue enum.
+func (e ConnectorCreateWorkQueue) Valid() bool {
+	switch e {
+	case ConnectorCreateWorkQueueBulk:
+		return true
+	case ConnectorCreateWorkQueueLive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConnectorHealthState.
 const (
 	ConnectorHealthStateAccessError        ConnectorHealthState = "access_error"
@@ -1544,7 +1580,13 @@ type Connector struct {
 
 	// WebhookUrl Public address of the instance's webhook route, present when its kind declares the push mode and the deployment sets public_url. The kind's plugin registers it with the source.
 	WebhookUrl *string `json:"webhook_url,omitempty"`
+
+	// WorkQueue Workload class for scheduled acquisition; push deliveries stay live.
+	WorkQueue *ConnectorWorkQueue `json:"work_queue,omitempty"`
 }
+
+// ConnectorWorkQueue Workload class for scheduled acquisition; push deliveries stay live.
+type ConnectorWorkQueue string
 
 // ConnectorCreate defines model for ConnectorCreate.
 type ConnectorCreate struct {
@@ -1562,7 +1604,13 @@ type ConnectorCreate struct {
 	PushPolicy      *ConnectorPushPolicy `json:"push_policy,omitempty"`
 	Schedule        *ConnectorSchedule   `json:"schedule,omitempty"`
 	SourceNamespace string               `json:"source_namespace"`
+
+	// WorkQueue Workload class for scheduled acquisition and its documents. Push deliveries always use live.
+	WorkQueue *ConnectorCreateWorkQueue `json:"work_queue,omitempty"`
 }
+
+// ConnectorCreateWorkQueue Workload class for scheduled acquisition and its documents. Push deliveries always use live.
+type ConnectorCreateWorkQueue string
 
 // ConnectorError defines model for ConnectorError.
 type ConnectorError struct {
@@ -2633,6 +2681,21 @@ type QuarantinedVersion struct {
 
 // QuarantinedVersionStage The step it failed at, which a reprocess reruns. normalization - its normalizer failed or its route was removed, and it was published with its submitted input; ingestion - its segmentation through the ingestion plugin was refused or stopped.
 type QuarantinedVersionStage string
+
+// QueueBacklog defines model for QueueBacklog.
+type QueueBacklog struct {
+	Queues struct {
+		Bulk QueueStatus `json:"bulk"`
+		Live QueueStatus `json:"live"`
+	} `json:"queues"`
+}
+
+// QueueStatus defines model for QueueStatus.
+type QueueStatus struct {
+	InProgress              int64   `json:"in_progress"`
+	OldestWaitingAgeSeconds float64 `json:"oldest_waiting_age_seconds"`
+	Waiting                 int64   `json:"waiting"`
+}
 
 // Receipt Durable acceptance outcome, not workflow state. Availability is a separate authorized live read view; omitted before a linked version exists. Infrastructure retry never resolves a Receipt as failed.
 type Receipt struct {
@@ -4339,6 +4402,11 @@ type ClientInterface interface {
 	// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. Set from_stage to normalization to normalize its stored source Blob again before ingestion; omit it to retry the failed step. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and Corpus, the answer is 409 dry_run_required. The same key with another filter scope or restart stage is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
 	ReprocessQuarantine(ctx context.Context, body ReprocessQuarantineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetQueueBacklog performs a GET /v0/admin/queues (the `GetQueueBacklog` operationId) request.
+	//
+	// Installation-wide document backlog for live and bulk workers. Requires the operator grant queues:read and all-Corpora scope. Stable numeric queues.live.waiting and queues.bulk.waiting paths support external autoscalers. Counts come from PostgreSQL, including undispatched work, and exclude terminal work. Bearer authentication uses the configured API key.
+	GetQueueBacklog(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PromoteVectorSpaceWithBody performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -5259,6 +5327,21 @@ func (c *Client) ReprocessQuarantineWithBody(ctx context.Context, contentType st
 // Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. Set from_stage to normalization to normalize its stored source Blob again before ingestion; omit it to retry the failed step. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and Corpus, the answer is 409 dry_run_required. The same key with another filter scope or restart stage is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
 func (c *Client) ReprocessQuarantine(ctx context.Context, body ReprocessQuarantineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewReprocessQuarantineRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetQueueBacklog performs a GET /v0/admin/queues (the `GetQueueBacklog` operationId) request.
+//
+// Installation-wide document backlog for live and bulk workers. Requires the operator grant queues:read and all-Corpora scope. Stable numeric queues.live.waiting and queues.bulk.waiting paths support external autoscalers. Counts come from PostgreSQL, including undispatched work, and exclude terminal work. Bearer authentication uses the configured API key.
+func (c *Client) GetQueueBacklog(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetQueueBacklogRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -7762,6 +7845,33 @@ func NewReprocessQuarantineRequestWithBody(server string, contentType string, bo
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetQueueBacklogRequest constructs an http.Request for the GetQueueBacklog method
+func NewGetQueueBacklogRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/admin/queues")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -11638,6 +11748,13 @@ type ClientWithResponsesInterface interface {
 	// Rerun, with the Pipeline Plan active now, the step a Corpus's stuck Versions failed at, typically after a plugin was fixed and activated or a plan rolled back. A Version quarantined at normalization is normalized again, published with its new Manifest and processed; one quarantined at ingestion is segmented, embedded and indexed again. A Version that succeeds goes through the normal path, as for a first success. It becomes current if its Record still desires it, searchable, its alerts are evaluated, and the change feed announces it (record.materialized when its content changed, record.retrieval_ready, record.enrichment_available). A Version that fails again stays quarantined with its new reason. The scope is the Corpus's stuck Versions (see listQuarantinedVersions), kept by the optional filters, taken when the reprocess is accepted. Set from_stage to normalization to normalize its stored source Blob again before ingestion; omit it to retry the failed step. A dry run is required. dry_run true answers 200 with the count and records it under the idempotency key. The same body with dry_run false then accepts the reprocess as a queued Operation (202, Location). Without a dry run recorded under that key and Corpus, the answer is 409 dry_run_required. The same key with another filter scope or restart stage is 409 idempotency_conflict, and an accepted key replays its Operation. A Corpus whose previous reprocess has not finished is 409 reprocess_in_progress. The reprocess runs on the backfills' task queue at the deployment's backfill.rate, pinned to the plan active when it is accepted. It can be paused, resumed, canceled and rerun. Its counters are versions_in_scope, versions_recovered, versions_quarantined (failed again) and versions_skipped (with skipped_<reason>). Requires plugins:admin, on a key of the Corpus's Organization that grants the Corpus.
 	ReprocessQuarantineWithResponse(ctx context.Context, body ReprocessQuarantineJSONRequestBody, reqEditors ...RequestEditorFn) (*ReprocessQuarantineResponse, error)
 
+	// GetQueueBacklogWithResponse performs a GET /v0/admin/queues (the `GetQueueBacklog` operationId) request.
+	//
+	// Installation-wide document backlog for live and bulk workers. Requires the operator grant queues:read and all-Corpora scope. Stable numeric queues.live.waiting and queues.bulk.waiting paths support external autoscalers. Counts come from PostgreSQL, including undispatched work, and exclude terminal work. Bearer authentication uses the configured API key.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetQueueBacklogWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetQueueBacklogResponse, error)
+
 	// PromoteVectorSpaceWithBodyWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -13176,6 +13293,54 @@ func (r ReprocessQuarantineResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ReprocessQuarantineResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetQueueBacklogResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *QueueBacklog
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetQueueBacklogResponse) GetJSON200() *QueueBacklog {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetQueueBacklogResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetQueueBacklogResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetQueueBacklogResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetQueueBacklogResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetQueueBacklogResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -17153,6 +17318,19 @@ func (c *ClientWithResponses) ReprocessQuarantineWithResponse(ctx context.Contex
 	return ParseReprocessQuarantineResponse(rsp)
 }
 
+// GetQueueBacklogWithResponse performs a GET /v0/admin/queues (the `GetQueueBacklog` operationId) request.
+//
+// Installation-wide document backlog for live and bulk workers. Requires the operator grant queues:read and all-Corpora scope. Stable numeric queues.live.waiting and queues.bulk.waiting paths support external autoscalers. Counts come from PostgreSQL, including undispatched work, and exclude terminal work. Bearer authentication uses the configured API key.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetQueueBacklogWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetQueueBacklogResponse, error) {
+	rsp, err := c.GetQueueBacklog(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetQueueBacklogResponse(rsp)
+}
+
 // PromoteVectorSpaceWithBodyWithResponse performs a POST /v0/admin/spaces/{vector_space_id}/promote (the `PromoteVectorSpace` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -19144,6 +19322,39 @@ func ParseReprocessQuarantineResponse(rsp *http.Response) (*ReprocessQuarantineR
 			headers.Location = value
 		}
 		response.Headers202 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetQueueBacklogResponse parses an HTTP response from a GetQueueBacklogWithResponse call
+func ParseGetQueueBacklogResponse(rsp *http.Response) (*GetQueueBacklogResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetQueueBacklogResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest QueueBacklog
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
 	}
 
 	return response, nil

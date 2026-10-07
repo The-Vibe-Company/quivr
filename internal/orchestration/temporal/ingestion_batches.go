@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"go.opentelemetry.io/otel/trace"
 	"sync"
 	"time"
@@ -151,6 +152,10 @@ func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 }
 
 func processBatchedReceipt(ctx context.Context, steps Steps, pins Pinner, in content.Dispatch) error {
+	return workqueue.Track(ctx, in.Organization, "ingestion", in.ReceiptID, in.ReceiptID, func(ctx context.Context) error { return processReceipt(ctx, steps, pins, in) })
+}
+
+func processReceipt(ctx context.Context, steps Steps, pins Pinner, in content.Dispatch) error {
 	parent := trace.SpanContextFromContext(ctx)
 	ctx, span := telemetry.Start(telemetry.Restore(ctx, in.TraceContext), "ingestion.receipt", trace.WithLinks(trace.Link{SpanContext: parent}))
 	defer span.End()

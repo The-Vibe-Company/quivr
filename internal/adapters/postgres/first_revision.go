@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,14 +31,17 @@ func acceptFirstRevision(ctx context.Context, pool *pgxpool.Pool, org string, c 
  SELECT $1,id,$9,$10,$8,1,$7,convert_from($11::bytea,'UTF8')::jsonb,now(),nullif($12,''),coalesce(nullif($13,''),'text/plain') FROM record
  RETURNING record_id
 ), receipt AS (
- INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest)
- SELECT $1,$3,$14,$11::bytea,convert_from($11::bytea,'UTF8')::jsonb,$4,record_id,1,$9,$10 FROM revision RETURNING id
+ INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,work_queue)
+ SELECT $1,$3,$14,$11::bytea,convert_from($11::bytea,'UTF8')::jsonb,$4,record_id,1,$9,$10,$18 FROM revision RETURNING id
 ), outbox AS (
- INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context)
- SELECT $1,id,false,'infinity'::timestamptz,$17 FROM receipt RETURNING receipt_id
+ INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue)
+ SELECT $1,id,false,'infinity'::timestamptz,$17,$18 FROM receipt WHERE $18<>'bulk' RETURNING receipt_id
+), bulk_outbox AS (
+ INSERT INTO bulk_ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue)
+ SELECT $1,id,false,'infinity'::timestamptz,$17,$18 FROM receipt WHERE $18='bulk' RETURNING receipt_id
 ), positions AS (
  UPDATE organization_journals SET last_sequence=last_sequence+2
- WHERE organization=$1 AND EXISTS(SELECT 1 FROM outbox) RETURNING last_sequence
+ WHERE organization=$1 AND (EXISTS(SELECT 1 FROM outbox) OR EXISTS(SELECT 1 FROM bulk_outbox)) RETURNING last_sequence
 ), events AS (
  INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,trace_context)
  SELECT $1,p.last_sequence+e.delta,e.id,$4,e.kind,e.resource,e.resource_id,$17
@@ -45,7 +49,7 @@ func acceptFirstRevision(ctx context.Context, pool *pgxpool.Pool, org string, c 
    ($15::text,'receipt.pending','receipt',$3::text,-1),
    ($16::text,'record.accepted','record',$2::text,0)
  ) e(id,kind,resource,resource_id,delta)
-) SELECT EXISTS(SELECT 1 FROM record)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, canonical, content.Title(c), c.SourceMediaType, c.Key, eventID(pending), eventID(accepted), telemetry.Encode(ctx))
+) SELECT EXISTS(SELECT 1 FROM record)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, canonical, content.Title(c), c.SourceMediaType, c.Key, eventID(pending), eventID(accepted), telemetry.Encode(ctx), workqueue.Class(ctx))
 	results := pool.SendBatch(ctx, batch)
 	defer results.Close()
 	for range batch.Len() - 1 {

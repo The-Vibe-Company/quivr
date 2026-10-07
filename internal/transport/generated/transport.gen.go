@@ -141,6 +141,42 @@ func (e BuildVersionApiVersion) Valid() bool {
 	}
 }
 
+// Defines values for ConnectorWorkQueue.
+const (
+	ConnectorWorkQueueBulk ConnectorWorkQueue = "bulk"
+	ConnectorWorkQueueLive ConnectorWorkQueue = "live"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorWorkQueue enum.
+func (e ConnectorWorkQueue) Valid() bool {
+	switch e {
+	case ConnectorWorkQueueBulk:
+		return true
+	case ConnectorWorkQueueLive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConnectorCreateWorkQueue.
+const (
+	ConnectorCreateWorkQueueBulk ConnectorCreateWorkQueue = "bulk"
+	ConnectorCreateWorkQueueLive ConnectorCreateWorkQueue = "live"
+)
+
+// Valid indicates whether the value is a known member of the ConnectorCreateWorkQueue enum.
+func (e ConnectorCreateWorkQueue) Valid() bool {
+	switch e {
+	case ConnectorCreateWorkQueueBulk:
+		return true
+	case ConnectorCreateWorkQueueLive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConnectorHealthState.
 const (
 	ConnectorHealthStateAccessError        ConnectorHealthState = "access_error"
@@ -1544,7 +1580,13 @@ type Connector struct {
 
 	// WebhookUrl Public address of the instance's webhook route, present when its kind declares the push mode and the deployment sets public_url. The kind's plugin registers it with the source.
 	WebhookUrl *string `json:"webhook_url,omitempty"`
+
+	// WorkQueue Workload class for scheduled acquisition; push deliveries stay live.
+	WorkQueue *ConnectorWorkQueue `json:"work_queue,omitempty"`
 }
+
+// ConnectorWorkQueue Workload class for scheduled acquisition; push deliveries stay live.
+type ConnectorWorkQueue string
 
 // ConnectorCreate defines model for ConnectorCreate.
 type ConnectorCreate struct {
@@ -1562,7 +1604,13 @@ type ConnectorCreate struct {
 	PushPolicy      *ConnectorPushPolicy `json:"push_policy,omitempty"`
 	Schedule        *ConnectorSchedule   `json:"schedule,omitempty"`
 	SourceNamespace string               `json:"source_namespace"`
+
+	// WorkQueue Workload class for scheduled acquisition and its documents. Push deliveries always use live.
+	WorkQueue *ConnectorCreateWorkQueue `json:"work_queue,omitempty"`
 }
+
+// ConnectorCreateWorkQueue Workload class for scheduled acquisition and its documents. Push deliveries always use live.
+type ConnectorCreateWorkQueue string
 
 // ConnectorError defines model for ConnectorError.
 type ConnectorError struct {
@@ -2633,6 +2681,21 @@ type QuarantinedVersion struct {
 
 // QuarantinedVersionStage The step it failed at, which a reprocess reruns. normalization - its normalizer failed or its route was removed, and it was published with its submitted input; ingestion - its segmentation through the ingestion plugin was refused or stopped.
 type QuarantinedVersionStage string
+
+// QueueBacklog defines model for QueueBacklog.
+type QueueBacklog struct {
+	Queues struct {
+		Bulk QueueStatus `json:"bulk"`
+		Live QueueStatus `json:"live"`
+	} `json:"queues"`
+}
+
+// QueueStatus defines model for QueueStatus.
+type QueueStatus struct {
+	InProgress              int64   `json:"in_progress"`
+	OldestWaitingAgeSeconds float64 `json:"oldest_waiting_age_seconds"`
+	Waiting                 int64   `json:"waiting"`
+}
 
 // Receipt Durable acceptance outcome, not workflow state. Availability is a separate authorized live read view; omitted before a linked version exists. Infrastructure retry never resolves a Receipt as failed.
 type Receipt struct {
@@ -4210,6 +4273,9 @@ type ServerInterface interface {
 	// (POST /v0/admin/quarantine/reprocess)
 	ReprocessQuarantine(w http.ResponseWriter, r *http.Request)
 
+	// (GET /v0/admin/queues)
+	GetQueueBacklog(w http.ResponseWriter, r *http.Request)
+
 	// (POST /v0/admin/spaces/{vector_space_id}/promote)
 	PromoteVectorSpace(w http.ResponseWriter, r *http.Request, vectorSpaceId string)
 	// ListConnectorPushStats Count accepted and refused pushes per source instance
@@ -4613,6 +4679,17 @@ func (siw *ServerInterfaceWrapper) ReprocessQuarantine(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ReprocessQuarantine(w, r)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func (siw *ServerInterfaceWrapper) GetQueueBacklog(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetQueueBacklog(w, r)
 	}))
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
@@ -5640,6 +5717,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/plugins/plans", wrapper.ListPipelinePlans)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/backfills", wrapper.RequestBackfill)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/spaces/{vector_space_id}/promote", wrapper.PromoteVectorSpace)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/queues", wrapper.GetQueueBacklog)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/admin/quarantine", wrapper.ListQuarantinedVersions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/quarantine/reprocess", wrapper.ReprocessQuarantine)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/admin/subscriptions/evaluator-migrations", wrapper.MigrateSubscriptionEvaluators)
@@ -6441,6 +6519,54 @@ type ReprocessQuarantinedefaultJSONResponse struct {
 }
 
 func (response ReprocessQuarantinedefaultJSONResponse) VisitReprocessQuarantineResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetQueueBacklogRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+}
+
+type GetQueueBacklogResponseObject interface {
+	VisitGetQueueBacklogResponse(w http.ResponseWriter) error
+}
+
+// GetQueueBacklogResponseFunc writes a deferred response, including streams and plugin answers.
+type GetQueueBacklogResponseFunc func(http.ResponseWriter)
+
+func (response GetQueueBacklogResponseFunc) VisitGetQueueBacklogResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type GetQueueBacklog200JSONResponse QueueBacklog
+
+func (response GetQueueBacklog200JSONResponse) VisitGetQueueBacklogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetQueueBacklogdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetQueueBacklogdefaultJSONResponse) VisitGetQueueBacklogResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -10455,6 +10581,9 @@ type StrictServerInterface interface {
 	// (POST /v0/admin/quarantine/reprocess)
 	ReprocessQuarantine(ctx context.Context, request ReprocessQuarantineRequestObject) (ReprocessQuarantineResponseObject, error)
 
+	// (GET /v0/admin/queues)
+	GetQueueBacklog(ctx context.Context, request GetQueueBacklogRequestObject) (GetQueueBacklogResponseObject, error)
+
 	// (POST /v0/admin/spaces/{vector_space_id}/promote)
 	PromoteVectorSpace(ctx context.Context, request PromoteVectorSpaceRequestObject) (PromoteVectorSpaceResponseObject, error)
 	// ListConnectorPushStats Count accepted and refused pushes per source instance
@@ -11132,6 +11261,33 @@ func (sh *strictHandler) ReprocessQuarantine(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ReprocessQuarantineResponseObject); ok {
 		if err := validResponse.VisitReprocessQuarantineResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetQueueBacklog operation middleware
+func (sh *strictHandler) GetQueueBacklog(w http.ResponseWriter, r *http.Request) {
+	var request GetQueueBacklogRequestObject
+
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetQueueBacklog(ctx, request.(GetQueueBacklogRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetQueueBacklog")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetQueueBacklogResponseObject); ok {
+		if err := validResponse.VisitGetQueueBacklogResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

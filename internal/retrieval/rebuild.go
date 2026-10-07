@@ -3,6 +3,7 @@ package retrieval
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"slices"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -164,6 +165,10 @@ func (r Rebuilder) stop(ctx context.Context, org, operationID string) (bool, err
 }
 
 func (r Rebuilder) cover(ctx context.Context, org string, target RebuildTarget, c RebuildCandidate) error {
+	return workqueue.Track(ctx, org, "operation", target.Operation.ID, c.VersionID, func(ctx context.Context) error { return r.coverDocument(ctx, org, target, c) })
+}
+
+func (r Rebuilder) coverDocument(ctx context.Context, org string, target RebuildTarget, c RebuildCandidate) error {
 	corpusID := target.Operation.CorpusID
 	v, err := r.Content.TrustedVersion(ctx, org, corpusID, c.RecordID, c.VersionID)
 	if errors.Is(err, corpus.ErrNotFound) {

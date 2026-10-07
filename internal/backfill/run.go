@@ -3,6 +3,7 @@ package backfill
 import (
 	"context"
 	"errors"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -208,27 +209,29 @@ func (b Backfiller) Step(ctx context.Context, org, id string) (Progress, error) 
 		turn, next := previous, make(chan struct{})
 		previous = next
 		group.Go(func() error {
-			if err := work.Err(); err != nil {
-				return err
-			}
-			commit, err := b.prepare(work, org, t, c)
-			if err != nil {
-				return err
-			}
-			// Preparation may finish out of order, but the checkpoint is a
-			// high-water mark. Commit only after every preceding Version.
-			select {
-			case <-work.Done():
-				return work.Err()
-			case <-turn:
-			}
-			if err := commit(work); err != nil {
-				return err
-			}
-			// The turn chain serializes this counter as well as checkpoints.
-			completed++
-			close(next)
-			return nil
+			return workqueue.Track(work, org, "operation", id, c.VersionID, func(work context.Context) error {
+				if err := work.Err(); err != nil {
+					return err
+				}
+				commit, err := b.prepare(work, org, t, c)
+				if err != nil {
+					return err
+				}
+				// Preparation may finish out of order, but the checkpoint is a
+				// high-water mark. Commit only after every preceding Version.
+				select {
+				case <-work.Done():
+					return work.Err()
+				case <-turn:
+				}
+				if err := commit(work); err != nil {
+					return err
+				}
+				// The turn chain serializes this counter as well as checkpoints.
+				completed++
+				close(next)
+				return nil
+			})
 		})
 	}
 	// Join all effects before retrying, failing or returning a pause. The

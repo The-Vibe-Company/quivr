@@ -7,6 +7,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/lifecycle"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 
 	"go.temporal.io/sdk/activity"
 	sdktemporal "go.temporal.io/sdk/temporal"
@@ -43,6 +44,7 @@ type Connectors struct {
 
 // AcquireInput identifies one acquisition run; it never carries a secret.
 type AcquireInput struct {
+	WorkQueue    string `json:",omitempty"`
 	Organization string
 	ConnectorID  string
 	Run          int64
@@ -91,6 +93,9 @@ func acquireWorkflowFn(ctx workflow.Context, in AcquireInput) error {
 func registerConnectors(w worker.Registry, c *Connectors, pins Pinner) {
 	w.RegisterWorkflowWithOptions(acquireWorkflowFn, workflow.RegisterOptions{Name: acquireWorkflow})
 	acquire := func(ctx context.Context, in AcquireInput, legacy bool) error {
+		if workqueue.Valid(in.WorkQueue) {
+			ctx = workqueue.WithClass(ctx, in.WorkQueue)
+		}
 		return heartbeating(ctx, stepHeartbeatTimeout/3, func() error {
 			// The run's attempts resolve its connector kind in the plan its first
 			// attempt pinned; the run's end releases it.

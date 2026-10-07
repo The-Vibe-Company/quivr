@@ -29,13 +29,21 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 			c.GenerationRole = content.SpaceServed
 		}
 		// Owner presence preserves independent evaluation routing without a
-		// segment count. Legacy engine spaces keep generation routing.
+		// segment count. Lateral point lookups prevent stale planner statistics
+		// from rescanning every projection for each Record. Legacy engine spaces
+		// keep generation routing.
 		if c.OwnerPluginID != "" {
 			var present bool
 			err = database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS(
  SELECT 1 FROM projection_coverage pc
- JOIN record_versions v ON (v.organization,v.id)=(pc.organization,pc.version_id)
- JOIN records r ON (r.organization,r.id,r.current_version_id)=(v.organization,v.record_id,v.id)
+ JOIN LATERAL (
+  SELECT v.* FROM record_versions v
+  WHERE (v.organization,v.id)=(pc.organization,pc.version_id) OFFSET 0
+ ) v ON true
+ JOIN LATERAL (
+  SELECT r.* FROM records r
+  WHERE (r.organization,r.id)=(v.organization,v.record_id) OFFSET 0
+ ) r ON r.current_version_id=v.id
  WHERE pc.organization=$1 AND pc.generation_id=$3 AND pc.plugin_id=$4 AND pc.role='served'
  AND r.corpus_id=$2 AND `+eligibleVersionSQL+`)`, org, corpusID, g.ID, c.OwnerPluginID).Scan(&present)
 			if err != nil {

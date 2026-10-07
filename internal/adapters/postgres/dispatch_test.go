@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -157,7 +158,7 @@ func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
 	pool := scratchDatabase(t, ctx)
 	prior := embedded(t, regexp.MustCompile(".*"))
 	for name := range prior {
-		if strings.HasSuffix(name, "_ingestion_dispatch_batches.sql") || strings.HasSuffix(name, "_ingestion_workflow_batches.sql") {
+		if strings.HasSuffix(name, "_ingestion_dispatch_batches.sql") || strings.HasSuffix(name, "_ingestion_workflow_batches.sql") || strings.HasSuffix(name, "_work_queues.sql") {
 			delete(prior, name)
 		}
 	}
@@ -269,5 +270,58 @@ func TestAcceptancePersistsTraceAcrossDispatcherRestart(t *testing.T) {
 	restored := telemetry.Capture(telemetry.Restore(context.Background(), claimed[0].Receipts[0].TraceContext))
 	if restored.Traceparent != "00-11111111111111111111111111111111-2222222222222222-01" || restored.RequestID != "caller-request-123" || claimed[0].Receipts[0].ReceiptID != expected[0].ReceiptID {
 		t.Fatalf("durable trace lost: %+v", restored)
+	}
+}
+
+// A live dispatcher can claim later arrivals without scanning or starting an
+// older bulk backlog. Persisted retry batches retain their original class.
+func TestIngestionQueueClaimsIsolateLiveFromBulk(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := contentStores(pool)
+	bulk := acceptDispatchBacklog(t, workqueue.WithClass(ctx, "bulk"), store, 64)
+	// The helper's unique request keys must not replay the older bulk receipts.
+	liveCtx := workqueue.WithClass(ctx, "live")
+	scope := corpus.Scope{Organization: "queue-live", Actions: []string{"corpora:write", "content:write"}, Corpora: []string{"*"}}
+	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "live", Name: "Live"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := (content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store}).Accept(liveCtx, scope, content.Command{Key: "live", Source: content.Source{CorpusID: c.ID, Namespace: "tests", RecordKey: "live"}, Content: content.Text{Kind: "text", Text: "Live receipt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batches, err := store.ClaimIngestionBatches(liveCtx, 8)
+	if err != nil || len(batches) != 1 || batches[0].WorkQueue != "live" || len(batches[0].Receipts) != 1 || batches[0].Receipts[0].ReceiptID != receipt.ID {
+		t.Fatalf("live behind bulk: %+v %v", batches, err)
+	}
+	bulkBatches, err := store.ClaimIngestionBatches(workqueue.WithClass(ctx, "bulk"), 8)
+	if err != nil || len(bulkBatches) != 2 {
+		t.Fatalf("bulk batches: %+v %v", bulkBatches, err)
+	}
+	for i, b := range bulkBatches {
+		if b.WorkQueue != "bulk" || !reflect.DeepEqual(b.Receipts, bulk[i*32:(i+1)*32]) {
+			t.Fatalf("mixed class batch: %+v", b)
+		}
+	}
+	for _, batch := range bulkBatches {
+		if err = store.IngestionBatchDispatched(ctx, batch.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	remaining, err := store.ClaimIngestionBatches(workqueue.WithClass(ctx, workqueue.Bulk), 8)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("acknowledged bulk was reclaimed: %+v %v", remaining, err)
+	}
+	if _, err = pool.Exec(ctx, "UPDATE ingestion_batches SET lease_until='-infinity'"); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := store.ClaimIngestionBatches(liveCtx, 1)
+	if err != nil || !reflect.DeepEqual(retried, batches) {
+		t.Fatalf("class changed on lost acknowledgement: %+v %v", retried, err)
 	}
 }

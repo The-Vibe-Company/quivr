@@ -44,10 +44,12 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Config struct {
+	Worker    workqueue.Config `json:"worker"`
 	TLS       TLSConfig        `json:"tls"`
 	Telemetry telemetry.Config `json:"telemetry"`
 	// TEIURL encodes queries for generations built before the core.ingest
@@ -256,6 +258,10 @@ func Run(command string, args ...string) error {
 		}
 	}()
 	slog.Debug("debug logging enabled", "event", "quivr.debug")
+	workerSettings, err := cfg.Worker.Resolve()
+	if err != nil {
+		return invalidConfig("worker", "invalid worker queues or slots", err)
+	}
 	tlsSettings, err := cfg.validateTLS()
 	if err != nil {
 		return err
@@ -570,6 +576,33 @@ func Run(command string, args ...string) error {
 		}
 		return err
 	}
+	queueSnapshots := postgres.QueueSnapshots{Pool: pool}
+	loops.Go(func(ctx context.Context) {
+		delay := time.Second
+		failed := false
+		for {
+			refresh, cancel := context.WithTimeout(ctx, 30*time.Second)
+			err := queueSnapshots.Refresh(refresh)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				if !failed {
+					slog.Warn("queue backlog refresh unavailable")
+				}
+				failed = true
+				delay = min(delay*2, 15*time.Second)
+			} else {
+				failed = false
+				delay = time.Second
+			}
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+	})
 	// The registry checks registered plugins with the Contract Runner (api)
 	// and records activations with the spaces they register, refusing one
 	// that breaks a startup rule of this engine.
@@ -756,12 +789,12 @@ func Run(command string, args ...string) error {
 			evaluationMetrics.Write(w)
 			recorder.WriteMetrics(w)
 		}
-		probes.Handle("GET /metrics", buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)))
+		probes.Handle("GET /metrics", queueMetrics(buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)), queueSnapshots))
 		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators.Load().Served))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
-		probes.Handle("GET /metrics", buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)))
+		probes.Handle("GET /metrics", queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)), queueSnapshots))
 	}
 	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes), ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
@@ -770,8 +803,8 @@ func Run(command string, args ...string) error {
 		loops.Go(func(ctx context.Context) { pluginRegistry.RunChecks(ctx, 5*time.Second, 2*time.Minute) })
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
-		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore),
-				httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(spaceSnapshots),
+		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithQueues(queueSnapshots), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore),
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(spaceSnapshots),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators backfill past Versions and promote vector spaces (plugins:admin).
@@ -790,17 +823,19 @@ func Run(command string, args ...string) error {
 		}
 		servers = append(servers, &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384})
 	} else {
-		// Monitoring evaluation keeps its durable state in PostgreSQL and runs
-		// independently of Temporal availability.
-		loops.Go(func(ctx context.Context) {
-			evaluation := postgres.EvaluationStore{Pool: pool}
-			monitoring.Engine{Store: evaluation, Versions: versionParts{content: contents, metadata: evaluation, vectors: baseline}, Evaluators: evaluators, Workers: 4, Lease: time.Minute, Metrics: evaluationMetrics, Matched: recorder.Matched}.Run(ctx)
-		})
-		// Webhook delivery is a separate PostgreSQL-leased loop: admission and
-		// outcome facts commit around, never inside, the network attempt.
-		loops.Go(func(ctx context.Context) {
-			monitoring.Deliverer{Store: deliveryStore, Destinations: cfg.Destinations, Workers: 2, Lease: time.Minute, Timeout: deliveryTimeout, Retry: retryPolicy, Metrics: deliveryMetrics, AllowPrivateAddresses: cfg.Delivery.AllowPrivateDestinations}.Run(ctx)
-		})
+		if workerSettings.Serves(workqueue.Live) {
+			// Monitoring evaluation keeps its durable state in PostgreSQL and runs
+			// independently of Temporal availability.
+			loops.Go(func(ctx context.Context) {
+				evaluation := postgres.EvaluationStore{Pool: pool}
+				monitoring.Engine{Store: evaluation, Versions: versionParts{content: contents, metadata: evaluation, vectors: baseline}, Evaluators: evaluators, Workers: 4, Lease: time.Minute, Metrics: evaluationMetrics, Matched: recorder.Matched}.Run(workqueue.WithTracker(ctx, postgres.QueueTracker{Pool: pool}))
+			})
+			// Webhook delivery is a separate PostgreSQL-leased loop: admission and
+			// outcome facts commit around, never inside, the network attempt.
+			loops.Go(func(ctx context.Context) {
+				monitoring.Deliverer{Store: deliveryStore, Destinations: cfg.Destinations, Workers: 2, Lease: time.Minute, Timeout: deliveryTimeout, Retry: retryPolicy, Metrics: deliveryMetrics, AllowPrivateAddresses: cfg.Delivery.AllowPrivateDestinations}.Run(ctx)
+			})
+		}
 		// The change-journal prune is a bounded PostgreSQL loop beside
 		// evaluation and delivery; its watermark keeps cursor expiry exact.
 		loops.Go(func(ctx context.Context) {
@@ -816,7 +851,7 @@ func Run(command string, args ...string) error {
 				rt, err := orchestration.Start(ctx, cfg.TemporalAddress, processor, rebuilder, struct {
 					orchestration.ReceiptDispatchStore
 					orchestration.OperationDispatchStore
-				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner, cfg.IngestionEvaluationConcurrency, tlsSettings.temporal, orchestration.RuntimeOptions{ShutdownGrace: grace})
+				}{materialization, operationStore}, acquisition, backfiller, reprocessor, workPinner, cfg.IngestionEvaluationConcurrency, tlsSettings.temporal, orchestration.RuntimeOptions{ShutdownGrace: grace, Queues: workerSettings, Tracker: postgres.QueueTracker{Pool: pool}})
 				if err == nil {
 					runtime.Store(rt)
 					<-ctx.Done()
