@@ -214,7 +214,7 @@ func backlogBackfillScope() string {
 		"$3", "o.target_generation_id",
 		"$2", "o.corpus_id",
 		"$1", "o.organization",
-	).Replace(backfillScopeSQL)
+	).Replace(backfillScopeSQL("AND v.id>$11"))
 }
 
 func queueBacklogSQL() string {
