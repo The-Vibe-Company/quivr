@@ -27,11 +27,8 @@ func BootstrapDatabase(ctx context.Context, pool *pgxpool.Pool, spaces []content
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	if err := postgres.EnsureIndexes(ctx, pool); err != nil {
-		return fmt.Errorf("concurrent index setup: %w", err)
-	}
-	// Index builds get a longer budget, while registry/default-generation work
-	// retains its bounded startup deadline, including advisory-lock waits.
+	// Optional performance indexes are maintained by the API and worker after
+	// startup. Required registry/default-generation work keeps its own budget.
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	// Once a Pipeline Plan is active, api and worker register the spaces of
