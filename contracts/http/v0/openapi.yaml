@@ -6485,12 +6485,18 @@ components:
         segments:
           type: integer
           minimum: 0
-          description: Current segments the generation projects; a space whose coverage equals it holds
-            a vector for every one.
+          description: Background snapshot of segments the generation projects; zero before coverage is known. Counts may be stale.
         items:
           type: array
           items:
             $ref: '#/components/schemas/VectorSpace'
+        coverage_unknown:
+          type: boolean
+          description: True until a background coverage snapshot completes; counts are placeholders.
+        coverage_age_ms:
+          type: integer
+          minimum: 0
+          description: Age of the background coverage snapshot. Counts may be stale during refresh or dependency failure.
       required:
       - projection_generation_id
       - segments
@@ -6559,11 +6565,18 @@ components:
             total_segments:
               type: integer
               minimum: 0
-              description: Current segments in this plugin's own projection; different plugins may cut the same Version differently.
+              description: Snapshot segments in this plugin's own projection; different plugins may cut the same Version differently.
             versions_covered:
               type: integer
               minimum: 0
-              description: Current eligible Versions whose entire projection has vectors in this space.
+              description: Snapshot eligible Versions whose entire projection has vectors in this space.
+            unknown:
+              type: boolean
+              description: True until a background snapshot completes; counts are placeholders.
+            age_ms:
+              type: integer
+              minimum: 0
+              description: Age of this space's coverage snapshot. Coverage is informational and may be stale.
           required:
           - segments
       required:

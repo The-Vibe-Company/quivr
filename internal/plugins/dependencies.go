@@ -47,6 +47,26 @@ func (m *Manifest) SupportsSearchBudget() bool {
 	return true
 }
 
+// SupportsCoverageSnapshots requires the declared range to exclude older
+// implementations whose request schemas reject snapshot metadata.
+func (m *Manifest) SupportsCoverageSnapshots() bool {
+	r, err := ParseRange(m.Compatibility.PluginAPI)
+	if err != nil {
+		return false
+	}
+	version, ok := NegotiatePluginAPI(r)
+	if !ok || !ResolveAPI(version).Speaks(FeatureCoverageSnapshots) {
+		return false
+	}
+	for _, version := range SupportedPluginAPIVersions {
+		v, _ := ParseVersion(version)
+		if r.Contains(v) && !ResolveAPI(version).Speaks(FeatureCoverageSnapshots) {
+			return false
+		}
+	}
+	return true
+}
+
 func dependencyIssues(pins []*Pin) []Issue {
 	byID := map[string]*Pin{}
 	for _, p := range pins {

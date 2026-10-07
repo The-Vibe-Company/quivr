@@ -242,8 +242,10 @@ type SpaceOwner struct {
 
 // SpaceCoverage counts current segments with a vector in a space.
 type SpaceCoverage struct {
-	Segments int64 `json:"segments"`
-	Total    int64 `json:"total"`
+	Segments int64  `json:"segments"`
+	Total    int64  `json:"total"`
+	Unknown  bool   `json:"unknown,omitempty"`
+	AgeMS    *int64 `json:"age_ms,omitempty"`
 }
 
 // SearchSpace is a vector space a search may name.

@@ -68,7 +68,7 @@ def verify(stack):
             cfg = json.loads(text)
             others = [p for p in cfg.get('plugins', []) if not p['manifest'].endswith('/core-retrieve/quivr-plugin.yaml')]
             cfg['plugins'] = others + pins
-            cfg['retrieval'] = {'profiles': {'default': 'example.fusion_retriever/default', 'deep': 'example.fusion_retriever/deep',
+            cfg['retrieval'] = {**cfg.get('retrieval', {}), 'profiles': {'default': 'example.fusion_retriever/default', 'deep': 'example.fusion_retriever/deep',
                                             'first': 'quivr-test.first_retriever/default', 'second': 'quivr-test.second_retriever/default'}}
             path = stack.directory / name
             path.write_text(json.dumps(cfg))

@@ -200,6 +200,13 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 		}
 		phase := time.Now()
 		request := session.Request()
+		if !m.SupportsCoverageSnapshots() {
+			request.Spaces = slices.Clone(request.Spaces)
+			for i := range request.Spaces {
+				request.Spaces[i].Coverage.Unknown = false
+				request.Spaces[i].Coverage.AgeMS = nil
+			}
+		}
 		if m.SupportsSearchBudget() {
 			deadline, _ := ctx.Deadline()
 			request.Budget = &plugins.SearchBudget{RemainingTimeMS: int(max(0, time.Until(deadline).Milliseconds())), RemainingCostCents: remainingCost(frames)}
@@ -334,7 +341,7 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) (
 					owner = plugins.SpaceOwner{Kind: "plugin", PluginID: c.OwnerPluginID, PluginVersion: c.OwnerPluginVersion}
 				}
 				out = append(out, plugins.SearchSpace{ID: c.ID, Owner: owner, Model: c.Model, Dimensions: c.VectorSpace.Dimensions, Metric: c.Metric,
-					Indexes: nonNil(c.Indexes), QueryModalities: nonNil(c.QueryModalities), Role: c.GenerationRole, Coverage: plugins.SpaceCoverage{Segments: c.Segments, Total: ownerTotal(c, total)}})
+					Indexes: nonNil(c.Indexes), QueryModalities: nonNil(c.QueryModalities), Role: c.GenerationRole, Coverage: plugins.SpaceCoverage{Segments: c.Segments, Total: ownerTotal(c, total), Unknown: c.CoverageUnknown, AgeMS: c.CoverageAgeMS}})
 			}
 			continue
 		}
@@ -350,6 +357,10 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route) (
 				}
 				out[j].Coverage.Segments += c.Segments
 				out[j].Coverage.Total += ownerTotal(c, total)
+				out[j].Coverage.Unknown = out[j].Coverage.Unknown || c.CoverageUnknown
+				if c.CoverageAgeMS != nil && (out[j].Coverage.AgeMS == nil || *c.CoverageAgeMS > *out[j].Coverage.AgeMS) {
+					out[j].Coverage.AgeMS = c.CoverageAgeMS
+				}
 			}
 		}
 	}
