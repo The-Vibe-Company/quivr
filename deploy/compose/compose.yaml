@@ -46,7 +46,7 @@ services:
       driver: json-file
       options: {max-size: 1m, max-file: '3'}
   weaviate:
-    image: cr.weaviate.io/semitechnologies/weaviate:1.37.15@sha256:cede92f9f43f9b4be25a9f453e756173bbe171d2e88210a0e5b7ab72e8b96d96
+    image: cr.weaviate.io/semitechnologies/weaviate:1.39.10@sha256:de371bb2e07604636915581d784ce182303f0046376a3dd23822936fa10acc56
     environment:
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
       AUTOSCHEMA_ENABLED: 'false'
