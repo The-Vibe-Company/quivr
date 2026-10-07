@@ -335,6 +335,9 @@ func (s ServingProjectionStore) coverServingProjectionAttempt(ctx context.Contex
 	if err = queueIngestionEvaluations(ctx, tx, j.Organization, j.RecordID, j.VersionID, g.ID, j.PlanID, j.PluginID); err != nil {
 		return err
 	}
+	if err = observeQueueRecords(ctx, tx, []string{j.Organization}, []string{j.RecordID}); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 

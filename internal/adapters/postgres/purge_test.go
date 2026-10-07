@@ -16,9 +16,7 @@ import (
 )
 
 // notice records every dead item in the shared adapter database.
-func notice(t *testing.T, ctx context.Context, store interface {
-	NoticePurges(context.Context, int) (int, error)
-}) {
+func notice(t *testing.T, ctx context.Context, store fixtureContentStores) {
 	t.Helper()
 	for {
 		n, err := store.NoticePurges(ctx, 1000)
@@ -26,7 +24,17 @@ func notice(t *testing.T, ctx context.Context, store interface {
 			t.Fatal(err)
 		}
 		if n == 0 {
-			return
+			// Zero notices can mean a live repair batch. Finish the durable
+			// keyset cycle so older-writer fences behind its cursor are seen.
+			var drained bool
+			if err := store.Pool.QueryRow(ctx, `SELECT initialized AND organization='' AND segmentation_id=''
+ AND NOT EXISTS(SELECT FROM projection_purge_candidates)
+FROM projection_purge_bootstrap WHERE singleton`).Scan(&drained); err != nil {
+				t.Fatal(err)
+			}
+			if drained {
+				return
+			}
 		}
 	}
 }
@@ -277,6 +285,42 @@ func TestPurgeSelectsOnlyDeadVersionsAndSurvivesRevert(t *testing.T) {
 	}
 	if n := f.count(`SELECT count(*) FROM record_versions WHERE organization=$1 AND record_id=$2`, f.org, record); n != 3 {
 		t.Fatalf("Versions of r: %d, want 3", n)
+	}
+
+	// Discovery can consume an obsolete Version before its first segmentation
+	// lands. A later segmentation must enqueue it again, even behind the
+	// bootstrap cursor, and tombstone-only fences must also create candidates.
+	lateCommand := correctionCommand(f.corpusID, "late", "late-1", "Late text")
+	lateReceipt, err := f.contents.Accept(ctx, f.scope, lateCommand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	late, _, err := f.store.Work(ctx, f.org, lateReceipt.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.store.Publish(ctx, late, publication(content.Blob{Key: "fixture/late-1", SHA256: "late-text-" + f.run, Size: 9}, content.Blob{Key: "fixture/late-manifest", SHA256: "late-manifest-" + f.run, Size: 2})); err != nil {
+		t.Fatal(err)
+	}
+	f.publish("late", "late-2", "Replacement text")
+	notice(t, ctx, f.store)
+	if got := noticed(t, ctx, f.pool, f.org); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("unsegmented superseded Version was noticed: %v, want %v", got, want)
+	}
+	lateVersion := content.Version{ID: late.VersionID, RecordID: late.RecordID, Manifest: content.ManifestFor(lateCommand)}
+	if err = f.contents.SaveSegmentation(ctx, f.org, lateVersion, wholeBodySegmentation(f.org, lateVersion)); err != nil {
+		t.Fatal(err)
+	}
+	tombstoneRecord, tombstoneVersion := f.publish("tombstone", "tombstone-1", "Tombstone text")
+	notice(t, ctx, f.store) // Consume the live candidate before its fence changes.
+	if _, err = f.pool.Exec(ctx, `INSERT INTO tombstones(organization,record_id) VALUES($1,$2)`, f.org, tombstoneRecord); err != nil {
+		t.Fatal(err)
+	}
+	notice(t, ctx, f.store)
+	want = append(want, "version:::"+late.VersionID, "version:::"+tombstoneVersion)
+	sort.Strings(want)
+	if got := noticed(t, ctx, f.pool, f.org); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("late segmentation and tombstone candidates = %v, want %v", got, want)
 	}
 }
 

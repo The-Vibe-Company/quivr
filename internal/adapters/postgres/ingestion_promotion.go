@@ -223,6 +223,9 @@ func updatePinnedVersion(ctx context.Context, pool *pgxpool.Pool, org, id, sql s
 			return err
 		}
 	}
+	if err = observeQueueVersion(ctx, tx, org, id); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 

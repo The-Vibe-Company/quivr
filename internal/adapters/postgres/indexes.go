@@ -20,6 +20,13 @@ var concurrentIndexes = []struct {
 	Predicate   string
 }{
 	{Name: "segments_by_segmentation", Table: "segments", Columns: []string{"organization", "segmentation_id"}},
+	{Name: "queue_enrichment_pending", Table: "queue_enrichment_records", Columns: []string{"organization", "version_id"}, Predicate: "pending"},
+	{Name: "queue_versions_baseline", Table: "record_versions", Columns: []string{"organization", "id"}, Predicate: "((NOT baseline_ready) AND (NOT quarantined) AND (processing = ANY (ARRAY['queued'::text, 'running'::text, 'retrying'::text])))"},
+	{Name: "queue_receipts_pending", Table: "ingestion_receipts", Columns: []string{"organization", "id"}, Predicate: "((route_family = 'ingestion'::text) AND (state = 'pending'::text))"},
+	{Name: "queue_evaluations_pending", Table: "ingestion_evaluations", Columns: []string{"organization", "version_id"}, Predicate: "(state = 'queued'::text)"},
+	{Name: "queue_serving_pending", Table: "serving_projections", Columns: []string{"organization", "version_id"}, Predicate: "(state = 'queued'::text)"},
+	{Name: "queue_operations_active", Table: "operations", Columns: []string{"organization", "corpus_id"}, Predicate: "(state = ANY (ARRAY['queued'::text, 'running'::text]))"},
+	{Name: "accepted_revisions_version_lookup", Table: "accepted_revisions", Columns: []string{"organization", "version_id"}},
 }
 
 // Index setup errors let the CLI report operator actions without logging raw
