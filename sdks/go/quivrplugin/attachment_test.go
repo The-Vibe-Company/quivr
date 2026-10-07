@@ -281,3 +281,29 @@ func TestUploadBurstsReuseConnections(t *testing.T) {
 		t.Fatalf("stored=%d source reads=%d", len(store.stored), src.opens)
 	}
 }
+
+type uploadRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f uploadRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// A host's default tracing/TLS/proxy wrapper must survive SDK construction and
+// actually carry the granted PUT, rather than panic or silently disappear.
+func TestUploadsPreserveACustomDefaultTransport(t *testing.T) {
+	previousDefault, previousClient := http.DefaultTransport, uploadClient
+	defer func() { http.DefaultTransport, uploadClient = previousDefault, previousClient }()
+	var calls atomic.Int32
+	http.DefaultTransport = uploadRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return previousDefault.RoundTrip(r)
+	})
+	uploadClient = newAttachmentUploadClient()
+	store := &storage{stored: map[string]string{}}
+	server := httptest.NewServer(store)
+	defer server.Close()
+	src := &mailSource{bytes: map[string]string{"custom": "sample bytes"}}
+	h, _ := mailPlugin(t, src)
+	status, _, raw := call(h, uploadRoute, attachmentBody("custom", "2026-09-29T09:00:00Z", grantFor(server.URL+"/custom", "sample bytes")))
+	if status != 200 || calls.Load() != 1 || store.stored["/custom"] != "sample bytes" {
+		t.Fatalf("custom transport PUT: status=%d calls=%d stored=%q response=%s", status, calls.Load(), store.stored["/custom"], raw)
+	}
+}

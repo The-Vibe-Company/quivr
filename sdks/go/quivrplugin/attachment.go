@@ -292,12 +292,18 @@ func (p *Plugin) serveDescribeAttachment(w http.ResponseWriter, r *http.Request)
 // keeps only two idle connections per host, reconnecting for most later PUTs.
 // This is an idle-pool bound, not a limit on active uploads. Grants never follow
 // redirects and never share the engine's authenticated plugin-call transport.
-var uploadClient = func() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.MaxIdleConnsPerHost = 32
-	transport.MaxIdleConns = 128
+var uploadClient = newAttachmentUploadClient()
+
+func newAttachmentUploadClient() *http.Client {
+	transport := http.DefaultTransport
+	if defaults, ok := transport.(*http.Transport); ok {
+		owned := defaults.Clone()
+		owned.MaxIdleConnsPerHost = 32
+		owned.MaxIdleConns = 128
+		transport = owned
+	}
 	return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-}()
+}
 
 func (p *Plugin) serveUploadAttachment(w http.ResponseWriter, r *http.Request) {
 	req, impl, redact, ctx, cancel := p.attachmentHandler(w, r, "plugins/v0/connector-upload-attachment-request.schema.json")

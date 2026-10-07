@@ -114,7 +114,7 @@ Its diagnostics report:
 | `acquisition` | Engine timing for this committed page; fields below |
 
 `acquisition.items` counts page members. `fetch_ms` is elapsed fetch time,
-including source admission. `grant_ms`, `upload_ms`, `verify_ms`, `accept_ms`,
+including the engine's lease/archive admission and its release. `grant_ms`, `upload_ms`, `verify_ms`, `accept_ms`,
 `receipt_ms` and `describe_ms` sum time across workers for upload grants,
 plugin uploads, stored-byte verification, durable submission, replay checks
 and attachment descriptions. These sums overlap when submissions run in
@@ -125,12 +125,14 @@ time since the run began acquiring pages. Times are milliseconds.
 
 `more` reports whether acquisition can continue. `stop_reason` is empty for
 an intermediate page, or `source_drained`, `page_limit`, `soft_limit` or
-`attachment_budget` for the last page. Runs remain bounded to ten pages, two
+`attachment_budget` for the last page. Failed or interrupted page logs use
+`incomplete`; intentionally skipped or inactive runs emit no page diagnostic. Runs remain bounded to ten pages, two
 minutes before starting another page, and a 200 MiB attachment budget.
 
 `continuation: true` means the engine requests another durable leased run
 immediately after a successful bounded run. The final page must contain items,
-report `more: true`, and advance the checkpoint from the run's starting value.
+report `more: true`, and advance the checkpoint from both this page's input and the run's starting
+value.
 Replayed items can advance this cursor without creating new versions. Empty
 pages, unchanged checkpoints, source exhaustion, errors, notices and permanent
 item rejections keep the configured interval; `RetryAfter` and healthy push
@@ -144,7 +146,9 @@ Logs and successive committed pages show any additional dispatch delay.
 
 Diagnostics capture timing before checkpoint persistence. The `connector
 acquisition page` log includes that persistence in elapsed page/run time and
-reports a soft limit crossed during the commit. An incomplete page is logged
+reports a soft limit crossed during the commit. That crossing can also change
+`continuation` from false in the stored snapshot to true in the committed log;
+use the log's post-commit decision when classifying how the run ended. An incomplete page is logged
 without advancing its checkpoint. If kind diagnostics are omitted or null,
 already use `acquisition`, or adding timing would exceed the 16 KiB diagnostics
 bound, the engine preserves their existing behavior and reports timings in the

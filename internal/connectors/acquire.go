@@ -281,9 +281,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		}
 	}()
 	for i := 0; i < pages; i++ {
-		activeTiming = &pageTimings{started: a.now()}
-		activePage, activeMore = i, false
-		rc.timing = activeTiming
+		pageStarted := a.now()
 		release, active, err := a.beginPoll(ctx, org, id, run)
 		if err != nil {
 			return err
@@ -291,6 +289,9 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		if !active {
 			return nil
 		}
+		activeTiming = &pageTimings{started: pageStarted}
+		activePage, activeMore = i, false
+		rc.timing = activeTiming
 		page, err := func() (Page, error) {
 			defer release()
 			return connector.Fetch(ctx, FetchRequest{Organization: org, InstanceID: id, CorpusID: target.CorpusID, Namespace: target.Namespace, WebhookURL: receiverWebhookURL(connector, a.PublicURL, id), Config: target.Config, Credential: credential, Checkpoint: checkpoint, Now: a.now(), PageInRun: i, ReadsToday: reads})
@@ -298,10 +299,12 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		activeTiming.fetch = a.now().Sub(activeTiming.started)
 		activeTiming.items, activeMore = len(page.Items), page.More
 		if errors.Is(err, ErrNotDue) && i == 0 {
+			activeTiming = nil
 			slog.Info("connector run skipped", "connector_id", id, "reason", "not_due")
 			return a.Store.FinishRun(ctx, org, id, run, &RunError{Skipped: true, At: a.now()})
 		}
 		if errors.Is(err, ErrNotDue) {
+			activeTiming = nil
 			break
 		}
 		if err != nil {
@@ -365,7 +368,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 		timing := activeTiming.diagnostic(now, started, page.More, reason, target.Interval)
 		continuation := func() bool {
 			return canContinue && (reason == "page_limit" || reason == "soft_limit" || reason == "attachment_budget") &&
-				page.More && len(page.Items) > 0 && checkpointChanged(target.Checkpoint, page.Checkpoint) &&
+				page.More && len(page.Items) > 0 && checkpointChanged(target.Checkpoint, page.Checkpoint) && checkpointChanged(checkpoint, page.Checkpoint) &&
 				notice == "" && page.Notice == "" && rejected == ""
 		}
 		timing["continuation"] = continuation()

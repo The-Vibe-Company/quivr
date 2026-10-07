@@ -69,15 +69,16 @@ durable acceptance. Worker stage times are sums across concurrent submissions;
 reported so acquisition work can be distinguished from scheduled idle time.
 A successful run that reaches its page, time or byte bound continues in a new
 leased run immediately when its last page contains items, reports more and
-advances the run's checkpoint. Empty pages, unchanged checkpoints, exhaustion,
+advances both the page's input and the run's starting checkpoint. Empty pages, unchanged checkpoints, exhaustion,
 errors, notices and permanent rejections retain normal interval/retry scheduling.
 The `continuation` timing field reports that request; run bounds, durable
 acceptance before checkpointing and same-record ordering stay in place.
 See the operator guide for all fields and diagnostics-size fallback behavior.
-The SDK retains up to 32 idle upload connections per storage host between
+With the standard HTTP transport, the SDK retains up to 32 idle upload connections per storage host between
 pages (128 total), with the default transport's 90-second idle expiry. Active
 submissions remain bounded by `concurrency`; upload grants, checksum checks
-and redirect refusal retain their existing behavior.
+and redirect refusal retain their existing behavior. A host-provided custom
+HTTP transport is preserved without assuming it is a standard transport.
 
 ZIP directories are limited to 4 MiB and 100,000 entries before metadata parsing; use tar.gz for larger member sets. A 1 MiB ranged-read window bounds ZIP buffering and avoids a network request for each deflate fragment.
 

@@ -1,10 +1,12 @@
 package connectors
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -729,5 +731,42 @@ func TestAttachmentOnlyInputSubmitsAVerifiedSourceBlob(t *testing.T) {
 				t.Fatalf("producer or record extensions lost: provenance=%v extensions=%v", command.Provenance, command.Extensions)
 			}
 		})
+	}
+}
+
+// Intentional source skips and inactive leases are not incomplete pages.
+func TestSkippedRunsDoNotReportIncompletePages(t *testing.T) {
+	previous := slog.Default()
+	defer slog.SetDefault(previous)
+	for _, inactive := range []bool{false, true} {
+		var logs bytes.Buffer
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+		stub := &stubConnector{err: ErrNotDue}
+		a, runs := stubAcquirer(t, stub, 0)
+		if inactive {
+			a.Store = &archivePollingRuns{fakeRuns: runs, archived: true}
+		}
+		if err := a.Run(context.Background(), "org_a", "connector_1", 1); err != nil {
+			t.Fatal(err)
+		}
+		if inactive {
+			if len(stub.requests) != 0 || len(runs.finished) != 0 {
+				t.Fatal("inactive lease attempted a source request or completion")
+			}
+		} else if len(stub.requests) != 1 || len(runs.finished) != 1 || runs.finished[0] == nil || !runs.finished[0].Skipped {
+			t.Fatal("source not-due did not intentionally skip the fetched run")
+		}
+		decoder := json.NewDecoder(&logs)
+		for decoder.More() {
+			var event struct {
+				Message string `json:"msg"`
+			}
+			if err := decoder.Decode(&event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Message == "connector acquisition page" {
+				t.Fatalf("inactive=%v: intentional skip emitted a page diagnostic", inactive)
+			}
+		}
 	}
 }

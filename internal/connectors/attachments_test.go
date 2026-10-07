@@ -527,15 +527,15 @@ func (f *continuingRuns) ContinueRun(context.Context, string, string, int64) err
 
 type pagedExchange struct {
 	exchangingConnector
-	page    Page
+	pages   []Page
 	advance func()
 }
 
-func (c pagedExchange) Fetch(context.Context, FetchRequest) (Page, error) {
+func (c pagedExchange) Fetch(_ context.Context, req FetchRequest) (Page, error) {
 	if c.advance != nil {
 		c.advance()
 	}
-	return c.page, nil
+	return c.pages[min(req.PageInRun, len(c.pages)-1)], nil
 }
 
 func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
@@ -548,6 +548,8 @@ func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
 		notice    string
 		replay    bool
 		legacy    bool
+		stalled   bool
+		cycled    bool
 		want      bool
 	}{
 		{name: "page bound", bound: "page", want: true},
@@ -558,6 +560,8 @@ func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
 		{name: "source drained", bound: "page", drained: true},
 		{name: "empty pages", bound: "page", empty: true},
 		{name: "unchanged checkpoint formatting", bound: "page", unchanged: true},
+		{name: "final page stalls after earlier progress", bound: "page", stalled: true},
+		{name: "final page returns to run start", bound: "page", cycled: true},
 		{name: "notice", bound: "page", notice: "source_notice"},
 		{name: "store without continuation", bound: "page", legacy: true},
 	} {
@@ -573,8 +577,17 @@ func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
 				page.Items = nil
 			}
 			clock := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
-			connector := pagedExchange{exchangingConnector: exchangingConnector{src: src}, page: page}
+			connector := pagedExchange{exchangingConnector: exchangingConnector{src: src}, pages: []Page{page}}
 			a.MaxPages = 1
+			wantCheckpoints := 1
+			if tc.stalled || tc.cycled {
+				a.MaxPages, wantCheckpoints = 2, 2
+				last := page
+				if tc.cycled {
+					last.Checkpoint = runs.target.Checkpoint
+				}
+				connector.pages = []Page{page, last}
+			}
 			if tc.bound == "time" {
 				a.MaxPages = 10
 				connector.advance = func() { clock = clock.Add(150 * time.Second) }
@@ -606,8 +619,8 @@ func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
 			if tc.want {
 				wantContinue, wantFinish = 1, 0
 			}
-			if observed.continued != wantContinue || len(runs.finished) != wantFinish || len(runs.checkpoints) != 1 {
-				t.Fatalf("continued=%d finished=%d checkpoints=%v; want continue=%d finish=%d after one committed page", observed.continued, len(runs.finished), runs.checkpoints, wantContinue, wantFinish)
+			if observed.continued != wantContinue || len(runs.finished) != wantFinish || len(runs.checkpoints) != wantCheckpoints {
+				t.Fatalf("continued=%d finished=%d checkpoints=%v; want continue=%d finish=%d after committed progress", observed.continued, len(runs.finished), runs.checkpoints, wantContinue, wantFinish)
 			}
 			if tc.replay && (len(ingest.accepted) != 0 || runs.items[0]) {
 				t.Fatal("replayed cursor progress must continue without a fresh acceptance")
@@ -617,7 +630,7 @@ func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
 					Continuation bool `json:"continuation"`
 				} `json:"acquisition"`
 			}
-			if err := json.Unmarshal(runs.progress[0].Diagnostics, &diagnostic); err != nil || diagnostic.Acquisition.Continuation != (tc.want && tc.bound != "checkpoint") {
+			if err := json.Unmarshal(runs.progress[len(runs.progress)-1].Diagnostics, &diagnostic); err != nil || diagnostic.Acquisition.Continuation != (tc.want && tc.bound != "checkpoint") {
 				t.Fatalf("continuation diagnostic=%s err=%v", runs.progress[0].Diagnostics, err)
 			}
 		})
