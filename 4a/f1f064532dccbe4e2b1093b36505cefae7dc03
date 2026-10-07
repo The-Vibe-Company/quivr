@@ -1,0 +1,45 @@
+quivr-search/src/components/ui.tsx
+  s_c21c70c5aa40f0::t_f20bc143fb2a3e 58
+  s_c21c70c5aa40f0::t_d952727ed4e1ed 4,28-37
+  s_c21c70c5aa40f0::t_4085f9e1121e0a 56
+  s_c21c70c5aa40f0::t_17fd97cc091e7a 38
+quivr-search/src/dashboard.css
+  s_c21c70c5aa40f0::t_f9636e063ef9a5 4145
+  s_c21c70c5aa40f0::t_631545a55360ae 339-342,379-400,428,2380,2382,2388-2390,2415
+  s_c21c70c5aa40f0::t_b2415298a8e96f 404-411,426,2391,2401-2413
+  s_c21c70c5aa40f0::t_f20bc143fb2a3e 343,401-403,412-425
+  s_c21c70c5aa40f0::t_4085f9e1121e0a 2392-2400
+quivr-search/tests/dashboard.spec.ts
+  s_c21c70c5aa40f0::t_020d3f1be3cd43 46-51,60-61,810,812,816
+  s_c21c70c5aa40f0::t_23c150379a0a24 795-796
+  s_c21c70c5aa40f0::t_8c7c107515e5df 655-658,761-762,764,766,781,784
+  s_c21c70c5aa40f0::t_fb9607e5ebee74 52-59
+quivr-search/src/components/alerts/AlertsView.tsx
+  s_c21c70c5aa40f0::t_ffd3dabe83f1fa 128,144-145
+  s_c21c70c5aa40f0::t_5887a6dab2ccc9 57,432-436,443-444,450
+  s_c21c70c5aa40f0::t_b2415298a8e96f 448
+quivr-search/README.md
+  s_c21c70c5aa40f0::t_40f70cb853ed06 26
+quivr-search/src/App.tsx
+  s_c21c70c5aa40f0::t_7051c796df8127 204-207
+  s_c21c70c5aa40f0::t_d952727ed4e1ed 449-450,504-505,543,585
+quivr-search/src/components/connectors/ConnectorsView.tsx
+  s_c21c70c5aa40f0::t_b2415298a8e96f 415
+  s_c21c70c5aa40f0::t_6c53e030bb01e6 27,53,62-63,393-397,409-410,418
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4af1f064532dccbe4e2b1093b36505cefae7dc03",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}

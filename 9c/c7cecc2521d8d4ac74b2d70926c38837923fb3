@@ -1,0 +1,20 @@
+quivr-search/src/components/feed/SourceLogo.tsx
+  s_c21c70c5aa40f0::t_a5ac92dfe53faf 16-17,51,113-115
+  s_c21c70c5aa40f0::t_acfd0533177d3b 47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9cc7cecc2521d8d4ac74b2d70926c38837923fb3",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}

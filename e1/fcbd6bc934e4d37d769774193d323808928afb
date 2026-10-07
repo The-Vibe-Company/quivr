@@ -1,0 +1,259 @@
+.agents/skills/armada-coordinator/SKILL.md
+  s_c21c70c5aa40f0::t_43bdfbe882ee5d 6,8
+.agents/skills/armada-runtime-claude-code/SKILL.md
+  s_c21c70c5aa40f0::t_19244f6b15566b 6,8
+.agents/skills/armada-runtime-conductor/SKILL.md
+  s_c21c70c5aa40f0::t_d8681322c3e013 6,8
+.agents/skills/armada-runtime-herdr/SKILL.md
+  s_c21c70c5aa40f0::t_60f603cf2c6106 6,8
+.agents/skills/armada-worker/SKILL.md
+  s_c21c70c5aa40f0::t_4d0554ba9c2470 6,8
+README.md
+  s_c21c70c5aa40f0::t_60851031b37560 271-272
+armada.toml
+  s_c21c70c5aa40f0::t_898dd7327a8231 59,62-98
+client/client.gen.go
+  s_c21c70c5aa40f0::t_10505083638f6b 498-512,729-743,2297-2299,2307-2309,2559-2563,2575-2577,4323,4329,5233,5249,11620,11628,17123,17137
+contracts/http/v0/openapi.yaml
+  s_c21c70c5aa40f0::t_c86a59f7fdb8c2 3023-3024,3027,5252-5257,5315-5319
+deploy/modal/README.md
+  s_c21c70c5aa40f0::t_bdb7a585b3b959 1-91
+deploy/modal/embedding_api.py
+  s_c21c70c5aa40f0::t_0e913f1b980f73 1-139
+deploy/modal/embeddinggemma.py
+  s_c21c70c5aa40f0::t_53c04e726028f0 1-83
+deploy/railway/README.md
+  s_c21c70c5aa40f0::t_76047f64d9b4d3 85-136,138
+deploy/railway/core-entrypoint.py
+  s_c21c70c5aa40f0::t_17c3099517b9ef 12,84,86-90,102-141,151-152,157,162,238-241,312-313,389
+deploy/railway/hosted-embeddings.md
+  s_c21c70c5aa40f0::t_ed73446b4da7d5 3,10,15-17,23,29-30,44-51,65,67,69,71-76,79-81,84-86,88,90,96,98-103
+docs-site/guides/archive-import.mdx
+  s_c21c70c5aa40f0::t_5b4b34f05c3d51 150-153,155-175
+docs-site/openapi.yaml
+  s_c21c70c5aa40f0::t_602c7fc7ac7861 4083-4092,6577-6584,6642-6648
+docs-site/run-quivr/catalog.mdx
+  s_c21c70c5aa40f0::t_87ab3c83508e5d 11,38-40,42-43,46-51,56-62
+docs-site/run-quivr/reprocess-quarantined-versions.mdx
+  s_c21c70c5aa40f0::t_756f8d2f14e761 39,54-57,74,101,117,128-129,132
+docs-site/run-quivr/run-search-campaign.mdx
+  s_c21c70c5aa40f0::t_e3cd423574210d 78-86
+docs-site/run-quivr/switch-a-vector-model.mdx
+  s_c21c70c5aa40f0::t_cc35ec89778042 68-77
+docs/eval-modal.md
+  s_c21c70c5aa40f0::t_3bc153f2be3297 152-157
+docs/inventory.toml
+  s_c21c70c5aa40f0::t_cc12be1d91ab9e 72,126,139
+docs/reference/http-api.md
+  s_c21c70c5aa40f0::t_04235fdbf7750c 1593,5358,5391-5395,5466,5490-5494
+docs/search-campaigns.md
+  s_c21c70c5aa40f0::t_b4d43452bed069 99-102
+docs/start/functional.md
+  s_c21c70c5aa40f0::t_81d17e9fba7f03 15
+internal/adapters/pluginhttp/ingestion.go
+  s_c21c70c5aa40f0::t_4fd294c53e3899 15,40-47
+internal/adapters/pluginhttp/ingestion_test.go
+  s_c21c70c5aa40f0::t_05722e68d49488 41-89
+internal/adapters/postgres/ingestion_promotion_test.go
+  s_c21c70c5aa40f0::t_7ddd8b8df26ce3 20,24-29,683-693,695-696,699-700
+internal/adapters/postgres/operations.go
+  s_c21c70c5aa40f0::t_cb5f36f6f1eb53 311
+internal/adapters/postgres/quarantine.go
+  s_c21c70c5aa40f0::t_0bf9b381928181 131,156,166,192,226,233,363-379,382,445
+internal/adapters/postgres/quarantine_test.go
+  s_c21c70c5aa40f0::t_58196be2bed730 428-537
+internal/adapters/postgres/rebuild_model_test.go
+  s_c21c70c5aa40f0::t_2626a186015363 1-216
+internal/content/content.go
+  s_c21c70c5aa40f0::t_8f92174f33e6ad 902
+internal/content/plugin.go
+  s_c21c70c5aa40f0::t_6279aaa53748a5 45-46
+internal/normalization/normalization.go
+  s_c21c70c5aa40f0::t_4e6f7c83491089 139
+internal/operations/operations.go
+  s_c21c70c5aa40f0::t_b2b191859da2d2 130-131
+internal/orchestration/temporal/ingestion_batches.go
+  s_c21c70c5aa40f0::t_1897f7b3d0b8ef 22,24-26
+internal/orchestration/temporal/ingestion_batches_test.go
+  s_c21c70c5aa40f0::t_1fb7d56abea9fa 38,44,49,61-62
+internal/plugins/devhost/fakeplugin/fakeplugin.go
+  s_c21c70c5aa40f0::t_0467048f7bb993 283-289
+internal/quarantine/quarantine.go
+  s_c21c70c5aa40f0::t_40e31e982ab7be 2,4-6,83,97-98,158-160,162,188,211-212,220-227
+internal/quarantine/run.go
+  s_c21c70c5aa40f0::t_6fb4712f72376e 18,53
+internal/retrieval/rebuild.go
+  s_c21c70c5aa40f0::t_5bae0520f0615e 6,138-147,170-182,199-215
+internal/retrieval/rebuild_test.go
+  s_c21c70c5aa40f0::t_e0552893c704e8 17,41-45,57,97,103-105,138-151,179-184,234-268,288-317
+internal/transport/generated/transport.gen.go
+  s_c21c70c5aa40f0::t_ab28912312cfe7 498-512,729-743,2297-2299,2307-2309,2559-2563,2575-2577
+internal/transport/httpapi/quarantine.go
+  s_c21c70c5aa40f0::t_c3d1b7e6cda1fd 151,167,198-206
+internal/transport/httpapi/quarantine_test.go
+  s_c21c70c5aa40f0::t_409aee93b14e09 46,51,93-100,119-120
+migrations/20261006T1653Z_quarantine_restart_stage.sql
+  s_c21c70c5aa40f0::t_4b5091e95b58fd 1-3
+plugins/core-ingest/newsml_test.go
+  s_c21c70c5aa40f0::t_335d57d2a6bf1c 1-136
+plugins/hosted-embed/README.md
+  s_c21c70c5aa40f0::t_44a4c3dc1d052f 130-131,139-159,191-193
+plugins/hosted-embed/configuration.go
+  s_c21c70c5aa40f0::t_6f130af9db3e00 18-35,46,91-96
+plugins/hosted-embed/document_batches.go
+  s_c21c70c5aa40f0::t_dd08885b526968 1-177
+plugins/hosted-embed/ingestion.go
+  s_c21c70c5aa40f0::t_f5a636f01ae184 18-24,32-34,98-104,106-108,110-114
+plugins/hosted-embed/ingestion_test.go
+  s_c21c70c5aa40f0::t_6e3f5e1e800e60 290-302,304-306,475-782
+plugins/hosted-embed/provider.go
+  s_c21c70c5aa40f0::t_5cab2bc0c85bbd 25-38,41-43,73-76,78,93,111,114,120-124,144-181
+plugins/newsml-g2/README.md
+  s_c21c70c5aa40f0::t_9f462ff0059292 3,5-7,23-24,29-30,32-34,38-43,49,64-67,88-89,111-120
+plugins/newsml-g2/fixtures/multi-item.json
+  s_c21c70c5aa40f0::t_3c2fb5e11583f3 1-7
+plugins/newsml-g2/fixtures/multi-item.xml
+  s_c21c70c5aa40f0::t_69cae80741e2ed 1-12
+plugins/newsml-g2/fixtures/oversized-header.json
+  s_c21c70c5aa40f0::t_a85b4b01f21924 1-12
+plugins/newsml-g2/fixtures/oversized-header.xml
+  s_c21c70c5aa40f0::t_432abd8bbc35f9 1-6
+plugins/newsml-g2/newsml_g2/normalizer.py
+  s_c21c70c5aa40f0::t_e886d494f4a356 1,23-27,182-204,212,215-216,234-246,248-271,294-297,310-327,336
+plugins/newsml-g2/pyproject.toml
+  s_c21c70c5aa40f0::t_2746a9745bd5b0 7
+plugins/newsml-g2/quivr-plugin.yaml
+  s_c21c70c5aa40f0::t_f43e6fb994cfe5 2,48,69,72,79,86
+plugins/newsml-g2/tests/data/sample.expected.json
+  s_c21c70c5aa40f0::t_b8f50fcef4d24c 23-24,27,33-34,40,44,50-51
+plugins/newsml-g2/tests/test_normalizer.py
+  s_c21c70c5aa40f0::t_cf4f67aadc170e 74,76,88-89,113
+quivr-search/README.md
+  s_c21c70c5aa40f0::t_fc543b44c173c7 17,21
+quivr-search/explore.mjs
+  s_c21c70c5aa40f0::t_f639e1bd0a0b1b 10-17,40-56,131-141,143-332,378-389,427-494,520-523,541-542,546-550,555,559-561,569,572-573,577-583
+quivr-search/feeds.mjs
+  s_c21c70c5aa40f0::t_dd03608a4f1158 17-21,271-278,289-292,294-295,307-310,318-355,496,518-526,531-534,545-546,551-554,560-578,580-594,602-678
+quivr-search/package.json
+  s_c21c70c5aa40f0::t_921d5f89487514 12
+quivr-search/server.mjs
+  s_c21c70c5aa40f0::t_b2c5b93e58d456 235,239,247,255,641-644,676-679
+quivr-search/src/App.tsx
+  s_c21c70c5aa40f0::t_636d8b08298d70 98-100,113-114,272-276,295-297,305-313,338,348,351-353,396-397,412,426-428,430-431,587-590,643,715,717,725-726
+quivr-search/src/components/ChartTip.tsx
+  s_c21c70c5aa40f0::t_66683be140538b 52-65,73-74,152,155,163
+quivr-search/src/components/explorer/ExplorerView.tsx
+  s_c21c70c5aa40f0::t_1aec14f0d3ff42 1-2,4,6,10-12,14,16,18,20-22,24-25,28-37,40-45,48,50,55-56,59-60,62-63,68-71,74-75,80-86,88-106,110-112,116-122,125-139,141-142,146-148,152-155,157,160,163,166,168-172,180-197,199,202-203,209,228-280,282-293,297-396,399-418,423-424,427,436-437,439-498,500-567,571-581,588-592
+quivr-search/src/components/explorer/Facets.tsx
+  s_c21c70c5aa40f0::t_38fc12eb3e6fe4 1-334
+quivr-search/src/components/explorer/Preview.tsx
+  s_c21c70c5aa40f0::t_6e01ae4fed6c93 1-247
+quivr-search/src/components/explorer/Timeline.tsx
+  s_c21c70c5aa40f0::t_f1fdd43ced6585 1-278
+quivr-search/src/components/explorer/WireList.tsx
+  s_c21c70c5aa40f0::t_92cd39c3c1371b 1-216
+quivr-search/src/components/feed/SourceLogo.tsx
+  s_c21c70c5aa40f0::t_f3776c95b8a381 45,110-111,146-147
+quivr-search/src/components/ui.tsx
+  s_c21c70c5aa40f0::t_1feb550bfc1901 28-31,35
+quivr-search/src/explorer.css
+  s_c21c70c5aa40f0::t_e16e8077a04c3b 1-13,18-143,145-170,172-196,198-254,259-260,262-271,273-284,287-308,310-314,316-323,325-326,330-356,360-361,364-369,373-386,396-397,399-401,403,406-407,413-421,423,430-436,444-457,459-540,548-558,560-564,567-569,571-573,575-667,670-671,673-674,676-680,682-713,715-717,719-745,748-749,751-757,759-779,781-802,804,806-811,813-814,816-818,820,822,826-848,850,852-863,867-948,950,952-958,960-963,966-979,1142-1153,1155-1182,1184-1185,1187-1222
+quivr-search/src/lib/corpora.ts
+  s_c21c70c5aa40f0::t_093127e9143ed7 26-27,30-42
+quivr-search/src/lib/explore.ts
+  s_c21c70c5aa40f0::t_016016b22c7df8 2-4,6,16-17,24-25,28-29,33-38,43-46,99-106,108-118,120-121,125-135,137-158,162-163,165-233,245,249,254-269,274-288,291-308,321,380-444
+quivr-search/src/lib/search.ts
+  s_c21c70c5aa40f0::t_920321ff434526 34,49-50
+quivr-search/tests/admin-health-live.spec.ts
+  s_c21c70c5aa40f0::t_05c7f68db5bbe8 2-6,11-12,50-117
+quivr-search/tests/diff.spec.ts
+  s_c21c70c5aa40f0::t_d1d231a40cd90d 3,24-46
+quivr-search/tests/explore.test.mjs
+  s_c21c70c5aa40f0::t_cb028531b3a5a1 1-179
+quivr-search/tests/explorer.spec.ts
+  s_c21c70c5aa40f0::t_deb5829ffd6c2e 4-8,19-22,25-30,33-36,39,44-47,50-52,54,56-60,64,66-68,70-71,73,75-78,80-83,85-87,89-91,93-222,229,261
+quivr-search/tests/explorerState.spec.ts
+  s_c21c70c5aa40f0::t_ad0a4c5c6dd620 1-20
+quivr-search/tests/fake-engine.ts
+  s_c21c70c5aa40f0::t_3f7623a50d4e1b 12-13,168-169,329-336,338-343,353-388,417-420,422-425,427,429,437,439,444,446-455
+quivr-search/tests/feeds.test.mjs
+  s_c21c70c5aa40f0::t_0e045199fa4468 12,14,216-224,234-238,252-256,259-286,289,301-314,326-329
+quivr-search/tests/server.test.mjs
+  s_c21c70c5aa40f0::t_0831ef8dd58e5c 453,506,1311,1329-1351,1411-1412,1440-1479
+scripts/eval/campaign_store.py
+  s_c21c70c5aa40f0::t_020a1aa7907de2 203-217
+scripts/eval/control_store.py
+  s_c21c70c5aa40f0::t_69b02171ba5840 481-507,540-562
+scripts/eval/direct_bakeoff.py
+  s_c21c70c5aa40f0::t_17b8f889f3becb 514
+scripts/eval/embeddinggemma_server.py
+  s_c21c70c5aa40f0::t_91b92f59b5e7f8 1-95
+scripts/eval/embeddings.py
+  s_c21c70c5aa40f0::t_245c68c998545f 21-46
+scripts/eval/modal_search.py
+  s_c21c70c5aa40f0::t_821c8aa9a50e68 4,29,81,85-87,168-173,189-203,208-210,212-225,227-228,234-237,263-307,413,490,507,517-519,521,526,528,554
+scripts/eval/oss_bakeoff.py
+  s_c21c70c5aa40f0::t_88442360d061a0 12,26,35-36,41-48,51-58,68-73,89,94,102,105,107-108,111,209-212,220,222,227,229,245,247,253-258,322
+scripts/eval/oss_image_check.py
+  s_c21c70c5aa40f0::t_a5a147451d3251 1-25
+scripts/eval/oss_modal.py
+  s_c21c70c5aa40f0::t_dd7e4775df4245 13,15-16,20,35-36,41-48,57-59,82-86,91
+scripts/eval/scoring.py
+  s_c21c70c5aa40f0::t_0cac41cd59af45 1,3,22-39
+scripts/eval/search_campaign.py
+  s_c21c70c5aa40f0::t_962d25aa3579d3 170
+scripts/eval/search_trial.py
+  s_c21c70c5aa40f0::t_2c9385bd7dfb04 186-187,543,586-596
+scripts/eval/test_campaign_confirmation.py
+  s_c21c70c5aa40f0::t_c5e3b67d2bdd17 66-68
+scripts/eval/test_campaign_promotion.py
+  s_c21c70c5aa40f0::t_1e5990d5a51884 45-46,223-224
+scripts/eval/test_control_store.py
+  s_c21c70c5aa40f0::t_8ad3ce8fb46dab 243-272
+scripts/eval/test_direct_bakeoff.py
+  s_c21c70c5aa40f0::t_d3f914b5e0cbb4 337-359
+scripts/eval/test_modal_search.py
+  s_c21c70c5aa40f0::t_bdb70bda8871eb 23,219-279,356,375-408,540-541,703
+scripts/eval/test_oss_bakeoff.py
+  s_c21c70c5aa40f0::t_06cd8070668bdc 14,18-111
+scripts/eval/test_oss_modal.py
+  s_c21c70c5aa40f0::t_88e00878b908dd 28-29,31-40,54-55,58-72,140-143,164-168
+scripts/eval/test_private_working.py
+  s_c21c70c5aa40f0::t_11553464131176 298-311
+scripts/eval/test_scoring.py
+  s_c21c70c5aa40f0::t_07aef6016915ed 3,25-38
+scripts/eval/test_search_campaign.py
+  s_c21c70c5aa40f0::t_31713a9bd52d02 115,141,185-187,212-222
+scripts/measure_archive.py
+  s_c21c70c5aa40f0::t_45ce22feb4bdbf 2-10,12,14,16,18,29-368,370-391,395,397,401-403,405-406,411,413,415-424,426-439,441,443-447,450-451,453,456-457,460-479,484-486,488-502,505-506,508-521,523-524,527,529-614,616,619
+scripts/measure_archive_hosted.py
+  s_c21c70c5aa40f0::t_5ad795aeafb7f8 1-400
+scripts/normalizer_plugin.py
+  s_c21c70c5aa40f0::t_f036663b07c6f8 327
+scripts/plugin_sdk.sh
+  s_c21c70c5aa40f0::t_4aa88257c78bae 152,155-156
+scripts/test_core_entrypoint.py
+  s_c21c70c5aa40f0::t_778effacd419f6 33-34,37-38,54-55,65-66,72,79,127,130-132,136-139,142,148-150,182-220
+scripts/test_embedding_api.py
+  s_c21c70c5aa40f0::t_10af6ab57fa092 1-95
+skills-lock.json
+  s_c21c70c5aa40f0::t_c7a3f8d97f7666 6,8-9,13,15-16,20,22-23,27,29-30,34,36-37
+tests/acceptance/quarantine_test.go
+  s_c21c70c5aa40f0::t_b8fa03ce147729 6,30,33-35,180-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e1fcbd6bc934e4d37d769774193d323808928afb",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}

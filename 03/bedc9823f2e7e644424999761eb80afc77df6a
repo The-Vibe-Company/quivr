@@ -1,0 +1,21 @@
+quivr-search/src/App.tsx
+  s_c21c70c5aa40f0::t_8564e705f77f42 506,560-562
+quivr-search/src/dashboard.css
+  s_c21c70c5aa40f0::t_8564e705f77f42 405-408
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "03bedc9823f2e7e644424999761eb80afc77df6a",
+  "prompts": {},
+  "sessions": {
+    "s_c21c70c5aa40f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d7ba6728-4733-4f44-999c-61c2a093bb10",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Zewed <dewez.antoine2@gmail.com>"
+    }
+  }
+}

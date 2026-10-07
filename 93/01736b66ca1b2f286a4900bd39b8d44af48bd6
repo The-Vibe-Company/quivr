@@ -1,0 +1,19 @@
+scripts/test_core_entrypoint.py
+  s_54b80c92daa9cb::t_b2944cc47fbca1 238,242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9301736b66ca1b2f286a4900bd39b8d44af48bd6",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
