@@ -39,6 +39,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `public_url` | no | The address where sources reach this API, such as `https://quivr.example.com`. Connector kinds that receive webhooks need it. |
 | `connector_min_interval` | no | Shortest polling interval an instance may ask for, a Go duration. Default `30s`. |
 | `connector_push` | no | Declared source API protection: `rate_per_second` (default `10`, range `0.001`–`100000`), `burst` (default `100`, maximum `100000`), `idempotency_ttl` (Go duration, default `24h`, range `1ms`–`168h`) and `trusted_proxy_cidrs` (default empty). Instance `push_policy` can override rate/burst and set `allowed_cidrs`. |
+| `retain_import_audit_detail` | no | Retain full canonical import requests and successful plugin invocation ledger detail. Default `false`. Required work input, request digest, normalization outcomes, extensions and failure/conflict diagnostics remain durable. Existing deployments keep legacy capture during the compatibility window; see [Compact import storage](/run-quivr/upgrade-quivr#compact-import-storage). |
 | `audit_retention_months` | no | Calendar months to retain sensitive-action audit entries. Default `12`, range `1`–`1200`; `0` selects the default. The worker prunes them on the change-pruning schedule. See [Audit trail](#audit-trail). |
 | `change_retention` | no | How long the change feed keeps events and a cursor stays valid. Default `168h` (7 days). |
 | `change_stream_poll` | no | How often an open change stream (`/v0/changes/stream`) checks for new events. Shorter delivers sooner and reads the database more often. Api only. Default `250ms`. |
@@ -66,6 +67,12 @@ Engine configuration refusals exit with status `1` and log `event: quivr.failed`
 | `config_conflict` | Settings contradict each other, such as a TLS switch with the wrong endpoint scheme or an initial retry delay above its maximum. |
 
 Plugin-pin validation also exits with status `1` but keeps its existing plugin issue codes without `field` or `problem`. Other process failures use `process_failed`.
+
+## Import audit detail
+
+`retain_import_audit_detail` applies to both the API and workers. Set it consistently and restart them after changing it. Compact storage keeps one required execution input and a SHA-256 digest of each full request for idempotency. Successful normalization extensions live in an immutable outcome object; PostgreSQL keeps its pointer, owner, manifest and operational outcome. Failure and conflict diagnostics remain available. The normalizer’s deterministic invocation digest remains for detecting divergent output.
+
+With `true`, Quivr also retains full canonical request copies and successful normalization invocation IDs. This adds database storage and import writes. Existing deployments keep legacy writes until you activate compact storage after draining previous binaries. Changing the option affects future capture; it does not remove previously captured detail. Historical retirement requires `storage compact --retire-audit-detail` after compact storage activation. Sensitive-action auditing and change-feed retention have separate settings.
 
 ## Audit trail
 

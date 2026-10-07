@@ -268,45 +268,29 @@ func (d PluginDeriver) derive(ctx context.Context, org, corpusID string, v conte
 	if err != nil {
 		return seg, nil, err
 	}
-	data := make([]content.EmbeddingData, 0, len(seg.Segments)*len(spaces))
-	for i, p := range seg.Segments {
-		for _, key := range spaces {
-			space, _ := d.descriptor.VectorSpace(key)
-			vector := segments[i].Vectors[key]
-			input := content.EmbeddingInput(org, corpusID, v, seg, p, space, d.descriptor.Producer)
-			artifact, vector, err := d.saveOrAdopt(ctx, org, input, space, vector)
-			if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
-				return seg, nil, content.Refused("the ingestion plugin answered a vector that differs from the stored artifact")
-			}
-			if err != nil {
-				return seg, nil, err
-			}
-			data = append(data, content.EmbeddingData{Artifact: artifact, Vector: vector})
-		}
+	data, err := d.saveVectors(ctx, org, corpusID, v, seg, spaces, segments)
+	if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
+		return seg, nil, content.Refused("the ingestion plugin answered a vector that differs from the stored artifact")
 	}
-	return seg, data, nil
+	return seg, data, err
 }
 
-// saveOrAdopt stores a segment's vector, or adopts the artifact another
-// derivation of the same input stored first, for example an ingestion running
-// beside a rebuild. Embedding providers are not bitwise deterministic, so the
-// first stored artifact is canonical. Saving the stored vector again yields
-// that same artifact and still checks the registered space, so a space whose
-// manifest changed, or an unreadable or differently sized stored vector,
-// keeps the conflict.
-func (d PluginDeriver) saveOrAdopt(ctx context.Context, org string, input content.Embedding, space content.VectorSpace, vector []float32) (content.Embedding, []float32, error) {
-	artifact, err := d.Content.SaveEmbedding(ctx, input, space, vector)
-	if !errors.Is(err, content.ErrConflict) {
-		return artifact, vector, err
+// saveVectors adopts canonical output and writes each space as one durable file.
+func (d PluginDeriver) saveVectors(ctx context.Context, org, corpusID string, v content.Version, seg content.Segmentation, spaces []string, segments []PluginSegment) ([]content.EmbeddingData, error) {
+	data := make([]content.EmbeddingData, 0, len(seg.Segments)*len(spaces))
+	for _, key := range spaces {
+		space, _ := d.descriptor.VectorSpace(key)
+		group := make([]content.EmbeddingData, 0, len(seg.Segments))
+		for i, p := range seg.Segments {
+			group = append(group, content.EmbeddingData{Artifact: content.EmbeddingInput(org, corpusID, v, seg, p, space, d.descriptor.Producer), Vector: segments[i].Vectors[key]})
+		}
+		stored, err := d.Content.SaveEmbeddingGroup(ctx, seg, space, group)
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, stored...)
 	}
-	_, stored, loadErr := d.Content.LoadEmbedding(ctx, org, input.DerivationID)
-	if loadErr != nil || len(stored) != len(vector) {
-		return artifact, vector, err
-	}
-	if artifact, err = d.Content.SaveEmbedding(ctx, input, space, stored); err != nil {
-		return artifact, vector, err
-	}
-	return artifact, stored, nil
+	return data, nil
 }
 
 // ErrSegmentsDiffer reports that the plugin cuts a Version into other
@@ -348,22 +332,11 @@ func (d PluginDeriver) Fill(ctx context.Context, org, corpusID string, v content
 			return nil, ErrSegmentsDiffer
 		}
 	}
-	data = make([]content.EmbeddingData, 0, len(seg.Segments)*len(spaces))
-	for i, p := range seg.Segments {
-		for _, key := range spaces {
-			space, _ := d.descriptor.VectorSpace(key)
-			vector := segments[i].Vectors[key]
-			artifact, vector, err := d.saveOrAdopt(ctx, org, content.EmbeddingInput(org, corpusID, v, seg, p, space, d.descriptor.Producer), space, vector)
-			if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
-				return nil, fmt.Errorf("%w: a vector differs from the stored artifact", content.ErrIngestionRefused)
-			}
-			if err != nil {
-				return nil, err
-			}
-			data = append(data, content.EmbeddingData{Artifact: artifact, Vector: vector})
-		}
+	data, err = d.saveVectors(ctx, org, corpusID, v, seg, spaces, segments)
+	if errors.Is(err, content.ErrConflict) || errors.Is(err, content.ErrInvalid) {
+		return nil, fmt.Errorf("%w: a vector differs from the stored artifact", content.ErrIngestionRefused)
 	}
-	return data, nil
+	return data, err
 }
 
 // FillIndependent derives an owner's own segmentation and vectors for a
@@ -419,19 +392,17 @@ func (d PluginDeriver) save(ctx context.Context, org string, v content.Version, 
 // incomplete when one is missing.
 func (d PluginDeriver) stored(ctx context.Context, org, corpusID string, v content.Version, seg content.Segmentation, spaces []string) ([]content.EmbeddingData, bool, error) {
 	data := make([]content.EmbeddingData, 0, len(seg.Segments)*len(spaces))
-	for _, p := range seg.Segments {
-		for _, key := range spaces {
-			space, _ := d.descriptor.VectorSpace(key)
-			input := content.EmbeddingInput(org, corpusID, v, seg, p, space, d.descriptor.Producer)
-			artifact, vector, err := d.Content.LoadEmbedding(ctx, org, input.DerivationID)
-			switch {
-			case errors.Is(err, corpus.ErrNotFound), errors.Is(err, content.ErrArtifactMissing):
-				return nil, false, nil
-			case err != nil:
-				return nil, false, err
-			}
-			data = append(data, content.EmbeddingData{Artifact: artifact, Vector: vector})
+	for _, key := range spaces {
+		space, _ := d.descriptor.VectorSpace(key)
+		inputs := make([]content.Embedding, 0, len(seg.Segments))
+		for _, p := range seg.Segments {
+			inputs = append(inputs, content.EmbeddingInput(org, corpusID, v, seg, p, space, d.descriptor.Producer))
 		}
+		stored, complete, err := d.Content.LoadEmbeddingGroup(ctx, inputs)
+		if err != nil || !complete {
+			return nil, false, err
+		}
+		data = append(data, stored...)
 	}
 	return data, true, nil
 }

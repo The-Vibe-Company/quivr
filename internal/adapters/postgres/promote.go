@@ -26,7 +26,7 @@ var promotionGapSQL = `WITH routed AS (
  JOIN projection_coverage pc ON pc.organization=v.organization AND pc.version_id=v.id AND pc.generation_id=rt.generation_id
  JOIN segmentations ss ON ss.organization=pc.organization AND ss.id=pc.segmentation_id
  JOIN segments sg ON sg.organization=v.organization AND sg.version_id=v.id AND sg.segmentation_id=pc.segmentation_id
- WHERE ` + eligibleVersionSQL + ` AND (SELECT owner_plugin_id FROM vector_spaces WHERE id=$1)=split_part(substring(ss.recipe from 8),'@',1) AND (NOT rt.carries OR NOT EXISTS(SELECT 1 FROM embedding_coverage ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=rt.generation_id AND ec.space_id=$1))
+ WHERE ` + eligibleVersionSQL + ` AND (SELECT owner_plugin_id FROM vector_spaces WHERE id=$1)=split_part(substring(ss.recipe from 8),'@',1) AND (NOT rt.carries OR NOT EXISTS(SELECT 1 FROM ` + embeddingCoverageRelation + ` ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=rt.generation_id AND ec.space_id=$1))
 )
 SELECT count(DISTINCT (organization,corpus_id)),count(*) FROM gaps`
 

@@ -147,7 +147,7 @@ func (s SpaceStore) VectorSpaces(ctx context.Context, org, corpusID string) (con
 ), vectors AS (
  SELECT cur.plugin_id,cur.version_id,ec.space_id,count(*) AS covered,max(cur.version_segments) AS total
  FROM current cur JOIN LATERAL (
-  SELECT space_id FROM embedding_coverage ec
+  SELECT space_id FROM `+embeddingCoverageRelation+` ec
   WHERE ec.organization=$1 AND ec.segment_id=cur.segment_id AND ec.generation_id=$3 AND ec.space_id=ANY($4::text[])
   OFFSET 0
  ) ec ON true

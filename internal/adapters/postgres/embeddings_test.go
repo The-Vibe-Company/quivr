@@ -116,6 +116,13 @@ func TestDurableEmbeddingConflictAndAtomicEnrichment(t *testing.T) {
 	if _, err = service.SaveEmbedding(ctx, input, space, divergent); !errors.Is(err, content.ErrConflict) {
 		t.Fatal("divergence accepted", err)
 	}
+	// The same owner verifies atomic publication after compact conversion,
+	// using real S3 bytes and the original public artifact identity.
+	packed, err := service.PackEmbeddingGroup(ctx, seg, space, []content.EmbeddingData{{Artifact: artifact, Vector: vector}})
+	if err != nil || len(packed) != 1 || packed[0].Artifact.ID != artifact.ID {
+		t.Fatalf("compact conversion %v %+v", err, packed)
+	}
+	artifact = packed[0].Artifact
 	if err = service.Promote(ctx, scope.Organization, seg, g); err != nil {
 		t.Fatal(err)
 	}

@@ -27,6 +27,9 @@ func BootstrapDatabase(ctx context.Context, pool *pgxpool.Pool, spaces []content
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	if err := postgres.InitializeStorage(ctx, pool); err != nil {
+		return fmt.Errorf("storage mode: %w", err)
+	}
 	if err := postgres.EnsureIndexes(ctx, pool); err != nil {
 		return fmt.Errorf("concurrent index setup: %w", err)
 	}

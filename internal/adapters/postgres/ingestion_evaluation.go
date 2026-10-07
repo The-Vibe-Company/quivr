@@ -83,7 +83,7 @@ func coverOwnerProjection(ctx context.Context, tx pgx.Tx, org string, g content.
 			return content.ErrInvalid
 		}
 		var stored string
-		if err = tx.QueryRow(ctx, `SELECT a.id FROM embedding_artifacts a JOIN vector_spaces vs ON vs.id=a.space_id WHERE a.organization=$1 AND a.derivation_id=$2 AND a.segment_id=$3 AND a.space_id=$4 AND vs.owner_plugin_id=$5`, org, e.DerivationID, e.SegmentID, e.SpaceID, owner).Scan(&stored); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT a.id FROM `+embeddingArtifactsRelation+` a JOIN vector_spaces vs ON vs.id=a.space_id WHERE a.organization=$1 AND a.derivation_id=$2 AND a.segment_id=$3 AND a.space_id=$4 AND vs.owner_plugin_id=$5`, org, e.DerivationID, e.SegmentID, e.SpaceID, owner).Scan(&stored); err != nil {
 			return err
 		}
 		if stored != e.ID {
@@ -98,11 +98,11 @@ func coverOwnerProjection(ctx context.Context, tx pgx.Tx, org string, g content.
 	if tag.RowsAffected() != 1 {
 		return content.ErrConflict
 	}
-	for _, e := range artifacts {
-		if _, err = tx.Exec(ctx, `INSERT INTO embedding_coverage(organization,segment_id,generation_id,artifact_id,space_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, org, e.SegmentID, g.ID, e.ID, e.SpaceID); err != nil {
-			return err
-		}
+	_, err = insertEmbeddingCoverage(ctx, tx, org, seg, g, artifacts)
+	if err != nil {
+		return err
 	}
+
 	return nil
 }
 

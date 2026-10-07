@@ -41,23 +41,25 @@ type RegisteredSpace struct {
 	Role                              string
 }
 type Embedding struct {
-	ID             string `json:"embedding_artifact_id"`
-	DerivationID   string `json:"derivation_id"`
-	Organization   string `json:"organization_id"`
-	CorpusID       string `json:"corpus_id"`
-	VersionID      string `json:"version_id"`
-	SegmentID      string `json:"segment_id"`
-	PartKey        string `json:"part_key"`
-	SegmentationID string `json:"segmentation_id"`
-	Recipe         string `json:"segmentation_recipe"`
-	SourceSHA      string `json:"normalized_content_sha256"`
-	SliceSHA       string `json:"slice_sha256"`
-	InputSHA       string `json:"input_sha256"`
-	InputBytes     int    `json:"input_bytes"`
-	SpaceID        string `json:"vector_space_id"`
-	Producer       string `json:"producer"`
-	Payload        Blob   `json:"payload"`
-	Manifest       Blob   `json:"manifest"`
+	ID             string         `json:"embedding_artifact_id"`
+	DerivationID   string         `json:"derivation_id"`
+	Organization   string         `json:"organization_id"`
+	CorpusID       string         `json:"corpus_id"`
+	VersionID      string         `json:"version_id"`
+	SegmentID      string         `json:"segment_id"`
+	PartKey        string         `json:"part_key"`
+	SegmentationID string         `json:"segmentation_id"`
+	Recipe         string         `json:"segmentation_recipe"`
+	SourceSHA      string         `json:"normalized_content_sha256"`
+	SliceSHA       string         `json:"slice_sha256"`
+	InputSHA       string         `json:"input_sha256"`
+	InputBytes     int            `json:"input_bytes"`
+	SpaceID        string         `json:"vector_space_id"`
+	Producer       string         `json:"producer"`
+	Payload        Blob           `json:"payload"`
+	Manifest       Blob           `json:"manifest"`
+	File           *EmbeddingFile `json:"vector_file,omitempty"`
+	Ordinal        int            `json:"vector_ordinal,omitempty"`
 }
 type EmbeddingRepository interface {
 	Embedding(context.Context, string, string) (Embedding, error)
@@ -117,6 +119,17 @@ func (s Service) LoadEmbedding(ctx context.Context, org, derivation string) (Emb
 	if err != nil {
 		return e, nil, err
 	}
+	return s.loadEmbeddingArtifact(ctx, e)
+}
+
+func (s Service) loadEmbeddingArtifact(ctx context.Context, e Embedding) (Embedding, []float32, error) {
+	if e.File != nil {
+		data, err := s.LoadEmbeddingData(ctx, []Embedding{e})
+		if err != nil {
+			return e, nil, err
+		}
+		return data[0].Artifact, data[0].Vector, nil
+	}
 	manifest, err := s.Blobs.Read(ctx, e.Manifest)
 	if err != nil {
 		return e, nil, err
@@ -139,6 +152,14 @@ func (s Service) LoadEmbedding(ctx context.Context, org, derivation string) (Emb
 	return e, v, err
 }
 func (s Service) SaveEmbedding(ctx context.Context, e Embedding, space VectorSpace, vector []float32) (Embedding, error) {
+	e, err := s.prepareEmbedding(ctx, e, space, vector)
+	if err != nil {
+		return e, err
+	}
+	return e, s.Embeddings.SaveEmbedding(ctx, e, space)
+}
+
+func (s Service) prepareEmbedding(ctx context.Context, e Embedding, space VectorSpace, vector []float32) (Embedding, error) {
 	raw, err := VectorBytes(vector)
 	if err != nil {
 		return e, err
@@ -150,18 +171,22 @@ func (s Service) SaveEmbedding(ctx context.Context, e Embedding, space VectorSpa
 	if err != nil {
 		return e, err
 	}
+	e.ID = ""
+	e.Manifest = Blob{}
 	manifest := embeddingManifest(e)
 	e.ID = Hash(append(append([]byte("quivr/embedding-artifact/v1\x00"), manifest...), raw...))
 	e.Manifest, err = s.Blobs.Put(ctx, e.Organization, manifest)
 	if err != nil {
 		return e, err
 	}
-	return e, s.Embeddings.SaveEmbedding(ctx, e, space)
+	return e, nil
 }
 
 // All manifest values are bounded integers or ASCII identifiers. Sorting object
 // keys gives the RFC 8785 representation for this restricted manifest vocabulary.
 func embeddingManifest(e Embedding) []byte {
+	e.File = nil
+	e.Ordinal = 0
 	b, _ := json.Marshal(e)
 	var fields map[string]any
 	_ = json.Unmarshal(b, &fields)
@@ -261,4 +286,19 @@ func (s Service) CommitEnrichment(ctx context.Context, org string, seg Segmentat
 		artifacts[i] = e
 	}
 	return s.Embeddings.CommitEnrichment(ctx, org, seg, g, artifacts)
+}
+
+// Legacy probes stay on the existing indexed derivation key. New grouped
+// writers must not scan compact vectors to prove that a legacy winner is absent.
+func (s Service) loadLegacyEmbedding(ctx context.Context, org, derivation string) (Embedding, []float32, error) {
+	if repo, ok := s.Embeddings.(interface {
+		LegacyEmbedding(context.Context, string, string) (Embedding, error)
+	}); ok {
+		e, err := repo.LegacyEmbedding(ctx, org, derivation)
+		if err != nil {
+			return e, nil, err
+		}
+		return s.loadEmbeddingArtifact(ctx, e)
+	}
+	return s.LoadEmbedding(ctx, org, derivation)
 }

@@ -65,20 +65,21 @@ func (e savedQueryEncoder) EncodeSavedQuery(ctx context.Context, org string, def
 }
 
 type subscriptionEmbeddingReader interface {
-	SubscriptionEmbeddings(context.Context, string, string, string) (content.Generation, []string, int, error)
+	SubscriptionEmbeddings(context.Context, string, string, string) (content.Generation, []content.Embedding, int, error)
 }
 
 func (v versionParts) ArticleVectors(ctx context.Context, org, corpusID, versionID string) (*monitoring.ArticleVectors, error) {
-	generation, derivations, total, err := v.vectors.SubscriptionEmbeddings(ctx, org, corpusID, versionID)
+	generation, artifacts, total, err := v.vectors.SubscriptionEmbeddings(ctx, org, corpusID, versionID)
 	if err != nil {
 		return nil, err
 	}
-	result := &monitoring.ArticleVectors{SpaceID: generation.SpaceID, Ready: total > 0 && total == len(derivations), Parts: map[string][]monitoring.SegmentVector{}}
-	for _, derivation := range derivations {
-		artifact, vector, err := v.content.LoadEmbedding(ctx, org, derivation)
-		if err != nil {
-			return nil, err
-		}
+	result := &monitoring.ArticleVectors{SpaceID: generation.SpaceID, Ready: total > 0 && total == len(artifacts), Parts: map[string][]monitoring.SegmentVector{}}
+	data, err := v.content.LoadEmbeddingData(ctx, artifacts)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range data {
+		artifact, vector := d.Artifact, d.Vector
 		if artifact.SpaceID != generation.SpaceID || artifact.VersionID != versionID || artifact.CorpusID != corpusID {
 			return nil, content.ErrConflict
 		}

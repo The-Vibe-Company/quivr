@@ -27,8 +27,9 @@ type Config struct {
 	Bucket    string `json:"bucket"`
 }
 type Store struct {
-	client *awss3.Client
-	bucket string
+	client       *awss3.Client
+	vectorClient *awss3.Client
+	bucket       string
 }
 
 func New(cfg Config) *Store { return newWithTransport(cfg, outbound.Transport(nil)) }
@@ -41,7 +42,12 @@ func newWithTransport(cfg Config, transport *http.Transport) *Store {
 	transport.MaxIdleConnsPerHost = canonicalIdleConnections
 	transport.MaxIdleConns = canonicalIdleConnections
 	client := awss3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")), HTTPClient: &http.Client{Timeout: 5 * time.Second, Transport: telemetry.Transport(transport, "s3.request"), CheckRedirect: outbound.CheckRedirect}}, func(o *awss3.Options) { o.BaseEndpoint = aws.String(cfg.Endpoint); o.UsePathStyle = true })
-	return &Store{client: client, bucket: cfg.Bucket}
+	vectorClient := awss3.New(client.Options(), func(o *awss3.Options) {
+		httpClient := *o.HTTPClient.(*http.Client)
+		httpClient.Timeout = 30 * time.Second
+		o.HTTPClient = &httpClient
+	})
+	return &Store{client: client, vectorClient: vectorClient, bucket: cfg.Bucket}
 }
 func (s *Store) Bootstrap(ctx context.Context) error {
 	if _, err := s.client.HeadBucket(ctx, &awss3.HeadBucketInput{Bucket: aws.String(s.bucket)}); err == nil {
@@ -57,21 +63,40 @@ func (s *Store) Ready(ctx context.Context) error {
 	return err
 }
 func (s *Store) Put(ctx context.Context, org string, data []byte) (content.Blob, error) {
+	return s.put(ctx, org, data, 2<<20)
+}
+
+func (s *Store) PutVectorFile(ctx context.Context, org string, data []byte) (content.Blob, error) {
+	return s.put(ctx, org, data, content.MaxVectorFileBytes)
+}
+
+func (s *Store) put(ctx context.Context, org string, data []byte, limit int64) (content.Blob, error) {
+	if int64(len(data)) > limit {
+		return content.Blob{}, content.ErrInvalid
+	}
 	digest := content.Hash(data)
 	b := content.Blob{Key: content.Hash([]byte(org)) + "/sha256/" + digest, SHA256: digest, Size: int64(len(data))}
 	checksum, _ := hex.DecodeString(digest)
-	_, _ = s.client.PutObject(ctx, &awss3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(b.Key), Body: bytes.NewReader(data), ContentLength: aws.Int64(b.Size), ContentType: aws.String("application/octet-stream"), ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(checksum)), IfNoneMatch: aws.String("*"), Metadata: map[string]string{"sha256": digest}})
+	_, _ = s.clientFor(limit).PutObject(ctx, &awss3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(b.Key), Body: bytes.NewReader(data), ContentLength: aws.Int64(b.Size), ContentType: aws.String("application/octet-stream"), ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(checksum)), IfNoneMatch: aws.String("*"), Metadata: map[string]string{"sha256": digest}})
 	// Both a successful PUT and an ambiguous/lost response must prove the immutable bytes.
-	if _, err := s.Read(ctx, b); err != nil {
+	if _, err := s.read(ctx, b, limit); err != nil {
 		return content.Blob{}, errors.New("immutable S3 object could not be verified")
 	}
 	return b, nil
 }
 func (s *Store) Read(ctx context.Context, b content.Blob) ([]byte, error) {
-	if b.Size < 0 || b.Size > 2<<20 {
+	return s.read(ctx, b, 2<<20)
+}
+
+func (s *Store) ReadVectorFile(ctx context.Context, b content.Blob) ([]byte, error) {
+	return s.read(ctx, b, content.MaxVectorFileBytes)
+}
+
+func (s *Store) read(ctx context.Context, b content.Blob, limit int64) ([]byte, error) {
+	if b.Size < 0 || b.Size > limit {
 		return nil, errors.New("unsupported canonical object size")
 	}
-	object, err := s.client.GetObject(ctx, &awss3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(b.Key)})
+	object, err := s.clientFor(limit).GetObject(ctx, &awss3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(b.Key)})
 	var missing *types.NoSuchKey
 	if errors.As(err, &missing) {
 		return nil, fmt.Errorf("canonical S3 object absent: %w", content.ErrArtifactMissing)
@@ -88,4 +113,11 @@ func (s *Store) Read(ctx context.Context, b content.Blob) ([]byte, error) {
 		return nil, fmt.Errorf("canonical S3 checksum mismatch: %w", content.ErrArtifactCorrupt)
 	}
 	return data, nil
+}
+
+func (s *Store) clientFor(limit int64) *awss3.Client {
+	if limit > 2<<20 {
+		return s.vectorClient
+	}
+	return s.client
 }

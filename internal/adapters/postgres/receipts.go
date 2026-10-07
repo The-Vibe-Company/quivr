@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,17 +22,11 @@ func (s ReceiptStore) HasReceipt(ctx context.Context, org, key string) (bool, er
 
 func (s ReceiptStore) Receipt(ctx context.Context, org, id string) (content.Receipt, error) {
 	r := content.Receipt{Diagnostics: []content.Diagnostic{}}
-	var command []byte
 	var code string
-	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT id,state,coalesce(outcome,''),record_id,coalesce(version_id,''),command,processing,error_code FROM ingestion_receipts WHERE organization=$1 AND id=$2`, org, id).Scan(&r.ID, &r.State, &r.Outcome, &r.RecordID, &r.VersionID, &command, &r.Processing.State, &code)
+	err := database(ctx, s.Pool).QueryRow(ctx, `SELECT rc.id,rc.state,coalesce(rc.outcome,''),rc.record_id,coalesce(rc.version_id,''),r.corpus_id,r.namespace,r.record_key,rc.processing,rc.error_code FROM ingestion_receipts rc JOIN records r ON (r.organization,r.id)=(rc.organization,rc.record_id) WHERE rc.organization=$1 AND rc.id=$2`, org, id).Scan(&r.ID, &r.State, &r.Outcome, &r.RecordID, &r.VersionID, &r.Source.CorpusID, &r.Source.Namespace, &r.Source.RecordKey, &r.Processing.State, &code)
 	if err != nil {
 		return r, notFound(err)
 	}
-	var c content.Command
-	if err = json.Unmarshal(command, &c); err != nil {
-		return r, err
-	}
-	r.Source = c.Source
 	if r.Processing.State != "idle" {
 		r.Processing.Phase = "materialization"
 	}

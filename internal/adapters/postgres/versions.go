@@ -87,7 +87,7 @@ func (s VersionStore) versionDiagnostics(ctx context.Context, org, id string, qu
 			out = append(out, d)
 		}
 	}
-	n, found, err := (NormalizationStore{Pool: s.Pool}).Normalized(ctx, org, id)
+	n, found, err := (NormalizationStore{Pool: s.Pool}).diagnosticNormalization(ctx, org, id)
 	if err != nil || !found || n.Failed() {
 		return out, err
 	}
