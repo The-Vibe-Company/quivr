@@ -146,6 +146,19 @@ type Config struct {
 // RetrievalConfig names the search profiles selected by this deployment.
 type RetrievalConfig struct {
 	Profiles map[string]string `json:"profiles"`
+	// CoverageRefresh paces background snapshots (Go duration, default 10s).
+	CoverageRefresh string `json:"coverage_refresh"`
+}
+
+func (c RetrievalConfig) coverageRefresh() (time.Duration, error) {
+	if c.CoverageRefresh == "" {
+		return 10 * time.Second, nil
+	}
+	refresh, err := time.ParseDuration(c.CoverageRefresh)
+	if err != nil || refresh <= 0 {
+		return 0, badConfig(configInvalid, "retrieval.coverage_refresh", "retrieval.coverage_refresh must be a positive duration")
+	}
+	return refresh, nil
 }
 
 // connectorSealer builds the Deposited Credential sealer. credential_key is
@@ -323,6 +336,10 @@ func Run(command string, args ...string) error {
 		}
 	}
 	rebuildConcurrency, err := cfg.Rebuild.concurrency()
+	if err != nil {
+		return err
+	}
+	coverageRefresh, err := cfg.Retrieval.coverageRefresh()
 	if err != nil {
 		return err
 	}
@@ -730,7 +747,7 @@ func Run(command string, args ...string) error {
 	embedding := tei.Encoder{Endpoint: cfg.TEIURL}
 	// Coverage counts refresh independently of search deadlines. The API and
 	// retrieval share snapshots; one count at a time bounds background load.
-	spaceSnapshots := retrieval.NewSpaceSnapshots(lifecycle.WorkContext(ctx), spaces, 10*time.Second)
+	spaceSnapshots := retrieval.NewSpaceSnapshots(lifecycle.WorkContext(ctx), spaces, coverageRefresh)
 	metadataProjection := retrieval.MetadataProjection{Projection: projection, Metadata: records}
 	search := retrieval.Service{Embedder: embedding, Routing: baseline, Registry: spaceSnapshots, Projection: metadataProjection, Content: contents}
 	// External normalization runs in the worker only, before publication.

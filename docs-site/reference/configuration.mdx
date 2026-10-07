@@ -28,7 +28,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `environment` | no | Deployment environment label in each log event. Default `unspecified`; `QUIVR_ENVIRONMENT` overrides the file. |
 | `shutdown_grace` | no | Shared grace period for draining HTTP requests and background work after SIGTERM or SIGINT. Positive Go duration, default `60s`; `QUIVR_SHUTDOWN_GRACE` overrides the file. |
 | `log_directory` | no | Also write JSON logs to rotating files in this folder; stdout remains enabled. Four files per process, up to 1 MiB each. |
-| `retrieval` | no | Search profile aliases. See [Search profiles](#search-profiles). |
+| `retrieval` | no | Search profile aliases and coverage refresh interval. See [Search profiles](#search-profiles). |
 | `plugins` | no | The plugins this deployment calls. See [Plugin pins](#plugin-pins). |
 | `ingestion_evaluation_concurrency` | no | Evaluation activities in flight per worker. Default `4`, range `1`–`32`; `0` selects the default. Served ingestion has separate capacity. |
 | `ingestion` | no | Source media routing and the default ingestion plugin. See [Ingestion routing](#ingestion-routing). |
@@ -219,6 +219,8 @@ To measure an evaluation projection, send `evaluation_plugin` and `evaluation_sp
 The search protocol carries at most 16 enabled vector spaces, counting served and evaluation spaces across all pinned ingestion plugins. Startup refuses a configuration above that protocol limit.
 
 ## Search profiles
+
+`retrieval.coverage_refresh` is a positive Go duration, default `10s`, between background coverage refresh attempts after the previous count finishes. Shorter intervals update informational counts sooner and perform more database work. At most one count runs per process, with a one-minute bound. See [Search profiles](/run-quivr/search-profiles) for unknown and stale coverage.
 
 `retrieval.profiles` maps deployment short names to full `plugin_id/profile` names. Pin several retrieval plugins in `plugins`, then choose which profile serves each short name. An explicit map must contain `default`; every target must be declared by an installed retrieval plugin. Short names cannot contain `/` or surrounding whitespace.
 

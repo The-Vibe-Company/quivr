@@ -30,7 +30,7 @@ func TestIngestionSourceRoutes(t *testing.T) {
 	fallback := awaitRetrievalReady(t, request(t, "POST", "/v0/records", admin, fallbackCmd, 202)["receipt_id"].(string))
 	fallbackVersion := fallback["version_id"].(string)
 	awaitEnriched(t, admin, corpusID, cursor, fallback["record_id"].(string))
-	spaces, total := vectorSpaces(t, corpusID)
+	spaces, total := awaitVectorSpaces(t, corpusID)
 	if spaces[coreIngestSpace]["role"] != "served" || spaces[routedFixtureSpace]["role"] != "served" || coverage(spaces[coreIngestSpace]) == 0 || coverage(spaces[routedFixtureSpace]) == 0 || coverage(spaces[coreIngestSpace])+coverage(spaces[routedFixtureSpace]) != total {
 		t.Fatalf("source routes must split coverage between served owners: %v of %v", spaces, total)
 	}
