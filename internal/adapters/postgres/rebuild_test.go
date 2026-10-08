@@ -182,10 +182,6 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	if _, err = rebuild.CoverRebuild(ctx, org, op.ID, x1, artifacts); err != nil {
 		t.Fatal(err)
 	}
-	// A running operation from an older binary has only the compatibility keys.
-	if _, err = pool.Exec(ctx, `UPDATE operations SET counters=counters-'versions_covered'-'passages_covered' WHERE organization=$1 AND id=$2`, org, op.ID); err != nil {
-		t.Fatal(err)
-	}
 	var covers errgroup.Group
 	covers.SetLimit(8)
 	for range 8 {
@@ -200,7 +196,7 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	}
 	activate(true)
 	read, err := store.Operation(ctx, org, op.ID)
-	if err != nil || read.State != operations.StateSucceeded || read.ResultGenerationID != op.TargetGenerationID || read.Counters["indexed"] != 2 || read.Counters["vectors_reused"] != 3 || read.Counters["versions_covered"] != 2 || read.Counters["passages_covered"] != 3 || read.Counters["versions_quarantined"] != 1 || len(read.Errors) != 1 || read.Errors[0].Code != reason.Code {
+	if err != nil || read.State != operations.StateSucceeded || read.ResultGenerationID != op.TargetGenerationID || read.Counters["versions_covered"] != 2 || read.Counters["passages_covered"] != 3 || read.Counters["versions_quarantined"] != 1 || len(read.Errors) != 1 || read.Errors[0].Code != reason.Code {
 		t.Fatalf("succeeded operation %+v %v", read, err)
 	}
 	if g, _ := store.Generation(ctx, org, a.ID); g.ID != op.TargetGenerationID {

@@ -29,7 +29,7 @@ func TestQueueOperationBacklogUsesScopeAndProgressCounters(t *testing.T) {
 INSERT INTO plugin_registrations(id,plugin_id,version,endpoint,manifest_digest,contributions,roles,state)
 VALUES('registration','example.counter','1','http://example.invalid','example','{}','{}','active');
 INSERT INTO operations(organization,id,kind,corpus_id,request_key,canonical_request,target_generation_id,counters,created_at)
-VALUES('example','rebuild','projection_rebuild','corpus','rebuild','','target','{"versions_in_scope":8,"indexed":3,"versions_quarantined":1}',clock_timestamp()-interval '30 seconds'),
+VALUES('example','rebuild','projection_rebuild','corpus','rebuild','','target','{"versions_in_scope":8,"versions_covered":3,"versions_quarantined":1}',clock_timestamp()-interval '30 seconds'),
 ('example','backfill','backfill','corpus','backfill','','target','{"versions_in_scope":8,"versions_done":3,"versions_skipped":1}',clock_timestamp()-interval '30 seconds'),
 ('example','estimated','backfill','corpus','estimated','','target','{"versions_done":3,"versions_skipped":1}',clock_timestamp()-interval '30 seconds');
 INSERT INTO backfills(organization,operation_id,registration_id,spaces,estimate)

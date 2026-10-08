@@ -271,7 +271,7 @@ def build_config(env):
             raise ValueError('QUIVR_QUEUE_KEY must differ from API and operator keys')
         config['keys'][queue_key] = {'organization': 'quivr-demo', 'corpora': ['*'],
                                      'actions': ['queues:read']}
-    # Omitted queue variables retain the mixed worker needed for old histories.
+    # Omitted queue variables keep one worker serving both queues.
     worker = {}
     if 'QUIVR_WORKER_QUEUES' in env:
         queues = [queue.strip() for queue in env['QUIVR_WORKER_QUEUES'].split(',')]

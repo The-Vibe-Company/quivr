@@ -11,6 +11,8 @@ You need operator access to the deployment, the new and previous binaries, and t
 
 Read the release notes for required backfills and contract migrations. Historical migrations classified as risks in the repository's `migrations/legacy.json` predate this rule; the rollback guarantee does not extend across those changes.
 
+In-place upgrades from 2.0.0-alpha.6 and older are not supported. Reset the installation, or export its data and re-import it into a new installation.
+
 ## Steps
 
 1. Run the new binary's `quivr migrate` with `QUIVR_CONFIG` pointing to its deployment configuration. It applies pending expansions and required dependency setup, leaving tagged contracts untouched. Performance indexes are built concurrently by the API and worker after startup. They reuse matching valid indexes and retry interrupted builds in the background, allowing database writes to continue.
@@ -53,7 +55,7 @@ Previous API and worker versions do not read the setting and store a new Corpus'
 
 Compact storage keeps each Version's vectors in one current float32 file per segmentation and vector space. Each uploaded object is immutable; a partial group can replace its descriptor with a new immutable object as more canonical vectors arrive. A segmentation is the saved set of passages; a vector space identifies the embedding model. Compact PostgreSQL rows retain vector and public artifact digests, file ordinals and generation coverage. Rebuilds reuse these files without calling the embedding provider. Each file is bounded to 256 MiB; ordinary canonical objects retain their 2 MiB bound.
 
-Rebuild Operation counters distinguish `versions_covered` (document revisions added to the rebuilt search index) from `passages_covered` (passage/vector-space coverage entries added to that index). A passage covered in two spaces counts twice. The compatibility keys `indexed` and `vectors_reused` keep those respective counts. Replays count only newly added coverage, including individual passages within a compact file. Running operations initialize the new keys from their existing compatibility totals when coverage next commits.
+Rebuild Operation counters distinguish `versions_covered` (document revisions added to the rebuilt search index) from `passages_covered` (passage/vector-space coverage entries added to that index). A passage covered in two spaces counts twice. Replays count only newly added coverage, including individual passages within a compact file.
 
 New installations start in compact mode. Existing installations retain legacy writes after the additive migration so previous binaries can still read new work. Use the new binary and `QUIVR_CONFIG` for these commands:
 

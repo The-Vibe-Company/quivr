@@ -197,7 +197,6 @@ func (s DeliveryStore) admitDeliveryGroupAttempt(ctx context.Context, works []mo
 SELECT $1,x.attempt_id,x.delivery_id,1 FROM unnest($2::text[],$3::text[]) AS x(attempt_id,delivery_id)`, org, attemptIDs, ids)
 	writes.Queue(`UPDATE deliveries SET state='delivering',attempt_count=1 WHERE organization=$1 AND id=ANY($2::text[])`, org, ids)
 	writes.Queue(deliveryEventsBatchSQL, org, eventIDs, corpusIDs, ids, attemptTraceContexts(attempts))
-	writes.Queue(acknowledgeQueueJournalSQL, org, len(eventIDs))
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return true, nil, err
 	}
@@ -330,7 +329,6 @@ SELECT $1,x.attempt_id,'acknowledged',NULLIF(x.http_status,0),x.error_code,left(
 FROM unnest($2::text[],$3::integer[],$4::text[],$5::text[]) AS x(attempt_id,http_status,error_code,error_message)`, org, attemptIDs, statuses, codes, messages)
 	writes.Queue(`UPDATE deliveries SET state='delivered',exhausted_reason='',last_outcome='acknowledged' WHERE organization=$1 AND id=ANY($2::text[])`, org, ids)
 	writes.Queue(deliveryEventsBatchSQL, org, eventIDs, corpusIDs, ids, attemptTraceContexts(attempts))
-	writes.Queue(acknowledgeQueueJournalSQL, org, len(eventIDs))
 	writes.Queue(`DELETE FROM delivery_outbox WHERE organization=$1 AND delivery_id=ANY($2::text[])`, org, ids)
 	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 		return true, err

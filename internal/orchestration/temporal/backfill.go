@@ -11,10 +11,6 @@ import (
 
 const backfillWorkflowName = "backfill-v1"
 
-// backfillTaskQueue is served by its own worker, one activity at a time, so
-// a backfill never takes a slot from live content processing.
-const backfillTaskQueue = "quivr-backfill-v0"
-
 func backfillWorkflow(ctx workflow.Context, in RebuildInput) error {
 	ctx = backgroundContext(ctx, backfillWorkflowName)
 	return operationWorkflow(ctx, workflowStep(func(ctx workflow.Context) (StepProgress, error) {

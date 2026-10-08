@@ -311,7 +311,7 @@ Follow the [bounded retirement procedure](https://docs.quivr.thevibecompany.co/r
 
 Authenticate `railway login`, then create/link a dedicated project in the intended
 workspace. The provisioner refuses any project not named `quivr-v2-demo` or whose ID
-does not match the explicit argument; [drain old mixed work first](autoscaler/README.md#create-the-workers).
+does not match the explicit argument.
 
 ```sh
 railway init --name quivr-v2-demo --workspace YOUR_WORKSPACE_ID --json

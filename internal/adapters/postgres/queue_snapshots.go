@@ -50,8 +50,6 @@ func (s QueueSnapshots) Refresh(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	// Existing installations retain the legacy branch during initialization.
-	// Bounded repair also discovers writes made by a preceding binary.
 	if err = advanceQueueObservations(ctx, tx, 1000); err != nil {
 		return err
 	}
