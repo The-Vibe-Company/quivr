@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"github.com/The-Vibe-Company/quivr/internal/content"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -51,6 +52,15 @@ func queueRecordObservations(batch *pgx.Batch, organizations, records []string) 
 }
 
 func observeQueueRecords(ctx context.Context, tx pgx.Tx, organizations, records []string) error {
+	if group := journalGroupOf(ctx); group != nil {
+		for i, record := range records {
+			if organizations[i] != group.organization {
+				return content.ErrInvalid
+			}
+			group.records[record] = true
+		}
+		return nil
+	}
 	if len(records) == 0 {
 		return nil
 	}
