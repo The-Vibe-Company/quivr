@@ -26,8 +26,8 @@ func LogFailure(err error) {
 	switch {
 	case errors.Is(err, postgres.ErrIndexConflict):
 		code = "index_definition_conflict"
-	case errors.Is(err, postgres.ErrIndexBusy):
-		code = "index_setup_busy"
+	case errors.Is(err, postgres.ErrMigrationBusy):
+		code = "migration_busy"
 	case errors.Is(err, postgres.ErrIndexSetup):
 		code = "index_setup_failed"
 	}
