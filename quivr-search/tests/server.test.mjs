@@ -59,7 +59,35 @@ test("upstream read failures remain retryable; out-of-corpus resources stay hidd
   }
 });
 
+// The demo in front of a fake core whose demo corpus, created by the demo,
+// is "demo"; every other call reaches the fake as it is.
 async function startDemo(t, upstreamPort, env = {}) {
+  const core = http.createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/v0/corpora") {
+      res.writeHead(201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ corpus_id: "demo", name: "Espace démo" }));
+      return;
+    }
+    const relay = http.request(
+      { host: "127.0.0.1", port: upstreamPort, method: req.method, path: req.url, headers: req.headers },
+      (answer) => {
+        res.writeHead(answer.statusCode, answer.headers);
+        answer.pipe(res);
+      },
+    );
+    relay.on("error", () => res.destroy());
+    req.pipe(relay);
+  });
+  core.listen(0, "127.0.0.1");
+  await once(core, "listening");
+  t.after(() => {
+    core.closeAllConnections();
+    core.close();
+  });
+  return (await spawnDemo(t, core.address().port, env)).base;
+}
+
+async function spawnDemo(t, upstreamPort, env = {}) {
   const demo = spawn(process.execPath, ["server.mjs"], {
     env: {
       ...process.env,
@@ -68,7 +96,6 @@ async function startDemo(t, upstreamPort, env = {}) {
       DEMO_PASSWORD: "",
       QUIVR_API_URL: `http://127.0.0.1:${upstreamPort}`,
       QUIVR_API_KEY: "fixture-server-key",
-      QUIVR_DEMO_CORPUS_ID: "demo",
       ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -87,7 +114,10 @@ async function startDemo(t, upstreamPort, env = {}) {
   ]);
   const port = String(ready[0]).match(/127\.0\.0\.1:(\d+)/)?.[1];
   assert.ok(port);
-  return `http://127.0.0.1:${port}`;
+  // What the demo logs as errors, line by line.
+  const errors = [];
+  demo.stderr.on("data", (chunk) => errors.push(...String(chunk).split("\n").filter(Boolean)));
+  return { base: `http://127.0.0.1:${port}`, errors };
 }
 
 test("search relays the engine's profile list and the chosen profile", async (t) => {
@@ -214,14 +244,15 @@ test("connector routes are fenced to the demo corpus and mutations must be same-
   assert.equal(seen.at(-1).method, "PUT");
   assert.equal(seen.at(-1).url, "/v0/connectors/connector_demo/credential");
 
-  // Creation is limited to the demo corpus and a namespace of its own.
+  // Creation is limited to the demo corpus and a namespace of its own; another
+  // corpus is one the page's session no longer knows.
   const create = (body, headers = origin) =>
     call("/v0/connectors", {
       method: "POST",
       headers,
       body: JSON.stringify(body),
     });
-  assert.equal((await create({ corpus_id: "private-corpus" })).status, 403);
+  assert.equal((await create({ corpus_id: "private-corpus" })).status, 409);
   assert.equal(
     (await create({ corpus_id: "demo", source_namespace: "web-demo" })).status,
     422,
@@ -1113,6 +1144,8 @@ test("answers are compressed, revalidated with an ETag and say what they waited 
     upstream.close();
   });
   const base = await startDemo(t, upstream.address().port);
+  // The demo corpus is created on the first request, not counted below.
+  await fetch(`${base}/demo/session`);
   for (const coding of ["br", "gzip"]) {
     const first = await raw(`${base}/v0/connectors`, { "Accept-Encoding": coding });
     assert.equal(first.status, 200);
@@ -1350,6 +1383,7 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
         ...(desk && body.corpus_ids.includes("demo") ? { excluded_corpora: [{ corpus_id: "demo", fields: ["desk"] }] } : {}),
       });
     }
+    if (url.pathname === "/v0/corpora") return json(200, { items: Object.values(corpora) });
     const corpus = url.pathname.match(/^\/v0\/corpora\/(\w+)$/);
     if (corpus) return corpora[corpus[1]] ? json(200, corpora[corpus[1]]) : json(404, { code: "not_found" });
     if (url.pathname === "/v0/blobs/blob_1")
@@ -1397,7 +1431,7 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
     upstream.closeAllConnections();
     upstream.close();
   });
-  const base = await startDemo(t, upstream.address().port, { QUIVR_DEMO_CORPORA: "wires" });
+  const base = await startDemo(t, upstream.address().port, { QUIVR_DEMO_CORPORA: "Dépêches" });
   const get = async (path) => {
     const response = await fetch(base + path);
     return { status: response.status, data: await response.json() };
@@ -1541,11 +1575,101 @@ test("the corpora the demo reads: search, feed and Explorer span them, any other
   assert.equal(await statusOf("/demo/feed/stream", true), true);
   assert.equal(await statusOf("/demo/feed/stream?corpora=demo,wires"), false);
 
-  // Another corpus is read, never written to.
+  // Another corpus is read, never written to: the page that asks reloads its session.
   const write = await fetch(base + "/v0/records", {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: base },
     body: JSON.stringify({ source: { corpus_id: "wires", namespace: "web-demo", record_key: "k" }, content: { kind: "text", text: "x" } }),
   });
-  assert.equal(write.status, 403);
+  assert.equal(write.status, 409);
+  assert.equal((await write.json()).code, "demo_corpus_changed");
+});
+
+test("after the engine's databases are reset, the demo forgets its corpora and finds them again", async (t) => {
+  // The engine's corpora, renewed by each reset: the demo's own and one named "Archive".
+  let generation = 1;
+  const demoID = () => `demo-${generation}`;
+  const listed = () => [
+    { corpus_id: demoID(), name: "Espace démo" },
+    { corpus_id: `archive-${generation}`, name: "Archive" },
+  ];
+  const known = (id) => listed().some((c) => c.corpus_id === id);
+  // The change streams open, by corpus.
+  const streams = new Map();
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    const url = new URL(req.url, "http://core");
+    const corpus = url.searchParams.get("corpus_id");
+    const json = (status, data) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+    };
+    const gone = () => json(404, { code: "not_found", message: "Not found" });
+    if (url.pathname === "/v0/corpora" && req.method === "POST") return json(201, { corpus_id: demoID(), name: body.name });
+    if (url.pathname === "/v0/corpora") return json(200, { items: listed() });
+    const one = url.pathname.match(/^\/v0\/corpora\/([\w-]+)$/);
+    if (one) return known(one[1]) ? json(200, { ...listed().find((c) => c.corpus_id === one[1]), effective_retrieval: { fields: [] } }) : gone();
+    if (url.pathname === "/v0/connectors" && req.method === "POST")
+      return known(body.corpus_id) ? json(201, { connector_id: "connector_new", ...body }) : gone();
+    if (corpus && !known(corpus)) return gone();
+    if (url.pathname === "/v0/changes/stream") {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(": live\n\n");
+      streams.set(corpus, res);
+      res.on("close", () => streams.get(corpus) === res && streams.delete(corpus));
+      return;
+    }
+    if (url.pathname === "/v0/changes") return json(200, { items: [], next_cursor: "c0", has_more: false });
+    if (url.pathname === "/v0/records") return json(200, { items: [] });
+    if (url.pathname === "/v0/records/count") return json(200, { count: 0 });
+    gone();
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  const { base, errors } = await spawnDemo(t, upstream.address().port, {
+    QUIVR_DEMO_CORPORA: "Archive, corpus-from-before",
+  });
+  const until = async (what, done) => {
+    for (const deadline = Date.now() + 3000; !done(); await delay(20))
+      assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
+  };
+  const get = async (path) => (await fetch(base + path)).json();
+  const addSource = (corpus_id) =>
+    fetch(base + "/v0/connectors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: base },
+      body: JSON.stringify({ corpus_id, kind: "fixture", source_namespace: "wire", config: {} }),
+    });
+
+  // One line at startup names the variable and the entry that matches no corpus.
+  await until("the startup check", () => errors.length);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /^QUIVR_DEMO_CORPORA: .*"corpus-from-before"/);
+  assert.doesNotMatch(errors[0], /Archive/);
+
+  assert.equal((await get("/demo/session")).corpus_id, "demo-1");
+  assert.deepEqual((await get("/demo/corpora")).items.map((c) => c.corpus_id), ["demo-1", "archive-1"]);
+  await get("/demo/feed");
+  await until("the demo corpus's change stream", () => streams.has("demo-1"));
+
+  // The databases are wiped while the demo runs. The page still open adds a
+  // source: the engine no longer has the corpus, so the page reloads.
+  generation = 2;
+  const stale = await addSource("demo-1");
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).code, "demo_corpus_changed");
+  // The forgotten corpus's change stream is left.
+  await until("the old change stream to close", () => !streams.has("demo-1"));
+
+  // After the reload, the demo runs on new corpora, the archive found by its name.
+  assert.equal((await get("/demo/session")).corpus_id, "demo-2");
+  assert.deepEqual((await get("/demo/corpora")).items.map((c) => c.corpus_id), ["demo-2", "archive-2"]);
+  assert.equal((await addSource("demo-2")).status, 201);
+  assert.equal(errors.length, 1);
 });

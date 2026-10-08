@@ -173,6 +173,9 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
   let cursor = null;
   let started = null;
   let live = false;
+  // Set once the corpus is no longer read: the change stream is left.
+  let stopped = false;
+  let following;
   const query = (extra = {}) =>
     new URLSearchParams({ corpus_id: corpus, ...extra }).toString();
 
@@ -268,8 +271,9 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
   }
 
   async function follow() {
-    for (let delay = 1000; ;) {
+    for (let delay = 1000; !stopped; ) {
       const controller = new AbortController();
+      following = controller;
       let idle;
       const watch = () => {
         clearTimeout(idle);
@@ -339,6 +343,7 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
         controller.abort();
         if (expired) await resync();
       } catch (error) {
+        if (stopped) break;
         // Reconnect below from the last cursor.
         const reason = error.status ? `HTTP ${error.status}` : error.message;
         console.warn(`Veille: change stream interrupted (${reason})`);
@@ -452,6 +457,11 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
     /** Reads the catalog once and follows the change stream from then on. */
     start() {
       start().catch(() => {});
+    },
+    /** Leaves the change stream for good: the corpus is no longer read. */
+    stop() {
+      stopped = true;
+      following?.abort();
     },
     /** Settles once the first catalog scan is done (or failed). */
     ready() {
