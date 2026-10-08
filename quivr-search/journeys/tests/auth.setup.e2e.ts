@@ -23,8 +23,8 @@ test.setup('sign in to the demo', { sessions: ['demo'] }, async ({ app, browser,
     const cookie = response.headers.getSetCookie().find((header) => header.startsWith('quivr_demo='));
     if (!cookie) throw new Error(`POST ${login} set no quivr_demo cookie`);
     const value = cookie.split(';')[0].slice('quivr_demo='.length);
-    const secure = /;\s*Secure(;|$)/i.test(cookie);
-    await browser.setCookies([{ url: base, name: 'quivr_demo', value, httpOnly: true, secure, sameSite: 'Strict' }]);
+    // Set by url, the cookie is Secure exactly when the demo is served over https.
+    await browser.setCookies([{ url: base, name: 'quivr_demo', value, httpOnly: true, sameSite: 'Strict' }]);
     await app.open('/');
   }
   const fil = screen.getByRole('navigation', 'Sections').getByRole('link', 'Fil');
