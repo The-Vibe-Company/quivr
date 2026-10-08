@@ -38,7 +38,7 @@ func changeToTransport(c changes.Change) transport.ChangeEvent {
 	corpusID := c.CorpusID
 	event := transport.ChangeEvent{EventId: c.ID, Type: c.Type, SchemaVersion: changeSchemaVersion, OccurredAt: c.OccurredAt.UTC(), Resource: transport.ResourceReference{Kind: c.ResourceKind, Id: c.ResourceID, CorpusId: &corpusID}, Cursor: c.Cursor}
 	if m := c.Monitoring; m != nil {
-		refs := transport.MonitoringReferences{MatchId: m.MatchID, RecordId: m.RecordID, RecordVersionId: m.RecordVersionID, SubscriptionId: m.SubscriptionID, SubscriptionVersionId: m.SubscriptionVersionID, DeliveryId: m.DeliveryID}
+		refs := transport.MonitoringReferences{MatchId: m.MatchID, RecordId: m.RecordID, RecordVersionId: m.RecordVersionID, SubscriptionId: m.SubscriptionID, SubscriptionVersionId: m.SubscriptionVersionID, DeliveryId: optionalString(m.DeliveryID)}
 		if m.PreviousMatchID != "" {
 			refs.PreviousMatchId = &m.PreviousMatchID
 		}

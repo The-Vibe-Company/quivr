@@ -287,12 +287,13 @@ deliveries; without the variable, X lists only poll.
 ## Keyword alerts and PDF text (optional)
 
 The core image bakes in [`alerts`](../../plugins/alerts/README.md), which the **Alertes** tab needs, and [`pdf-text`](../../plugins/pdf-text/README.md).
-Set `QUIVR_DEMO_PLUGINS=1` on api and worker and `QUIVR_DEMO_DESTINATION_ID=demo-alerts-sink` on web, then redeploy all three. `core-entrypoint.py`:
+Set `QUIVR_DEMO_PLUGINS=1` on api and worker, then redeploy them. `core-entrypoint.py`:
 
 - pins pdf-text on `127.0.0.1:9900` (`application/pdf`) and alerts on `127.0.0.1:9910`; worker runs both, api also runs alerts for previews. A sidecar exit stops its container for Railway to restart;
 - enables external [described alerts](https://docs.quivr.thevibecompany.co/guides/described-alerts) when `TYPESAFE_API_KEY` is the same on api and worker; alerts receives it, as does the API's Jev sidecar when enabled. Set `DEMO_DESCRIBED_ALERTS=true` on web to offer them;
-- grants the demo key `monitoring:read` and `monitoring:write`;
-- declares destination `demo-alerts-sink` at `http://alerts-sink.invalid/`: web reads Matches through the API, deliveries fail on the reserved name, and private-address refusal stays on. Its signing secret derives from `QUIVR_CURSOR_KEY`.
+- grants the demo key `monitoring:read` and `monitoring:write`.
+
+The web app creates alerts without a delivery destination and reads Matches through the API. No webhook receiver or signing secret is needed.
 
 The worker logs its actual versions in `plugins pinned`. Without a web `DEMO_STATE_FILE` volume, paused alerts leave the list after a web restart; active ones are found through the API.
 
@@ -309,9 +310,11 @@ Follow the [bounded retirement procedure](https://docs.quivr.thevibecompany.co/r
 
 ## Provision and deploy
 
+In-place upgrades from 2.0.0-alpha.6 and older are not supported. Reset the installation, or export its data and re-import it into a fresh installation before following these steps.
+
 Authenticate `railway login`, then create/link a dedicated project in the intended
 workspace. The provisioner refuses any project not named `quivr-v2-demo` or whose ID
-does not match the explicit argument; [drain old mixed work first](autoscaler/README.md#create-the-workers).
+does not match the explicit argument.
 
 ```sh
 railway init --name quivr-v2-demo --workspace YOUR_WORKSPACE_ID --json

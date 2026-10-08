@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Queue observations and their checkpoint share the round trip of the event
+// Queue observations share the round trip of the event
 // they follow. Every other writer waits while the Organization journal is
 // locked, so an observation-only round trip delays the whole Organization.
 func TestJournalEventsCarryQueueObservationsInTheirRoundTrip(t *testing.T) {
@@ -25,11 +25,6 @@ func TestJournalEventsCarryQueueObservationsInTheirRoundTrip(t *testing.T) {
 	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-journal-trips-%d", time.Now().UnixNano())}
 	c, _, err := (postgres.Store{Pool: pool}).Create(ctx, scope.Organization, corpus.CreateInput{Key: "trips", Name: "Trips", Resolved: corpus.Retrieval{}})
 	if err != nil {
-		t.Fatal(err)
-	}
-	// A maintained checkpoint at the journal head advances only by contiguous acknowledgements.
-	var start int64
-	if err = pool.QueryRow(ctx, `INSERT INTO queue_observation_journals(organization,position) SELECT $1,coalesce((SELECT last_sequence FROM organization_journals WHERE organization=$1),0) RETURNING position`, scope.Organization).Scan(&start); err != nil {
 		t.Fatal(err)
 	}
 	trips := &lockedRoundTrips{locked: map[*pgx.Conn]bool{}}
@@ -54,14 +49,14 @@ func TestJournalEventsCarryQueueObservationsInTheirRoundTrip(t *testing.T) {
 	if len(extra) > 0 {
 		t.Errorf("round trips under the journal lock carried only queue observation work: %q", extra)
 	}
-	var position, head int64
+	var head int64
 	var observed bool
-	if err = pool.QueryRow(ctx, `SELECT q.position,j.last_sequence,EXISTS(SELECT 1 FROM queue_enrichment_records r WHERE r.organization=$1)
- FROM queue_observation_journals q JOIN organization_journals j USING(organization) WHERE q.organization=$1`, scope.Organization).Scan(&position, &head, &observed); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT last_sequence,EXISTS(SELECT 1 FROM queue_enrichment_records r WHERE r.organization=$1)
+ FROM organization_journals WHERE organization=$1`, scope.Organization).Scan(&head, &observed); err != nil {
 		t.Fatal(err)
 	}
-	if position != head || head != start+4 || !observed {
-		t.Fatalf("checkpoint %d at head %d (want %d: four events acknowledged), Record observed %v", position, head, start+4, observed)
+	if head != 4 || !observed {
+		t.Fatalf("journal head %d (want four events), Record observed %v", head, observed)
 	}
 }
 
@@ -85,7 +80,7 @@ func (r *lockedRoundTrips) trip(c *pgx.Conn, sqls []string) {
 		r.lockedTrips++
 		observation, event := false, false
 		for _, sql := range sqls {
-			observation = observation || strings.Contains(sql, "queue_observation_journals") || strings.Contains(sql, "queue_enrichment_records")
+			observation = observation || strings.Contains(sql, "queue_enrichment_records")
 			event = event || strings.Contains(sql, "INSERT INTO change_events")
 		}
 		if observation && !event {

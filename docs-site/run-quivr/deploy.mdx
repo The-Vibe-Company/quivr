@@ -185,15 +185,25 @@ Keep `/metrics` scraping as it is: metric names and buckets remain unchanged. Ea
 
 Run separate `quivr worker` processes with `worker.queues: ["live"]` and `["bulk"]`; choose each process's slots using [Worker queues](/reference/configuration#worker-queues). Replicas keep no durable local work: PostgreSQL and Temporal own claims, progress and retries. Use the same database, Temporal namespace, storage, signing keys and active plugin plan. Give processes distinct probe addresses on a shared host, or separate network namespaces. Plugin endpoints may point to shared services or sidecars in each process's network namespace; each sidecar needs its own lifecycle and writable temporary directory. A shared embedding provider still needs enough capacity for both classes.
 
-During an upgrade, keep at least one worker serving both classes until queued legacy receipts and every unfinished history on `quivr-content-v0` have drained. Inspect that queue's running workflows in Temporal and confirm no pending `legacy_workflow` rows remain in `ingestion_outbox` or `ingestion_batches` before removing the mixed worker. Queue-specific workers do not drain that old mixed queue.
-
 `GET /v0/admin/queues` accepts a bearer API key granted `queues:read` with all-corpus scope (`corpora: ["*"]`); configure it under [API keys](/reference/configuration#api-keys). Its numeric paths stay stable, including `queues.bulk.waiting` and `queues.live.waiting`. Observations refresh every 15 seconds by default; configure `queue_observation.refresh_interval` in all processes for an interval from 1 to 60 seconds. Rebuild/backfill waiting counts use scope and progress counters and may count overlapping bulk work more than once; use them as a scaling signal. See [Worker queues](/reference/configuration#worker-queues) for freshness and estimation details. For example, not run:
 
 ```json
 {"queues":{"live":{"waiting":0,"in_progress":1,"oldest_waiting_age_seconds":0},"bulk":{"waiting":123,"in_progress":2,"oldest_waiting_age_seconds":45}}}
 ```
 
-For Kubernetes with KEDA installed, create a Deployment named `quivr-bulk` running `quivr worker` with `worker.queues: ["bulk"]`. Mount its configuration and supply plugin secrets as for any worker. Put the operator API key in the `token` entry of a Secret named `quivr-queue-reader`. Give KEDA HTTPS access to the API service. This example uses the Railway autoscaler defaults: one to eight workers, 20,000 waiting documents per replica, and five-minute downscale stabilization. Choose the target from measured document throughput and your provider's capacity.
+Every option below applies the same rule to one queue's waiting count:
+
+```text
+replicas = clamp(ceil(waiting / documents_per_replica), min, max)
+```
+
+Scale-up needs no stabilization window; scale-down goes only to the highest recommendation of the last five minutes, which reduces short-lived scale-downs around a threshold. The examples use one to eight workers and 20,000 waiting documents per replica, so 20,001 waiting documents need two workers. Choose the target from measured document throughput and your provider's capacity. Keep at least one bulk worker so admitted work continues when waiting reaches zero. Counts are installation-wide, so a request to any healthy API replica is enough.
+
+Create a dedicated key for the scaler with only `queues:read` and `corpora: ["*"]`, distinct from the API and operator keys, under [API keys](/reference/configuration#api-keys). Never give a scaler the operator key.
+
+### Kubernetes with KEDA
+
+Use KEDA when it is installed. Create a Deployment named `quivr-bulk` running `quivr worker` with `worker.queues: ["bulk"]`. Mount its configuration and supply plugin secrets as for any worker. Put the dedicated `queues:read` key in the `token` entry of a Secret named `quivr-queue-reader`, and give KEDA HTTPS access to the API service.
 
 For example, not run; substitute your API service URL:
 
@@ -235,9 +245,9 @@ spec:
         name: quivr-queue-reader
 ```
 
-KEDA's [metrics-api scaler](https://keda.sh/docs/2.20/scalers/metrics-api/) reads that numeric path and sends the Secret as `Authorization: Bearer …`. HPA stabilization controls scale-down between positive replica counts; KEDA's `cooldownPeriod` applies to scaling to zero. HPA tolerance can change exact decisions near a threshold. Counts are installation-wide, so a request to any healthy API replica is sufficient. Keep at least one bulk worker while scaling on waiting documents so admitted work continues when waiting reaches zero. Set the Deployment's termination grace period longer than Quivr's `shutdown_grace`.
+KEDA's [metrics-api scaler](https://keda.sh/docs/2.20/scalers/metrics-api/) reads that numeric path and sends the Secret as `Authorization: Bearer …`. HPA stabilization controls scale-down between positive replica counts; KEDA's `cooldownPeriod` applies to scaling to zero. HPA tolerance can change exact decisions near a threshold. Set the Deployment's termination grace period longer than Quivr's `shutdown_grace`.
 
-Alternatively, scrape Quivr's private probe endpoint `/metrics` and replace the trigger with KEDA's [Prometheus scaler](https://keda.sh/docs/2.20/scalers/prometheus/). The example `job` selector must identify only this Quivr installation. `max` avoids adding the same database count once per scraped replica. Configure Prometheus authentication separately when required.
+Alternatively, scrape Quivr's private probe endpoint `/metrics` and replace the trigger with KEDA's [Prometheus scaler](https://keda.sh/docs/2.20/scalers/prometheus/) on `quivr_queue_waiting_documents`. The example `job` selector must identify only this Quivr installation. `max` avoids adding the same database count once per scraped replica. Configure Prometheus authentication separately when required.
 
 For example, not run:
 
@@ -251,12 +261,41 @@ triggers:
       ignoreNullValues: "false"
 ```
 
-The same gauges expose `in_progress` and `oldest_waiting_age_seconds` for dashboards and saturation alerts. A shared PostgreSQL snapshot keeps scrapes independent of operation size. Processes refresh it in the background at most once per configured interval (15 seconds by default), with a 30-second refresh budget; counts describe the last completed observation. The queue API returns 503 for a missing snapshot or one older than the larger of one minute and twice the configured interval. Metrics instead omit unavailable queue series and continue serving other families. Set `ignoreNullValues: "false"` so the Prometheus scaler treats an empty result as an error instead of zero backlog. The API and metrics need no Railway-specific service and can drive any orchestrator that replicates stateless worker processes.
+The same gauges expose `in_progress` and `oldest_waiting_age_seconds` for dashboards and saturation alerts. A shared PostgreSQL snapshot keeps scrapes independent of operation size. Processes refresh it in the background at most once per configured interval (15 seconds by default), with a 30-second refresh budget; counts describe the last completed observation. The queue API returns 503 for a missing snapshot or one older than the larger of one minute and twice the configured interval. Metrics instead omit unavailable queue series and continue serving other families. Set `ignoreNullValues: "false"` so the Prometheus scaler treats an empty result as an error instead of zero backlog.
+
+### The quivr-autoscaler binary
+
+Where KEDA is not available, run `quivr-autoscaler`: one small, always-on process that polls the queue endpoint and sets one worker service's replica count. Build it from the repository root with `cmd/quivr-autoscaler/Dockerfile`. Run exactly one per target, with no other scaler on it. `QUIVR_AUTOSCALER_BACKEND` selects how replicas are read and set:
+
+- `kubernetes` patches the `/scale` subresource of a Deployment in the autoscaler pod's own namespace, as the pod's service account. Grant that account `get` and `patch` on `deployments/scale` for the target only, for example with a Role whose rule is `{apiGroups: ["apps"], resources: ["deployments/scale"], resourceNames: ["quivr-bulk"], verbs: ["get", "patch"]}`.
+- `railway` updates a Railway service's replica count. The [Railway guide](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/autoscaler/README.md) covers its project token and service setup.
+
+| Variable | Default / meaning |
+| --- | --- |
+| `QUIVR_AUTOSCALER_BACKEND` | Required: `kubernetes` or `railway`. Any other value stops the process. |
+| `QUIVR_QUEUE_URL` | Required: the full queue endpoint, for example `http://quivr-api:8080/v0/admin/queues`; use HTTPS outside a private network |
+| `QUIVR_QUEUE_KEY` | Required secret: the dedicated `queues:read` key |
+| `QUIVR_AUTOSCALER_QUEUE` | `bulk`; the queue whose waiting count drives the target, `bulk` or `live` |
+| `QUIVR_AUTOSCALER_KUBERNETES_DEPLOYMENT` | Required for `kubernetes`: the Deployment to scale |
+| `RAILWAY_TOKEN`, `QUIVR_AUTOSCALER_RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID` | Required for `railway` only; the service ID is the target, not the autoscaler's own `RAILWAY_SERVICE_ID` |
+| `QUIVR_AUTOSCALER_ENABLED` | `true`; `false` exits without reading APIs or changing replicas |
+| `QUIVR_AUTOSCALER_MIN` / `QUIVR_AUTOSCALER_MAX` | `1` / `8` replicas |
+| `QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA` | `20000` waiting documents per replica |
+| `QUIVR_AUTOSCALER_DOWNSCALE_WINDOW` | `5m`; the highest recent recommendation limits scale-down; `0s` disables stabilization |
+| `QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL` | `2m` between successful scale actions; `0s` disables spacing |
+| `QUIVR_AUTOSCALER_INTERVAL` | `30s` delay after each poll, at least `1s` |
+| `QUIVR_AUTOSCALER_REQUEST_TIMEOUT` | `10s` per HTTP request, at least `1s` |
+
+The process logs JSON lines: `autoscaler started` with its backend and queue, then one `autoscaling decision` per poll with `waiting`, the observed `current` count, the recommended `target`, the acknowledged `applied` count and an `outcome`: `hold`, `cooldown`, `scaled`, or an error stage. An unknown count is `-1`. A `hold` with a lower backlog can be the stabilization window; `cooldown` means the minimum scale interval has not elapsed. It reads the backend's replica count on every poll and never assumes a failed write succeeded. Startup, failed reads or writes and replica changes made by someone else restart the stabilization window at the observed count. Missing or malformed counts and `503` responses are errors, never zero backlog.
+
+### Scale by hand
+
+On a platform without a replica API, or to size workers before automating, read `queues.bulk.waiting` or the `quivr_queue_waiting_documents` gauge, apply the rule above and set the worker count yourself.
 
 ## Example deployments
 
 - **Local:** `make dev`, in the [Quickstart](/quickstart).
-- **Hosted, single node:** the repository's [Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/README.md) runs the demo app and Quivr with separate live/bulk workers and an optional [Go autoscaler](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/autoscaler/README.md), without high availability.
+- **Hosted, single node:** the repository's [Railway example](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/README.md) runs the demo app and Quivr with separate live/bulk workers and an optional [autoscaler service](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/railway/autoscaler/README.md), without high availability.
 
 ## Next
 

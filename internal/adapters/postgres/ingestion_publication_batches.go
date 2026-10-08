@@ -252,7 +252,4 @@ func (group *journalGroup) queueAppend(writes *pgx.Batch) {
 	if len(records) > 0 {
 		queueRecordObservations(writes, orgs, records)
 	}
-	if len(group.events) > 0 {
-		writes.Queue(acknowledgeQueueJournalSQL, group.organization, len(group.events))
-	}
 }

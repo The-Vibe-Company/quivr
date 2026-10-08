@@ -7,8 +7,7 @@
 //   FAKE_RECORDS=300 FAKE_DAYS=1 FAKE_LATENCY_MS=20 node scripts/fake-core.mjs
 //
 // Then run the demo against it:
-//   QUIVR_API_URL=http://127.0.0.1:7700 QUIVR_API_KEY=local QUIVR_DEMO_CORPUS_ID=demo \
-//   QUIVR_DEMO_DESTINATION_ID=demo-alerts-sink node server.mjs
+//   QUIVR_API_URL=http://127.0.0.1:7700 QUIVR_API_KEY=local node server.mjs
 //
 // GET /fake/calls answers how many calls each route received, to check that
 // the facade does not hammer the core.
@@ -181,6 +180,8 @@ export function fakeCore({ records: given, alerts = [], latency = 0 } = {}) {
       });
       return;
     }
+    if (path === "/v0/corpora" && req.method === "POST") return json(res, 201, { corpus_id: "demo", name: "Espace démo" });
+    if (path === "/v0/corpora/demo") return json(res, 200, { corpus_id: "demo", name: "Espace démo", effective_retrieval: { fields: [] } });
     if (path === "/v0/changes") return json(res, 200, { items: [], next_cursor: "c0", has_more: false });
     if (path === "/v0/records/count") return json(res, 200, { count: inBounds(url).length });
     if (path === "/v0/records") {

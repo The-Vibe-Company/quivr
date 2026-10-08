@@ -102,7 +102,7 @@ func (p provider) requestWithCost(ctx context.Context, inputs []string, mode str
 		if mode == "document" {
 			return nil, quivrplugin.RetryableIngestError("provider_credentials", "provider credentials unavailable")
 		}
-		return nil, quivrplugin.TerminalIngestError("provider_credentials", "AZURE_FOUNDRY_KEY is required")
+		return nil, quivrplugin.TerminalIngestError("provider_credentials", "EMBED_API_KEY is required")
 	}
 	body := map[string]any{"model": c.Model}
 	path := "/embeddings"
@@ -119,9 +119,9 @@ func (p provider) requestWithCost(ctx context.Context, inputs []string, mode str
 		}
 		body["embedding_types"] = []string{"float"}
 		if mode == "query" {
-			body["input_type"] = c.QueryInputType
+			body["input_type"] = "search_query"
 		} else {
-			body["input_type"] = c.DocumentInputType
+			body["input_type"] = "search_document"
 		}
 	}
 	encoded, _ := json.Marshal(body)

@@ -67,7 +67,7 @@ including a changed ID for the same question.
 
 `mapping_policy.production` contains `ingestion` and `hybrid_fusion`.
 Hosted ingestion requires explicit `kind="hosted"`, `max_tokens_per_segment`
-and `overlap`, plus frozen `batch_size`, `max_batch_tokens`, `request_timeout_ms`,
+and `body_tokens`, plus frozen `batch_size`, `max_batch_tokens`, `request_timeout_ms`,
 `call_budget_ms`, `max_concurrent_requests` and `max_retries`. Standard Cohere
 input types, empty prefixes and cosine distance are supported; other settings
 are refused. The model, deployment revision and dimensions come from each
