@@ -15,6 +15,7 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `worker` | no | Queues and processing slots per worker process. See [Worker queues](#worker-queues). |
 | `queue_observation` | no | Shared backlog refresh pacing. `queue_observation.refresh_interval` is a Go duration from `1s` to `60s`, default `15s`. Use the same value in every API and worker process. |
 | `database_url` | yes | PostgreSQL connection URL, such as `postgres://quivr:…@db:5432/quivr?sslmode=verify-full` |
+| `postgres` | no | Connection pool sizing per process. See [PostgreSQL connections](#postgresql-connections). |
 | `cursor_key` | yes | A secret of at least 32 bytes that signs change-feed cursors. Keep it stable. |
 | `keys` | yes | The API keys, by bearer token. See [API keys](#api-keys). |
 | `temporal_address` | yes | Temporal's frontend address, such as `temporal:7233` |
@@ -57,6 +58,30 @@ In the [release image](/run-quivr/deploy#run-the-image), mount the file read-onl
 | `m365` | no | Refused. The Microsoft 365 settings moved to the `m365-mail` plugin's pin configuration. |
 
 Durations are Go durations: `30s`, `10m`, `168h`. Unknown fields refuse startup. Remove the former `connector_fixtures` and `monitoring_fixture_evaluator` settings; the acceptance harness now pins its fixture plugin through `plugins`.
+
+## PostgreSQL connections
+
+`postgres.max_connections` sets the maximum connections in each process's pool.
+It accepts a positive integer up to `2147483647`; omitted or `0` preserves the
+`database_url`'s `pool_max_conns`, or pgx's default of the larger of four and the
+process's CPU count. Negative values and limits below the URL's `pool_min_conns`
+or `pool_min_idle_conns` are refused. A positive JSON setting overrides
+`pool_max_conns`. It applies to API, worker, migrate and storage commands;
+restart processes after changing it. Worker activity slots are separate.
+
+For example, a configuration fragment with a pool of 16 connections:
+
+```json
+{"postgres": {"max_connections": 16}}
+```
+
+Set PostgreSQL's server `max_connections` so usable connections cover the sum of
+pool sizes across **all replicas**, other clients and deployment headroom.
+Subtract PostgreSQL's reserved connections from the server limit. One API,
+one live worker and eight bulk workers with pools of 16 can use 160 connections;
+rolling deployments can temporarily add more. Size memory for concurrent query
+operations as well as connections. The [deployment templates](https://github.com/The-Vibe-Company/quivr/tree/main/deploy/compose)
+document server memory ratios and startup settings.
 
 ## Configuration refusals
 

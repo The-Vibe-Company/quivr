@@ -28,6 +28,25 @@ Only `web` is exposed publicly; bulk workers can [scale on backlog](autoscaler/R
 This evaluation deployment uses the Temporal dev server and single-replica dependencies without high availability.
 Redeploying a volume-backed service can interrupt requests. No public dependency domains are needed.
 
+## Size PostgreSQL before importing
+
+The template builds `postgres.Dockerfile` and applies the [shared startup settings](../compose/README.md):
+256 server connections, memory-based buffers/cache, bounded maintenance memory,
+`dynamic_shared_memory_type=mmap`, `pg_stat_statements` and I/O timing.
+`synchronous_commit`, `fsync` and `full_page_writes` stay on for durable acknowledged writes.
+`jit=on` is retained: a local A/B run of the updated backlog query did not trigger JIT at default thresholds.
+These settings are **command-line options**: they override old `ALTER SYSTEM` values
+in `postgresql.auto.conf` on existing volumes. Removing an option restores config-file precedence.
+Fresh databases install the statistics extension; an existing database needs `CREATE EXTENSION IF NOT EXISTS pg_stat_statements` once.
+
+On each API/worker service, `QUIVR_POSTGRES_MAX_CONNECTIONS` sets the generated
+`postgres.max_connections` pool limit (default 16). On the **postgres** service,
+the same variable sets the server limit (default 256). Usable server connections
+must cover the **sum of pool sizes across all replicas**, other clients and
+rolling-deployment headroom, after subtracting PostgreSQL's reserved connections.
+One API, one live worker and eight bulk workers can use `10 × 16 = 160` connections.
+Choose memory and connection budgets together; worker activity slots are separate.
+
 ## Upgrade the search database
 
 The template pins Weaviate 1.39.10 by digest. Existing 1.37.15 data needs no

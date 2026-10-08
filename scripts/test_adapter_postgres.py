@@ -72,7 +72,7 @@ class AdapterPostgres(unittest.TestCase):
     def test_success_captures_logs_then_removes_only_its_project(self):
         p, code = self.run_main(Recorder(), lambda self, config, args: None)
         self.assertEqual(code, 0)
-        self.assertEqual(p.compose.verbs(), ['up', 'port', 'logs', 'ps', 'down'])
+        self.assertEqual(p.compose.verbs(), ['up', 'exec', 'exec', 'restart', 'up', 'exec', 'port', 'logs', 'ps', 'down'])
         self.assertEqual(p.compose.calls[-1], ('down', '--volumes'))
         self.assertTrue((p.directory / 'postgres.log').exists())
         self.assertFalse((p.directory / 'config.json').exists(), 'credentials outlive the database')

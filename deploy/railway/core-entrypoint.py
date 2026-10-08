@@ -238,8 +238,12 @@ def build_config(env):
     # Opt-in: the read-only Admin tab follows documents through their steps.
     if env.get('QUIVR_DEMO_ADMIN') == '1':
         actions += ['observability:read']
+    pool_limit = env.get('QUIVR_POSTGRES_MAX_CONNECTIONS', '16').strip()
+    if not pool_limit.isdecimal() or not 1 <= int(pool_limit) <= 2147483647:
+        raise ValueError('QUIVR_POSTGRES_MAX_CONNECTIONS must be a positive int32')
     config = {
         'database_url': env['DATABASE_URL'],
+        'postgres': {'max_connections': int(pool_limit)},
         'cursor_key': env['QUIVR_CURSOR_KEY'],
         'listen': '0.0.0.0:8080',
         'probe_listen': '0.0.0.0:' + env.get('PORT', '8081'),
