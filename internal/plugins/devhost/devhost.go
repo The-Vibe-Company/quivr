@@ -64,20 +64,58 @@ type Process struct {
 	BaseURL string
 	Port    int
 
-	cmd  *exec.Cmd
-	done chan struct{}
-	err  error
-	once sync.Once
+	cmd    *exec.Cmd
+	done   chan struct{}
+	err    error
+	once   sync.Once
+	output *tail
 }
 
-// FreePort returns a TCP port that was free on host a moment ago.
+// FreePort returns a TCP port that was free on host a moment ago. On Linux
+// the port stays reserved for the plugin for a minute (see reserve), so
+// another process cannot take it before the plugin binds it.
 func FreePort(host string) (int, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
 		return 0, err
 	}
 	defer l.Close()
+	reserve(l)
 	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+// tailBytes bounds the plugin output kept for a start failure.
+const tailBytes = 2048
+
+// tail keeps the last tailBytes a plugin wrote: when it exits before becoming
+// healthy, its own error (a port in use, a missing module) names the cause.
+type tail struct {
+	mu  sync.Mutex
+	buf []byte
+	cut bool
+}
+
+func (t *tail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - tailBytes; over > 0 {
+		t.buf, t.cut = append(t.buf[:0], t.buf[over:]...), true
+	}
+	return len(p), nil
+}
+
+func (t *tail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := t.buf
+	if t.cut {
+		// Start on a whole line.
+		if i := bytes.IndexByte(out, '\n'); i >= 0 {
+			out = out[i+1:]
+		}
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // Start launches the plugin command with the local run convention
@@ -117,7 +155,11 @@ func Start(opts Options) (*Process, error) {
 	if out == nil {
 		out = io.Discard
 	}
-	cmd.Stdout, cmd.Stderr = out, out
+	output := &tail{}
+	// One writer for both streams, so exec writes to it from one goroutine.
+	// The tail comes first: a failing out must not hide the plugin's error.
+	both := io.MultiWriter(output, out)
+	cmd.Stdout, cmd.Stderr = both, both
 	// A descendant that escapes the process group while holding the output
 	// pipe must not block Wait forever.
 	cmd.WaitDelay = 2 * time.Second
@@ -125,7 +167,7 @@ func Start(opts Options) (*Process, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", strings.Join(opts.Command, " "), err)
 	}
-	p := &Process{BaseURL: "http://" + net.JoinHostPort(host, strconv.Itoa(port)), Port: port, cmd: cmd, done: make(chan struct{})}
+	p := &Process{BaseURL: "http://" + net.JoinHostPort(host, strconv.Itoa(port)), Port: port, cmd: cmd, done: make(chan struct{}), output: output}
 	go func() {
 		p.err = cmd.Wait()
 		close(p.done)
@@ -191,9 +233,17 @@ func get(ctx context.Context, url string, timeout time.Duration) (int, []byte, e
 }
 
 // WaitHealthy polls GET /v0/health until it returns 200, the process exits or
-// ctx ends.
+// ctx ends. An exit is reported with the plugin's last output.
 func (p *Process) WaitHealthy(ctx context.Context) error {
-	return waitHealthy(ctx, p.BaseURL, p.done, p.ExitError)
+	return waitHealthy(ctx, p.BaseURL, p.done, p.exited)
+}
+
+func (p *Process) exited() error {
+	err := fmt.Errorf("plugin exited (%v) before becoming healthy", p.ExitError())
+	if last := p.output.String(); last != "" {
+		err = fmt.Errorf("%w; its last output:\n%s", err, last)
+	}
+	return err
 }
 
 // WaitHealthyAt polls GET /v0/health on an already running plugin until it
@@ -202,7 +252,7 @@ func WaitHealthyAt(ctx context.Context, baseURL string) error {
 	return waitHealthy(ctx, baseURL, nil, nil)
 }
 
-func waitHealthy(ctx context.Context, baseURL string, done <-chan struct{}, exitErr func() error) error {
+func waitHealthy(ctx context.Context, baseURL string, done <-chan struct{}, exited func() error) error {
 	last := "no answer yet"
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -223,7 +273,7 @@ func waitHealthy(ctx context.Context, baseURL string, done <-chan struct{}, exit
 		}
 		select {
 		case <-done:
-			return fmt.Errorf("plugin exited (%v) before becoming healthy", exitErr())
+			return exited()
 		case <-ctx.Done():
 			return fmt.Errorf("plugin not healthy at %s: %s", baseURL, last)
 		case <-ticker.C:
