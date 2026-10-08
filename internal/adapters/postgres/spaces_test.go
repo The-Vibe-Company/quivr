@@ -280,9 +280,10 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	}
 
 	// Fresh bulk indexing can leave planner statistics far behind actual rows.
-	// Statistics taken now count this Organization as one Record; the clone
-	// below is never analyzed. PRs bound the pages the counting owner reads on
-	// 6,003 segments (THE-1137), and check cold search and completed counts.
+	// Statistics taken now count this Organization as one Record; the test
+	// never analyzes the clone below, though autovacuum may. PRs bound the
+	// pages the counting owner reads on 6,003 segments (THE-1137), and check
+	// cold search and completed counts.
 	// Nightly/manual QUIVR_MEASURE=1 seeds at least one million segments;
 	// both modes run the same assertions.
 	cuts := 1
