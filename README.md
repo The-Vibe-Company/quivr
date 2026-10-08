@@ -242,8 +242,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   configurable interval and rebuild/backfill estimates from progress counters
   ([queue configuration](docs-site/reference/configuration.mdx#worker-queues)).
 
-  Bulk workers group ready document commits within each receipt batch, up to
-  sixteen distinct Records per organization. Segments-only ingestion providers
+  Live and bulk workers group ready document commits within each receipt batch,
+  up to sixteen distinct Records per organization. Segments-only ingestion providers
   can publish new content and keyword readiness together; vectors remain a
   separate step. The change feed keeps synchronous, gap-free commit ordering.
 

@@ -445,17 +445,10 @@ func prepareEnrichment(ctx context.Context, tx pgx.Tx, org string, seg content.S
 		}
 		if !emitted {
 			queueEvent(ctx, writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.enrichment_available", Resource: "record", ResourceID: recordID, MutationID: mutation, VersionID: seg.VersionID})
+		} else {
+			observeRecordInBatch(ctx, writes, org, recordID)
 		}
-
-		if err = tx.SendBatch(ctx, writes).Close(); err != nil {
-			return err
-		}
-		if emitted {
-			if err = observeQueueRecords(ctx, tx, []string{org}, []string{recordID}); err != nil {
-				return err
-			}
-		}
-		return nil
+		return tx.SendBatch(ctx, writes).Close()
 	}, nil
 }
 
