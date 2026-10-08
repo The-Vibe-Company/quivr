@@ -18,6 +18,24 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AdminDocumentEvaluation.
+const (
+	Applicable    AdminDocumentEvaluation = "applicable"
+	NotApplicable AdminDocumentEvaluation = "not_applicable"
+)
+
+// Valid indicates whether the value is a known member of the AdminDocumentEvaluation enum.
+func (e AdminDocumentEvaluation) Valid() bool {
+	switch e {
+	case Applicable:
+		return true
+	case NotApplicable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminDocumentState.
 const (
 	AdminDocumentStateBuildingBaseline AdminDocumentState = "building_baseline"
@@ -1399,11 +1417,14 @@ type ActivePluginList struct {
 
 // AdminDocument defines model for AdminDocument.
 type AdminDocument struct {
-	CorpusId        string `json:"corpus_id"`
-	IsCurrent       bool   `json:"is_current"`
-	RecordId        string `json:"record_id"`
-	RecordKey       string `json:"record_key"`
-	SourceNamespace string `json:"source_namespace"`
+	CorpusId string `json:"corpus_id"`
+
+	// Evaluation Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it.
+	Evaluation      AdminDocumentEvaluation `json:"evaluation"`
+	IsCurrent       bool                    `json:"is_current"`
+	RecordId        string                  `json:"record_id"`
+	RecordKey       string                  `json:"record_key"`
+	SourceNamespace string                  `json:"source_namespace"`
 
 	// State received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is.
 	State AdminDocumentState `json:"state"`
@@ -1415,6 +1436,9 @@ type AdminDocument struct {
 	Title     *string `json:"title,omitempty"`
 	VersionId string  `json:"version_id"`
 }
+
+// AdminDocumentEvaluation Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it.
+type AdminDocumentEvaluation string
 
 // AdminDocumentState received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is.
 type AdminDocumentState string
@@ -2009,15 +2033,17 @@ type DeliveryAttemptPage struct {
 // On an optional route every quarantining code above that comes from the normalizer is instead
 // listed on a searchable Version published through the built-in text path. A plugin that is
 // unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-// pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-// Plan names it; the Receipt shows plugin_unavailable while it retries.
+// pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+// diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+// shows plugin_unavailable while it retries.
 //
-//   - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-//     normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-//     reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-//     moved to the plugin that
-//     replaced it: the Version is quarantined, or, when its text was already searchable, its
-//     enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+//   - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+//     during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+//     longer serve the work. Live imports
+//     and normalization now retain their pin and retry reachability outages until the exact build
+//     returns; they never silently move to its replacement. A Version with this diagnostic is
+//     quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+//     plugin_version name the original plan and plugin.
 //   - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
 //     rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
 //     work stopped instead of calling it, with the same outcome and fields as
@@ -2749,15 +2775,17 @@ type QuarantinedVersion struct {
 	// On an optional route every quarantining code above that comes from the normalizer is instead
 	// listed on a searchable Version published through the built-in text path. A plugin that is
 	// unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-	// pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-	// Plan names it; the Receipt shows plugin_unavailable while it retries.
+	// pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+	// diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+	// shows plugin_unavailable while it retries.
 	//
-	// - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-	//   normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-	//   reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-	//   moved to the plugin that
-	//   replaced it: the Version is quarantined, or, when its text was already searchable, its
-	//   enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+	// - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+	//   during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+	//   longer serve the work. Live imports
+	//   and normalization now retain their pin and retry reachability outages until the exact build
+	//   returns; they never silently move to its replacement. A Version with this diagnostic is
+	//   quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+	//   plugin_version name the original plan and plugin.
 	// - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
 	//   rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
 	//   work stopped instead of calling it, with the same outcome and fields as

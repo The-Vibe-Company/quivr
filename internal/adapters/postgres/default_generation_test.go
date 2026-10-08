@@ -24,7 +24,7 @@ func TestNewCorporaStartOnTheRegisteredSpaces(t *testing.T) {
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
 	store := contentStores(pool)
-	if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+	if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 		t.Fatal(err)
 	}
 	// The default as a deployment built it before named spaces: the E5 space alone.
@@ -39,7 +39,7 @@ func TestNewCorporaStartOnTheRegisteredSpaces(t *testing.T) {
 		t.Fatalf("activate %s: %v %v", first.ID, done, err)
 	}
 	// The same space registered again moves nothing.
-	if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+	if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 		t.Fatal(err)
 	}
 	var current string
@@ -70,7 +70,6 @@ func TestNewCorporaStartOnTheRegisteredSpaces(t *testing.T) {
 	if again := f.routed(f.corpus("later")); again != g.ID {
 		t.Fatalf("migrate again moved the default from %s to %s", g.ID, again)
 	}
-
 	second := f.rebuild(kept, "second")
 	if done, err := f.activate(second.ID); err != nil || !done {
 		t.Fatalf("activate %s: %v %v", second.ID, done, err)
@@ -85,5 +84,27 @@ func TestNewCorporaStartOnTheRegisteredSpaces(t *testing.T) {
 	sort.Strings(want)
 	if got := noticed(t, ctx, pool, f.org); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("noticed\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	// A changed index setting moves new Corpora onto a default that records
+	// it; a Corpus created before keeps the index it was built with.
+	served.Index = &content.VectorIndex{Quantization: content.QuantizationRQ1, RescoreLimit: 64}
+	if err := app.BootstrapDatabase(ctx, pool, []content.RegisteredSpace{served, evaluation}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.routed(f.corpus("later")); got != g.ID {
+		t.Fatalf("a Corpus created before the index change moved to %s, want %s", got, g.ID)
+	}
+	indexed, err := store.Generation(ctx, f.org, f.corpus("indexed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if indexed.ID == g.ID || len(indexed.Spaces) != 2 || indexed.Spaces[0].Index == nil || *indexed.Spaces[0].Index != *served.Index || indexed.Spaces[1].Index != nil {
+		t.Fatalf("a new Corpus after the index change starts on %s with spaces %+v, want a new default recording %+v", indexed.ID, indexed.Spaces, *served.Index)
+	}
+	if err := app.BootstrapDatabase(ctx, pool, []content.RegisteredSpace{served, evaluation}); err != nil {
+		t.Fatal(err)
+	}
+	if again := f.routed(f.corpus("indexed-later")); again != indexed.ID {
+		t.Fatalf("an unchanged index setting moved the default from %s to %s", indexed.ID, again)
 	}
 }

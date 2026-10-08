@@ -492,6 +492,8 @@ function StepCell({
   } else if (cell.state === "done") hint = `en ${duration(cell.ms ?? 0)}`;
   else if (cell.state === "slow")
     hint = `en ${duration(cell.ms ?? 0)}, lent : ${usual}`;
+  else if (cell.reason === "no_alert")
+    hint = "aucune alerte ne suit ce corpus";
   else if (cell.state === "none") hint = "non enregistré";
   else if (cell.state === "error") hint = "échec, document mis en quarantaine";
   else hint = "à venir";
@@ -512,7 +514,12 @@ function StepCell({
           <span className="cell-pulse" />
         )}
         {text && <span className="cell-text">{text}</span>}
-        {cell.state === "none" && <span className="cell-text">—</span>}
+        {cell.state === "none" &&
+          (cell.reason === "no_alert" ? (
+            <span className="cell-text cell-note">Aucune alerte</span>
+          ) : (
+            <span className="cell-text">—</span>
+          ))}
       </span>
     </span>
   );

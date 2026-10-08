@@ -114,6 +114,9 @@ type fakeGrants struct {
 	expected map[string]string // session id -> sha256
 	tamper   bool
 	fail     error
+	// interrupt stops that many Confirms mid-verification, as a stopped
+	// worker does, leaving their sessions verifying.
+	interrupt int
 }
 
 func newFakeGrants() *fakeGrants {
@@ -130,6 +133,12 @@ func (g *fakeGrants) Grant(_ context.Context, org string, req uploads.Request) (
 	if _, ok := g.blobs[id]; ok {
 		return uploads.Session{State: "verified", BlobID: id}, nil
 	}
+	if s, ok := g.sessions["upload-"+req.Key]; ok && s.State != "awaiting_upload" {
+		// Like uploads.Service, only a session awaiting its bytes is replayed
+		// with an upload capability.
+		s.UploadURL = ""
+		return s, nil
+	}
 	s := uploads.Session{ID: "upload-" + req.Key, State: "awaiting_upload", UploadURL: "https://storage.invalid/" + req.Key, SHA256: req.SHA256, MediaType: req.MediaType}
 	g.sessions[s.ID] = s
 	return s, nil
@@ -137,6 +146,12 @@ func (g *fakeGrants) Grant(_ context.Context, org string, req uploads.Request) (
 
 func (g *fakeGrants) Confirm(_ context.Context, org, id string) (uploads.Session, error) {
 	s := g.sessions[id]
+	if g.interrupt > 0 {
+		g.interrupt--
+		s.State = "verifying"
+		g.sessions[id] = s
+		return uploads.Session{}, context.Canceled
+	}
 	b, ok := g.stored[s.UploadURL]
 	if g.tamper {
 		b += "tampered"
@@ -253,6 +268,28 @@ func TestBytesAlreadyStoredAsABlobAreNotUploadedAgain(t *testing.T) {
 	}
 	if src.uploads != 0 || len(ingest.accepted) != 1 || len(ingest.accepted[0].Manifest.Parts) != 3 {
 		t.Fatalf("uploaded %d accepted %+v", src.uploads, ingest.accepted)
+	}
+}
+
+// A worker stopped mid-verification leaves the upload session verifying, and
+// the retried run replays it without an upload URL. Its stored bytes are
+// confirmed again; the plugin is never sent a grant without a URL (THE-1314).
+func TestAVerificationInterruptedByARestartIsConfirmedWithoutAnotherUpload(t *testing.T) {
+	item := mailItem("sha256:r1")
+	item.Attachments = item.Attachments[:1]
+	a, runs, ingest, src := exchangingAcquirer(t, func() []Item { return []Item{item} })
+	src.storage.interrupt = 1
+	// The same run sequence twice: the activity retry after the restart.
+	for range 2 {
+		if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if last := runs.finished[len(runs.finished)-1]; src.uploads != 1 || len(ingest.accepted) != 1 || last != nil {
+		t.Fatalf("uploaded %d accepted %d last run error %+v; the retry must confirm the stored bytes", src.uploads, len(ingest.accepted), last)
+	}
+	if p := ingest.accepted[0].Manifest.Parts[1]; src.storage.blobs[p.Content.BlobID] != bodyBytes {
+		t.Fatalf("part %+v is not the verified Blob", p)
 	}
 }
 

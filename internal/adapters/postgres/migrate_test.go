@@ -43,7 +43,7 @@ func TestDatabaseSetupAndBackgroundLookupIndexes(t *testing.T) {
 					t.Fatal(err)
 				}
 				startup, stop := context.WithTimeout(ctx, time.Second)
-				err = app.BootstrapDatabase(startup, pool, app.DeploymentSpaces(nil))
+				err = app.BootstrapDatabase(startup, pool, app.Config{}.DeploymentSpaces(nil))
 				stop()
 				if err != nil {
 					t.Fatalf("blocked performance index prevented migration setup: %v", err)
@@ -57,7 +57,7 @@ func TestDatabaseSetupAndBackgroundLookupIndexes(t *testing.T) {
 			}
 			bootstrap := func() {
 				t.Helper()
-				if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+				if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -168,8 +168,10 @@ AND wait_event_type='Lock' AND pid<>pg_backend_pid() LIMIT 1), 0)`).Scan(&buildP
 			if err := postgres.EnsureIndexes(ctx, pool); !errors.Is(err, postgres.ErrIndexBusy) {
 				t.Fatalf("want prompt competing-maintainer contention, got %v", err)
 			}
-			// Exercise the actual two-second migrator lock timeout while another
-			// installer holds the shared lock; do not delay on the test clock.
+			// Another installer, possibly abandoned mid-transaction, holds the
+			// migration lock. An up-to-date schema needs no lock, so startup
+			// still succeeds; a pending migration hits the real two-second
+			// migrator lock timeout and is not applied.
 			installer, err := pool.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -178,11 +180,26 @@ AND wait_event_type='Lock' AND pid<>pg_backend_pid() LIMIT 1), 0)`).Scan(&buildP
 			if _, err := installer.Exec(ctx, "SELECT pg_advisory_xact_lock(642001)"); err != nil {
 				t.Fatal(err)
 			}
-			if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); !errors.Is(err, postgres.ErrIndexBusy) {
-				t.Fatalf("want retryable setup contention, got %v", err)
+			if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
+				t.Fatalf("held migration and index locks failed an up-to-date migrate: %v", err)
+			}
+			pending := fstest.MapFS{"99991231T2359Z_pending.sql": {Data: []byte("CREATE TABLE contended_migration ()")}}
+			if names, err := migrations.Names(); err != nil {
+				t.Fatal(err)
+			} else {
+				for _, name := range names {
+					pending[name] = &fstest.MapFile{Data: []byte("SELECT 1")}
+				}
+			}
+			if err := postgres.MigrateFS(ctx, pool, pending); !errors.Is(err, postgres.ErrMigrationBusy) {
+				t.Fatalf("want retryable migration contention, got %v", err)
 			}
 			if err := installer.Rollback(ctx); err != nil {
 				t.Fatal(err)
+			}
+			var applied bool
+			if err := pool.QueryRow(ctx, "SELECT to_regclass('contended_migration') IS NOT NULL").Scan(&applied); err != nil || applied {
+				t.Fatalf("contended migration applied: %v, %v", applied, err)
 			}
 
 			// The real migrator lock timeout elapsed while the optional DDL

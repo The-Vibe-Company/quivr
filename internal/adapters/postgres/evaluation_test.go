@@ -143,6 +143,22 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	if got := intents(hitVersion); got != 3 {
 		t.Fatalf("want one intent per Subscription across pages, got %d", got)
 	}
+	// Alert evaluation applies where a Subscription covers the Corpus, so the
+	// admin views wait for an evaluated step only there.
+	evaluationOf := func(versionID string) string {
+		t.Helper()
+		activity, err := store.VersionActivity(ctx, org, versionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return activity.Evaluation
+	}
+	if got := evaluationOf(hitVersion); got != content.EvaluationApplicable {
+		t.Fatalf("watched Corpus: evaluation %q", got)
+	}
+	if got := evaluationOf(otherVersion); got != content.EvaluationNotApplicable {
+		t.Fatalf("unwatched Corpus: evaluation %q", got)
+	}
 
 	// A later enrichment trigger of the same Version is new evaluation work.
 	trigger("record.enrichment_available", a.ID, hitRecord, hitVersion)
@@ -531,6 +547,28 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	}
 	if outcomes, err = evaluation.CommitMatches(ctx, group); err != nil || fmt.Sprint(outcomes) != fmt.Sprint([]string{monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeEvaluatorRetired, monitoring.OutcomeDuplicate, monitoring.OutcomeSubscriptionDisabled, monitoring.OutcomeDuplicate, monitoring.OutcomeDuplicate}) || head() != beforeHead+2 {
 		t.Fatalf("group replay: %v %v, head %d", outcomes, err, head())
+	}
+
+	// Once no enabled Subscription covers the Corpus, a new Version has no
+	// evaluation coming; an evaluated one keeps its evaluated step, and one
+	// whose evaluation is still pending still waits for it.
+	_, waiting := searchable(a.ID, "waiting")
+	drain()
+	for i, sub := range []monitoring.Subscription{subs[0], subs[2]} {
+		if _, err = service.DisableSubscription(ctx, scope, fmt.Sprint("disable-all-", i), sub.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, unwatched := searchable(a.ID, "unwatched")
+	drain()
+	if got := evaluationOf(unwatched); got != content.EvaluationNotApplicable {
+		t.Fatalf("every Subscription disabled: evaluation %q", got)
+	}
+	if got := evaluationOf(groupVersion); got != content.EvaluationApplicable {
+		t.Fatalf("evaluated Version: evaluation %q", got)
+	}
+	if got := evaluationOf(waiting); got != content.EvaluationApplicable {
+		t.Fatalf("pending evaluation: evaluation %q", got)
 	}
 }
 

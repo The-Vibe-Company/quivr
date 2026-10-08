@@ -21,24 +21,42 @@ const activityColumns = `SELECT a.version_id,a.record_id,r.corpus_id,r.namespace
  coalesce(a.accepted_at,rc.accepted_at),v.materialized_at,v.segmented_at,v.retrieval_ready_at,v.enriched_at,v.evaluated_at,v.quarantined_at,r.withdrawn_at,
  v.id IS NOT NULL,coalesce(v.baseline_ready,false),coalesce(v.quarantined,false),coalesce(v.processing,''),
  ` + recordGoneSQL + `,
- coalesce(r.current_version_id=a.version_id,false)
+ coalesce(r.current_version_id=a.version_id,false),
+ ` + evaluationAppliesSQL + `
 FROM accepted_revisions a
 JOIN records r ON (r.organization,r.id)=(a.organization,a.record_id)
 LEFT JOIN record_versions v ON (v.organization,v.id)=(a.organization,a.version_id)
 LEFT JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.acceptance_order)=(a.organization,a.record_id,a.acceptance_order)`
 
+// evaluationAppliesSQL is whether alert evaluation applies to the Version:
+// it was evaluated, an evaluation of it is pending, or an enabled
+// Subscription's current saved query covers its Corpus now. Each test is an
+// index-backed lookup; the last one is bounded by the Subscriptions ever
+// scoped to the Corpus.
+const evaluationAppliesSQL = `(v.evaluated_at IS NOT NULL
+ OR EXISTS(SELECT 1 FROM evaluation_intents i WHERE i.organization=a.organization AND i.record_version_id=a.version_id AND i.state='pending' AND i.kind='evaluation')
+ OR EXISTS(SELECT 1 FROM subscription_corpora sc
+  JOIN subscriptions s ON (s.organization,s.id)=(sc.organization,sc.subscription_id)
+  JOIN subscription_versions sv ON (sv.organization,sv.id)=(s.organization,s.current_version_id)
+  JOIN saved_query_versions q ON (q.organization,q.id)=(sv.organization,sv.saved_query_version_id)
+  WHERE sc.organization=r.organization AND sc.corpus_id=r.corpus_id AND s.enabled AND NOT s.deleted AND r.corpus_id=ANY(q.corpus_ids)))`
+
 func scanActivity(row pgx.Row) (content.Activity, error) {
 	var a content.Activity
 	s := &a.Steps
-	var materialized, baseline, quarantined, withdrawn bool
+	var materialized, baseline, quarantined, withdrawn, evaluates bool
 	var processing string
 	err := row.Scan(&a.VersionID, &a.RecordID, &a.Source.CorpusID, &a.Source.Namespace, &a.Source.RecordKey, &a.Title,
 		&s.Accepted, &s.Materialized, &s.Segmented, &s.RetrievalReady, &s.Enriched, &s.Evaluated, &s.Quarantined, &s.Withdrawn,
-		&materialized, &baseline, &quarantined, &processing, &withdrawn, &a.Current)
+		&materialized, &baseline, &quarantined, &processing, &withdrawn, &a.Current, &evaluates)
 	if err != nil {
 		return a, err
 	}
 	a.Steps = utcSteps(a.Steps)
+	a.Evaluation = content.EvaluationNotApplicable
+	if evaluates {
+		a.Evaluation = content.EvaluationApplicable
+	}
 	// The same rule as VersionStatus, extended to the states before and
 	// after a Version exists.
 	switch {

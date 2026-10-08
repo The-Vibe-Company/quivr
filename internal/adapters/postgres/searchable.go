@@ -42,7 +42,10 @@ type DefaultMove struct {
 // it is rebuilt. That default is then marked former, and a new default in the
 // same collection and profile, carrying the registry's spaces, takes over.
 // No existing Corpus changes generation, so in-flight work keeps the one it
-// read. A default that already matches, or a database with no default, is left
+// read. A changed index setting moves a default built with named spaces the
+// same way, so new Corpora get the new index and existing ones keep theirs
+// until rebuilt. A default that
+// already matches, or a database with no default, is left
 // as it is. Missing projection capabilities rotate the default even before a
 // served space is registered, retaining its prior spaces. It runs after RegisterSpaces, in
 // migrate and at api and worker startup.
@@ -62,7 +65,8 @@ func (s ProjectionStore) AlignDefaultGeneration(ctx context.Context) (DefaultMov
 	err = tx.QueryRow(ctx, `SELECT d.id,d.metadata_projected AND d.item_keywords_projected AND (`+servedSpaceSQL+` IS NULL OR (d.space_id=`+servedSpaceSQL+` AND
  (SELECT array_agg(e->>'id' ORDER BY e->>'id') FROM jsonb_array_elements(CASE WHEN d.spaces_projected THEN d.spaces ELSE jsonb_build_array(jsonb_build_object('id',d.space_id)) END) e)
  =(SELECT array_agg(vs.id ORDER BY vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation')) AND (NOT d.spaces_projected OR NOT EXISTS
- (SELECT 1 FROM vector_spaces vs WHERE vs.role IN ('served','evaluation') AND NOT d.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id))))))
+ (SELECT 1 FROM vector_spaces vs WHERE vs.role IN ('served','evaluation') AND (NOT d.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id))
+ OR vs.vector_index IS DISTINCT FROM (SELECT e->'index' FROM jsonb_array_elements(d.spaces) e WHERE e->>'id'=vs.id LIMIT 1))))))
 FROM projection_generations d WHERE d.active`).Scan(&move.Previous, &matches)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && matches) {
 		return DefaultMove{}, nil

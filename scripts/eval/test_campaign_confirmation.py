@@ -5,6 +5,7 @@ This owner catches missing native translation, forged native receipts, and
 campaign restart/promotion mistakes that neither isolated side can observe.
 """
 import copy
+import functools
 import hashlib
 import importlib.util
 import io
@@ -30,15 +31,24 @@ import search_trial
 @unittest.skipUnless(os.environ.get('EVAL_CONTROL_TEST_DSN') and importlib.util.find_spec('optuna')
                      and importlib.util.find_spec('scipy'), 'requires PostgreSQL, Optuna and scipy')
 class NativeCampaign(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Promotion only reads the repository and runs its configure binary;
+        # build and clone them once instead of per fixture.
+        directory = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(directory.cleanup)
+        cls.repository = pathlib.Path(directory.name) / 'repository'
+        subprocess.run(['git', 'clone', '--quiet', '--local', str(search_campaign.ROOT), str(cls.repository)], check=True)
+        cls.sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cls.repository, text=True).strip()
+        cls.binary = pathlib.Path(directory.name) / 'hosted-embed'
+        subprocess.run(['go', 'build', '-o', str(cls.binary), '.'], cwd=cls.repository / 'plugins/hosted-embed', check=True)
+
     def setUp(self):
         import psycopg
         import yaml
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.path = pathlib.Path(self.directory.name)
-        self.repository = self.path / 'repository'
-        subprocess.run(['git', 'clone', '--quiet', '--local', str(search_campaign.ROOT), str(self.repository)], check=True)
-        self.sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=self.repository, text=True).strip()
         spec = yaml.safe_load((search_campaign.ROOT / 'scripts/eval/examples/search-campaign.yaml').read_text())
         self.name = spec['name'] = uuid.uuid4().hex
         spec['max_trials'] = 1
@@ -120,9 +130,12 @@ class NativeCampaign(unittest.TestCase):
                 self.prs[branch] = {'url': 'https://github.com/example/engine/pull/1', 'body': body}
                 return self.prs[branch]
         self.github = GitHub()
-        binary = self.path / 'hosted-embed'
-        subprocess.run(['go', 'build', '-o', str(binary), '.'], cwd=self.repository / 'plugins/hosted-embed', check=True)
-        self.builder = campaign_promotion.HostedManifestBuilder(binary=binary)
+        self.builder = campaign_promotion.HostedManifestBuilder(binary=self.binary)
+        # The engine source tree is unchanged during a test, and test_engine_confirmation
+        # owns its lineage bytes; hash it once instead of on every native request.
+        patch = mock.patch('engine_confirmation.lineage', functools.cache(engine_confirmation.lineage))
+        patch.start()
+        self.addCleanup(patch.stop)
         patch = mock.patch('campaign_promotion.HostedManifestBuilder', return_value=self.builder)
         patch.start()
         self.addCleanup(patch.stop)
@@ -180,8 +193,11 @@ class NativeCampaign(unittest.TestCase):
         return result
 
     def adapter(self):
-        return search_campaign.NativeConfirmation(self.store, self.name, self.configuration,
-                                                  self.path / 'outbox', transport=self.transport)
+        # Like supervise, one adapter serves every confirmation of a process.
+        if not hasattr(self, 'native'):
+            self.native = search_campaign.NativeConfirmation(self.store, self.name, self.configuration,
+                                                             self.path / 'outbox', transport=self.transport)
+        return self.native
 
     def advance(self):
         outcomes = search_campaign.advance_confirmations(self.store, self.name, self.owner, self.study,
@@ -257,6 +273,9 @@ class NativeCampaign(unittest.TestCase):
         self.assertEqual(self.store.availability(self.name)['confirmation_reads_left'], 9)
 
     def test_native_binding_policy_cleanup_and_tracking_forgery_fail_closed(self):
+        # The slowest native owner (about 10 s): each forgery is checked by a
+        # different validator, so each row runs a full confirmation, and
+        # production makes three full-tree Git checkouts per confirmation.
         mutations = (
             lambda r: r['bindings'].update(candidate_hash='0' * 64),
             lambda r: r.update(confirmation_policy_digest='0' * 64),
@@ -266,6 +285,9 @@ class NativeCampaign(unittest.TestCase):
             lambda r: r['receipts'][0].update(status='pending'),
             lambda r: r['receipts'][0].update(run_id='forged-run'),
         )
+        patch = mock.patch('subprocess.run', wraps=subprocess.run)
+        run = patch.start()
+        self.addCleanup(patch.stop)
         for mutate in mutations:
             with self.subTest(mutate=mutate):
                 self.tamper = mutate
@@ -276,6 +298,9 @@ class NativeCampaign(unittest.TestCase):
                 self.assertFalse(self.apps)
         self.assertEqual(len(self.invocations), 1)
         self.assertEqual(self.store.availability(self.name)['confirmation_reads_left'], 9)
+        # Campaign, engine and production settings share one revision: one checkout per confirmation.
+        clones = [c.args[0] for c in run.call_args_list if c.args[0][:2] == ['git', 'clone']]
+        self.assertEqual(len(clones), len(mutations), clones)
 
     def test_production_settings_mismatch_is_unavailable_before_any_paid_dispatch(self):
         for field, value in (('batch_size', 8), ('max_tokens_per_segment', 512), ('hybrid_fusion', 'ranked')):

@@ -107,6 +107,8 @@ type Config struct {
 	IngestionEvaluationConcurrency int `json:"ingestion_evaluation_concurrency"`
 	// Retrieval maps deployment short names to installed plugin/profile names.
 	Retrieval RetrievalConfig `json:"retrieval"`
+	// VectorIndex sets how the search index stores vector spaces.
+	VectorIndex VectorIndexConfig `json:"vector_index"`
 
 	// ChangePrune tunes the worker's change-journal prune (THE-697).
 	ChangePrune ChangePruneConfig `json:"change_prune"`
@@ -117,10 +119,9 @@ type Config struct {
 	// ChangeStreamPoll is how often an open change stream reads the journal
 	// again (Go duration, default 250ms).
 	ChangeStreamPoll string `json:"change_stream_poll"`
-	// PinnedPluginAttempts is how many attempts work pinned to a Pipeline
-	// Plan gets once a plugin of that plan has left the active plan and cannot
-	// be reached, before the work stops with a pinned_plugin_unavailable
-	// diagnostic (worker only; default 10).
+	// PinnedPluginAttempts bounds unavailable plugins of older plans for
+	// operations, and incompatible owners or invocation deadlines for live imports.
+	// Live import reachability outages keep retrying (worker only; default 10).
 	PinnedPluginAttempts int `json:"pinned_plugin_attempts"`
 	// ProjectionPurgeGrace delays the physical purge of dead projection
 	// objects (Go duration, default 1h; worker only).
@@ -286,6 +287,9 @@ func Run(command string, args ...string) error {
 	queueRefreshInterval, err := cfg.QueueObservation.Resolve()
 	if err != nil {
 		return invalidConfig("queue_observation", "invalid queue refresh interval", err)
+	}
+	if err = cfg.VectorIndex.Validate(); err != nil {
+		return invalidConfig("vector_index", "invalid vector index settings", err)
 	}
 	tlsSettings, err := cfg.validateTLS()
 	if err != nil {
@@ -539,15 +543,15 @@ func Run(command string, args ...string) error {
 			err = postgres.MigrateContracts(contractCtx, pool)
 			cancel()
 			if err != nil {
-				if errors.Is(err, postgres.ErrIndexBusy) {
+				if errors.Is(err, postgres.ErrMigrationBusy) {
 					return err
 				}
 				return errors.New("contract migration failed; check database connectivity and schema")
 			}
 		}
 		// Required PostgreSQL setup runs first and needs no other dependency.
-		if err = BootstrapDatabase(ctx, pool, DeploymentSpaces(cfg.migrationPins())); err != nil {
-			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrIndexBusy) {
+		if err = BootstrapDatabase(ctx, pool, cfg.DeploymentSpaces(cfg.migrationPins())); err != nil {
+			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrMigrationBusy) {
 				return err
 			}
 			return errors.New("migration failed; check database connectivity and schema")
@@ -647,7 +651,7 @@ func Run(command string, args ...string) error {
 	// The registry checks registered plugins with the Contract Runner (api)
 	// and records activations with the spaces they register, refusing one
 	// that breaks a startup rule of this engine.
-	pluginRegistry := pluginregistry.Service{Store: postgres.PluginStore{Pool: pool}, Spaces: DeploymentSpaces, Wake: make(chan struct{}, 1),
+	pluginRegistry := pluginregistry.Service{Store: postgres.PluginStore{Pool: pool}, Spaces: cfg.DeploymentSpaces, Wake: make(chan struct{}, 1),
 		Validate: func(set *plugins.PinSet) error {
 			if command == "api" && len(set.Retrievals()) == 0 {
 				return errors.New("the active pipeline plan requires a retrieval plugin")
@@ -725,7 +729,7 @@ func Run(command string, args ...string) error {
 	// space claimed by another owner, or changed under the same version,
 	// refuses startup. New Corpora then start on the registered spaces.
 	register, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err = spaces.RegisterSpaces(register, DeploymentSpaces(resolved))
+	err = spaces.RegisterSpaces(register, cfg.DeploymentSpaces(resolved))
 	if err == nil {
 		err = alignDefaultGeneration(register, baseline)
 	}
@@ -808,6 +812,9 @@ func Run(command string, args ...string) error {
 		}
 	}
 	loops.Go(func(ctx context.Context) { follower.Run(ctx, planPoll) })
+	loadMetrics := telemetry.NewLoadMetrics()
+	loadMetrics.RegisterRoutes("/healthz", "/readyz", "/metrics")
+	poolMetrics := postgres.NewPoolMetrics(pool)
 	probes := http.NewServeMux()
 	probes.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	probes.Handle("GET /readyz", readinessProbe(loops, ready, indexes))
@@ -830,14 +837,14 @@ func Run(command string, args ...string) error {
 			evaluationMetrics.Write(w)
 			recorder.WriteMetrics(w)
 		}
-		probes.Handle("GET /metrics", queueMetrics(buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)), queueSnapshots))
+		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)), queueSnapshots), loadMetrics, poolMetrics))
 		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators.Load().Served))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
-		probes.Handle("GET /metrics", queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)), queueSnapshots))
+		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)), queueSnapshots), loadMetrics, poolMetrics))
 	}
-	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes), ReadHeaderTimeout: 5 * time.Second}}
+	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes, loadMetrics), ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
 		// The api checks registered plugins with the Contract Runner in
 		// process; a check a restart interrupted runs again after its lease.
@@ -845,7 +852,7 @@ func Run(command string, args ...string) error {
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithQueues(queueSnapshots), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore),
-			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(spaceSnapshots),
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithLoadMetrics(loadMetrics), httpapi.WithVectorSpaces(spaceSnapshots),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators backfill past Versions and promote vector spaces (plugins:admin).

@@ -11,20 +11,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/observability"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Owns the process build gauge, including dependency failures from either
 // metrics handler. Build identity must remain scrapeable during an outage.
 func TestBuildMetricsSurvivesDependencyFailure(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(), "postgres://localhost/unavailable?sslmode=disable&pool_max_conns=3&pool_min_conns=0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	load := telemetry.NewLoadMetrics()
+	load.RegisterRoutes("/example")
+	load.Begin("/example", "GET")(503, time.Second)
 	w := httptest.NewRecorder()
-	buildMetrics(apiMetrics(telemetry.NewCommands(), func(context.Context) (int64, time.Duration, error) {
+	processMetrics(buildMetrics(apiMetrics(telemetry.NewCommands(), func(context.Context) (int64, time.Duration, error) {
 		return 0, 0, errors.New("storage unavailable")
-	}, func(io.Writer) {})).ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
-	if !strings.Contains(w.Body.String(), `quivr_build_info{version="dev",revision="unknown"} 1`) {
-		t.Fatal(w.Body.String())
+	}, func(io.Writer) {})), load, postgres.NewPoolMetrics(pool)).ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	for _, want := range []string{`quivr_build_info{version="dev",revision="unknown"} 1`, `quivr_http_requests_total{route="/example",method="GET",status_class="5xx"} 1`, "quivr_postgres_pool_max_connections 3"} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("missing %q in\n%s", want, w.Body.String())
+		}
 	}
 }
 

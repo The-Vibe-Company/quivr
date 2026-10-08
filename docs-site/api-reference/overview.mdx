@@ -54,7 +54,7 @@ Every error has the same body:
 | `410` | The change cursor expired | `cursor_expired` |
 | `413` | The request is too large | `request_too_large` |
 | `422` | Well-formed but refused | `invalid_schema`, `invalid_input`, `unverified_blob`, `invalid_expression`, `unsupported_profile`, `query_too_long`, `invalid_config` |
-| `503` | A dependency is unavailable; retry later | `storage_unavailable`, `search_unavailable`, `credentials_unavailable` |
+| `503` | A dependency is unavailable; retry later | `storage_unavailable`, `search_unavailable`, `model_unavailable`, `credentials_unavailable` |
 
 A mistake gets the same code on every route. A query parameter that is unknown, repeated, or required but missing is `422 invalid_query`. A value that a parameter refuses, including an empty one, gets that parameter's code: `invalid_limit` for `limit`, `invalid_cursor` for `page_cursor` or `cursor`, and `invalid_owner` for a Subscription owner, whether it is in a creation body or in the listing filter. A body that does not match the request schema is `invalid_schema`. A body that matches but is refused is `invalid_input` or a more specific code.
 

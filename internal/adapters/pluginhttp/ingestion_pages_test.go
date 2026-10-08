@@ -214,6 +214,14 @@ func TestWholeItemResponseLimitsRemainPageable(t *testing.T) {
 			if !errors.Is(err, content.ErrIngestionRefused) || !errors.As(err, &refusal) || refusal.Code != want {
 				t.Fatalf("error=%v; want terminal %s", err, want)
 			}
+			if strings.Contains(message, "max_response_bytes") {
+				// A reachable provider that cannot fit even one code point has
+				// refused this input; restoring its build cannot make it fit.
+				_, err = (pluginhttp.Ingestor{Pin: pin}).SegmentAndEmbedPage(t.Context(), "org", "corpus", v, nil, nil)
+				if !errors.Is(err, content.ErrIngestionRefused) || errors.Is(err, plugins.ErrUnavailable) {
+					t.Fatalf("irreducible page must be refused, not retried: %v", err)
+				}
+			}
 		})
 	}
 }
