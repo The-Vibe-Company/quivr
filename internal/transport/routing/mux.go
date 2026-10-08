@@ -68,6 +68,15 @@ func (m *Mux) HandleAlias(alias, target string) error {
 	return fmt.Errorf("route alias %s has no contract target %s", alias, target)
 }
 
+// Templates returns the registered paths for bounded process telemetry.
+func (m *Mux) Templates() []string {
+	templates := make([]string, 0, len(m.routes))
+	for _, route := range m.routes {
+		templates = append(templates, route.path)
+	}
+	return templates
+}
+
 // Pattern resolves a registered template before authentication. Unmatched paths
 // never become log fields; aliases and unsupported methods use the same routes.
 func (m *Mux) Pattern(req *http.Request) string {

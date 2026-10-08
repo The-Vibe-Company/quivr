@@ -2017,7 +2017,7 @@ The most frequent search queries of the key's Organization over the window, norm
 
 Operation `searchRecords`. Requires `content:read`, `search:query`.
 
-Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 
 **Request body** (required): `application/json` [`SearchRequest`](#searchrequest)
 
@@ -2026,7 +2026,7 @@ Resolve the requested profile, compile mandatory Corpus/Organization prefilters 
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`SearchResponse`](#searchresponse) | Successful response |
-| `default` | `application/json` [`Error`](#error)<br><br>Header `Retry-After`: integer. Present when search capacity is full; minimum delay in seconds before retrying. | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 dependency unavailable, 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms; a dependency that does not answer in time is 503). At search capacity, 503 search_unavailable includes Retry-After; retry only after that delay. |
+| `default` | `application/json` [`Error`](#error)<br><br>Header `Retry-After`: integer. Present when search capacity is full; minimum delay in seconds before retrying. | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 model_unavailable (the query encoding model could not answer) or search_unavailable (another search dependency is unavailable), 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms; a dependency that does not answer in time is 503). At search capacity, 503 search_unavailable includes Retry-After; retry only after that delay. |
 
 #### `GET /v0/search/profiles`
 
@@ -2432,15 +2432,17 @@ invocation a normalization diagnostic concerns. Codes of external normalization:
 On an optional route every quarantining code above that comes from the normalizer is instead
 listed on a searchable Version published through the built-in text path. A plugin that is
 unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-Plan names it; the Receipt shows plugin_unavailable while it retries.
+pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+shows plugin_unavailable while it retries.
 
-- pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-  normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-  reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-  moved to the plugin that
-  replaced it: the Version is quarantined, or, when its text was already searchable, its
-  enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+- pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+  during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+  longer serve the work. Live imports
+  and normalization now retain their pin and retry reachability outages until the exact build
+  returns; they never silently move to its replacement. A Version with this diagnostic is
+  quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+  plugin_version name the original plan and plugin.
 - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
   rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
   work stopped instead of calling it, with the same outcome and fields as
@@ -2493,15 +2495,17 @@ description: |-
   On an optional route every quarantining code above that comes from the normalizer is instead
   listed on a searchable Version published through the built-in text path. A plugin that is
   unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-  pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-  Plan names it; the Receipt shows plugin_unavailable while it retries.
+  pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+  diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+  shows plugin_unavailable while it retries.
 
-  - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-    normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-    reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-    moved to the plugin that
-    replaced it: the Version is quarantined, or, when its text was already searchable, its
-    enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+  - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+    during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+    longer serve the work. Live imports
+    and normalization now retain their pin and retry reachability outages until the exact build
+    returns; they never silently move to its replacement. A Version with this diagnostic is
+    quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+    plugin_version name the original plan and plugin.
   - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
     rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
     work stopped instead of calling it, with the same outcome and fields as

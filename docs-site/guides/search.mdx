@@ -305,6 +305,8 @@ These outputs come from the `make dev` stack, where `deep` maps to `core.retriev
 
 Each API process admits at most 64 active searches across callers. When capacity is full, it returns `503 search_unavailable` with `retryable: true` and a `Retry-After` header. Wait at least that many seconds before retrying, and limit concurrent searches in your client. A dependency outage can return the same code without the header; use bounded backoff for those failures. The [API overview](/api-reference/overview) describes the error envelope.
 
+If Quivr cannot encode the query because its model is unavailable or times out, it returns retryable `503 model_unavailable`. Retry with increasing delays and stop at your client's retry deadline, or try `lexical` if the profile supports it. Query length limits still return `422 query_too_long`.
+
 ## Search from the command line
 
 `quivr search` sends the same request from a terminal, with the same `QUIVR_API_URL` and `QUIVR_API_KEY`:
@@ -330,3 +332,4 @@ Add `--json` to print the API response unchanged, and `--source` to filter by So
 | `422 query_too_long`, `422 unsupported_profile` | The query or the profile is refused. The message says why. |
 | `422 source_filter_unavailable` | The Corpus was indexed before source filtering existed; rebuild it once. |
 | `503 search_unavailable` | Search capacity is full or a dependency is unavailable. Wait for `Retry-After` when present; otherwise use bounded backoff. Quivr never answers an empty list instead. |
+| `503 model_unavailable` | The query encoding model is unavailable or timed out. Use bounded backoff, or try `lexical` if the profile supports it. |

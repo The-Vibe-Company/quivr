@@ -69,6 +69,7 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, scope corpus.Scope)
 	case a.searches <- struct{}{}:
 		defer func() { <-a.searches }()
 	default:
+		a.loadMetrics.SearchRefused()
 		a.recordSearch(scope.Organization, q, retrieval.Result{}, started, publicerr.SearchUnavailable)
 		w.Header().Set("Retry-After", "1")
 		writeError(w, publicerr.SearchUnavailable, nil)

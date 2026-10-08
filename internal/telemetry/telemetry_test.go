@@ -1,6 +1,7 @@
 package telemetry_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -88,5 +89,22 @@ func TestHistogramWithoutBoundariesKeepsHistogramExposition(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in %s", want, text)
 		}
+	}
+}
+
+// Legitimate route/method/status combinations can exceed the SDK's default
+// 2,000 points. The registered-template budget must own that limit instead.
+func TestLoadMetricsRetainRegisteredRoutesBeyondSDKDefaultLimit(t *testing.T) {
+	m := telemetry.NewLoadMetrics()
+	for i := 0; i < 405; i++ {
+		route := fmt.Sprintf("/example/%d", i)
+		m.RegisterRoutes(route)
+		for _, status := range []int{101, 200, 301, 400, 500} {
+			m.Begin(route, "GET")(status, time.Second)
+		}
+	}
+	text := render(func(b *strings.Builder) { m.Write(b) })
+	if !strings.Contains(text, `quivr_http_requests_total{route="/example/404",method="GET",status_class="5xx"} 1`) {
+		t.Fatal("registered route lost beyond 2,000 SDK points")
 	}
 }

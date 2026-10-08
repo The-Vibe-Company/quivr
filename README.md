@@ -86,6 +86,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 ## What works today
 
+- Searches report query-model outages as retryable `503 model_unavailable`, separately from overload and other search dependency failures. See [Search errors](https://docs.quivr.thevibecompany.co/guides/search#when-a-search-fails).
+
 - [Bulk worker autoscaling](deploy/railway/autoscaler/README.md) uses a standalone Go controller on Railway; Kubernetes can use KEDA. Live workers keep separate capacity.
 
 - Rolling application upgrades use additive schema expansions; destructive cleanup
@@ -228,9 +230,13 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   source ([guide](quivr-search/README.md#fil)).
 - **Operational metrics and correlated logs** on each process's private probe
   listener (`/metrics`, Prometheus text, bounded labels):
-  - API: accepted commands and the pending-ingestion backlog;
+  - API: accepted commands, pending-ingestion backlog, and search admission capacity,
+    occupancy and refusals;
   - worker: processing outcomes, time from acceptance to searchable, and delivery
     attempts and durations.
+  - both: HTTP request counts by registered route, method and status class;
+    durations and requests in flight by route and method; local PostgreSQL pool
+    occupancy and saturation.
 
   Live/bulk backlog observations refresh every 15 seconds by default, with a
   configurable interval and rebuild/backfill estimates from progress counters

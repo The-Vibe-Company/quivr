@@ -38,7 +38,7 @@ func TestLiveServesTheNamespacesOfTheCurrentSet(t *testing.T) {
 // TestPinnedWorkFinishesOnItsPlan owns how work pinned to a Pipeline Plan
 // resolves plugins (Spec 5): under its context every lookup stays in its
 // plan after another plan becomes current, a restarted process resolves the
-// plan again, and a plugin of that plan that cannot be reached keeps the work
+// plan again, and an Operation whose plugin cannot be reached keeps the work
 // retrying while it serves the current plan, then stops it with a diagnostic
 // naming the plan and the plugin once it has left and the budget is spent.
 func TestPinnedWorkFinishesOnItsPlan(t *testing.T) {
@@ -58,12 +58,12 @@ func TestPinnedWorkFinishesOnItsPlan(t *testing.T) {
 	}
 	attempts := 0
 	count := func(context.Context) (int, error) { attempts++; return attempts, nil }
-	work, err := live.Pin(context.Background(), plugins.Work{Kind: plugins.WorkIngestion, Organization: "org", ID: "receipt", Plan: "plan_a"}, count, 2)
+	work, err := live.Pin(context.Background(), plugins.Work{Kind: plugins.WorkOperation, Organization: "org", ID: "receipt", Plan: "plan_a"}, count, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pinA, _, _ := live.Normalizer(work, "text/markdown")
-	if reason, err := plugins.Unreachable(work, pinA, "normalizer"); reason != nil || err != nil || attempts != 0 {
+	if reason, err := plugins.Unavailable(work, pinA, "normalizer"); reason != nil || err != nil || attempts != 0 {
 		t.Fatalf("a plugin of the current plan: %v (%v), %d attempts counted; want retries, uncounted", reason, err, attempts)
 	}
 
@@ -74,10 +74,10 @@ func TestPinnedWorkFinishesOnItsPlan(t *testing.T) {
 	if !live.Routed(work, "text/markdown") || live.Routed(context.Background(), "text/markdown") {
 		t.Fatalf("after plan_b: pinned work routed %v, new work routed %v; want only the pinned work routed", live.Routed(work, "text/markdown"), live.Routed(context.Background(), "text/markdown"))
 	}
-	if reason, err := plugins.Unreachable(work, pinA, "normalizer"); reason != nil || err != nil || attempts != 1 {
+	if reason, err := plugins.Unavailable(work, pinA, "normalizer"); reason != nil || err != nil || attempts != 1 {
 		t.Fatalf("the first attempt after the plugin left the plan: %v (%v), %d attempts; want a counted retry", reason, err, attempts)
 	}
-	reason, err := plugins.Unreachable(work, pinA, "normalizer")
+	reason, err := plugins.Unavailable(work, pinA, "normalizer")
 	if err != nil || reason == nil || reason.Code != plugins.CodePinnedPluginUnavailable || reason.Plan != "plan_a" || reason.Plugin != "certified.fake" || reason.PluginVersion != "0.1.0" || reason.Contribution != "normalizer" {
 		t.Fatalf("the budget spent: %+v (%v); want pinned_plugin_unavailable naming plan_a and certified.fake@0.1.0", reason, err)
 	}

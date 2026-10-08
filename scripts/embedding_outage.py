@@ -44,7 +44,7 @@ def verify(stack):
     for mode in ['semantic','hybrid']:
         query['mode']=mode
         error=call('POST','/v0/search',query,status=503)
-        assert error['retryable'] and error['code']=='search_unavailable'
+        assert error['retryable'] and error['code']=='model_unavailable'
     stack.stop_processes();stack.compose('start','tei')
     stack.compose('up','-d','--wait','--wait-timeout','180')
     stack.config();stack.start_processes()
