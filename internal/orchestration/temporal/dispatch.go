@@ -168,28 +168,12 @@ func (r *Runtime) ingestionIntents(classes ...string) IntentSource {
 		}
 		intents := make([]Intent, 0, len(batch))
 		for _, b := range batch {
-			queue, name := ingestionBatchQueue, ingestionBatchWorkflow
-			if workqueue.Valid(b.WorkQueue) {
-				queue = workqueue.TaskQueue(b.WorkQueue)
-			}
-			var input any = b
-			if b.Legacy {
-				// A pre-upgrade start may already exist, even when its outbox
-				// acknowledgement was lost. Keep its name, queue and input.
-				queue, name = taskQueue, "process-e5-v3"
-				d := b.Receipts[0]
-				input = Input{Organization: d.Organization, ReceiptID: d.ReceiptID}
-			}
 			intents = append(intents, dispatchIntent{
 				traceContext: b.Receipts[0].TraceContext,
-				options:      client.StartWorkflowOptions{ID: b.ID, TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
-				name:         name, input: input,
+				options:      client.StartWorkflowOptions{ID: b.ID, TaskQueue: workqueue.TaskQueue(b.WorkQueue), WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
+				name:         ingestionBatchWorkflow, input: b,
 				complete: func(ctx context.Context) error {
-					class := b.WorkQueue
-					if !workqueue.Valid(class) {
-						class = workqueue.Live
-					}
-					return r.Store.IngestionBatchDispatched(workqueue.WithClass(ctx, class), b.ID)
+					return r.Store.IngestionBatchDispatched(workqueue.WithClass(ctx, b.WorkQueue), b.ID)
 				},
 				retry: func(ctx context.Context) error {
 					for _, d := range b.Receipts {
@@ -244,12 +228,8 @@ func (r *Runtime) connectorIntents(classes ...string) IntentSource {
 		}
 		intents := make([]Intent, 0, len(runs))
 		for _, run := range runs {
-			queue := connectorTaskQueue
-			if workqueue.Valid(run.WorkQueue) {
-				queue = workqueue.TaskQueue(run.WorkQueue)
-			}
 			intents = append(intents, dispatchIntent{
-				options: client.StartWorkflowOptions{ID: acquisitionWorkflowID(run), TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY},
+				options: client.StartWorkflowOptions{ID: acquisitionWorkflowID(run), TaskQueue: workqueue.TaskQueue(run.WorkQueue), WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY},
 				name:    acquireWorkflow, input: AcquireInput{Organization: run.Organization, ConnectorID: run.ConnectorID, Run: run.Run, WorkQueue: run.WorkQueue},
 				complete: func(context.Context) error { return nil }, // Run completion advances its schedule.
 				retry: func(ctx context.Context) error {

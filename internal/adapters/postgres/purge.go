@@ -63,21 +63,8 @@ LIMIT $1 ON CONFLICT DO NOTHING`, limit)
 		return 0, err
 	}
 	noticed := int(tag.RowsAffected())
-	tx, err := s.Pool.Begin(ctx)
+	tag, err = s.Pool.Exec(ctx, noticeVersionPurgesSQL, limit)
 	if err != nil {
-		return noticed, err
-	}
-	defer tx.Rollback(ctx)
-	// Repair advances by scanned segmentations, even if none are dead. It
-	// revisits bounded key ranges to catch previous-binary and late writes.
-	if err = advancePurgeCandidates(ctx, tx, limit); err != nil {
-		return noticed, err
-	}
-	tag, err = tx.Exec(ctx, noticeVersionPurgesSQL, limit)
-	if err != nil {
-		return noticed, err
-	}
-	if err = tx.Commit(ctx); err != nil {
 		return noticed, err
 	}
 	return noticed + int(tag.RowsAffected()), nil
