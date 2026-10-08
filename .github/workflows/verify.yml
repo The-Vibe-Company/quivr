@@ -455,6 +455,18 @@ jobs:
             VERSION=dev
             REVISION=${{ github.sha }}
             PLUGIN=${{ matrix.plugin }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: matrix.plugin == 'hosted-embed'
+        with:
+          python-version: '3.12'
+      - name: Prepare the pinned E5 tokenizer fixture
+        if: matrix.plugin == 'hosted-embed'
+        run: python3 scripts/prepare_tokenizer.py
+      - name: Check hosted image token packing offline
+        if: matrix.plugin == 'hosted-embed'
+        env:
+          REVISION: ${{ github.sha }}
+        run: python3 scripts/image_smoke.py quivr-scan:local --plugin hosted-embed --plugin-id hosted.embed --version dev --revision "$REVISION"
       - name: Install checksum-verified inventory and scan tools
         env:
           TOOLS_DIR: ${{ runner.temp }}/security-tools
