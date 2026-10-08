@@ -104,7 +104,8 @@ class Batching(FakeServer):
         parts = [FR_PARTS[0], {**FR_PARTS[1], "vectors": [{"segment_id": "body-1", "vector": [0, 1]}]}]
         self.assertEqual(self.decisions(evaluations, parts=parts,
                                        record={"vector_space_id": "text-space-1", "vectors_ready": True},
-                                       query_vectors=[None] * 5 + [{"vector_space_id": "text-space-1", "vector": [0, 1]}]),
+                                       query_vectors=[None] * 5 + [{"vector_space_id": "text-space-1", "vector": [0, 1]}],
+                                       configuration={"vectors": {"thresholds": {"text-space-1": 0.8}}}),
                          ["match", "no_match", "match", "match", "match", "match"])
         self.assertEqual(len(self.fake.requests), 1)
         self.assertEqual(sorted(self.fake.requests[0]["descriptions"]), sorted([STRIKE, VISAS]))
@@ -127,7 +128,7 @@ class Batching(FakeServer):
         self.assertGreater(len(self.fake.requests), 1)
         self.assertLess(len(self.fake.requests), 10)
         self.assertEqual(sum(len(r["descriptions"]) for r in self.fake.requests), 200)
-        self.assertTrue(all(r["bytes"] <= jev.MAX_REQUEST_BYTES for r in self.fake.requests))
+        self.assertTrue(all(r["bytes"] <= 120_000 for r in self.fake.requests))
 
 
 class State(FakeServer):
@@ -156,7 +157,7 @@ class State(FakeServer):
 
 class Errors(FakeServer):
     def fail(self, status):
-        self.fake.failures.append(status)
+        self.fake.failures.extend([status] * (3 if status in (408, 429) or status >= 500 else 1))
         answer = self.ask([(D(STRIKE), {}), ({"kind": "keywords", "match": {"term": "grève"}}, {})], parts=FR_PARTS)
         self.assertNotIn("a failure the test asked for", json.dumps(answer.body))
         return answer.status, answer.body["code"], answer.body["retryable"]
@@ -178,7 +179,8 @@ class Errors(FakeServer):
     def test_rate_limits_and_server_errors_are_retryable(self):
         for status in (408, 429, 500, 503, 529):
             with self.subTest(status=status):
-                self.assertEqual(self.fail(status), (503, "classifier_unavailable", True))
+                with unittest.mock.patch("quivr_plugin.system_one.time.sleep"):
+                    self.assertEqual(self.fail(status), (503, "classifier_unavailable", True))
 
     def test_a_refused_request_is_terminal(self):
         self.assertEqual(self.fail(422), (422, "classifier_refused_request", False))

@@ -10,11 +10,11 @@ These plugins live in the `plugins/` folder of the repository. They use the same
 | --- | --- | --- | --- |
 | `newsml-g2` | `newsml-g2` 0.1.1 | Normalizer | IPTC NewsML-G2 text items, metadata and raw XML |
 | `pdf-text` | `pdf-text` 0.1.0 | Normalizer | `application/pdf`: one Part per page |
-| `alerts` | `alerts` 0.3.0 | Alert rule | keyword and meaning alerts, alone or combined |
+| `alerts` | `alerts` 0.4.0 | Alert rule | keyword and meaning alerts, alone or combined |
 | `core-ingest` | `core.ingest` 1.0.0 | Ingestion | token windows embedded with `multilingual-e5-small` |
 | `hosted-embed` | `hosted.embed` 1.0.0 | Ingestion | a configured hosted or OpenAI-compatible text model |
 | `core-retrieve` | `core.retrieve` 1.2.0 | Retrieval | `default` and `deep`: keyword, vector or hybrid search, with configurable weight, depth and fusion |
-| `jev-rerank` | `jev.rerank` 1.0.0 | Retrieval | `deep`: Jev re-ranking of a hybrid shortlist, with an unpaid hybrid fallback |
+| `jev-rerank` | `jev.rerank` 1.0.1 | Retrieval | `deep`: Jev re-ranking of a hybrid shortlist, with an unpaid hybrid fallback |
 | `rss` | `connector.rss` 1.0.0 | Connector | kind `rss`: RSS, Atom and JSON Feed |
 | `m365-mail` | `connector.m365_mail` 1.0.0 | Connector | kind `m365_mail`: a Microsoft 365 mailbox folder |
 | `x-list` | `connector.x_list` 1.1.0 | Connector | kind `x_list`: the posts of an X list |
@@ -83,14 +83,14 @@ To offer Jev checks:
 2. Add `described` to the pin's `kinds`, keeping the kinds already offered: `"kinds": ["keywords", "meaning", "keywords_or_meaning", "keywords_and_meaning", "described"]`. A kind missing from the list is refused for new alerts.
 3. Restart the plugin and Quivr. The plugin logs at startup whether described alerts are enabled.
 
-`make dev` adds `described` only when `TYPESAFE_API_KEY` is set in its environment. Meaning kinds need `alerts` `0.3.0`; existing Subscriptions keep the version they name until you [migrate them](/run-quivr/upgrade-an-alert-rule).
+`make dev` adds `described` only when `TYPESAFE_API_KEY` is set in its environment. Meaning kinds need `alerts` `0.4.0`; existing Subscriptions keep the version they name until you [migrate them](/run-quivr/upgrade-an-alert-rule).
 
 | Configuration | Default | Meaning |
 | --- | --- | --- |
 | `fields` | `{}` | Filter names mapped to JSON Pointers into document metadata, such as `{"author": "/extensions/example.news/data/author"}` |
 | `text_roles` | `["title", "body"]` | Part roles that keyword terms search and Jev checks; local meaning checks use all supplied vectors |
 | `described.threshold` | `0.5` | Default Jev probability threshold, 0.2 to 0.95 |
-| `vectors.threshold` | `0.8` | Default local-vector cosine similarity threshold, 0.2 to 0.95 |
+| `vectors.thresholds` | `{}` | Local-vector cosine thresholds, 0.2 to 0.95, keyed by exact vector-space ID; a Subscription’s `threshold` overrides its space entry. A ready comparison without either threshold fails with `vector_threshold_required` |
 
 See [How alerts work](/guides/alerts), [Keyword alerts](/guides/keyword-alerts) and [Meaning alerts](/guides/described-alerts).
 

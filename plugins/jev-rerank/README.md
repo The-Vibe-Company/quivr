@@ -1,7 +1,7 @@
 # Jev reranking
 
 An optional retrieval plugin (`jev.rerank`), not an engine dependency. Pin it
-beside `core.retrieve` to enable Jev in `deep`. Jev 1.0.0 serves only `deep`
+beside `core.retrieve` to enable Jev in `deep`. Jev 1.0.1 serves only `deep`
 and requires `core.retrieve`'s `default` profile (version `>=1.1.0 <2.0.0`) and Plugin API 0.13.
 Map `default` to `core.retrieve/default` and `deep` to `jev.rerank/deep`.
 
@@ -38,12 +38,13 @@ model, rubric, whitespace-normalized query, immutable segment id and trimming
 recipe. Changing case or the trimming recipe does not reuse evidence.
 
 The paid round has at most a 2-second absolute deadline, leaving room within the
-3-second profile objective for retrieval and hydration. At most three HTTP
-attempts retry only 429 or 5xx. Each attempt reserves its maximum input cost
+3-second profile objective for retrieval and hydration. The shared Python SDK client splits requests at 120,000 UTF-8 bytes, preserving
+question IDs. Each batch retries 408, 429 or 5xx at most three times. Each attempt reserves its maximum input cost
 within the engine's remaining chain allowance; the paid deadline also respects
 the remaining time, with 10 ms left to return. Usage reports only Jev's own
 paid work; the engine aggregates both profiles. `Retry-After` that cannot fit the remaining
-budget causes immediate fallback. Oversized input, invalid answers, missing
+budget causes immediate fallback. All batches share the same time and cost allowance.
+A single question that cannot fit, invalid answers, missing
 usage/model, outages and missing keys return hybrid order with
 `re-ranker unavailable: <reason>`, with no Jev score, including for cached hits.
 No query, passage, provider body, identifiers or key is logged.

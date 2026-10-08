@@ -37,7 +37,7 @@ The API keeps the parts of an alert as separate objects, so you can change one w
 | Saved Query | The search to repeat: an expression and the collections (Corpora) it watches. Your application creates it. |
 | Expression | The condition, as JSON, inside the Saved Query. Its `kind` picks the check, such as `keywords` or `meaning`. |
 | Subscription | The alert. It switches a Saved Query on and names its rule, destination and `owner`. Your application creates it. |
-| Alert rule | The plugin version that judges each document, such as `alerts` `0.3.0`. The operator installs it. |
+| Alert rule | The plugin version that judges each document, such as `alerts` `0.4.0`. The operator installs it. |
 | Destination | A webhook receiver's URL and signing secret. The operator sets it in Quivr's configuration. |
 | Match | A stored decision that a document version fits a Subscription, with its evidence. Quivr creates it. |
 | Delivery | One notice about one Match, sent to the destination. Its attempts are the HTTP requests. |
@@ -58,7 +58,7 @@ The first-party `alerts` plugin offers three checks. Pick the one that fits how 
 
 `keywords_or_meaning` and `keywords_and_meaning` combine a keyword tree with one meaning check.
 
-The local check's default threshold, 0.80, was measured on 156 pairs of articles and descriptions in French and English. It matched all 16 related pairs, and also 11 of the 140 pairs labelled unrelated. Results depend on the model and the threshold: treat the score as closeness, not a probability, and tune the threshold on your own examples.
+Local checks require a threshold calibrated for their vector space. The operator sets `vectors.thresholds[<vector-space-id>]` on the plugin, or you set `threshold` in the Subscription's evaluator configuration. The Subscription setting takes precedence. There is no implicit default. Scores measure closeness, not a probability; tune the threshold on your own examples ([Meaning alerts](/guides/described-alerts#use-the-local-meaning-check)).
 
 The local check never calls Jev, but it is not private by itself: document and description text go to whatever embedding provider the operator configured. To keep that text inside your installation, the operator must use a local embedding provider, such as the default `core-ingest` plugin, which calls an embedding server the operator runs (the local stack starts one). [Meaning alerts](/guides/described-alerts#use-the-local-meaning-check) has the details.
 

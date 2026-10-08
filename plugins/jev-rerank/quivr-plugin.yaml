@@ -1,5 +1,5 @@
 id: jev.rerank
-version: 1.0.0
+version: 1.0.1
 description: Jev reranking of core.retrieve's hybrid ranking, with an unpaid hybrid fallback.
 compatibility:
   engine: ">=0.1.0 <0.3.0"

@@ -131,23 +131,24 @@ def rerank(query, passages, budget, key, price, timing=None):
     """One bounded Jev attempt, no hidden retry/background transport."""
     sys.path.insert(0, str(ROOT / 'plugins/jev-rerank'))
     from jev_rerank import client as jev
+    from quivr_plugin import system_one as provider
     raw = json.dumps(jev.payload(query, passages), ensure_ascii=False, separators=(',', ':')).encode()
-    if len(raw) > jev.MAX_BYTES:
+    if len(raw) > provider.MAX_REQUEST_BYTES:
         raise ValueError('reranker request exceeds its supported bound')
     timing = {} if timing is None else timing
     started = time.monotonic()
-    call = budget.reserve(jev.MODEL, 'rerank', 'query', jev.MAX_TOKENS, price)
+    call = budget.reserve(provider.MODEL, 'rerank', 'query', provider.MAX_TOKENS, price)
     timing['blocked'] = time.monotonic() - started
     timing['ledger'] = timing['blocked']
-    request = urllib.request.Request(jev.URL, data=raw, headers={'Content-Type': 'application/json',
+    request = urllib.request.Request(provider.URL, data=raw, headers={'Content-Type': 'application/json',
                                      'Authorization': 'Bearer ' + key}, method='POST')
     try:
         started = time.monotonic()
         with urllib.request.build_opener(embeddings.NoRedirect()).open(request, timeout=60) as response:
-            answer = response.read(jev.MAX_RESPONSE_BYTES + 1)
+            answer = response.read(provider.MAX_RESPONSE_BYTES + 1)
         timing['provider'] = time.monotonic() - started
         timing['blocked'] += timing['provider']
-        if len(answer) > jev.MAX_RESPONSE_BYTES:
+        if len(answer) > provider.MAX_RESPONSE_BYTES:
             raise ValueError()
         body = json.loads(answer)
         tokens = body['usage']['input_tokens']
@@ -157,7 +158,7 @@ def rerank(query, passages, budget, key, price, timing=None):
         timing['ledger'] += ledger
         timing['blocked'] += ledger
         scores = {name: item['noul'] for name, item in body['answers'].items()}
-        if (type(tokens) is not int or not 0 <= tokens <= jev.MAX_TOKENS or body['model'] != jev.MODEL
+        if (type(tokens) is not int or not 0 <= tokens <= provider.MAX_TOKENS or body['model'] != provider.MODEL
                 or set(scores) != set(passages) or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in scores.values())):
             raise ValueError()
         return sorted(scores, key=lambda name: (-scores[name], name))

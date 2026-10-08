@@ -1,6 +1,6 @@
 # Local-vector calibration
 
-This reference records how the default cosine threshold was chosen for alert
+This reference records how per-space cosine threshold suggestions were measured for alert
 authors and operators. All scores are measured, not classifier probabilities.
 
 ## Model and inputs
@@ -47,9 +47,9 @@ time and a threshold sweep. Article indices are zero-based indices in `set.json`
 | Labour strikes at ports and harbours | 9: Rovers sign striker for club-record fee | Unrelated control | 0.765448 |
 | Grèves des travailleurs dans les ports | 9: Rovers sign striker for club-record fee | Unrelated control | 0.743865 |
 
-## Default and limitations
+## E5 suggestion and limitations
 
-The default **0.80** is the highest hundredth that retains all 16 labeled
+The E5 suggestion **0.80** is the highest hundredth that retains all 16 labeled
 positives, including the cross-language examples. Positive scores range from
 0.806005 to 0.893625; negatives range from 0.712355 to 0.860294. The ranges overlap,
 so no single threshold classifies this whole set correctly.
@@ -86,3 +86,54 @@ The run prints 156 pairs, 16 positives and 140 negatives, followed by the score
 ranges. Small platform-dependent floating-point differences are possible.
 This measurement stays outside unit tests and CI's quick lane. Recalibrate
 before changing model weights, templates, segmentation or the default threshold.
+
+## EmbeddingGemma 2 measurement
+
+Measured on October 8, 2026 with `google/embeddinggemma-2`, revision
+`914f7f89142e33e77833254d9c9b90c3cef7303b`, CPU float32, two threads and
+batches of four inputs. The official SentenceTransformers text-only encoder
+uses mean pooling, its learned 512-to-768 projection and L2 normalization.
+The [pinned model card](https://huggingface.co/google/embeddinggemma-2/blob/914f7f89142e33e77833254d9c9b90c3cef7303b/README.md)
+documents the pipeline. No paid embedding service was called.
+
+Queries use `task: search result | query: <description>`; documents use
+`title: <title> | text: <body>`, matching the hosted embedding plugin's Gemma
+search templates. The same 13 articles and 12 descriptions produce 156 pairs.
+Maximum token counts were title 14, body 61, query 13 and full input 82.
+Every document fits one body passage; no truncation or segmentation occurred.
+Separate title-only passages and long-document segmentation remain unmeasured.
+
+[`vectors-gemma-results.json`](vectors-gemma-results.json) records exact inputs,
+all scores, revision, dimensions, runtime versions and the threshold sweep.
+Positive scores range from 0.659968 to 0.831484; negatives from 0.472581 to
+0.728274. They overlap, so no single threshold perfectly separates this set.
+
+| Threshold | True positives | False positives | False negatives |
+| --- | --- | --- | --- |
+| 0.65 | 16 | 6 | 0 |
+| 0.66 | 15 | 5 | 1 |
+| 0.70 | 14 | 2 | 2 |
+| 0.80 | 4 | 0 | 12 |
+
+**0.65** is the highest hundredth retaining all labeled positives. This is
+in-sample advice for this revision, 768 dimensions and these templates, not
+production-quality evidence. The plugin has no implicit threshold: configure
+`vectors.thresholds[<vector-space-id>]` on its pin, or `threshold` on a
+Subscription. The earlier global `vectors.threshold` setting is replaced by
+the per-space map. Recalibrate after changing weights, dimensions or inputs.
+
+To reproduce the bounded CPU run from `plugins/alerts`, in Python 3.12+:
+
+```bash
+pip install torch==2.8.0+cpu torchvision==0.23.0+cpu \
+  --index-url https://download.pytorch.org/whl/cpu
+pip install sentence-transformers==6.1.0 transformers==5.19.0 pillow==12.3.0
+python3 calibration/calibrate_vectors.py --model gemma --threads 2 \
+  --output /tmp/alerts-vectors-gemma-results.json
+```
+
+The output path must be new; the script refuses to overwrite evidence. Model
+weights download from the pinned public revision, then inference stays on CPU.
+Torchvision is required by the Transformers processor import even with the
+vision and audio encoders disabled. Runtime versions were PyTorch `2.8.0+cpu`,
+Transformers `5.19.0`, SentenceTransformers `6.1.0` and Tokenizers `0.23.2`.
