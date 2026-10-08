@@ -62,8 +62,10 @@ names the affected collections in `corpus_ids`, even when no documents match.
 Other collections keep their hybrid results. You can show this notice until a
 later response omits the marker; rebuilding needs no client-side retry loop.
 
-An explicit `semantic` request has no keyword fallback: it returns
-`422 unsupported_search` when vector search cannot run. Unknown coverage counts
+An explicit `semantic` request has no keyword fallback. A collection with eligible
+documents returns `422 unsupported_search` when served vectors are unavailable.
+With no eligible documents, including after the last Record is withdrawn, it
+returns empty results. Stale or unknown coverage counts
 alone do not disable a valid vector route. Model, index and storage outages
 keep their error responses; they do not become keyword-only successes.
 

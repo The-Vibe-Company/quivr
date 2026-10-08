@@ -311,7 +311,9 @@ for (const view of ["explorer", "feed"] as const) {
     await expect(page.getByRole("heading", { name: view === "explorer" ? "Aucun document pour ces critères." : "Aucun article ne parle de ça." })).toBeVisible();
     await expect(notice).toBeVisible();
     degraded = false;
+    empty = false;
     await search.fill("reprise");
+    await expect(results.filter({ hasText: "Port reopens after three-day closure" })).toHaveCount(1);
     await expect(notice).toHaveCount(0);
     refused = true;
     await search.fill("sens");

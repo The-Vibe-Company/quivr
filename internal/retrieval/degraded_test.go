@@ -19,6 +19,8 @@ type rebuildingRegistry struct {
 	missing      map[string]bool
 	absent       bool
 	zeroCoverage bool
+	stale        bool
+	empty        bool
 }
 
 func (r rebuildingRegistry) VectorSpaces(ctx context.Context, org, id string) (content.Generation, []content.SpaceCoverage, int64, error) {
@@ -27,12 +29,17 @@ func (r rebuildingRegistry) VectorSpaces(ctx context.Context, org, id string) (c
 		return g, nil, total, err
 	}
 	for i := range spaces {
+		spaces[i].CorpusEmpty = r.empty
 		spaces[i].CoverageUnknown = true
 		if r.zeroCoverage {
 			one := int64(1)
 			spaces[i].CoverageUnknown = false
 			spaces[i].TotalSegments = &one
 			spaces[i].ServingSegments = &one
+			if r.stale {
+				age := int64(1)
+				spaces[i].CoverageAgeMS = &age
+			}
 			continue
 		}
 		if r.missing[id] {
@@ -58,6 +65,9 @@ func (p *rebuildProjection) Search(_ context.Context, routes []retrieval.Route, 
 	out := []content.Candidate{}
 	for _, r := range routes {
 		if r.CorpusID == "rebuilding" {
+			if q.Mode != "lexical" && !r.Generation.Serves(q.Space) {
+				return nil, errors.New("queried an unserved vector space")
+			}
 			if p.missing[r.CorpusID] && q.Mode != "lexical" {
 				return nil, errors.New("no vectors in rebuilt generation")
 			}
@@ -65,7 +75,11 @@ func (p *rebuildProjection) Search(_ context.Context, routes []retrieval.Route, 
 			if score == 0 {
 				score = 1
 			}
-			out = append(out, content.Candidate{SegmentID: "keyword", GenerationID: r.Generation.ID, Score: score})
+			segment := "keyword"
+			if !p.missing[r.CorpusID] {
+				segment = "vec-rebuilding"
+			}
+			out = append(out, content.Candidate{SegmentID: segment, GenerationID: r.Generation.ID, Score: score})
 		} else {
 			out = append(out, content.Candidate{SegmentID: "vec-healthy", GenerationID: r.Generation.ID, Score: 2})
 		}
@@ -84,6 +98,11 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 		sameSpace    bool
 		absent       bool
 		zeroCoverage bool
+		stale        bool
+		empty        bool
+		populated    bool
+		evaluation   bool
+		everySpace   bool
 		keywordScore float64
 		twoSpaces    bool
 		otherFilter  bool
@@ -93,8 +112,15 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 		{name: "rebuilt corpus", ids: []string{"rebuilding"}},
 		{name: "no registered space", ids: []string{"rebuilding"}, absent: true},
 		{name: "known zero vector coverage", ids: []string{"rebuilding"}, zeroCoverage: true},
+		{name: "stale zero coverage keeps current route", ids: []string{"rebuilding"}, zeroCoverage: true, stale: true},
+		{name: "stale zero coverage keeps semantic search", ids: []string{"rebuilding"}, mode: "semantic", zeroCoverage: true, stale: true},
+		{name: "empty corpus keeps semantic success", ids: []string{"rebuilding"}, mode: "semantic", empty: true},
+		{name: "empty corpus has no degradation", ids: []string{"rebuilding"}, empty: true},
 		{name: "different spaces", ids: []string{"healthy", "rebuilding"}},
 		{name: "different spaces reversed", ids: []string{"rebuilding", "healthy"}},
+		{name: "selected space keeps other populated corpus keywords", ids: []string{"healthy", "rebuilding"}, populated: true},
+		{name: "other served model clears transient keyword fallback", ids: []string{"healthy", "rebuilding"}, populated: true, everySpace: true},
+		{name: "evaluation vectors remain outside normal hybrid", ids: []string{"healthy", "rebuilding"}, populated: true, evaluation: true},
 		{name: "incomparable keyword score scale", ids: []string{"healthy", "rebuilding"}, keywordScore: 1000},
 		{name: "two healthy spaces share one keyword query", ids: []string{"healthy", "rebuilding"}, twoSpaces: true},
 		{name: "distinct source filters keep distinct keyword queries", ids: []string{"healthy", "rebuilding"}, twoSpaces: true, otherFilter: true},
@@ -121,14 +147,22 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 				g.Spaces[1].Role = content.SpaceServed
 				routes["healthy"] = g
 			}
+			if tc.evaluation {
+				g := pluginGeneration("rebuilt-generation", true, "example.small@1", "space")
+				g.Spaces[1].Role = content.SpaceEvaluation
+				routes["rebuilding"] = g
+			}
 			missing := map[string]bool{"rebuilding": true}
+			if tc.stale || tc.populated {
+				delete(missing, "rebuilding")
+			}
 			projection := &rebuildProjection{missing: missing, keywordScore: tc.keywordScore, err: tc.indexErr}
 			s := service(&projection.fakeProjection, &fakeEmbeddings{})
 			s.Projection = projection
 			s.Routing = routes
-			s.Registry = rebuildingRegistry{routing: routes, missing: missing, absent: tc.absent, zeroCoverage: tc.zeroCoverage}
+			s.Registry = rebuildingRegistry{routing: routes, missing: missing, absent: tc.absent, zeroCoverage: tc.zeroCoverage, stale: tc.stale, empty: tc.empty}
 			s.Spaces = &pluginEncoder{}
-			if tc.twoSpaces {
+			if tc.twoSpaces || tc.everySpace {
 				s.Ranker = &scriptedRanker{answer: func(ctx context.Context, q plugins.SearchRequest) ([]byte, error) {
 					if q.Round != 1 {
 						return passthrough(ctx, q)
@@ -154,18 +188,22 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || len(result.Hits) != len(ids) {
+			wantHits := len(ids)
+			if tc.empty {
+				wantHits = 0
+			}
+			if err != nil || len(result.Hits) != wantHits {
 				t.Fatalf("hybrid returned %d hits, error %v; want keyword results from every corpus (%v)", len(result.Hits), err, ids)
 			}
 			found := map[string]bool{}
 			for _, h := range result.Hits {
 				found[h.Segment.ID] = true
 			}
-			if ids[0] != "healthy" && !found["keyword"] || len(ids) == 2 && (!found["keyword"] || !found["vec-healthy"]) {
+			if !tc.stale && !tc.populated && !tc.empty && (ids[0] != "healthy" && !found["keyword"] || len(ids) == 2 && (!found["keyword"] || !found["vec-healthy"])) {
 				t.Fatalf("hits %v; want rebuilt corpus keywords and healthy corpus vectors", found)
 			}
 			var degraded []retrieval.Degradation
-			if tc.mode != "lexical" && (len(ids) == 2 || ids[0] == "rebuilding") {
+			if tc.mode != "lexical" && !tc.stale && !tc.empty && !tc.everySpace && (len(ids) == 2 || ids[0] == "rebuilding") {
 				degraded = []retrieval.Degradation{{Reason: "vectors_unavailable", CorpusIDs: []string{"rebuilding"}}}
 			}
 			if !reflect.DeepEqual(result.Degraded, degraded) {
@@ -194,7 +232,7 @@ func TestHybridSearchIncludesCorporaWithoutVectors(t *testing.T) {
 				}
 			}
 			// The next search observes repaired routing without retaining a marker.
-			if len(ids) == 1 && ids[0] == "rebuilding" && !tc.absent && !tc.zeroCoverage {
+			if len(ids) == 1 && ids[0] == "rebuilding" && !tc.absent && !tc.zeroCoverage && !tc.empty {
 				delete(missing, "rebuilding")
 				again, err := s.Search(t.Context(), searchScope, retrieval.Request{Query: "lanterne", CorpusIDs: ids})
 				if err != nil || len(again.Hits) != 1 || len(again.Degraded) != 0 {

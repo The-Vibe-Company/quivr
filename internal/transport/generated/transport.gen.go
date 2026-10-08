@@ -3015,11 +3015,11 @@ type ScheduleChange struct {
 type SearchDegradation struct {
 	CorpusIds []string `json:"corpus_ids"`
 
-	// Reason No usable served vector route or a completed coverage snapshot with no vectors; keywords remain available.
+	// Reason No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
 	Reason SearchDegradationReason `json:"reason"`
 }
 
-// SearchDegradationReason No usable served vector route or a completed coverage snapshot with no vectors; keywords remain available.
+// SearchDegradationReason No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
 type SearchDegradationReason string
 
 // SearchExcerpt Exact canonical normalized Part text slice [start,end), using Unicode code points, not UTF-8 bytes or UTF-16 units. End must be >= start and end-start must equal the excerpt code-point length. Bounds are checked against the referenced immutable Part. No synthetic highlights or rewritten snippets.

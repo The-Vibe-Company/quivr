@@ -10489,7 +10489,7 @@ description: Resolved retrieval profile identity. Name is the requested short or
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `reason` | string | yes | No usable served vector route or a completed coverage snapshot with no vectors; keywords remain available. One of `vectors_unavailable`. |
+| `reason` | string | yes | No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes. One of `vectors_unavailable`. |
 | `corpus_ids` | array of string | yes | At least `1` items. At most `16` items. Items are unique. Each item: Minimum length `1`. |
 
 <details>
@@ -10502,7 +10502,7 @@ properties:
   reason:
     type: string
     enum: [vectors_unavailable]
-    description: No usable served vector route or a completed coverage snapshot with no vectors; keywords remain available.
+    description: No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
   corpus_ids:
     type: array
     minItems: 1

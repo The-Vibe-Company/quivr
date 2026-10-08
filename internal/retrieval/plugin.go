@@ -167,6 +167,9 @@ func (s Service) rankProfile(ctx context.Context, scope corpus.Scope, q Request,
 		return out, s.unserved(ctx, m.ID, ErrUnavailable, timing)
 	}
 	spaces := plan.spaces
+	if plan.empty && q.EvaluationPlugin == "" {
+		return out, nil
+	}
 	if q.EvaluationPlugin == "" {
 		servingOwners := map[string]bool{}
 		for _, sp := range spaces {
@@ -329,16 +332,21 @@ func (p *Phases) attrs() []any {
 
 // spacePlan retains per-Corpus routing alongside the plugin's aggregate space
 // descriptions. Unknown coverage does not disable a route. An absent served
-// projection or a completed snapshot with no vectors uses keywords instead.
+// projection or current coverage with no vectors uses keywords instead. A
+// background snapshot may predate ingestion and cannot disable a current route.
 type spacePlan struct {
-	spaces   []plugins.SearchSpace
-	bySpace  map[string][]Route
-	fallback []Route
+	spaces       []plugins.SearchSpace
+	bySpace      map[string][]Route
+	carried      map[string][]Route
+	fallback     []Route
+	empty        bool
+	emptyCorpora map[string]bool
 }
 
 func (s Service) searchSpaces(ctx context.Context, org string, routes []Route, hybrid bool) (spacePlan, error) {
-	plan := spacePlan{spaces: []plugins.SearchSpace{}, bySpace: map[string][]Route{}}
+	plan := spacePlan{spaces: []plugins.SearchSpace{}, bySpace: map[string][]Route{}, carried: map[string][]Route{}, empty: len(routes) > 0, emptyCorpora: map[string]bool{}}
 	if s.Registry == nil {
+		plan.empty = false
 		return plan, nil
 	}
 	var out []plugins.SearchSpace
@@ -349,19 +357,27 @@ func (s Service) searchSpaces(ctx context.Context, org string, routes []Route, h
 			return plan, err
 		}
 		byID := map[string]content.SpaceCoverage{}
+		corpusEmpty := len(spaces) > 0 && spaces[0].CorpusEmpty
+		plan.emptyCorpora[r.CorpusID] = corpusEmpty
+		plan.empty = plan.empty && corpusEmpty
 		served := false
 		for _, c := range spaces {
 			if r.Generation.Carries(c.ID) {
-				if c.ServingSegments != nil && *c.ServingSegments == 0 || !c.CoverageUnknown && c.TotalSegments != nil && c.Segments == 0 {
+				noProjection := c.ServingSegments != nil && *c.ServingSegments == 0
+				noVectors := !c.CoverageUnknown && c.CoverageAgeMS == nil && c.TotalSegments != nil && c.Segments == 0
+				if noProjection || noVectors {
 					c.GenerationRole = content.SpaceEvaluation
 				} else {
-					plan.bySpace[c.ID] = append(plan.bySpace[c.ID], r)
-					served = served || c.GenerationRole == content.SpaceServed
+					plan.carried[c.ID] = append(plan.carried[c.ID], r)
+					if c.GenerationRole == content.SpaceServed {
+						plan.bySpace[c.ID] = append(plan.bySpace[c.ID], r)
+						served = true
+					}
 				}
 				byID[c.ID] = c
 			}
 		}
-		if !served {
+		if !served && !corpusEmpty {
 			plan.fallback = append(plan.fallback, r)
 		}
 		if i == 0 || hybrid {
@@ -478,8 +494,18 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 	var fallback []Route
 	if q.Mode == "hybrid" && q.EvaluationPlugin == "" && pq.Mode != "lexical" && sv.s.Registry != nil {
 		routes = sv.plan.bySpace[c.Space]
+		// A ranker may explicitly select an offered evaluation space of a
+		// serving owner. A globally served space uses only each Corpus's
+		// served routes, never another Corpus's evaluation vectors.
+		if slices.ContainsFunc(sv.spaces, func(sp plugins.SearchSpace) bool { return sp.ID == c.Space && sp.Role == content.SpaceEvaluation }) {
+			routes = sv.plan.carried[c.Space]
+		}
 		if pq.Mode == "hybrid" {
-			fallback = sv.plan.fallback
+			for _, route := range sv.routes {
+				if !sv.plan.emptyCorpora[route.CorpusID] && !slices.ContainsFunc(routes, func(vectorRoute Route) bool { return vectorRoute.CorpusID == route.CorpusID }) {
+					fallback = append(fallback, route)
+				}
+			}
 		}
 	}
 	if pq.Mode != "lexical" && len(routes) > 0 {
@@ -505,10 +531,22 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 		if err != nil {
 			return nil, ErrUnavailable
 		}
+		if q.EvaluationPlugin == "" && pq.Mode != "lexical" {
+			if sv.chain.vectors == nil {
+				sv.chain.vectors = map[string]bool{}
+			}
+			for _, route := range routes {
+				sv.chain.vectors[route.CorpusID] = true
+			}
+		}
 	}
 	if len(fallback) > 0 {
 		keywords := pq
 		keywords.Mode, keywords.Space, keywords.Vector, keywords.Hybrid = "lexical", "", nil, nil
+		keywords.CorpusIDs = nil
+		for _, route := range fallback {
+			keywords.CorpusIDs = append(keywords.CorpusIDs, route.CorpusID)
+		}
 		key, err := json.Marshal(keywords)
 		if err != nil {
 			return nil, ErrUnsupported
@@ -525,6 +563,12 @@ func (sv *server) serve(ctx context.Context, q Request, c plugins.CandidateReque
 			sv.keywordCandidates[string(key)] = more
 		}
 		found = append(NormalizeCandidateRanks(found), NormalizeCandidateRanks(more)...)
+		if sv.chain.degraded == nil {
+			sv.chain.degraded = map[string]bool{}
+		}
+		for _, route := range fallback {
+			sv.chain.degraded[route.CorpusID] = true
+		}
 		slices.SortStableFunc(found, func(a, b content.Candidate) int {
 			return cmp.Or(cmp.Compare(b.Score, a.Score), cmp.Compare(a.SegmentID, b.SegmentID))
 		})

@@ -57,5 +57,26 @@ func (s SpaceStore) DescribeVectorSpaces(ctx context.Context, org, corpusID stri
 		}
 		out = append(out, c)
 	}
+	// A missing served owner can mean rebuilding or an empty Corpus. Read
+	// current eligibility only in this case; never use old coverage totals.
+	for _, c := range out {
+		if c.GenerationRole != content.SpaceServed || c.ServingSegments == nil || *c.ServingSegments != 0 {
+			continue
+		}
+		var present bool
+		err = database(ctx, s.Pool).QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM records r JOIN LATERAL (
+  SELECT v.* FROM record_versions v
+  WHERE (v.organization,v.id)=(r.organization,r.current_version_id) OFFSET 0
+ ) v ON true
+ WHERE r.organization=$1 AND r.corpus_id=$2 AND `+eligibleVersionSQL+`)`, org, corpusID).Scan(&present)
+		if err != nil {
+			return g, nil, err
+		}
+		for i := range out {
+			out[i].CorpusEmpty = !present
+		}
+		break
+	}
 	return g, out, nil
 }

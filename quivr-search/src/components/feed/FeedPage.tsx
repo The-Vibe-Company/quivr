@@ -1033,7 +1033,7 @@ export function FeedPage({
             </Notice>
           )}
           {query && searching === "ready" && degraded && (
-            <Notice tone="info" title="Recherche par sens indisponible pendant la reconstruction, résultats par mots-clés" />
+          <Notice tone="info" title="Recherche par sens indisponible pendant la reconstruction, résultats par mots-clés pour les corpus concernés" />
           )}
           {!query && day && dayFeed.status === "loading" && !rows.length && (
             <LoadingState label="Chargement des articles de ce jour…" rows={5} />

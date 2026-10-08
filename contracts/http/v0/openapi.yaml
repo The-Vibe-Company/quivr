@@ -7976,7 +7976,7 @@ components:
         reason:
           type: string
           enum: [vectors_unavailable]
-          description: No usable served vector route or a completed coverage snapshot with no vectors; keywords remain available.
+          description: No usable served vector route or current coverage confirms no vectors; keywords remain available. Stale and unknown counts do not disable current routes.
         corpus_ids:
           type: array
           minItems: 1
