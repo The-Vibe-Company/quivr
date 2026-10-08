@@ -125,3 +125,22 @@ func TestConfigurationRefusalDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+// Bare storage usage belongs to the executable boundary and must work without
+// a deployment configuration or database.
+func TestStorageUsageDoesNotLoadConfiguration(t *testing.T) {
+	if os.Getenv("QUIVR_TEST_USAGE") == "1" {
+		os.Args = []string{"quivr", "storage"}
+		main()
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestStorageUsageDoesNotLoadConfiguration$")
+	cmd.Env = []string{"QUIVR_TEST_USAGE=1"}
+	output, err := cmd.CombinedOutput()
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 2 {
+		t.Fatalf("exit = %v, want usage exit 2; output: %s", err, output)
+	}
+	if !bytes.Contains(output, []byte("usage: quivr")) || bytes.Contains(output, []byte("config_missing")) {
+		t.Fatalf("expected storage usage without configuration refusal: %s", output)
+	}
+}

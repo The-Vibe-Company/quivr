@@ -263,7 +263,7 @@ A deployment with one retrieval plugin and no map keeps its existing short names
 }
 ```
 
-The setting is part of each generation. A change never alters an existing index: it applies to new Corpora, and to an existing Corpus once you [rebuild](/run-quivr/switch-a-vector-model) it.
+The setting is part of each generation. A change never alters an existing index: it applies to new Corpora, and to an existing Corpus once you rebuild it. Start the rebuild with `POST /v0/corpora/{corpus_id}/rebuilds` and a body containing a new `idempotency_key`, using a key with `projections:rebuild`. Follow the returned Operation with `GET /v0/operations/{operation_id}`, using `operations:read`. The Corpus keeps serving its previous generation until the rebuild activates.
 
 ## Webhook destinations
 
