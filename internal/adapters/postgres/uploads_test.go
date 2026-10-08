@@ -57,6 +57,13 @@ func TestUploadSessionsReconcileAndScope(t *testing.T) {
 	if err = store.SetState(ctx, org, meta.ID, "verified", "blob_1", ""); err != nil {
 		t.Fatal(err)
 	}
+	// A late rollback from another Confirm cannot leave a terminal state.
+	if err = store.SetState(ctx, org, meta.ID, "awaiting_upload", "", "verification_unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	if settled, err := store.Get(ctx, org, meta.ID); err != nil || settled.State != "verified" || settled.BlobID != "blob_1" {
+		t.Fatal("verified session regressed", settled, err)
+	}
 	if err = store.SaveBlob(ctx, org, "blob_1", "adapter-uploads/object", digest, 12, "text/plain"); err != nil {
 		t.Fatal(err)
 	}

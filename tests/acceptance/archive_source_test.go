@@ -67,8 +67,9 @@ func TestArchiveSourceBeforeRestart(t *testing.T) {
 			t.Fatal("deposited storage credential appeared in connector response")
 		}
 	}
-	// The long schedule leaves this instance idle at its committed checkpoint.
-	// Disable is terminal in the connector API and cannot represent a pause.
+	// A page-limited run continues at once, so the restart may interrupt the
+	// next run mid-attachment; its retry must resume (THE-1314). Disable is
+	// terminal in the connector API and cannot represent a pause.
 	keys := map[string]int{"ITEM7": 1}
 	for i := 0; i < 9; i++ {
 		keys[fmt.Sprintf("FILLER%d", i)] = 1
