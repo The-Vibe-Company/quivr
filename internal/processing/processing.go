@@ -173,8 +173,6 @@ func baselineFailure(err error) []any {
 		details = append(details, "plugin_retryable", pluginErr.Retryable)
 	case errors.Is(err, plugins.ErrCallDeadline):
 		kind = "plugin_deadline"
-	case errors.Is(err, plugins.ErrUnavailable):
-		kind = "plugin_unavailable"
 	case errors.Is(err, context.DeadlineExceeded):
 		kind = "context_deadline"
 	case errors.Is(err, context.Canceled):
@@ -189,6 +187,8 @@ func baselineFailure(err error) []any {
 	case errors.As(err, &networkErr):
 		kind = "network_error"
 		details = append(details, "network_timeout", networkErr.Timeout())
+	case errors.Is(err, plugins.ErrUnavailable):
+		kind = "plugin_unavailable"
 	}
 	return append(details, "failure_kind", kind)
 }

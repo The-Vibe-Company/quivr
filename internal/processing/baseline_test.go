@@ -28,8 +28,8 @@ func TestBaselineRetryPreservesFailureCause(t *testing.T) {
 	}{
 		{"route", "database_error", baselineDatabaseError{}},
 		{"derive", "plugin_error", provider},
-		{"index", "network_error", &net.DNSError{Err: "private submitted error marker", IsTimeout: true}},
-		{"route", "context_deadline", context.DeadlineExceeded},
+		{"derive", "network_error", errors.Join(plugins.ErrUnavailable, &net.DNSError{Err: "private submitted error marker", IsTimeout: true})},
+		{"derive", "context_deadline", errors.Join(plugins.ErrUnavailable, context.DeadlineExceeded)},
 		{"index", "dependency_error", errors.New("private submitted error marker")},
 	} {
 		t.Run(tc.step, func(t *testing.T) {
@@ -91,7 +91,7 @@ func TestBaselineRetryPreservesFailureCause(t *testing.T) {
 			if tc.kind == "network_error" && outcome["network_timeout"] != true {
 				t.Fatalf("missing network timeout: %v", outcome)
 			}
-			if tc.step == "derive" {
+			if tc.kind == "plugin_error" {
 				var got *plugins.PluginError
 				if !errors.As(err, &got) || got != provider || outcome["plugin_code"] != "embedding_incomplete" || outcome["plugin_http_status"] != float64(503) || outcome["plugin_retryable"] != true {
 					t.Fatalf("missing plugin error diagnostic: err=%v log=%v", err, outcome)
