@@ -18,6 +18,24 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AdminDocumentEvaluation.
+const (
+	Applicable    AdminDocumentEvaluation = "applicable"
+	NotApplicable AdminDocumentEvaluation = "not_applicable"
+)
+
+// Valid indicates whether the value is a known member of the AdminDocumentEvaluation enum.
+func (e AdminDocumentEvaluation) Valid() bool {
+	switch e {
+	case Applicable:
+		return true
+	case NotApplicable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminDocumentState.
 const (
 	AdminDocumentStateBuildingBaseline AdminDocumentState = "building_baseline"
@@ -425,12 +443,15 @@ func (e FacetFieldInterval) Valid() bool {
 
 // Defines values for FieldMappingAnalyzer.
 const (
+	Folded      FieldMappingAnalyzer = "folded"
 	FrenchLight FieldMappingAnalyzer = "french_light"
 )
 
 // Valid indicates whether the value is a known member of the FieldMappingAnalyzer enum.
 func (e FieldMappingAnalyzer) Valid() bool {
 	switch e {
+	case Folded:
+		return true
 	case FrenchLight:
 		return true
 	default:
@@ -1399,11 +1420,14 @@ type ActivePluginList struct {
 
 // AdminDocument defines model for AdminDocument.
 type AdminDocument struct {
-	CorpusId        string `json:"corpus_id"`
-	IsCurrent       bool   `json:"is_current"`
-	RecordId        string `json:"record_id"`
-	RecordKey       string `json:"record_key"`
-	SourceNamespace string `json:"source_namespace"`
+	CorpusId string `json:"corpus_id"`
+
+	// Evaluation Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it.
+	Evaluation      AdminDocumentEvaluation `json:"evaluation"`
+	IsCurrent       bool                    `json:"is_current"`
+	RecordId        string                  `json:"record_id"`
+	RecordKey       string                  `json:"record_key"`
+	SourceNamespace string                  `json:"source_namespace"`
 
 	// State received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is.
 	State AdminDocumentState `json:"state"`
@@ -1415,6 +1439,9 @@ type AdminDocument struct {
 	Title     *string `json:"title,omitempty"`
 	VersionId string  `json:"version_id"`
 }
+
+// AdminDocumentEvaluation Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it.
+type AdminDocumentEvaluation string
 
 // AdminDocumentState received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is.
 type AdminDocumentState string
@@ -1580,7 +1607,7 @@ type ChangeEvent struct {
 	Cursor  string `json:"cursor"`
 	EventId string `json:"event_id"`
 
-	// Monitoring owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+	// Monitoring owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 	Monitoring    *MonitoringReferences `json:"monitoring,omitempty"`
 	OccurredAt    time.Time             `json:"occurred_at"`
 	Resource      ResourceReference     `json:"resource"`
@@ -2009,15 +2036,17 @@ type DeliveryAttemptPage struct {
 // On an optional route every quarantining code above that comes from the normalizer is instead
 // listed on a searchable Version published through the built-in text path. A plugin that is
 // unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-// pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-// Plan names it; the Receipt shows plugin_unavailable while it retries.
+// pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+// diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+// shows plugin_unavailable while it retries.
 //
-//   - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-//     normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-//     reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-//     moved to the plugin that
-//     replaced it: the Version is quarantined, or, when its text was already searchable, its
-//     enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+//   - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+//     during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+//     longer serve the work. Live imports
+//     and normalization now retain their pin and retry reachability outages until the exact build
+//     returns; they never silently move to its replacement. A Version with this diagnostic is
+//     quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+//     plugin_version name the original plan and plugin.
 //   - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
 //     rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
 //     work stopped instead of calling it, with the same outcome and fields as
@@ -2208,7 +2237,7 @@ type FacetResponse struct {
 
 // FieldMapping v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Exactly one of source_pointer and part_role is required; Core validates this as invalid_mapping, along with role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are consumed by SearchFilter.metadata. New generations index each search field once per item with its boost; older generations retain passage scoring until rebuilt.
 type FieldMapping struct {
-	// Analyzer Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged.
+	// Analyzer Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents and ligatures in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged.
 	Analyzer *FieldMappingAnalyzer `json:"analyzer,omitempty"`
 
 	// Boost Positive integer BM25F weight, allowed only with the search role. For ratios 3/2/2/1.5/1 use 6/4/4/3/2.
@@ -2228,7 +2257,7 @@ type FieldMapping struct {
 	ValuePointer *string `json:"value_pointer,omitempty"`
 }
 
-// FieldMappingAnalyzer Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged.
+// FieldMappingAnalyzer Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents and ligatures in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged.
 type FieldMappingAnalyzer string
 
 // FieldMappingPartRole Collect canonical text Parts of this role instead of source_pointer. Requires the search role.
@@ -2355,10 +2384,10 @@ type MetadataFilter_AnyOf_Item struct {
 	union json.RawMessage
 }
 
-// MonitoringReferences owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+// MonitoringReferences owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 type MonitoringReferences struct {
-	DeliveryId string `json:"delivery_id"`
-	MatchId    string `json:"match_id"`
+	DeliveryId *string `json:"delivery_id,omitempty"`
+	MatchId    string  `json:"match_id"`
 
 	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 	Owner                 *SubscriptionOwner `json:"owner,omitempty"`
@@ -2749,15 +2778,17 @@ type QuarantinedVersion struct {
 	// On an optional route every quarantining code above that comes from the normalizer is instead
 	// listed on a searchable Version published through the built-in text path. A plugin that is
 	// unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-	// pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-	// Plan names it; the Receipt shows plugin_unavailable while it retries.
+	// pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+	// diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+	// shows plugin_unavailable while it retries.
 	//
-	// - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-	//   normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-	//   reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-	//   moved to the plugin that
-	//   replaced it: the Version is quarantined, or, when its text was already searchable, its
-	//   enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+	// - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+	//   during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+	//   longer serve the work. Live imports
+	//   and normalization now retain their pin and retry reachability outages until the exact build
+	//   returns; they never silently move to its replacement. A Version with this diagnostic is
+	//   quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+	//   plugin_version name the original plan and plugin.
 	// - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
 	//   rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
 	//   work stopped instead of calling it, with the same outcome and fields as
@@ -3214,7 +3245,7 @@ type StepStatsList struct {
 
 // Subscription Absent owner means a global, organization-wide Subscription.
 type Subscription struct {
-	// CurrentVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
+	// CurrentVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription. destination_id is absent when this Version records Matches and change-feed notices without webhook delivery.
 	CurrentVersion SubscriptionVersion `json:"current_version"`
 
 	// Deleted Logically deleted for good; a deleted Subscription is also disabled and stays readable with its Versions, Matches and Deliveries.
@@ -3227,9 +3258,9 @@ type Subscription struct {
 	SubscriptionId string             `json:"subscription_id"`
 }
 
-// SubscriptionCreate Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. One deployment-configured destination per version; destination belongs to this Organization. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
+// SubscriptionCreate Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. An optional deployment-configured destination per version belongs to this Organization. Omit destination_id to record Matches and change-feed notices without creating Deliveries or sending webhooks. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
 type SubscriptionCreate struct {
-	DestinationId string `json:"destination_id"`
+	DestinationId *string `json:"destination_id,omitempty"`
 
 	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator      EvaluatorConfig `json:"evaluator"`
@@ -3356,9 +3387,9 @@ type SubscriptionPreviewRequest struct {
 	SavedQueryVersionId *string `json:"saved_query_version_id,omitempty"`
 }
 
-// SubscriptionVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
+// SubscriptionVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription. destination_id is absent when this Version records Matches and change-feed notices without webhook delivery.
 type SubscriptionVersion struct {
-	DestinationId string `json:"destination_id"`
+	DestinationId *string `json:"destination_id,omitempty"`
 
 	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator EvaluatorConfig `json:"evaluator"`
@@ -3371,9 +3402,9 @@ type SubscriptionVersion struct {
 	VersionId           string             `json:"version_id"`
 }
 
-// SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
+// SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query. Omit destination_id for no delivery, including when replacing a Version that had a destination; omission does not inherit the previous destination.
 type SubscriptionVersionCreate struct {
-	DestinationId string `json:"destination_id"`
+	DestinationId *string `json:"destination_id,omitempty"`
 
 	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator           EvaluatorConfig `json:"evaluator"`
@@ -3591,7 +3622,7 @@ type WebhookEvent struct {
 	EventId    string    `json:"event_id"`
 	OccurredAt time.Time `json:"occurred_at"`
 
-	// References owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+	// References owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 	References    MonitoringReferences      `json:"references"`
 	SchemaVersion WebhookEventSchemaVersion `json:"schema_version"`
 	Type          WebhookEventType          `json:"type"`
@@ -5074,13 +5105,13 @@ type ClientInterface interface {
 	// SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSearchProfiles performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
@@ -6995,7 +7026,7 @@ func (c *Client) GetSavedQueryVersion(ctx context.Context, savedQueryId string, 
 // SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -7011,7 +7042,7 @@ func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, 
 // SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *Client) SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequest(c.Server, body)
 	if err != nil {
@@ -12945,7 +12976,7 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
@@ -12953,7 +12984,7 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
 
 	// ListSearchProfilesWithResponse performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
@@ -19375,7 +19406,7 @@ func (c *ClientWithResponses) GetSavedQueryVersionWithResponse(ctx context.Conte
 // SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
@@ -19389,7 +19420,7 @@ func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Cont
 // SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *ClientWithResponses) SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
 	rsp, err := c.SearchRecords(ctx, body, reqEditors...)
 	if err != nil {

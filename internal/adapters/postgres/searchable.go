@@ -399,16 +399,12 @@ func promoteCanonical(ctx context.Context, tx pgx.Tx, org string, seg content.Se
 		writes.Queue(`UPDATE records SET current_version_id=$3 WHERE organization=$1 AND id=$2`, org, recordID, seg.VersionID)
 	}
 	if !ready {
+		// The event observes its Record after these writes.
 		queueEvent(ctx, writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.retrieval_ready", Resource: "record", ResourceID: recordID, MutationID: content.StableID("baseline", seg.VersionID, g.ID), VersionID: seg.VersionID})
+	} else {
+		observeRecordInBatch(ctx, writes, org, recordID)
 	}
-	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
-		return err
-	}
-
-	if err = observeQueueRecords(ctx, tx, []string{org}, []string{recordID}); err != nil {
-		return err
-	}
-	return nil
+	return tx.SendBatch(ctx, writes).Close()
 }
 
 // hydrateSQL looks up a batch of candidates, given as parallel arrays of

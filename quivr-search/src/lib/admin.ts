@@ -19,6 +19,8 @@ export interface Cell {
   /** Above this many ms the step is slow: its p95 over the day; null while
    * the step has too little history to say. */
   limit: number | null;
+  /** Why a step is not recorded: no_alert when no alert covers the corpus. */
+  reason?: "no_alert";
 }
 
 export type StepKey = "received" | "cut" | "searchable" | "vectors" | "alerts";
@@ -53,6 +55,8 @@ export interface AdminDocument {
   state: string;
   is_current: boolean;
   steps: Steps;
+  /** Whether alert evaluation applies; absent from a core before THE-1315. */
+  evaluation?: "applicable" | "not_applicable";
 }
 
 export interface AdminRow extends AdminDocument {

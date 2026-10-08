@@ -951,7 +951,8 @@
       "corpus_id": "corpus_news",
       "state": "succeeded",
       "counters": {
-        "indexed": 24
+        "versions_covered": 24,
+        "passages_covered": 96
       },
       "errors": [],
       "result": {
@@ -1381,7 +1382,8 @@
           "segmented_at": "2026-09-30T10:00:03Z",
           "retrieval_ready_at": "2026-09-30T10:00:04Z",
           "enriched_at": "2026-09-30T10:00:09Z"
-        }
+        },
+        "evaluation": "not_applicable"
       },
       "steps": [
         {

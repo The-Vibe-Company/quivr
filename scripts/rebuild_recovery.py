@@ -60,7 +60,7 @@ def verify(stack):
     done=wait('rebuild terminal',lambda:(lambda o:o if o['state'] in ('succeeded','failed') else None)(call('GET',location)))
     assert done['state']=='succeeded' and not done['errors'],done
     generation=done['result']['projection_generation_id']
-    assert done['counters'].get('vectors_reused',0)>=1,done
+    assert done['counters'].get('passages_covered',0)>=1,done
     fixed=receipt(correction)
     def reconciled():
         found={h['version_id']:h for h in hits([a],'phare')}
@@ -77,7 +77,7 @@ def verify(stack):
     terminal=call('POST','/v0/corpora/'+a+'/rebuilds',{'idempotency_key':'recovery-'+run},202)
     assert terminal['operation_id']==op['operation_id'] and terminal['result']['projection_generation_id']==generation,terminal
     error=call('POST','/v0/search',{'query':'phare','corpus_ids':[a],'mode':'semantic'},503)
-    assert error['retryable'] and error['code']=='search_unavailable',error
+    assert error['retryable'] and error['code']=='model_unavailable',error
     stack.stop_processes();stack.compose('start','tei')
     stack.compose('up','-d','--wait','--wait-timeout','180')
     stack.config();stack.start_processes()
@@ -86,4 +86,4 @@ def verify(stack):
     semantic={h['version_id']:h for h in hits([a],'phare','semantic')}
     assert semantic[stable['version_id']]['embedding_artifact_id']==prior[stable['version_id']]['embedding_artifact_id'],semantic
     assert semantic[stable['version_id']]['projection_generation_id']==generation,semantic
-    (stack.directory/'rebuild-recovery.json').write_text(json.dumps({'worker_stopped_before_acceptance':'passed','queued_replay':'passed','inference_stopped_rebuild':'passed','mutations_reconciled':'passed','neighbour_corpus_preserved':'passed','terminal_replay':'passed','vectors_reused':done['counters'].get('vectors_reused'),'indexed':done['counters'].get('indexed')}))
+    (stack.directory/'rebuild-recovery.json').write_text(json.dumps({'worker_stopped_before_acceptance':'passed','queued_replay':'passed','inference_stopped_rebuild':'passed','mutations_reconciled':'passed','neighbour_corpus_preserved':'passed','terminal_replay':'passed','passages_covered':done['counters'].get('passages_covered'),'versions_covered':done['counters'].get('versions_covered')}))

@@ -13,12 +13,21 @@ class PolicyTests(unittest.TestCase):
         cases = [
             ("CREATE TABLE items(id int PRIMARY KEY); CREATE INDEX by_id ON items(id);", True),
             ("ALTER TABLE items ADD COLUMN optional text;", True),
+            ("ALTER TABLE items ALTER COLUMN optional DROP NOT NULL;", True),
+            ("ALTER TABLE items ALTER COLUMN optional SET NOT NULL;", False),
+            ("ALTER TABLE items ALTER COLUMN optional DROP NOT NULL, DROP COLUMN title;", False),
             ("CREATE TABLE parent(id int PRIMARY KEY); CREATE TABLE child(id int REFERENCES parent(id));", True),
             ("CREATE TABLE self_ref(id int PRIMARY KEY, parent int REFERENCES self_ref(id));", True),
             ("CREATE TABLE child(id int REFERENCES old_parent(id));", False),
             ("CREATE TABLE child(parent int, FOREIGN KEY(parent) REFERENCES old_parent(id));", False),
             ("ALTER TABLE items ADD COLUMN state text NOT NULL DEFAULT 'queued';", True),
             ("ALTER TABLE items ADD COLUMN flags jsonb DEFAULT '{}'::jsonb;", True),
+            ("ALTER TABLE items SET (vacuum_truncate=false, fillfactor=70, autovacuum_vacuum_threshold=10);", True),
+            ("ALTER TABLE items SET (toast.autovacuum_vacuum_scale_factor=0);", True),
+            ("ALTER INDEX by_id SET (fillfactor=70);", False),
+            ("ALTER TABLE items RESET (fillfactor);", False),
+            ("ALTER TABLE items SET SCHEMA other;", False),
+            ("ALTER TABLE items SET (fillfactor=70), DROP COLUMN title;", False),
             ("-- DROP TABLE is just a comment\nALTER TABLE items ADD COLUMN note text DEFAULT 'DROP TABLE';", True),
             ("ALTER TABLE items DROP COLUMN title;", False),
             ("ALTER TABLE items RENAME COLUMN title TO name;", False),
@@ -47,6 +56,67 @@ class PolicyTests(unittest.TestCase):
         for sql, allowed in cases:
             with self.subTest(sql=sql):
                 self.assertEqual(not p.expand_risks(sql), allowed)
+
+    def test_expand_drops_only_proven_nonunique_performance_indexes(self):
+        # The guard's public repository boundary must resolve earlier index
+        # declarations, rather than trusting a name or accepting every DROP.
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            def git(*args):
+                subprocess.run(['git', *args], cwd=root, check=True, capture_output=True)
+            git('init', '-q', '-b', 'main')
+            git('config', 'user.email', 'test@example.invalid')
+            git('config', 'user.name', 'test')
+            (root / 'migrations').mkdir()
+            baseline = root / 'migrations/20261001T0000Z_indexes.sql'
+            baseline.write_text('''CREATE TABLE items(id int PRIMARY KEY, title text NOT NULL);
+CREATE INDEX replaced ON items(id);
+DROP INDEX replaced;
+CREATE UNIQUE INDEX replaced ON items(id);
+CREATE UNIQUE INDEX ambiguous ON items(id);
+CREATE INDEX IF NOT EXISTS ambiguous ON items(id);
+CREATE INDEX renamed ON items(id);
+ALTER INDEX renamed RENAME TO former;
+CREATE UNIQUE INDEX identity ON items(id);
+CREATE INDEX by_id ON items(id);
+CREATE SCHEMA other;
+CREATE TABLE other.items(id int);
+CREATE INDEX by_id ON other.items(id);
+ALTER TABLE items ALTER COLUMN title DROP NOT NULL;''')
+            (root / p.INVENTORY).write_text(json.dumps({baseline.name: {
+                'sha256': hashlib.sha256(baseline.read_bytes()).hexdigest(),
+                'classification': 'legacy-risk', 'risks': ['RenameStmt']}}))
+            git('add', '.')
+            git('-c', 'commit.gpgsign=false', 'commit', '-qm', 'base')
+            candidate = root / 'migrations/20261002T0000Z_tuning.sql'
+            cases = [
+                ('ALTER TABLE items SET (vacuum_truncate=false); DROP INDEX public.by_id;', True),
+                ('DROP INDEX public.by_id;', True),
+                ('DROP INDEX by_id;', False),
+                ('DROP INDEX IF EXISTS by_id;', False),
+                ('DROP INDEX public.by_id, other.by_id;', True),
+                ('DROP INDEX public.by_id, by_id;', False),
+                ('DROP INDEX other.by_id;', True),
+                ('DROP INDEX IF EXISTS public.by_id;', True),
+                ('DROP INDEX public.identity;', False),
+                ('DROP INDEX public.items_pkey;', False),
+                ('DROP INDEX public.replaced;', False),
+                ('DROP INDEX public.ambiguous;', False),
+                ('DROP INDEX public.renamed;', False),
+                ('DROP INDEX public.former;', False),
+                ('DROP INDEX public.missing;', False),
+                ('DROP INDEX absent.by_id;', False),
+                ('DROP INDEX public.by_id, public.identity;', False),
+                ('DROP INDEX public.by_id; CREATE TABLE extra(id int); CREATE UNIQUE INDEX by_id ON extra(id); DROP INDEX public.by_id;', False),
+                ('DROP INDEX public.by_id CASCADE;', False),
+                ('DROP INDEX CONCURRENTLY public.by_id;', False),
+                ('DROP TABLE items;', False),
+            ]
+            for sql, allowed in cases:
+                with self.subTest(sql=sql):
+                    candidate.write_text(sql)
+                    errors = p.check(root, 'main', {baseline.name})
+                    self.assertEqual(not errors, allowed, errors)
 
     def test_contract_requires_expansion_already_in_previous_version(self):
         old = '20261001T0000Z_expand.sql'

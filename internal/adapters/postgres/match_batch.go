@@ -194,7 +194,9 @@ func writeNewMatches(ctx context.Context, tx pgx.Tx, matches []monitoring.MatchC
 				return err
 			}
 			r := monitoring.NoticeReferences{MatchID: matchIDs[i], RecordID: in.RecordID, RecordVersionID: in.VersionID, SubscriptionID: in.SubscriptionID, SubscriptionVersionID: in.SubscriptionVersionID, Owner: c.owner}
-			r.DeliveryID = content.StableID("delivery", org, r.MatchID, c.pinned.destination, monitoring.NoticeCreated)
+			if c.pinned.destination != "" {
+				r.DeliveryID = content.StableID("delivery", org, r.MatchID, c.pinned.destination, monitoring.NoticeCreated)
+			}
 			event := eventInput{Organization: org, CorpusID: c.corpusID, Kind: monitoring.NoticeCreated, Resource: "match", ResourceID: r.MatchID, MutationID: r.MatchID}
 			body, err := json.Marshal(monitoring.Notice{EventID: eventID(event), Type: monitoring.NoticeCreated, SchemaVersion: "1", OccurredAt: c.now.UTC(), References: r})
 			if err != nil {
@@ -218,22 +220,21 @@ FROM unnest($4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::text[],$1
   WITH ORDINALITY AS x(match_id,subscription_id,subscription_version_id,query_id,query_version_id,corpus_id,evidence,position,ordinal) ORDER BY x.ordinal`, org, matches[0].Intent.RecordID, matches[0].Intent.VersionID, ids, subscriptionIDs, subscriptionVersions, queryIDs, queryVersions, corpusIDs, evidenceJSON, ordinals, count)
 		writes.Queue(`INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id,window_start)
 SELECT $1,x.delivery_id,x.match_id,x.destination_id,'match.created',x.event_id,NULL
-FROM unnest($2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(delivery_id,match_id,destination_id,event_id,ordinal) ORDER BY x.ordinal`, org, deliveryIDs, ids, destinations, eventIDs)
+FROM unnest($2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(delivery_id,match_id,destination_id,event_id,ordinal)
+WHERE x.destination_id<>'' ORDER BY x.ordinal`, org, deliveryIDs, ids, destinations, eventIDs)
 		writes.Queue(`INSERT INTO monitoring_notices(organization,event_id,kind,match_id,record_id,record_version_id,subscription_id,subscription_version_id,delivery_id,previous_match_id,body,position)
-SELECT $1,x.event_id,'match.created',x.match_id,$2,$3,x.subscription_id,x.subscription_version_id,x.delivery_id,NULL,x.body,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$11::bigint+x.position
+SELECT $1,x.event_id,'match.created',x.match_id,$2,$3,x.subscription_id,x.subscription_version_id,NULLIF(x.delivery_id,''),NULL,x.body,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$11::bigint+x.position
 FROM unnest($4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::bytea[],$10::bigint[])
   WITH ORDINALITY AS x(event_id,match_id,subscription_id,subscription_version_id,delivery_id,body,position,ordinal) ORDER BY x.ordinal`, org, matches[0].Intent.RecordID, matches[0].Intent.VersionID, eventIDs, ids, subscriptionIDs, subscriptionVersions, deliveryIDs, bodies, ordinals, count)
 		writes.Queue(`INSERT INTO delivery_outbox(organization,delivery_id,trace_context)
-SELECT $1,x.delivery_id,$3 FROM unnest($2::text[]) WITH ORDINALITY AS x(delivery_id,ordinal) ORDER BY x.ordinal`, org, deliveryIDs, telemetry.Encode(ctx))
+SELECT $1,x.delivery_id,$3 FROM unnest($2::text[]) WITH ORDINALITY AS x(delivery_id,ordinal)
+WHERE x.delivery_id<>'' ORDER BY x.ordinal`, org, deliveryIDs, telemetry.Encode(ctx))
 	}
 	if len(completeVersions) > 0 {
 		writes.Queue(completeMatchGroupSQL, org, completeVersions, completeSequences, completeOutcomes)
 	}
 	if writes.Len() == 0 {
 		return nil
-	}
-	if count > 0 {
-		writes.Queue(acknowledgeQueueJournalSQL, org, count)
 	}
 	return tx.SendBatch(ctx, writes).Close()
 }

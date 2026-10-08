@@ -70,7 +70,7 @@ excluded = [
 "deploy/images/README.md" = { audience = "contributor", kind = "guide", summary = "configure release-please and publish signed engine and first-party plugin images" }
 "deploy/mlflow/README.md" = { audience = "functional", kind = "guide", summary = "deploy an authenticated shared search measurement store" }
 "deploy/modal/README.md" = { audience = "functional", kind = "guide", summary = "authenticated Modal embedding deployment, corpus rebuild and rollback" }
-"deploy/railway/autoscaler/README.md" = { audience = "functional", kind = "guide", summary = "scale bulk workers from backlog with a standalone Go controller" }
+"deploy/railway/autoscaler/README.md" = { audience = "functional", kind = "guide", summary = "scale Railway bulk workers from queue backlog" }
 "deploy/railway/README.md" = { audience = "functional", kind = "guide", summary = "run a hosted single-node evaluation demo" }
 "deploy/railway/hosted-embeddings.md" = { audience = "functional", kind = "guide", summary = "evaluate, fill and switch hosted text embeddings with rollback" }
 "docs/agents/documentation.md" = { audience = "contributor", kind = "guide", summary = "living and dated documents, the inventory, budgets and when docs may change" }
@@ -156,7 +156,7 @@ excluded = [
 "plugins/push-source/README.md" = 21
 "plugins/rss/README.md" = 60
 "plugins/x-list/README.md" = 60
-"quivr-search/README.md" = 117
+"quivr-search/README.md" = 128
 "sdks/AGENTS.md" = 8
 "sdks/go/README.md" = 212
 "sdks/python/README.md" = 166

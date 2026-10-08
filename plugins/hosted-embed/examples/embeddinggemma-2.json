@@ -1,0 +1,22 @@
+{
+  "format": "openai",
+  "base_url": "https://embeddings.example.org/v1",
+  "auth": "bearer",
+  "model": "google/embeddinggemma-2",
+  "dimensions": 768,
+  "model_revision": "914f7f89142e33e7",
+  "query_template": "task: search result | query: {query}",
+  "document_template": "title: {title} | text: {text}",
+  "title_source": "title",
+  "body_tokens": 512,
+  "max_chunks": 256,
+  "rebalance_tail": true,
+  "tail_min_fraction": 0.25,
+  "max_tokens_per_segment": 2048,
+  "batch_size": 32,
+  "max_batch_tokens": 65536,
+  "max_concurrent_requests": 16,
+  "request_timeout_ms": 10000,
+  "call_budget_ms": 90000,
+  "usd_per_million_tokens": null
+}

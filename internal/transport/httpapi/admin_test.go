@@ -47,8 +47,8 @@ const (
 // response mapping of the admin document reads.
 func TestAdminDocumentsNeedObservabilityRead(t *testing.T) {
 	at := func(s int) *time.Time { v := time.Date(2026, 9, 30, 10, 0, s, 0, time.UTC); return &v }
-	newer := content.Activity{VersionID: "version_2", RecordID: "record_2", Source: content.Source{CorpusID: "corpus_b", Namespace: "news", RecordKey: "b"}, State: "received", Steps: content.Steps{Accepted: at(5)}}
-	older := content.Activity{VersionID: "version_1", RecordID: "record_1", Source: content.Source{CorpusID: "corpus_a", Namespace: "news", RecordKey: "a"}, Title: "Harbour reopens", State: "retrieval_ready", Current: true,
+	newer := content.Activity{VersionID: "version_2", RecordID: "record_2", Source: content.Source{CorpusID: "corpus_b", Namespace: "news", RecordKey: "b"}, State: "received", Evaluation: content.EvaluationApplicable, Steps: content.Steps{Accepted: at(5)}}
+	older := content.Activity{VersionID: "version_1", RecordID: "record_1", Source: content.Source{CorpusID: "corpus_a", Namespace: "news", RecordKey: "a"}, Title: "Harbour reopens", State: "retrieval_ready", Current: true, Evaluation: content.EvaluationNotApplicable,
 		Normalizer: &content.PluginRef{ID: "pdf-text", Version: "0.1.0"}, Steps: content.Steps{Accepted: at(0), Materialized: at(1), Segmented: at(2), RetrievalReady: at(3)}}
 	keys := map[string]corpus.Scope{
 		organizationAdmin: {Organization: "org_a", Actions: []string{"corpora:read", "content:read", "changes:read", "monitoring:read", "operations:read"}, Corpora: []string{"*"}},
@@ -84,7 +84,8 @@ func TestAdminDocumentsNeedObservabilityRead(t *testing.T) {
 	doc := items[0].(map[string]any)
 	steps, _ := doc["steps"].(map[string]any)
 	if doc["version_id"] != "version_1" || doc["corpus_id"] != "corpus_a" || doc["source_namespace"] != "news" || doc["record_key"] != "a" || doc["title"] != "Harbour reopens" ||
-		doc["state"] != "retrieval_ready" || doc["is_current"] != true || steps["retrieval_ready_at"] != "2026-09-30T10:00:03Z" || steps["enriched_at"] != nil {
+		doc["state"] != "retrieval_ready" || doc["is_current"] != true || steps["retrieval_ready_at"] != "2026-09-30T10:00:03Z" || steps["enriched_at"] != nil ||
+		doc["evaluation"] != "not_applicable" {
 		t.Fatalf("document: %v", doc)
 	}
 	// A cursor is bound to the scope that listed it.

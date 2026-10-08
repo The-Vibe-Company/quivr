@@ -2017,7 +2017,7 @@ The most frequent search queries of the key's Organization over the window, norm
 
 Operation `searchRecords`. Requires `content:read`, `search:query`.
 
-Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 
 **Request body** (required): `application/json` [`SearchRequest`](#searchrequest)
 
@@ -2026,7 +2026,7 @@ Resolve the requested profile, compile mandatory Corpus/Organization prefilters 
 | Status | Body | Description |
 | --- | --- | --- |
 | `200` | `application/json` [`SearchResponse`](#searchresponse) | Successful response |
-| `default` | `application/json` [`Error`](#error)<br><br>Header `Retry-After`: integer. Present when search capacity is full; minimum delay in seconds before retrying. | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 dependency unavailable, 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms; a dependency that does not answer in time is 503). At search capacity, 503 search_unavailable includes Retry-After; retry only after that delay. |
+| `default` | `application/json` [`Error`](#error)<br><br>Header `Retry-After`: integer. Present when search capacity is full; minimum delay in seconds before retrying. | Structured error; 400 malformed, 401 unauthenticated, 403 unauthorized scope/action, 404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long (the query is over the profile's or the vector space owner's length limit; the message names it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its contract, for example ranked a segment the engine never served it), 503 model_unavailable (the query encoding model could not answer) or search_unavailable (another search dependency is unavailable), 504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms; a dependency that does not answer in time is 503). At search capacity, 503 search_unavailable includes Retry-After; retry only after that delay. |
 
 #### `GET /v0/search/profiles`
 
@@ -2432,15 +2432,17 @@ invocation a normalization diagnostic concerns. Codes of external normalization:
 On an optional route every quarantining code above that comes from the normalizer is instead
 listed on a searchable Version published through the built-in text path. A plugin that is
 unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-Plan names it; the Receipt shows plugin_unavailable while it retries.
+pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+shows plugin_unavailable while it retries.
 
-- pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-  normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-  reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-  moved to the plugin that
-  replaced it: the Version is quarantined, or, when its text was already searchable, its
-  enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+- pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+  during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+  longer serve the work. Live imports
+  and normalization now retain their pin and retry reachability outages until the exact build
+  returns; they never silently move to its replacement. A Version with this diagnostic is
+  quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+  plugin_version name the original plan and plugin.
 - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
   rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
   work stopped instead of calling it, with the same outcome and fields as
@@ -2493,15 +2495,17 @@ description: |-
   On an optional route every quarantining code above that comes from the normalizer is instead
   listed on a searchable Version published through the built-in text path. A plugin that is
   unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-  pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-  Plan names it; the Receipt shows plugin_unavailable while it retries.
+  pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+  diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+  shows plugin_unavailable while it retries.
 
-  - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-    normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-    reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-    moved to the plugin that
-    replaced it: the Version is quarantined, or, when its text was already searchable, its
-    enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+  - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+    during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+    longer serve the work. Live imports
+    and normalization now retain their pin and retry reachability outages until the exact build
+    returns; they never silently move to its replacement. A Version with this diagnostic is
+    quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+    plugin_version name the original plan and plugin.
   - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
     rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
     work stopped instead of calling it, with the same outcome and fields as
@@ -3876,6 +3880,7 @@ properties:
 | `state` | string | yes | received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is. One of `received`, `materialized`, `building_baseline`, `retrieval_ready`, `quarantined`, `withdrawn`. |
 | `is_current` | boolean | yes |  |
 | `steps` | [`VersionSteps`](#versionsteps) | yes |  |
+| `evaluation` | string | yes | Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it. One of `applicable`, `not_applicable`. |
 
 <details>
 <summary>Full schema</summary>
@@ -3914,6 +3919,12 @@ properties:
     type: boolean
   steps:
     $ref: '#/components/schemas/VersionSteps'
+  evaluation:
+    type: string
+    enum:
+      - applicable
+      - not_applicable
+    description: Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it.
 required:
   - version_id
   - record_id
@@ -3923,6 +3934,7 @@ required:
   - state
   - is_current
   - steps
+  - evaluation
 ```
 
 </details>
@@ -4030,7 +4042,8 @@ Example `document_timeline`:
       "segmented_at": "2026-09-30T10:00:03Z",
       "retrieval_ready_at": "2026-09-30T10:00:04Z",
       "enriched_at": "2026-09-30T10:00:09Z"
-    }
+    },
+    "evaluation": "not_applicable"
   },
   "steps": [
     {
@@ -4302,7 +4315,8 @@ Example `rebuild_succeeded`:
   "corpus_id": "corpus_news",
   "state": "succeeded",
   "counters": {
-    "indexed": 24
+    "versions_covered": 24,
+    "passages_covered": 96
   },
   "errors": [],
   "result": {
@@ -4403,7 +4417,7 @@ v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$
 | `source_pointer` | string |  | Minimum length `1`. |
 | `type` | string | yes | One of `string`, `number`, `boolean`, `datetime`, `string_array`. |
 | `boost` | integer |  | Positive integer BM25F weight, allowed only with the search role. For ratios 3/2/2/1.5/1 use 6/4/4/3/2. Default `1`. Minimum `1`. Maximum `100`. |
-| `analyzer` | string |  | Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged. One of `french_light`. |
+| `analyzer` | string |  | Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents and ligatures in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged. One of `folded`, `french_light`. |
 | `part_role` | string |  | Collect canonical text Parts of this role instead of source_pointer. Requires the search role. One of `title`, `body`, `caption`, `transcript`. |
 | `part_key_prefix` | string |  | Optional key prefix to narrow part_role, for example slugline-. Maximum length `200`. |
 | `value_pointer` | string |  | For a string_array source, select this JSON Pointer from each array entry and flatten its string or string-array values. Minimum length `1`. |
@@ -4438,8 +4452,8 @@ properties:
     description: Positive integer BM25F weight, allowed only with the search role. For ratios 3/2/2/1.5/1 use 6/4/4/3/2.
   analyzer:
     type: string
-    enum: [french_light]
-    description: Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged.
+    enum: [folded, french_light]
+    description: Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents and ligatures in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged.
   part_role:
     type: string
     enum: [title, body, caption, transcript]
@@ -8869,7 +8883,7 @@ description: Pins an installed evaluator by plugin id and version, and its confi
 
 ### `SubscriptionCreate`
 
-Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. One deployment-configured destination per version; destination belongs to this Organization. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
+Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. An optional deployment-configured destination per version belongs to this Organization. Omit destination_id to record Matches and change-feed notices without creating Deliveries or sending webhooks. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -8878,7 +8892,7 @@ Create enabled from-now Subscription. An optional owner makes it the Subscriptio
 | `saved_query_id` | string | yes | Minimum length `1`. |
 | `saved_query_version_id` | string | yes | Minimum length `1`. |
 | `evaluator` | [`EvaluatorConfig`](#evaluatorconfig) | yes |  |
-| `destination_id` | string | yes | Minimum length `1`. |
+| `destination_id` | string |  | Minimum length `1`. |
 | `owner` | [`SubscriptionOwner`](#subscriptionowner) |  |  |
 
 Example `subscription_create`:
@@ -8958,22 +8972,21 @@ required:
   - saved_query_id
   - saved_query_version_id
   - evaluator
-  - destination_id
-description: Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. One deployment-configured destination per version; destination belongs to this Organization. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
+description: Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. An optional deployment-configured destination per version belongs to this Organization. Omit destination_id to record Matches and change-feed notices without creating Deliveries or sending webhooks. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
 ```
 
 </details>
 
 ### `SubscriptionVersionCreate`
 
-New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
+New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query. Omit destination_id for no delivery, including when replacing a Version that had a destination; omission does not inherit the previous destination.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `idempotency_key` | string | yes | Minimum length `1`. |
 | `saved_query_version_id` | string | yes | Minimum length `1`. |
 | `evaluator` | [`EvaluatorConfig`](#evaluatorconfig) | yes |  |
-| `destination_id` | string | yes | Minimum length `1`. |
+| `destination_id` | string |  | Minimum length `1`. |
 
 Example `subscription_version_create`:
 
@@ -9014,15 +9027,14 @@ required:
   - idempotency_key
   - saved_query_version_id
   - evaluator
-  - destination_id
-description: New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
+description: New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query. Omit destination_id for no delivery, including when replacing a Version that had a destination; omission does not inherit the previous destination.
 ```
 
 </details>
 
 ### `SubscriptionVersion`
 
-Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
+Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription. destination_id is absent when this Version records Matches and change-feed notices without webhook delivery.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -9031,7 +9043,7 @@ Immutable Subscription configuration. Every Version keeps the Subscription's own
 | `saved_query_id` | string | yes | Minimum length `1`. |
 | `saved_query_version_id` | string | yes | Minimum length `1`. |
 | `evaluator` | [`EvaluatorConfig`](#evaluatorconfig) | yes |  |
-| `destination_id` | string | yes | Minimum length `1`. |
+| `destination_id` | string |  | Minimum length `1`. |
 | `owner` | [`SubscriptionOwner`](#subscriptionowner) |  |  |
 
 <details>
@@ -9066,8 +9078,7 @@ required:
   - saved_query_id
   - saved_query_version_id
   - evaluator
-  - destination_id
-description: Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
+description: Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription. destination_id is absent when this Version records Matches and change-feed notices without webhook delivery.
 ```
 
 </details>
@@ -9545,7 +9556,7 @@ required:
 
 ### `MonitoringReferences`
 
-owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -9554,7 +9565,7 @@ owner is the Subscription Owner, so a client routes the notice to its user; abse
 | `record_version_id` | string | yes | Minimum length `1`. |
 | `subscription_id` | string | yes | Minimum length `1`. |
 | `subscription_version_id` | string | yes | Minimum length `1`. |
-| `delivery_id` | string | yes | Minimum length `1`. |
+| `delivery_id` | string |  | Minimum length `1`. |
 | `previous_match_id` | string |  | Minimum length `1`. |
 | `owner` | [`SubscriptionOwner`](#subscriptionowner) |  |  |
 
@@ -9594,8 +9605,7 @@ required:
   - record_version_id
   - subscription_id
   - subscription_version_id
-  - delivery_id
-description: owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+description: owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 ```
 
 </details>

@@ -1,6 +1,5 @@
 """The Railway core entrypoint: credential_key only when configured, connector and alert features only on opt-in,
 and a worker that runs its plugin sidecars and stops with them."""
-import base64
 import importlib.util
 import json
 import os
@@ -108,7 +107,7 @@ class CoreEntrypointTest(unittest.TestCase):
                         effective = core_env if core_env is not None else dict(os.environ)
                         jev = [child for name, _, _, child in commands if name == 'jev-rerank']
                         hosted = [child for name, _, _, child in commands if name == 'hosted-embed']
-                        self.assertEqual(hosted[0]['AZURE_FOUNDRY_KEY'],
+                        self.assertEqual(hosted[0]['EMBED_API_KEY'],
                                          'fixture-foundry-key' if provider == 'cohere' else 'fixture-modal-token')
                         self.assertEqual(len(jev), 1 if role == 'api' else 0)
                         if jev:
@@ -197,8 +196,6 @@ class CoreEntrypointTest(unittest.TestCase):
                     hosted = pins['hosted-embed']['configuration']
                     self.assertEqual(hosted['base_url'], 'https://resource.example.org/providers/cohere/v2')
                     self.assertEqual((hosted['model'], hosted['dimensions']), ('Cohere-Embed-V5-Pro', 1024))
-                    self.assertEqual((hosted['document_input_type'], hosted['query_input_type']),
-                                     ('search_document', 'search_query'))
                     self.assertEqual(hosted['usd_per_million_tokens'], 0.12)
                 else:
                     self.assertEqual(config, core_entrypoint.build_config(ENV))
@@ -208,7 +205,7 @@ class CoreEntrypointTest(unittest.TestCase):
                     for name, (argv, child) in children.items():
                         if name == 'hosted-embed':
                             self.assertEqual(argv, ['/usr/local/bin/quivr-hosted-embed'])
-                            self.assertEqual(child['AZURE_FOUNDRY_KEY'], 'fixture-foundry-key')
+                            self.assertEqual(child['EMBED_API_KEY'], 'fixture-foundry-key')
                             self.assertEqual(child['QUIVR_PLUGIN_MANIFEST'], pins['hosted-embed']['manifest'])
                             self.assertEqual(child['QUIVR_PLUGIN_PORT'], '9980')
                             self.assertNotIn('AZURE_FOUNDRY_ENDPOINT', child)
@@ -237,14 +234,14 @@ class CoreEntrypointTest(unittest.TestCase):
             'format': 'openai', 'base_url': 'https://example--embeddings.modal.run/v1',
             'auth': 'bearer', 'model': 'google/embeddinggemma-2', 'dimensions': 768,
             'model_revision': '914f7f89142e33e7',
-            'query_prefix': 'task: search result | query: ',
-             'document_template': 'gemma', 'title_source': 'title',
-            'packing': 'paragraphs', 'body_tokens': 512, 'max_chunks': 256,
+            'query_template': 'task: search result | query: {query}',
+            'document_template': 'title: {title} | text: {text}', 'title_source': 'title',
+            'body_tokens': 512, 'max_chunks': 256,
             'rebalance_tail': True, 'tail_min_fraction': 0.25,
             'tokenizer': {'python': '/app/.scratch/tokenizer/venv/bin/python',
                           'model': '/app/.scratch/tokenizer/embeddinggemma-2.json',
                           'sha256': '4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4'},
-            'max_tokens_per_segment': 2048, 'overlap': 0,
+            'max_tokens_per_segment': 2048,
             'batch_size': 32, 'max_batch_tokens': 65536, 'max_concurrent_requests': 16,
             'request_timeout_ms': 10000, 'call_budget_ms': 90000, 'usd_per_million_tokens': 0,
         })
@@ -252,8 +249,8 @@ class CoreEntrypointTest(unittest.TestCase):
         for role in ('api', 'worker'):
             child = next(child for name, _, _, child in core_entrypoint.sidecar_commands(env, role)
                          if name == 'hosted-embed')
-            self.assertEqual(child['AZURE_FOUNDRY_KEY'], 'fixture-modal-token')
-            self.assertNotIn('EMBED_API_KEY', child)
+            self.assertEqual(child['EMBED_API_KEY'], 'fixture-modal-token')
+            self.assertNotIn('AZURE_FOUNDRY_KEY', child)
             engine_ring = json.loads(core_entrypoint.engine_signing_environment(env)['QUIVR_ENGINE_PLUGIN_KEYS'])['hosted.embed']
             self.assertEqual(json.loads(child['QUIVR_PLUGIN_SIGNING_KEYS']), engine_ring)
         for selection, endpoint in [('typo', env['EMBED_URL']), ('gemma', ''),
@@ -357,7 +354,7 @@ class CoreEntrypointTest(unittest.TestCase):
         enabled = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})
         actions = enabled['keys']['placeholder-api-key']['actions']
         self.assertEqual(set(actions) - set(base['keys']['placeholder-api-key']['actions']), {'monitoring:read', 'monitoring:write'})
-        self.assertEqual(list(enabled['destinations']), [core_entrypoint.DESTINATION_ID])
+        self.assertNotIn('destinations', enabled)
         self.assertEqual(enabled['plugins'][:len(base['plugins'])], base['plugins'])
 
     def test_connector_plugins_are_pinned_and_run_without_any_flag(self):
@@ -445,22 +442,6 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertEqual(ids, {'alerts', 'pdf-text', 'newsml-g2', 'connector.rss', 'connector.x_list', 'connector.m365_mail', 'connector.object_storage_archive', 'core.ingest', 'core.retrieve'})
         pdf = next(p for p in pins if 'pdf-text' in p['manifest'])
         self.assertEqual(pdf['routes'], [{'media_type': 'application/pdf', 'mode': 'required'}])
-
-    def test_sink_destination_passes_the_core_rules_without_private_allowance(self):
-        config = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})
-        self.assertNotIn('delivery', config)
-        sink = config['destinations'][core_entrypoint.DESTINATION_ID]
-        self.assertEqual(sink['organization'], config['keys']['placeholder-api-key']['organization'])
-        # The core refuses a literal private address or a localhost name at startup.
-        self.assertTrue(re.fullmatch(r'https?://[a-z0-9.-]+\.invalid/.*', sink['url']), sink['url'])
-        # monitoring.ParseSecret: whsec_ and 24 to 64 decoded bytes.
-        self.assertTrue(sink['secret'].startswith('whsec_'))
-        self.assertTrue(24 <= len(base64.b64decode(sink['secret'][6:], validate=True)) <= 64)
-        # api and worker derive the same secret from the shared cursor key; another key gives another secret.
-        again = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})['destinations']
-        self.assertEqual(again[core_entrypoint.DESTINATION_ID]['secret'], sink['secret'])
-        other = core_entrypoint.sink_secret('another-placeholder-cursor-key')
-        self.assertNotEqual(other, sink['secret'])
 
     def test_sidecar_environment_carries_only_its_own_secret(self):
         env = {**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin', 'TYPESAFE_API_KEY': 'placeholder-typesafe-key'}

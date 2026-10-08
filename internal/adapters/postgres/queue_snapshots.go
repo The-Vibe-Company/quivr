@@ -50,16 +50,16 @@ func (s QueueSnapshots) Refresh(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	// Existing installations retain the legacy branch during initialization.
-	// Bounded repair also discovers writes made by a preceding binary.
 	if err = advanceQueueObservations(ctx, tx, 1000); err != nil {
 		return err
 	}
 	// Unique fencing tokens allow bounded cleanup even while an old process
 	// still holds an expired token. Ordinary completed attempts are deleted.
+	// Any expired batch suffices; sorting by expiry would require a hot index
+	// or a full sort before applying the limit.
 	if _, err = tx.Exec(ctx, `DELETE FROM queue_document_attempts WHERE (organization,kind,work_id,document_id) IN (
 	 SELECT organization,kind,work_id,document_id FROM queue_document_attempts
-	 WHERE lease_until<clock_timestamp() ORDER BY lease_until LIMIT 1000 FOR UPDATE SKIP LOCKED
+	 WHERE lease_until<clock_timestamp() LIMIT 1000 FOR UPDATE SKIP LOCKED
 	)`); err != nil {
 		return err
 	}

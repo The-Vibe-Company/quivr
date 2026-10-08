@@ -16,7 +16,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-const ingestionBatchQueue = "quivr-ingestion-batches-v1"
 const ingestionBatchWorkflow = "process-ingestion-batch-v1"
 const ingestionBatchActivity = "process-receipt-batch-v1"
 const ingestionBatchReleaseActivity = "release-receipt-batch-v1"
@@ -24,8 +23,8 @@ const ingestionReceiptConcurrency = 16
 
 // Two waves of sixteen receipts cover a full batch. Four activities admit at
 // most 64 receipts per worker; provider admission remains independently bounded.
-// Each receipt retains the
-// legacy stage deadlines; a silent worker is recovered by the heartbeat bound.
+// Each receipt keeps its per-step deadlines; a silent worker is recovered by
+// the heartbeat bound.
 const ingestionBatchTimeout = 4 * (30*time.Second + maxNormalizationRounds*(normalizationActivityTimeout+30*time.Second) + enrichmentActivityTimeout)
 
 // Remaining indexes belong to this activity's input. A nil result from an
@@ -66,14 +65,12 @@ func ingestionBatch(ctx workflow.Context, in content.DispatchBatch) error {
 func registerIngestionBatches(w worker.Registry, steps Steps, pins Pinner) {
 	w.RegisterWorkflowWithOptions(ingestionBatch, workflow.RegisterOptions{Name: ingestionBatchWorkflow})
 	w.RegisterActivityWithOptions(func(ctx context.Context, in content.DispatchBatch) (ingestionBatchResult, error) {
-		if in.WorkQueue == workqueue.Bulk {
-			if batches, ok := steps.(interface {
-				BeginIngestionBatch(context.Context) (context.Context, func())
-			}); ok {
-				var closeBatch func()
-				ctx, closeBatch = batches.BeginIngestionBatch(ctx)
-				defer closeBatch()
-			}
+		if batches, ok := steps.(interface {
+			BeginIngestionBatch(context.Context) (context.Context, func())
+		}); ok {
+			var closeBatch func()
+			ctx, closeBatch = batches.BeginIngestionBatch(ctx)
+			defer closeBatch()
 		}
 		var completed []int
 		if activity.HasHeartbeatDetails(ctx) {

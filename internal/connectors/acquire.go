@@ -657,25 +657,30 @@ func (a Acquirer) transfer(ctx context.Context, ex AttachmentExchanger, maxBytes
 		if session.State == "verified" {
 			return session.BlobID, d.SizeBytes, nil, nil
 		}
-		release, active, err := a.beginPoll(ctx, req.Organization, req.InstanceID, run)
-		if err != nil {
-			return "", 0, nil, err
-		}
-		if !active {
-			return "", 0, nil, corpus.ErrArchived
-		}
-		err = func() error {
-			defer release()
-			done := a.measure(timing, stageUpload)
-			defer done()
-			return ex.UploadAttachment(ctx, req, UploadGrant{URL: session.UploadURL, Headers: session.UploadHeaders, SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType, ExpiresAt: session.ExpiresAt})
-		}()
-		var typed *Error
-		if errors.As(err, &typed) && typed.Class == ClassSource && typed.Code == CodeAttachmentChanged {
-			continue
-		}
-		if err != nil {
-			return "", 0, nil, err
+		// Only a session awaiting its bytes carries an upload URL. A replayed
+		// one whose verification was interrupted (a worker stopped mid-Confirm)
+		// already holds them: confirm it again instead of uploading.
+		if session.State == "awaiting_upload" {
+			release, active, err := a.beginPoll(ctx, req.Organization, req.InstanceID, run)
+			if err != nil {
+				return "", 0, nil, err
+			}
+			if !active {
+				return "", 0, nil, corpus.ErrArchived
+			}
+			err = func() error {
+				defer release()
+				done := a.measure(timing, stageUpload)
+				defer done()
+				return ex.UploadAttachment(ctx, req, UploadGrant{URL: session.UploadURL, Headers: session.UploadHeaders, SizeBytes: d.SizeBytes, SHA256: d.SHA256, MediaType: at.MediaType, ExpiresAt: session.ExpiresAt})
+			}()
+			var typed *Error
+			if errors.As(err, &typed) && typed.Class == ClassSource && typed.Code == CodeAttachmentChanged {
+				continue
+			}
+			if err != nil {
+				return "", 0, nil, err
+			}
 		}
 		done = a.measure(timing, stageVerify)
 		verified, err := a.Blobs.Confirm(ctx, req.Organization, session.ID)

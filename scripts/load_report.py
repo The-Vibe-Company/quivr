@@ -51,6 +51,17 @@ def markdown(report):
                       'Probes share the APIs and can influence measured request latency.']
         for operation, row in run.get('lag', {}).items():
             lines.append(f"{operation}: {row}")
+        if run.get('anchored'):
+            a = run['anchored']
+            lines += ['', 'Anchored burst: durable step times and all alerts, from the common arrival.', '',
+                      '| Step | Documents | p50 ms | p95 ms | max ms |', '| --- | ---: | ---: | ---: | ---: |']
+            for step, row in [*a['stages_from_anchor'].items(), ('all alerts', a['all_alerts_from_anchor'])]:
+                lines.append(f"| {step} | {row['count']} | {row['p50_ms']} | {row['p95_ms']} | {row['max_ms']} |")
+            lines += ['', f"Accepted {a['accepted']}/{a['documents']}; verified by hybrid search "
+                      f"{a['verified_hybrid']}; alerts {a['received_alerts']}/{a['expected_alerts']}, "
+                      f"duplicates {a['duplicate_alerts']}. Database clock offset "
+                      f"{a['database_clock_offset_seconds']} s; step times are overstated by at most "
+                      f"{a['steps_overstated_by_at_most_seconds']} s."]
         if run.get('fault_windows'):
             lines += ['', 'Requests grouped by start time relative to the kill:', '', '```json',
                       __import__('json').dumps(run['fault_windows'], indent=2), '```']

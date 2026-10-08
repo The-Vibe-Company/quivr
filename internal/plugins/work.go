@@ -63,13 +63,24 @@ func WorkOf(ctx context.Context) (*Work, bool) {
 	return w, ok
 }
 
+// Unavailable handles a reachability failure. Live imports keep their original
+// pin and retry until its exact build returns; only an explicit stop ends them.
+// Other work retains the bounded Unreachable policy.
+func Unavailable(ctx context.Context, pin *Pin, contribution string) (*content.Diagnostic, error) {
+	if w, ok := WorkOf(ctx); ok && w.Kind == WorkIngestion && !Stopped(ctx, pin) {
+		return nil, nil
+	}
+	return Unreachable(ctx, pin, contribution)
+}
+
 // Unreachable decides what happens to the work ctx carries when a plugin of
 // its plan could not be reached, or can no longer serve it. While the plugin
 // serves the active plan, the work keeps retrying: a nil diagnostic. Once the
 // plugin has left the active plan, each call counts one attempt; when the
 // work's budget is spent, the diagnostic names the plan and the plugin, and
 // the caller stops the work with it instead of moving it to another plugin
-// version. Work that is not pinned always keeps retrying.
+// version. Work that is not pinned always keeps retrying. Reachability failures
+// use Unavailable instead; incompatible owners retain this budget.
 func Unreachable(ctx context.Context, pin *Pin, contribution string) (*content.Diagnostic, error) {
 	w, ok := WorkOf(ctx)
 	if !ok || pin == nil || (w.live.Active(pin) && !(w.Kind == WorkIngestion && w.stopped(ctx))) {

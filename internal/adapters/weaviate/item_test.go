@@ -1,13 +1,18 @@
 package weaviate_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
@@ -57,6 +62,47 @@ func TestItemKeywordRanking(t *testing.T) {
 	hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, q)
 	if err != nil || len(hits) != 1 || hits[0].SegmentID != "accenta" {
 		t.Fatalf("French tea must survive English stopwords: %+v %v", hits, err)
+	}
+	// An English Corpus with the language-neutral analyzer folds accents but
+	// never stems: French stemming would match "organisation" to "organ" and
+	// highlight the earlier passage.
+	english := f.gen
+	english.ID = "english-generation"
+	english.ItemKeywordsProjected = true
+	english.Fields = []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "folded"}}
+	publishEnglish := func(gen content.Generation, id, title string, passages ...string) {
+		seg := f.segmentation(id, "")
+		seg.Segments = nil
+		for i, text := range passages {
+			seg.Segments = append(seg.Segments, content.Segment{ID: id + string(rune('a'+i)), PartKey: "body", Text: text})
+		}
+		parts := []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: strings.Join(passages, "\n")}}}
+		if title != "" {
+			parts = append(parts, content.Part{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: title}})
+		}
+		v := content.Version{ID: seg.VersionID, RecordID: "record-" + id, Manifest: content.Manifest{Parts: parts}}
+		if err := f.store.Publish(f.ctx, gen, f.org, gen.ID, "feed", v, seg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publishEnglish(english, "organ", "", "The organisation met", "An organ donor")
+	publishEnglish(english, "society", "", "The organisation met")
+	publishEnglish(english, "cafe", "", "Café opening")
+	// With two analyzers, each copy is queried only with its own analysis:
+	// French "nations" stems to the title's "nation", folded keeps the plural.
+	mixed := english
+	mixed.ID = "mixed-generation"
+	mixed.Fields = append(english.Fields, corpus.Field{Name: "title", PartRole: "title", Type: "string", Roles: []string{"search"}, Analyzer: "french_light"})
+	publishEnglish(mixed, "nation", "", "Nation building")
+	publishEnglish(mixed, "report", "Nation report", "Annual figures")
+	for _, tc := range []struct {
+		gen         content.Generation
+		query, want string
+	}{{english, "organ", "organb"}, {english, "cafe", "cafea"}, {mixed, "nations", "reporta"}} {
+		hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: tc.gen.ID, Generation: tc.gen}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: tc.query, Mode: "lexical", GroupBy: "record", K: 10})
+		if err != nil || len(hits) != 1 || hits[0].SegmentID != tc.want {
+			t.Fatalf("%s %q: %+v %v, want only %s", tc.gen.ID, tc.query, hits, err, tc.want)
+		}
 	}
 	q.Query = "election"
 	q.GroupBy = ""
@@ -318,4 +364,61 @@ func (b *searchRequestBudget) RoundTrip(r *http.Request) (*http.Response, error)
 		}
 	}
 	return b.next.RoundTrip(r)
+}
+
+// Owns bounded recovery when individually valid passages exceed a response's
+// byte budget. The transport models GraphQL limits, not passage selection.
+func TestItemPassageResponseBudget(t *testing.T) {
+	transport := &largePassageHTTP{text: strings.Repeat("harbour ", 1<<17)}
+	store := weaviate.New("http://index.invalid")
+	store.Client.Transport = transport
+	g := content.Generation{ID: "generation", Collection: "PassageBudget", ItemKeywordsProjected: true, Fields: []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}}}}
+	hits, err := store.Search(context.Background(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{Query: "harbour", Mode: "lexical", GroupBy: "record", K: 10})
+	if err != nil || len(hits) == 0 || hits[0].SegmentID != "passage-000" {
+		t.Fatalf("bounded large-passage search: %+v %v", hits, err)
+	}
+}
+
+type largePassageHTTP struct {
+	requests int
+	text     string
+}
+
+func (h *largePassageHTTP) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasPrefix(r.URL.Path, "/v1/schema/") {
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+	}
+	if r.URL.Path != "/v1/graphql" {
+		return nil, errors.New("unexpected projection endpoint")
+	}
+	h.requests++
+	if h.requests > 3 {
+		return nil, errors.New("large-passage dependency budget exhausted")
+	}
+	var request struct{ Query string }
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		return nil, err
+	}
+	match := regexp.MustCompile(`limit:(\d+)`).FindStringSubmatch(request.Query)
+	if len(match) != 2 {
+		return nil, errors.New("missing GraphQL limit")
+	}
+	limit, _ := strconv.Atoi(match[1])
+	count := limit
+	if strings.Contains(request.Query, "passageText") {
+		count = min(limit, 17)
+	}
+	rows := make([]map[string]any, 0, count)
+	for i := 0; i < count; i++ {
+		row := map[string]any{"segmentId": fmt.Sprintf("passage-%03d", i), "generationId": "generation", "versionId": fmt.Sprintf("version-%03d", i), "_additional": map[string]any{"score": "1"}}
+		if strings.Contains(request.Query, "passageText") {
+			row["passageText"] = h.text
+		}
+		rows = append(rows, row)
+	}
+	body, err := json.Marshal(map[string]any{"data": map[string]any{"Get": map[string]any{"PassageBudget": rows}}})
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
 }

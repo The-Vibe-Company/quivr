@@ -35,18 +35,19 @@ import (
 	transport "github.com/The-Vibe-Company/quivr/internal/transport/generated"
 	"github.com/The-Vibe-Company/quivr/internal/transport/routing"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
-"github.com/The-Vibe-Company/quivr/internal/workqueue"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type API struct {
- Queues workqueue.Reader
+	Queues         workqueue.Reader
 	Audit          audit.Store
 	draining       func() bool
 	processWork    context.Context
 	router         *routing.Mux
 	routes         http.Handler
+	loadMetrics    *telemetry.LoadMetrics
 	searches       chan struct{}
 	facets         chan struct{}
 	pushProxyCIDRs []string
@@ -116,6 +117,8 @@ func New(store corpus.Store, contents content.Service, search retrieval.Service,
 		}
 	}
 	a.router = mux
+	a.loadMetrics.RegisterRoutes(mux.Templates()...)
+	a.loadMetrics.BindSearch(a.searches)
 	return http.HandlerFunc(a.serveAccess), nil
 }
 

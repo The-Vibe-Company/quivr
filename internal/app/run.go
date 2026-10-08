@@ -119,10 +119,9 @@ type Config struct {
 	// ChangeStreamPoll is how often an open change stream reads the journal
 	// again (Go duration, default 250ms).
 	ChangeStreamPoll string `json:"change_stream_poll"`
-	// PinnedPluginAttempts is how many attempts work pinned to a Pipeline
-	// Plan gets once a plugin of that plan has left the active plan and cannot
-	// be reached, before the work stops with a pinned_plugin_unavailable
-	// diagnostic (worker only; default 10).
+	// PinnedPluginAttempts bounds unavailable plugins of older plans for
+	// operations, and incompatible owners or invocation deadlines for live imports.
+	// Live import reachability outages keep retrying (worker only; default 10).
 	PinnedPluginAttempts int `json:"pinned_plugin_attempts"`
 	// ProjectionPurgeGrace delays the physical purge of dead projection
 	// objects (Go duration, default 1h; worker only).
@@ -544,7 +543,7 @@ func Run(command string, args ...string) error {
 			err = postgres.MigrateContracts(contractCtx, pool)
 			cancel()
 			if err != nil {
-				if errors.Is(err, postgres.ErrIndexBusy) {
+				if errors.Is(err, postgres.ErrMigrationBusy) {
 					return err
 				}
 				return errors.New("contract migration failed; check database connectivity and schema")
@@ -552,7 +551,7 @@ func Run(command string, args ...string) error {
 		}
 		// Required PostgreSQL setup runs first and needs no other dependency.
 		if err = BootstrapDatabase(ctx, pool, cfg.DeploymentSpaces(cfg.migrationPins())); err != nil {
-			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrIndexBusy) {
+			if errors.Is(err, content.ErrSpaceOwner) || errors.Is(err, content.ErrSpaceChanged) || errors.Is(err, postgres.ErrIndexSetup) || errors.Is(err, postgres.ErrMigrationBusy) {
 				return err
 			}
 			return errors.New("migration failed; check database connectivity and schema")
@@ -813,6 +812,9 @@ func Run(command string, args ...string) error {
 		}
 	}
 	loops.Go(func(ctx context.Context) { follower.Run(ctx, planPoll) })
+	loadMetrics := telemetry.NewLoadMetrics()
+	loadMetrics.RegisterRoutes("/healthz", "/readyz", "/metrics")
+	poolMetrics := postgres.NewPoolMetrics(pool)
 	probes := http.NewServeMux()
 	probes.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	probes.Handle("GET /readyz", readinessProbe(loops, ready, indexes))
@@ -835,14 +837,14 @@ func Run(command string, args ...string) error {
 			evaluationMetrics.Write(w)
 			recorder.WriteMetrics(w)
 		}
-		probes.Handle("GET /metrics", queueMetrics(buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)), queueSnapshots))
+		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(deliveryMetrics.Handler(deliveryStore.DeliveryBacklog)), queueSnapshots), loadMetrics, poolMetrics))
 		slog.Info("plugins pinned", "plan", planID, "plugins", resolved.Describe(), "evaluators", len(evaluators.Load().Served))
 	} else {
 		// Accepted durable commands and the ingestion backlog: what the API committed
 		// and how much of it still waits for the worker.
-		probes.Handle("GET /metrics", queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)), queueSnapshots))
+		probes.Handle("GET /metrics", processMetrics(queueMetrics(buildMetrics(apiMetrics(commands, materialization.IngestionBacklog, recorder.WriteMetrics)), queueSnapshots), loadMetrics, poolMetrics))
 	}
-	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes), ReadHeaderTimeout: 5 * time.Second}}
+	servers = []*http.Server{{Addr: cfg.ProbeListen, Handler: httpapi.AccessLog(probes, loadMetrics), ReadHeaderTimeout: 5 * time.Second}}
 	if command == "api" {
 		// The api checks registered plugins with the Contract Runner in
 		// process; a check a restart interrupted runs again after its lease.
@@ -850,7 +852,7 @@ func Run(command string, args ...string) error {
 		// Subscription previews call the subscription plugins from the API.
 		previews := postgres.EvaluationStore{Pool: pool}
 		handler, err := httpapi.New(postgres.Store{Pool: pool}, contents, search, uploadService, cfg.Keys, []byte(cfg.CursorKey), httpapi.WithChanges(changes.Service{Journal: journal, Key: []byte(cfg.CursorKey), Retention: retention}, streamPoll), httpapi.WithMonitoring(monitoring.Service{QueryEncoder: savedQueryEncoder{search: search, evaluators: evaluators}, Store: monitor, Corpora: baseline, Destinations: cfg.Destinations, Profiles: search, MatchStore: matches, Evaluators: evaluators, Moves: monitor, Evaluations: monitor, Recent: previews, Versions: versionParts{content: contents, metadata: previews, vectors: baseline}}), httpapi.WithOperations(operations.Service{Store: operationStore}), httpapi.WithQueues(queueSnapshots), httpapi.WithLifecycle(loops), httpapi.WithAudit(auditStore),
-			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithVectorSpaces(spaceSnapshots),
+			httpapi.WithConnectors(connectors.Service{Store: connectorStore, Tokens: connectorStore, Registry: registry, Sealer: sealer, MinInterval: minInterval, PublicURL: cfg.PublicURL}), httpapi.WithCommands(commands), httpapi.WithLoadMetrics(loadMetrics), httpapi.WithVectorSpaces(spaceSnapshots),
 			// Operators register, check and activate plugins (plugins:admin).
 			httpapi.WithPlugins(pluginRegistry),
 			// Operators backfill past Versions and promote vector spaces (plugins:admin).

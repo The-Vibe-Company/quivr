@@ -163,7 +163,7 @@ func (s SubmissionStore) acceptAttempt(ctx context.Context, scope corpus.Scope, 
 	if workqueue.Class(ctx) == workqueue.Bulk {
 		outbox = "bulk_ingestion_outbox"
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO "+outbox+"(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue) VALUES($1,$2,false,'infinity',$3,$4)", scope.Organization, receiptID, telemetry.Encode(ctx), workqueue.Class(ctx)); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO "+outbox+"(organization,receipt_id,trace_context,work_queue) VALUES($1,$2,$3,$4)", scope.Organization, receiptID, telemetry.Encode(ctx), workqueue.Class(ctx)); err != nil {
 		return content.Receipt{}, err
 	}
 	if err = appendEvent(ctx, tx, eventInput{Organization: scope.Organization, CorpusID: c.Source.CorpusID, Kind: "receipt.pending", Resource: "receipt", ResourceID: receiptID}); err != nil {

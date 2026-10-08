@@ -168,7 +168,7 @@ func queuePendingServingProjections(ctx context.Context, tx pgx.Tx, previous reg
 
 func (s ServingProjectionStore) ClaimServingProjections(ctx context.Context, limit int) ([]content.IngestionEvaluation, error) {
 	q, _ := workqueue.Selected(ctx)
-	rows, err := s.Pool.Query(ctx, `UPDATE serving_projections SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM serving_projections WHERE ($2='' OR work_queue=$2 OR (work_queue='' AND $2='live')) AND NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue`, limit, q)
+	rows, err := s.Pool.Query(ctx, `UPDATE serving_projections SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM serving_projections WHERE ($2='' OR work_queue=$2) AND NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue`, limit, q)
 	if err != nil {
 		return nil, err
 	}

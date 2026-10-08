@@ -1,0 +1,90 @@
+package kubernetes_test
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/autoscaling/kubernetes"
+)
+
+type transport func(*http.Request) (*http.Response, error)
+
+func (f transport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+const scaleURL = "https://203.0.113.1:443/apis/apps/v1/namespaces/quivr/deployments/quivr-bulk/scale"
+
+// This owner test exercises the scale subresource wire contract: bearer token
+// read per request, merge patch on spec.replicas, and failed calls.
+// RequestJSON owns error redaction (queues_test.go).
+func TestKubernetesScaleAPI(t *testing.T) {
+	token := filepath.Join(t.TempDir(), "token")
+	var check func(*http.Request, []byte) (int, string)
+	// One backend serves every row, so a cached token would miss the rotations below.
+	backend := kubernetes.Backend{URL: scaleURL, TokenFile: token, Client: &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		status, response := check(r, body)
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(response))}, nil
+	})}}
+	for _, tc := range []struct {
+		name, method, response string
+		status, set, want      int
+		bad                    bool
+	}{
+		{name: "read", method: "GET", status: 200, response: `{"kind":"Scale","spec":{"replicas":3},"status":{"replicas":2}}`, want: 3},
+		{name: "read zero omitted", method: "GET", status: 200, response: `{"kind":"Scale","spec":{},"status":{}}`, want: 0},
+		{name: "read not a scale", method: "GET", status: 200, response: `{"kind":"Status"}`, bad: true},
+		{name: "read negative", method: "GET", status: 200, response: `{"kind":"Scale","spec":{"replicas":-1}}`, bad: true},
+		{name: "read forbidden", method: "GET", status: 403, response: `forbidden`, bad: true},
+		{name: "scale", method: "PATCH", set: 5, status: 200, response: `{"kind":"Scale","spec":{"replicas":5}}`},
+		{name: "scale not applied", method: "PATCH", set: 5, status: 200, response: `{"kind":"Scale","spec":{"replicas":4}}`, bad: true},
+		{name: "scale conflict", method: "PATCH", set: 5, status: 409, response: `conflict`, bad: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Each row rotates the token; the shared backend must send the new one.
+			if err := os.WriteFile(token, []byte(" token-"+tc.name+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			check = func(r *http.Request, body []byte) (int, string) {
+				if r.Method != tc.method || r.URL.String() != scaleURL || r.Header.Get("Authorization") != "Bearer token-"+tc.name || r.Header.Get("User-Agent") != "quivr-autoscaler" {
+					t.Fatalf("unexpected request %s %s", r.Method, r.URL)
+				}
+				if tc.method == "PATCH" && (r.Header.Get("Content-Type") != "application/merge-patch+json" || string(body) != `{"spec":{"replicas":5}}`) {
+					t.Fatalf("unexpected patch %q %s", r.Header.Get("Content-Type"), body)
+				}
+				return tc.status, tc.response
+			}
+			var got int
+			var err error
+			if tc.method == "GET" {
+				got, err = backend.Replicas(context.Background())
+			} else {
+				err = backend.SetReplicas(context.Background(), tc.set)
+			}
+			if (err != nil) != tc.bad || got != tc.want {
+				t.Fatalf("got %d/%v, want %d/error %v", got, err, tc.want, tc.bad)
+			}
+		})
+	}
+	t.Run("Deployment names stay one path segment", func(t *testing.T) {
+		for _, deployment := range []string{"", "../secrets", "quivr/bulk", "Quivr-Bulk", "quivr-bulk?x=1"} {
+			if _, err := kubernetes.InCluster(deployment, time.Second); err == nil || err.Error() != "Kubernetes Deployment name is invalid" {
+				t.Fatalf("Deployment %q: got %v", deployment, err)
+			}
+		}
+	})
+	t.Run("missing token", func(t *testing.T) {
+		backend := kubernetes.Backend{URL: scaleURL, TokenFile: filepath.Join(t.TempDir(), "absent"), Client: &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("request sent without a token")
+		})}}
+		if _, err := backend.Replicas(context.Background()); err == nil || !strings.Contains(err.Error(), "token") {
+			t.Fatalf("want token error, got %v", err)
+		}
+	})
+}

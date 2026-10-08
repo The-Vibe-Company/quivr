@@ -11,15 +11,19 @@ You need operator access to the deployment, the new and previous binaries, and t
 
 Read the release notes for required backfills and contract migrations. Historical migrations classified as risks in the repository's `migrations/legacy.json` predate this rule; the rollback guarantee does not extend across those changes.
 
+In-place upgrades from 2.0.0-alpha.6 and older are not supported. Reset the installation, or export its data and re-import it into a new installation.
+
 ## Steps
 
 1. Run the new binary's `quivr migrate` with `QUIVR_CONFIG` pointing to its deployment configuration. It applies pending expansions and required dependency setup, leaving tagged contracts untouched. Performance indexes are built concurrently by the API and worker after startup. They reuse matching valid indexes and retry interrupted builds in the background, allowing database writes to continue.
 2. Roll the workers first. Start a new worker and wait for its `/readyz`, then signal the previous worker to drain. Keep the compatible plugin versions available to both versions while work is in flight. Confirm every previous worker has drained and stopped before rolling the API.
 3. Roll the API instances. Wait for each new instance's `/readyz` to return HTTP 204 before routing traffic to it, then drain the previous instance. Keep at least one ready API serving throughout.
-4. Observe ingestion, search and worker processing before ending the rollback window. Until you apply contracts, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place.
+4. Observe ingestion, search and worker processing before ending the rollback window. Before applying contracts or enabling features that close the window, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place.
 5. Once all previous instances and their work have drained, and you accept closing the rollback window, run the new binary's `quivr migrate --contract`. This applies every pending contract as well as expansions; review all deferred steps before running it. The current application must already work with and without those contracts.
 
 Do not run the previous version's migrator during rollback. Rollback switches application binaries; there are no hand-written down migrations. After contracts remove old fields or constraints, restoring the previous application is no longer supported. Recovery then needs a forward fix or your deployment's data recovery procedure.
+
+Hot queue and journal tables disable vacuum truncation to keep vacuum from blocking writers. Autovacuum reuses their dead space; files may retain that space. Queue attempt renewals no longer update a timestamp index, and previous binaries can still read and write their leases. If the attempt primary key ever bloats, run `REINDEX INDEX CONCURRENTLY queue_document_attempts_pkey;` in an operator database session outside a transaction. This rebuild allows concurrent writes and needs temporary disk space for a second index.
 
 Existing Corpora keep their keyword generation through an upgrade. Rebuild a
 Corpus to enable item keyword fields and range-indexed dates; a successful
@@ -35,7 +39,13 @@ process has stopped before enabling those writes.
 
 The ingestion path prepares blob and embedding coverage writes before locking the organization's change journal. Upgrade every API instance and every live and bulk worker that writes to the database as one deployment. Wait until all previous processes finish draining and stop before relying on the improved import throughput. Previous writers acquire these locks in a different order and lack the bounded deadlock retries. New writers make at most three transaction attempts, including the first attempt, for a PostgreSQL deadlock. The third failed attempt returns the storage error to the caller; the `quivr.postgres.journal_deadlock` log event records `operation`, `attempt`, `retry_count` and `retry_exhausted`.
 
-Bulk workers group documents whose provider and external-storage work has finished, up to sixteen distinct documents in one organization. A partially filled group flushes two milliseconds after its first ready write. New inline-text documents handled by providers that return segments without vectors in a single response publish content and keyword readiness together. Keyword search becomes available at that commit; vectors remain a separate step. If preparation fails, the worker stores accepted content first, then follows the usual keyword retry or quarantine path. Change-feed cursors keep their synchronous, gap-free commit order. This batching needs no schema or cursor migration; upgrade the bulk workers to use it.
+Live and bulk workers group documents whose provider and external-storage work has finished, up to sixteen distinct documents in one organization. A partially filled group flushes two milliseconds after its first ready write. New inline-text documents handled by providers that return segments without vectors in a single response publish content and keyword readiness together. Keyword search becomes available at that commit; vectors remain a separate step. If preparation fails, the worker stores accepted content first, then follows the usual keyword retry or quarantine path. Change-feed cursors keep their synchronous, gap-free commit order. This batching needs no schema or cursor migration; upgrade the live and bulk workers to use it. A burst of direct submissions shares these groups as well.
+
+## Alerts without a webhook destination
+
+Drain and stop every previous API, live-worker and bulk-worker instance before creating or versioning a Subscription without `destination_id`. The schema expansion retains the Delivery foreign key but allows notices without a Delivery reference. Previous readers cannot read those notices, and previous workers still attempt delivery for those Subscriptions.
+
+Keep destinations on every Subscription Version while application rollback is needed. Using alerts without a destination closes rollback to binaries that require one, even when no contract migration is pending. Adding a destination later does not repair historical Versions or notices. After using this feature, recovery requires a forward fix or your deployment's data recovery procedure.
 
 ## Connector pause and resume
 
@@ -53,7 +63,7 @@ Previous API and worker versions do not read the setting and store a new Corpus'
 
 Compact storage keeps each Version's vectors in one current float32 file per segmentation and vector space. Each uploaded object is immutable; a partial group can replace its descriptor with a new immutable object as more canonical vectors arrive. A segmentation is the saved set of passages; a vector space identifies the embedding model. Compact PostgreSQL rows retain vector and public artifact digests, file ordinals and generation coverage. Rebuilds reuse these files without calling the embedding provider. Each file is bounded to 256 MiB; ordinary canonical objects retain their 2 MiB bound.
 
-Rebuild Operation counters distinguish `versions_covered` (document revisions added to the rebuilt search index) from `passages_covered` (passage/vector-space coverage entries added to that index). A passage covered in two spaces counts twice. The compatibility keys `indexed` and `vectors_reused` keep those respective counts. Replays count only newly added coverage, including individual passages within a compact file. Running operations initialize the new keys from their existing compatibility totals when coverage next commits.
+Rebuild Operation counters distinguish `versions_covered` (document revisions added to the rebuilt search index) from `passages_covered` (passage/vector-space coverage entries added to that index). A passage covered in two spaces counts twice. Replays count only newly added coverage, including individual passages within a compact file.
 
 New installations start in compact mode. Existing installations retain legacy writes after the additive migration so previous binaries can still read new work. Use the new binary and `QUIVR_CONFIG` for these commands:
 
@@ -181,7 +191,7 @@ Inspect the `X-Quivr-Index-Setup` header on `/readyz` for that process's last in
 
 | Symptom | Cause and fix |
 | --- | --- |
-| Migration times out | SQL migrations bound locks to two seconds and statements to five seconds; a failure rolls back their transaction. Let conflicting transactions finish, then rerun. Index maintenance uses a separate advisory lock. An index build started by an older binary can still hold the migration lock until it finishes or is stopped. |
+| Migration times out, or `migration_busy` | SQL migrations bound locks to two seconds and statements to five seconds; a failure rolls back their transaction. `migration_busy` means another migrator held the migration lock for more than two seconds. Let conflicting transactions finish, then rerun. When every migration is already applied, `quivr migrate` takes no migration lock and succeeds. From this release, PostgreSQL ends a migrator that stops responding mid-transaction after five idle seconds and releases its lock. A migrator from an earlier release can keep the lock until PostgreSQL detects its lost connection; find its backend in `pg_locks` (advisory lock `642001`) and stop it with `pg_terminate_backend`. Index maintenance uses a separate advisory lock. An index build started by an older binary can still hold the migration lock until it finishes or is stopped. |
 | `index_setup_failed` or `index_setup_busy` in background events | Live processes retry with backoff from one second to one minute. Each attempt has a 30-minute budget and no separate lock timeout. Interrupted builds can leave invalid indexes; the next attempt repairs them. Required migrations and readiness proceed independently. |
 | `index_definition_conflict` | A performance index name belongs to an object with a different definition. Inspect the database catalog and rename the conflicting object. Quivr leaves it untouched and detects your repair on a later attempt. |
 | `compaction_unit_deadline` | A unit exceeded its 30-second budget. Check index setup and storage access, then rerun the same operation identifier; its previous checkpoint remains. |

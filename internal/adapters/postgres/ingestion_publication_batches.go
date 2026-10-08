@@ -241,8 +241,5 @@ func (group *journalGroup) append(ctx context.Context, tx pgx.Tx) error {
 	if len(records) > 0 {
 		queueRecordObservations(writes, orgs, records)
 	}
-	if len(group.events) > 0 {
-		writes.Queue(acknowledgeQueueJournalSQL, group.organization, len(group.events))
-	}
 	return tx.SendBatch(ctx, writes).Close()
 }
