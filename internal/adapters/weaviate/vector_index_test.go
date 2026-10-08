@@ -3,6 +3,7 @@ package weaviate_test
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
@@ -25,8 +26,11 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 			{ID: space, Metric: "cosine", Index: &content.VectorIndex{Quantization: content.QuantizationRQ1, RescoreLimit: 64}},
 			{ID: large, Metric: "dot", Index: &content.VectorIndex{Quantization: content.QuantizationNone}},
 		}}
-	f.publish(before, f.segmentation("before", "harbour strike at dawn"))
-	f.publish(after, f.segmentation("after", "harbour strike at dusk"))
+	for _, g := range []content.Generation{before, after} {
+		seg := f.segmentation(strings.TrimPrefix(g.ID, "generation-"), "harbour strike")
+		seg.Segments[0].Derivation.LexicalText = "harbour strike"
+		f.publish(g, seg)
+	}
 	if err := f.store.PublishEmbeddings(f.ctx, before, f.org, []content.EmbeddingData{spaceEmbedding(f, space, "before", smallVector(1, 4))}); err != nil {
 		t.Fatal(err)
 	}
@@ -84,14 +88,19 @@ func TestSpaceAddedLaterGetsItsIndexSetting(t *testing.T) {
 
 	routes := []retrieval.Route{{CorpusID: f.corpusID, Generation: before}, {CorpusID: f.corpusID, Generation: after}}
 	scope := corpus.Scope{Organization: f.org, Corpora: []string{"*"}}
-	for _, mode := range []string{"semantic", "hybrid"} {
-		candidates, err := f.store.Search(f.ctx, routes, scope, retrieval.Request{Query: "harbour", Mode: mode, Vector: smallVector(1, 4), Space: space})
+	for _, q := range []retrieval.Request{
+		{Mode: "semantic", Vector: smallVector(1, 4), Space: space},
+		{Mode: "hybrid", Vector: smallVector(1, 4), Space: space},
+		{Mode: "lexical", Field: retrieval.FieldLexical},
+	} {
+		q.Query = "harbour"
+		candidates, err := f.store.Search(f.ctx, routes, scope, q)
 		found := map[string]bool{}
 		for _, c := range candidates {
 			found[c.SegmentID] = true
 		}
 		if err != nil || !found["before"] || !found["after"] {
-			t.Fatalf("%s search over both generations: %+v, %v; want both segments", mode, candidates, err)
+			t.Fatalf("%s %s search over both generations: %+v, %v; want both segments", q.Mode, q.Field, candidates, err)
 		}
 	}
 }

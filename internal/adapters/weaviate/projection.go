@@ -611,10 +611,14 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	}
 	operands = append(operands, identityConditions(q)...)
 	where := "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
-	// Every route names the space's vectors the same way, or the query
-	// cannot rank them together.
+	// For a vector search, every route names the space's vectors the same
+	// way, or the query cannot rank them together; a keyword search reads
+	// no vector.
 	target := ""
 	for _, r := range routes {
+		if q.Mode == "lexical" {
+			break
+		}
 		space := q.Space
 		if space == "" {
 			space = r.Generation.SpaceID
@@ -627,10 +631,8 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 		// A generation's named vectors exist from its first vector write; a
 		// semantic or hybrid search before any (a new install, a Corpus whose
 		// Versions still wait for their vectors) adds them, and finds nothing.
-		if q.Mode != "lexical" {
-			if err := s.ensureVectors(ctx, r.Generation); err != nil {
-				return nil, err
-			}
+		if err := s.ensureVectors(ctx, r.Generation); err != nil {
+			return nil, err
 		}
 	}
 	// The source field ranks the title and body as written; the lexical field
