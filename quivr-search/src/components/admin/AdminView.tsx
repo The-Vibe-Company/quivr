@@ -432,7 +432,7 @@ function FlowRow({
               </span>
             )}
             {withdrawn && <span className="flow-badge">Retiré</span>}
-            {!row.is_current && !withdrawn && (
+            {row.replaced && (
               <span className="flow-badge">Remplacé</span>
             )}
           </span>
