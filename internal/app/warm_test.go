@@ -56,13 +56,11 @@ func awaitWarm(t *testing.T, done <-chan struct{}) {
 	}
 }
 
-// The api reports ready only once the ingestion plugin answered its warm-up
-// embed_query (THE-813), and an answer that says the embedding service is
-// down still ends the warm-up at once: readiness never waits for that
-// service, only for the plugin's own first-use loading.
+// Readiness waits for successful query encoding; an error envelope is retried.
 func TestReadinessWaitsForTheQueryEncoderWarmUp(t *testing.T) {
 	received := make(chan map[string]any, 1)
 	release := make(chan struct{})
+	var attempts atomic.Int32
 	var pin *plugins.Pin
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v0/discovery" {
@@ -77,8 +75,12 @@ func TestReadinessWaitsForTheQueryEncoderWarmUp(t *testing.T) {
 		}
 		<-release // the plugin is loading its tokenizer
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(503)
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": "inference_unavailable", "message": "the embedding service is unavailable", "retryable": true})
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(503)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": "inference_unavailable", "message": "the embedding service is unavailable", "retryable": true})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"vector": []float64{0.6, 0.8}})
 	}))
 	defer server.Close()
 	var unblock sync.Once
@@ -100,6 +102,9 @@ func TestReadinessWaitsForTheQueryEncoderWarmUp(t *testing.T) {
 	}
 	unblock.Do(func() { close(release) })
 	awaitWarm(t, done)
+	if n := attempts.Load(); n != 2 {
+		t.Fatalf("warm-up attempts = %d, want error envelope then success", n)
+	}
 }
 
 // A sidecar that starts after the api is warmed once it answers: the

@@ -64,13 +64,15 @@ The `hosted.embed` manifest declares these execution-only settings:
 
 - `max_concurrent_requests`, `batch_size` and `max_batch_tokens`;
 - `request_timeout_ms`, `call_budget_ms` and `batch_wait_ms`;
-- `max_retries`.
+- `max_retries` and `tokenizer_processes`.
+
+A manifest must already declare `tokenizer_processes` for pool tuning to preserve its recipe. Installing a manifest that first adds that execution key changes the recipe; follow the [first-registration caveat](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding).
 
 Keep the plugin id and version unchanged when changing only those settings. Regenerate the manifest from the exact configuration, certify it and install a new immutable registration. Run it at a separate endpoint and keep the old process and exact manifest reachable until its registration is `inactive`. Replacing a manifest at an old endpoint breaks discovery for work pinned to that registration.
 
 Endpoint and authentication changes are not in this execution-only list: they change the recipe and need a rebuild for existing Corpora, even if the vector-space id stays the same. Follow the [plugin configuration and upgrade procedure](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding).
 
-Worker replicas, engine worker slots and provider concurrency are separate controls. Plan them together with the server's throughput; [Run a large import](/run-quivr/run-a-large-import) explains their combined load.
+Worker replicas, engine worker slots and provider concurrency are separate controls. Plan them together with the server's throughput; [Run a large import](/run-quivr/run-a-large-import) explains their combined load. [Scale Quivr](/run-quivr/scale-quivr) explains the capacity model, tokenizer memory and overload checks.
 
 ## Next
 
