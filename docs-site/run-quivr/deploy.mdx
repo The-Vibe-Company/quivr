@@ -279,7 +279,7 @@ Where KEDA is not available, run `quivr-autoscaler`: one small, always-on proces
 | `QUIVR_QUEUE_KEY` | Required secret: the dedicated `queues:read` key |
 | `QUIVR_AUTOSCALER_QUEUE` | `bulk`; the queue whose waiting count drives the target, `bulk` or `live` |
 | `QUIVR_AUTOSCALER_KUBERNETES_DEPLOYMENT` | Required for `kubernetes`: the Deployment to scale |
-| `RAILWAY_TOKEN`, `RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID` | Required for `railway` only |
+| `RAILWAY_TOKEN`, `QUIVR_AUTOSCALER_RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID` | Required for `railway` only; the service ID is the target, not the autoscaler's own `RAILWAY_SERVICE_ID` |
 | `QUIVR_AUTOSCALER_ENABLED` | `true`; `false` exits without reading APIs or changing replicas |
 | `QUIVR_AUTOSCALER_MIN` / `QUIVR_AUTOSCALER_MAX` | `1` / `8` replicas |
 | `QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA` | `20000` waiting documents per replica |

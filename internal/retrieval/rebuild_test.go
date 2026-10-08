@@ -16,7 +16,6 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/operations"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
-	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 )
 
 type fakeRebuildStore struct {
@@ -451,17 +450,13 @@ func TestRebuildQuarantinesAnEligibleItemThatCannotBeHydrated(t *testing.T) {
 			}
 		})
 	}
-	t.Run("unreadable Version beyond leased gaps", func(t *testing.T) {
+	t.Run("unreadable Version beyond a slow first page", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 		defer cancel()
 		store := &fakeRebuildStore{covered: map[string][]content.Embedding{}, quarantinedEvents: make(chan string, 1)}
-		lost := &loseOnce{lost: map[string]bool{}, ids: map[string]bool{}}
 		for i := range 60 {
 			id := fmt.Sprintf("v%03d", i)
 			store.candidates = append(store.candidates, retrieval.RebuildCandidate{RecordID: fmt.Sprint(i), VersionID: id, VectorsRequired: true})
-			if i > 0 && i <= 30 {
-				lost.ids[id] = true
-			}
 		}
 		release := make(chan struct{})
 		close(release)
@@ -469,7 +464,7 @@ func TestRebuildQuarantinesAnEligibleItemThatCannotBeHydrated(t *testing.T) {
 		r := rebuilder(store, &fakeRebuildContent{versionErr: corpus.ErrNotFound, missingID: "v059"}, &fakeRebuildProjection{})
 		r.Plugin, r.Concurrency = d, 3
 		finished := make(chan error, 1)
-		go func() { _, err := r.Step(workqueue.WithTracker(ctx, lost), "org", "op"); finished <- err }()
+		go func() { _, err := r.Step(ctx, "org", "op"); finished <- err }()
 		select {
 		case version := <-store.quarantinedEvents:
 			if version != "v059" {
@@ -488,7 +483,6 @@ func TestRebuildQuarantinesAnEligibleItemThatCannotBeHydrated(t *testing.T) {
 			t.Fatalf("diagnostic=%v", store.quarantined)
 		}
 	})
-
 }
 
 func TestRebuildRetriesWhenStorageLeavesTheSameCoverageGap(t *testing.T) {
@@ -920,96 +914,6 @@ func TestRebuildJoinsCanceledCandidatesBeforeSettling(t *testing.T) {
 			}
 			if len(d.entered) != 0 || len(store.covered) != 0 || store.activated || store.checkpoints != 0 {
 				t.Fatalf("remaining calls=%d covered=%v activated=%v", len(d.entered), store.covered, store.activated)
-			}
-		})
-	}
-}
-
-// loseOnce reports one lost lease for a Version, as when a slow renewal lets
-// another attempt take it, then tracks normally.
-type loseOnce struct {
-	mu      sync.Mutex
-	lost    map[string]bool
-	id      string
-	ids     map[string]bool
-	join    error
-	runLost bool
-}
-
-func (l *loseOnce) Track(ctx context.Context, _, _, _, documentID string, run func(context.Context) error) error {
-	l.mu.Lock()
-	lose := (documentID == l.id || l.ids[documentID]) && !l.lost[documentID]
-	if lose {
-		l.lost[documentID] = true
-	}
-	l.mu.Unlock()
-	if lose {
-		if l.runLost {
-			return errors.Join(run(ctx), workqueue.ErrLeaseLost, l.join)
-		}
-		return errors.Join(workqueue.ErrLeaseLost, l.join)
-	}
-	return run(ctx)
-}
-
-func TestRebuildKeepsSiblingsWhenOneVersionLosesItsLease(t *testing.T) {
-	outage := errors.New("lease cleanup unavailable")
-	for _, tc := range []struct {
-		name              string
-		join              error
-		refused, canceled bool
-	}{
-		{name: "lease"},
-		{name: "canceled callback", join: context.Canceled},
-		{name: "terminal callback", refused: true},
-		{name: "transient cleanup", join: outage},
-		{name: "operation cancellation", join: operations.ErrNotRunning, canceled: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &fakeRebuildStore{candidates: []retrieval.RebuildCandidate{{RecordID: "r1", VersionID: "v1", VectorsRequired: true}, {RecordID: "r2", VersionID: "v2", VectorsRequired: true}}, covered: map[string][]content.Embedding{}}
-			r := rebuilder(store, &fakeRebuildContent{}, &fakeRebuildProjection{})
-			r.Concurrency = 2
-			if tc.refused {
-				r.Plugin = &selectiveRebuildDeriver{refused: "v1"}
-			}
-			if tc.canceled {
-				store.candidates = store.candidates[:1]
-			}
-			tracker := &loseOnce{lost: map[string]bool{}, id: "v1", join: tc.join, runLost: tc.refused}
-			// The Operation changes after Begin, so the tracked result drives settlement.
-			if tc.canceled {
-				store.state = ""
-				r.Plugin = &fakeDeriver{onDerive: func() { store.mu.Lock(); store.state = operations.StateCancelRequested; store.mu.Unlock() }}
-				tracker.runLost = true
-			}
-			ctx := workqueue.WithTracker(context.Background(), tracker)
-			done, err := r.Step(ctx, "org", "op")
-			if tc.canceled {
-				if err != nil || !done || store.confirms != 1 || store.state != operations.StateCanceled {
-					t.Fatalf("cancellation done=%v err=%v confirms=%d state=%s", done, err, store.confirms, store.state)
-				}
-				return
-			}
-			if tc.join == outage {
-				if !errors.Is(err, outage) {
-					t.Fatalf("joined outage was hidden: %v", err)
-				}
-				return
-			}
-			if err != nil || done {
-				t.Fatalf("first step: done=%v err=%v", done, err)
-			}
-			if _, ok := store.covered["v1"]; ok || len(store.covered["v2"]) != 1 || store.cursor != "" || len(store.quarantined) != 0 {
-				t.Fatalf("lost lease covered=%v cursor=%q quarantine=%v; want v2 only", store.covered, store.cursor, store.quarantined)
-			}
-			r.Plugin = &fakeDeriver{}
-			for i := 0; i < 5 && !store.activated; i++ {
-				if _, err := r.Step(ctx, "org", "op"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if !store.activated || len(store.covered["v1"]) != 1 {
-				t.Fatalf("activated=%v covered=%v", store.activated, store.covered)
 			}
 		})
 	}

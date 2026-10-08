@@ -21,6 +21,8 @@ Read the release notes for required backfills and contract migrations. Historica
 
 Do not run the previous version's migrator during rollback. Rollback switches application binaries; there are no hand-written down migrations. After contracts remove old fields or constraints, restoring the previous application is no longer supported. Recovery then needs a forward fix or your deployment's data recovery procedure.
 
+Hot queue and journal tables disable vacuum truncation to keep vacuum from blocking writers. Autovacuum reuses their dead space; files may retain that space. Queue attempt renewals no longer update a timestamp index, and previous binaries can still read and write their leases. If the attempt primary key ever bloats, run `REINDEX INDEX CONCURRENTLY queue_document_attempts_pkey;` in an operator database session outside a transaction. This rebuild allows concurrent writes and needs temporary disk space for a second index.
+
 Existing Corpora keep their keyword generation through an upgrade. Rebuild a
 Corpus to enable item keyword fields and range-indexed dates; a successful
 rebuild activates the new recipe. New Corpora use it immediately. Lexical and
