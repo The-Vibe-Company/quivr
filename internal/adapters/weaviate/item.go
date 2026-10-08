@@ -8,10 +8,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/keywords"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
@@ -23,6 +23,24 @@ func itemProperty(f corpus.Field) string {
 	return "k_" + content.Hash(b)[:32]
 }
 
+// analyzedProperty stores the field's keyword copy written by its analyzer.
+func analyzedProperty(f corpus.Field, a keywords.Analyzer) string {
+	return itemProperty(f) + "_" + a.Property
+}
+
+// fieldAnalyzers lists the distinct analyzers fields name, in field order.
+func fieldAnalyzers(fields []corpus.Field) []keywords.Analyzer {
+	var out []keywords.Analyzer
+	seen := map[string]bool{}
+	for _, f := range fields {
+		if a, ok := keywords.Lookup(f.Analyzer); ok && !seen[a.Name] {
+			seen[a.Name] = true
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 func (s *Store) ensureItemSchema(ctx context.Context, g content.Generation) error {
 	if !g.ItemKeywordsProjected {
 		return nil
@@ -30,8 +48,8 @@ func (s *Store) ensureItemSchema(ctx context.Context, g content.Generation) erro
 	props := []map[string]any{filterable(itemKind), filterable("recordId"), {"name": passageText, "dataType": []string{"text"}, "indexSearchable": false, "indexFilterable": false}}
 	for _, f := range content.ItemFields(g.Fields) {
 		props = append(props, searchable(itemProperty(f)))
-		if f.Analyzer != "" {
-			props = append(props, searchable(itemProperty(f)+"_fr"))
+		if a, ok := keywords.Lookup(f.Analyzer); ok {
+			props = append(props, searchable(analyzedProperty(f, a)))
 		}
 	}
 	return s.ensureProperties(ctx, g.Collection, props)
@@ -100,8 +118,8 @@ func (s *Store) publishItem(ctx context.Context, g content.Generation, org, corp
 	for _, f := range content.ItemFields(g.Fields) {
 		if text := values[f.Name]; text != "" {
 			props[itemProperty(f)] = text
-			if f.Analyzer != "" {
-				props[itemProperty(f)+"_fr"] = content.AnalyzeKeywords(text, f.Analyzer)
+			if a, ok := keywords.Lookup(f.Analyzer); ok {
+				props[analyzedProperty(f, a)] = a.Analyze(text)
 			}
 		}
 	}
@@ -269,30 +287,36 @@ func ordered(pool map[string]content.Candidate) []content.Candidate {
 	})
 	return out
 }
-func termCoverage(text, query string) int {
-	terms := strings.FieldsFunc(content.AnalyzeKeywords(query, "french_light"), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	words := map[string]bool{}
-	for _, w := range strings.Fields(content.AnalyzeKeywords(text, "french_light")) {
-		words[w] = true
-	}
-	score := 0
-	seen := map[string]bool{}
-	for _, t := range terms {
-		if words[t] && !seen[t] {
-			score++
-			seen[t] = true
+
+// termCoverage counts the distinct query terms text contains, under whichever
+// of the fields' analyzers matches the most.
+func termCoverage(text, query string, analyzers []keywords.Analyzer) int {
+	best := 0
+	for _, a := range analyzers {
+		words := map[string]bool{}
+		for _, w := range strings.Fields(a.Analyze(text)) {
+			words[w] = true
 		}
+		score := 0
+		seen := map[string]bool{}
+		for _, t := range strings.Fields(a.Analyze(query)) {
+			if words[t] && !seen[t] {
+				score++
+				seen[t] = true
+			}
+		}
+		best = max(best, score)
 	}
-	return score
+	return best
 }
 
 // Refill in small, deterministically ordered pages instead of choosing a
 // highlight from one storage-order slice. A complete query-term match cannot
 // be improved by later passages. The ceiling bounds work for very long items.
-func (s *Store) itemPassages(ctx context.Context, collection, where, query string, limit, items int, grouped bool) ([]itemRow, error) {
+func (s *Store) itemPassages(ctx context.Context, collection, where, query string, analyzers []keywords.Analyzer, limit, items int, grouped bool) ([]itemRow, error) {
 	const ceiling = 2400
 	page := min(128, max(8, 8*limit))
-	terms := termCoverage(query, query)
+	terms := termCoverage(query, query, analyzers)
 	best := map[string]int{}
 	var rows []itemRow
 	for offset := 0; offset < ceiling; offset += page {
@@ -304,7 +328,7 @@ func (s *Store) itemPassages(ctx context.Context, collection, where, query strin
 		rows = append(rows, batch...)
 		for _, r := range batch {
 			key := r.GenerationID + "/" + r.VersionID
-			coverage := termCoverage(r.Text, query)
+			coverage := termCoverage(r.Text, query, analyzers)
 			if old, ok := best[key]; !ok || coverage > old {
 				best[key] = coverage
 			}
@@ -335,8 +359,9 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 	}
 	sparse, dense := map[string]content.Candidate{}, map[string]content.Candidate{}
 	type partition struct {
-		routes []retrieval.Route
-		fields []corpus.Field
+		routes    []retrieval.Route
+		fields    []corpus.Field
+		analyzers []keywords.Analyzer
 	}
 	partitions := map[string]*partition{}
 	var partitionKeys []string
@@ -351,7 +376,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 		b, _ := json.Marshal(fields)
 		key := string(b)
 		if partitions[key] == nil {
-			partitions[key] = &partition{fields: fields}
+			partitions[key] = &partition{fields: fields, analyzers: fieldAnalyzers(fields)}
 			partitionKeys = append(partitionKeys, key)
 		}
 		partitions[key].routes = append(partitions[key].routes, r)
@@ -367,29 +392,33 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 			if where == "" {
 				continue
 			}
+			// The unnamed request scores the fields' own text; each analyzer then
+			// scores its copies with the query analyzed the same way.
+			requests := append([]keywords.Analyzer{{}}, p.analyzers...)
+			passageAnalyzers := p.analyzers
+			if len(passageAnalyzers) == 0 {
+				passageAnalyzers = []keywords.Analyzer{keywords.Folded}
+			}
 			items := map[string]content.Candidate{}
 			// An ownerless item may not yet have passages from the selected
 			// ingestion owner. Refill before allowing it to consume the page.
 			for depth := limit; ; depth = min(2400, depth*2) {
 				more := false
-				for _, normalized := range []bool{false, true} {
+				for _, analyzer := range requests {
 					var props []string
 					for _, f := range p.fields {
 						property := itemProperty(f)
-						if normalized {
-							if f.Analyzer == "" {
+						if analyzer.Name != "" {
+							if f.Analyzer != analyzer.Name {
 								continue
 							}
-							property += "_fr"
+							property = analyzedProperty(f, analyzer)
 						}
 						props = append(props, property+"^"+strconv.Itoa(f.EffectiveBoost()))
 					}
-					if len(props) == 0 {
-						continue
-					}
 					query := q.Query
-					if normalized {
-						query = content.AnalyzeKeywords(query, "french_light")
+					if analyzer.Name != "" {
+						query = analyzer.Analyze(query)
 					}
 					if strings.TrimSpace(query) == "" {
 						continue
@@ -416,7 +445,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 				for _, c := range ordered(items) {
 					ids = append(ids, equal("versionId", c.VersionID))
 				}
-				rows, err := s.itemPassages(ctx, collection, and(passageWhere, or(ids...)), q.Query, limit, len(items), grouped)
+				rows, err := s.itemPassages(ctx, collection, and(passageWhere, or(ids...)), q.Query, passageAnalyzers, limit, len(items), grouped)
 				if err != nil {
 					return nil, err
 				}
@@ -424,7 +453,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 				// every returned ID is subsequently hydrated from canonical storage.
 				coverage := map[string]int{}
 				for _, r := range rows {
-					coverage[r.SegmentID] = termCoverage(r.Text, q.Query)
+					coverage[r.SegmentID] = termCoverage(r.Text, q.Query, passageAnalyzers)
 				}
 				sort.Slice(rows, func(i, j int) bool {
 					a, b := coverage[rows[i].SegmentID], coverage[rows[j].SegmentID]
@@ -446,7 +475,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 						continue
 					}
 					chosen[id] = true
-					// Preserve the selected passage on equal original/French scores.
+					// Preserve the selected passage on equal original/analyzed scores.
 					if prev, ok := sparse[id]; !ok || c.Score > prev.Score {
 						sparse[id] = c
 					}

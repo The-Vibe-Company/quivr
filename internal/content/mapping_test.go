@@ -102,20 +102,3 @@ func TestItemTextSelectors(t *testing.T) {
 		t.Fatal("Part prefix ignored")
 	}
 }
-
-func TestFrenchLightKeywordCopy(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{
-		{"Les élections françaises", "election francais"},
-		{"chevaux cheval", "cheval cheval"},
-		{"actrices acteurs", "acteu acteu"},
-		{"LE port et la mer", "port mer"},
-		{"cœur coeur ŒUVRES oeuvres", "coeu coeu oeuvr oeuvr"},
-	} {
-		if got := content.AnalyzeKeywords(tc.in, "french_light"); got != tc.want {
-			t.Errorf("%q: %q, want %q", tc.in, got, tc.want)
-		}
-	}
-	if got := content.AnalyzeKeywords("Élections françaises", ""); got != "Élections françaises" {
-		t.Fatalf("original text changed: %q", got)
-	}
-}
