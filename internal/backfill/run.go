@@ -368,20 +368,18 @@ func (b Backfiller) prepare(ctx context.Context, org string, t Target, c Candida
 	if err != nil {
 		return nil, err
 	}
-	all := make([]content.EmbeddingData, 0, len(covered)+len(data))
+	var reuse []content.Embedding
 	for _, e := range covered {
-		if targets[e.SpaceID] {
-			continue
+		if !targets[e.SpaceID] {
+			reuse = append(reuse, e)
 		}
-		_, vector, err := b.Content.LoadEmbedding(ctx, org, e.DerivationID)
-		if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrArtifactMissing) || errors.Is(err, content.ErrArtifactCorrupt) || errors.Is(err, content.ErrConflict) {
-			// A stored vector no retry can read: the Version needs a rebuild.
-			return skip(SkipArtifactUnavailable)
-		}
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, content.EmbeddingData{Artifact: e, Vector: vector})
+	}
+	all, err := loadCoveredData(ctx, b.Content, org, reuse)
+	if errors.Is(err, corpus.ErrNotFound) || errors.Is(err, content.ErrArtifactMissing) || errors.Is(err, content.ErrArtifactCorrupt) || errors.Is(err, content.ErrConflict) {
+		return skip(SkipArtifactUnavailable)
+	}
+	if err != nil {
+		return nil, err
 	}
 	all = append(all, data...)
 	if c.Independent {
@@ -409,4 +407,23 @@ func (b Backfiller) prepare(ctx context.Context, org string, t Target, c Candida
 	return func(ctx context.Context) error {
 		return b.Store.CoverBackfill(ctx, org, op.ID, g, c.VersionID, artifacts)
 	}, nil
+}
+
+// Batch-capable content reads each matrix once; legacy adapters keep their
+// single-artifact contract during the rolling upgrade.
+func loadCoveredData(ctx context.Context, reader Content, org string, artifacts []content.Embedding) ([]content.EmbeddingData, error) {
+	if batch, ok := reader.(interface {
+		LoadEmbeddingData(context.Context, []content.Embedding) ([]content.EmbeddingData, error)
+	}); ok {
+		return batch.LoadEmbeddingData(ctx, artifacts)
+	}
+	var data []content.EmbeddingData
+	for _, e := range artifacts {
+		_, v, err := reader.LoadEmbedding(ctx, org, e.DerivationID)
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, content.EmbeddingData{Artifact: e, Vector: v})
+	}
+	return data, nil
 }

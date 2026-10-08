@@ -1000,7 +1000,7 @@ type Normalization struct {
 	PluginVersion  string `json:"plugin_version"`
 	PluginAPI      string `json:"plugin_api"`
 	Contribution   string `json:"contribution"`
-	InvocationID   string `json:"invocation_id"`
+	InvocationID   string `json:"invocation_id,omitempty"`
 	IdempotencyKey string `json:"idempotency_key"`
 	InputSHA256    string `json:"input_sha256"`
 	// Fallback is set when an optional route's plugin failed and the built-in

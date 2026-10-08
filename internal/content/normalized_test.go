@@ -163,42 +163,53 @@ func (n normalizations) Normalized(_ context.Context, _, versionID string) (cont
 }
 
 func TestMaterializePublishesTheNormalizedManifestWithProvenance(t *testing.T) {
-	blobs := memoryBlobs{}
-	manifest := content.Manifest{Kind: "manifest", Parts: []content.Part{{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: "Title"}}, {Key: "section-1", Role: "section", Content: content.Text{Kind: "text", Text: "Body"}}}}
-	raw, _ := json.Marshal(manifest)
-	stored, _ := blobs.Put(context.Background(), "org_a", raw)
-	command := routedCommand("text/markdown")
-	command.Content.BlobSHA256 = content.Hash(markdownBytes)
-	command.Provenance = map[string]any{"source_blob_ids": []any{"blob_md"}, "producer": "client"}
-	repo := &workRepository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", VersionID: "version_1", Command: command}}
-	provenance := content.Normalization{PluginID: "acme.markdown", PluginVersion: "1.0.0", PluginAPI: "0.1.0", Contribution: "normalizer", InvocationID: "inv_1", IdempotencyKey: "key", InputSHA256: content.Hash(markdownBytes)}
-	service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: blobs, Normalizations: normalizations{"version_1": {Manifest: stored, Provenance: provenance}}}
-	if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
-		t.Fatal(err)
-	}
-	if len(repo.published) != 1 {
-		t.Fatalf("published %d", len(repo.published))
-	}
-	got := repo.published[0].Command.Provenance
-	if got["producer"] != "client" || got["source_blob_ids"].([]any)[0] != "blob_md" {
-		t.Fatalf("acquirer provenance changed: %+v", got)
-	}
-	n, ok := got["normalization"].(map[string]any)
-	if !ok || n["plugin_id"] != "acme.markdown" || n["invocation_id"] != "inv_1" || n["input_sha256"] != content.Hash(markdownBytes) || n["contribution"] != "normalizer" {
-		t.Fatalf("normalization provenance %+v", got)
-	}
-	if _, leaked := command.Provenance["normalization"]; leaked {
-		t.Fatal("the accepted Command was mutated")
-	}
-	// The published Manifest and Part text come from the normalizer output.
-	var found bool
-	for _, data := range blobs {
-		if string(data) == "Title\nBody" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("normalized text not published")
+	for _, invocationID := range []string{"inv_1", ""} {
+		t.Run("invocation="+invocationID, func(t *testing.T) {
+			blobs := memoryBlobs{}
+			manifest := content.Manifest{Kind: "manifest", Parts: []content.Part{{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: "Title"}}, {Key: "section-1", Role: "section", Content: content.Text{Kind: "text", Text: "Body"}}}}
+			raw, _ := json.Marshal(manifest)
+			stored, _ := blobs.Put(context.Background(), "org_a", raw)
+			command := routedCommand("text/markdown")
+			command.Content.BlobSHA256 = content.Hash(markdownBytes)
+			command.Provenance = map[string]any{"source_blob_ids": []any{"blob_md"}, "producer": "client"}
+			repo := &workRepository{work: content.Work{Organization: "org_a", ReceiptID: "receipt_1", VersionID: "version_1", Command: command}}
+			provenance := content.Normalization{PluginID: "acme.markdown", PluginVersion: "1.0.0", PluginAPI: "0.1.0", Contribution: "normalizer", InvocationID: invocationID, IdempotencyKey: "key", InputSHA256: content.Hash(markdownBytes)}
+			service := content.Service{Submissions: repo, Receipts: repo, RecordStore: repo, Versions: repo, Materialization: repo, Blobs: blobs, Normalizations: normalizations{"version_1": {Manifest: stored, Provenance: provenance}}}
+			if err := service.Materialize(context.Background(), "org_a", "receipt_1"); err != nil {
+				t.Fatal(err)
+			}
+			if len(repo.published) != 1 {
+				t.Fatalf("published %d", len(repo.published))
+			}
+			got := repo.published[0].Command.Provenance
+			if got["producer"] != "client" || got["source_blob_ids"].([]any)[0] != "blob_md" {
+				t.Fatalf("acquirer provenance changed: %+v", got)
+			}
+			n, ok := got["normalization"].(map[string]any)
+			if !ok || n["plugin_id"] != "acme.markdown" || n["input_sha256"] != content.Hash(markdownBytes) || n["contribution"] != "normalizer" {
+				t.Fatalf("normalization provenance %+v", got)
+			}
+			if invocationID == "" {
+				if _, present := n["invocation_id"]; present {
+					t.Fatalf("omitted audit invocation ID appeared in published provenance: %v", n)
+				}
+			} else if n["invocation_id"] != invocationID {
+				t.Fatalf("retained audit invocation ID = %v, want %q", n["invocation_id"], invocationID)
+			}
+			if _, leaked := command.Provenance["normalization"]; leaked {
+				t.Fatal("the accepted Command was mutated")
+			}
+			// The published Manifest and Part text come from the normalizer output.
+			var found bool
+			for _, data := range blobs {
+				if string(data) == "Title\nBody" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("normalized text not published")
+			}
+		})
 	}
 }
 

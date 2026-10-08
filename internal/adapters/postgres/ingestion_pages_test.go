@@ -192,10 +192,21 @@ func TestPagedIngestionResumesCommittedPassages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var covered int
-	if err = pool.QueryRow(ctx, `SELECT count(*) FROM embedding_coverage ec JOIN segments s ON (s.organization,s.id)=(ec.organization,ec.segment_id) WHERE ec.organization=$1 AND s.version_id=$2 AND ec.generation_id=$3`, scope.Organization, v.ID, active.ID).Scan(&covered); err != nil {
+	candidates := make([]content.Candidate, len(seg.Segments))
+	for i, segment := range seg.Segments {
+		candidates[i] = content.Candidate{SegmentID: segment.ID, GenerationID: active.ID}
+	}
+	located, err := store.Hydrate(ctx, scope, candidates)
+	if err != nil {
 		t.Fatal(err)
 	}
+	covered := 0
+	for _, item := range located {
+		if item.EmbeddingID != "" {
+			covered++
+		}
+	}
+
 	if covered != 5 || projection.vectors != 5 || projection.segmentation.Segments[4].End != 10 || len(third.calls) != 0 {
 		t.Fatalf("recovery lost active coverage: covered=%d projected=%d calls=%v", covered, projection.vectors, third.calls)
 	}

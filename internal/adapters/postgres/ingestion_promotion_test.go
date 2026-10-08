@@ -211,6 +211,13 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 	if _, err = pool.Exec(ctx, `DELETE FROM embedding_coverage WHERE organization=$1 AND segment_id=$2 AND space_id=$3`, scope.Organization, publication.segmentation.Segments[1].ID, "certified.ingestion-valid.small@1"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = pool.Exec(ctx, `UPDATE compact_embedding_coverage c SET covered=set_bit(c.covered,e.ordinal,0)
+ FROM compact_embeddings e JOIN storage_organizations o ON o.id=e.organization_id
+ JOIN storage_segments k ON (k.organization_id,k.id)=(e.organization_id,e.segment_id)
+ JOIN storage_spaces sp ON sp.id=e.space_id
+ WHERE c.organization_id=e.organization_id AND c.file_id=e.file_id AND o.organization=$1 AND k.segment_id=$2 AND sp.space_id=$3`, scope.Organization, publication.segmentation.Segments[1].ID, "certified.ingestion-valid.small@1"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = registryService.Activate(ctx, operator, b.Registration); !errors.Is(err, registry.ErrConflict) {
 		t.Fatalf("activation with a target vector gap: %v", err)
 	}

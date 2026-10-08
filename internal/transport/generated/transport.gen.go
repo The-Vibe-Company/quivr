@@ -2377,7 +2377,9 @@ type NormalizationProvenance struct {
 	} `json:"fallback,omitempty"`
 	IdempotencyKey string `json:"idempotency_key"`
 	InputSha256    string `json:"input_sha256"`
-	InvocationId   string `json:"invocation_id"`
+
+	// InvocationId Present when import audit detail is retained, or when it identifies a failed invocation. Omitted for successful normalization without audit detail.
+	InvocationId *string `json:"invocation_id,omitempty"`
 
 	// PluginApi Plugin API version the engine invoked.
 	PluginApi     string `json:"plugin_api"`

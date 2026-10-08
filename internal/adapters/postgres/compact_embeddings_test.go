@@ -1,0 +1,270 @@
+package postgres_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/processing"
+)
+
+func TestPackedVectorsReuseCanonicalPartialOutput(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool := adapterPool(t, ctx)
+	if err := postgres.ActivateCompactStorage(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	org := fmt.Sprintf("compact-vectors-%d", time.Now().UnixNano())
+	scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write", "content:write", "content:read"}, Corpora: []string{"*"}}
+	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "files", Name: "Vector files"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects := &objectMemory{objects: map[string][]byte{}}
+	stores := contentStores(pool)
+	service := content.Service{Submissions: stores, Materialization: stores, Versions: stores, RecordStore: stores, Receipts: stores, Baseline: stores, Embeddings: stores, Blobs: objects}
+	for _, scenario := range []struct {
+		name                      string
+		partial, race, activation bool
+	}{{name: "fresh"}, {name: "partial", partial: true}, {name: "concurrent", race: true}, {name: "activation", activation: true}} {
+		partial := scenario.partial
+		cmd := content.Command{Key: scenario.name, Source: content.Source{CorpusID: c.ID, Namespace: "example", RecordKey: scenario.name}, Content: content.Text{Kind: "text", Text: "First second"}}
+		receipt, err := service.Accept(ctx, scope, cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = service.Materialize(ctx, org, receipt.ID); err != nil {
+			t.Fatal(err)
+		}
+		v, err := service.ProcessingVersion(ctx, org, receipt.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seg, err := content.PluginSegmentation(org, v, "plugin:core.ingest@1.0.0", json.RawMessage(`{"producer":"example"}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 5, Provenance: json.RawMessage(`null`)}, {PartKey: "body", Start: 6, End: 12}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = service.SaveSegmentation(ctx, org, v, seg); err != nil {
+			t.Fatal(err)
+		}
+		g, err := stores.Generation(ctx, org, c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		space := content.VectorSpace{ID: g.SpaceID, Dimensions: 2}
+		if err = pool.QueryRow(ctx, `SELECT manifest FROM vector_spaces WHERE id=$1`, space.ID).Scan(&space.Manifest); err != nil {
+			t.Fatal(err)
+		}
+		data := []content.EmbeddingData{}
+		for i, p := range seg.Segments {
+			data = append(data, content.EmbeddingData{Artifact: content.EmbeddingInput(org, c.ID, v, seg, p, space, "plugin:core.ingest@1.0.0"), Vector: []float32{float32(1 + 2*i), float32(2 + 2*i)}})
+		}
+		originalID := ""
+		if partial {
+			original, err := service.SaveEmbedding(ctx, data[0].Artifact, space, data[0].Vector)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalID = original.ID
+			data[0].Vector = []float32{9, 9}
+		}
+		before := len(objects.objects)
+		var packed []content.EmbeddingData
+		expectedVectors, expectedObjects := [][]float32{{1, 2}, {3, 4}}, 1
+		if scenario.race {
+			gated := &concurrentVectorBlobs{Blobs: objects, arrived: make(chan struct{}, 2), release: make(chan struct{})}
+			service.Blobs = gated
+			alternative := []content.EmbeddingData{{Artifact: data[0].Artifact, Vector: []float32{7, 8}}, {Artifact: data[1].Artifact, Vector: []float32{5, 6}}}
+			type result struct {
+				data []content.EmbeddingData
+				err  error
+			}
+			results := make(chan result, 2)
+			for _, candidate := range [][]content.EmbeddingData{data, alternative} {
+				go func(candidate []content.EmbeddingData) {
+					d, err := service.SaveEmbeddingGroup(ctx, seg, space, candidate)
+					results <- result{d, err}
+				}(candidate)
+			}
+			for range 2 {
+				select {
+				case <-gated.arrived:
+				case <-ctx.Done():
+					close(gated.release)
+					t.Fatal(ctx.Err())
+				}
+			}
+			close(gated.release)
+			first, second := <-results, <-results
+			if first.err != nil || second.err != nil {
+				t.Fatalf("concurrent adoption %v %v", first.err, second.err)
+			}
+			packed = first.data
+			if len(packed) != 2 || len(second.data) != 2 {
+				t.Fatal("incomplete concurrent winner")
+			}
+			if packed[0].Vector[0] == 7 {
+				expectedVectors = [][]float32{{7, 8}, {5, 6}}
+			}
+			for i := range packed {
+				if packed[i].Artifact.ID != second.data[i].Artifact.ID || !slices.Equal(packed[i].Vector, second.data[i].Vector) {
+					t.Fatal("concurrent writers did not adopt one canonical file")
+				}
+			}
+			expectedObjects = 2 // The losing immutable upload is retained for guarded cleanup.
+		} else {
+			if scenario.activation {
+				if _, err = pool.Exec(ctx, `UPDATE storage_state SET compact=false`); err != nil {
+					t.Fatal(err)
+				}
+				service.Blobs = &activateOnPut{Blobs: objects, activate: func() error { return postgres.ActivateCompactStorage(ctx, pool) }}
+				expectedObjects = 5 // Abandoned legacy uploads precede the fenced retry.
+			}
+			packed, err = service.SaveEmbeddingGroup(ctx, seg, space, data)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		service.Blobs = objects
+		if scenario.activation {
+			var legacy int
+			if err = pool.QueryRow(ctx, `SELECT count(*) FROM embedding_artifacts WHERE organization=$1 AND segment_id=ANY($2::text[])`, org, []string{seg.Segments[0].ID, seg.Segments[1].ID}).Scan(&legacy); err != nil || legacy != 0 {
+				t.Fatalf("legacy writes crossed activation: count=%d %v", legacy, err)
+			}
+		}
+		var files int
+		if err = pool.QueryRow(ctx, `SELECT count(*) FROM embedding_files f JOIN storage_organizations o ON o.id=f.organization_id WHERE o.organization=$1 AND f.segmentation_id=$2`, org, seg.ID).Scan(&files); err != nil {
+			t.Fatal(err)
+		}
+		if files != 1 || (!scenario.activation && len(objects.objects) != before+expectedObjects) || (scenario.activation && len(objects.objects) > before+expectedObjects) {
+			t.Fatalf("files=%d additional objects=%d; want one current descriptor and bounded candidate uploads", files, len(objects.objects)-before)
+		}
+		if len(packed) != 2 || !slices.Equal(packed[0].Vector, expectedVectors[0]) || !slices.Equal(packed[1].Vector, expectedVectors[1]) {
+			t.Fatalf("canonical partial output changed: %+v", packed)
+		}
+		if partial && packed[0].Artifact.ID != originalID {
+			t.Fatal("conversion changed public artifact ID")
+		}
+		inputs := []content.Embedding{data[0].Artifact, data[1].Artifact}
+		recovered, complete, err := service.LoadEmbeddingGroup(ctx, inputs)
+		if err != nil || !complete || len(recovered) != 2 || !slices.Equal(recovered[0].Vector, expectedVectors[0]) || !slices.Equal(recovered[1].Vector, expectedVectors[1]) {
+			t.Fatalf("stored group reuse: %+v complete=%v err=%v", recovered, complete, err)
+		}
+		// A new generation must recover the same float32s with the provider disabled.
+		rebuildGeneration := g
+		rebuildGeneration.ID = "rebuilt-generation"
+		deriver := processing.PluginDeriver{Content: service, Plugin: storedVectorProvider{space: space, recipe: seg.Recipe}}
+		_, reused, err := deriver.Derive(ctx, org, c.ID, v, rebuildGeneration)
+		if err != nil || len(reused) != 2 || !slices.Equal(reused[0].Vector, expectedVectors[0]) || !slices.Equal(reused[1].Vector, expectedVectors[1]) || reused[0].Artifact.ID != packed[0].Artifact.ID {
+			t.Fatalf("rebuild called disabled provider or changed vectors: %v %+v", err, reused)
+		}
+
+		for _, d := range packed {
+			loaded, vector, err := service.LoadEmbedding(ctx, org, d.Artifact.DerivationID)
+			if err != nil || loaded.ID != d.Artifact.ID || !slices.Equal(vector, d.Vector) {
+				t.Fatalf("mixed-format reader: %v %+v", err, loaded)
+			}
+		}
+		if partial {
+			// A historical derivation with another producer remains readable until
+			// explicitly retired, even beside the canonical compact tuple.
+			prior := data[0].Artifact
+			prior.Producer = "plugin:alternate@1.0.0"
+			prior.DerivationID = content.StableID("embedding-derivation", org, prior.SegmentID, space.ID, prior.InputSHA, prior.Producer)
+			legacy, err := service.SaveEmbedding(ctx, prior, space, []float32{9, 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, vector, err := service.LoadEmbedding(ctx, org, legacy.DerivationID)
+			if err != nil || loaded.ID != legacy.ID || !slices.Equal(vector, []float32{9, 10}) {
+				t.Fatalf("historical derivation hidden by compact tuple: %v %+v %v", err, loaded, vector)
+			}
+		}
+		if err = service.Promote(ctx, org, seg, g); err != nil {
+			t.Fatal(err)
+		}
+		if err = service.CommitEnrichment(ctx, org, seg, g, packed); err != nil {
+			t.Fatal(err)
+		}
+		if err = service.CommitEnrichment(ctx, org, seg, g, packed); err != nil {
+			t.Fatal(err)
+		}
+		located, err := stores.Hydrate(ctx, scope, []content.Candidate{{SegmentID: seg.Segments[0].ID, GenerationID: g.ID}})
+		if err != nil || located[0].EmbeddingID != packed[0].Artifact.ID {
+			t.Fatalf("search hydration lost compact identity: %v %+v", err, located)
+		}
+
+		var covered []byte
+		if err = pool.QueryRow(ctx, `SELECT covered FROM compact_embedding_coverage WHERE file_id=$1 AND generation_id=$2`, packed[0].Artifact.File.ID, g.ID).Scan(&covered); err != nil {
+			t.Fatal(err)
+		}
+		if !content.Present(covered, 0) || !content.Present(covered, 1) {
+			t.Fatalf("coverage %v", covered)
+		}
+
+	}
+}
+
+// Only the external embedding boundary is disabled; storage/reuse is real.
+type storedVectorProvider struct {
+	space  content.VectorSpace
+	recipe string
+}
+
+func (p storedVectorProvider) Descriptor() processing.IngestionDescriptor {
+	return processing.IngestionDescriptor{Recipe: p.recipe, Producer: p.recipe, Spaces: []string{p.space.ID}, VectorSpaces: map[string]content.VectorSpace{p.space.ID: p.space}}
+}
+func (storedVectorProvider) SegmentAndEmbed(context.Context, string, string, content.Version, []string) ([]processing.PluginSegment, error) {
+	return nil, errors.New("embedding provider disabled")
+}
+
+// The external object-store boundary holds both candidate uploads before SQL
+// arbitration. This forces the race without sleeps or a production test seam.
+type concurrentVectorBlobs struct {
+	content.Blobs
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func (b *concurrentVectorBlobs) Put(ctx context.Context, org string, raw []byte) (content.Blob, error) {
+	blob, err := b.Blobs.Put(ctx, org, raw)
+	if err == nil && bytes.HasPrefix(raw, []byte("QVEC")) {
+		select {
+		case b.arrived <- struct{}{}:
+		default:
+		}
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+			return content.Blob{}, ctx.Err()
+		}
+	}
+	return blob, err
+}
+
+// Activation lands while immutable candidate objects are being uploaded, before
+// the database writer can acquire its routing fence. No timing waits are used.
+type activateOnPut struct {
+	content.Blobs
+	activate func() error
+	done     bool
+}
+
+func (b *activateOnPut) Put(ctx context.Context, org string, raw []byte) (content.Blob, error) {
+	if !b.done {
+		b.done = true
+		if err := b.activate(); err != nil {
+			return content.Blob{}, err
+		}
+	}
+	return b.Blobs.Put(ctx, org, raw)
+}

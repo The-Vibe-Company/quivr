@@ -80,7 +80,7 @@ class NormalizationProvenance(Model):
     plugin_version: str
     plugin_api: str
     contribution: Literal["normalizer"] = "normalizer"
-    invocation_id: str
+    invocation_id: str | None = None
     idempotency_key: str
     input_sha256: str
     fallback: NormalizationProvenanceFallback | None = None
