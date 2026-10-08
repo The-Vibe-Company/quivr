@@ -110,7 +110,7 @@ materialized, segmented, retrieval ready, enriched and evaluated), measured from
 the common arrival. Enriched is when hybrid search can use the document's vectors.
 These times come from the database's clock. The report records its measured
 offset from the driver's clock, which matters when Docker runs in a VM, and the
-most by which that measurement can overstate step times.
+maximum amount by which that measurement can overstate step times.
 The receiver gives the time until all alerts of a document arrived. After the
 burst, public hybrid search checks every document. The run fails if any document
 is missing, an alert is missing, or the receiver saw a notice more than once.

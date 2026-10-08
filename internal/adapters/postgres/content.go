@@ -84,8 +84,10 @@ func eventArguments(ctx context.Context, event eventInput) []any {
 	return []any{event.Organization, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID, telemetry.Encode(ctx)}
 }
 
-// The append, its Record's queue observation and the checkpoint acknowledgement
-// travel in one round trip: the caller holds the journal lock until commit.
+// Outside a journal group, the append, its Record's queue observation and the
+// checkpoint acknowledgement travel in one round trip: the caller holds the
+// journal lock until commit. Inside a group, the append and acknowledgement run
+// directly and the Record joins the group's single observation before commit.
 func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, error) {
 	var sequence int64
 	if journalGroupOf(ctx) != nil {

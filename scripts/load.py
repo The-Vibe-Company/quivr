@@ -416,6 +416,8 @@ class Workload:
         durable = {}
         while time.monotonic() < deadline and not self.stop.is_set():
             for r in accepted:
+                if time.monotonic() >= deadline:
+                    break
                 if not r.get('version'):
                     row, receipt = call(self.endpoint(), self.token, 'GET', '/v0/ingestion-receipts/' + r['receipt'])
                     if row['status'] == 200 and receipt.get('version_id'):
@@ -432,7 +434,7 @@ class Workload:
             verified = sum(pool.map(self.verify, accepted))
         stages = {stage: distribution([(times[stage] - anchor)*1000 for times in durable.values() if times.get(stage)])
                   for stage in STEPS}
-        alerted = [max(arrivals) for r in accepted if r.get('version') and
+        alerted = [max(arrivals) for r in accepted if self.s['alerts'] and r.get('version') and
                    len(arrivals := self.receiver.arrivals(r['version'])) == self.s['alerts']]
         expected = len(accepted) * self.s['alerts']
         received = sum(len(self.receiver.arrivals(r['version'])) for r in accepted if r.get('version'))
