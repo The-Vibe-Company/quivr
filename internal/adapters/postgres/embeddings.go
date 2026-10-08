@@ -273,6 +273,7 @@ func prepareEnrichment(ctx context.Context, tx pgx.Tx, org string, seg content.S
 	// This retains routing -> journal -> mutable-row lock ordering.
 	guarded, evaluationsPrepared := false, false
 	if group := journalGroupOf(ctx); group != nil && eligible && !ownerPrepared && stage != nil {
+		group.preparedVectors[seg.VersionID] = true
 		group.beforeFinishes = append(group.beforeFinishes, func() error {
 			if err := read(true); err != nil {
 				return err

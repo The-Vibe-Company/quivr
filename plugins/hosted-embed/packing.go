@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/The-Vibe-Company/quivr/sdks/go/quivrplugin"
@@ -18,9 +19,6 @@ type paragraph struct {
 	run        int
 }
 
-func (c configuration) gemmaTemplate() bool {
-	return c.DocumentTemplate == "gemma" || c.DocumentTemplate == "auto" && strings.Contains(strings.ToLower(c.Model), "embeddinggemma")
-}
 func (c configuration) documentTitle(parts []quivrplugin.IngestPart, includeHeadline bool) (string, error) {
 	title := ""
 	titles := 0
@@ -60,18 +58,10 @@ func (c configuration) documentInput(title, body string) string {
 		body = title + sourceSeparator + body
 		title = ""
 	}
-	if c.gemmaTemplate() {
-		if title == "" {
-			title = "none"
-		}
-		return "title: " + title + " | text: " + body
+	if title == "" {
+		title = "none"
 	}
-	prefix := c.DocumentPrefix
-	// Title context is opt-in to generic templates; preserve their provider format.
-	if title != "" {
-		return prefix + title + sourceSeparator + body
-	}
-	return prefix + body
+	return strings.NewReplacer("{prefix}", c.DocumentPrefix, "{title}", title, "{text}", body).Replace(c.DocumentTemplate)
 }
 func encodeOne(ctx context.Context, t tokenCounter, text string, special bool) (tokenEncoding, error) {
 	out, err := t.Encode(ctx, []tokenInput{{Text: text, Special: special}})
@@ -133,6 +123,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "more than 256 KiB of text")
 	}
 	titleOnly := false
+	titleOnlyContext := false
 	modelBody := func(body string) string {
 		if titleOnly {
 			return ""
@@ -143,6 +134,13 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	if err != nil {
 		return nil, nil, err
 	}
+	inputForBody := func(body string) string {
+		body = modelBody(body)
+		if titleOnlyContext && title != "" {
+			body = title + sourceSeparator + body
+		}
+		return c.documentInput(title, body)
+	}
 	// Body budget is separate from the model's full templated-input window.
 	fits := func(group []paragraph) (bool, int, error) {
 		text := paragraphText(group)
@@ -150,7 +148,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		if err != nil {
 			return false, 0, err
 		}
-		full, err := encodeOne(ctx, t, c.documentInput(title, modelBody(text)), true)
+		full, err := encodeOne(ctx, t, inputForBody(text), true)
 		if err != nil {
 			return false, 0, err
 		}
@@ -171,7 +169,16 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		}
 	}
 	if !hasBody {
-		titleOnly = c.TitleSource != "none"
+		titleOnly = c.TitleSource == "title" && strings.Contains(c.DocumentTemplate, "{title}")
+		if !titleOnly {
+			// The headline is already the source passage. Preserve selected
+			// context even when the template has no separate title field.
+			titleOnlyContext = c.TitleSource == "title"
+			title, err = c.documentTitle(parts, false)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		bodyParts = nil
 		for _, part := range parts {
 			if part.Role == "title" && strings.TrimSpace(part.Text) != "" {
@@ -334,7 +341,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	for n, group := range groups {
 		ranges := paragraphRanges(group)
 		body := paragraphText(group)
-		input := c.documentInput(title, modelBody(body))
+		input := inputForBody(body)
 		e, err := encodeOne(ctx, t, input, true)
 		if err != nil {
 			return nil, nil, err
@@ -343,4 +350,26 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		inputs[n] = input
 	}
 	return segments, inputs, nil
+}
+
+// Prefer the latest paragraph, then line, then sentence end in the latter
+// half of a window. Hard cuts still preserve every source code point.
+func snap(runes []rune, start, end int) int {
+	floor := start + (end-start)/2
+	for k := end; k > floor; k-- {
+		if k > start+1 && runes[k-1] == '\n' && runes[k-2] == '\n' {
+			return k
+		}
+	}
+	for k := end; k > floor; k-- {
+		if runes[k-1] == '\n' {
+			return k
+		}
+	}
+	for k := end; k > floor; k-- {
+		if k > start+1 && unicode.IsSpace(runes[k-1]) && strings.ContainsRune(".!?。！？", runes[k-2]) {
+			return k
+		}
+	}
+	return end
 }

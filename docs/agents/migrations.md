@@ -3,8 +3,7 @@
 In-place upgrades from `2.0.0-alpha.6` and earlier are unsupported: reset, or
 export from the old installation and re-import into a fresh one. Within the
 supported window, keep the previous binary usable on the expanded schema.
-Operators apply expansions before rolling the API and worker, and apply
-contracts only after retiring the previous binary. There are no down migrations.
+Operators apply expansions before rolling the API and worker, and apply contracts only after retiring the previous binary. There are no down migrations.
 
 ## Write the expansion
 
@@ -17,8 +16,9 @@ write successfully. Keep later expansions independent of any deferred contract.
 `contracts/http/v0/checks/requirements.txt`. Its conservative allowlist accepts
 permanent tables without foreign keys into existing tables, sequences, enum types,
 non-concurrent indexes on tables created earlier in the same file, table reloption SETs,
-schema-qualified RESTRICT drops of nonunique performance indexes declared in earlier SQL, and added columns without new checks, uniqueness or references.
+schema-qualified RESTRICT drops of declared nonunique performance indexes from earlier SQL, added columns without new checks, uniqueness or references, and dropping NOT NULL while retaining other constraints.
 Unknown or unique index drops remain rejected. Mixed ALTER commands are checked separately.
+Dropping NOT NULL preserves rollback only while writers supply the old required value. Document feature use that closes that window and drain all previous readers and writers first. API-only alerts close rollback; see the release notes for rollout and recovery.
 Renames, type changes, constraints and index creation on existing tables need a contract. Backfills use resumable work. The lint is a guard, not a semantic proof.
 
 For a rename, add the new field in release N, keep reading the old field and

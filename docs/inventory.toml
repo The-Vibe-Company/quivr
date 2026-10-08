@@ -60,6 +60,7 @@ excluded = [
 ]
 
 [pages]
+"deploy/compose/README.md" = { audience = "functional", kind = "guide", summary = "size PostgreSQL connections and memory for imports" }
 "AGENTS.md" = { audience = "contributor", kind = "guide", summary = "rules every contributor and coding agent follows in this repository" }
 "CONTEXT.md" = { audience = "contributor", kind = "concept", summary = "the domain language: Corpus, Record, Version, Manifest and the other terms" }
 "README.md" = { audience = "functional", kind = "index", summary = "the project overview: why Quivr, architecture, quickstart and what works today" }
@@ -124,6 +125,7 @@ excluded = [
 
 # Maximum number of lines per page, in path order.
 [budgets]
+"deploy/compose/README.md" = 85
 "deploy/modal/README.md" = 100
 "conformance/README.md" = 125
 "docs/eval-private-working.md" = 90
@@ -138,7 +140,7 @@ excluded = [
 "CONTEXT.md" = 327
 "deploy/images/README.md" = 76
 "deploy/railway/autoscaler/README.md" = 75
-"deploy/railway/README.md" = 419
+"deploy/railway/README.md" = 450
 "deploy/railway/hosted-embeddings.md" = 107
 "docs/agents/documentation.md" = 55
 "docs/agents/domain.md" = 45
@@ -156,7 +158,7 @@ excluded = [
 "plugins/push-source/README.md" = 21
 "plugins/rss/README.md" = 60
 "plugins/x-list/README.md" = 60
-"quivr-search/README.md" = 117
+"quivr-search/README.md" = 128
 "sdks/AGENTS.md" = 8
 "sdks/go/README.md" = 212
 "sdks/python/README.md" = 166

@@ -84,19 +84,16 @@ func eventArguments(ctx context.Context, event eventInput) []any {
 	return []any{event.Organization, eventID(event), event.CorpusID, event.Kind, event.Resource, event.ResourceID, event.VersionID, telemetry.Encode(ctx)}
 }
 
-// Outside a journal group, the append, its Record's queue observation and the
-// checkpoint acknowledgement travel in one round trip: the caller holds the
-// journal lock until commit. Inside a group, the append and acknowledgement run
-// directly and the Record joins the group's single observation before commit.
+// Outside a journal group, the append and its Record's queue observation
+// travel in one round trip: the caller holds the journal lock until commit.
+// Inside a group, the append runs directly and the Record joins the group's
+// single observation before commit.
 func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, error) {
 	var sequence int64
 	if journalGroupOf(ctx) != nil {
 		err := tx.QueryRow(ctx, appendEventSQL, eventArguments(ctx, event)...).Scan(&sequence)
 		if err == nil && event.Resource == "record" {
 			err = observeQueueRecords(ctx, tx, []string{event.Organization}, []string{event.ResourceID})
-		}
-		if err == nil {
-			_, err = tx.Exec(ctx, acknowledgeQueueJournalSQL, event.Organization, 1)
 		}
 		return sequence, err
 	}
@@ -115,11 +112,9 @@ func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, err
 	return sequence, results.Close()
 }
 
-// queueEvent appends one event, observes its Record and acknowledges the
-// observation checkpoint. Consecutive events in one batch share a single
-// acknowledgement of their contiguous range: it holds exactly when the chain of
-// one-event acknowledgements would. A trailing observation of the same Record
-// moves after the next append, which changes no canonical state it reads.
+// queueEvent appends one event and observes its Record. A trailing observation
+// of the same Record moves after the next append, which changes no canonical
+// state it reads.
 func queueEvent(ctx context.Context, batch *pgx.Batch, event eventInput) {
 	if group := journalGroupOf(ctx); group != nil {
 		group.events = append(group.events, journalEvent{event, telemetry.Encode(ctx)})
@@ -128,23 +123,13 @@ func queueEvent(ctx context.Context, batch *pgx.Batch, event eventInput) {
 		}
 		return
 	}
-	acknowledged := 0
-	queued := batch.QueuedQueries
-	if n := len(queued); n > 0 && queued[n-1].SQL == acknowledgeQueueJournalSQL && queued[n-1].Arguments[0] == event.Organization {
-		if count, ok := queued[n-1].Arguments[1].(int); ok {
-			acknowledged = count
-			queued = queued[:n-1]
-			if event.Resource == "record" && trailingObservation(queued, event.Organization, event.ResourceID) {
-				queued = queued[:len(queued)-len(recordObservationSQL)]
-			}
-			batch.QueuedQueries = queued
-		}
+	if event.Resource == "record" && trailingObservation(batch.QueuedQueries, event.Organization, event.ResourceID) {
+		batch.QueuedQueries = batch.QueuedQueries[:len(batch.QueuedQueries)-len(recordObservationSQL)]
 	}
 	batch.Queue(appendEventSQL, eventArguments(ctx, event)...)
 	if event.Resource == "record" {
 		queueRecordObservations(batch, []string{event.Organization}, []string{event.ResourceID})
 	}
-	batch.Queue(acknowledgeQueueJournalSQL, event.Organization, acknowledged+1)
 }
 
 // trailingObservation reports whether queued ends with the observation of one Record.

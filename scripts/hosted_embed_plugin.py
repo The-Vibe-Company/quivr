@@ -44,6 +44,19 @@ def build(directory):
     return binary
 
 
+def check_committed_manifest(binary):
+    """Keep the shipped TEI declaration in step with the configure command."""
+    generated = json.loads(subprocess.check_output(
+        [str(binary), 'configure', str(PLUGIN / 'examples' / 'tei.json')]))
+    # configure embeds the absolute binary path; the checked-in package uses
+    # its portable development launcher. All other declaration fields must match.
+    generated['run']['command'] = ['go', 'run', '.']
+    committed = json.loads((PLUGIN / 'quivr-plugin.yaml').read_text())
+    if generated != committed:
+        raise RuntimeError('plugins/hosted-embed/quivr-plugin.yaml is stale; regenerate '
+                           'with configure examples/tei.json and set run.command to ["go", "run", "."]')
+
+
 def package(binary, directory, endpoint, format):
     directory.mkdir(parents=True, exist_ok=True)
     configuration = {'format': format, 'base_url': endpoint + ('/openai/v1' if format == 'openai' else '/providers/cohere/v2'),
@@ -62,6 +75,7 @@ def package(binary, directory, endpoint, format):
 def certify(quivr, directory):
     started = time.monotonic()
     binary = build(directory)
+    check_committed_manifest(binary)
     with Fake('embedding') as fake:
         for format in ['openai', 'cohere']:
             manifest, config, _ = package(binary, directory / format, fake.url, format)
@@ -74,7 +88,7 @@ def certify(quivr, directory):
             with log.open('w') as output:
                 result = subprocess.run([str(quivr), 'plugin', 'test', '--startup-timeout', '120s', '--report', str(report),
                                          '--fixture', str(fixture), str(manifest.parent)],
-                                        env={**os.environ, 'AZURE_FOUNDRY_KEY': 'fake-key'}, stdout=output, stderr=subprocess.STDOUT)
+                                        env={**os.environ, 'EMBED_API_KEY': 'fake-key'}, stdout=output, stderr=subprocess.STDOUT)
             if result.returncode or '\nCERTIFIED' not in '\n' + log.read_text():
                 raise RuntimeError(f'{format} did not certify: {log.read_text()}')
             print(f'Certified hosted.embed {format}: {report}', flush=True)
@@ -102,7 +116,7 @@ def verify(stack):
                         subprocess.run([str(binary), 'configure', str(config_path)], stdout=output, check=True)
                 port = ports.allocate()
                 env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port),
-                       'QUIVR_PLUGIN_MANIFEST': str(manifest), 'QUIVR_PLUGIN_SIGNING_KEYS': signing_ring, 'AZURE_FOUNDRY_KEY': 'fake-key'}
+                       'QUIVR_PLUGIN_MANIFEST': str(manifest), 'QUIVR_PLUGIN_SIGNING_KEYS': signing_ring, 'EMBED_API_KEY': 'fake-key'}
                 log = directory / f'{format}.log'
                 with log.open('w') as output:
                     plugin = subprocess.Popen([str(binary)], env=env, stdout=output, stderr=output, start_new_session=True)
@@ -156,7 +170,7 @@ def verify_redeploy(stack):
 
             def start(executable, declaration, name):
                 env = {**plugin_environment.inherited(), 'QUIVR_PLUGIN_HOST': '127.0.0.1', 'QUIVR_PLUGIN_PORT': str(port),
-                       'QUIVR_PLUGIN_MANIFEST': str(declaration), 'QUIVR_PLUGIN_SIGNING_KEYS': signing_ring, 'AZURE_FOUNDRY_KEY': 'fake-key'}
+                       'QUIVR_PLUGIN_MANIFEST': str(declaration), 'QUIVR_PLUGIN_SIGNING_KEYS': signing_ring, 'EMBED_API_KEY': 'fake-key'}
                 log = directory / (name + '.log')
                 with log.open('w') as output:
                     process = subprocess.Popen([str(executable)], env=env, stdout=output, stderr=output, start_new_session=True)

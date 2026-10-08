@@ -4,6 +4,16 @@
     "plugin_api": ">=0.18.0 <0.19.0"
   },
   "configuration": {
+    "execution_keys": [
+      "tokenizer_processes",
+      "max_concurrent_requests",
+      "batch_size",
+      "max_batch_tokens",
+      "request_timeout_ms",
+      "call_budget_ms",
+      "batch_wait_ms",
+      "max_retries"
+    ],
     "schema": {
       "additionalProperties": false,
       "properties": {
@@ -28,14 +38,11 @@
         "dimensions": {
           "const": 384
         },
-        "document_input_type": {
-          "const": "search_document"
-        },
         "document_prefix": {
           "const": "passage: "
         },
         "document_template": {
-          "const": "auto"
+          "const": "{prefix}{text}"
         },
         "format": {
           "const": "openai"
@@ -64,23 +71,17 @@
         "model_revision": {
           "const": "1"
         },
-        "overlap": {
-          "const": 48
-        },
-        "packing": {
-          "const": "paragraphs"
-        },
         "plugin_id": {
           "const": "hosted.embed"
         },
         "plugin_version": {
           "const": "1.2.0"
         },
-        "query_input_type": {
-          "const": "search_query"
-        },
         "query_prefix": {
           "const": "query: "
+        },
+        "query_template": {
+          "const": "{prefix}{query}"
         },
         "rebalance_tail": {
           "const": true
@@ -106,6 +107,9 @@
         "tokenizer": {
           "const": null
         },
+        "tokenizer_processes": {
+          "const": 0
+        },
         "usd_per_million_tokens": {
           "const": null
         }
@@ -128,7 +132,7 @@
       "paging": true,
       "query_timeout_ms": 10000,
       "spaces": {
-        "hosted.embed.intfloat-multilingual-e5-sma-384-ff4367462a0d1408": {
+        "hosted.embed.intfloat-multilingual-e5-sma-384-32096b91c08ed286": {
           "dimensions": 384,
           "indexes": [
             "text"
@@ -144,7 +148,7 @@
       "timeout_ms": 120000
     }
   },
-  "description": "Text windows embedded with a configured hosted or OpenAI-compatible model.",
+  "description": "Text passages embedded with a configured hosted or OpenAI-compatible model.",
   "id": "hosted.embed",
   "run": {
     "command": [
@@ -156,7 +160,7 @@
   "secrets": [
     {
       "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration.",
-      "name": "AZURE_FOUNDRY_KEY",
+      "name": "EMBED_API_KEY",
       "required": false
     }
   ],

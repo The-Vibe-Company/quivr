@@ -27,8 +27,8 @@ type matchCandidate struct {
 // Organization journal lock fences subscription edits, retirement, promotion,
 // quarantine and withdrawal while the group is committed.
 var matchCandidatesSQL = `WITH requested AS (
-  SELECT * FROM unnest($4::text[],$5::text[],$6::bigint[],$7::text[])
-    WITH ORDINALITY AS inputs(subscription_id,subscription_version_id,sequence,match_id,ordinal)),
+  SELECT * FROM unnest($2::text[],$3::text[],$4::text[],$5::text[],$6::bigint[],$7::text[])
+    WITH ORDINALITY AS inputs(record_id,version_id,subscription_id,subscription_version_id,sequence,match_id,ordinal)),
 locked AS MATERIALIZED (
   SELECT i.subscription_version_id,i.sequence,i.state,i.outcome FROM evaluation_intents i
   WHERE i.organization=$1 AND EXISTS(SELECT 1 FROM requested x
@@ -43,28 +43,41 @@ SELECT x.ordinal,coalesce(sv.saved_query_id,''),coalesce(sv.saved_query_version_
     WHEN r.id IS NULL OR v.id IS NULL OR NOT coalesce(r.current_version_id IS NOT DISTINCT FROM v.id
       AND ` + eligibleVersionPointSQL + ` AND r.corpus_id=ANY(q.corpus_ids),false) THEN 'ineligible'
     ELSE '' END,
-  EXISTS(SELECT 1 FROM matches m WHERE m.organization=$1 AND m.record_id=$2
-    AND m.subscription_id=x.subscription_id AND m.record_version_id=$3)
+  EXISTS(SELECT 1 FROM matches m WHERE m.organization=$1 AND m.record_id=x.record_id
+    AND m.subscription_id=x.subscription_id AND m.record_version_id=x.version_id)
     OR EXISTS(SELECT 1 FROM deliveries d WHERE d.organization=$1 AND d.match_id=x.match_id
       AND d.destination_id=sv.destination_id AND d.event_kind='match.created'),
   EXISTS(SELECT 1 FROM matches m JOIN subscription_versions previous
     ON (previous.organization,previous.id)=(m.organization,m.subscription_version_id)
-    WHERE m.organization=$1 AND m.record_id=$2 AND m.subscription_id=x.subscription_id AND m.record_version_id<>$3),
+    WHERE m.organization=$1 AND m.record_id=x.record_id AND m.subscription_id=x.subscription_id AND m.record_version_id<>x.version_id),
   now()
 FROM requested x
 LEFT JOIN locked i ON (i.subscription_version_id,i.sequence)=(x.subscription_version_id,x.sequence)
 LEFT JOIN subscriptions s ON s.organization=$1 AND s.id=x.subscription_id
 LEFT JOIN subscription_versions sv ON (sv.organization,sv.id)=(s.organization,x.subscription_version_id) AND sv.subscription_id=s.id
 LEFT JOIN saved_query_versions q ON (q.organization,q.id)=(sv.organization,sv.saved_query_version_id)
-LEFT JOIN record_versions v ON v.organization=$1 AND v.id=$3 AND v.record_id=$2
+LEFT JOIN record_versions v ON v.organization=$1 AND v.id=x.version_id AND v.record_id=x.record_id
 LEFT JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
 ORDER BY x.ordinal`
 
-// CommitMatches commits one bounded Record Version group. New positives take
-// a fixed number of round trips regardless of the number of subscriptions.
+// CommitMatches shares one Organization journal across ready Versions. New
+// positives take fixed round trips regardless of the number of subscriptions.
 // Repeated positives share their first eligible Match; corrections keep the
 // established decision path so their predecessor and ordering rules hold.
 func (s EvaluationStore) CommitMatches(ctx context.Context, matches []monitoring.MatchCommit) ([]string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var stops []func() bool
+	for _, match := range matches {
+		if match.Context != nil {
+			stops = append(stops, context.AfterFunc(match.Context, cancel))
+		}
+	}
+	defer func() {
+		for _, stop := range stops {
+			stop()
+		}
+	}()
 	var result0 []string
 	err := retryJournalWrite(ctx, "CommitMatches", func(ctx context.Context) error {
 		var err error
@@ -78,24 +91,29 @@ func (s EvaluationStore) commitMatchesAttempt(ctx context.Context, matches []mon
 	if len(matches) == 0 {
 		return []string{}, nil
 	}
+	if err := matchGroupError(ctx, matches); err != nil {
+		return nil, err
+	}
 	first := matches[0].Intent
 	ids, versions, sequences, matchIDs := make([]string, len(matches)), make([]string, len(matches)), make([]int64, len(matches)), make([]string, len(matches))
+	records, recordVersions := make([]string, len(matches)), make([]string, len(matches))
 	fallback := false
 	for i, match := range matches {
 		in := match.Intent
-		if in.Organization != first.Organization || in.RecordID != first.RecordID || in.VersionID != first.VersionID {
-			return nil, errors.New("match group must name one organization, record and version")
+		if in.Organization != first.Organization {
+			return nil, errors.New("match group must name one organization")
 		}
 		ids[i], versions[i], sequences[i] = in.SubscriptionID, in.SubscriptionVersionID, in.Sequence
+		records[i], recordVersions[i] = in.RecordID, in.VersionID
 		matchIDs[i] = content.StableID("match", in.Organization, in.SubscriptionVersionID, in.VersionID)
 	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(context.WithoutCancel(ctx))
 	guards := journalBatch(first.Organization)
-	guards.Queue(matchCandidatesSQL, first.Organization, first.RecordID, first.VersionID, ids, versions, sequences, matchIDs)
+	guards.Queue(matchCandidatesSQL, first.Organization, records, recordVersions, ids, versions, sequences, matchIDs)
 	results := tx.SendBatch(ctx, guards)
 	defer results.Close()
 	for range 3 {
@@ -118,12 +136,15 @@ func (s EvaluationStore) commitMatchesAttempt(ctx context.Context, matches []mon
 	if err = results.Close(); err != nil {
 		return nil, err
 	}
+	if err = matchGroupError(ctx, matches); err != nil {
+		return nil, err
+	}
 	if len(candidates) != len(matches) {
 		return nil, errors.New("match group eligibility count differs from inputs")
 	}
 	outcomes := make([]string, len(matches))
 	newMatches := 0
-	created := make(map[string]bool, len(matches))
+	created := make(map[[2]string]bool, len(matches))
 	for i, c := range candidates {
 		if c.ordinal != i+1 {
 			return nil, errors.New("match group eligibility order differs from inputs")
@@ -132,13 +153,13 @@ func (s EvaluationStore) commitMatchesAttempt(ctx context.Context, matches []mon
 		switch {
 		case c.refused != "":
 			outcomes[i] = c.refused
-		case c.duplicate || created[matches[i].Intent.SubscriptionID]:
+		case c.duplicate || created[[2]string{matches[i].Intent.SubscriptionID, matches[i].Intent.VersionID}]:
 			outcomes[i] = monitoring.OutcomeDuplicate
 		default:
 			outcomes[i] = monitoring.OutcomeMatched
 			// Only an eligible new positive suppresses later inputs for this
 			// Subscription. Refusals and retirement retain their own outcomes.
-			created[matches[i].Intent.SubscriptionID] = true
+			created[[2]string{matches[i].Intent.SubscriptionID, matches[i].Intent.VersionID}] = true
 			newMatches++
 		}
 	}
@@ -147,7 +168,7 @@ func (s EvaluationStore) commitMatchesAttempt(ctx context.Context, matches []mon
 			if outcomes[i] == monitoring.OutcomeEvaluatorRetired {
 				continue
 			}
-			outcomes[i], err = commitMatch(ctx, tx, match.Intent, match.Evidence)
+			outcomes[i], err = commitMatch(matchContext(ctx, match), tx, match.Intent, match.Evidence)
 			if err != nil {
 				return nil, err
 			}
@@ -160,10 +181,23 @@ func (s EvaluationStore) commitMatchesAttempt(ctx context.Context, matches []mon
 			return nil, err
 		}
 	}
+	// AfterFunc can lag; check members again at the durable commit boundary.
+	if err = matchGroupError(ctx, matches); err != nil {
+		return nil, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return outcomes, nil
+}
+
+func matchGroupError(ctx context.Context, matches []monitoring.MatchCommit) error {
+	for _, m := range matches {
+		if m.Context != nil && m.Context.Err() != nil {
+			return m.Context.Err()
+		}
+	}
+	return ctx.Err()
 }
 
 func writeNewMatches(ctx context.Context, tx pgx.Tx, matches []monitoring.MatchCommit, candidates []matchCandidate, matchIDs, outcomes []string, count int) error {
@@ -178,6 +212,7 @@ func writeNewMatches(ctx context.Context, tx pgx.Tx, matches []monitoring.MatchC
 	}
 	var ids, subscriptionIDs, subscriptionVersions, queryIDs, queryVersions, corpusIDs, deliveryIDs, destinations, eventIDs, evidenceJSON []string
 	var bodies [][]byte
+	var records, recordVersions, traces []string
 	var ordinals []int64
 	var ordinal int64
 	var completeVersions, completeOutcomes []string
@@ -194,13 +229,17 @@ func writeNewMatches(ctx context.Context, tx pgx.Tx, matches []monitoring.MatchC
 				return err
 			}
 			r := monitoring.NoticeReferences{MatchID: matchIDs[i], RecordID: in.RecordID, RecordVersionID: in.VersionID, SubscriptionID: in.SubscriptionID, SubscriptionVersionID: in.SubscriptionVersionID, Owner: c.owner}
-			r.DeliveryID = content.StableID("delivery", org, r.MatchID, c.pinned.destination, monitoring.NoticeCreated)
+			if c.pinned.destination != "" {
+				r.DeliveryID = content.StableID("delivery", org, r.MatchID, c.pinned.destination, monitoring.NoticeCreated)
+			}
 			event := eventInput{Organization: org, CorpusID: c.corpusID, Kind: monitoring.NoticeCreated, Resource: "match", ResourceID: r.MatchID, MutationID: r.MatchID}
 			body, err := json.Marshal(monitoring.Notice{EventID: eventID(event), Type: monitoring.NoticeCreated, SchemaVersion: "1", OccurredAt: c.now.UTC(), References: r})
 			if err != nil {
 				return err
 			}
 			ordinal++
+			records, recordVersions = append(records, in.RecordID), append(recordVersions, in.VersionID)
+			traces = append(traces, telemetry.Encode(matchContext(ctx, match)))
 			ids, subscriptionIDs, subscriptionVersions = append(ids, r.MatchID), append(subscriptionIDs, in.SubscriptionID), append(subscriptionVersions, in.SubscriptionVersionID)
 			queryIDs, queryVersions, corpusIDs = append(queryIDs, c.pinned.queryID), append(queryVersions, c.pinned.queryVersionID), append(corpusIDs, c.corpusID)
 			deliveryIDs, destinations, eventIDs = append(deliveryIDs, r.DeliveryID), append(destinations, c.pinned.destination), append(eventIDs, eventID(event))
@@ -210,30 +249,29 @@ func writeNewMatches(ctx context.Context, tx pgx.Tx, matches []monitoring.MatchC
 	}
 	if len(ids) > 0 {
 		writes.Queue(`INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,resource_type,resource_id,record_version_id,trace_context)
-SELECT $1,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$6::bigint+x.position,x.event_id,x.corpus_id,'match.created','match',x.match_id,NULL,$7
-FROM unnest($2::bigint[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(position,event_id,corpus_id,match_id,ordinal) ORDER BY x.ordinal`, org, ordinals, eventIDs, corpusIDs, ids, count, telemetry.Encode(ctx))
+SELECT $1,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$6::bigint+x.position,x.event_id,x.corpus_id,'match.created','match',x.match_id,NULL,x.trace
+FROM unnest($2::bigint[],$3::text[],$4::text[],$5::text[],$7::text[]) WITH ORDINALITY AS x(position,event_id,corpus_id,match_id,trace,ordinal) ORDER BY x.ordinal`, org, ordinals, eventIDs, corpusIDs, ids, count, traces)
 		writes.Queue(`INSERT INTO matches(organization,id,subscription_id,subscription_version_id,saved_query_id,saved_query_version_id,corpus_id,record_id,record_version_id,previous_match_id,evidence,position)
-SELECT $1,x.match_id,x.subscription_id,x.subscription_version_id,x.query_id,x.query_version_id,x.corpus_id,$2,$3,NULL,x.evidence,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$12::bigint+x.position
-FROM unnest($4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::text[],$10::jsonb[],$11::bigint[])
-  WITH ORDINALITY AS x(match_id,subscription_id,subscription_version_id,query_id,query_version_id,corpus_id,evidence,position,ordinal) ORDER BY x.ordinal`, org, matches[0].Intent.RecordID, matches[0].Intent.VersionID, ids, subscriptionIDs, subscriptionVersions, queryIDs, queryVersions, corpusIDs, evidenceJSON, ordinals, count)
+SELECT $1,x.match_id,x.subscription_id,x.subscription_version_id,x.query_id,x.query_version_id,x.corpus_id,x.record_id,x.version_id,NULL,x.evidence,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$12::bigint+x.position
+FROM unnest($2::text[],$3::text[],$4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::text[],$10::jsonb[],$11::bigint[])
+  WITH ORDINALITY AS x(record_id,version_id,match_id,subscription_id,subscription_version_id,query_id,query_version_id,corpus_id,evidence,position,ordinal) ORDER BY x.ordinal`, org, records, recordVersions, ids, subscriptionIDs, subscriptionVersions, queryIDs, queryVersions, corpusIDs, evidenceJSON, ordinals, count)
 		writes.Queue(`INSERT INTO deliveries(organization,id,match_id,destination_id,event_kind,event_id,window_start)
 SELECT $1,x.delivery_id,x.match_id,x.destination_id,'match.created',x.event_id,NULL
-FROM unnest($2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(delivery_id,match_id,destination_id,event_id,ordinal) ORDER BY x.ordinal`, org, deliveryIDs, ids, destinations, eventIDs)
+FROM unnest($2::text[],$3::text[],$4::text[],$5::text[]) WITH ORDINALITY AS x(delivery_id,match_id,destination_id,event_id,ordinal)
+WHERE x.destination_id<>'' ORDER BY x.ordinal`, org, deliveryIDs, ids, destinations, eventIDs)
 		writes.Queue(`INSERT INTO monitoring_notices(organization,event_id,kind,match_id,record_id,record_version_id,subscription_id,subscription_version_id,delivery_id,previous_match_id,body,position)
-SELECT $1,x.event_id,'match.created',x.match_id,$2,$3,x.subscription_id,x.subscription_version_id,x.delivery_id,NULL,x.body,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$11::bigint+x.position
-FROM unnest($4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::bytea[],$10::bigint[])
-  WITH ORDINALITY AS x(event_id,match_id,subscription_id,subscription_version_id,delivery_id,body,position,ordinal) ORDER BY x.ordinal`, org, matches[0].Intent.RecordID, matches[0].Intent.VersionID, eventIDs, ids, subscriptionIDs, subscriptionVersions, deliveryIDs, bodies, ordinals, count)
+SELECT $1,x.event_id,'match.created',x.match_id,x.record_id,x.version_id,x.subscription_id,x.subscription_version_id,NULLIF(x.delivery_id,''),NULL,x.body,(SELECT last_sequence FROM organization_journals WHERE organization=$1)-$11::bigint+x.position
+FROM unnest($2::text[],$3::text[],$4::text[],$5::text[],$6::text[],$7::text[],$8::text[],$9::bytea[],$10::bigint[])
+  WITH ORDINALITY AS x(record_id,version_id,event_id,match_id,subscription_id,subscription_version_id,delivery_id,body,position,ordinal) ORDER BY x.ordinal`, org, records, recordVersions, eventIDs, ids, subscriptionIDs, subscriptionVersions, deliveryIDs, bodies, ordinals, count)
 		writes.Queue(`INSERT INTO delivery_outbox(organization,delivery_id,trace_context)
-SELECT $1,x.delivery_id,$3 FROM unnest($2::text[]) WITH ORDINALITY AS x(delivery_id,ordinal) ORDER BY x.ordinal`, org, deliveryIDs, telemetry.Encode(ctx))
+SELECT $1,x.delivery_id,x.trace FROM unnest($2::text[],$3::text[]) WITH ORDINALITY AS x(delivery_id,trace,ordinal)
+WHERE x.delivery_id<>'' ORDER BY x.ordinal`, org, deliveryIDs, traces)
 	}
 	if len(completeVersions) > 0 {
 		writes.Queue(completeMatchGroupSQL, org, completeVersions, completeSequences, completeOutcomes)
 	}
 	if writes.Len() == 0 {
 		return nil
-	}
-	if count > 0 {
-		writes.Queue(acknowledgeQueueJournalSQL, org, count)
 	}
 	return tx.SendBatch(ctx, writes).Close()
 }
@@ -271,3 +309,17 @@ WHERE v.organization=evaluated.organization AND v.id=evaluated.record_version_id
     AND NOT EXISTS(SELECT 1 FROM subscription_versions e JOIN done d ON d.organization=e.organization AND d.subscription_version_id=e.id
       WHERE e.organization=n.organization AND e.subscription_id=n.subscription_id
       AND d.record_version_id=n.record_version_id AND d.kind='evaluation' AND d.outcome<>'not_ready'))`
+
+// Keep each evaluation's values while using the shared transaction's lifetime.
+type matchMemberContext struct {
+	context.Context
+	values context.Context
+}
+
+func (c matchMemberContext) Value(key any) any { return c.values.Value(key) }
+func matchContext(ctx context.Context, m monitoring.MatchCommit) context.Context {
+	if m.Context == nil {
+		return ctx
+	}
+	return matchMemberContext{Context: ctx, values: m.Context}
+}

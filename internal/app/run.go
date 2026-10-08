@@ -49,6 +49,7 @@ import (
 )
 
 type Config struct {
+	Postgres         PostgresConfig              `json:"postgres"`
 	Worker           workqueue.Config            `json:"worker"`
 	QueueObservation workqueue.ObservationConfig `json:"queue_observation"`
 	TLS              TLSConfig                   `json:"tls"`
@@ -470,9 +471,9 @@ func Run(command string, args ...string) error {
 		closeResources(deadline)
 		graceExpired = deadline.Err() != nil
 	}()
-	poolConfig, err := postgres.PoolConfig(cfg.DatabaseURL, cfg.TLS.Postgres)
+	poolConfig, err := cfg.poolConfig()
 	if err != nil {
-		return invalidConfig("database_url", "invalid database_url or PostgreSQL TLS settings", err)
+		return err
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {

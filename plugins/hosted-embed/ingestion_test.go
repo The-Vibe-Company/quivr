@@ -15,10 +15,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -69,6 +71,31 @@ func TestProviderModesAndUsage(t *testing.T) {
 			}
 		})
 	}
+	t.Run("explicit templates ignore model names", func(t *testing.T) {
+		for _, model := range []string{"google/embeddinggemma-2", "another-model"} {
+			fake := embedding.New()
+			server := httptest.NewServer(fake)
+			defer server.Close()
+			raw := fmt.Sprintf(`{"format":"openai","base_url":%q,"auth":"bearer","model":%q,"dimensions":8,"document_template":"title: {title} | text: {text}","query_template":"task: search result | query: {query}"}`, server.URL, model)
+			c, err := parseConfiguration([]byte(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			i := newIngester(c, "fake-key", slog.New(slog.DiscardHandler))
+			req := ingestRequest(c, "Body with {query} and {title}.", true)
+			req.Parts = append([]quivrplugin.IngestPart{{Key: "headline", Role: "title", Text: "A {text} title"}}, req.Parts...)
+			if _, err := i.SegmentAndEmbed(t.Context(), req); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := i.EmbedQuery(t.Context(), queryRequest(c, "Find {prefix}")); err != nil {
+				t.Fatal(err)
+			}
+			calls := fake.Calls()
+			if len(calls) != 2 || calls[0].Texts[0] != "title: A {text} title | text: Body with {query} and {title}." || calls[1].Texts[0] != "task: search result | query: Find {prefix}" {
+				t.Fatalf("model %s prompt bytes: %+v", model, calls)
+			}
+		}
+	})
 }
 
 // Owns local query routing through the plugin HTTP boundary. The remote mapping
@@ -325,10 +352,9 @@ func TestLocalQueryRefusesIdentityAndEndpointDrift(t *testing.T) {
 	}
 }
 
-func TestWindowsBoundInputsAndPreserveUnicodeOffsets(t *testing.T) {
+func TestPackedInputsPreserveUnicodeOffsets(t *testing.T) {
 	c := testConfig("openai", "http://127.0.0.1:9")
 	c.MaxTokens = 60
-	c.Overlap = 5
 	c.DocumentPrefix = "passage: "
 	text := "Bonjour 🌌. Une bibliothèque ouvre.\n\nDeuxième paragraphe et encore une phrase."
 	i := newIngester(c, "", slog.Default())
@@ -346,8 +372,8 @@ func TestWindowsBoundInputsAndPreserveUnicodeOffsets(t *testing.T) {
 		for k := s.Start; k < s.End; k++ {
 			covered[k] = true
 		}
-		if n > 0 && s.Start >= got[n-1].End {
-			t.Fatalf("missing overlap: %+v", got)
+		if n > 0 && s.Start != got[n-1].End {
+			t.Fatalf("gap or overlap: %+v", got)
 		}
 	}
 	for k, ok := range covered {
@@ -376,7 +402,12 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 	}
 	c := testConfig("openai", "http://127.0.0.1:9")
 	original := c.spaceID()
-	for _, change := range []func(*configuration){func(c *configuration) { c.Model = "other" }, func(c *configuration) { c.Dimensions = 16 }, func(c *configuration) { c.QueryPrefix = "query: " }, func(c *configuration) { c.Revision = "2" }, func(c *configuration) { c.Metric = "dot" }} {
+	tuned := c
+	tuned.TokenizerProcesses = 2
+	if tuned.spaceID() != original {
+		t.Fatal("tokenizer process tuning changed the vector space")
+	}
+	for _, change := range []func(*configuration){func(c *configuration) { c.Model = "other" }, func(c *configuration) { c.Dimensions = 16 }, func(c *configuration) { c.QueryPrefix = "query: " }, func(c *configuration) { c.Revision = "2" }, func(c *configuration) { c.Metric = "dot" }, func(c *configuration) { c.DocumentTemplate = "document: {text}" }, func(c *configuration) { c.QueryTemplate = "question: {query}" }} {
 		other := c
 		change(&other)
 		if other.spaceID() == original {
@@ -391,11 +422,18 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 		Configuration struct {
 			ExecutionKeys []string `json:"execution_keys"`
 		} `json:"configuration"`
+		Secrets []struct {
+			Name     string `json:"name"`
+			Required bool   `json:"required"`
+		} `json:"secrets"`
 	}
 	if err := json.Unmarshal(manifest, &declared); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"max_concurrent_requests", "batch_size", "max_batch_tokens", "request_timeout_ms", "call_budget_ms", "batch_wait_ms", "max_retries"}
+	if len(declared.Secrets) != 1 || declared.Secrets[0].Name != "EMBED_API_KEY" || !declared.Secrets[0].Required {
+		t.Fatalf("provider-neutral credential declaration: %+v", declared.Secrets)
+	}
+	want := []string{"tokenizer_processes", "max_concurrent_requests", "batch_size", "max_batch_tokens", "request_timeout_ms", "call_budget_ms", "batch_wait_ms", "max_retries"}
 	slices.Sort(want)
 	slices.Sort(declared.Configuration.ExecutionKeys)
 	if !slices.Equal(declared.Configuration.ExecutionKeys, want) {
@@ -482,7 +520,6 @@ func TestRetryResumeAndRefusal(t *testing.T) {
 	c := testConfig("openai", server.URL)
 	c.BatchSize = 1
 	c.MaxTokens = 18
-	c.Overlap = 0
 	c.MaxRetries = 1
 	i := newIngester(c, "fake-key", slog.Default())
 	req := ingestRequest(c, "aaaaaaaaaabbbbbbbbbbcccccccccc", true)
@@ -528,7 +565,7 @@ func TestMalformedProviderAnswers(t *testing.T) {
 }
 
 func testConfig(format, url string) configuration {
-	c, err := parseConfiguration([]byte(`{"packing":"none","plugin_version":"1.0.0","format":"` + format + `","base_url":"` + url + `","auth":"bearer","model":"test-model","dimensions":8}`))
+	c, err := parseConfiguration([]byte(`{"format":"` + format + `","base_url":"` + url + `","auth":"bearer","model":"test-model","dimensions":8}`))
 	if err != nil {
 		panic(err)
 	}
@@ -593,27 +630,42 @@ func TestResumeCacheIsolatesOrganizationsAndQueryMode(t *testing.T) {
 func TestConfigAndContentRefusals(t *testing.T) {
 	// Literal external keys and omission protect the configuration contract.
 	for _, tc := range []struct {
-		raw  string
-		wait int
+		raw       string
+		wait      int
+		processes int
 	}{
-		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8}`, 25},
-		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":0}`, 0},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8}`, 25, 0},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":0}`, 0, 0},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer_processes":0}`, 25, 0},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer_processes":2}`, 25, 2},
 	} {
 		c, err := parseConfiguration([]byte(tc.raw))
-		if err != nil || c.BatchWaitMS != tc.wait {
-			t.Fatalf("batch collection default: %d %v", c.BatchWaitMS, err)
+		if err != nil || c.BatchWaitMS != tc.wait || c.TokenizerProcesses != tc.processes || c.DocumentTemplate != "{prefix}{text}" || c.QueryTemplate != "{prefix}{query}" {
+			t.Fatalf("configuration defaults: %+v %v", c, err)
 		}
 	}
 	for _, tc := range []struct{ raw, reason string }{
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"packing":"paragraphs"}`, "configuration must contain only declared fields"},
+		{`{"format":"cohere","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"query_input_type":"search_query"}`, "configuration must contain only declared fields"},
+		{`{"format":"cohere","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"document_input_type":"search_document"}`, "configuration must contain only declared fields"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"document_template":"gemma"}`, "document_template: must contain {text}"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"query_template":"{text}"}`, "query_template: unsupported"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"query_template":"{query","document_template":"{text}"}`, "query_template: unsupported"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"document_template":"{text}}"}`, "document_template: unmatched"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"document_template":"{text}","document_prefix":"passage: "}`, "document_template: nonempty prefix requires {prefix}"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"query_template":"{query}","query_prefix":"query: "}`, "query_template: nonempty prefix requires {prefix}"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"query_template":"{query}\u0000"}`, "query_template: must not contain NUL"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer":{"python":"bad\u0000path","model":"local.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`, "tokenizer requires"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer":{"python":"python3","model":"bad\u0000path","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`, "tokenizer requires"},
 
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer_processes":-1}`, "tokenizer_processes must be between 0 and 32"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer_processes":33}`, "tokenizer_processes must be between 0 and 32"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":-1}`, "batch_wait_ms must be between 0 and 100"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":101}`, "batch_wait_ms must be between 0 and 100"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":100,"call_budget_ms":100}`, "batch_wait_ms must be less than call_budget_ms"},
 		{`{"format":"openai","base_url":"https://key@example.org","auth":"bearer","model":"m","dimensions":8}`, "base_url must be an HTTP(S) base without credentials"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"bearer","model":"m","dimensions":8,"api_key":"secret"}`, "configuration must contain only declared fields"},
-		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"overlap":512}`, "invalid segment, overlap or batch limits"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"overlap":512}`, "configuration must contain only declared fields"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"model_revision":"has spaces"}`, "model and model_revision must be nonempty and bounded"},
 	} {
 		if _, err := parseConfiguration([]byte(tc.raw)); err == nil || !strings.Contains(err.Error(), tc.reason) {
@@ -631,7 +683,9 @@ func TestConfigAndContentRefusals(t *testing.T) {
 			t.Errorf("content: got %v, want terminal %s", err, tc.code)
 		}
 	}
-	_, err := i.EmbedQuery(context.Background(), queryRequest(c, strings.Repeat("q", c.MaxTokens)))
+	c.QueryTemplate = strings.Repeat("q", c.MaxTokens-specialTokens-4) + "{query}"
+	i = newIngester(c, "", slog.Default())
+	_, err := i.EmbedQuery(context.Background(), queryRequest(c, "short"))
 	var refusal *quivrplugin.IngestError
 	if !errors.As(err, &refusal) || refusal.Code != "query_limit" || refusal.Retryable {
 		t.Errorf("oversize query: got %v, want terminal query_limit", err)
@@ -641,6 +695,33 @@ func TestConfigAndContentRefusals(t *testing.T) {
 // The configured package must be admissible for every accepted model/base URL,
 // and must accept the same configuration the operator originally supplied.
 func TestConfiguredManifestAcceptsOriginalConfiguration(t *testing.T) {
+	examples, err := os.ReadDir("examples")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, example := range examples {
+		t.Run(example.Name(), func(t *testing.T) {
+			raw, err := os.ReadFile("examples/" + example.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := parseConfiguration(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := c.manifest([]string{"hosted-embed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := t.TempDir() + "/quivr-plugin.yaml"
+			if err := os.WriteFile(path, body, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := quivrplugin.New(path); err != nil {
+				t.Fatalf("example manifest admission: %v", err)
+			}
+		})
+	}
 	for _, tc := range []struct{ name, model, url string }{{"numeric deployment", "3-model", "http://127.0.0.1:9/v1"}, {"trailing slash", "test-model", "http://127.0.0.1:9/v1/"}, {"empty title context", "test-model", "http://127.0.0.1:9/v1"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			settings := map[string]any{"format": "openai", "auth": "none", "model": tc.model, "dimensions": 8, "base_url": tc.url}
@@ -764,25 +845,34 @@ func TestProviderCapsConcurrentCalls(t *testing.T) {
 // A Retry-After discovered by one call also fences subsequent calls. A
 // cancelled waiter makes no provider attempt; no wall-clock sleep is needed.
 func TestProviderSharesThrottleAcrossCalls(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.Header().Set("Retry-After", "3600")
-		w.WriteHeader(429)
-	}))
-	defer server.Close()
-	c := testConfig("openai", server.URL)
-	c.MaxRetries = 0
-	i := newIngester(c, "fake-key", slog.New(slog.DiscardHandler))
-	_, err := i.EmbedQuery(t.Context(), queryRequest(c, "first"))
-	if err == nil {
-		t.Fatal("429 succeeded")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
-	defer cancel()
-	_, err = i.EmbedQuery(ctx, queryRequest(c, "second"))
-	if err == nil || calls.Load() != 1 {
-		t.Fatalf("throttled waiter made a provider call: calls=%d error=%v", calls.Load(), err)
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Retry-After", "3600")
+				w.Header().Set("Connection", "close")
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+			c := testConfig("openai", server.URL)
+			c.MaxRetries = 0
+			i := newIngester(c, "fake-key", slog.New(slog.DiscardHandler))
+			_, err := i.EmbedQuery(t.Context(), queryRequest(c, "first"))
+			if err == nil {
+				t.Fatalf("HTTP %d succeeded", status)
+			}
+			// Keep real socket I/O outside the virtual-time bubble. Only the
+			// subsequent admission wait needs the virtual deadline.
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				_, err := i.EmbedQuery(ctx, queryRequest(c, "second"))
+				if err == nil || ctx.Err() != context.DeadlineExceeded || calls.Load() != 1 {
+					t.Fatalf("throttled waiter made a provider call: calls=%d error=%v", calls.Load(), err)
+				}
+			})
+		})
 	}
 }
 
@@ -1123,7 +1213,6 @@ func (wordCounter) Encode(_ context.Context, inputs []tokenInput) ([]tokenEncodi
 }
 func TestPackedPassagesKeepParagraphsAndRebalance(t *testing.T) {
 	c := testConfig("openai", "http://127.0.0.1:9")
-	c.Packing = "paragraphs"
 	c.BodyTokens = 10
 	c.MaxChunks = 4
 	c.RebalanceTail = true
@@ -1158,7 +1247,6 @@ func TestPackedPassagesKeepParagraphsAndRebalance(t *testing.T) {
 
 func TestPackedPassagesSplitOnlyOversizedParagraphAndKeepEveryPassage(t *testing.T) {
 	c := testConfig("openai", "http://127.0.0.1:9")
-	c.Packing = "paragraphs"
 	c.BodyTokens = 8
 	c.MaxChunks = 4
 	c.RebalanceTail = false
@@ -1203,7 +1291,7 @@ func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 		{"string error", "αβγδεζηθ", `{"error":"input is too long"}`, "", "", 512},
 		{"structured detail", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"},"detail":{"message":"input is too long"}}`, "", "", 512},
 		{"validation detail", "αβγδεζηθ", `{"detail":[{"msg":"input is too long"}]}`, "", "", 512},
-		{"Gemma window template", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "title: none | text: ", "gemma", 512},
+		{"Gemma window template", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "title: none | text: ", "title: {title} | text: {text}", 512},
 		{"whitespace window", "        ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 512},
 		{"conservative budget", "αβγδεζηθ", `{"error":{"code":"context_length_exceeded"}}`, "", "", 2},
 	} {
@@ -1242,9 +1330,8 @@ func TestPagedIngestionSplitsProviderInputWithoutLosingText(t *testing.T) {
 			c.BatchWaitMS = 0
 			c.TitleSource = "none"
 			c.MaxTokens = variant.maxTokens
-			c.DocumentTemplate = variant.template
 			if variant.template != "" {
-				c.Packing = "none"
+				c.DocumentTemplate = variant.template
 			}
 			i := newIngester(c, "", slog.Default())
 			i.tokenizer = wordCounter{}
@@ -1289,7 +1376,7 @@ func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
 		server := httptest.NewServer(fake)
 		defer server.Close()
 		c := testConfig("openai", server.URL)
-		c.Packing, c.DocumentTemplate, c.TitleSource = "paragraphs", "gemma", "title"
+		c.DocumentTemplate, c.TitleSource = "title: {title} | text: {text}", "title"
 		c.BodyTokens, c.MaxTokens, c.MaxChunks = 512, 2048, 4
 		i := newIngester(c, "fake-key", slog.Default())
 		i.tokenizer = wordCounter{}
@@ -1341,8 +1428,7 @@ func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
 	server := httptest.NewServer(fake)
 	defer server.Close()
 	c := testConfig("openai", server.URL)
-	c.Packing = "paragraphs"
-	c.DocumentTemplate = "gemma"
+	c.DocumentTemplate = "title: {title} | text: {text}"
 	c.TitleSource = "title"
 	c.BodyTokens = 812
 	c.MaxTokens = 2048
@@ -1379,32 +1465,24 @@ func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
 	if calls = fake.Calls(); len(calls) != 3 || calls[2].Texts[0] != "title: Library opens | text: " {
 		t.Fatalf("title-only duplicated: %+v", calls)
 	}
-	c.Packing = "none"
-	for index, variant := range []struct {
-		template, source, prefix, want string
-	}{
-		{"gemma", "title", "", "title: none | text: Library opens"},
-		{"gemma", "inline", "", "title: none | text: Library opens"},
-		{"prefix", "title", "passage: ", "passage: Library opens"},
-	} {
-		c.DocumentTemplate, c.TitleSource, c.DocumentPrefix = variant.template, variant.source, variant.prefix
-		i = newIngester(c, "fake-key", slog.Default())
-		req.Spaces = []string{c.spaceID()}
-		if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
-			t.Fatal(err)
-		}
-		if calls = fake.Calls(); len(calls) != index+4 || calls[index+3].Texts[0] != variant.want {
-			t.Fatalf("legacy title-only duplicated: %+v", calls)
-		}
+	// Plain templates must keep title-only text in the body once.
+	c.DocumentTemplate, c.DocumentPrefix = "{prefix}{text}", "passage: "
+	i = newIngester(c, "fake-key", slog.Default())
+	req.Spaces = []string{c.spaceID()}
+	if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	if calls = fake.Calls(); len(calls) != 4 || calls[3].Texts[0] != "passage: Library opens" {
+		t.Fatalf("plain title-only lost or duplicated: %+v", calls)
 	}
 	c.TitleContextParts = []string{"place"}
 	req.Parts = append(req.Parts, quivrplugin.IngestPart{Key: "place", Role: "place", Text: "Riverside"})
 	for index, variant := range []struct {
 		template, source, prefix, want string
 	}{
-		{"gemma", "title", "", "title: Riverside | text: Library opens"},
-		{"gemma", "inline", "", "title: none | text: Riverside\n\nLibrary opens"},
-		{"prefix", "title", "passage: ", "passage: Riverside\n\nLibrary opens"},
+		{"title: {title} | text: {text}", "title", "", "title: Library opens — Riverside | text: "},
+		{"{prefix}{text}", "inline", "passage: ", "passage: Riverside\n\nLibrary opens"},
+		{"{prefix}{text}", "title", "passage: ", "passage: Riverside\n\nLibrary opens"},
 	} {
 		c.DocumentTemplate, c.TitleSource, c.DocumentPrefix = variant.template, variant.source, variant.prefix
 		i = newIngester(c, "fake-key", slog.Default())
@@ -1412,9 +1490,8 @@ func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
 		if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
 			t.Fatal(err)
 		}
-		if calls = fake.Calls(); len(calls) != index+7 || calls[index+6].Texts[0] != variant.want {
-			t.Fatalf("legacy title context lost: %+v", calls)
+		if calls = fake.Calls(); len(calls) != index+5 || calls[index+4].Texts[0] != variant.want {
+			t.Fatalf("title-only context lost or headline duplicated: %+v", calls)
 		}
 	}
-
 }

@@ -7,7 +7,7 @@ import (
 )
 
 // providerGate shares admission and throttling across document/query calls
-// in one plugin process. Already outstanding calls may finish after a 429.
+// in one plugin process. Already outstanding calls may finish after a 429/503.
 type providerGate struct {
 	slots        chan struct{}
 	mu           sync.Mutex

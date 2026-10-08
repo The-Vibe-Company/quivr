@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	connectorTaskQueue           = "quivr-connectors-v0"
 	acquireWorkflow              = "connector-acquire-v1"
 	acquireActivity              = "connector-acquire"
 	acquirePinnedActivity        = "connector-acquire-v2"

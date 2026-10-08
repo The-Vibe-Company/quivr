@@ -17,11 +17,14 @@ type journalEvent struct {
 	trace string
 }
 type journalGroup struct {
-	organization   string
-	locked         bool
-	events         []journalEvent
-	records        map[string]bool
-	beforeFinishes []journalFinish
+	organization    string
+	locked          bool
+	events          []journalEvent
+	records         map[string]bool
+	beforeFinishes  []journalFinish
+	entries         []content.IngestionCommit
+	preparedVectors map[string]bool
+	segmented       map[string]bool
 }
 
 var errJournalReplay = errors.New("journal receipt already resolved")
@@ -140,10 +143,10 @@ func (s MaterializationStore) commitIngestionGroup(ctx context.Context, entries 
 			}
 		}
 	}
-	return commitJournalGroup(ctx, s.Pool, org, preparations, members)
+	return commitJournalGroup(ctx, s.Pool, org, preparations, members, entries)
 }
 
-func commitJournalGroup(ctx context.Context, pool *pgxpool.Pool, org string, preparations []journalPreparation, members []context.Context) error {
+func commitJournalGroup(ctx context.Context, pool *pgxpool.Pool, org string, preparations []journalPreparation, members []context.Context, entries []content.IngestionCommit) error {
 	memberError := func() error {
 		for _, member := range members {
 			if err := member.Err(); err != nil {
@@ -164,7 +167,7 @@ func commitJournalGroup(ctx context.Context, pool *pgxpool.Pool, org string, pre
 		if err = lockProjectionRouting(ctx, tx); err != nil {
 			return err
 		}
-		group := &journalGroup{organization: org, records: map[string]bool{}}
+		group := &journalGroup{organization: org, records: map[string]bool{}, entries: entries, preparedVectors: map[string]bool{}, segmented: map[string]bool{}}
 		ctx = context.WithValue(ctx, journalGroupKey{}, group)
 		finishes := make([]journalFinish, 0, len(preparations))
 		for _, prepare := range preparations {
@@ -182,22 +185,25 @@ func commitJournalGroup(ctx context.Context, pool *pgxpool.Pool, org string, pre
 		if err = memberError(); err != nil {
 			return err
 		}
-		if err = lockJournal(ctx, tx, org); err != nil {
+		pipelined, err := group.pipeline(ctx, tx)
+		if err != nil {
 			return err
 		}
 		group.locked = true
-		for _, finish := range group.beforeFinishes {
-			if err = finish(); err != nil {
+		if !pipelined {
+			for _, finish := range group.beforeFinishes {
+				if err = finish(); err != nil {
+					return err
+				}
+			}
+			for _, finish := range finishes {
+				if err = finish(); err != nil {
+					return err
+				}
+			}
+			if err = group.append(ctx, tx); err != nil {
 				return err
 			}
-		}
-		for _, finish := range finishes {
-			if err = finish(); err != nil {
-				return err
-			}
-		}
-		if err = group.append(ctx, tx); err != nil {
-			return err
 		}
 		// AfterFunc links cancellation during I/O, but its callback may lag.
 		// Recheck members synchronously at the durable commit boundary.
@@ -212,6 +218,11 @@ func commitJournalGroup(ctx context.Context, pool *pgxpool.Pool, org string, pre
 // Record. Every event retains its member's trace.
 func (group *journalGroup) append(ctx context.Context, tx pgx.Tx) error {
 	writes := &pgx.Batch{}
+	group.queueAppend(writes)
+	return tx.SendBatch(ctx, writes).Close()
+}
+
+func (group *journalGroup) queueAppend(writes *pgx.Batch) {
 	if len(group.events) > 0 {
 		ids, corpora, kinds, resources, records, versions, traces := []string{}, []string{}, []string{}, []string{}, []string{}, []string{}, []string{}
 		for _, e := range group.events {
@@ -241,8 +252,4 @@ func (group *journalGroup) append(ctx context.Context, tx pgx.Tx) error {
 	if len(records) > 0 {
 		queueRecordObservations(writes, orgs, records)
 	}
-	if len(group.events) > 0 {
-		writes.Queue(acknowledgeQueueJournalSQL, group.organization, len(group.events))
-	}
-	return tx.SendBatch(ctx, writes).Close()
 }

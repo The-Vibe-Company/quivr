@@ -182,6 +182,9 @@ func prepareSegmentation(ctx context.Context, tx pgx.Tx, org string, result cont
 			return nil, err
 		}
 	}
+	if group := journalGroupOf(ctx); group != nil {
+		group.segmented[result.VersionID] = true
+	}
 	return func() error {
 		// Mutable progress follows the journal fence in prepared groups.
 		if _, err := tx.Exec(ctx, `UPDATE record_versions SET segmented_at=clock_timestamp() WHERE organization=$1 AND id=$2 AND segmented_at IS NULL AND materialized_at IS NOT NULL`, org, result.VersionID); err != nil {

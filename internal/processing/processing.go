@@ -5,10 +5,14 @@ package processing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
+	"regexp"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
@@ -133,7 +137,7 @@ type Observer interface {
 }
 
 // outcome reports one stage outcome to the Observer and a correlated log line.
-func (s Service) outcome(ctx context.Context, org, stage, outcome, receiptID string, v content.Version, started time.Time, code string) {
+func (s Service) outcome(ctx context.Context, org, stage, outcome, receiptID string, v content.Version, started time.Time, code string, details ...any) {
 	if s.Observer != nil {
 		s.Observer.Outcome(org, stage, outcome, code, time.Since(started))
 	}
@@ -141,8 +145,52 @@ func (s Service) outcome(ctx context.Context, org, stage, outcome, receiptID str
 	if outcome != "succeeded" {
 		level = slog.LevelWarn
 	}
-	slog.Log(ctx, level, "processing outcome", "component", "worker", "stage", stage, "outcome", outcome, "code", code,
-		"receipt_id", receiptID, "record_id", v.RecordID, "version_id", v.ID, "duration_ms", time.Since(started).Milliseconds())
+	attrs := []any{"component", "worker", "stage", stage, "outcome", outcome, "code", code,
+		"receipt_id", receiptID, "record_id", v.RecordID, "version_id", v.ID, "duration_ms", time.Since(started).Milliseconds()}
+	slog.Log(ctx, level, "processing outcome", append(attrs, details...)...)
+}
+
+// Baseline diagnostics expose operational metadata, never dependency messages:
+// plugin responses and database errors may contain submitted content or secrets.
+var baselinePluginCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,99}$`)
+var baselineSQLState = regexp.MustCompile(`^[0-9A-Z]{5}$`)
+
+func baselineFailure(err error) []any {
+	kind := logging.Diagnostic("dependency_error")
+	var details []any
+	var pluginErr *plugins.PluginError
+	var databaseErr interface{ SQLState() string }
+	var networkErr net.Error
+	switch {
+	case errors.As(err, &pluginErr):
+		kind = "plugin_error"
+		if baselinePluginCode.MatchString(pluginErr.Code) {
+			details = append(details, "plugin_code", pluginErr.Code)
+		}
+		if pluginErr.Status >= 100 && pluginErr.Status <= 599 {
+			details = append(details, "plugin_http_status", pluginErr.Status)
+		}
+		details = append(details, "plugin_retryable", pluginErr.Retryable)
+	case errors.Is(err, plugins.ErrCallDeadline):
+		kind = "plugin_deadline"
+	case errors.Is(err, context.DeadlineExceeded):
+		kind = "context_deadline"
+	case errors.Is(err, context.Canceled):
+		kind = "context_canceled"
+	case errors.Is(err, ErrSpaceUnowned):
+		kind = "space_unowned"
+	case errors.As(err, &databaseErr):
+		kind = "database_error"
+		if state := databaseErr.SQLState(); baselineSQLState.MatchString(state) {
+			details = append(details, "sqlstate", state)
+		}
+	case errors.As(err, &networkErr):
+		kind = "network_error"
+		details = append(details, "network_timeout", networkErr.Timeout())
+	case errors.Is(err, plugins.ErrUnavailable):
+		kind = "plugin_unavailable"
+	}
+	return append(details, "failure_kind", kind)
 }
 
 // Normalizer runs external normalization for one accepted receipt.
@@ -177,9 +225,11 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 		return err
 	}
 	started := time.Now()
+	step := "route"
 	rt, err := s.route(ctx, org, v)
 	var result content.Segmentation
 	if err == nil {
+		step = "derive"
 		out := Derive(ctx, org, s.Plugin, s.Content, DerivationRequest{CorpusID: rt.corpusID, Version: v, Target: rt.generation, Kind: Segments, AllowLegacy: rt.legacy || rt.recipeMismatch})
 		result, err = out.Segmentation, out.Retry
 		if out.Terminal != nil {
@@ -188,12 +238,14 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 		}
 	}
 	if err == nil {
+		step = "index"
 		err = s.Retrieval.Index(ctx, org, v, result)
 	}
 	if err != nil {
-		s.outcome(ctx, org, "baseline", "retrying", receiptID, v, started, "baseline_unavailable")
+		details := append([]any{"failure_step", logging.Diagnostic(step)}, baselineFailure(err)...)
+		s.outcome(ctx, org, "baseline", "retrying", receiptID, v, started, "baseline_unavailable", details...)
 		_ = s.Content.BaselineProgress(ctx, org, v.ID, "retrying", "baseline_unavailable", false)
-		return errors.New("baseline processing unavailable")
+		return fmt.Errorf("baseline processing unavailable (%s): %w", step, err)
 	}
 	s.outcome(ctx, org, "baseline", "succeeded", receiptID, v, started, "")
 	if s.Observer != nil {

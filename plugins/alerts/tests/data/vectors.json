@@ -1,5 +1,6 @@
 {
   "description": "Synthetic two-dimensional vectors exercise local meaning decisions and fixture forwarding, not model calibration. No classifier key or network call is needed.",
+  "configuration": {"vectors": {"thresholds": {"text-space-1": 0.8}}},
   "record": {
     "enriched": true,
     "vector_space_id": "text-space-1",

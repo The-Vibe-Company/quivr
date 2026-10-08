@@ -18,16 +18,22 @@ import (
 // currentServingRecipe returns the active registration's recipe only when it
 // can serve this generation's primary. A retired model waits for rebuild;
 // dispatching a current-plan job into that old space would recreate retries.
-func currentServingRecipe(ctx context.Context, q querier, org, versionID string, g content.Generation) (string, error) {
-	var r registry.Registration
-	var settings, provenance []byte
-	var recipe string
-	err := q.QueryRow(ctx, `SELECT pr.id,pr.plugin_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings,COALESCE(rr.ingestion_recipe,''),rr.ingestion_provenance
+const currentServingRecipeSQL = `SELECT pr.id,pr.plugin_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings,COALESCE(rr.ingestion_recipe,''),rr.ingestion_provenance
  FROM record_versions v JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
  JOIN projection_generations g ON g.id=$3 JOIN active_pipeline_plan a ON true
  JOIN plugin_registrations pr ON pr.plugin_id=COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')
  JOIN pipeline_plan_roles rr ON rr.plan_id=a.plan_id AND rr.registration_id=pr.id AND rr.role='ingestion:'||pr.plugin_id
- WHERE v.organization=$1 AND v.id=$2`, org, versionID, g.ID).Scan(&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.Manifest, &settings, &recipe, &provenance)
+ WHERE v.organization=$1 AND v.id=$2`
+
+func currentServingRecipe(ctx context.Context, q querier, org, versionID string, g content.Generation) (string, error) {
+	return scanServingRecipe(q.QueryRow(ctx, currentServingRecipeSQL, org, versionID, g.ID), g)
+}
+
+func scanServingRecipe(row pgx.Row, g content.Generation) (string, error) {
+	var r registry.Registration
+	var settings, provenance []byte
+	var recipe string
+	err := row.Scan(&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.Manifest, &settings, &recipe, &provenance)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -168,7 +174,7 @@ func queuePendingServingProjections(ctx context.Context, tx pgx.Tx, previous reg
 
 func (s ServingProjectionStore) ClaimServingProjections(ctx context.Context, limit int) ([]content.IngestionEvaluation, error) {
 	q, _ := workqueue.Selected(ctx)
-	rows, err := s.Pool.Query(ctx, `UPDATE serving_projections SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM serving_projections WHERE ($2='' OR work_queue=$2 OR (work_queue='' AND $2='live')) AND NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue`, limit, q)
+	rows, err := s.Pool.Query(ctx, `UPDATE serving_projections SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM serving_projections WHERE ($2='' OR work_queue=$2) AND NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue`, limit, q)
 	if err != nil {
 		return nil, err
 	}

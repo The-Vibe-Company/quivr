@@ -1,0 +1,5 @@
+FROM postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+COPY --chmod=755 deploy/postgres/start.sh /usr/local/bin/quivr-postgres
+COPY deploy/postgres/init.sql /docker-entrypoint-initdb.d/quivr.sql
+ENTRYPOINT ["quivr-postgres"]
+CMD ["postgres"]

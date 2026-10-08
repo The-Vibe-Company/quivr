@@ -34,7 +34,7 @@ func newIngester(c configuration, key string, log *slog.Logger) *ingester {
 	i := &ingester{config: c, provider: provider{config: c, key: key, log: log, gate: &providerGate{slots: make(chan struct{}, c.MaxConcurrentRequests)}}, cache: map[[32]byte]*list.Element{}, order: list.New()}
 	i.tokenizer = byteCounter{}
 	if c.Tokenizer != nil {
-		i.tokenizer = &localTokenizer{config: *c.Tokenizer}
+		i.tokenizer = newLocalTokenizer(*c.Tokenizer, c.TokenizerProcesses)
 		i.provider.counter = i.tokenizer
 	}
 	i.documents = &documentBatcher{provider: i.provider, slots: make(chan struct{}, min(256, c.MaxConcurrentRequests*c.BatchSize)), pending: map[string]*documentBatch{}}
@@ -67,28 +67,7 @@ func (i *ingester) put(key [32]byte, v []float32) {
 }
 func (i *ingester) SegmentAndEmbed(ctx context.Context, req *quivrplugin.IngestRequest) ([]quivrplugin.Segment, error) {
 	c := i.config
-	var segments []quivrplugin.Segment
-	var inputs []string
-	var err error
-	if c.Packing == "paragraphs" {
-		segments, inputs, err = c.packedSegments(ctx, req.Parts, i.tokenizer)
-	} else {
-		legacy := c
-		if c.gemmaTemplate() || c.TitleSource != "none" {
-			// Legacy windows promote the title to body content when no body
-			// exists. Preserve explicit context without repeating the headline.
-			hasBody := false
-			for _, part := range req.Parts {
-				hasBody = hasBody || part.Role == "body" && strings.TrimSpace(part.Text) != ""
-			}
-			title, titleErr := c.documentTitle(req.Parts, hasBody)
-			if titleErr != nil {
-				return nil, titleErr
-			}
-			legacy.DocumentPrefix = c.documentInput(title, "")
-		}
-		segments, inputs, err = legacy.segments(req.Parts)
-	}
+	segments, inputs, err := c.packedSegments(ctx, req.Parts, i.tokenizer)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +144,7 @@ func (i *ingester) EmbedQuery(ctx context.Context, req *quivrplugin.QueryRequest
 	if req.Space != c.spaceID() {
 		return nil, quivrplugin.TerminalIngestError("unknown_space", "request must name the configured space")
 	}
-	input := c.QueryPrefix + req.Query.Text
+	input := c.queryInput(req.Query.Text)
 	if req.Query.Modality != "text" || !utf8.ValidString(input) || strings.ContainsRune(input, 0) || strings.TrimSpace(req.Query.Text) == "" {
 		return nil, quivrplugin.TerminalIngestError("invalid_query", "query must contain valid text")
 	}
@@ -193,7 +172,7 @@ func (i *ingester) EmbedQuery(ctx context.Context, req *quivrplugin.QueryRequest
 		if admitted {
 			encoder.gate.release()
 		}
-		return nil, quivrplugin.TerminalIngestError("query_limit", "query exceeds max_tokens_per_segment including its prefix and special token reserve")
+		return nil, quivrplugin.TerminalIngestError("query_limit", "query exceeds max_tokens_per_segment including its template and special token reserve")
 	}
 	var vectors [][]float32
 	if admitted {
@@ -205,4 +184,8 @@ func (i *ingester) EmbedQuery(ctx context.Context, req *quivrplugin.QueryRequest
 		return nil, err
 	}
 	return vectors[0], nil
+}
+
+func (c configuration) queryInput(query string) string {
+	return strings.NewReplacer("{prefix}", c.QueryPrefix, "{query}", query).Replace(c.QueryTemplate)
 }

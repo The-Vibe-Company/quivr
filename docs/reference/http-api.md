@@ -4315,7 +4315,8 @@ Example `rebuild_succeeded`:
   "corpus_id": "corpus_news",
   "state": "succeeded",
   "counters": {
-    "indexed": 24
+    "versions_covered": 24,
+    "passages_covered": 96
   },
   "errors": [],
   "result": {
@@ -8882,7 +8883,7 @@ description: Pins an installed evaluator by plugin id and version, and its confi
 
 ### `SubscriptionCreate`
 
-Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. One deployment-configured destination per version; destination belongs to this Organization. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
+Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. An optional deployment-configured destination per version belongs to this Organization. Omit destination_id to record Matches and change-feed notices without creating Deliveries or sending webhooks. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -8891,7 +8892,7 @@ Create enabled from-now Subscription. An optional owner makes it the Subscriptio
 | `saved_query_id` | string | yes | Minimum length `1`. |
 | `saved_query_version_id` | string | yes | Minimum length `1`. |
 | `evaluator` | [`EvaluatorConfig`](#evaluatorconfig) | yes |  |
-| `destination_id` | string | yes | Minimum length `1`. |
+| `destination_id` | string |  | Minimum length `1`. |
 | `owner` | [`SubscriptionOwner`](#subscriptionowner) |  |  |
 
 Example `subscription_create`:
@@ -8971,22 +8972,21 @@ required:
   - saved_query_id
   - saved_query_version_id
   - evaluator
-  - destination_id
-description: Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. One deployment-configured destination per version; destination belongs to this Organization. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
+description: Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. An optional deployment-configured destination per version belongs to this Organization. Omit destination_id to record Matches and change-feed notices without creating Deliveries or sending webhooks. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
 ```
 
 </details>
 
 ### `SubscriptionVersionCreate`
 
-New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
+New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query. Omit destination_id for no delivery, including when replacing a Version that had a destination; omission does not inherit the previous destination.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `idempotency_key` | string | yes | Minimum length `1`. |
 | `saved_query_version_id` | string | yes | Minimum length `1`. |
 | `evaluator` | [`EvaluatorConfig`](#evaluatorconfig) | yes |  |
-| `destination_id` | string | yes | Minimum length `1`. |
+| `destination_id` | string |  | Minimum length `1`. |
 
 Example `subscription_version_create`:
 
@@ -9027,15 +9027,14 @@ required:
   - idempotency_key
   - saved_query_version_id
   - evaluator
-  - destination_id
-description: New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
+description: New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query. Omit destination_id for no delivery, including when replacing a Version that had a destination; omission does not inherit the previous destination.
 ```
 
 </details>
 
 ### `SubscriptionVersion`
 
-Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
+Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription. destination_id is absent when this Version records Matches and change-feed notices without webhook delivery.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -9044,7 +9043,7 @@ Immutable Subscription configuration. Every Version keeps the Subscription's own
 | `saved_query_id` | string | yes | Minimum length `1`. |
 | `saved_query_version_id` | string | yes | Minimum length `1`. |
 | `evaluator` | [`EvaluatorConfig`](#evaluatorconfig) | yes |  |
-| `destination_id` | string | yes | Minimum length `1`. |
+| `destination_id` | string |  | Minimum length `1`. |
 | `owner` | [`SubscriptionOwner`](#subscriptionowner) |  |  |
 
 <details>
@@ -9079,8 +9078,7 @@ required:
   - saved_query_id
   - saved_query_version_id
   - evaluator
-  - destination_id
-description: Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
+description: Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription. destination_id is absent when this Version records Matches and change-feed notices without webhook delivery.
 ```
 
 </details>
@@ -9558,7 +9556,7 @@ required:
 
 ### `MonitoringReferences`
 
-owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -9567,7 +9565,7 @@ owner is the Subscription Owner, so a client routes the notice to its user; abse
 | `record_version_id` | string | yes | Minimum length `1`. |
 | `subscription_id` | string | yes | Minimum length `1`. |
 | `subscription_version_id` | string | yes | Minimum length `1`. |
-| `delivery_id` | string | yes | Minimum length `1`. |
+| `delivery_id` | string |  | Minimum length `1`. |
 | `previous_match_id` | string |  | Minimum length `1`. |
 | `owner` | [`SubscriptionOwner`](#subscriptionowner) |  |  |
 
@@ -9607,8 +9605,7 @@ required:
   - record_version_id
   - subscription_id
   - subscription_version_id
-  - delivery_id
-description: owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+description: owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 ```
 
 </details>

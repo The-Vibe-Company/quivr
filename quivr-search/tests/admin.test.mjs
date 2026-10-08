@@ -311,6 +311,71 @@ test("the header prefers the rollups, but not over a document they do not count 
   assert.equal(withRollups(own, null).hours_of, "received");
 });
 
+test("a version is replaced once a newer one took its place, not while it is still building", async () => {
+  const version = (version_id, record_id, ago, state, is_current) => ({
+    version_id,
+    record_id,
+    corpus_id: "demo",
+    state,
+    is_current,
+    steps: { accepted_at: at(-ago) },
+  });
+  const docs = [
+    // The core reports a Version still building as not current.
+    version("v_building", "r1", 1_000, "received", false),
+    version("v_shown", "r1", 60_000, "retrieval_ready", true),
+    // Searchable, but a newer Version of its Record, still building, was
+    // desired meanwhile.
+    version("v_finished", "r2", 50_000, "retrieval_ready", false),
+    version("v_newer", "r2", 40_000, "received", false),
+    // Overtaken while it waited; a quarantine is shown as an error instead.
+    version("v_overtaken", "r3", 30_000, "received", false),
+    version("v_failed", "r3", 35_000, "quarantined", false),
+    version("v_latest", "r3", 20_000, "retrieval_ready", true),
+  ];
+  const upstream = async (path) => {
+    const url = new URL(path, "http://core");
+    const timeline = url.pathname.match(/^\/v0\/admin\/documents\/(\w+)\/timeline$/);
+    if (timeline)
+      return {
+        status: 200,
+        data: { document: docs.find((d) => d.version_id === timeline[1]), steps: [] },
+      };
+    if (url.pathname === "/v0/admin/documents")
+      return { status: 200, data: { items: docs } };
+    return { status: 404, data: { code: "not_found" } };
+  };
+  const admin = createAdmin({ upstream, corpus: "demo", clock: () => now });
+  // A timeline opened first waits for the list it is judged against.
+  assert.equal(
+    (await admin.timeline("v_overtaken")).data.document.replaced,
+    true,
+  );
+  const { documents, stats } = await admin.snapshot();
+  assert.deepEqual(
+    Object.fromEntries(documents.map((d) => [d.version_id, d.replaced])),
+    {
+      v_building: false,
+      v_shown: false,
+      v_finished: true,
+      v_newer: false,
+      v_overtaken: true,
+      v_failed: false,
+      v_latest: false,
+    },
+  );
+  assert.equal(stats.waiting, 3, "the counts do not look at the label");
+  for (const [id, replaced] of [
+    ["v_building", false],
+    ["v_finished", true],
+  ])
+    assert.equal(
+      (await admin.timeline(id)).data.document.replaced,
+      replaced,
+      id,
+    );
+});
+
 // The engine's count API over synthetic Records: one acceptance time each,
 // or null for a Record without a current Version. Each count answers on a
 // later turn, so reads overlap as they would against the core.

@@ -27,7 +27,7 @@ Start each new API instance and wait for `/readyz` to return HTTP 204 before rou
 
 ## Keep the rollback window
 
-Observe ingestion, search and worker processing before ending the rollback window. Until you apply contracts, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place.
+Observe ingestion, search and worker processing before ending the rollback window. Before applying contracts or enabling features that close the rollback window, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place. Read the release notes for feature-specific compatibility limits; an additive schema alone does not guarantee that previous binaries can read newly written data.
 
 ## Apply the contract
 

@@ -59,6 +59,8 @@ export async function request<T>(
         );
       });
   const data = await response.json();
+  // The demo's databases were reset: its session names a corpus that is gone.
+  if (data.code === "demo_corpus_changed") location.reload();
   if (!response.ok)
     throw new APIError(
       response.status,

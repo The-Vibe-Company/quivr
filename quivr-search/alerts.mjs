@@ -2,7 +2,7 @@
 //
 // An alert is a Saved Query holding an alerts expression (plugins/alerts) and
 // the Subscription that pins it to the alerts evaluator. The facade forces the
-// demo corpus, the evaluator, the deployment's webhook destination and one
+// demo corpus, the evaluator and one
 // opaque Subscription Owner, so the browser only chooses a name and either a
 // keyword query or, when the deployment offers them, a plain-language
 // description judged by a classifier (`described`, see DEMO_DESCRIBED_ALERTS).
@@ -81,7 +81,6 @@ export function alertRoutes({
   upstream,
   jsonBody,
   fail,
-  destination,
   evaluator,
   owner,
   registry,
@@ -393,7 +392,6 @@ export function alertRoutes({
       saved_query_id: saved.data.saved_query_id,
       saved_query_version_id: saved.data.current_version.version_id,
       evaluator: pin,
-      destination_id: destination,
       owner,
     });
     if (sub.status !== 201 && sub.status !== 200) {
@@ -487,7 +485,6 @@ export function alertRoutes({
       idempotency_key: `demo-alert-edit-subscription:${idem}`,
       saved_query_version_id: version.data.version_id,
       evaluator: pin,
-      destination_id: destination,
     });
     if (result.status !== 201 && result.status !== 200) return result;
     queries.set(version.data.version_id, version.data);
@@ -562,7 +559,6 @@ export function alertRoutes({
     return pending;
   }
   async function matched(corpus) {
-    if (!destination) return {};
     // A list still being read is waited for, never started again.
     if (!asked || (asked.done && Date.now() - asked.at >= 60000))
       void listed(corpus).catch(() => {});
@@ -574,13 +570,6 @@ export function alertRoutes({
   /** The response for an alerts route, or undefined when the path is not one. */
   async function route(req, path, corpus) {
     if (path !== "/demo/alerts" && !path.startsWith("/demo/alerts/")) return;
-    if (!destination)
-      return path === "/demo/alerts" && req.method === "GET"
-        ? {
-            status: 200,
-            data: { available: false, described, items: [], matched: {} },
-          }
-        : undefined;
     try {
       if (path === "/demo/alerts")
         return req.method === "GET"

@@ -1607,7 +1607,7 @@ type ChangeEvent struct {
 	Cursor  string `json:"cursor"`
 	EventId string `json:"event_id"`
 
-	// Monitoring owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+	// Monitoring owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 	Monitoring    *MonitoringReferences `json:"monitoring,omitempty"`
 	OccurredAt    time.Time             `json:"occurred_at"`
 	Resource      ResourceReference     `json:"resource"`
@@ -2384,10 +2384,10 @@ type MetadataFilter_AnyOf_Item struct {
 	union json.RawMessage
 }
 
-// MonitoringReferences owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+// MonitoringReferences owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 type MonitoringReferences struct {
-	DeliveryId string `json:"delivery_id"`
-	MatchId    string `json:"match_id"`
+	DeliveryId *string `json:"delivery_id,omitempty"`
+	MatchId    string  `json:"match_id"`
 
 	// Owner Subscription Owner, an opaque end-user reference defined by the client application (for example user-123). Quivr stores, filters and echoes it without interpreting it. At most 128 characters without control characters; none is reserved for the listing filter. A refused owner is 422 invalid_owner, in a creation body as in the listing filter.
 	Owner                 *SubscriptionOwner `json:"owner,omitempty"`
@@ -3245,7 +3245,7 @@ type StepStatsList struct {
 
 // Subscription Absent owner means a global, organization-wide Subscription.
 type Subscription struct {
-	// CurrentVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
+	// CurrentVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription. destination_id is absent when this Version records Matches and change-feed notices without webhook delivery.
 	CurrentVersion SubscriptionVersion `json:"current_version"`
 
 	// Deleted Logically deleted for good; a deleted Subscription is also disabled and stays readable with its Versions, Matches and Deliveries.
@@ -3258,9 +3258,9 @@ type Subscription struct {
 	SubscriptionId string             `json:"subscription_id"`
 }
 
-// SubscriptionCreate Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. One deployment-configured destination per version; destination belongs to this Organization. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
+// SubscriptionCreate Create enabled from-now Subscription. An optional owner makes it the Subscription of one end user of the client application; without one it is global to the Organization. The owner is fixed for the Subscription's life and part of the idempotent request. An optional deployment-configured destination per version belongs to this Organization. Omit destination_id to record Matches and change-feed notices without creating Deliveries or sending webhooks. URL and signing key are provisioned outside this API and not returned. No inline secret or dynamic destination registry in the tracer.
 type SubscriptionCreate struct {
-	DestinationId string `json:"destination_id"`
+	DestinationId *string `json:"destination_id,omitempty"`
 
 	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator      EvaluatorConfig `json:"evaluator"`
@@ -3387,9 +3387,9 @@ type SubscriptionPreviewRequest struct {
 	SavedQueryVersionId *string `json:"saved_query_version_id,omitempty"`
 }
 
-// SubscriptionVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription.
+// SubscriptionVersion Immutable Subscription configuration. Every Version keeps the Subscription's owner, absent for a global Subscription. destination_id is absent when this Version records Matches and change-feed notices without webhook delivery.
 type SubscriptionVersion struct {
-	DestinationId string `json:"destination_id"`
+	DestinationId *string `json:"destination_id,omitempty"`
 
 	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator EvaluatorConfig `json:"evaluator"`
@@ -3402,9 +3402,9 @@ type SubscriptionVersion struct {
 	VersionId           string             `json:"version_id"`
 }
 
-// SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query.
+// SubscriptionVersionCreate New immutable configuration of an existing Subscription. The Saved Query and name are unchanged (rename changes the name); saved_query_version_id is the current Version of that Saved Query. Omit destination_id for no delivery, including when replacing a Version that had a destination; omission does not inherit the previous destination.
 type SubscriptionVersionCreate struct {
-	DestinationId string `json:"destination_id"`
+	DestinationId *string `json:"destination_id,omitempty"`
 
 	// Evaluator Pins an installed evaluator by plugin id and version, and its configuration. Evaluators are the subscription Contributions of the plugins pinned at startup (Plugin Protocol v0). The configuration must satisfy the evaluator's declared configuration schema.
 	Evaluator           EvaluatorConfig `json:"evaluator"`
@@ -3622,7 +3622,7 @@ type WebhookEvent struct {
 	EventId    string    `json:"event_id"`
 	OccurredAt time.Time `json:"occurred_at"`
 
-	// References owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. References alone confer no access.
+	// References owner is the Subscription Owner, so a client routes the notice to its user; absent for a global Subscription and in notices committed before owners existed. match_id is the new Match for created/corrected, prior positive Match for no_longer_matches/withdrawn. record_version_id is the causal correction version for corrected/no_longer_matches, otherwise the matched version. delivery_id is present only when a destination created a Delivery. References alone confer no access.
 	References    MonitoringReferences      `json:"references"`
 	SchemaVersion WebhookEventSchemaVersion `json:"schema_version"`
 	Type          WebhookEventType          `json:"type"`

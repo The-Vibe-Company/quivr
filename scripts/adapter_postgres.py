@@ -31,12 +31,28 @@ class Project:
     def compose(self, *args, **kwargs):
         # Compose interpolates every service of the shared file; only postgres starts,
         # so the roots the other services mount point at this run's directory.
-        env = {**os.environ, 'QUIVR_DB_PASSWORD': self.password, 'QUIVR_LOCAL_ROOT': str(self.directory), 'QUIVR_MODEL_ROOT': str(self.directory)}
+        env = {k: v for k, v in os.environ.items() if not k.startswith('QUIVR_POSTGRES_')}
+        env.update(QUIVR_DB_PASSWORD=self.password, QUIVR_LOCAL_ROOT=str(self.directory),
+                   QUIVR_MODEL_ROOT=str(self.directory), QUIVR_POSTGRES_MEMORY_MB='1024',
+                   QUIVR_POSTGRES_VOLUME_MB='327680')
         return subprocess.run(['docker', 'compose', '-p', self.name, '-f', COMPOSE, *args], check=True, cwd=ROOT, env=env, **kwargs)
 
     def start(self):
         """Start PostgreSQL and write the adapter configuration: this database only."""
         self.compose('up', '-d', '--wait', '--wait-timeout', '120', 'postgres')
+        # Verify actual settings/extension, including persistence across a boot.
+        # The SQL owns the deployment contract; unit tests only own lifecycle.
+        smoke = (ROOT / 'deploy/postgres/check-settings.sql').read_text()
+        for reboot in (False, True):
+            if reboot:
+                self.compose('exec', '-T', 'postgres', 'psql', '-U', 'quivr', '-d', 'quivr',
+                             '-v', 'ON_ERROR_STOP=1', '-c', "ALTER SYSTEM SET shared_buffers='128MB'")
+                self.compose('exec', '-T', 'postgres', 'psql', '-U', 'quivr', '-d', 'quivr',
+                             '-v', 'ON_ERROR_STOP=1', '-c', "ALTER SYSTEM SET max_wal_size='1GB'")
+                self.compose('restart', 'postgres')
+                self.compose('up', '-d', '--wait', '--wait-timeout', '120', 'postgres')
+            self.compose('exec', '-T', 'postgres', 'psql', '-U', 'quivr', '-d', 'quivr',
+                         input=smoke, text=True)
         address = self.compose('port', 'postgres', '5432', capture_output=True, text=True).stdout.strip()
         config = self.directory / 'config.json'
         config.write_text(json.dumps({'database_url': f'postgres://quivr:{self.password}@{address}/quivr?sslmode=disable'}))

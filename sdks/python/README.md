@@ -139,7 +139,7 @@ requests themselves.
 Return a `SearchResponse` or JSON: candidate `requests` or a final `ranking`,
 with optional paid-call `usage`. The adapter validates profiles, configuration
 and schemas; the engine validates candidates, authorization and budgets.
-See [Jev reranking](../../plugins/jev-rerank/README.md) for an example and fixtures.
+See [Jev reranking](../../plugins/jev-rerank/README.md) for examples. Alerts and reranking share the optional [`system_one` client](src/quivr_plugin/system_one.py), which bounds request bytes, retries and deadlines, accounts for costs and enforces an optional cost limit and withholds partial scores on failure.
 Register `@plugin.segment_and_embed` and `@plugin.embed_query` for ingestion.
 They receive generated `SegmentAndEmbedRequest` and `EmbedQueryRequest` models;
 return the corresponding response model or JSON. The adapter checks declared

@@ -191,17 +191,19 @@ func servingSpaceIDs(spaces []content.RegisteredSpace) []string {
 
 // pinnedOwnerServes fences global Version state from work whose source route
 // now belongs to another owner. Such work keeps its original plugin pin.
+var pinnedOwnerServesSQL = `SELECT g.ingestion_routing IS NULL OR COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')=COALESCE(
+ (SELECT pr.plugin_id FROM pipeline_plan_roles rr JOIN plugin_registrations pr ON pr.id=rr.registration_id WHERE rr.plan_id=$3 AND rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain') LIMIT 1),
+ (SELECT pr.plugin_id FROM pipeline_plan_roles rr JOIN plugin_registrations pr ON pr.id=rr.registration_id WHERE rr.plan_id=$3 AND rr.role IN ('ingestion','ingestion-default') LIMIT 1),'')
+ FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
+ JOIN projection_generations g ON g.id=` + routedGenerationSQL("r.organization", "r.corpus_id") + ` WHERE v.organization=$1 AND v.id=$2`
+
 func pinnedOwnerServes(ctx context.Context, tx pgx.Tx, org, versionID string) (bool, error) {
 	w, ok := plugins.WorkOf(ctx)
 	if !ok || w.Kind != plugins.WorkIngestion {
 		return true, nil
 	}
 	var serves bool
-	err := tx.QueryRow(ctx, `SELECT g.ingestion_routing IS NULL OR COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')=COALESCE(
- (SELECT pr.plugin_id FROM pipeline_plan_roles rr JOIN plugin_registrations pr ON pr.id=rr.registration_id WHERE rr.plan_id=$3 AND rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain') LIMIT 1),
- (SELECT pr.plugin_id FROM pipeline_plan_roles rr JOIN plugin_registrations pr ON pr.id=rr.registration_id WHERE rr.plan_id=$3 AND rr.role IN ('ingestion','ingestion-default') LIMIT 1),'')
- FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id) JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
- JOIN projection_generations g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+` WHERE v.organization=$1 AND v.id=$2`, org, versionID, w.Plan).Scan(&serves)
+	err := tx.QueryRow(ctx, pinnedOwnerServesSQL, org, versionID, w.Plan).Scan(&serves)
 	return serves, err
 }
 

@@ -42,15 +42,16 @@ Save its returned `version_id` as `QUERY_VERSION_ID`.
 </Step>
 <Step title="Move each Subscription to it">
 
-For each Subscription of this Saved Query, set `SUBSCRIPTION_ID` and create a new Version, retaining its evaluator settings and destination:
+For each Subscription of this Saved Query, set `SUBSCRIPTION_ID` and create a new Version, retaining its evaluator settings and optional destination:
 
 ```bash
 curl -fsS "$QUIVR_API_URL/v0/subscriptions/$SUBSCRIPTION_ID" \
   -H "Authorization: Bearer $QUIVR_ALERT_KEY" \
   | jq --arg key "model-switch-$SUBSCRIPTION_ID-$QUERY_VERSION_ID" \
        --arg query "$QUERY_VERSION_ID" \
-    '{idempotency_key:$key, saved_query_version_id:$query,
-      evaluator:.current_version.evaluator, destination_id:.current_version.destination_id}' \
+    '.current_version as $version |
+      {idempotency_key:$key, saved_query_version_id:$query, evaluator:$version.evaluator}
+      + ($version | if has("destination_id") then {destination_id} else {} end)' \
     > subscription-version.json
 curl -fsS -X POST "$QUIVR_API_URL/v0/subscriptions/$SUBSCRIPTION_ID/versions" \
   -H "Authorization: Bearer $QUIVR_ALERT_KEY" -H "Content-Type: application/json" \

@@ -702,7 +702,7 @@ func TestEvaluationOwnerActivationKeepsSearchableVersions(t *testing.T) {
 			break
 		}
 	}
-	if outcome, err := store.Operation(ctx, scope.Organization, migration.ID); err != nil || outcome.State != operations.StateSucceeded || outcome.Counters["vectors_reused"] == 0 {
+	if outcome, err := store.Operation(ctx, scope.Organization, migration.ID); err != nil || outcome.State != operations.StateSucceeded || outcome.Counters["passages_covered"] == 0 {
 		t.Fatalf("configured-owner rebuild did not finish with vectors: %+v %v", outcome, err)
 	}
 	if current, err := store.Generation(ctx, scope.Organization, c.ID); err != nil || current.IngestionRouting.For("text/plain") != b.Manifest.ID {

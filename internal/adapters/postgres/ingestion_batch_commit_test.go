@@ -30,7 +30,15 @@ func TestPreparedPublicationGroupsKeepAtomicOrderedFeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stores := contentStores(pool)
+	trips := &lockedRoundTrips{locked: map[*pgx.Conn]bool{}}
+	cfg := pool.Config()
+	cfg.ConnConfig.Tracer = trips
+	traced, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer traced.Close()
+	stores := contentStores(traced)
 	g, err := stores.Generation(ctx, org, c.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +78,7 @@ func TestPreparedPublicationGroupsKeepAtomicOrderedFeed(t *testing.T) {
 	if _, err = barrier.Exec(ctx, `INSERT INTO content_blobs VALUES($1,$2,$3,$4,$5)`, org, content.StableID("blob", org, b.SHA256), b.Key, b.SHA256, b.Size); err != nil {
 		t.Fatal(err)
 	}
-	cfg := pool.Config()
+	cfg = pool.Config()
 	cfg.ConnConfig.RuntimeParams["application_name"] = org
 	blocked, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -94,10 +102,21 @@ func TestPreparedPublicationGroupsKeepAtomicOrderedFeed(t *testing.T) {
 		default:
 		}
 	}
+	// The locked section has a fixed round-trip budget regardless of members:
+	// fenced reads travel with the lock, followed by writes/events and commit.
+	trips.mu.Lock()
+	trips.lockedTrips = 0
+	trips.mu.Unlock()
 	// Progress by independent writers under injected insert latency, without
 	// a flaky elapsed-time ratio in CI.
 	if err = commitPrepared(ctx, stores, entries[2:]); err != nil {
 		t.Fatal(err)
+	}
+	trips.mu.Lock()
+	lockedTrips := trips.lockedTrips
+	trips.mu.Unlock()
+	if lockedTrips > 2 {
+		t.Errorf("publication held journal across %d round trips, want at most 2", lockedTrips)
 	}
 	window, err := stores.ReadChanges(ctx, org, c.ID, head.Head, 100, 24*time.Hour)
 	if err != nil {
@@ -280,8 +299,17 @@ func TestPreparedPublicationGroupsKeepAtomicOrderedFeed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		trips.mu.Lock()
+		trips.lockedTrips = 0
+		trips.mu.Unlock()
 		if err = errors.Join(stores.CommitIngestion(ctx, commits)...); err != nil {
 			t.Fatal(err)
+		}
+		trips.mu.Lock()
+		lockedTrips := trips.lockedTrips
+		trips.mu.Unlock()
+		if lockedTrips > 2 {
+			t.Errorf("enrichment held journal across %d round trips, want at most 2", lockedTrips)
 		}
 		after, err := stores.ReadChanges(ctx, org, c.ID, before.Head, 100, 24*time.Hour)
 		if err != nil || len(after.Events) != 4 {
@@ -302,6 +330,64 @@ func TestPreparedPublicationGroupsKeepAtomicOrderedFeed(t *testing.T) {
 		replay, err := stores.ReadChanges(ctx, org, c.ID, before.Head, 100, 24*time.Hour)
 		if err != nil || !reflect.DeepEqual(after, replay) {
 			t.Fatalf("enrichment replay changed cursor window: %+v %v", replay, err)
+		}
+	})
+
+	t.Run("baseline replay and one withdrawn member keep the guarded fallback", func(t *testing.T) {
+		commits := make([]content.IngestionCommit, 2)
+		for i, e := range entries[:2] {
+			commits[i] = content.IngestionCommit{Context: ctx, Kind: content.CommitBaseline, Organization: org, RecordID: e.Work.RecordID, Segmentation: e.Segmentation, Generation: g}
+		}
+		before, err := stores.ReadChanges(ctx, org, c.ID, 0, 100, 24*time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trips.mu.Lock()
+		trips.lockedTrips = 0
+		trips.mu.Unlock()
+		if err = errors.Join(stores.CommitIngestion(ctx, commits)...); err != nil {
+			t.Fatal(err)
+		}
+		trips.mu.Lock()
+		count := trips.lockedTrips
+		trips.mu.Unlock()
+		if count > 2 {
+			t.Errorf("baseline held journal across %d round trips, want at most 2", count)
+		}
+		replay, err := stores.ReadChanges(ctx, org, c.ID, 0, 100, 24*time.Hour)
+		if err != nil || !reflect.DeepEqual(before, replay) {
+			t.Fatalf("baseline replay changed feed: %+v %v", replay, err)
+		}
+		extra := []content.PublicationCommit{prepare("withdrawn-before-baseline"), prepare("healthy-before-baseline")}
+		for i, e := range extra {
+			if err = stores.Publish(ctx, e.Work, e.Publication); err != nil {
+				t.Fatal(err)
+			}
+			if err = stores.SaveSegmentation(ctx, org, e.Segmentation); err != nil {
+				t.Fatal(err)
+			}
+			commits[i] = content.IngestionCommit{Context: ctx, Kind: content.CommitBaseline, Organization: org, RecordID: e.Work.RecordID, Segmentation: e.Segmentation, Generation: g}
+		}
+		service := content.Service{Submissions: stores, Receipts: stores, RecordStore: stores, Versions: stores}
+		scope := corpus.Scope{Organization: org, Actions: []string{"content:write"}, Corpora: []string{"*"}}
+		if _, err = service.Withdraw(ctx, scope, content.Withdrawal{Key: "withdraw-fallback", Source: extra[0].Work.Command.Source}); err != nil {
+			t.Fatal(err)
+		}
+		before, err = stores.ReadChanges(ctx, org, c.ID, 0, 100, 24*time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = errors.Join(stores.CommitIngestion(ctx, commits)...); err != nil {
+			t.Fatal(err)
+		}
+		after, err := stores.ReadChanges(ctx, org, c.ID, before.Head, 100, 24*time.Hour)
+		if err != nil || len(after.Events) != 1 || after.Events[0].Type != "record.retrieval_ready" || after.Events[0].ResourceID != extra[1].Work.RecordID || after.Head != before.Head+1 {
+			t.Fatalf("fallback feed: %+v %v", after, err)
+		}
+		var withdrawn, ready bool
+		var current *string
+		if err = pool.QueryRow(ctx, `SELECT r.withdrawn,r.current_version_id,v.baseline_ready FROM records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,$3) WHERE r.organization=$1 AND r.id=$2`, org, extra[0].Work.RecordID, extra[0].Work.VersionID).Scan(&withdrawn, &current, &ready); err != nil || !withdrawn || ready || current != nil {
+			t.Fatalf("fallback republished withdrawn record: withdrawn=%v ready=%v current=%v err=%v", withdrawn, ready, current, err)
 		}
 	})
 

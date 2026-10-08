@@ -54,6 +54,11 @@ export interface AdminDocument {
   title?: string;
   state: string;
   is_current: boolean;
+  /** Not current and no longer building, as the facade judges it: a newer
+   * Version of the Record is current, or this one became searchable without
+   * becoming current. Not current alone also describes a Version still
+   * building. */
+  replaced: boolean;
   steps: Steps;
   /** Whether alert evaluation applies; absent from a core before THE-1315. */
   evaluation?: "applicable" | "not_applicable";

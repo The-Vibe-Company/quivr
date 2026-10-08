@@ -174,8 +174,7 @@ func loadGenerationIngestion(ctx context.Context, q interface {
 // owners other than the owner that just served this Corpus. Existing Corpora
 // can retain another serving route after configuration changes. It makes no
 // plugin calls and pins each optional job before the receipt releases.
-func queueIngestionEvaluations(ctx context.Context, tx pgx.Tx, org, recordID, versionID, generationID, planID, servingOwner string) error {
-	rows, err := tx.Query(ctx, `SELECT pr.id,pr.plugin_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings FROM pipeline_plan_roles rr
+const ingestionEvaluationTargetsSQL = `SELECT pr.id,pr.plugin_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings FROM pipeline_plan_roles rr
  JOIN plugin_registrations pr ON pr.id=rr.registration_id
  JOIN record_versions v ON v.organization=$1 AND v.id=$2
  JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
@@ -183,7 +182,10 @@ func queueIngestionEvaluations(ctx context.Context, tx pgx.Tx, org, recordID, ve
  AND pr.plugin_id<>$4 AND (rr.role='ingestion-evaluation:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')||':'||pr.plugin_id
  OR rr.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain')
  OR (rr.role IN ('ingestion-default','ingestion') AND NOT EXISTS(SELECT 1 FROM pipeline_plan_roles source_route WHERE source_route.plan_id=rr.plan_id AND source_route.role='ingestion-route:'||COALESCE(NULLIF(ar.source_media_type,''),'text/plain'))))
- ORDER BY pr.id`, org, versionID, planID, servingOwner)
+ ORDER BY pr.id`
+
+func queueIngestionEvaluations(ctx context.Context, tx pgx.Tx, org, recordID, versionID, generationID, planID, servingOwner string) error {
+	rows, err := tx.Query(ctx, ingestionEvaluationTargetsSQL, org, versionID, planID, servingOwner)
 	if err != nil {
 		return err
 	}
@@ -250,7 +252,7 @@ func queueIngestionEvaluations(ctx context.Context, tx pgx.Tx, org, recordID, ve
 
 func (s IngestionEvaluationStore) ClaimIngestionEvaluations(ctx context.Context, limit int) ([]content.IngestionEvaluation, error) {
 	q, _ := workqueue.Selected(ctx)
-	rows, err := s.Pool.Query(ctx, `UPDATE ingestion_evaluations SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM ingestion_evaluations WHERE ($2='' OR work_queue=$2 OR (work_queue='' AND $2='live')) AND NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue`, limit, q)
+	rows, err := s.Pool.Query(ctx, `UPDATE ingestion_evaluations SET lease_until=now()+interval '5 seconds' WHERE (organization,id) IN (SELECT organization,id FROM ingestion_evaluations WHERE ($2='' OR work_queue=$2) AND NOT dispatched AND state='queued' AND lease_until<now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT $1) RETURNING organization,id,record_id,version_id,generation_id,plugin_id,registration_id,plan_id,spaces,state,work_queue`, limit, q)
 	if err != nil {
 		return nil, err
 	}
