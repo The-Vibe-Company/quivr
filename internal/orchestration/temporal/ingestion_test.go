@@ -3,6 +3,7 @@ package temporal
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,6 +61,12 @@ var oneReceipt = content.DispatchBatch{ID: "batch", WorkQueue: workqueue.Live, R
 // within seconds and work pinned to a draining plugin version is freed (THE-835).
 func TestUnavailableNormalizerKeepsWorkflowPendingBeyondRetryInterval(t *testing.T) {
 	env, steps, timeouts := ingestionEnvironment(t)
+	var heartbeats atomic.Int64
+	env.SetOnActivityHeartbeatListener(func(info *activity.Info, _ converter.EncodedValues) {
+		if info.ActivityType.Name == ingestionBatchActivity {
+			heartbeats.Add(1)
+		}
+	})
 	steps.normalizeErr = errors.New("plugin_unavailable: connection refused")
 	observed := false
 	env.RegisterDelayedCallback(func() {
@@ -75,6 +82,9 @@ func TestUnavailableNormalizerKeepsWorkflowPendingBeyondRetryInterval(t *testing
 	}
 	if err := env.GetWorkflowError(); !sdktemporal.IsCanceledError(err) {
 		t.Fatalf("workflow ended with %v, want cancellation after observing the pending outage", err)
+	}
+	if heartbeats.Load() == 0 {
+		t.Error("retrying batch activity never emitted a heartbeat")
 	}
 	if d, ok := timeouts[ingestionBatchActivity]; !ok || d <= 0 || d > 10*time.Second {
 		t.Errorf("%s scheduled with heartbeat timeout %v (ran %t), want at most 10s", ingestionBatchActivity, d, ok)

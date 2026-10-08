@@ -12,6 +12,8 @@ The steps below are operator examples, not run against a live Railway project. T
 
 ## Create the workers
 
+In-place upgrades from 2.0.0-alpha.6 and older are not supported. Reset the installation, or export its data and re-import it into a fresh installation before following these steps.
+
 1. Run the existing [provisioning procedure](../README.md#provision-and-deploy). `services.json` keeps the existing service named `worker` as the live worker and adds `worker-bulk`. Both start at one replica, use `core.Dockerfile`, and probe `/readyz`. The provisioner sets `QUIVR_WORKER_QUEUES=live` on `worker` and `bulk` on `worker-bulk`.
 2. Before deploying `worker-bulk`, copy the existing worker's additional plugin/provider variables and secrets to it. All workers must share database, Temporal namespace, storage, cursor/credential/signing keys, active plugin settings and embedding endpoints. Keep each service's queue selector. Do not add a volume: each replica runs its own loopback plugin sidecars and temporary files. Both slot counts default to four; override with `QUIVR_WORKER_LIVE_SLOTS` and `QUIVR_WORKER_BULK_SLOTS` (1–1024).
 3. Deploy API, `worker` and `worker-bulk` with the existing deploy helper. Verify readiness and a live document becoming searchable while bulk work is pending. The API and workers must agree on plugin pins before scaling.

@@ -309,6 +309,8 @@ Follow the [bounded retirement procedure](https://docs.quivr.thevibecompany.co/r
 
 ## Provision and deploy
 
+In-place upgrades from 2.0.0-alpha.6 and older are not supported. Reset the installation, or export its data and re-import it into a fresh installation before following these steps.
+
 Authenticate `railway login`, then create/link a dedicated project in the intended
 workspace. The provisioner refuses any project not named `quivr-v2-demo` or whose ID
 does not match the explicit argument.

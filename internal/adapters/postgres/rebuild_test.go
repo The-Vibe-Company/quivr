@@ -196,7 +196,9 @@ func TestRebuildCoverageReconciliationAndAtomicCutover(t *testing.T) {
 	}
 	activate(true)
 	read, err := store.Operation(ctx, org, op.ID)
-	if err != nil || read.State != operations.StateSucceeded || read.ResultGenerationID != op.TargetGenerationID || read.Counters["versions_covered"] != 2 || read.Counters["passages_covered"] != 3 || read.Counters["versions_quarantined"] != 1 || len(read.Errors) != 1 || read.Errors[0].Code != reason.Code {
+	_, hasIndexed := read.Counters["indexed"]
+	_, hasReused := read.Counters["vectors_reused"]
+	if err != nil || hasIndexed || hasReused || read.State != operations.StateSucceeded || read.ResultGenerationID != op.TargetGenerationID || read.Counters["versions_covered"] != 2 || read.Counters["passages_covered"] != 3 || read.Counters["versions_quarantined"] != 1 || len(read.Errors) != 1 || read.Errors[0].Code != reason.Code {
 		t.Fatalf("succeeded operation %+v %v", read, err)
 	}
 	if g, _ := store.Generation(ctx, org, a.ID); g.ID != op.TargetGenerationID {
