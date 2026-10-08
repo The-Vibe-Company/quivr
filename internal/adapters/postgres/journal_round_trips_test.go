@@ -66,6 +66,7 @@ type lockedRoundTrips struct {
 	mu              sync.Mutex
 	locked          map[*pgx.Conn]bool
 	observationOnly []string
+	lockedTrips     int
 }
 
 func journalLock(sql string) bool {
@@ -76,6 +77,7 @@ func (r *lockedRoundTrips) trip(c *pgx.Conn, sqls []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.locked[c] {
+		r.lockedTrips++
 		observation, event := false, false
 		for _, sql := range sqls {
 			observation = observation || strings.Contains(sql, "queue_enrichment_records")
