@@ -379,7 +379,7 @@ class NativeConfirmation:
             self.heldout_family.update(preview['heldout_family'])
         self.confirmation_policy_digest = native.digest(native.invariants(preview, policy))
 
-    def prepare(self, trial):
+    def prepare(self, trial, checkout):
         import engine_confirmation as native
         cfg = self.configuration
         candidate = self.store.snapshot(self.name)['trials'][str(trial)]['config']
@@ -393,11 +393,11 @@ class NativeConfirmation:
         # actually deploys. Resolve omitted hosted values with its real offline
         # configure command; never guess execution defaults or segmentation.
         import campaign_promotion as promotion
-        with promotion._checkout(ROOT, self.engine_git_sha) as checkout:
-            baseline = promotion.effective_settings(checkout)
-            effective = {'baseline': baseline, 'candidate': promotion._candidate_settings(
-                checkout, candidate, self.store.policy(self.name)['baseline'], 'ranked')}
-            manifest = promotion.HostedManifestBuilder()(checkout, baseline['hosted'])
+        checkout = checkout(self.engine_git_sha)
+        baseline = promotion.effective_settings(checkout)
+        effective = {'baseline': baseline, 'candidate': promotion._candidate_settings(
+            checkout, candidate, self.store.policy(self.name)['baseline'], 'ranked')}
+        manifest = promotion.HostedManifestBuilder()(checkout, baseline['hosted'])
         locked = {k: v.get('const') for k, v in manifest['configuration']['schema']['properties'].items()}
         for side, settings in effective.items():
             hosted = {**locked, **settings['hosted']}
