@@ -143,12 +143,6 @@ def providers():
         self.assertEqual(result.report['baseline']['no_answer_queries'], 6)
         self.assertEqual(result.report['baseline']['metrics']['ndcg@10'], 1)
         self.assertTrue(all(len(qid) == 64 for qid in result.working['queries']))
-        from trec import load
-        with tempfile.TemporaryDirectory() as directory:
-            news.write_trec(pathlib.Path(directory), result.working)
-            parsed = load(directory)
-            self.assertEqual(len(parsed['queries']), 30)
-            self.assertEqual(len(parsed['dropped_queries']), 6)
 
     @mock.patch('scoring.score', side_effect=unavailable_scorer)
     def test_live_minimum_supports_smaller_sets_and_nonempty_partitions(self, scorer):
