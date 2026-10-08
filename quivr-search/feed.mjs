@@ -460,13 +460,15 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
     },
     /**
      * Leaves the change stream for good: the corpus is no longer read. Its
-     * listeners are told ("stopped") so the browsers following it reconnect.
+     * listeners and watchers are told ("stopped") so the browsers following
+     * it reconnect.
      */
     stop() {
       stopped = true;
       following?.abort();
       setLive(false);
       broadcast("stopped");
+      notify("stopped");
     },
     /** Settles once the first catalog scan is done (or failed). */
     ready() {
@@ -476,7 +478,7 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
     opened() {
       return start();
     },
-    /** Follows the change stream: watcher("change", event), ("status", live), ("reset"). */
+    /** Follows the change stream: watcher("change", event), ("status", live), ("reset"), ("stopped"). */
     watch(watcher) {
       watchers.add(watcher);
       watcher("status", live);

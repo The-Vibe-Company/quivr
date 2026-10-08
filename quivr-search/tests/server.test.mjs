@@ -1630,6 +1630,7 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
     if (url.pathname === "/v0/changes") return json(200, { items: [], next_cursor: "c0", has_more: false });
     if (url.pathname === "/v0/records") return json(200, { items: [] });
     if (url.pathname === "/v0/records/count") return json(200, { count: 0 });
+    if (url.pathname === "/v0/admin/documents") return json(200, { items: [] });
     gone();
   });
   upstream.listen(0, "127.0.0.1");
@@ -1661,8 +1662,11 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
 
   assert.equal((await get("/demo/session")).corpus_id, "demo-1");
   assert.deepEqual((await get("/demo/corpora")).items.map((c) => c.corpus_id), ["demo-1", "archive-1"]);
-  // A browser follows the demo corpus's feed.
-  const followed = (await fetch(base + "/demo/feed/stream")).body.getReader();
+  // A browser follows the demo corpus's feed and its Admin tab.
+  const followed = [
+    (await fetch(base + "/demo/feed/stream")).body.getReader(),
+    (await fetch(base + "/demo/admin/stream")).body.getReader(),
+  ];
   await until("the demo corpus's change stream", () => streams.has("demo-1"));
 
   // The databases are wiped while the demo runs; the page reloads. The demo
@@ -1671,13 +1675,15 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
   generation = 2;
   assert.equal((await get("/demo/session")).corpus_id, "demo-2");
   await until("the old change stream to close", () => !streams.has("demo-1"));
-  // The browser's stream of the old corpus ends, so it reconnects to the new one.
-  const ended = (async () => {
-    for (let read; !(read = await followed.read()).done; );
-  })();
+  // The browser's streams of the old corpus end, so it reconnects to the new one.
+  const ended = Promise.all(
+    followed.map(async (stream) => {
+      for (let read; !(read = await stream.read()).done; );
+    }),
+  );
   await Promise.race([
     ended,
-    delay(3000, undefined, { ref: false }).then(() => assert.fail("the browser's stream of the old corpus stayed open")),
+    delay(3000, undefined, { ref: false }).then(() => assert.fail("a browser stream of the old corpus stayed open")),
   ]);
   assert.deepEqual((await get("/demo/corpora")).items.map((c) => c.corpus_id), ["demo-2", "archive-2"]);
   assert.equal((await addSource("demo-2")).status, 201);
