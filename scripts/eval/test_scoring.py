@@ -44,7 +44,7 @@ class Score(unittest.TestCase):
         run = {q: {d: 1 / (i + 1) for i, d in enumerate(ranking.get(q, []))} for q in qrels}
         # ranx's own metric code runs interpreted: compiling its Numba kernels
         # costs tens of seconds and adds nothing to these semantics.
-        oracle = subprocess.run([sys.executable, '-I', '-c', ORACLE], input=json.dumps([qrels, run]),
+        oracle = subprocess.run([sys.executable, '-P', '-c', ORACLE], input=json.dumps([qrels, run]),
                                 capture_output=True, text=True, env={**os.environ, 'NUMBA_DISABLE_JIT': '1'})
         self.assertEqual(oracle.returncode, 0, oracle.stderr[-2000:])
         expected = json.loads(oracle.stdout)
