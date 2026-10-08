@@ -63,7 +63,10 @@ const MAX_ZONES = 8;
  * decisions both follow the document becoming searchable. `after` falls back
  * to an earlier step when the cause has no time. Vectors and alert decisions
  * missing `settle` ms after the document became searchable are shown as not
- * recorded: a Corpus without vectors, or no alert to decide.
+ * recorded: a Corpus without vectors, or no alert to decide. `optional` names
+ * the document field the core sets to "not_applicable" when the step will
+ * never come; the cell then says so at once, unless a quarantine or a
+ * withdrawal already stopped the document.
  */
 export const STEPS = [
   {
@@ -102,6 +105,8 @@ export const STEPS = [
     needs: ["searchable"],
     floor: 1000,
     settle: 2 * MINUTE,
+    // No enabled alert covers the corpus: no decision is coming.
+    optional: { field: "evaluation", reason: "no_alert" },
   },
 ];
 // Below this many durations over the day, a step's p95 is too noisy to judge
@@ -162,8 +167,9 @@ export function limits(docs) {
 
 /**
  * The cells of one document, one per step: done (with its duration), slow,
- * running (with the time it waits from), to do, not recorded, or error for
- * the step a quarantine stopped. Each carries its step's slow limit.
+ * running (with the time it waits from), to do, not recorded (with a reason
+ * when the core says the step does not apply), or error for the step a
+ * quarantine stopped. Each carries its step's slow limit.
  */
 export function flow(doc, limit, now) {
   const steps = doc.steps || {};
@@ -181,6 +187,14 @@ export function flow(doc, limit, now) {
         ms !== undefined && cell.limit !== null && ms > cell.limit
           ? "slow"
           : "done";
+    } else if (
+      step.optional &&
+      !quarantined &&
+      !withdrawn &&
+      doc[step.optional.field] === "not_applicable"
+    ) {
+      cell.state = "none";
+      cell.reason = step.optional.reason;
     } else if (index < lastDone && !step.settle) {
       // A later step finished without this one's time (a Version from
       // before step times, or a path that skips it).
