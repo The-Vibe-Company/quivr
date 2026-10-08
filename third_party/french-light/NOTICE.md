@@ -1,6 +1,6 @@
 # French light stemming provenance
 
-`internal/content/french_light.go` adapts Apache Lucene's FrenchLightStemmer
+`internal/keywords/french_light.go` adapts Apache Lucene's FrenchLightStemmer
 (UniNE algorithm), from commit `1f4da953f0c13b9b5a3a38dfcfc3c7b6a5a2f6cd`:
 [upstream source](https://github.com/apache/lucene/blob/1f4da953f0c13b9b5a3a38dfcfc3c7b6a5a2f6cd/lucene/analysis/common/src/java/org/apache/lucene/analysis/fr/FrenchLightStemmer.java).
 
