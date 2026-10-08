@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os/exec"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -59,23 +61,39 @@ type localTokenizer struct {
 	slots     chan *tokenizerProcess
 	closed    chan struct{}
 	closeOnce sync.Once
+	ready     chan struct{}
+	log       *slog.Logger
+	helpers   atomic.Int64
+	restarts  atomic.Int64
 }
 
 type tokenizerProcess struct {
-	config tokenizerConfiguration
-	cmd    *exec.Cmd
-	writer *bufio.Writer
-	reader *bufio.Reader
+	config  tokenizerConfiguration
+	pool    *localTokenizer
+	started bool
+	cmd     *exec.Cmd
+	writer  *bufio.Writer
+	reader  *bufio.Reader
 }
 
-func newLocalTokenizer(config tokenizerConfiguration, processes int) *localTokenizer {
+func newLocalTokenizer(config tokenizerConfiguration, processes int, log *slog.Logger) *localTokenizer {
 	if processes == 0 {
 		processes = min(runtime.GOMAXPROCS(0), 4)
 	}
-	t := &localTokenizer{slots: make(chan *tokenizerProcess, processes), closed: make(chan struct{})}
+	t := &localTokenizer{slots: make(chan *tokenizerProcess, processes), closed: make(chan struct{}), ready: make(chan struct{}), log: log}
+	var starting sync.WaitGroup
 	for range processes {
-		t.slots <- &tokenizerProcess{config: config}
+		starting.Go(func() {
+			p := &tokenizerProcess{config: config, pool: t}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if _, err := p.exchange(ctx, nil, 0); err != nil {
+				t.log.Warn("tokenizer helper startup failed", "helper_count", t.helpers.Load(), "restarts", t.restarts.Load())
+			}
+			t.slots <- p
+		})
 	}
+	go func() { starting.Wait(); close(t.ready) }()
 	return t
 }
 
@@ -119,6 +137,7 @@ func (p *tokenizerProcess) stop() {
 		_ = p.cmd.Wait()
 		p.cmd = nil
 		p.writer, p.reader = nil, nil
+		p.pool.log.Info("tokenizer helper stopped", "helper_count", p.pool.helpers.Add(-1), "restarts", p.pool.restarts.Load())
 	}
 }
 
@@ -141,10 +160,15 @@ func (p *tokenizerProcess) exchange(ctx context.Context, raw []byte, count int) 
 			return nil, errTokenizer
 		}
 		p.cmd = cmd
+		if p.started {
+			p.pool.restarts.Add(1)
+		}
+		p.started = true
+		p.pool.log.Info("tokenizer helper started", "helper_count", p.pool.helpers.Add(1), "restarts", p.pool.restarts.Load())
 		p.writer = bufio.NewWriter(stdin)
 		p.reader = bufio.NewReader(stdout)
 	}
-	// The context has a hard ten-second deadline, including queueing and load.
+	// Only the independent hard deadline may kill this process.
 	// Capture this process only: cancellation cannot kill another slot or a
 	// replacement. Join an already-running callback before returning the lease.
 	cmd := p.cmd
@@ -167,6 +191,10 @@ func (p *tokenizerProcess) exchange(ctx context.Context, raw []byte, count int) 
 		if readErr != nil || string(ready) != "ready\n" {
 			return nil, errTokenizer
 		}
+	}
+	// A nil request prestarts the helper without sending an encoding.
+	if raw == nil {
+		return nil, nil
 	}
 	if _, writeErr := p.writer.Write(append(raw, '\n')); writeErr != nil {
 		return nil, errTokenizer
@@ -194,7 +222,7 @@ func (p *tokenizerProcess) exchange(ctx context.Context, raw []byte, count int) 
 
 func (t *localTokenizer) Encode(ctx context.Context, inputs []tokenInput) ([]tokenEncoding, error) {
 	// Keep the caller's cancellation channel at admission. Waiting calls hold no
-	// serialized copy or helper goroutine; the same deadline bounds the lease.
+	// serialized copy or helper goroutine; the hard deadline bounds the lease.
 	deadline := time.Now().Add(10 * time.Second)
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
@@ -211,14 +239,17 @@ func (t *localTokenizer) Encode(ctx context.Context, inputs []tokenInput) ([]tok
 		return nil, errTokenizer
 	case p = <-t.slots:
 	}
-	defer func() { t.slots <- p }()
+	release := true
+	defer func() {
+		if release {
+			t.slots <- p
+		}
+	}()
 	select {
 	case <-t.closed:
 		return nil, errTokenizer
 	default:
 	}
-	ctx, cancel := context.WithDeadline(ctx, deadline)
-	defer cancel()
 	if ctx.Err() != nil {
 		return nil, errTokenizer
 	}
@@ -226,5 +257,30 @@ func (t *localTokenizer) Encode(ctx context.Context, inputs []tokenInput) ([]tok
 	if err != nil || len(raw) > 4<<20 || ctx.Err() != nil {
 		return nil, errTokenizer
 	}
-	return p.exchange(ctx, raw, len(inputs))
+	// The lease outlives a cancelled caller until its response is drained.
+	// Buffer the result so abandoned calls never retain a helper goroutine.
+	type result struct {
+		out []tokenEncoding
+		err error
+	}
+	done := make(chan result, 1)
+	release = false
+	go func() {
+		hardCtx, cancel := context.WithDeadline(context.Background(), deadline)
+		defer cancel()
+		out, err := p.exchange(hardCtx, raw, len(inputs))
+		t.slots <- p
+		done <- result{out, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, errTokenizer
+	case <-t.closed:
+		return nil, errTokenizer
+	case r := <-done:
+		if ctx.Err() != nil {
+			return nil, errTokenizer
+		}
+		return r.out, r.err
+	}
 }

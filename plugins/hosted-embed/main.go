@@ -75,6 +75,7 @@ func run() error {
 	ingester := newIngester(c, os.Getenv("EMBED_API_KEY"), logger)
 	if tokenizer, ok := ingester.tokenizer.(*localTokenizer); ok {
 		defer tokenizer.Close()
+		<-tokenizer.ready // Complete parallel helper startup before serving requests.
 	}
 	if err := ingester.localQueries(context.Background(), os.Getenv("QUIVR_HOSTED_QUERY_URL")); err != nil {
 		return err

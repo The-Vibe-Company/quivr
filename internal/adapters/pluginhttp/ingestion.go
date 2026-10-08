@@ -240,13 +240,12 @@ const WarmUpOrganization = "engine.warm-up"
 // Warm sends one embed_query to each space the pin enables, served first, so
 // that the plugin loads what it loads on first use (core.ingest starts its
 // tokenizer process) before a search waits for it, not within that search's
-// latency budget. Any answer, even an error envelope such as an unavailable
-// embedding service, means the plugin did that loading; only a plugin that
-// does not answer is an error (ErrUnavailable). The calls count for no
-// Organization, so they are not observed.
+// latency budget. An error answer is a failed warm-up, so callers can retry
+// rather than report successful loading. The calls count for no Organization,
+// so they are not observed.
 func (i Ingestor) Warm(ctx context.Context) error {
 	for _, space := range i.Pin.EnabledSpaces() {
-		if result, err := i.embedQuery(ctx, "warm-up-"+plugins.InvocationID(), WarmUpOrganization, space.ID, "warm-up"); err != nil && result == nil {
+		if _, err := i.embedQuery(ctx, "warm-up-"+plugins.InvocationID(), WarmUpOrganization, space.ID, "warm-up"); err != nil {
 			return fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 	}
