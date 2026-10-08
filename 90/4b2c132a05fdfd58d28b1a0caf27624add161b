@@ -1,0 +1,25 @@
+docs-site/reference/configuration.mdx
+  s_54b80c92daa9cb::t_f54abe8fce91eb 359
+internal/retrieval/rebuild_test.go
+  s_54b80c92daa9cb::t_0e6b27b47b4405 16,702-743
+internal/adapters/postgres/queues.go
+  s_54b80c92daa9cb::t_f54abe8fce91eb 14
+internal/retrieval/rebuild.go
+  s_54b80c92daa9cb::t_0e6b27b47b4405 163-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "904b2c132a05fdfd58d28b1a0caf27624add161b",
+  "prompts": {},
+  "sessions": {
+    "s_54b80c92daa9cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93647a9b-da3d-4157-86fb-df236995a2bf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "StanGirard <stan@quivr.app>"
+    }
+  }
+}
