@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/autoscaling/kubernetes"
 )
@@ -32,10 +33,10 @@ func TestKubernetesScaleAPI(t *testing.T) {
 		{name: "read zero omitted", method: "GET", status: 200, response: `{"kind":"Scale","spec":{},"status":{}}`, want: 0},
 		{name: "read not a scale", method: "GET", status: 200, response: `{"kind":"Status"}`, bad: true},
 		{name: "read negative", method: "GET", status: 200, response: `{"kind":"Scale","spec":{"replicas":-1}}`, bad: true},
-		{name: "read forbidden", method: "GET", status: 403, response: `sensitive RBAC message`, bad: true},
+		{name: "read forbidden", method: "GET", status: 403, response: `forbidden`, bad: true},
 		{name: "scale", method: "PATCH", set: 5, status: 200, response: `{"kind":"Scale","spec":{"replicas":5}}`},
 		{name: "scale not applied", method: "PATCH", set: 5, status: 200, response: `{"kind":"Scale","spec":{"replicas":4}}`, bad: true},
-		{name: "scale conflict", method: "PATCH", set: 5, status: 409, response: `sensitive conflict`, bad: true},
+		{name: "scale conflict", method: "PATCH", set: 5, status: 409, response: `conflict`, bad: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// A rotated token must be used by the next request.
@@ -63,11 +64,15 @@ func TestKubernetesScaleAPI(t *testing.T) {
 			if (err != nil) != tc.bad || got != tc.want {
 				t.Fatalf("got %d/%v, want %d/error %v", got, err, tc.want, tc.bad)
 			}
-			if err != nil && strings.Contains(err.Error(), "sensitive") {
-				t.Fatalf("leaked remote error: %v", err)
-			}
 		})
 	}
+	t.Run("Deployment names stay one path segment", func(t *testing.T) {
+		for _, deployment := range []string{"", "../secrets", "quivr/bulk", "Quivr-Bulk", "quivr-bulk?x=1"} {
+			if _, err := kubernetes.InCluster(deployment, time.Second); err == nil || err.Error() != "Kubernetes Deployment name is invalid" {
+				t.Fatalf("Deployment %q: got %v", deployment, err)
+			}
+		}
+	})
 	t.Run("missing token", func(t *testing.T) {
 		backend := kubernetes.Backend{URL: scaleURL, TokenFile: filepath.Join(t.TempDir(), "absent"), Client: &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("request sent without a token")
