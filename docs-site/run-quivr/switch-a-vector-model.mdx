@@ -65,6 +65,23 @@ EOF
 
 For Cohere’s own API, use `"base_url":"https://api.cohere.com/v2"` and `"auth":"bearer"` in both configuration copies instead.
 
+For exact token budgets, prepare the model's matching `tokenizer.json` before
+generating the manifest:
+
+```bash
+python3 scripts/prepare_tokenizer.py --hosted \
+  --repository <owner/model> --revision <full-commit-sha> --sha256 <tokenizer-sha256>
+```
+
+Paste the returned object as `tokenizer` in the plugin configuration. Preparation
+downloads only tokenizer files; startup stays offline. Without a tokenizer, the
+plugin counts UTF-8 bytes conservatively and underfills passages. The published
+hosted image includes tokenizers 0.23.2: mount the model file read-only and use
+`/opt/tokenizer/bin/python` plus its container model path. Follow the
+[tokenizer preparation and image instructions](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#prepare-a-matching-tokenizer)
+for E5 and Gemma pins, mounts and manifest generation. A tokenizer change creates
+a new recipe and requires a rebuild for existing Corpora.
+
 For archive imports, `hosted.embed` combines concurrent document inputs from
 the same Organization within each plugin process. The `batch_wait_ms` window
 (default 25, range 0–100 ms) can extend while awaiting provider admission.

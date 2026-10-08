@@ -31,3 +31,12 @@ class ReleaseImagesTests(unittest.TestCase):
             (plugin / 'go.mod').unlink()
             (plugin / 'pyproject.toml').write_text('[project]\nname="feed"\n')
             self.assertEqual(release_images.inventory(root, 'example/quivr')['include'][1]['target'], 'python-plugin')
+            for folder, target in [('core-ingest', 'core-ingest'), ('hosted-embed', 'hosted-embed')]:
+                with self.subTest(folder=folder):
+                    runtime = root / 'plugins' / folder
+                    runtime.mkdir()
+                    (runtime / 'go.mod').write_text('module example.invalid/plugin\n')
+                    (runtime / 'quivr-plugin.yaml').write_text('id: example.' + folder + '\n')
+                    selected = next(image for image in release_images.inventory(root, 'example/quivr')['include']
+                                    if image['plugin'] == folder)
+                    self.assertEqual(selected['target'], target)

@@ -378,6 +378,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   refusals. Rebuild affected Corpora after the packing recipe changes. It selects a hosted model
   or OpenAI-compatible server by configuration, with OpenAI and Cohere v2 formats.
   Templates are explicit settings; authenticated providers use `EMBED_API_KEY`.
+  Prepare a checksum-pinned tokenizer for any hosted model; the published plugin
+  image runs it from a read-only mount for exact token budgets.
   [EmbeddingGemma 2](plugins/hosted-embed/examples/embeddinggemma-2.json) is an example
   configuration. Changed space ids require fresh ingestion or a rebuild.
   An optional pinned [CPU text encoder](deploy/railway/README.md#optional-cpu-query-encoding)
