@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	defaultQueueAttemptLease = time.Minute
+	defaultQueueAttemptLease = 15 * time.Second
 	maxQueueAttemptLease     = 5 * time.Minute
 )
 
