@@ -308,6 +308,12 @@ li[data-fresh] > .flow-row {
   align-items: center;
   gap: 5px;
 }
+/* A step that will never come says why, on two lines in a narrow cell. */
+.cell-note {
+  font-size: 11px;
+  line-height: 1.05;
+  text-align: center;
+}
 /* A duration fades in when its step finishes. */
 .cell-text {
   transition:
@@ -579,8 +585,18 @@ li[data-fresh] > .flow-row {
     color-mix(in oklab, var(--accent) 55%, var(--panel)) 5px 10px
   );
 }
-.gantt-row[data-state="todo"] {
+.gantt-row:is([data-state="todo"], [data-state="none"]) {
   color: var(--ink-faint);
+}
+/* A step that will never come says so where its bar would be. */
+.gantt-none {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  translate: 0 -50%;
+  font-size: 12.5px;
+  line-height: 1;
+  white-space: nowrap;
 }
 .gantt-tip {
   position: absolute;
@@ -605,7 +621,7 @@ li[data-fresh] > .flow-row {
   opacity: 1;
   translate: 0 0;
 }
-.gantt-row[data-state="todo"] .gantt-tip {
+.gantt-row:is([data-state="todo"], [data-state="none"]) .gantt-tip {
   display: none;
 }
 .gantt-ms {
