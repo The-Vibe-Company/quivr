@@ -13,6 +13,9 @@ class PolicyTests(unittest.TestCase):
         cases = [
             ("CREATE TABLE items(id int PRIMARY KEY); CREATE INDEX by_id ON items(id);", True),
             ("ALTER TABLE items ADD COLUMN optional text;", True),
+            ("ALTER TABLE items ALTER COLUMN optional DROP NOT NULL;", True),
+            ("ALTER TABLE items ALTER COLUMN optional SET NOT NULL;", False),
+            ("ALTER TABLE items ALTER COLUMN optional DROP NOT NULL, DROP COLUMN title;", False),
             ("CREATE TABLE parent(id int PRIMARY KEY); CREATE TABLE child(id int REFERENCES parent(id));", True),
             ("CREATE TABLE self_ref(id int PRIMARY KEY, parent int REFERENCES self_ref(id));", True),
             ("CREATE TABLE child(id int REFERENCES old_parent(id));", False),

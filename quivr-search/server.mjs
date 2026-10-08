@@ -181,7 +181,6 @@ const alerts = alertRoutes({
   upstream: (...args) => upstream(...args),
   jsonBody: (req) => jsonBody(req),
   fail: (status, message) => fail(status, message),
-  destination: process.env.QUIVR_DEMO_DESTINATION_ID,
   evaluator: process.env.QUIVR_DEMO_ALERTS_EVALUATOR,
   owner: "quivr-web-demo",
   // Described alerts (THE-763) need a classifier behind the alerts plugin; the

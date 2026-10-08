@@ -85,6 +85,9 @@ def expand_risks(sql):
         elif kind == 'AlterTableStmt':
             for cmd in stmt['cmds']:
                 operation = cmd['subtype']['name']
+                if operation == 'AT_DropNotNull':
+                    # Relaxing a constraint preserves existing rows and writes.
+                    continue
                 if operation != 'AT_AddColumn':
                     risks.append(operation)
                     continue

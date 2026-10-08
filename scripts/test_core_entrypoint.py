@@ -1,6 +1,5 @@
 """The Railway core entrypoint: credential_key only when configured, connector and alert features only on opt-in,
 and a worker that runs its plugin sidecars and stops with them."""
-import base64
 import importlib.util
 import json
 import os
@@ -357,7 +356,7 @@ class CoreEntrypointTest(unittest.TestCase):
         enabled = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})
         actions = enabled['keys']['placeholder-api-key']['actions']
         self.assertEqual(set(actions) - set(base['keys']['placeholder-api-key']['actions']), {'monitoring:read', 'monitoring:write'})
-        self.assertEqual(list(enabled['destinations']), [core_entrypoint.DESTINATION_ID])
+        self.assertNotIn('destinations', enabled)
         self.assertEqual(enabled['plugins'][:len(base['plugins'])], base['plugins'])
 
     def test_connector_plugins_are_pinned_and_run_without_any_flag(self):
@@ -445,22 +444,6 @@ class CoreEntrypointTest(unittest.TestCase):
         self.assertEqual(ids, {'alerts', 'pdf-text', 'newsml-g2', 'connector.rss', 'connector.x_list', 'connector.m365_mail', 'connector.object_storage_archive', 'core.ingest', 'core.retrieve'})
         pdf = next(p for p in pins if 'pdf-text' in p['manifest'])
         self.assertEqual(pdf['routes'], [{'media_type': 'application/pdf', 'mode': 'required'}])
-
-    def test_sink_destination_passes_the_core_rules_without_private_allowance(self):
-        config = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})
-        self.assertNotIn('delivery', config)
-        sink = config['destinations'][core_entrypoint.DESTINATION_ID]
-        self.assertEqual(sink['organization'], config['keys']['placeholder-api-key']['organization'])
-        # The core refuses a literal private address or a localhost name at startup.
-        self.assertTrue(re.fullmatch(r'https?://[a-z0-9.-]+\.invalid/.*', sink['url']), sink['url'])
-        # monitoring.ParseSecret: whsec_ and 24 to 64 decoded bytes.
-        self.assertTrue(sink['secret'].startswith('whsec_'))
-        self.assertTrue(24 <= len(base64.b64decode(sink['secret'][6:], validate=True)) <= 64)
-        # api and worker derive the same secret from the shared cursor key; another key gives another secret.
-        again = core_entrypoint.build_config({**ENV, 'QUIVR_DEMO_PLUGINS': '1'})['destinations']
-        self.assertEqual(again[core_entrypoint.DESTINATION_ID]['secret'], sink['secret'])
-        other = core_entrypoint.sink_secret('another-placeholder-cursor-key')
-        self.assertNotEqual(other, sink['secret'])
 
     def test_sidecar_environment_carries_only_its_own_secret(self):
         env = {**ENV, 'QUIVR_DEMO_PLUGINS': '1', 'PATH': '/usr/bin', 'TYPESAFE_API_KEY': 'placeholder-typesafe-key'}
