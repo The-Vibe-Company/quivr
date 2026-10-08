@@ -6221,9 +6221,11 @@ components:
         analyzer:
           type: string
           enum:
+          - folded
           - french_light
-          description: Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors
-            are unchanged.
+          description: Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds
+            accents and ligatures in any language; french_light also removes French stopwords and lightly stems. Omit for
+            no copy; canonical text and vectors are unchanged.
         part_role:
           type: string
           enum:
