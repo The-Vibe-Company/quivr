@@ -159,6 +159,13 @@ are declared in `configuration.execution_keys`; Quivr keeps the active plan's
 exact ingestion recipe and derivation provenance. Existing documents keep serving,
 and new documents do not require a rebuild for these changes. Defaults are unchanged.
 
+A package whose manifest already declares `tokenizer_processes` preserves its
+recipe when you tune that setting. For an earlier package, deploying the updated
+executable with the existing exact manifest enables the auto pool without a new
+recipe. Generating and installing a manifest that first adds the execution key
+changes the recipe: use the usual rebuild or evaluation cutover for that first
+registration. Subsequent pool tuning preserves that recipe.
+
 Run the new manifest at a separate address while earlier pinned work drains.
 Keep the previous process and exact manifest reachable at its recorded address
 until the registration becomes `inactive`. Discovery still checks exact manifest
@@ -211,7 +218,7 @@ buffers per helper. Measure resident memory with your tokenizer under load;
 model vocabularies vary, so there is no fixed per-helper memory limit. A local
 Linux x86_64 sample with Python 3.12, tokenizers 0.23.2 and EmbeddingGemma 2 used
 about 440 MiB resident memory per loaded helper after cutting short articles
-(about 1.8 GiB for four); allow extra memory for startup and larger requests. Set
+(about 1.7 GiB for four); allow extra memory for startup and larger requests. Set
 `tokenizer_processes: 1` on memory-limited installations, or increase it when
 concurrent document cutting queues and CPU and memory have room. The auto value
 is resolved on the running plugin, so generating a manifest on another machine

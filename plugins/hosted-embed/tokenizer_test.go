@@ -9,9 +9,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
+
+// Observe the admission select after preflight validation, before canceling a
+// queued caller. No production hook or scheduler delay is needed.
+type tokenizerWaitContext struct {
+	context.Context
+	started chan struct{}
+	once    sync.Once
+}
+
+func (c *tokenizerWaitContext) Done() <-chan struct{} {
+	done := c.Context.Done()
+	c.once.Do(func() { close(c.started) })
+	return done
+}
 
 // Owns local helper concurrency and recovery. Existing packing tests own cuts;
 // this fake replaces only the external executable, using request barriers.
@@ -122,12 +137,16 @@ for line in sys.stdin:
 	if a.PID == b.PID {
 		t.Fatal("concurrent exchanges shared a process")
 	}
-	// Fill both slots; an already-canceled caller must not reach the helper.
+	// Fill both slots and cancel a caller at the admission select.
 	canceled, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	waiting := &queryWaitContext{Context: canceled, started: make(chan struct{})}
+	waiting := &tokenizerWaitContext{Context: canceled, started: make(chan struct{})}
 	queued := start(waiting, "queued")
-	<-waiting.started
+	select {
+	case <-waiting.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("queued caller did not reach admission")
+	}
 	cancel()
 	finish(queued, false)
 	select {
@@ -158,7 +177,7 @@ for line in sys.stdin:
 	heldCtx, cancelHeld := context.WithCancel(t.Context())
 	defer cancelHeld()
 	held := start(heldCtx, "held")
-	h := next()
+	next()
 	healthy := start(t.Context(), "healthy")
 	f := next()
 	release(f, "r")
@@ -170,8 +189,8 @@ for line in sys.stdin:
 	g := next()
 	recovered := start(t.Context(), "recovered")
 	j := next()
-	if j.PID == h.PID {
-		t.Fatal("canceled hung process was reused")
+	if j.PID == g.PID {
+		t.Fatal("recovered request shared an occupied helper")
 	}
 	release(j, "r")
 	finish(recovered, true)

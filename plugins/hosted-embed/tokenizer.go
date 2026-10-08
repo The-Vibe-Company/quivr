@@ -193,18 +193,19 @@ func (p *tokenizerProcess) exchange(ctx context.Context, raw []byte, count int) 
 }
 
 func (t *localTokenizer) Encode(ctx context.Context, inputs []tokenInput) ([]tokenEncoding, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	// Keep the caller's cancellation channel at admission. Waiting calls hold no
+	// serialized copy or helper goroutine; the same deadline bounds the lease.
+	deadline := time.Now().Add(10 * time.Second)
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
 	if ctx.Err() != nil || len(inputs) > 512 {
-		return nil, errTokenizer
-	}
-	raw, err := json.Marshal(inputs)
-	if err != nil || len(raw) > 4<<20 {
 		return nil, errTokenizer
 	}
 	var p *tokenizerProcess
 	select {
 	case <-ctx.Done():
+		return nil, errTokenizer
+	case <-timer.C:
 		return nil, errTokenizer
 	case <-t.closed:
 		return nil, errTokenizer
@@ -216,7 +217,13 @@ func (t *localTokenizer) Encode(ctx context.Context, inputs []tokenInput) ([]tok
 		return nil, errTokenizer
 	default:
 	}
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
 	if ctx.Err() != nil {
+		return nil, errTokenizer
+	}
+	raw, err := json.Marshal(inputs)
+	if err != nil || len(raw) > 4<<20 || ctx.Err() != nil {
 		return nil, errTokenizer
 	}
 	return p.exchange(ctx, raw, len(inputs))
