@@ -4801,8 +4801,8 @@ components:
           description: Positive integer BM25F weight, allowed only with the search role. For ratios 3/2/2/1.5/1 use 6/4/4/3/2.
         analyzer:
           type: string
-          enum: [french_light]
-          description: Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged.
+          enum: [folded, french_light]
+          description: Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged.
         part_role:
           type: string
           enum: [title, body, caption, transcript]

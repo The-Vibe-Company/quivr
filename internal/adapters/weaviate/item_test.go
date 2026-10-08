@@ -57,6 +57,30 @@ func TestItemKeywordRanking(t *testing.T) {
 	if err != nil || len(hits) != 1 || hits[0].SegmentID != "accenta" {
 		t.Fatalf("French tea must survive English stopwords: %+v %v", hits, err)
 	}
+	// An English Corpus with the language-neutral analyzer folds accents but
+	// never stems: French stemming would match "organisation" to "organ" and
+	// highlight the earlier passage.
+	english := f.gen
+	english.ID = "english-generation"
+	english.ItemKeywordsProjected = true
+	english.Fields = []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "folded"}}
+	for id, passages := range map[string][]string{"organ": {"The organisation met", "An organ donor"}, "society": {"The organisation met"}, "cafe": {"Café opening"}} {
+		seg := f.segmentation(id, "")
+		seg.Segments = nil
+		for i, text := range passages {
+			seg.Segments = append(seg.Segments, content.Segment{ID: id + string(rune('a'+i)), PartKey: "body", Text: text})
+		}
+		v := content.Version{ID: seg.VersionID, RecordID: "record-" + id, Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: strings.Join(passages, "\n")}}}}}
+		if err := f.store.Publish(f.ctx, english, f.org, "english-corpus", "feed", v, seg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for query, want := range map[string]string{"organ": "organb", "cafe": "cafea"} {
+		hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: "english-corpus", Generation: english}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: query, Mode: "lexical", GroupBy: "record", K: 10})
+		if err != nil || len(hits) != 1 || hits[0].SegmentID != want {
+			t.Fatalf("English %q: %+v %v, want only %s", query, hits, err, want)
+		}
+	}
 	q.Query = "election"
 	q.GroupBy = ""
 	hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, q)

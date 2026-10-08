@@ -51,30 +51,16 @@
  */
 
 // Go adaptation of Apache Lucene FrenchLightStemmer (UniNE algorithm).
-package content
+package keywords
 
 import (
-	"golang.org/x/text/unicode/norm"
 	"strings"
 	"unicode"
 )
 
-var frenchLigatures = strings.NewReplacer("œ", "oe", "æ", "ae")
-
-// AnalyzeKeywords leaves source text unchanged unless the configured analyzer
-// asks for a separate French keyword copy. Both ingest and query use this path.
-func AnalyzeKeywords(text, analyzer string) string {
-	if analyzer != "french_light" {
-		return text
-	}
-	text = frenchLigatures.Replace(strings.ToLower(text))
-	folded := strings.Map(func(r rune) rune {
-		if unicode.Is(unicode.Mn, r) {
-			return -1
-		}
-		return r
-	}, norm.NFD.String(text))
-	words := strings.FieldsFunc(folded, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+// frenchLight folds text, removes French stopwords and lightly stems each word.
+func frenchLight(text string) string {
+	words := fold(text)
 	out := words[:0]
 	for _, word := range words {
 		if !frenchStopwords[word] {
@@ -84,7 +70,7 @@ func AnalyzeKeywords(text, analyzer string) string {
 	return strings.Join(out, " ")
 }
 
-// Stopwords apply only to the normalized copy, never other Corpora's fields.
+// Stopwords apply only to the analyzed copy, never to the field's own text.
 var frenchStopwords = func() map[string]bool {
 	out := map[string]bool{}
 	for _, w := range strings.Fields("a au aux avec ce ces dans de des du elle en et eux il je la le les leur lui ma mais me meme mes moi mon ne nos notre nous on ou par pas pour qu que qui sa se ses son sur ta te tes toi ton tu un une vos votre vous c d j l m n s t y est sont ete etre avait avoir fait") {

@@ -108,7 +108,7 @@ is unnecessary. Call `PUT /v0/corpora/{corpus_id}/retrieval` with `corpora:write
 and `operations:write` on that Corpus. The linked reference describes the full
 request and the Operation returned for monitoring progress.
 
-For example (not run), these retrieval fields favor titles and add a French body copy:
+For example (not run), these retrieval fields favor titles and add a French keyword copy of the body:
 
 ```json
 {"fields": [
@@ -127,10 +127,31 @@ array, use `type: "string_array"`; `value_pointer` selects labels from each memb
 for example `/names` (a string or array of strings).
 Use the roles, keys and metadata namespaces your normalizer emits.
 
-`french_light` lowercases, folds accents, removes French stopwords and lightly
-stems a separate keyword copy at ingestion and query time. Canonical excerpts
-and vector input keep their original text. Exact and normalized matches contribute
-one keyword score; hybrid search combines it with the strongest passage-vector score.
+An `analyzer` adds a second keyword copy of a field, analyzed the same way at
+ingestion and query time. Canonical excerpts and vector input keep their original
+text. Omit it to index the field only as written. Quivr ships two analyzers:
+
+| Analyzer | What it does | Use it for |
+| --- | --- | --- |
+| `folded` | Lowercases and folds accents and ligatures, so `cafe` finds `Café`. It removes no words and stems nothing. | Any language |
+| `french_light` | Folds the same way, then removes French stopwords and lightly stems, so `election` finds `élections`. | French text |
+
+Exact and analyzed matches contribute one keyword score; hybrid search combines it
+with the strongest passage-vector score. The highlighted passage is the one with the
+most query terms under the fields' analyzers, or under `folded` when no field names one.
+
+To support another language, add an analyzer to Quivr itself:
+
+1. Add an entry to the `analyzers` list in `internal/keywords/keywords.go`: the
+   `Name` the API accepts, a `Property` suffix no other analyzer uses, and a
+   function that turns text into space-separated terms. Start from `fold` and add
+   the language's stopwords or stemmer, as `french_light.go` does.
+2. Add the name to the `analyzer` enum of `FieldMapping` in
+   `contracts/http/v0/openapi.yaml`, then run `make generate` and `make docs-site`.
+3. Add rows for the analyzer to the table in `internal/keywords/keywords_test.go`.
+
+Never change the `Property` or the output of a released analyzer: Corpora indexed
+with it would stop matching new queries until you rebuild them.
 
 You can narrow search to known identities using `filter.record_ids` and
 `filter.version_ids`, each a nonempty array of up to 50 distinct IDs. Both conditions must hold;
