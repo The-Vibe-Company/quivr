@@ -42,6 +42,8 @@ var auditedRoutes = map[string]auditedRoute{
 	"POST /v0/admin/plugins/{registration_id}/activate":           {"plugin.activate", "plugin_registration", "registration_id"},
 	"POST /v0/admin/plugins/plan/rollback":                        {"plugin.rollback", "pipeline_plan", ""},
 	"POST /v0/connectors":                                         {"connector.create", "connector", ""},
+	"POST /v0/connectors/{connector_id}/pause":                    {"connector.pause", "connector", "connector_id"},
+	"POST /v0/connectors/{connector_id}/resume":                   {"connector.resume", "connector", "connector_id"},
 	"POST /v0/connectors/{connector_id}/disable":                  {"connector.disable", "connector", "connector_id"},
 	"PUT /v0/connectors/{connector_id}/credential":                {"credential.replace", "connector", "connector_id"},
 	"PUT /v0/connectors/{connector_id}/schedule":                  {"connector.update", "connector", "connector_id"},

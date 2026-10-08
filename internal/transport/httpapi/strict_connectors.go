@@ -59,6 +59,18 @@ func (a *API) DisableConnector(ctx context.Context, in transport.DisableConnecto
 	}), nil
 }
 
+func (a *API) PauseConnector(ctx context.Context, in transport.PauseConnectorRequestObject) (transport.PauseConnectorResponseObject, error) {
+	return transport.PauseConnectorResponseFunc(func(w http.ResponseWriter) {
+		a.handleConnectorPause(w, in.HTTPRequest, requestScope(ctx), in.ConnectorId, true)
+	}), nil
+}
+
+func (a *API) ResumeConnector(ctx context.Context, in transport.ResumeConnectorRequestObject) (transport.ResumeConnectorResponseObject, error) {
+	return transport.ResumeConnectorResponseFunc(func(w http.ResponseWriter) {
+		a.handleConnectorPause(w, in.HTTPRequest, requestScope(ctx), in.ConnectorId, false)
+	}), nil
+}
+
 func (a *API) ReplaceConnectorCredential(ctx context.Context, in transport.ReplaceConnectorCredentialRequestObject) (transport.ReplaceConnectorCredentialResponseObject, error) {
 	return transport.ReplaceConnectorCredentialResponseFunc(func(w http.ResponseWriter) {
 		a.handleReplaceConnectorCredential(w, in.HTTPRequest, requestScope(ctx), in.ConnectorId)

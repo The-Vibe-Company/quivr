@@ -73,6 +73,16 @@ curl -s -X POST "$QUIVR_API_URL/v0/connectors/$CONNECTOR_ID/runs" -H "Authorizat
 
 A shorter interval brings the next run forward; a longer one applies after the run already scheduled. A run requested now still respects the deployment's floor and any `Retry-After` from the source.
 
+## Pause and resume collection
+
+Before using pause, [upgrade the workers before the API](/run-quivr/upgrade-quivr) and confirm every previous worker has drained and stopped. Previous workers do not understand the paused state.
+
+Send `POST /v0/connectors/{connector_id}/pause` with an `idempotency_key` in the JSON body, using the instance's `CONNECTOR_ID` and a key with `connectors:write` on its Corpus. The response is the Connector resource with `paused_at` set. Pause stops scheduled collection, including a long import that keeps continuing; the last saved position is kept across worker restarts. A source request already in progress may finish, but cannot save a later position after pause.
+
+Send `POST /v0/connectors/{connector_id}/resume` with the same body shape to continue from that position. The response omits `paused_at`; collection becomes due immediately unless the source asked Quivr to wait with `Retry-After`. Repeating either call while already in that state changes nothing. Read or list connectors to check `paused_at`; `enabled` stays true and `health` continues to report the source's health.
+
+A manual run request while paused returns `409 connector_paused`. You can change the schedule or rotate credentials while paused. Incoming push deliveries remain available; use permanent disable to stop the instance entirely. Disabled instances refuse pause and resume with `409 connector_disabled`.
+
 ## Deposit or replace a credential
 
 Send the secret when you create the instance, in `credential`, or replace it later:
