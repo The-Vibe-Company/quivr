@@ -560,6 +560,9 @@ func (sv *server) encode(ctx context.Context, space, text string) ([]float32, er
 	defer func() { sv.timing.QueryEncoding += time.Since(started) }()
 	vector, err := sv.s.EncodeQuery(ctx, sv.scope.Organization, space, text)
 	if err != nil {
+		if errors.Is(err, ErrUnavailable) {
+			return nil, ErrModelUnavailable
+		}
 		return nil, err
 	}
 	sv.vectors[key] = vector

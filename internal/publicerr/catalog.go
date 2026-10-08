@@ -113,6 +113,7 @@ var (
 	SearchDeadlineExceeded           = declare("search_deadline_exceeded", DeadlineClass, false)
 	PreviewDeadlineExceeded          = declare("preview_deadline_exceeded", DeadlineClass, true)
 	SearchUnavailable                = declare("search_unavailable", UnavailableClass, true)
+	ModelUnavailable                 = declare("model_unavailable", UnavailableClass, true)
 	MetadataFilterUnavailable        = declare("metadata_filter_unavailable", InvalidClass, false)
 	SourceFilterUnavailable          = declare("source_filter_unavailable", InvalidClass, false)
 	SourceNamespaceInUse             = declare("source_namespace_in_use", ConflictClass, false)

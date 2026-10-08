@@ -137,7 +137,7 @@ func TestServingEncodesTheQueryWithTheSpaceOwner(t *testing.T) {
 		{name: "ingestion plugin unpinned", corpora: []string{"plugin"}, request: hybrid("example.small@1"), noPlugin: true, wantErr: retrieval.ErrUnsupported},
 		{name: "plugin refuses the query", corpora: []string{"plugin"}, request: hybrid("example.small@1"), encodeErr: content.ErrInvalid, wantErr: retrieval.ErrUnsupported, encoded: "org/example.small@1/lanterne"},
 		{name: "plugin names its query limit", corpora: []string{"plugin"}, request: hybrid("example.small@1"), encodeErr: publicerr.WithDetail(retrieval.ErrQueryTooLong, "query exceeds 128 tokens"), wantErr: retrieval.ErrQueryTooLong, encoded: "org/example.small@1/lanterne"},
-		{name: "plugin unavailable", corpora: []string{"plugin"}, request: hybrid("example.small@1"), encodeErr: errors.New("connection refused"), wantErr: retrieval.ErrUnavailable, encoded: "org/example.small@1/lanterne"},
+		{name: "plugin unavailable", corpora: []string{"plugin"}, request: hybrid("example.small@1"), encodeErr: errors.New("connection refused"), wantErr: retrieval.ErrModelUnavailable, encoded: "org/example.small@1/lanterne"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			routed := spaceRouting{}

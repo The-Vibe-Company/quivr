@@ -11,6 +11,7 @@ import (
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
+	"github.com/The-Vibe-Company/quivr/internal/publicerr"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
 )
 
@@ -283,15 +284,16 @@ func (stalledEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
 
 // When the engine cannot serve candidates before the search's deadline (the
 // profile's hard bound; the caller's shorter one stands in for it), a
-// dependency is down (here the embedding service): the search is unavailable
-// and retryable, 503, not a plugin that outran its bound, 504.
-func TestADependencyOutrunningTheDeadlineMakesSearchUnavailable(t *testing.T) {
-	s := rankedService(&fakeProjection{}, &scriptedRanker{answer: passthrough})
-	s.Embedder = stalledEmbedder{}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	_, err := s.Search(ctx, searchScope, retrieval.Request{Query: "lanterne", Mode: "semantic", CorpusIDs: []string{"corpus"}, Profile: "deep"})
-	if !errors.Is(err, retrieval.ErrUnavailable) {
-		t.Fatalf("error %v, want ErrUnavailable", err)
-	}
+// query model is unavailable and retryable, 503, even at the hard deadline.
+func TestAStalledQueryModelKeepsItsUnavailableCodeAtTheDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := rankedService(&fakeProjection{}, &scriptedRanker{answer: passthrough})
+		s.Embedder = stalledEmbedder{}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		_, err := s.Search(ctx, searchScope, retrieval.Request{Query: "lanterne", Mode: "semantic", CorpusIDs: []string{"corpus"}, Profile: "deep"})
+		if code, _ := publicerr.Code(err); code != "model_unavailable" {
+			t.Fatalf("error %v, want model_unavailable", err)
+		}
+	})
 }
