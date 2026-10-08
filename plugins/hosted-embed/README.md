@@ -159,8 +159,8 @@ are declared in `configuration.execution_keys`; Quivr keeps the active plan's
 exact ingestion recipe and derivation provenance. Existing documents keep serving,
 and new documents do not require a rebuild for these changes. Defaults are unchanged.
 
-Adding a new execution-only key, such as `tokenizer_processes`, also preserves
-the active recipe when the remaining manifest and semantic settings are
+Adding a new execution-only key, such as `tokenizer_processes`, to an existing
+execution declaration list also preserves the active recipe when the remaining manifest and semantic settings are
 unchanged. Quivr can serve pinned imports, rebuilds and queries through the
 active equivalent registration, including an update at the same address.
 Requests use its exact manifest and installed execution settings, while the

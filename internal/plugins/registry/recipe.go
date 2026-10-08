@@ -95,8 +95,8 @@ func sameIngestionInputs(before, next *plugins.Pin) bool {
 	}
 	for _, key := range b {
 		// The first declaration may adopt explicitly supplied legacy tuning
-		// settings. It cannot reclassify a field described by the old schema.
-		if !slices.Contains(a, key) && (schemaSemanticSetting(before, key) || len(a) > 0 && configuredSetting(before, key)) {
+		// settings. It cannot introduce an omitted historical semantic field.
+		if !slices.Contains(a, key) && hasSemanticSetting(before, key) && (len(a) > 0 || !configuredSetting(before, key)) {
 			return false
 		}
 	}
@@ -118,10 +118,9 @@ func configuredSetting(pin *plugins.Pin, key string) bool {
 }
 
 func hasSemanticSetting(pin *plugins.Pin, key string) bool {
-	return configuredSetting(pin, key) || schemaSemanticSetting(pin, key)
-}
-
-func schemaSemanticSetting(pin *plugins.Pin, key string) bool {
+	if configuredSetting(pin, key) {
+		return true
+	}
 	if pin.Manifest.Configuration != nil {
 		var keywords map[string]json.RawMessage
 		if err := json.Unmarshal(pin.Manifest.Configuration.Schema, &keywords); err != nil {
