@@ -249,7 +249,8 @@ requires `{prefix}` in its template; ignored prefixes, unknown placeholders and
 missing `{text}` or `{query}` are rejected. Source text is substituted once,
 so braces in a document or query remain literal. `{title}` expands the configured
 title, or `none` when absent. With `title_source: "inline"`, title context is
-prepended to `{text}`. A template without `{title}` still embeds title-only text.
+prepended to `{text}`. A template without `{title}` still embeds title-only text
+and its selected context, with the headline included once.
 Paged inputs embed titles and context independently, with `{title}` set to `none`;
 a large headline cannot crowd body text out of every input. Paged provenance
 records `context_mode: separate_passages`.
@@ -263,7 +264,8 @@ local `python`, `model` path and SHA-256 returned by
 `python3 scripts/prepare_tokenizer.py --hosted`. The `--hosted` flag selects
 the pinned EmbeddingGemma 2 tokenizer revision used by this example.
 Run preparation before startup; it downloads tokenizer files, never model weights. The example omits machine-specific paths and makes
-no provider call during configuration.
+no provider call during configuration. Set `usd_per_million_tokens` when you
+know the provider’s rate; the example leaves it unknown.
 
 Every model needs its matching local tokenizer for exact token budgets. Without
 one, a UTF-8 byte counts as one conservative token, plus eight reserved special

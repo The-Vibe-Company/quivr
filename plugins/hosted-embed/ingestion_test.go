@@ -1454,4 +1454,23 @@ func TestPackedGemmaUsesHeadlineTitleAndKeepsMetadataOut(t *testing.T) {
 	if calls = fake.Calls(); len(calls) != 4 || calls[3].Texts[0] != "passage: Library opens" {
 		t.Fatalf("plain title-only lost or duplicated: %+v", calls)
 	}
+	c.TitleContextParts = []string{"place"}
+	req.Parts = append(req.Parts, quivrplugin.IngestPart{Key: "place", Role: "place", Text: "Riverside"})
+	for index, variant := range []struct {
+		template, source, prefix, want string
+	}{
+		{"title: {title} | text: {text}", "title", "", "title: Library opens — Riverside | text: "},
+		{"{prefix}{text}", "inline", "passage: ", "passage: Riverside\n\nLibrary opens"},
+		{"{prefix}{text}", "title", "passage: ", "passage: Riverside\n\nLibrary opens"},
+	} {
+		c.DocumentTemplate, c.TitleSource, c.DocumentPrefix = variant.template, variant.source, variant.prefix
+		i = newIngester(c, "fake-key", slog.Default())
+		req.Spaces = []string{c.spaceID()}
+		if _, err = i.SegmentAndEmbed(t.Context(), req); err != nil {
+			t.Fatal(err)
+		}
+		if calls = fake.Calls(); len(calls) != index+5 || calls[index+4].Texts[0] != variant.want {
+			t.Fatalf("title-only context lost or headline duplicated: %+v", calls)
+		}
+	}
 }

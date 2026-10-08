@@ -123,6 +123,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		return nil, nil, quivrplugin.TerminalIngestError("segmentation_limit", "more than 256 KiB of text")
 	}
 	titleOnly := false
+	titleOnlyContext := false
 	modelBody := func(body string) string {
 		if titleOnly {
 			return ""
@@ -133,6 +134,13 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	if err != nil {
 		return nil, nil, err
 	}
+	inputForBody := func(body string) string {
+		body = modelBody(body)
+		if titleOnlyContext && title != "" {
+			body = title + sourceSeparator + body
+		}
+		return c.documentInput(title, body)
+	}
 	// Body budget is separate from the model's full templated-input window.
 	fits := func(group []paragraph) (bool, int, error) {
 		text := paragraphText(group)
@@ -140,7 +148,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 		if err != nil {
 			return false, 0, err
 		}
-		full, err := encodeOne(ctx, t, c.documentInput(title, modelBody(text)), true)
+		full, err := encodeOne(ctx, t, inputForBody(text), true)
 		if err != nil {
 			return false, 0, err
 		}
@@ -163,8 +171,9 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	if !hasBody {
 		titleOnly = c.TitleSource == "title" && strings.Contains(c.DocumentTemplate, "{title}")
 		if !titleOnly {
-			// The title is the source passage in this case; only additional
-			// context may be prepended by an inline template.
+			// The headline is already the source passage. Preserve selected
+			// context even when the template has no separate title field.
+			titleOnlyContext = c.TitleSource == "title"
 			title, err = c.documentTitle(parts, false)
 			if err != nil {
 				return nil, nil, err
@@ -332,7 +341,7 @@ func (c configuration) packedSegments(ctx context.Context, parts []quivrplugin.I
 	for n, group := range groups {
 		ranges := paragraphRanges(group)
 		body := paragraphText(group)
-		input := c.documentInput(title, modelBody(body))
+		input := inputForBody(body)
 		e, err := encodeOne(ctx, t, input, true)
 		if err != nil {
 			return nil, nil, err

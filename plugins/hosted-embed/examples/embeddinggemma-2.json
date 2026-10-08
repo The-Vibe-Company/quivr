@@ -18,5 +18,5 @@
   "max_concurrent_requests": 16,
   "request_timeout_ms": 10000,
   "call_budget_ms": 90000,
-  "usd_per_million_tokens": 0
+  "usd_per_million_tokens": null
 }
