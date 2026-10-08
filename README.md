@@ -230,8 +230,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
     occupancy and refusals;
   - worker: processing outcomes, time from acceptance to searchable, and delivery
     attempts and durations.
-  - both: HTTP request counts, durations and requests in flight by registered route
-    and method, plus local PostgreSQL pool occupancy and saturation.
+  - both: HTTP request counts by registered route, method and status class;
+    durations and requests in flight by route and method; local PostgreSQL pool
+    occupancy and saturation.
 
   Live/bulk backlog observations refresh every 15 seconds by default, with a
   configurable interval and rebuild/backfill estimates from progress counters

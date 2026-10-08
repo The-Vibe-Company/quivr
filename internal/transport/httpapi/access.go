@@ -63,7 +63,7 @@ func AccessLog(next http.Handler, metrics ...*telemetry.LoadMetrics) http.Handle
 				// A method rejection still belongs to its registered path. Ask
 				// the mux using fixed methods without dispatching a handler.
 				probe := *r
-				for _, method := range []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE"} {
+				for _, method := range telemetry.HTTPMethods() {
 					probe.Method = method
 					_, pattern = mux.Handler(&probe)
 					if pattern != "" {
@@ -95,10 +95,16 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metric
 	if route == "" {
 		route = "unmatched"
 	}
-	finish := metrics.Begin(route, safeMethod(r.Method))
+	finish := metrics.Begin(route, telemetry.HTTPMethod(r.Method))
+	observed := &responseWriter{ResponseWriter: w}
 	metricStatus := http.StatusInternalServerError
-	defer func() { finish(metricStatus, time.Since(start)) }()
-	ctx, span := telemetry.Start(ctx, safeMethod(r.Method)+" "+route, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("http.route", route), attribute.String("http.request.method", safeMethod(r.Method))))
+	defer func() {
+		if observed.status != 0 {
+			metricStatus = observed.status
+		}
+		finish(metricStatus, time.Since(start))
+	}()
+	ctx, span := telemetry.Start(ctx, telemetry.HTTPMethod(r.Method)+" "+route, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("http.route", route), attribute.String("http.request.method", telemetry.HTTPMethod(r.Method))))
 	defer span.End()
 	sc := span.SpanContext()
 	if sc.IsValid() {
@@ -106,14 +112,8 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metric
 		w.Header().Set("X-Span-ID", sc.SpanID().String())
 	}
 	r = r.WithContext(ctx)
-	observed := &responseWriter{ResponseWriter: w}
 	defer func() {
-		method := r.Method
-		switch method {
-		case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE":
-		default:
-			method = "OTHER"
-		}
+		method := telemetry.HTTPMethod(r.Method)
 		status := observed.status
 		if status == 0 {
 			status = http.StatusOK
@@ -128,10 +128,7 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metric
 			"response_size", observed.size, "client_ip", ip, "api_key_id", keyID, "error_code", observed.errorCode)
 	}()
 	next.ServeHTTP(observed, r)
-	metricStatus = observed.status
-	if metricStatus == 0 {
-		metricStatus = http.StatusOK
-	}
+	metricStatus = http.StatusOK
 }
 
 type responseWriter struct {
@@ -177,11 +174,4 @@ func validRequestID(id string) bool {
 		}
 	}
 	return true
-}
-func safeMethod(method string) string {
-	switch method {
-	case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE":
-		return method
-	}
-	return "OTHER"
 }

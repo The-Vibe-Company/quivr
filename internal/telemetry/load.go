@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -87,7 +88,7 @@ func (m *LoadMetrics) Begin(route, method string) func(int, time.Duration) {
 	if m == nil {
 		return func(int, time.Duration) {}
 	}
-	method = boundedHTTPMethod(method)
+	method = HTTPMethod(method)
 	m.mu.Lock()
 	if _, ok := m.routes[route]; !ok {
 		route = "unmatched"
@@ -111,7 +112,12 @@ func (m *LoadMetrics) Begin(route, method string) func(int, time.Duration) {
 	}
 }
 
-func boundedHTTPMethod(method string) string {
+// HTTPMethods returns the standard methods that can have distinct labels.
+// OTHER is reserved for normalization, rather than route matching.
+func HTTPMethods() []string { return slices.Clone(httpMethods[:len(httpMethods)-1]) }
+
+// HTTPMethod normalizes arbitrary request methods to the shared label set.
+func HTTPMethod(method string) string {
 	for _, known := range httpMethods {
 		if method == known {
 			return method

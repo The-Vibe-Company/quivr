@@ -54,9 +54,10 @@ func TestHTTPMetricsUseTemplatesAndTrackRequestLifetimes(t *testing.T) {
 		<-r.Context().Done()
 	})
 	entered, release := make(chan struct{}), make(chan struct{})
+	probes.HandleFunc("GET /panic-committed", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(202); panic("sentinel") })
 	probes.HandleFunc("GET /panic", func(http.ResponseWriter, *http.Request) { panic("sentinel") })
 	probes.HandleFunc("GET /held", func(http.ResponseWriter, *http.Request) { close(entered); <-release })
-	m.RegisterRoutes("/stream/{id}", "/panic", "/held")
+	m.RegisterRoutes("/stream/{id}", "/panic", "/panic-committed", "/held")
 	p := httpapi.AccessLog(probes, m)
 	p.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/stream/private-two", nil))
 	check(`quivr_http_requests_total{route="/stream/{id}",method="POST",status_class="4xx"} 1`)
@@ -68,15 +69,18 @@ func TestHTTPMetricsUseTemplatesAndTrackRequestLifetimes(t *testing.T) {
 		t.Fatalf("stream response: %v", rec)
 	}
 	check(`quivr_http_requests_in_flight{route="/stream/{id}",method="GET"} 0`, `quivr_http_requests_total{route="/stream/{id}",method="GET",status_class="2xx"} 1`)
-	func() {
-		defer func() {
-			if recover() == nil {
-				t.Fatal("middleware swallowed panic")
-			}
+	for _, path := range []string{"/panic", "/panic-committed"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("middleware swallowed panic")
+				}
+			}()
+			p.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", path, nil))
 		}()
-		p.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/panic", nil))
-	}()
-	check(`quivr_http_requests_in_flight{route="/panic",method="GET"} 0`, `quivr_http_requests_total{route="/panic",method="GET",status_class="5xx"} 1`)
+	}
+	check(`quivr_http_requests_in_flight{route="/panic",method="GET"} 0`, `quivr_http_requests_total{route="/panic",method="GET",status_class="5xx"} 1`,
+		`quivr_http_requests_in_flight{route="/panic-committed",method="GET"} 0`, `quivr_http_requests_total{route="/panic-committed",method="GET",status_class="2xx"} 1`)
 	done := make(chan struct{})
 	go func() { p.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/held", nil)); close(done) }()
 	<-entered
