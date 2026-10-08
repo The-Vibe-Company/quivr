@@ -36,4 +36,21 @@ func (s ProjectionStore) SaveIngestionPage(ctx context.Context, org, version, re
 	return winner, tx.Commit(ctx)
 }
 
+// DeleteIngestionPages retires only the caller's completed derivation input.
+// The caller has already committed segmentation and every requested vector.
+func (s ProjectionStore) DeleteIngestionPages(ctx context.Context, org, version, recipe, inputKey string) error {
+	tx, err := database(ctx, s.Pool).Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockProcessingVersion(ctx, tx, org, version); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM ingestion_pages WHERE organization=$1 AND version_id=$2 AND recipe=$3 AND spaces_key=$4`, org, version, recipe, inputKey); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 var _ content.IngestionPageStore = ProjectionStore{}
