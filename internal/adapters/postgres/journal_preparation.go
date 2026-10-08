@@ -15,6 +15,12 @@ import (
 // no-op. Rolling it back also releases the journal lock, so callers must fence
 // again before changing mutable state.
 func prepareJournal(ctx context.Context, tx pgx.Tx, prepare func(pgx.Tx) error) (pgx.Tx, error) {
+	if group := journalGroupOf(ctx); group != nil {
+		if group.locked {
+			return nil, content.ErrInvalid
+		}
+		return tx, prepare(tx)
+	}
 	if err := lockProjectionRouting(ctx, tx); err != nil {
 		return nil, err
 	}

@@ -34,6 +34,12 @@ func journalBatch(org string) *pgx.Batch {
 // separate statements: the read gets a fresh snapshot after the lock has been
 // acquired, including the preceding writer's commit under READ COMMITTED.
 func readJournal(ctx context.Context, tx pgx.Tx, org, query string, args []any, destinations ...any) error {
+	if group := journalGroupOf(ctx); group != nil {
+		if !group.locked || group.organization != org {
+			return content.ErrInvalid
+		}
+		return tx.QueryRow(ctx, query, args...).Scan(destinations...)
+	}
 	batch := journalBatch(org)
 	batch.Queue(query, args...)
 	results := tx.SendBatch(ctx, batch)
@@ -91,6 +97,13 @@ func appendEventAt(ctx context.Context, tx pgx.Tx, event eventInput) (int64, err
 }
 
 func queueEvent(ctx context.Context, batch *pgx.Batch, event eventInput) {
+	if group := journalGroupOf(ctx); group != nil {
+		group.events = append(group.events, journalEvent{event, telemetry.Encode(ctx)})
+		if event.Resource == "record" {
+			group.records[event.ResourceID] = true
+		}
+		return
+	}
 	batch.Queue(appendEventSQL, eventArguments(ctx, event)...)
 	if event.Resource == "record" {
 		queueRecordObservations(batch, []string{event.Organization}, []string{event.ResourceID})
@@ -121,6 +134,11 @@ func (s MaterializationStore) Progress(ctx context.Context, org, id, state, code
 	return err
 }
 func (s MaterializationStore) Publish(ctx context.Context, w content.Work, publication content.Publication) error {
+	if publication.Quarantine == nil {
+		if handled, err := content.EnqueueIngestion(ctx, content.IngestionCommit{Kind: content.CommitMaterialization, Organization: w.Organization, RecordID: w.RecordID, Publication: content.PublicationCommit{Work: w, Publication: publication}}); handled {
+			return err
+		}
+	}
 	err := retryJournalWrite(ctx, "Publish", func(ctx context.Context) error {
 		return s.publishAttempt(ctx, w, publication)
 	})
@@ -133,6 +151,25 @@ func (s MaterializationStore) publishAttempt(ctx context.Context, w content.Work
 		return err
 	}
 	defer tx.Rollback(ctx)
+	finish, err := preparePublication(ctx, tx, w, publication)
+	if err != nil {
+		return err
+	}
+	if finish == nil {
+		return nil
+	}
+	if err = finish(); err != nil {
+		if errors.Is(err, errJournalReplay) {
+			return nil
+		}
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func preparePublication(ctx context.Context, tx pgx.Tx, w content.Work, publication content.Publication) (journalFinish, error) {
+	var err error
+
 	var state string
 	var reserved *string
 	var withdrawn, exists, created bool
@@ -153,15 +190,18 @@ func (s MaterializationStore) publishAttempt(ctx context.Context, w content.Work
 		return tx.QueryRow(ctx, guard, args...).Scan(&state, &reserved, &withdrawn, &exists)
 	}
 	if err = lockProjectionRouting(ctx, tx); err != nil {
-		return err
+		return nil, err
 	}
 	if err = read(false); err != nil {
-		return err
+		return nil, err
 	}
 	// Resolved receipts are immutable. A committed replay needs no writes or
 	// journal acquisition, and must not validate another publication's blobs.
 	if state == "resolved" {
-		return nil
+		return nil, nil
+	}
+	if journalGroupOf(ctx) != nil && (reserved == nil || *reserved != w.Digest || withdrawn || exists) {
+		return nil, ErrGenerationChanged
 	}
 	var stage pgx.Tx
 	if reserved != nil && *reserved == w.Digest && !withdrawn && !exists {
@@ -171,72 +211,81 @@ func (s MaterializationStore) publishAttempt(ctx context.Context, w content.Work
 			return err
 		})
 		if err != nil {
-			return err
+			return nil, err
+		}
+		if journalGroupOf(ctx) != nil && !created {
+			return nil, ErrGenerationChanged
 		}
 	}
-	if err = read(true); err != nil {
-		return err
-	}
-	if state == "resolved" {
-		return nil
-	}
-	// Discard prepared blobs on a duplicate or source conflict. Rolling back
-	// releases the fence, so the guarded read must acquire a fresh one.
-	if stage != nil && reserved != nil && (*reserved != w.Digest || withdrawn || exists) {
-		if err = stage.Rollback(ctx); err != nil {
-			return err
-		}
-		created = false
+	return func() error {
+
 		if err = read(true); err != nil {
 			return err
 		}
 		if state == "resolved" {
-			return nil
+			return errJournalReplay
 		}
-		stage = nil
-	}
-	if reserved == nil {
-		return pgx.ErrNoRows
-	}
-	writes := &pgx.Batch{}
-	outcome := "created"
-	versionID := w.VersionID
-	code := ""
-	processing := "idle"
-	if *reserved != w.Digest || withdrawn {
-		outcome = "conflict"
-		versionID = ""
-		code = "source_revision_conflict"
-		processing = "blocked"
-	} else {
-		if exists {
-			outcome = "duplicate"
-		} else {
-			if stage == nil {
+		// Discard prepared blobs on a duplicate or source conflict. Rolling back
+		// releases the fence, so the guarded read must acquire a fresh one.
+		if stage != nil && reserved != nil && (*reserved != w.Digest || withdrawn || exists) {
+			if journalGroupOf(ctx) != nil {
 				return ErrGenerationChanged
 			}
-			queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.materialized", Resource: "record", ResourceID: w.RecordID, MutationID: w.VersionID})
-			if q := publication.Quarantine; q != nil {
-				queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.quarantined", Resource: "record", ResourceID: w.RecordID, MutationID: content.StableID("quarantine", w.VersionID, q.Code)})
-			}
-
-		}
-	}
-	writes.Queue("UPDATE ingestion_receipts SET state='resolved',outcome=$3,version_id=nullif($4,''),processing=$5,error_code=$6 WHERE organization=$1 AND id=$2", w.Organization, w.ReceiptID, outcome, versionID, processing, code)
-	queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "receipt.resolved", Resource: "receipt", ResourceID: w.ReceiptID})
-	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
-		return err
-	}
-	if versionID != "" {
-		serves, err := pinnedOwnerServes(ctx, tx, w.Organization, versionID)
-		if err != nil {
-			return err
-		}
-		if !serves {
-			if err = queueServingProjection(ctx, tx, w.Organization, versionID); err != nil {
+			if err = stage.Rollback(ctx); err != nil {
 				return err
 			}
+			created = false
+			if err = read(true); err != nil {
+				return err
+			}
+			if state == "resolved" {
+				return nil
+			}
+			stage = nil
 		}
-	}
-	return tx.Commit(ctx)
+		if reserved == nil {
+			return pgx.ErrNoRows
+		}
+		writes := &pgx.Batch{}
+		outcome := "created"
+		versionID := w.VersionID
+		code := ""
+		processing := "idle"
+		if *reserved != w.Digest || withdrawn {
+			outcome = "conflict"
+			versionID = ""
+			code = "source_revision_conflict"
+			processing = "blocked"
+		} else {
+			if exists {
+				outcome = "duplicate"
+			} else {
+				if stage == nil {
+					return ErrGenerationChanged
+				}
+				queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.materialized", Resource: "record", ResourceID: w.RecordID, MutationID: w.VersionID})
+				if q := publication.Quarantine; q != nil {
+					queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "record.quarantined", Resource: "record", ResourceID: w.RecordID, MutationID: content.StableID("quarantine", w.VersionID, q.Code)})
+				}
+
+			}
+		}
+		writes.Queue("UPDATE ingestion_receipts SET state='resolved',outcome=$3,version_id=nullif($4,''),processing=$5,error_code=$6 WHERE organization=$1 AND id=$2", w.Organization, w.ReceiptID, outcome, versionID, processing, code)
+		queueEvent(ctx, writes, eventInput{Organization: w.Organization, CorpusID: w.Command.Source.CorpusID, Kind: "receipt.resolved", Resource: "receipt", ResourceID: w.ReceiptID})
+		if err = tx.SendBatch(ctx, writes).Close(); err != nil {
+			return err
+		}
+		if versionID != "" {
+			serves, err := pinnedOwnerServes(ctx, tx, w.Organization, versionID)
+			if err != nil {
+				return err
+			}
+			if !serves {
+				if err = queueServingProjection(ctx, tx, w.Organization, versionID); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}, nil
 }
