@@ -241,8 +241,8 @@ schema with composition (`allOf`, `anyOf` or `oneOf`), references, wildcard cons
 keywords cannot prove equivalence; keep its original build reachable. Adopting an
 explicitly configured legacy setting in the first declaration preserves the stored
 recipe, but does not qualify for automatic serving replacement. Keep that exact
-old process reachable until its pinned work drains. Existing vectors stay served and imports do not settle with `rebuild_required` for tuning
-changes. After activation, inspect `GET /v0/admin/documents/{version_id}/timeline`
+old process reachable until its pinned work drains. Existing vectors stay served
+and imports do not settle with `rebuild_required` for tuning changes. After activation, inspect `GET /v0/admin/documents/{version_id}/timeline`
 for existing and newly imported documents: their enrichment should settle
 without `rebuild_required`. Repeat a semantic search against existing documents
 to confirm their vectors still serve; check `GET /v0/admin/plugins` for the

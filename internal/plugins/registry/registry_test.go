@@ -712,10 +712,12 @@ configuration:
 		return strings.Replace(manifest, "[max_concurrent_requests]", "[max_concurrent_requests, model_variant]", 1)
 	}
 	for _, tc := range []struct {
-		name, before, manifest, configuration string
-		enabled                               map[string]string
-		same                                  bool
+		name, before, beforeConfiguration, manifest, configuration string
+		enabled                                                    map[string]string
+		same                                                       bool
+		servingOnly                                                bool
 	}{
+		{name: "legacy adoption does not prove serving", before: legacy(source), beforeConfiguration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"one"}`, manifest: reclassify(legacy(source)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`, servingOnly: true},
 		{name: "new execution key", manifest: added, configuration: `{"max_concurrent_requests":16,"body_tokens":512,"tokenizer_processes":2}`, same: true},
 		{name: "semantic setting", manifest: source, configuration: `{"max_concurrent_requests":4,"body_tokens":256}`},
 		{name: "reclassified semantic setting", manifest: strings.Replace(source, "[max_concurrent_requests]", "[max_concurrent_requests, body_tokens]", 1), configuration: `{"max_concurrent_requests":4,"body_tokens":256}`},
@@ -748,7 +750,11 @@ configuration:
 			if beforeManifest == "" {
 				beforeManifest = source
 			}
-			before := load(beforeManifest, config, "before", nil)
+			beforeConfiguration := tc.beforeConfiguration
+			if beforeConfiguration == "" {
+				beforeConfiguration = config
+			}
+			before := load(beforeManifest, beforeConfiguration, "before", nil)
 			next := load(tc.manifest, tc.configuration, "next", tc.enabled)
 			replacement := registry.IngestionReplacement(before, next)
 			if (replacement.ManifestDigest == next.ManifestDigest && string(replacement.Configuration) == string(next.Configuration) && reflect.DeepEqual(replacement.Spaces, next.Spaces)) != tc.same {
@@ -757,7 +763,8 @@ configuration:
 			if tc.same && (replacement.Registration != before.Registration || replacement.Generation() != before.Generation() || registry.IngestionRecipe(replacement) != registry.IngestionRecipe(before) || string(registry.IngestionProvenance(replacement)) != string(registry.IngestionProvenance(before))) {
 				t.Fatal("serving replacement changed historical work identity")
 			}
-			if tc.before != "" {
+			// Persisted legacy adoption belongs to the PostgreSQL lineage owner.
+			if tc.before != "" && !tc.servingOnly {
 				seed := func(pin *plugins.Pin) registry.Seed {
 					t.Helper()
 					set, err := plugins.NewPinSet([]*plugins.Pin{pin})
