@@ -88,8 +88,8 @@ class Stack:
         self.directory.chmod(0o700)
         self.statefile=self.directory/'state.json'
         self.readiness={}
-        # The latest process this command launched behind each probe, in memory only: a readiness wait
-        # stops as soon as it exits instead of polling a port nothing will open (THE-1138).
+        # The latest process this command launched behind each probe port, in memory only: a readiness
+        # wait stops as soon as it exits instead of polling a port nothing will open (THE-1138).
         self.launched={}
         if self.statefile.exists(): self.state=json.loads(self.statefile.read_text())
         else:
@@ -224,7 +224,8 @@ class Stack:
         self.state['pids'].append(p.pid)
         self.state.setdefault('shutdown_graces',{})[str(p.pid)]=grace
         if command in ('api','worker'):self.state[command+'_pid']=p.pid
-        self.launched[command]=p
+        listen=json.loads((self.directory/config).read_text()).get('probe_listen')
+        if isinstance(listen,str):self.launched[int(listen.rsplit(':',1)[1])]=p
         self.save()
     def await_ready(self,key,timeout=20):
         """Bounded readiness wait; a timeout names the probe, its last answer and the logs to read. A process
@@ -232,18 +233,21 @@ class Stack:
         probe={'probe_port':'api','worker_probe_port':'worker','short_probe_port':'short-api','queue_bulk_probe_port':'worker'}.get(key,key)
         url=f"http://127.0.0.1:{self.state[key]}/readyz";start=time.monotonic();last='no answer'
         while True:
+            answered=False
             try:
                 with urllib.request.urlopen(url,timeout=1) as r:
-                    if r.status==204:break
+                    answered=r.status==204
                     last=f'HTTP {r.status}'
             except urllib.error.HTTPError as error:last=f'HTTP {error.code}: {error.read(200).decode(errors="replace").strip()}'
             except OSError as error:last=type(error).__name__
-            if (process:=self.launched.get(probe)) is not None and (code:=process.poll()) is not None:
+            # Checked before a 204 is accepted: a previous process still on the port must not answer for it.
+            if (process:=self.launched.get(self.state[key])) is not None and (code:=process.poll()) is not None:
                 self.readiness[probe]={'ready':False,'exited':code,'waited_seconds':round(time.monotonic()-start,3)}
                 self.save_readiness()
                 log=self.directory/f'{probe}-startup.log'
                 tail=log.read_text(errors='replace').splitlines()[-10:] if log.exists() else []
                 raise RuntimeError(f'{probe} exited with status {code} before it was ready at {url}; last lines of {log}:\n'+'\n'.join(line[:300] for line in tail))
+            if answered:break
             if time.monotonic()-start>timeout:
                 self.readiness[probe]={'ready':False,'last':last,'waited_seconds':round(time.monotonic()-start,3)}
                 self.save_readiness()
@@ -314,7 +318,7 @@ class Stack:
         grace=self.shutdown_grace('short-retention.json')
         with (self.directory/'short-api-startup.log').open('w') as log:
             p=subprocess.Popen([str(self.directory/'quivr'),'api'],cwd=ROOT,env={**os.environ,**connector_plugin.engine_environment(self,push_plugin.engine_environment(self)),'QUIVR_CONFIG':str(self.directory/'short-retention.json')},stdout=log,stderr=log,start_new_session=True)
-        self.state['pids'].append(p.pid);self.state.setdefault('shutdown_graces',{})[str(p.pid)]=grace;self.launched['short-api']=p;self.save()
+        self.state['pids'].append(p.pid);self.state.setdefault('shutdown_graces',{})[str(p.pid)]=grace;self.launched[s['short_probe_port']]=p;self.save()
         self.await_ready('short_probe_port')
     def stop_processes(self):
         for pid in self.state['pids']:self.signal_owned(pid,signal.SIGTERM)
