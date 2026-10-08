@@ -8,8 +8,6 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"net/http"
 	"reflect"
-	"regexp"
-	"strings"
 	"testing"
 	"time"
 
@@ -147,104 +145,6 @@ func TestIngestionClaimsSkipLockedReceiptsAndLiveBatchLeases(t *testing.T) {
 	}
 	if got, err := store.ClaimIngestionBatches(ctx, 8); err != nil || len(got) != 0 {
 		t.Fatalf("drained queue: %+v (%v)", got, err)
-	}
-}
-
-// Upgrades retain receipt audit facts and the lease of waiting work while
-// backfilling its original arrival time and removing historical acknowledgements.
-func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool := scratchDatabase(t, ctx)
-	prior := embedded(t, regexp.MustCompile(".*"))
-	for name := range prior {
-		if strings.HasSuffix(name, "_ingestion_dispatch_batches.sql") || strings.HasSuffix(name, "_ingestion_workflow_batches.sql") || strings.HasSuffix(name, "_work_queues.sql") || strings.HasSuffix(name, "_queue_backlog_counters.sql") || strings.HasSuffix(name, "_hot_small_tables.sql") {
-			delete(prior, name)
-		}
-	}
-	if err := postgres.MigrateFS(ctx, pool, prior); err != nil {
-		t.Fatal(err)
-	}
-	store := contentStores(pool)
-	// Seed the previous schema's durable queue directly: its API did not
-	// know the new dispatch topology. Acceptance itself has its own owner.
-	seedLegacy := func(i int) content.Dispatch {
-		org, id := fmt.Sprintf("upgrade-%d", i%2), fmt.Sprintf("receipt-%d", i)
-		scope := corpus.Scope{Organization: org, Actions: []string{"corpora:write"}, Corpora: []string{"*"}}
-		c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "queue", Name: "Queue"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err = pool.Exec(ctx, `INSERT INTO records(organization,id,corpus_id,namespace,record_key) VALUES($1,$2,$3,'tests',$2)`, org, id, c.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err = pool.Exec(ctx, `INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest) VALUES($1,$2,$2,'{}','{}',$3,$2,1,'text','reserved')`, org, id, c.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err = pool.Exec(ctx, `INSERT INTO ingestion_outbox(organization,receipt_id) VALUES($1,$2)`, org, id); err != nil {
-			t.Fatal(err)
-		}
-		return content.Dispatch{Organization: org, ReceiptID: id}
-	}
-	var expected []content.Dispatch
-	for i := range 3 {
-		expected = append(expected, seedLegacy(i))
-	}
-	first := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
-	for i, d := range expected {
-		if _, err := pool.Exec(ctx, "UPDATE ingestion_receipts SET accepted_at=$3 WHERE organization=$1 AND id=$2", d.Organization, d.ReceiptID, first.Add(time.Duration(i)*time.Second)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := pool.Exec(ctx, "UPDATE ingestion_outbox SET dispatched=true WHERE organization=$1 AND receipt_id=$2", expected[0].Organization, expected[0].ReceiptID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, "UPDATE ingestion_outbox SET lease_until='infinity' WHERE organization=$1 AND receipt_id=$2", expected[2].Organization, expected[2].ReceiptID); err != nil {
-		t.Fatal(err)
-	}
-	if err := postgres.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	var intents, receipts int
-	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM ingestion_outbox),(SELECT count(*) FROM ingestion_receipts)").Scan(&intents, &receipts); err != nil {
-		t.Fatal(err)
-	}
-	if intents != 2 || receipts != 3 {
-		t.Fatalf("migration: %d intents, %d receipts, want 2 and 3", intents, receipts)
-	}
-	var enqueued time.Time
-	if err := pool.QueryRow(ctx, "SELECT enqueued_at FROM ingestion_outbox WHERE organization=$1 AND receipt_id=$2", expected[1].Organization, expected[1].ReceiptID).Scan(&enqueued); err != nil {
-		t.Fatal(err)
-	}
-	if !enqueued.Equal(first.Add(time.Second)) {
-		t.Fatalf("backfilled arrival %v, want %v", enqueued, first.Add(time.Second))
-	}
-	got, err := store.ClaimIngestionBatches(ctx, 1)
-	if err != nil || len(got) != 1 || len(got[0].Receipts) != 1 || got[0].Receipts[0] != expected[1] || !got[0].Legacy || got[0].ID != content.StableID("ingestion-e5-v4", expected[1].Organization, expected[1].ReceiptID) {
-		t.Fatalf("upgrade claim: got %+v (%v), want %+v", got, err, expected[1])
-	}
-
-	// A lost post-upgrade acknowledgement recovers that same legacy intent.
-	if _, err = pool.Exec(ctx, "UPDATE ingestion_batches SET lease_until='-infinity'"); err != nil {
-		t.Fatal(err)
-	}
-	if recovered, err := store.ClaimIngestionBatches(ctx, 1); err != nil || !reflect.DeepEqual(recovered, got) {
-		t.Fatalf("legacy recovery: %+v %v, want %+v", recovered, err, got)
-	}
-	if err = store.IngestionBatchDispatched(ctx, got[0].ID); err != nil {
-		t.Fatal(err)
-	}
-	// An older API can still accept during rollout. Its default stays legacy,
-	// while new API intents are invisible to old lease-only dispatch queries.
-	oldAPI := seedLegacy(3)
-	newAPI := acceptDispatchBacklog(t, ctx, store, 2)
-	var oldVisible int
-	if err = pool.QueryRow(ctx, "SELECT count(*) FROM ingestion_outbox WHERE NOT dispatched AND lease_until<now()").Scan(&oldVisible); err != nil || oldVisible != 1 {
-		t.Fatalf("old dispatcher sees %d intents: %v, want only the old API's intent", oldVisible, err)
-	}
-	mixed, err := store.ClaimIngestionBatches(ctx, 8)
-	if err != nil || len(mixed) != 2 || !mixed[0].Legacy || mixed[0].ID != content.StableID("ingestion-e5-v4", oldAPI.Organization, oldAPI.ReceiptID) || !reflect.DeepEqual(mixed[0].Receipts, []content.Dispatch{oldAPI}) || mixed[1].Legacy || !reflect.DeepEqual(mixed[1].Receipts, newAPI) {
-		t.Fatalf("rolling upgrade dispatch: %+v %v", mixed, err)
 	}
 }
 

@@ -380,7 +380,7 @@ func TestSchemaReadyRequiresEveryEmbeddedMigration(t *testing.T) {
 	if err := postgres.SchemaReady(ctx, pool); err != nil {
 		t.Fatalf("migrated database not ready: %v", err)
 	}
-	names, err := migrations.Names()
+	names, err := migrations.Plan(migrations.Files, false)
 	if err != nil {
 		t.Fatal(err)
 	}

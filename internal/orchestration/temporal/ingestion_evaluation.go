@@ -15,10 +15,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// Optional vector work has its own queue and activity slots. A plugin's
-// deadline or outage can never occupy a served ingestion activity slot.
-const ingestionEvaluationQueue = "quivr-ingestion-evaluation-v0"
-
 func ingestionEvaluationWorkflow(ctx workflow.Context, in Input) error {
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: enrichmentActivityTimeout, HeartbeatTimeout: stepHeartbeatTimeout, RetryPolicy: &sdktemporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second}})
 	return workflow.ExecuteActivity(ctx, "evaluate-ingestion-plugin", in).Get(ctx, nil)
@@ -51,12 +47,10 @@ func (r *Runtime) ingestionEvaluationIntents(classes ...string) IntentSource {
 		}
 		intents := make([]Intent, 0, len(jobs))
 		for _, job := range jobs {
-			queue := ingestionEvaluationQueue
-			if workqueue.Valid(job.WorkQueue) {
-				queue = workqueue.TaskQueue(job.WorkQueue) + "-evaluation"
-			}
 			intents = append(intents, dispatchIntent{
-				options: client.StartWorkflowOptions{ID: content.StableID("ingestion-evaluation-workflow", job.Organization, job.ID), TaskQueue: queue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
+				// Optional vector work has its own queue and activity slots. A plugin's
+				// deadline or outage can never occupy a served ingestion activity slot.
+				options: client.StartWorkflowOptions{ID: content.StableID("ingestion-evaluation-workflow", job.Organization, job.ID), TaskQueue: workqueue.TaskQueue(job.WorkQueue) + "-evaluation", WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE},
 				name:    "evaluate-ingestion-plugin-v0", input: Input{Organization: job.Organization, ReceiptID: job.ID},
 				complete: func(ctx context.Context) error { return r.Evaluation.Store.IngestionEvaluationDispatched(ctx, job) },
 				retry:    func(context.Context) error { return nil }, // Lease expiry recovers it.
