@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/pluginhttp"
@@ -394,9 +395,9 @@ func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
 // A segment_and_embed call that reaches the plugin's deadline is told apart
 // from an outage: enrichment counts deadlines toward a bound, never outages.
 func TestSegmentAndEmbedReportsItsDeadline(t *testing.T) {
-	var pin *plugins.Pin
+	var serving atomic.Pointer[plugins.Pin]
 	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if serveDiscovery(w, r, pin) {
+		if serveDiscovery(w, r, serving.Load()) {
 			return
 		}
 		_, _ = io.Copy(io.Discard, r.Body) // the server notices the caller leave once the body is read
@@ -420,12 +421,11 @@ func TestSegmentAndEmbedReportsItsDeadline(t *testing.T) {
 		name, endpoint  string
 		deadline, paged bool
 	}{{"hanging plugin", hang.URL, true, false}, {"plugin down", down.URL, false, false}, {"hanging paged plugin", hang.URL, true, true}, {"paged plugin down", down.URL, false, true}} {
-		var err error
 		manifest := []byte(embedderManifest)
 		if c.paged {
 			manifest = raw
 		}
-		pin, err = plugins.LoadPinManifest(manifest, "embedder", plugins.PinConfig{Endpoint: c.endpoint})
+		pin, err := plugins.LoadPinManifest(manifest, "embedder", plugins.PinConfig{Endpoint: c.endpoint})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -447,6 +447,7 @@ func TestSegmentAndEmbedReportsItsDeadline(t *testing.T) {
 		if err = live.Store("plan_b", nil); err != nil {
 			t.Fatal(err)
 		}
+		serving.Store(pin) // publish only after this case has finished configuring its pin
 		ingestor := pluginhttp.Ingestor{Pin: pin}
 		for attempt := range 2 {
 			if c.paged {
