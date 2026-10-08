@@ -60,7 +60,7 @@ func TestAlertRuleVersionDrainsUntilItsSubscriptionsMove(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
-	if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+	if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 		t.Fatal(err)
 	}
 	registrations := postgres.PluginStore{Pool: pool}
@@ -106,7 +106,7 @@ func TestAlertRuleVersionDrainsUntilItsSubscriptionsMove(t *testing.T) {
 		return sub
 	}
 	moving, edited, gone := subscribe("moving", "0.2.0"), subscribe("edited", "0.2.0"), subscribe("gone", "0.2.0")
-	if _, err = (registry.Service{Store: registrations, Spaces: app.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return nil }}).Activate(ctx, operatorScope, next.ID); err != nil {
+	if _, err = (registry.Service{Store: registrations, Spaces: app.Config{}.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return nil }}).Activate(ctx, operatorScope, next.ID); err != nil {
 		t.Fatalf("activating alerts 0.3.0: %v", err)
 	}
 	subscribe("new", "0.3.0")
