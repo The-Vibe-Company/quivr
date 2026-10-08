@@ -55,6 +55,10 @@ returned vectors must still match the declared size. Cohere normally receives
 `output_dimension` instead. For an instruction model, use a `query_prefix`
 such as `Instruct: Find relevant passages.\nQuery: ` and its document template.
 
+EmbeddingGemma 2 (`examples/embeddinggemma-2.json`) uses explicit document and
+query templates. Choose that file when generating its package; all examples
+can be replaced with your model, endpoint and matching tokenizer settings.
+
 ## Optional local CPU queries
 
 An OpenAI-format deployment can run a pinned local text encoder beside the API
@@ -99,13 +103,11 @@ cp plugins/hosted-embed/examples/tei.json .scratch/hosted-embed/configuration.js
   > .scratch/hosted-embed/package/quivr-plugin.yaml
 ```
 
-For authenticated providers, inject `AZURE_FOUNDRY_KEY` from your secret
+For authenticated providers, inject `EMBED_API_KEY` from your secret
 manager into the **plugin process** environment. It is a declared plugin
 secret, required for `bearer` and `api-key`; `none` sends no credential.
-`AZURE_FOUNDRY_KEY` and `AZURE_FOUNDRY_ENDPOINT` are example environment variable
-names. The endpoint is configuration: copy its URL plus the format's base path
-into `base_url` before generating the manifest; do not declare it as a secret. The
-plugin refuses redirects and never logs keys, provider bodies or input text.
+The endpoint is configuration: set `base_url` before generating the manifest.
+The plugin refuses redirects and never logs keys, provider bodies or input text.
 
 Run the executable with `QUIVR_PLUGIN_MANIFEST` pointing to the generated
 manifest, and `QUIVR_PLUGIN_HOST` / `QUIVR_PLUGIN_PORT` for its HTTP address.
@@ -140,12 +142,11 @@ Each changed configuration is a new immutable registration. For changes to
 vector or segmentation meaning, choose a new `plugin_version` (default `1.2.0`),
 regenerate and certify the package, then install it. The space id includes the model, dimensions and a hash of the wire
 format, metric, model revision, input templates and full-text context mode.
-Version `1.2.0` introduces separate title/context passages and declares a new
-space, so install it with a rebuild or evaluation cutover. Changing any of those
-creates a new space. Set `model_revision` when a deployment name starts serving
+Changing any of those creates a new space. Set `model_revision` when a deployment name starts serving
 new weights; the plugin cannot detect a provider changing weights behind a
-stable name. Changing batching or timeouts preserves the vector space. Existing
-Corpora need a rebuild or backfill before they carry a newly configured space.
+stable name. Changing batching or timeouts preserves the vector space.
+Running deployments need fresh ingestion or a rebuild when space ids change.
+Existing Corpora must carry the new space before you serve it.
 
 
 ## Tune throughput without rebuilding
@@ -155,8 +156,7 @@ Keep `plugin_id` and `plugin_version` unchanged when changing only
 `call_budget_ms`, `batch_wait_ms` or `max_retries`. Regenerate the manifest from
 the new configuration, certify it and install the new registration. These keys
 are declared in `configuration.execution_keys`; Quivr keeps the active plan's
-exact ingestion recipe and derivation provenance, including when adopting this
-declaration from an older generated manifest. Existing documents keep serving,
+exact ingestion recipe and derivation provenance. Existing documents keep serving,
 and new documents do not require a rebuild for these changes. Defaults are unchanged.
 
 Run the new manifest at a separate address while earlier pinned work drains.
@@ -176,19 +176,17 @@ change also creates a new recipe, even when only execution settings differ.
 | `metric` | `cosine` | `cosine`, `dot`, or `l2` |
 | `model_revision` | `"1"` | Space version, 1–32 letters, numbers, dots, underscores or hyphens |
 | `query_prefix`, `document_prefix` | empty | Text prepended before embedding |
-| `query_input_type`, `document_input_type` | `search_query`, `search_document` | Cohere retrieval modes |
 | `send_dimensions` | `true` | Send dimensions to the provider; always validate returned size |
 | `max_tokens_per_segment` | `512` | Full input window including title/template and special tokens, 8–32768 |
-| `packing` | `paragraphs` | Consecutive paragraphs inside each source window; `none` uses plain windows |
 | `body_tokens` | `512` | Body budget excluding the title prefix |
 | `max_chunks` | `4` | Maximum passages returned per bounded work page, 1–256; all remaining text continues in later pages |
 | `rebalance_tail` | `true` | Move whole paragraphs between the last two passages to balance a short tail |
 | `tail_min_fraction` | `0.25` | Rebalance a tail below this fraction of the body budget, 0–0.5 |
 | `title_source` | `title` | `title`, `none`, or `inline`; headline comes from the sole title Part |
 | `title_context_parts` | empty | Optional explicit Part keys appended to title context in listed order |
-| `document_template` | `auto` | `gemma`, `prefix`, or model-name detection with `auto` |
+| `document_template` | `{prefix}{text}` | Literal prompt with required `{text}`, optional `{title}` and `{prefix}` |
+| `query_template` | `{prefix}{query}` | Literal prompt with required `{query}` and optional `{prefix}` |
 | `tokenizer` | absent | Local `python`, `model` path and `sha256` for pinned tokenizers 0.23.2 |
-| `overlap` | `48` | Legacy unpaged overlap in source bytes; paged ingestion uses no overlap |
 | `batch_size` | `16` | Most document inputs per provider request, across Versions, 1–32 |
 | `batch_wait_ms` | `25` | Document collection window, 0–100 ms and less than `call_budget_ms`; 0 disables cross-Version batching |
 | `max_batch_tokens` | `8192` | Maximum summed input estimate per request; at least the segment limit |
@@ -245,20 +243,34 @@ ties move the fewest paragraphs. Each source range remains an exact Unicode
 code-point slice of an immutable Part. Search responses expose `passage_text`
 and `source_excerpts`; the original `excerpt` remains the first source slice.
 
-For EmbeddingGemma, `auto` selects `title: {title} | text: {passage}` for whole
-items, using the title configuration. Paged inputs use `title: none`, with
-titles and context embedded independently; a large headline cannot crowd body
-text out of every input. Paged provenance records `context_mode: separate_passages`.
-Queries keep their prefix. The host's whole-item packing policy changes the
-ingestion recipe identity; rebuild affected Corpora to replace earlier passages.
+Templates are explicit strings and never depend on the model name. `{prefix}`
+expands the corresponding `document_prefix` or `query_prefix`. A nonempty prefix
+requires `{prefix}` in its template; ignored prefixes, unknown placeholders and
+missing `{text}` or `{query}` are rejected. Source text is substituted once,
+so braces in a document or query remain literal. `{title}` expands the configured
+title, or `none` when absent. With `title_source: "inline"`, title context is
+prepended to `{text}`. A template without `{title}` still embeds title-only text
+and its selected context, with the headline included once.
+Paged inputs embed titles and context independently, with `{title}` set to `none`;
+a large headline cannot crowd body text out of every input. Paged provenance
+records `context_mode: separate_passages`.
 
-Use `python3 scripts/prepare_tokenizer.py --hosted` to prepare the pinned Gemma
-tokenizer offline before startup. Configure the returned local tokenizer paths
-and checksum. The Railway image prepares this tokenizer; its Gemma selection uses a 512-token
-body budget with a 2048-token full window. Other models need their matching
-local tokenizer. Without one, a UTF-8 byte counts as one conservative token,
-plus eight reserved special tokens; this underfills subword models. No model
-weights are downloaded. Queries over the full window are refused.
+For EmbeddingGemma 2, choose `examples/embeddinggemma-2.json`. It specifies
+`title: {title} | text: {text}` and `task: search result | query: {query}`,
+768 dimensions, a pinned revision, a 512-token body budget and a 2048-token full
+window. Replace its example endpoint with your OpenAI-compatible server and
+inject `EMBED_API_KEY` for its bearer authentication. Add `tokenizer` with the
+local `python`, `model` path and SHA-256 returned by
+`python3 scripts/prepare_tokenizer.py --hosted`. The `--hosted` flag selects
+the pinned EmbeddingGemma 2 tokenizer revision used by this example.
+Run preparation before startup; it downloads tokenizer files, never model weights. The example omits machine-specific paths and makes
+no provider call during configuration. Set `usd_per_million_tokens` when you
+know the provider’s rate; the example leaves it unknown.
+
+Every model needs its matching local tokenizer for exact token budgets. Without
+one, a UTF-8 byte counts as one conservative token, plus eight reserved special
+tokens; this underfills subword models. The full expanded prompt is counted,
+including prefixes and title context. Queries over the full window are refused.
 
 Every packing, title, tokenizer and tail option belongs to the immutable
 segmentation recipe. Install a new registration and rebuild existing Corpora
@@ -286,7 +298,6 @@ vectors, are committed to PostgreSQL before the next page is requested. An
 activity or process restart reuses those pages. The complete immutable
 segmentation is published only after the final page; a new Version waits for its
 vectors before keyword readiness. Its keyword representation retains the full text.
-Legacy plugins without `contributions.ingestion.paging` keep their existing flow.
 
 Completed document batches stay in a per-organization, per-process LRU cache
 (up to 4096 vectors or 32 MiB of vector data). A retryable failure returns
@@ -308,7 +319,8 @@ provider rejected the request before processing. Cached document vectors
 produce no provider call or token charge. API 0.18 has no ingestion response
 usage field; this accounting interface is the plugin's structured log.
 
-`make check` certifies generated packages in both formats against the shared
+`make check` verifies that the committed TEI manifest matches its generator,
+then certifies generated packages in both formats against the shared
 fake. Reports are `.scratch/plugin-sdk/hosted-embed/hosted-embed-*-contract-report.json`
 and the CI artifact `hosted-embedding-contract-reports`.
 `make verify part=plugins` pins both formats, ingests text and finds it by a

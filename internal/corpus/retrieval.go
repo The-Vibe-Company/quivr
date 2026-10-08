@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/The-Vibe-Company/quivr/internal/keywords"
 )
 
 // Field is one logical, typed source-field retrieval mapping. SourcePointer is
@@ -108,8 +110,10 @@ func validField(f Field, declared func(string) bool) bool {
 	if f.Boost != nil && (!f.Searchable() || *f.Boost < 1 || *f.Boost > 100) {
 		return false
 	}
-	if f.Analyzer != "" && (f.Analyzer != "french_light" || !f.Searchable()) {
-		return false
+	if f.Analyzer != "" {
+		if _, ok := keywords.Lookup(f.Analyzer); !ok || !f.Searchable() {
+			return false
+		}
 	}
 	if f.ValuePointer != "" && (f.Type != "string_array" || !validPointer(f.ValuePointer)) {
 		return false

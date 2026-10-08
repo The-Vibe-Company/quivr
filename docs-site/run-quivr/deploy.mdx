@@ -185,8 +185,6 @@ Keep `/metrics` scraping as it is: metric names and buckets remain unchanged. Ea
 
 Run separate `quivr worker` processes with `worker.queues: ["live"]` and `["bulk"]`; choose each process's slots using [Worker queues](/reference/configuration#worker-queues). Replicas keep no durable local work: PostgreSQL and Temporal own claims, progress and retries. Use the same database, Temporal namespace, storage, signing keys and active plugin plan. Give processes distinct probe addresses on a shared host, or separate network namespaces. Plugin endpoints may point to shared services or sidecars in each process's network namespace; each sidecar needs its own lifecycle and writable temporary directory. A shared embedding provider still needs enough capacity for both classes.
 
-During an upgrade, keep at least one worker serving both classes until queued legacy receipts and every unfinished history on `quivr-content-v0` have drained. Inspect that queue's running workflows in Temporal and confirm no pending `legacy_workflow` rows remain in `ingestion_outbox` or `ingestion_batches` before removing the mixed worker. Queue-specific workers do not drain that old mixed queue.
-
 `GET /v0/admin/queues` accepts a bearer API key granted `queues:read` with all-corpus scope (`corpora: ["*"]`); configure it under [API keys](/reference/configuration#api-keys). Its numeric paths stay stable, including `queues.bulk.waiting` and `queues.live.waiting`. Observations refresh every 15 seconds by default; configure `queue_observation.refresh_interval` in all processes for an interval from 1 to 60 seconds. Rebuild/backfill waiting counts use scope and progress counters and may count overlapping bulk work more than once; use them as a scaling signal. See [Worker queues](/reference/configuration#worker-queues) for freshness and estimation details. For example, not run:
 
 ```json
@@ -279,7 +277,7 @@ Where KEDA is not available, run `quivr-autoscaler`: one small, always-on proces
 | `QUIVR_QUEUE_KEY` | Required secret: the dedicated `queues:read` key |
 | `QUIVR_AUTOSCALER_QUEUE` | `bulk`; the queue whose waiting count drives the target, `bulk` or `live` |
 | `QUIVR_AUTOSCALER_KUBERNETES_DEPLOYMENT` | Required for `kubernetes`: the Deployment to scale |
-| `RAILWAY_TOKEN`, `RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID` | Required for `railway` only |
+| `RAILWAY_TOKEN`, `QUIVR_AUTOSCALER_RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID` | Required for `railway` only; the service ID is the target, not the autoscaler's own `RAILWAY_SERVICE_ID` |
 | `QUIVR_AUTOSCALER_ENABLED` | `true`; `false` exits without reading APIs or changing replicas |
 | `QUIVR_AUTOSCALER_MIN` / `QUIVR_AUTOSCALER_MAX` | `1` / `8` replicas |
 | `QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA` | `20000` waiting documents per replica |

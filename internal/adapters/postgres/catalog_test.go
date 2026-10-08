@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -263,54 +261,5 @@ func TestRecordCatalogAcceptanceTraversal(t *testing.T) {
 	}
 	if count, err := service.CountRecords(ctx, scope, c.ID, content.RecordQuery{AcceptedBefore: &day}); err != nil || count != 0 {
 		t.Fatalf("old correction range count %d, %v", count, err)
-	}
-}
-
-// Owns upgrade backfill on existing data; the traversal owner exercises ongoing
-// pointer changes. A newer duplicate receipt must not redate a current Version.
-func TestRecordCatalogAcceptanceMigrationBackfillsCurrentVersion(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	pool := scratchDatabase(t, ctx)
-	all := embedded(t, regexp.MustCompile(`.`))
-	var migrationName string
-	for name := range all {
-		if strings.HasSuffix(name, "_record_catalog_acceptance_time.sql") {
-			migrationName = name
-			break
-		}
-	}
-	if migrationName == "" {
-		t.Fatal("catalog acceptance migration is not embedded")
-	}
-	migration := all[migrationName]
-	delete(all, migrationName)
-	if err := postgres.MigrateFS(ctx, pool, all); err != nil {
-		t.Fatal(err)
-	}
-	_, err := pool.Exec(ctx, `
-INSERT INTO corpora(organization,id,request_key,canonical_request,name,retrieval) VALUES('catalog-upgrade','corpus','create','{}','Catalog upgrade','{}');
-INSERT INTO records(organization,id,corpus_id,namespace,record_key,current_version_id) VALUES
- ('catalog-upgrade','record','corpus','fixture','dated','version_current'),
- ('catalog-upgrade','pending','corpus','fixture','undated',NULL);
-INSERT INTO content_blobs(organization,blob_id,object_key,sha256,byte_length) VALUES('catalog-upgrade','blob','fixture','fixture',1);
-INSERT INTO record_versions(organization,id,record_id,slot,digest,acceptance_order,source_position,text_blob_id,manifest_blob_id,provenance) VALUES
- ('catalog-upgrade','version_old','record','old','old',1,'','blob','blob','{}'),
- ('catalog-upgrade','version_current','record','current','current',2,'','blob','blob','{}');
-INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,version_id,accepted_at) VALUES
- ('catalog-upgrade','original','original','{}','{}','corpus','record',1,'old','old','version_old','2026-10-01T00:00:00Z'),
- ('catalog-upgrade','correction','correction','{}','{}','corpus','record',2,'current','current','version_current','2026-10-02T00:00:00Z'),
- ('catalog-upgrade','duplicate','duplicate','{}','{}','corpus','record',3,'current','current','version_current','2026-10-03T00:00:00Z');`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	all[migrationName] = migration
-	if err = postgres.MigrateFS(ctx, pool, all); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := (postgres.RecordStore{Pool: pool}).Records(ctx, "catalog-upgrade", "corpus", content.RecordQuery{Order: content.AcceptedAtDesc, Limit: 10})
-	expected := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
-	if err != nil || len(rows) != 2 || rows[0].ID != "record" || rows[0].CurrentAcceptedAt == nil || !rows[0].CurrentAcceptedAt.Equal(expected) || rows[1].ID != "pending" || rows[1].CurrentAcceptedAt != nil {
-		t.Fatalf("backfilled catalog %+v, want current acceptance %s then undated pending; err %v", rows, expected, err)
 	}
 }

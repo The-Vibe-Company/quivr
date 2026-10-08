@@ -35,7 +35,7 @@ type NoticeReferences struct {
 	RecordVersionID       string `json:"record_version_id"`
 	SubscriptionID        string `json:"subscription_id"`
 	SubscriptionVersionID string `json:"subscription_version_id"`
-	DeliveryID            string `json:"delivery_id"`
+	DeliveryID            string `json:"delivery_id,omitempty"`
 	PreviousMatchID       string `json:"previous_match_id,omitempty"`
 	// Owner is the Subscription Owner; absent for a global Subscription.
 	Owner string `json:"owner,omitempty"`

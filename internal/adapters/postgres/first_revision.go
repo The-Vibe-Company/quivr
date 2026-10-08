@@ -61,11 +61,11 @@ func acceptFirstRevisionAttempt(ctx context.Context, pool *pgxpool.Pool, org str
  INSERT INTO ingestion_receipts(organization,id,request_key,canonical_request,command,corpus_id,record_id,acceptance_order,slot,digest,work_queue,request_digest)
  SELECT $1,$3,$14,$11::bytea,$17::jsonb,$4,record_id,1,$9,$10,$16,$18::bytea FROM revision ON CONFLICT DO NOTHING RETURNING id
 ), outbox AS (
- INSERT INTO ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue)
- SELECT $1,id,false,'infinity'::timestamptz,$15,$16 FROM receipt WHERE $16<>'bulk' RETURNING receipt_id
+ INSERT INTO ingestion_outbox(organization,receipt_id,trace_context,work_queue)
+ SELECT $1,id,$15,$16 FROM receipt WHERE $16<>'bulk' RETURNING receipt_id
 ), bulk_outbox AS (
- INSERT INTO bulk_ingestion_outbox(organization,receipt_id,legacy_workflow,lease_until,trace_context,work_queue)
- SELECT $1,id,false,'infinity'::timestamptz,$15,$16 FROM receipt WHERE $16='bulk' RETURNING receipt_id
+ INSERT INTO bulk_ingestion_outbox(organization,receipt_id,trace_context,work_queue)
+ SELECT $1,id,$15,$16 FROM receipt WHERE $16='bulk' RETURNING receipt_id
 ) SELECT EXISTS(SELECT 1 FROM receipt)`, org, recordID, receiptID, c.Source.CorpusID, c.Source.Namespace, c.Source.RecordKey, c.Position, versionID, slot, digest, requestCopy, content.Title(c), c.SourceMediaType, c.Key, telemetry.Encode(ctx), workqueue.Class(ctx), receiptCommand, requestDigest[:], execution)
 	results := tx.SendBatch(ctx, batch)
 	defer results.Close()

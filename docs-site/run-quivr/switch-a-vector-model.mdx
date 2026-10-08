@@ -26,7 +26,7 @@ Run a second embedding model (a model that turns text into numeric vectors) besi
 
 All three keys for a Corpus must belong to its Organization. Plugin, plan and promotion requests affect the whole deployment; backfills and coverage reads see only the key's Organization and grants.
 
-You also need a reachable model endpoint, its model name and dimensions, and its credential in the **plugin process** environment. The plugin reads `AZURE_FOUNDRY_KEY` for every provider, despite that variable's name. The examples use a hosted Cohere v2 endpoint and 1024 dimensions; choose a model that supports them.
+You also need a reachable model endpoint, its model name and dimensions, and its credential in the **plugin process** environment. The plugin reads `EMBED_API_KEY` for authenticated providers. The examples use a hosted Cohere v2 endpoint and 1024 dimensions; choose a model that supports them.
 
 <Warning>
 Hosted embedding sends document text and search queries to your provider and can incur charges, including during certification and evaluation. Keep provider keys out of configuration files and API requests.
@@ -77,7 +77,7 @@ for cancellation, refusal isolation and batch usage logs.
 
 The generated manifest binds the model and settings to a distinct vector space, the coordinate system for its numeric vectors. Use that exact configuration when pinning or registering it. Copy the space name from `contributions.ingestion.spaces`; its API id is that name followed by `@` and the declared space `version`.
 
-Certify with a fixture carrying the same configuration. Inject `AZURE_FOUNDRY_KEY` into the certification command's environment so its plugin subprocess receives it. This step calls your provider:
+Certify with a fixture carrying the same configuration. Inject `EMBED_API_KEY` into the certification command's environment so its plugin subprocess receives it. This step calls your provider:
 
 ```bash
 jq --slurpfile config .scratch/hosted-embed/configuration.json \
@@ -91,11 +91,16 @@ Check that the report says `CERTIFIED`. Start the plugin in a separate terminal,
 ```bash
 QUIVR_PLUGIN_MANIFEST="$PWD/.scratch/hosted-embed/package/quivr-plugin.yaml" \
 QUIVR_PLUGIN_HOST=0.0.0.0 QUIVR_PLUGIN_PORT=8087 \
-AZURE_FOUNDRY_KEY="${AZURE_FOUNDRY_KEY:?Set the provider key in this terminal}" \
+EMBED_API_KEY="${EMBED_API_KEY:?Set the provider key in this terminal}" \
   .scratch/hosted-embed/hosted-embed
 ```
 
-Changing the model, dimensions, format, metric, input templates or `model_revision` creates another space. Set `model_revision` when the provider changes weights behind a stable model name. A changed package needs a new immutable registration: increment `plugin_version`, regenerate and certify it. To compare several hosted models at once, give each a distinct `plugin_id` before generation.
+Set `document_template` and `query_template` explicitly for models with special prompts;
+the model name never selects a template. EmbeddingGemma 2 has its own
+[example configuration](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/examples/embeddinggemma-2.json).
+
+Changing the model, dimensions, format, metric, input templates or `model_revision` creates another space. A running deployment needs fresh ingestion or a rebuild
+before it serves that space. Set `model_revision` when the provider changes weights behind a stable model name. A changed package needs a new immutable registration: increment `plugin_version`, regenerate and certify it. To compare several hosted models at once, give each a distinct `plugin_id` before generation.
 
 </Step>
 <Step title="Install it for evaluation">

@@ -12,20 +12,11 @@ The steps below are operator examples, not run against a live Railway project. T
 
 ## Create the workers
 
-1. For an existing installation, upgrade every API and worker that can write dispatch state to the queue-capable release. Keep the existing `worker` serving both queues: omit `QUIVR_WORKER_QUEUES` or set it to `live,bulk`. Older writers must stop before the drain can complete. Check both pending legacy dispatch tables with the SQL below, then query Temporal's workflow list for `TaskQueue = 'quivr-content-v0' AND ExecutionStatus = 'Running'`. Keep a mixed worker until both SQL counts and running executions remain zero after dispatch and Temporal visibility catch up; pending legacy rows can still start old mixed histories.
-2. Run the existing [provisioning procedure](../README.md#provision-and-deploy), after that drain. `services.json` keeps the existing service named `worker` as the live worker and adds `worker-bulk`. Both start at one replica, use `core.Dockerfile`, and probe `/readyz`. The provisioner sets `QUIVR_WORKER_QUEUES=live` on `worker` and `bulk` on `worker-bulk`. On a fresh installation there are no older histories to drain.
-3. Before deploying `worker-bulk`, copy the existing worker's additional plugin/provider variables and secrets to it. All workers must share database, Temporal namespace, storage, cursor/credential/signing keys, active plugin settings and embedding endpoints. Keep each service's queue selector. Do not add a volume: each replica runs its own loopback plugin sidecars and temporary files. Both slot counts default to four; override with `QUIVR_WORKER_LIVE_SLOTS` and `QUIVR_WORKER_BULK_SLOTS` (1–1024).
-4. Deploy API, `worker` and `worker-bulk` with the existing deploy helper. Verify readiness and a live document becoming searchable while bulk work is pending. The API and workers must agree on plugin pins before scaling.
+In-place upgrades from 2.0.0-alpha.6 and older are not supported. Reset the installation, or export its data and re-import it into a fresh installation before following these steps.
 
-Run this read-only query against the deployment's PostgreSQL database before switching to separate workers. `ingestion_batches` rows disappear only after durable workflow acceptance; they have no `dispatched` column.
-
-```sql
-SELECT 'outbox' AS source, count(*) AS pending
-FROM ingestion_outbox WHERE legacy_workflow AND NOT dispatched
-UNION ALL
-SELECT 'batches', count(*)
-FROM ingestion_batches WHERE legacy_workflow;
-```
+1. Run the existing [provisioning procedure](../README.md#provision-and-deploy). `services.json` keeps the existing service named `worker` as the live worker and adds `worker-bulk`. Both start at one replica, use `core.Dockerfile`, and probe `/readyz`. The provisioner sets `QUIVR_WORKER_QUEUES=live` on `worker` and `bulk` on `worker-bulk`.
+2. Before deploying `worker-bulk`, copy the existing worker's additional plugin/provider variables and secrets to it. All workers must share database, Temporal namespace, storage, cursor/credential/signing keys, active plugin settings and embedding endpoints. Keep each service's queue selector. Do not add a volume: each replica runs its own loopback plugin sidecars and temporary files. Both slot counts default to four; override with `QUIVR_WORKER_LIVE_SLOTS` and `QUIVR_WORKER_BULK_SLOTS` (1–1024).
+3. Deploy API, `worker` and `worker-bulk` with the existing deploy helper. Verify readiness and a live document becoming searchable while bulk work is pending. The API and workers must agree on plugin pins before scaling.
 
 ## Create the autoscaler
 
@@ -36,7 +27,7 @@ FROM ingestion_batches WHERE legacy_workflow;
 | Railway variable | Value |
 | --- | --- |
 | `RAILWAY_TOKEN` | Secret project token scoped to the target environment, not an account or workspace token |
-| `RAILWAY_SERVICE_ID` | ID of `worker-bulk`, never the live worker |
+| `QUIVR_AUTOSCALER_RAILWAY_SERVICE_ID` | ID of `worker-bulk`, never the live worker. Railway injects its own `RAILWAY_SERVICE_ID` (the autoscaler's ID), so the target needs its own name |
 | `RAILWAY_ENVIRONMENT_ID` | ID of that service's environment |
 
 The backend uses [Railway's service API](https://docs.railway.com/integrations/api/manage-services) with an explicit User-Agent and service/environment IDs. It reads the single region's count from `latestDeployment.meta.serviceManifest.deploy.multiRegionConfig`, then writes `input.multiRegionConfig` through `serviceInstanceUpdate` and requests `serviceInstanceDeploy`. Only when regional configuration is absent does it read/write plain `numReplicas` (preferring the deployment manifest's count when available); multiple regions or invalid regional counts cause an error without changes. A rejected deploy is retried from the deployed count on a later decision. Do not pin replicas in a Railway configuration file that overrides API changes or run another scaler. A normal poll makes one Railway read; a scale decision adds a fresh read, an update and a deploy request. Adjust polling for your token's rate limit.

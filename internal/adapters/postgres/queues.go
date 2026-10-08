@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
@@ -23,10 +24,10 @@ type QueueTracker struct {
 	Lease time.Duration
 }
 
-var (
-	_ workqueue.Tracker = QueueTracker{}
-	_ workqueue.Tracker = Store{}
-)
+var _ workqueue.Tracker = QueueTracker{}
+
+// errLeaseLost reports that another attempt took the row's fencing token.
+var errLeaseLost = errors.New("workqueue: lease lost")
 
 func (t QueueTracker) leaseDuration() time.Duration {
 	lease := t.Lease
@@ -57,8 +58,11 @@ func (t QueueTracker) validate(org, kind, workID, documentID string) error {
 }
 
 // Track claims one document attempt, renews its lease while run executes and
-// releases it with the latest fencing token. If another worker takes the row,
-// run's context is canceled and ErrLeaseLost is returned alongside its error.
+// releases it with the latest fencing token. The row is an observation only:
+// run receives ctx unchanged and Track returns run's result. A failed lookup,
+// claim, renewal or release is logged and leaves the row to expire. A retry
+// takes the row over; Temporal and the batch and operation leases, not this
+// row, keep two workers off the same document.
 func (t QueueTracker) Track(ctx context.Context, org, kind, workID, documentID string, run func(context.Context) error) error {
 	if run == nil {
 		return errors.New("workqueue: nil tracked function")
@@ -66,62 +70,62 @@ func (t QueueTracker) Track(ctx context.Context, org, kind, workID, documentID s
 	if err := t.validate(org, kind, workID, documentID); err != nil {
 		return err
 	}
-	canonicalDocumentID, err := t.canonicalDocumentID(ctx, kind, org, workID, documentID)
+	failed := func(step string, err error) {
+		slog.WarnContext(ctx, "work tracking failed; the work continues", "event", "quivr.workqueue.tracking_failed",
+			"step", step, "kind", kind, "work_id", workID, "error", err.Error())
+	}
+	documentID, err := t.canonicalDocumentID(ctx, kind, org, workID, documentID)
 	if err != nil {
-		return err
+		failed("lookup", err)
+		return run(ctx)
 	}
 	lease := t.leaseDuration()
-	token, err := t.claim(ctx, org, kind, workID, canonicalDocumentID, lease)
+	token, err := t.claim(ctx, org, kind, workID, documentID, lease)
 	if err != nil {
-		return err
+		failed("claim", err)
+		return run(ctx)
 	}
 
-	workCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	renewed := make(chan error, 1)
+	renewal, stopRenewal := context.WithCancel(ctx)
+	renewed := make(chan struct{})
 	go func() {
-		interval := lease / 3
-		if interval < 10*time.Millisecond {
-			interval = 10 * time.Millisecond
-		}
-		ticker := time.NewTicker(interval)
+		defer close(renewed)
+		ticker := time.NewTicker(max(lease/3, 10*time.Millisecond))
 		defer ticker.Stop()
 		for {
 			select {
-			case <-workCtx.Done():
-				renewed <- nil
+			case <-renewal.Done():
 				return
 			case <-ticker.C:
-				token, err = t.renew(workCtx, org, kind, workID, canonicalDocumentID, token, lease)
-				if err != nil {
-					if workCtx.Err() != nil {
-						renewed <- nil
-					} else {
-						cancel()
-						renewed <- err
-					}
+			}
+			next, err := t.renew(renewal, org, kind, workID, documentID, token, lease)
+			switch {
+			case renewal.Err() != nil:
+				return
+			case err != nil:
+				failed("renew", err)
+				if errors.Is(err, errLeaseLost) {
 					return
 				}
+			default:
+				token = next
 			}
 		}
 	}()
-
-	runErr := run(workCtx)
-	cancel()
-	renewErr := <-renewed
-
-	cleanup := context.Background()
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) > 0 {
-		var releaseCancel context.CancelFunc
-		cleanup, releaseCancel = context.WithTimeout(context.Background(), min(time.Until(deadline), lease))
-		defer releaseCancel()
-	} else {
-		var releaseCancel context.CancelFunc
-		cleanup, releaseCancel = context.WithTimeout(context.Background(), lease)
-		defer releaseCancel()
-	}
-	releaseErr := t.release(cleanup, org, kind, workID, canonicalDocumentID, token)
-	return errors.Join(runErr, renewErr, releaseErr)
+	defer func() {
+		stopRenewal()
+		<-renewed
+		timeout := lease
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) > 0 {
+			timeout = min(timeout, time.Until(deadline))
+		}
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+		defer cancel()
+		if err := t.release(cleanup, org, kind, workID, documentID, token); err != nil {
+			failed("release", err)
+		}
+	}()
+	return run(ctx)
 }
 
 // canonicalDocumentID maps an ingestion receipt attempt to the Version it
@@ -154,11 +158,7 @@ VALUES($1,$2,$3,$4,nextval('queue_document_attempt_tokens'),clock_timestamp()+ma
 ON CONFLICT (organization,kind,work_id,document_id) DO UPDATE
 SET token=EXCLUDED.token,
     lease_until=clock_timestamp()+make_interval(secs => $5::double precision)
-WHERE queue_document_attempts.lease_until<=clock_timestamp()
 RETURNING token`, org, kind, workID, documentID, lease.Seconds()).Scan(&token)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, workqueue.ErrLeaseHeld
-	}
 	return token, err
 }
 
@@ -166,10 +166,10 @@ func (t QueueTracker) renew(ctx context.Context, org, kind, workID, documentID s
 	var next int64
 	err := t.Pool.QueryRow(ctx, `UPDATE queue_document_attempts
 SET lease_until=clock_timestamp()+make_interval(secs => $6::double precision)
-WHERE organization=$1 AND kind=$2 AND work_id=$3 AND document_id=$4 AND token=$5 AND lease_until>clock_timestamp()
+WHERE organization=$1 AND kind=$2 AND work_id=$3 AND document_id=$4 AND token=$5
 RETURNING token`, org, kind, workID, documentID, token, lease.Seconds()).Scan(&next)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return token, workqueue.ErrLeaseLost
+		return token, errLeaseLost
 	}
 	return next, err
 }
@@ -181,38 +181,20 @@ WHERE organization=$1 AND kind=$2 AND work_id=$3 AND document_id=$4 AND token=$5
 		return err
 	}
 	if tag.RowsAffected() != 1 {
-		return workqueue.ErrLeaseLost
+		return errLeaseLost
 	}
 	return nil
 }
 
-// Track lets a Store be attached directly with workqueue.WithTracker. This is
-// useful for applications that already share one PostgreSQL Store value.
-func (s Store) Track(ctx context.Context, org, kind, workID, documentID string, run func(context.Context) error) error {
-	return (QueueTracker{Pool: s.Pool}).Track(ctx, org, kind, workID, documentID, run)
-}
-
 func queueBacklogSQL() string {
-	// The empty queue value is the rolling-upgrade representation of live work.
 	// Operations have no source queue because administrative work is always
 	// bulk. Version class comes from its receipt rather than a Version column.
 	// Rebuild/backfill scope is estimated from durable operation counters; overlap
 	// with other operations/stages is intentionally not deduplicated.
 	return `WITH enrichment_versions AS MATERIALIZED (
- SELECT q.organization,q.version_id FROM queue_enrichment_records q
- WHERE q.pending AND (SELECT initialized AND NOT EXISTS(SELECT FROM organization_journals j
- LEFT JOIN queue_observation_journals q USING(organization) WHERE j.last_sequence>coalesce(q.position,0))
- FROM queue_enrichment_bootstrap WHERE singleton)
- UNION ALL
- SELECT v.organization,v.id FROM record_versions v
- JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
- WHERE NOT (SELECT initialized AND NOT EXISTS(SELECT FROM organization_journals j
- LEFT JOIN queue_observation_journals q USING(organization) WHERE j.last_sequence>coalesce(q.position,0))
- FROM queue_enrichment_bootstrap WHERE singleton)
-   AND v.baseline_ready AND r.current_version_id=v.id AND NOT v.quarantined
-   AND v.enrichment_state IN ('queued','running','retrying')
+ SELECT organization,version_id FROM queue_enrichment_records WHERE pending
 ), work AS (
- SELECT CASE WHEN COALESCE(NULLIF(rc.work_queue,''),'live')='bulk' THEN 'bulk' ELSE 'live' END AS queue,
+ SELECT CASE WHEN rc.work_queue='bulk' THEN 'bulk' ELSE 'live' END AS queue,
         rc.organization,COALESCE(NULLIF(rc.version_id,''),ar.version_id,rc.id) AS document_id,
         COALESCE(LEAST(rc.accepted_at,ar.accepted_at),rc.accepted_at,ar.accepted_at) AS admitted_at,false AS active
  FROM ingestion_receipts rc
@@ -221,7 +203,7 @@ func queueBacklogSQL() string {
  WHERE rc.route_family='ingestion' AND rc.state='pending'
    AND NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
  UNION ALL
- SELECT CASE WHEN COALESCE(NULLIF(rc.work_queue,''),'live')='bulk' THEN 'bulk' ELSE 'live' END,
+ SELECT CASE WHEN rc.work_queue='bulk' THEN 'bulk' ELSE 'live' END,
         v.organization,v.id,COALESCE(LEAST(rc.accepted_at,ar.accepted_at),rc.accepted_at,ar.accepted_at),false
  FROM record_versions v
  JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
@@ -230,7 +212,7 @@ func queueBacklogSQL() string {
  WHERE NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
    AND NOT v.baseline_ready AND NOT v.quarantined AND v.processing IN ('queued','running','retrying')
  UNION ALL
- SELECT CASE WHEN COALESCE(NULLIF(rc.work_queue,''),'live')='bulk' THEN 'bulk' ELSE 'live' END,
+ SELECT CASE WHEN rc.work_queue='bulk' THEN 'bulk' ELSE 'live' END,
         v.organization,v.id,COALESCE(LEAST(rc.accepted_at,ar.accepted_at),rc.accepted_at,ar.accepted_at),false
  FROM enrichment_versions ev
  JOIN record_versions v ON (v.organization,v.id)=(ev.organization,ev.version_id)
@@ -241,21 +223,19 @@ func queueBacklogSQL() string {
    AND v.enrichment_state IN ('queued','running','retrying')
    AND NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
  UNION ALL
- SELECT CASE WHEN COALESCE(NULLIF(e.work_queue,''),NULLIF(rc.work_queue,''),'live')='bulk' THEN 'bulk' ELSE 'live' END,
+ SELECT CASE WHEN e.work_queue='bulk' THEN 'bulk' ELSE 'live' END,
         e.organization,e.version_id,e.created_at,false
  FROM ingestion_evaluations e
  JOIN record_versions v ON (v.organization,v.id)=(e.organization,e.version_id)
  JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
- LEFT JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.acceptance_order)=(v.organization,v.record_id,v.acceptance_order)
  WHERE e.state='queued'
    AND NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
  UNION ALL
- SELECT CASE WHEN COALESCE(NULLIF(sp.work_queue,''),NULLIF(rc.work_queue,''),'live')='bulk' THEN 'bulk' ELSE 'live' END,
+ SELECT CASE WHEN sp.work_queue='bulk' THEN 'bulk' ELSE 'live' END,
         sp.organization,sp.version_id,sp.created_at,false
  FROM serving_projections sp
  JOIN record_versions v ON (v.organization,v.id)=(sp.organization,sp.version_id)
  JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
- LEFT JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.acceptance_order)=(v.organization,v.record_id,v.acceptance_order)
  WHERE sp.state='queued'
    AND NOT (r.withdrawn OR EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id))
  UNION ALL
@@ -279,7 +259,7 @@ func queueBacklogSQL() string {
           WHEN a.kind='alert' THEN 'live'
           WHEN a.kind IN ('bulk','rebuild','retrieval_configuration','backfill','quarantine_reprocess','operation')
             OR COALESCE(op.kind,'') IN ('projection_rebuild','retrieval_configuration','backfill','quarantine_reprocess') THEN 'bulk'
-          WHEN COALESCE(NULLIF(rc.work_queue,''),NULLIF(ie.work_queue,''),NULLIF(sp.work_queue,''),'live')='bulk' THEN 'bulk'
+          WHEN COALESCE(rc.work_queue,ie.work_queue,sp.work_queue)='bulk' THEN 'bulk'
           ELSE 'live'
         END AS queue,
         a.organization,a.document_id,clock_timestamp() AS admitted_at,true AS active,op.id AS operation_id
@@ -310,7 +290,7 @@ func queueBacklogSQL() string {
  SELECT o.created_at,
  GREATEST(0,COALESCE((o.counters->>'versions_in_scope')::bigint,(b.estimate->>'versions')::bigint,0)
    - CASE WHEN o.kind='backfill' THEN COALESCE((o.counters->>'versions_done')::bigint,0)+COALESCE((o.counters->>'versions_skipped')::bigint,0)
-          ELSE COALESCE((o.counters->>'indexed')::bigint,0)+COALESCE((o.counters->>'versions_quarantined')::bigint,0) END
+          ELSE COALESCE((o.counters->>'versions_covered')::bigint,0)+COALESCE((o.counters->>'versions_quarantined')::bigint,0) END
    - COALESCE(a.active,0)) AS waiting
  FROM operations o
  LEFT JOIN backfills b ON (b.organization,b.operation_id)=(o.organization,o.id)
