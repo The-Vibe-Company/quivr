@@ -4,7 +4,7 @@ import { openai } from '@ai-sdk/openai';
 import { chatgpt } from 'e2e/oauth/chatgpt';
 
 const PROVIDERS = {
-  // A ChatGPT subscription, after `npx e2e login openai`.
+  // A ChatGPT subscription, after `npm run e2e -- login openai`.
   chatgpt,
   // The Vercel AI Gateway: AI_GATEWAY_API_KEY or a linked Vercel project.
   gateway,
@@ -14,8 +14,9 @@ const PROVIDERS = {
 
 /**
  * The agent model, chosen by QUIVR_JOURNEYS_MODEL as `<provider>:<model id>`,
- * for example `chatgpt:gpt-6-luna`. Unset, the agent has no model: steps
- * without the agent still run, and an agent step fails with MODEL_UNAVAILABLE.
+ * for example `chatgpt:gpt-6-luna`. Unset, the agent has no model: tests
+ * without agent steps still run, and the first agent step stops the run with
+ * MODEL_UNAVAILABLE.
  */
 export function agentModel(): Pick<AgentOptions, 'model'> {
   const choice = process.env.QUIVR_JOURNEYS_MODEL;
