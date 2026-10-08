@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func pluginSpace(owner, name string, dimensions int, role string) content.RegisteredSpace {
@@ -276,16 +280,24 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	}
 
 	// Fresh bulk indexing can leave planner statistics far behind actual rows.
-	// Clone this valid independent-owner fixture without ANALYZE, then check
-	// real coverage at its serving budget rather than a wall-clock sleep.
-	// PRs keep the 6,003-segment stale-planner regression fast (THE-1231).
-	// Nightly/manual QUIVR_MEASURE=1 also seeds at least one million segments;
-	// both modes keep the same cold-search and completed-snapshot assertions.
+	// The test never analyzes the clone below, though autovacuum may. PRs bound
+	// the pages the counting owner reads on 6,003 segments (THE-1137), and
+	// check cold search and completed counts.
+	// Nightly/manual QUIVR_MEASURE=1 seeds at least one million segments and
+	// runs the same assertions.
 	cuts := 1
 	copies := 2000
 	if os.Getenv("QUIVR_MEASURE") == "1" {
 		cuts = 8
 		copies = 100000
+	} else {
+		// Statistics taken now count this Organization as one Record. Only the
+		// PR clone starts from them: on a nearly empty database, foreign-key
+		// checks planned from them scan a referenced table per inserted row,
+		// which a million-row clone cannot afford.
+		if _, err = pool.Exec(ctx, `ANALYZE records, record_versions, version_parts, segmentations, segments, projection_coverage, embedding_artifacts, embedding_coverage`); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err = pool.Exec(ctx, `INSERT INTO segments
  SELECT (jsonb_populate_record(NULL::segments,to_jsonb(s)||jsonb_build_object('id',s.id||'-cut-'||n))).*
@@ -313,6 +325,15 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 			t.Fatal(table.name, err)
 		}
 	}
+	// Counting runs off the request deadline, so its cost is bounded in pages,
+	// whatever the CPU: point lookups read about 14 per segment, while a join
+	// filtered after an Organization-wide scan read about 110 (THE-1137).
+	segments := (cuts + 2) * (copies + 1)
+	pages, plan := coveragePages(t, ctx, pool, org, c.ID)
+	if pages > 40*segments {
+		t.Fatalf("counting coverage of %d fresh segments read %d pages, want at most %d; costliest plan: %s", segments, pages, 40*segments, plan)
+	}
+	t.Logf("counting coverage of %d fresh segments read %d pages", segments, pages)
 	snapshots := retrieval.NewSpaceSnapshots(ctx, store, 10*time.Second)
 	budget, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
@@ -337,7 +358,7 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	}
 	slices.Sort(latencies)
 	p95 := latencies[18]
-	t.Logf("%d segments, cold coverage enabled, lexical search p95 %s", (cuts+2)*(copies+1), p95)
+	t.Logf("%d segments, cold coverage enabled, lexical search p95 %s", segments, p95)
 	if p95 >= time.Second {
 		t.Fatalf("search p95 %s, objective <1s", p95)
 	}
@@ -383,6 +404,50 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	if err != nil || len(got) != 0 {
 		t.Fatalf("withdrawn evaluation hydrated: %+v %v", got, err)
 	}
+}
+
+// coveragePages counts the pages SpaceStore.VectorSpaces reads, as
+// auto_explain reports them on the store's own connection, and returns the
+// costliest statement's plan for the failure message.
+func coveragePages(t *testing.T, ctx context.Context, pool *pgxpool.Pool, org, corpusID string) (int, string) {
+	t.Helper()
+	cfg := pool.Config().Copy()
+	cfg.MaxConns = 1
+	var plans []string
+	cfg.ConnConfig.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) { plans = append(plans, n.Message) }
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, `LOAD 'auto_explain'; SET auto_explain.log_min_duration=0; SET auto_explain.log_analyze=on; SET auto_explain.log_timing=off; SET auto_explain.log_buffers=on; SET auto_explain.log_format=json; SET auto_explain.log_level=notice`)
+		return err
+	}
+	explained, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer explained.Close()
+	if _, _, _, err = (postgres.SpaceStore{Pool: explained}).VectorSpaces(ctx, org, corpusID); err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) == 0 {
+		t.Fatal("auto_explain reported no plan for VectorSpaces")
+	}
+	total, most, costliest := 0, -1, ""
+	for _, raw := range plans {
+		var plan struct {
+			Plan struct {
+				SharedHitBlocks  int `json:"Shared Hit Blocks"`
+				SharedReadBlocks int `json:"Shared Read Blocks"`
+			} `json:"Plan"`
+		}
+		if err = json.Unmarshal([]byte(raw[strings.Index(raw, "{"):]), &plan); err != nil {
+			t.Fatal(err)
+		}
+		pages := plan.Plan.SharedHitBlocks + plan.Plan.SharedReadBlocks
+		total += pages
+		if pages > most {
+			most, costliest = pages, raw
+		}
+	}
+	return total, costliest
 }
 
 type coverageIndex struct {
