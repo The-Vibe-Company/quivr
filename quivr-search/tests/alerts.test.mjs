@@ -77,8 +77,9 @@ function fakeCore() {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(data));
     };
-    // The demo creating its corpus is not one of the calls these tests read.
+    // The demo creating and checking its corpus is not one of the calls these tests read.
     if (req.method === "POST" && req.url === "/v0/corpora") return send(201, { corpus_id: "demo", name: body.name });
+    if (req.method === "GET" && req.url === "/v0/corpora/demo") return send(200, { corpus_id: "demo", name: "Espace démo" });
     seen.push({
       method: req.method,
       url: req.url,

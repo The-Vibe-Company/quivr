@@ -60,17 +60,22 @@ test("upstream read failures remain retryable; out-of-corpus resources stay hidd
 });
 
 // The demo in front of a fake core whose demo corpus, created by the demo,
-// is "demo"; every other call reaches the fake as it is.
+// is "demo" and stays there; every other call reaches the fake as it is.
 async function startDemo(t, upstreamPort, env = {}) {
+  const demoCorpus = (res, status) => {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ corpus_id: "demo", name: "Espace démo", effective_retrieval: { fields: [] } }));
+  };
   const core = http.createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/v0/corpora") {
-      res.writeHead(201, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ corpus_id: "demo", name: "Espace démo" }));
-      return;
-    }
+    if (req.method === "POST" && req.url === "/v0/corpora") return demoCorpus(res, 201);
     const relay = http.request(
       { host: "127.0.0.1", port: upstreamPort, method: req.method, path: req.url, headers: req.headers },
       (answer) => {
+        // A fake that does not describe the demo corpus still has it.
+        if (answer.statusCode === 404 && req.method === "GET" && req.url === "/v0/corpora/demo") {
+          answer.resume();
+          return demoCorpus(res, 200);
+        }
         res.writeHead(answer.statusCode, answer.headers);
         answer.pipe(res);
       },
