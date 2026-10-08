@@ -54,6 +54,8 @@ class Receiver:
     def __init__(self, port):
         self.lock = threading.Lock()
         self.notices = {}
+        # Every acknowledged POST, so redelivered duplicates stay visible.
+        self.posts = 0
         receiver = self
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
@@ -62,6 +64,7 @@ class Receiver:
                     ref = notice['references']
                     key = (ref['record_version_id'], ref['subscription_id'])
                     with receiver.lock:
+                        receiver.posts += 1
                         receiver.notices.setdefault(key, time.monotonic())
                     self.send_response(204)
                 except (ValueError, KeyError):
@@ -277,6 +280,8 @@ class Workload:
                 self.requests.append({'operation': mode, 'at_seconds': at, **row})
 
     def execute(self):
+        if 'anchor_records' in self.s['ingestion']:
+            return self.anchored()
         self.setup()
         started = time.monotonic()
         self.started = started
@@ -368,6 +373,92 @@ class Workload:
                          'submitted': len(measured), 'accepted': len(accepted),
                          'missing_searchable': missing_search, 'expected_alerts': len(accepted)*self.s['alerts'],
                          'missing_alerts': missing_alerts}}
+
+    def anchored(self):
+        """All anchor_records documents arrive at one instant after warmup.
+
+        Stage times come from the durable Version step columns, written by the
+        transaction that commits each step, on PostgreSQL's clock. Search probes
+        stop for the burst; every 0.5 s the drain reads receipts until each
+        Version is known, and the step columns. Public hybrid search verifies
+        every document afterwards. Alerts are first arrivals at the local receiver.
+        """
+        from load_stack import STEPS
+        self.setup()
+        self.observe_stop.set()
+        self.observer.join(timeout=2*TIMEOUT+1)
+        count, first = self.s['ingestion']['anchor_records'], self.s['corpus']['records']
+        pending = queue.Queue()
+        for index in range(first, first + count):
+            pending.put(index)
+        posts = self.receiver.posts
+        # Step columns use the database clock, which a Docker VM may skew from ours.
+        # The bound only ever overstates step times, by at most overstated_by.
+        offset, overstated_by = self.stack.clock_offset()
+        anchor = time.time() + offset
+        self.started = started = time.monotonic()
+        def client():
+            while not self.stop.is_set():
+                try:
+                    index = pending.get_nowait()
+                except queue.Empty:
+                    return
+                self.submit(index, started, True)
+        clients = [threading.Thread(target=self.guarded, args=(client,))
+                   for _ in range(self.s['ingestion']['concurrency'])]
+        for thread in clients:
+            thread.start()
+        for thread in clients:
+            thread.join()
+        elapsed = time.monotonic() - started
+        accepted = [r for r in self.records if r['measured'] and r.get('status') == 202]
+        deadline = started + self.s['drain_seconds']
+        durable = {}
+        while time.monotonic() < deadline and not self.stop.is_set():
+            for r in accepted:
+                if time.monotonic() >= deadline:
+                    break
+                if not r.get('version'):
+                    row, receipt = call(self.endpoint(), self.token, 'GET', '/v0/ingestion-receipts/' + r['receipt'])
+                    if row['status'] == 200 and receipt.get('version_id'):
+                        r.update(version=receipt['version_id'], record_id=receipt['record_id'])
+            versions = [r['version'] for r in accepted if r.get('version')]
+            durable = self.stack.step_times(versions)
+            done = len(versions) == len(accepted) and all(
+                durable.get(v, {}).get('enriched') and (not self.s['alerts'] or durable[v].get('evaluated'))
+                for v in versions)
+            if done and len(self.receiver.notices) >= len(self.records) * self.s['alerts']:
+                break
+            self.stop.wait(.5)
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            verified = sum(pool.map(self.verify, accepted))
+        stages = {stage: distribution([(times[stage] - anchor)*1000 for times in durable.values() if times.get(stage)])
+                  for stage in STEPS}
+        alerted = [max(arrivals) for r in accepted if self.s['alerts'] and r.get('version') and
+                   len(arrivals := self.receiver.arrivals(r['version'])) == self.s['alerts']]
+        expected = len(accepted) * self.s['alerts']
+        received = sum(len(self.receiver.arrivals(r['version'])) for r in accepted if r.get('version'))
+        duplicates = self.receiver.posts - posts - received
+        self.close()
+        summary = request_summary([r for r in self.requests if r['operation'] == 'ingestion'], elapsed, 202)
+        complete = (len(accepted) == count and verified == count and received == expected
+                    and duplicates == 0 and not self.driver_errors and summary['errors'] == 0)
+        return {'status': 'complete' if complete else 'failed', 'elapsed_seconds': round(elapsed, 3),
+                'requests': {'ingestion': summary}, 'driver_errors': self.driver_errors,
+                'anchored': {'documents': count, 'accepted': len(accepted), 'verified_hybrid': verified,
+                             'database_clock_offset_seconds': round(offset, 3),
+                             'steps_overstated_by_at_most_seconds': round(overstated_by, 3),
+                             'stages_from_anchor': stages,
+                             'all_alerts_from_anchor': distribution([(at - started)*1000 for at in alerted]),
+                             'expected_alerts': expected, 'received_alerts': received,
+                             'duplicate_alerts': duplicates}}
+
+    def verify(self, record):
+        row, found = call(self.endpoint(), self.token, 'POST', '/v0/search', {
+            'query': record['marker'], 'corpus_ids': [self.corpus], 'mode': 'hybrid', 'limit': 10})
+        return row['status'] == 200 and any(hit['record_id'] == record.get('record_id') and
+            hit['version_id'] == record.get('version') and hit.get('embedding_artifact_id')
+            for hit in found.get('items', []))
 
     def close(self):
         self.stop.set()

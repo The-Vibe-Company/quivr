@@ -39,9 +39,10 @@ func RequestJSON(client *http.Client, req *http.Request, out any) error {
 	return nil
 }
 
+// QueueSource reads one queue's waiting count, such as "bulk" or "live".
 type QueueSource struct {
-	URL, Key string
-	Client   *http.Client
+	URL, Key, Queue string
+	Client          *http.Client
 }
 
 func (q QueueSource) Waiting(ctx context.Context) (int64, error) {
@@ -51,18 +52,16 @@ func (q QueueSource) Waiting(ctx context.Context) (int64, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(q.Key))
 	var response struct {
-		Queues struct {
-			Bulk struct {
-				Waiting *int64 `json:"waiting"`
-			} `json:"bulk"`
+		Queues map[string]struct {
+			Waiting *int64 `json:"waiting"`
 		} `json:"queues"`
 	}
 	if err = RequestJSON(q.Client, req, &response); err != nil {
 		return 0, err
 	}
-	count := response.Queues.Bulk.Waiting
+	count := response.Queues[q.Queue].Waiting
 	if count == nil || *count < 0 {
-		return 0, errors.New("bulk waiting count missing or invalid")
+		return 0, fmt.Errorf("%s waiting count missing or invalid", q.Queue)
 	}
 	return *count, nil
 }

@@ -41,6 +41,15 @@ const (
 	ActivityWithdrawn = "withdrawn"
 )
 
+// Whether alert evaluation applies to a Version: it was evaluated, an
+// evaluation of it is pending, or an enabled Subscription covers its Corpus
+// now. A Subscription created after the Version became searchable never
+// evaluates it, yet makes it applicable.
+const (
+	EvaluationApplicable    = "applicable"
+	EvaluationNotApplicable = "not_applicable"
+)
+
 // PluginRef names the plugin version that ran a step.
 type PluginRef struct {
 	ID, Version string
@@ -55,6 +64,8 @@ type Activity struct {
 	State   string
 	Current bool
 	Steps   Steps
+	// Evaluation is EvaluationApplicable or EvaluationNotApplicable.
+	Evaluation string
 	// Normalizer ran the materialized step; Ingestion cut the segments the
 	// Corpus serves. Filled on single reads only; nil when unknown.
 	Normalizer, Ingestion *PluginRef

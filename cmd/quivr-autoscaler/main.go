@@ -1,4 +1,5 @@
-// quivr-autoscaler reconciles bulk-worker replicas from Quivr's queue endpoint.
+// quivr-autoscaler reconciles one worker service's replicas from Quivr's queue
+// endpoint, through a backend selected by QUIVR_AUTOSCALER_BACKEND.
 package main
 
 import (
@@ -13,8 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	railway "github.com/The-Vibe-Company/quivr/deploy/railway/autoscaler"
 	"github.com/The-Vibe-Company/quivr/internal/autoscaling"
+	"github.com/The-Vibe-Company/quivr/internal/autoscaling/kubernetes"
+	"github.com/The-Vibe-Company/quivr/internal/autoscaling/railway"
 )
 
 func main() {
@@ -52,6 +54,78 @@ func duration(name string, fallback time.Duration, zero bool) (time.Duration, er
 	return parsed, nil
 }
 
+// settings is the autoscaler configuration read from the environment.
+type settings struct {
+	backend, queue, endpoint, key                    string
+	deployment                                       string
+	railwayToken, railwayService, railwayEnvironment string
+	policy                                           autoscaling.Config
+	interval, minScaleInterval, timeout              time.Duration
+}
+
+// load reads the backend first, so only the selected backend's variables are required.
+func load() (settings, error) {
+	s := settings{backend: os.Getenv("QUIVR_AUTOSCALER_BACKEND"), queue: os.Getenv("QUIVR_AUTOSCALER_QUEUE")}
+	required := []string{"QUIVR_QUEUE_URL", "QUIVR_QUEUE_KEY"}
+	switch s.backend {
+	case "kubernetes":
+		required = append(required, "QUIVR_AUTOSCALER_KUBERNETES_DEPLOYMENT")
+	case "railway":
+		required = append(required, "RAILWAY_TOKEN", "RAILWAY_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID")
+	default:
+		return s, errors.New("QUIVR_AUTOSCALER_BACKEND must be kubernetes or railway")
+	}
+	for _, name := range required {
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			return s, errors.New(name + " is required")
+		}
+	}
+	s.deployment = os.Getenv("QUIVR_AUTOSCALER_KUBERNETES_DEPLOYMENT")
+	s.railwayToken, s.railwayService, s.railwayEnvironment = os.Getenv("RAILWAY_TOKEN"), os.Getenv("RAILWAY_SERVICE_ID"), os.Getenv("RAILWAY_ENVIRONMENT_ID")
+	if s.queue == "" {
+		s.queue = "bulk"
+	}
+	if s.queue != "bulk" && s.queue != "live" {
+		return s, errors.New("QUIVR_AUTOSCALER_QUEUE must be bulk or live")
+	}
+	endpoint, err := url.Parse(os.Getenv("QUIVR_QUEUE_URL"))
+	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "https" && endpoint.Scheme != "http") || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return s, errors.New("QUIVR_QUEUE_URL must be an HTTP(S) queue URL without credentials, query or fragment")
+	}
+	s.endpoint, s.key = endpoint.String(), os.Getenv("QUIVR_QUEUE_KEY")
+	minimum, err := integer("QUIVR_AUTOSCALER_MIN", 1)
+	if err != nil {
+		return s, err
+	}
+	maximum, err := integer("QUIVR_AUTOSCALER_MAX", 8)
+	if err != nil {
+		return s, err
+	}
+	// Both backends store replica counts as signed 32-bit integers.
+	if minimum < 1 || maximum < minimum || maximum > 1<<31-1 {
+		return s, errors.New("autoscaler replica bounds must be positive ordered 32-bit integers")
+	}
+	documents, err := integer("QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA", 20000)
+	if err != nil {
+		return s, err
+	}
+	window, err := duration("QUIVR_AUTOSCALER_DOWNSCALE_WINDOW", 5*time.Minute, true)
+	if err != nil {
+		return s, err
+	}
+	s.policy = autoscaling.Config{Min: int(minimum), Max: int(maximum), DocumentsPerReplica: documents, DownscaleWindow: window}
+	if s.interval, err = duration("QUIVR_AUTOSCALER_INTERVAL", 30*time.Second, false); err != nil {
+		return s, err
+	}
+	if s.minScaleInterval, err = duration("QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL", 2*time.Minute, true); err != nil {
+		return s, err
+	}
+	if s.timeout, err = duration("QUIVR_AUTOSCALER_REQUEST_TIMEOUT", 10*time.Second, false); err != nil {
+		return s, err
+	}
+	return s, nil
+}
+
 func run(logger *slog.Logger) error {
 	enabled := os.Getenv("QUIVR_AUTOSCALER_ENABLED")
 	if enabled == "false" {
@@ -61,60 +135,30 @@ func run(logger *slog.Logger) error {
 	if enabled != "" && enabled != "true" {
 		return errors.New("QUIVR_AUTOSCALER_ENABLED must be true or false")
 	}
-	required := []string{"QUIVR_QUEUE_URL", "QUIVR_QUEUE_KEY", "RAILWAY_TOKEN", "RAILWAY_BULK_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID"}
-	for _, name := range required {
-		if strings.TrimSpace(os.Getenv(name)) == "" {
-			return errors.New(name + " is required")
+	s, err := load()
+	if err != nil {
+		return err
+	}
+	policy, err := autoscaling.NewPolicy(s.policy)
+	if err != nil {
+		return err
+	}
+	client := autoscaling.NewHTTPClient(s.timeout)
+	source := autoscaling.QueueSource{URL: s.endpoint, Key: s.key, Queue: s.queue, Client: client}
+	var backend autoscaling.Backend
+	switch s.backend {
+	case "kubernetes":
+		if backend, err = kubernetes.InCluster(s.deployment, s.timeout); err != nil {
+			return err
 		}
+	case "railway":
+		backend = railway.Backend{Token: s.railwayToken, ServiceID: s.railwayService, EnvironmentID: s.railwayEnvironment, Client: client}
 	}
-	endpoint, err := url.Parse(os.Getenv("QUIVR_QUEUE_URL"))
-	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "https" && endpoint.Scheme != "http") || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-		return errors.New("QUIVR_QUEUE_URL must be an HTTP(S) queue URL without credentials, query or fragment")
-	}
-	minimum, err := integer("QUIVR_AUTOSCALER_MIN", 1)
-	if err != nil {
-		return err
-	}
-	maximum, err := integer("QUIVR_AUTOSCALER_MAX", 8)
-	if err != nil {
-		return err
-	}
-	// Replica counts are GraphQL Int (signed 32-bit).
-	if minimum < 1 || maximum < minimum || maximum > 1<<31-1 {
-		return errors.New("autoscaler replica bounds must be positive ordered GraphQL integers")
-	}
-	documents, err := integer("QUIVR_AUTOSCALER_DOCUMENTS_PER_REPLICA", 20000)
-	if err != nil {
-		return err
-	}
-	window, err := duration("QUIVR_AUTOSCALER_DOWNSCALE_WINDOW", 5*time.Minute, true)
-	if err != nil {
-		return err
-	}
-	interval, err := duration("QUIVR_AUTOSCALER_INTERVAL", 30*time.Second, false)
-	if err != nil {
-		return err
-	}
-	minScaleInterval, err := duration("QUIVR_AUTOSCALER_MIN_SCALE_INTERVAL", 2*time.Minute, true)
-	if err != nil {
-		return err
-	}
-	timeout, err := duration("QUIVR_AUTOSCALER_REQUEST_TIMEOUT", 10*time.Second, false)
-	if err != nil {
-		return err
-	}
-	policy, err := autoscaling.NewPolicy(autoscaling.Config{Min: int(minimum), Max: int(maximum), DocumentsPerReplica: documents, DownscaleWindow: window})
-	if err != nil {
-		return err
-	}
-	client := autoscaling.NewHTTPClient(timeout)
-	source := autoscaling.QueueSource{URL: endpoint.String(), Key: os.Getenv("QUIVR_QUEUE_KEY"), Client: client}
-	backend := railway.Backend{Token: os.Getenv("RAILWAY_TOKEN"), ServiceID: os.Getenv("RAILWAY_BULK_SERVICE_ID"), EnvironmentID: os.Getenv("RAILWAY_ENVIRONMENT_ID"), Client: client}
 	controller := autoscaling.NewController(policy, source, backend)
-	controller.MinScaleInterval = minScaleInterval
+	controller.MinScaleInterval = s.minScaleInterval
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	logger.Info("autoscaler started", "min", minimum, "max", maximum, "documents_per_replica", documents, "downscale_window", window.String(), "interval", interval.String(), "min_scale_interval", minScaleInterval.String())
+	logger.Info("autoscaler started", "backend", s.backend, "queue", s.queue, "min", s.policy.Min, "max", s.policy.Max, "documents_per_replica", s.policy.DocumentsPerReplica, "downscale_window", s.policy.DownscaleWindow.String(), "interval", s.interval.String(), "min_scale_interval", s.minScaleInterval.String())
 	for {
 		decision, err := controller.Step(ctx, time.Now())
 		if ctx.Err() != nil {
@@ -127,7 +171,7 @@ func run(logger *slog.Logger) error {
 			logger.Info("autoscaling decision", attrs...)
 		}
 		// Wait after each reconciliation; slow APIs cannot cause a catch-up burst.
-		timer := time.NewTimer(interval)
+		timer := time.NewTimer(s.interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

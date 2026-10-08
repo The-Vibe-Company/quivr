@@ -209,6 +209,7 @@ func TestInvocationClassifiesWireOutcomes(t *testing.T) {
 		declared        bool
 		class           connectors.ErrorClass
 		code            string
+		secrets         []string
 	}{
 		{name: "success", operation: call.EmbedQuery, status: 200, body: `{"vector":[1,0]}`},
 		{name: "retryable", operation: call.Normalize, status: 503, body: `{"code":"busy","message":"later","retryable":true}`, declared: true},
@@ -225,6 +226,8 @@ func TestInvocationClassifiesWireOutcomes(t *testing.T) {
 		{name: "connector source", operation: call.DescribeAttachment, status: 422, body: `{"code":"gone","message":"removed","retryable":false,"error_class":"source"}`, class: connectors.ClassSource, code: "gone"},
 		{name: "contradictory connector error", operation: call.CheckCredential, status: 422, body: `{"code":"bad","message":"no","retryable":true,"error_class":"source"}`, class: connectors.ClassSource, code: "plugin_invalid_error"},
 		{name: "credential leak", operation: call.UploadAttachment, status: 200, body: `{"uploaded":true,"secret":"credential_value"}`, class: connectors.ClassSource, code: "credential_leak"},
+		// An empty string is in every body; it holds no secret (THE-1314).
+		{name: "empty secret", operation: call.UploadAttachment, status: 200, body: `{"status":"uploaded"}`, secrets: []string{"credential_value", ""}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -241,7 +244,11 @@ func TestInvocationClassifiesWireOutcomes(t *testing.T) {
 					return plugins.ValidateDocument("ingestion-embed-query-response.schema.json", body)
 				}
 			}
-			result, err := call.Invoke(context.Background(), pin, tc.operation, call.Bytes([]byte(`{}`)), check, []string{"credential_value"})
+			secrets := tc.secrets
+			if secrets == nil {
+				secrets = []string{"credential_value"}
+			}
+			result, err := call.Invoke(context.Background(), pin, tc.operation, call.Bytes([]byte(`{}`)), check, secrets)
 			if result == nil {
 				t.Fatalf("expected a wire result: %v", err)
 			}
