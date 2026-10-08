@@ -199,7 +199,7 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 	admissionDone := admission.Done()
 	checkpoints := time.NewTicker(5 * time.Second)
 	defer checkpoints.Stop()
-	var barrier unfinished // earliest lost lease or canceled unfinished Version
+	var barrier unfinished // earliest failed or canceled unfinished Version
 	var retry error
 	stopped, yielded, notRunning := false, false, false
 	completed := 0
@@ -299,7 +299,7 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 				if err == nil {
 					err = r.coverCandidate(work, ctx, org, target, c)
 				}
-				if err != nil && err != workqueue.ErrLeaseLost {
+				if err != nil {
 					cancel(err)
 				}
 				results <- result{candidate: u, err: err}
@@ -311,13 +311,10 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 		select {
 		case out := <-results:
 			delete(pending, out.candidate.id)
-			switch {
-			case out.err == workqueue.ErrLeaseLost:
-				remember(out.candidate)
-			case out.err != nil:
+			if out.err != nil {
 				remember(out.candidate)
 				stop(out.err)
-			default:
+			} else {
 				completed++
 			}
 			if !stopped && completed >= rebuildBatch {
@@ -375,48 +372,14 @@ func (r Rebuilder) Step(ctx context.Context, org, operationID string) (bool, err
 // a deterministic refusal already observed before the join.
 func (r Rebuilder) coverCandidate(work, parent context.Context, org string, target RebuildTarget, c RebuildCandidate) error {
 	err := r.cover(work, org, target, c)
-	if errors.Is(err, workqueue.ErrLeaseLost) {
-		// A terminal or canceled callback under a lost lease cannot authorize
-		// quarantine. Keep the gap, while preserving independent retry causes.
-		if retry := rebuildRetryCause(err); retry != nil {
-			return errors.Join(workqueue.ErrLeaseLost, retry)
-		}
-		return workqueue.ErrLeaseLost
-	}
 	var item terminal
-	if errors.As(err, &item) && rebuildRetryCause(err) == nil {
+	if errors.As(err, &item) {
 		reason := content.Diagnostic{Code: item.failure.Code, Message: item.failure.Message}
 		if item.reason != nil {
 			reason = *item.reason
 			reason.Code = item.failure.Code
 		}
 		err = r.Store.QuarantineRebuild(parent, org, target.Operation.ID, c.VersionID, reason)
-	}
-	return err
-}
-
-// rebuildRetryCause keeps independent failures joined by the lease tracker.
-// Lease loss, canceled callbacks and deterministic item failures leave a gap
-// for the next owner; storage failures and Operation fences still stop a turn.
-func rebuildRetryCause(err error) error {
-	if err == nil {
-		return nil
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		var causes []error
-		for _, cause := range joined.Unwrap() {
-			if retry := rebuildRetryCause(cause); retry != nil {
-				causes = append(causes, retry)
-			}
-		}
-		return errors.Join(causes...)
-	}
-	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
-		return rebuildRetryCause(wrapped.Unwrap())
-	}
-	var item terminal
-	if errors.Is(err, workqueue.ErrLeaseLost) || errors.Is(err, context.Canceled) || errors.As(err, &item) {
-		return nil
 	}
 	return err
 }
@@ -438,8 +401,8 @@ func (r Rebuilder) coverDocument(ctx context.Context, org string, target Rebuild
 	corpusID := target.Operation.CorpusID
 	v, err := r.Content.TrustedVersion(ctx, org, corpusID, c.RecordID, c.VersionID)
 	if errors.Is(err, corpus.ErrNotFound) {
-		// A bounded first-page listing can exclude this Version behind older
-		// lost leases; classify against its actual canonical eligibility.
+		// A bounded candidate page can exclude this Version; classify against
+		// its actual canonical eligibility.
 		pending, checkErr := r.Store.RebuildCandidatePending(ctx, org, target.Operation.ID, c.VersionID)
 		if checkErr != nil {
 			return checkErr

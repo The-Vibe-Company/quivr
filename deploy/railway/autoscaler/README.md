@@ -36,7 +36,7 @@ FROM ingestion_batches WHERE legacy_workflow;
 | Railway variable | Value |
 | --- | --- |
 | `RAILWAY_TOKEN` | Secret project token scoped to the target environment, not an account or workspace token |
-| `RAILWAY_SERVICE_ID` | ID of `worker-bulk`, never the live worker |
+| `QUIVR_AUTOSCALER_RAILWAY_SERVICE_ID` | ID of `worker-bulk`, never the live worker. Railway injects its own `RAILWAY_SERVICE_ID` (the autoscaler's ID), so the target needs its own name |
 | `RAILWAY_ENVIRONMENT_ID` | ID of that service's environment |
 
 The backend uses [Railway's service API](https://docs.railway.com/integrations/api/manage-services) with an explicit User-Agent and service/environment IDs. It reads the single region's count from `latestDeployment.meta.serviceManifest.deploy.multiRegionConfig`, then writes `input.multiRegionConfig` through `serviceInstanceUpdate` and requests `serviceInstanceDeploy`. Only when regional configuration is absent does it read/write plain `numReplicas` (preferring the deployment manifest's count when available); multiple regions or invalid regional counts cause an error without changes. A rejected deploy is retried from the deployed count on a later decision. Do not pin replicas in a Railway configuration file that overrides API changes or run another scaler. A normal poll makes one Railway read; a scale decision adds a fresh read, an update and a deploy request. Adjust polling for your token's rate limit.
