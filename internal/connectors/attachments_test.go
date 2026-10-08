@@ -577,30 +577,32 @@ func (c pagedExchange) Fetch(_ context.Context, req FetchRequest) (Page, error) 
 
 func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		bound     string
-		empty     bool
-		unchanged bool
-		drained   bool
-		notice    string
-		replay    bool
-		legacy    bool
-		stalled   bool
-		cycled    bool
-		want      bool
+		name       string
+		bound      string
+		empty      bool
+		unchanged  bool
+		drained    bool
+		notice     string
+		replay     bool
+		legacy     bool
+		stalled    bool
+		cycled     bool
+		want       bool
+		wantReason string
 	}{
 		{name: "page bound", bound: "page", want: true},
 		{name: "time bound", bound: "time", want: true},
 		{name: "time bound crossed by checkpoint", bound: "checkpoint", want: true},
 		{name: "byte bound", bound: "byte", want: true},
 		{name: "receipt replay advances cursor", bound: "page", replay: true, want: true},
-		{name: "source drained", bound: "page", drained: true},
-		{name: "empty pages", bound: "page", empty: true},
-		{name: "unchanged checkpoint formatting", bound: "page", unchanged: true},
-		{name: "final page stalls after earlier progress", bound: "page", stalled: true},
-		{name: "final page returns to run start", bound: "page", cycled: true},
-		{name: "notice", bound: "page", notice: "source_notice"},
-		{name: "store without continuation", bound: "page", legacy: true},
+		{name: "source drained", bound: "page", drained: true, wantReason: "source_drained"},
+		{name: "empty advancing pages", bound: "page", empty: true, want: true},
+		{name: "empty unchanged pages", bound: "page", empty: true, unchanged: true, wantReason: "checkpoint_stalled"},
+		{name: "unchanged checkpoint formatting", bound: "page", unchanged: true, wantReason: "checkpoint_stalled"},
+		{name: "final page stalls after earlier progress", bound: "page", stalled: true, wantReason: "checkpoint_stalled"},
+		{name: "final page returns to run start", bound: "page", cycled: true, wantReason: "checkpoint_cycled"},
+		{name: "notice", bound: "page", notice: "source_notice", wantReason: "source_notice"},
+		{name: "store without continuation", bound: "page", legacy: true, wantReason: "store_unsupported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			item := mailItem("r1")
@@ -664,10 +666,15 @@ func TestBoundedRunsContinueOnlyAfterCommittedProgress(t *testing.T) {
 			}
 			var diagnostic struct {
 				Acquisition struct {
-					Continuation bool `json:"continuation"`
+					Continuation bool   `json:"continuation"`
+					Reason       string `json:"continuation_reason"`
 				} `json:"acquisition"`
 			}
-			if err := json.Unmarshal(runs.progress[len(runs.progress)-1].Diagnostics, &diagnostic); err != nil || diagnostic.Acquisition.Continuation != (tc.want && tc.bound != "checkpoint") {
+			wantReason := tc.wantReason
+			if tc.bound == "checkpoint" {
+				wantReason = "run_in_progress"
+			}
+			if err := json.Unmarshal(runs.progress[len(runs.progress)-1].Diagnostics, &diagnostic); err != nil || diagnostic.Acquisition.Reason != wantReason || diagnostic.Acquisition.Continuation != (tc.want && tc.bound != "checkpoint") {
 				t.Fatalf("continuation diagnostic=%s err=%v", runs.progress[len(runs.progress)-1].Diagnostics, err)
 			}
 		})

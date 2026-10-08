@@ -72,8 +72,11 @@ func Class(ctx context.Context) string {
 // time; estimated operation age uses operation creation time.
 // Rebuild/backfill waiting terms estimate remaining scope from operation counters.
 type Status struct {
-	Queue            string  `json:"-"`
-	Waiting          int64   `json:"waiting"`
+	Queue   string `json:"-"`
+	Waiting int64  `json:"waiting"`
+	// IngestionWaiting excludes operations and post-baseline work. Nil means
+	// the snapshot writer has not published this split yet.
+	IngestionWaiting *int64  `json:"-"`
 	InProgress       int64   `json:"in_progress"`
 	OldestAgeSeconds float64 `json:"oldest_waiting_age_seconds"`
 }

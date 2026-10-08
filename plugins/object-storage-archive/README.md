@@ -68,11 +68,18 @@ durable acceptance. Worker stage times are sums across concurrent submissions;
 `page_ms` is elapsed time. Run limits and the configured interval are also
 reported so acquisition work can be distinguished from scheduled idle time.
 A successful run that reaches its page, time or byte bound continues in a new
-leased run immediately when its last page contains items, reports more and
-advances both the page's input and the run's starting checkpoint. Empty pages, unchanged checkpoints, exhaustion,
+leased run immediately when its last page reports more and
+advances both the page's input and the run's starting checkpoint. Pages that only traverse filtered entries can continue when their cursor advances.
+Unchanged checkpoints, exhaustion,
 errors, notices and permanent rejections retain normal interval/retry scheduling.
 The `continuation` timing field reports that request; run bounds, durable
-acceptance before checkpointing and same-record ordering stay in place.
+acceptance before checkpointing and same-record ordering stay in place. Bulk fetching
+also defers at 1,000 waiting ingestion documents (pending receipts or documents
+before baseline processing), excluding active ingestion, enrichment and operations.
+Missing or stale snapshots defer as well. Snapshot lag and concurrent pages may
+overshoot the watermark. `continuation_reason` explains suppression; deferrals
+before fetching log `ingestion_backpressure` or `queue_unavailable` without
+replacing the last committed page diagnostic.
 See the operator guide for all fields and diagnostics-size fallback behavior.
 With the standard HTTP transport, the SDK retains up to 32 idle upload connections per storage host between
 pages (128 total), with the default transport's 90-second idle expiry. Active

@@ -16,6 +16,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/connectors"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 )
 
 // TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime drives
@@ -652,5 +653,107 @@ func TestRunRequestsPullTheNextRunInWithinTheFloorAndRetryAfter(t *testing.T) {
 	}
 	if _, err = service.RequestRun(ctx, scope, created.ID, "now"); !errors.Is(err, connectors.ErrDisabled) {
 		t.Fatalf("disabled: %v", err)
+	}
+}
+
+// Only the source is scripted. The acquirer, durable checkpoints and scheduler
+// are real, so a run that mistakenly chooses interval scheduling stalls here.
+type drainingSource struct {
+	fakeplugin.FixtureConnector
+	credentials []string
+}
+
+func (s *drainingSource) Fetch(_ context.Context, req connectors.FetchRequest) (connectors.Page, error) {
+	var cp struct {
+		Next int `json:"next"`
+	}
+	if len(req.Checkpoint) > 0 {
+		if err := json.Unmarshal(req.Checkpoint, &cp); err != nil {
+			return connectors.Page{}, err
+		}
+	}
+	s.credentials = append(s.credentials, string(req.Credential))
+	next := cp.Next + 1
+	page := connectors.Page{Checkpoint: json.RawMessage(fmt.Sprintf(`{"next":%d}`, next)), More: next < 4, Diagnostics: json.RawMessage(`{"members_done":1}`)}
+	if next != 2 {
+		page.Items = []connectors.Item{{RecordKey: fmt.Sprintf("member-%d", next), Content: content.Text{Kind: "text", Text: "Archive member"}}}
+	}
+	return page, nil
+}
+func TestAcquisitionDrainsConsecutiveRunsThenWaitsForItsInterval(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := adapterPool(t, ctx)
+	scope := corpus.Scope{Organization: fmt.Sprintf("adapter-draining-%d", time.Now().UnixNano()), Actions: []string{"corpora:write", "connectors:write", "connectors:read"}, Corpora: []string{"*"}}
+	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "drain", Name: "Archive import"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &drainingSource{}
+	registry, err := connectors.NewRegistry(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.ConnectorStore{Pool: pool}
+	sealer, err := connectors.NewSealer("adapter-test-credential-key-0123456789")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := connectors.Service{Store: store, Registry: registry, Sealer: sealer}
+	interval := 3600
+	created, err := service.Create(ctx, scope, connectors.CreateInput{Key: "archive", CorpusID: c.ID, Namespace: "archive", Kind: "fixture", Config: json.RawMessage(`{"script":[]}`), IntervalSeconds: &interval, WorkQueue: workqueue.Bulk, Secret: json.RawMessage(`{"token":"fixture-test-secret-one"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stores := contentStores(pool)
+	ingest := content.Service{Submissions: stores, Receipts: stores, RecordStore: stores, Versions: stores, Materialization: stores}
+	snapshots := postgres.QueueSnapshots{Pool: pool}
+	a := connectors.Acquirer{Store: store, Queues: snapshots, Registry: registry, Sealer: sealer, Ingest: ingest, MaxPages: 1}
+	claim := func() []connectors.ConnectorRun {
+		t.Helper()
+		all, err := store.ClaimConnectorRuns(workqueue.WithClass(ctx, workqueue.Bulk), time.Minute, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var own []connectors.ConnectorRun
+		for _, run := range all {
+			if run.Organization == scope.Organization {
+				own = append(own, run)
+			} else if err := store.ReleaseConnectorRun(ctx, run); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return own
+	}
+	var sequence int64
+	for step := 1; step <= 4; step++ {
+		readQueueStatus(t, snapshots, ctx)
+		runs := claim()
+		if len(runs) != 1 {
+			t.Fatalf("step %d: want immediately due acquisition run, got %+v", step, runs)
+		}
+		if step > 1 && runs[0].Run != sequence+1 {
+			t.Fatalf("step %d sequence=%d after %d", step, runs[0].Run, sequence)
+		}
+		sequence = runs[0].Run
+		if err := a.Run(ctx, scope.Organization, created.ID, sequence); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := store.LoadRun(ctx, scope.Organization, created.ID)
+		if err != nil || string(loaded.Checkpoint) != fmt.Sprintf(`{"next": %d}`, step) {
+			t.Fatalf("step %d checkpoint=%s err=%v", step, loaded.Checkpoint, err)
+		}
+		if step == 1 {
+			_, err = service.ReplaceCredential(ctx, scope, created.ID, connectors.CredentialInput{Key: "rotation", Secret: json.RawMessage(`{"token":"fixture-test-secret-two"}`)})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if runs := claim(); len(runs) != 0 {
+		t.Fatalf("drained source must wait its interval, got %+v", runs)
+	}
+	if len(source.credentials) != 4 || source.credentials[0] == source.credentials[1] || source.credentials[1] != source.credentials[3] {
+		t.Fatalf("next run did not reload the replaced credential")
 	}
 }
