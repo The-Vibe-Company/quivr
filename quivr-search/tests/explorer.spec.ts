@@ -1,15 +1,40 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fakeEngine, type Engine } from "./fake-engine";
+import type { Facet } from "../src/lib/explore";
+import { daysAgo, fakeEngine, type Engine } from "./fake-engine";
 
 // The Explorer (THE-1171, THE-1204) and the corpora the feed spans, against
 // the fake engine's two synthetic corpora: the demo corpus and « Dépêches
 // d’agence », which maps a field of its own, desk, and whose first dispatch
-// was corrected once. Counts and the timeline come from the facade's own
-// planning over the fake engine's counts (THE-1184).
+// was corrected once. Each step says what the facade answers next; how the
+// facade filters, pages and counts is tested in server.test.mjs and
+// explore.test.mjs. These specs check what the page asks and shows.
+
+// The four dispatches, as the facade lists them: the last read first.
+const WIRES = ["rec_wcup", "rec_wport", "rec_wgrain", "rec_wvote"];
+const facet = (field: string, values: [string, number][], interval?: Facet["interval"]): Facet => ({
+  field,
+  type: interval ? "datetime" : "string",
+  ...(interval ? { interval } : {}),
+  values: values.map(([value, count]) => ({ value, count })),
+});
+// The dispatches' publication days, by UTC period like the facade's counts.
+const day = (n: number) => daysAgo(n, 12).slice(0, 10);
+const WIRE_FACETS = {
+  total: 4,
+  fields: [
+    facet("metadata.language", [["en", 2], ["fr", 2]]),
+    facet("metadata.published_at", [[day(2), 1], [day(1), 2], [day(0), 1]], "day"),
+    facet("desk", [["economy", 2], ["politics", 1], ["sport", 1]]),
+  ],
+};
 
 let engine: Engine;
+// What the facade answers the Explorer's next list and facets.
+const answer = (listed: string[], facets: Engine["explorer"]["facets"] = WIRE_FACETS, excluded?: Engine["explorer"]["excluded"]) =>
+  Object.assign(engine.explorer, { listed, facets, excluded });
 test.beforeEach(async ({ page }) => {
   engine = await fakeEngine(page);
+  answer(WIRES);
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 test.afterEach(async () => {
@@ -20,10 +45,10 @@ const rows = (page: Page) => page.getByRole("listbox", { name: "Documents" }).ge
 const headlines = (page: Page) => rows(page).locator(".wire-title");
 const corpus = (page: Page, name: string) =>
   page.getByRole("group", { name: "Corpus", exact: true }).getByRole("button", { name: new RegExp(`^${name}`) });
-const facet = (page: Page, name: string) =>
+const facets = (page: Page, name: string) =>
   page.getByRole("complementary", { name: "Filtres" }).getByRole("region", { name });
 // A facet's values as shown: each label then its count.
-const counts = (page: Page, name: string) => facet(page, name).getByRole("listitem");
+const counts = (page: Page, name: string) => facets(page, name).getByRole("listitem");
 const pills = (page: Page) => page.getByRole("group", { name: "Filtres actifs" });
 const preview = (page: Page) => page.getByRole("complementary", { name: "Aperçu" });
 // The address the next Explorer list is read from, its next pages left
@@ -35,13 +60,17 @@ const listed = (page: Page) =>
       { timeout: 10_000 },
     )
     .then((r) => new URL(r.url()).searchParams);
+// The address the next facets are read from. Start it before the action.
+const counted = (page: Page) =>
+  page
+    .waitForRequest((r) => new URL(r.url()).pathname === "/demo/explore/facets", { timeout: 10_000 })
+    .then((r) => new URL(r.url()).searchParams);
 
-test("l’Explorer passe d’un corpus à l’autre, filtre par facettes comptées et dit quels corpus il exclut", async ({
-  page,
-}) => {
+test("l’Explorer passe d’un corpus à l’autre, filtre par facettes et dit quels corpus il exclut", async ({ page }) => {
   // A test page for now: no tab leads to it, its address opens it.
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "Sections" }).getByRole("link", { name: "Explorer" })).toHaveCount(0);
+  answer(engine.ws.articles.map((a) => a.record_id), { fields: [] });
   await page.goto("/?view=explorer");
   // The demo corpus first; each corpus says how many documents it holds.
   await expect(headlines(page).first()).toHaveText("Orages : la grêle frappe les vergers de la vallée");
@@ -52,6 +81,7 @@ test("l’Explorer passe d’un corpus à l’autre, filtre par facettes compté
   // One corpus at a time and its own field. Its rows come by date, though
   // the cup final was read last, and the next page loads on its own as the
   // end of the list shows.
+  answer(WIRES);
   let next = listed(page);
   await corpus(page, "Dépêches d’agence").click();
   expect((await next).get("corpora")).toBe("wires");
@@ -69,30 +99,47 @@ test("l’Explorer passe d’un corpus à l’autre, filtre par facettes compté
   await expect(counts(page, "Langue")).toHaveText(["anglais2", "français2"]);
   await expect(pills(page).getByRole("status")).toHaveText("4 documents");
 
-  // A value narrows the list with the engine's predicate, shows as a pill,
-  // and the other facets and the count follow; its own values keep theirs.
+  // A value asks for the engine's predicate and shows as a pill; with a
+  // filter, the count is the dated documents the facade counted.
+  answer(["rec_wcup", "rec_wport"], { ...WIRE_FACETS, total: 2 });
   next = listed(page);
-  await facet(page, "Langue").getByRole("button", { name: /^anglais/ }).click();
+  let asked = counted(page);
+  await facets(page, "Langue").getByRole("button", { name: /^anglais/ }).click();
   expect(JSON.parse((await next).get("metadata")!)).toEqual([{ field: "metadata.language", any_of: ["en"] }]);
+  const facetsAsked = await asked;
+  expect([facetsAsked.get("corpora"), JSON.parse(facetsAsked.get("metadata")!)]).toEqual([
+    "wires",
+    [{ field: "metadata.language", any_of: ["en"] }],
+  ]);
   await expect(headlines(page)).toHaveText(["Port reopens after three-day closure", "Cup final moved to Sunday"]);
-  await expect(counts(page, "Desk")).toHaveText(["economy1", "sport1"]);
-  await expect(counts(page, "Langue")).toHaveText(["anglais2", "français2"]);
+  await expect(pills(page).getByRole("button", { name: /^Langue anglais/ })).toBeVisible();
   await expect(pills(page).getByRole("status")).toHaveText("2 documents datés");
 
   // The corpus's own field, then every corpus: the field stays picked, the
   // demo corpus is left out and the filters column says so.
-  await facet(page, "Desk").getByRole("button", { name: /^sport/ }).click();
+  answer(["rec_wcup"], { ...WIRE_FACETS, total: 1 });
+  next = listed(page);
+  await facets(page, "Desk").getByRole("button", { name: /^sport/ }).click();
+  expect(JSON.parse((await next).get("metadata")!)).toContainEqual({ field: "desk", any_of: ["sport"] });
   await expect(headlines(page)).toHaveText(["Cup final moved to Sunday"]);
+  answer(["rec_wcup"], { ...WIRE_FACETS, total: 1 }, [{ corpus_id: "demo", fields: ["desk"] }]);
   next = listed(page);
   await corpus(page, "Tous").click();
   expect((await next).get("corpora")).toBe("demo,wires");
   await expect(page.getByRole("note")).toHaveText("Le corpus « Espace démo » est exclu : il n’a pas le champ « Desk ».");
-  await expect(facet(page, "Desk")).toHaveCount(0);
+  // A corpus's own field is offered only while it is picked alone.
+  await expect(facets(page, "Desk")).toHaveCount(0);
   await expect(headlines(page)).toHaveText(["Cup final moved to Sunday"]);
-  // Removing the field's pill brings the demo corpus back; "Tout effacer" the rest.
+  // Removing the field's pill drops its predicate; "Tout effacer" the rest.
+  answer(["rec_wcup", "rec_wport"], { ...WIRE_FACETS, total: 2 });
+  next = listed(page);
   await pills(page).getByRole("button", { name: /^Desk sport/ }).click();
+  expect(JSON.parse((await next).get("metadata")!)).toEqual([{ field: "metadata.language", any_of: ["en"] }]);
   await expect(page.getByRole("note")).toHaveCount(0);
+  answer([...engine.ws.articles, ...engine.ws.wires].map((a) => a.record_id));
+  next = listed(page);
   await pills(page).getByRole("button", { name: "Tout effacer" }).click();
+  expect((await next).has("metadata")).toBe(false);
   await expect(pills(page).getByRole("button")).toHaveCount(0);
   await expect(headlines(page).first()).toHaveText("Orages : la grêle frappe les vergers de la vallée");
 });
@@ -107,13 +154,14 @@ test("la chronologie choisit une période en glissant, et l’adresse garde la v
   // A drag from the first day to the second picks both, as one date filter.
   const from = (await bar.nth(0).boundingBox())!;
   const to = (await bar.nth(1).boundingBox())!;
-  const next = listed(page);
+  answer(["rec_wcup", "rec_wgrain", "rec_wvote"], { ...WIRE_FACETS, total: 3 });
+  let next = listed(page);
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 4 });
   await page.mouse.up();
   const [range] = JSON.parse((await next).get("metadata")!);
-  expect(range).toMatchObject({ field: "metadata.published_at" });
+  expect(range).toMatchObject({ field: "metadata.published_at", gte: expect.stringContaining(day(2)), lte: expect.stringContaining(day(1)) });
   await expect(bar.nth(0)).toHaveAttribute("aria-pressed", "true");
   await expect(bar.nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect(bar.nth(2)).toHaveAttribute("aria-pressed", "false");
@@ -125,14 +173,22 @@ test("la chronologie choisit une période en glissant, et l’adresse garde la v
   await expect(pills(page).getByRole("button", { name: /^Période/ })).toBeVisible();
   await expect(pills(page).getByRole("status")).toHaveText("3 documents");
 
-  // Zoomed in, the timeline shows the range alone; the overview widens it back.
+  // Zoomed in, the timeline asks for the range's span and shows it alone;
+  // the overview widens it back.
+  let asked = counted(page);
   await page.getByRole("button", { name: "Zoomer sur la période" }).click();
+  expect((await asked).get("window")).toBe(`${range.gte},${range.lte}`);
   await expect(bar).toHaveCount(2);
+  asked = counted(page);
   await page.getByRole("button", { name: "Vue d’ensemble" }).click();
+  expect((await asked).has("window")).toBe(false);
   await expect(bar).toHaveCount(3);
 
   // A value and a document picked: the address keeps them all.
-  await facet(page, "Langue").getByRole("button", { name: /^français/ }).click();
+  answer(["rec_wgrain", "rec_wvote"], { ...WIRE_FACETS, total: 2 });
+  next = listed(page);
+  await facets(page, "Langue").getByRole("button", { name: /^français/ }).click();
+  expect(JSON.parse((await next).get("metadata")!)).toContainEqual({ field: "metadata.language", any_of: ["fr"] });
   await expect(headlines(page)).toHaveText(["Récolte de blé : les prix reculent", "Le conseil vote le budget"]);
   await rows(page).nth(1).click();
   await expect(preview(page).getByRole("heading", { level: 2 })).toHaveText("Le conseil vote le budget");
@@ -195,6 +251,7 @@ test("la recherche cherche dans le corpus choisi, et une liste vide propose d’
   await page.goto("/?view=explorer&corpora=wires");
   await expect(rows(page)).toHaveCount(4);
   const search = page.getByRole("searchbox", { name: "Chercher dans les documents" });
+  answer(["rec_wport"]);
   let next = listed(page);
   await search.fill("port");
   const asked = await next;
@@ -203,11 +260,15 @@ test("la recherche cherche dans le corpus choisi, et une liste vide propose d’
   await expect(pills(page).getByRole("status")).toHaveText("1 résultat pour « port »");
   await expect(page).toHaveURL(/q=port/);
 
+  answer([]);
   next = listed(page);
   await search.fill("introuvable");
   await next;
   await expect(page.getByRole("heading", { name: "Aucun document pour ces critères." })).toBeVisible();
+  answer(WIRES);
+  next = listed(page);
   await page.getByRole("button", { name: "Effacer la recherche" }).click();
+  expect((await next).has("q")).toBe(false);
   await expect(rows(page)).toHaveCount(4);
 });
 

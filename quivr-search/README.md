@@ -4,7 +4,7 @@ React/TypeScript frontend adapted from [Quivr PR #3714](https://github.com/The-V
 
 ## Run locally
 
-Prerequisites: the repository's Linux/Docker/Go/Python setup, Node 22+ and npm (see root README). From the repository root:
+Prerequisites: the repository's Linux/Docker/Go/Python setup, Node 22.18+ (its tests load TypeScript directly) and npm (see root README). From the repository root:
 
 ```sh
 make demo
@@ -83,6 +83,17 @@ QUIVR_DEMO_URL=https://… QUIVR_DEMO_PASSWORD=… npm run perf --prefix quivr-s
 ```
 
 `make demo-perf` adds 12 synthetic sources of 100 articles and six alerts, then also times how long an alert takes to catch a new text (`PERF_ALERT_LAG=1`, which writes an alert and five texts to the demo it measures); its report is `.scratch/quivr-demo-perf-*/perf.json`. A remote deployment's endpoint times include the network: they are reported, not checked. Its searches (`port grève`, 20 per mode) show in Admin's top queries where the core records query text. The facade compresses its answers (brotli or gzip), revalidates reads with an ETag, and names in `Server-Timing` the time and calls each one spent in the core. The Fil ships with the page; the other tabs load when the browser is idle.
+
+### Journeys with an AI test agent
+
+`journeys/` walks the demo's main journeys like a visitor, with the open-source TesterArmy [`e2e`](https://e2e.tester.army/docs) runner, on a demo that is already running (`make demo` or a deployment). It is run by hand, never in CI, and pins its own dependencies (Node `^22.22.3 || >=24.8`).
+
+```sh
+npm ci --prefix quivr-search/journeys
+QUIVR_DEMO_URL=http://127.0.0.1:5183 QUIVR_DEMO_PASSWORD=… npm run journeys --prefix quivr-search/journeys   # -- --tag live: read-only journeys
+```
+
+The runner posts the password itself, so neither the model nor the page sees it. On macOS it can come from the keychain instead: `security add-generic-password -s quivr-demo -a <demo origin> -w`. Steps where the agent acts or judges need a model, chosen with `QUIVR_JOURNEYS_MODEL=<provider>:<model id>` (`chatgpt`, `gateway` or `openai`); nothing is committed. We recommend a ChatGPT subscription: `npm run e2e --prefix quivr-search/journeys -- login openai`, then `-- models openai` for the ids. Both scripts set `E2E_TELEMETRY_DISABLED=1`, so nothing reaches e2e's usage tracking. Reports, screenshots and the replay cache stay in its `.e2e` folder, ignored by git. Its traces hold the demo's session cookie: share one only with people who may have the password.
 
 ## Server configuration
 

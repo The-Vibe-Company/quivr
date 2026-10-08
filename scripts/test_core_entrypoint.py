@@ -107,7 +107,7 @@ class CoreEntrypointTest(unittest.TestCase):
                         effective = core_env if core_env is not None else dict(os.environ)
                         jev = [child for name, _, _, child in commands if name == 'jev-rerank']
                         hosted = [child for name, _, _, child in commands if name == 'hosted-embed']
-                        self.assertEqual(hosted[0]['AZURE_FOUNDRY_KEY'],
+                        self.assertEqual(hosted[0]['EMBED_API_KEY'],
                                          'fixture-foundry-key' if provider == 'cohere' else 'fixture-modal-token')
                         self.assertEqual(len(jev), 1 if role == 'api' else 0)
                         if jev:
@@ -196,8 +196,6 @@ class CoreEntrypointTest(unittest.TestCase):
                     hosted = pins['hosted-embed']['configuration']
                     self.assertEqual(hosted['base_url'], 'https://resource.example.org/providers/cohere/v2')
                     self.assertEqual((hosted['model'], hosted['dimensions']), ('Cohere-Embed-V5-Pro', 1024))
-                    self.assertEqual((hosted['document_input_type'], hosted['query_input_type']),
-                                     ('search_document', 'search_query'))
                     self.assertEqual(hosted['usd_per_million_tokens'], 0.12)
                 else:
                     self.assertEqual(config, core_entrypoint.build_config(ENV))
@@ -207,7 +205,7 @@ class CoreEntrypointTest(unittest.TestCase):
                     for name, (argv, child) in children.items():
                         if name == 'hosted-embed':
                             self.assertEqual(argv, ['/usr/local/bin/quivr-hosted-embed'])
-                            self.assertEqual(child['AZURE_FOUNDRY_KEY'], 'fixture-foundry-key')
+                            self.assertEqual(child['EMBED_API_KEY'], 'fixture-foundry-key')
                             self.assertEqual(child['QUIVR_PLUGIN_MANIFEST'], pins['hosted-embed']['manifest'])
                             self.assertEqual(child['QUIVR_PLUGIN_PORT'], '9980')
                             self.assertNotIn('AZURE_FOUNDRY_ENDPOINT', child)
@@ -236,14 +234,14 @@ class CoreEntrypointTest(unittest.TestCase):
             'format': 'openai', 'base_url': 'https://example--embeddings.modal.run/v1',
             'auth': 'bearer', 'model': 'google/embeddinggemma-2', 'dimensions': 768,
             'model_revision': '914f7f89142e33e7',
-            'query_prefix': 'task: search result | query: ',
-             'document_template': 'gemma', 'title_source': 'title',
-            'packing': 'paragraphs', 'body_tokens': 512, 'max_chunks': 256,
+            'query_template': 'task: search result | query: {query}',
+            'document_template': 'title: {title} | text: {text}', 'title_source': 'title',
+            'body_tokens': 512, 'max_chunks': 256,
             'rebalance_tail': True, 'tail_min_fraction': 0.25,
             'tokenizer': {'python': '/app/.scratch/tokenizer/venv/bin/python',
                           'model': '/app/.scratch/tokenizer/embeddinggemma-2.json',
                           'sha256': '4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4'},
-            'max_tokens_per_segment': 2048, 'overlap': 0,
+            'max_tokens_per_segment': 2048,
             'batch_size': 32, 'max_batch_tokens': 65536, 'max_concurrent_requests': 16,
             'request_timeout_ms': 10000, 'call_budget_ms': 90000, 'usd_per_million_tokens': 0,
         })
@@ -251,8 +249,8 @@ class CoreEntrypointTest(unittest.TestCase):
         for role in ('api', 'worker'):
             child = next(child for name, _, _, child in core_entrypoint.sidecar_commands(env, role)
                          if name == 'hosted-embed')
-            self.assertEqual(child['AZURE_FOUNDRY_KEY'], 'fixture-modal-token')
-            self.assertNotIn('EMBED_API_KEY', child)
+            self.assertEqual(child['EMBED_API_KEY'], 'fixture-modal-token')
+            self.assertNotIn('AZURE_FOUNDRY_KEY', child)
             engine_ring = json.loads(core_entrypoint.engine_signing_environment(env)['QUIVR_ENGINE_PLUGIN_KEYS'])['hosted.embed']
             self.assertEqual(json.loads(child['QUIVR_PLUGIN_SIGNING_KEYS']), engine_ring)
         for selection, endpoint in [('typo', env['EMBED_URL']), ('gemma', ''),

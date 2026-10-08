@@ -1,0 +1,19 @@
+{
+  "name": "quivr-demo-journeys",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": "^22.22.3 || >=24.8"
+  },
+  "scripts": {
+    "journeys": "E2E_TELEMETRY_DISABLED=1 e2e run --reporter list,junit",
+    "e2e": "E2E_TELEMETRY_DISABLED=1 e2e"
+  },
+  "devDependencies": {
+    "@ai-sdk/openai": "4.0.89",
+    "@e2e-dev/web": "0.13.0",
+    "ai": "7.0.133",
+    "e2e": "0.18.0"
+  }
+}

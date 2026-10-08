@@ -377,6 +377,9 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   together for bounded items and retains full-text paging for large items and size
   refusals. Rebuild affected Corpora after the packing recipe changes. It selects a hosted model
   or OpenAI-compatible server by configuration, with OpenAI and Cohere v2 formats.
+  Templates are explicit settings; authenticated providers use `EMBED_API_KEY`.
+  [EmbeddingGemma 2](plugins/hosted-embed/examples/embeddinggemma-2.json) is an example
+  configuration. Changed space ids require fresh ingestion or a rebuild.
   An optional pinned [CPU text encoder](deploy/railway/README.md#optional-cpu-query-encoding)
   answers queries beside the API while documents keep using the remote provider.
 - **Search ranked by a plugin** (Plugin API 0.7, the `retrieval` Contribution): a
