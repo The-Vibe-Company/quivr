@@ -136,6 +136,7 @@ class Chat:
         self.timeouts = self.retries = 0
         self.cost = self.confirmed_cost = decimal.Decimal(0)
         self.stopped = False
+        self.stop_cause = None
         self.rejected = collections.Counter()
         self.refusals = collections.Counter()
         self.lock = threading.RLock()
@@ -157,12 +158,21 @@ class Chat:
         return news.InvalidBatch(reason)
 
     @synchronized
+    def stop(self, message, diagnostic=None):
+        # Keep only safe data, never a provider exception or its traceback.
+        # Every caller gets a fresh error so concurrent raises cannot share it.
+        if not self.stopped:
+            self.stop_cause = (message, dict(diagnostic) if diagnostic is not None else None)
+            self.stopped = True
+        message, diagnostic = self.stop_cause
+        return AdapterError(message, diagnostic=dict(diagnostic) if diagnostic is not None else None)
+
+    @synchronized
     def reserve(self, inputs, outputs):
         cost = inputs * self.input_rate + outputs * self.output_rate
         if (self.stopped or self.input_tokens + inputs > self.cfg['max_input_tokens']
                 or self.output_tokens + outputs > self.cfg['max_output_tokens'] or self.cost + cost > self.cap):
-            self.stopped = True
-            raise AdapterError('chat adapter token or USD cap exhausted', diagnostic={'reason': 'chat_cap_exhausted'})
+            raise self.stop('chat adapter token or USD cap exhausted', diagnostic={'reason': 'chat_cap_exhausted'})
         self.input_tokens += inputs
         self.output_tokens += outputs
         self.cost += cost
@@ -184,8 +194,7 @@ class Chat:
         self.confirmed_output += used_out
         self.confirmed_cost += actual
         if used_in > inputs or used_out > outputs:
-            self.stopped = True
-            raise AdapterError('chat usage exceeded the conservative token reservation')
+            raise self.stop('chat usage exceeded the conservative token reservation')
 
     def request_body(self, instruction, data):
         messages = [{'role': 'system', 'content': instruction},
@@ -274,9 +283,7 @@ class Chat:
                             'input_tokens': inputs, 'output_tokens': outputs, 'cost_usd': float(reserved)})
                     raise self.invalid(reason) from None
                 if permanent or (code != 429 and not 500 <= code <= 599) or attempt == self.cfg['max_retries']:
-                    with self.lock:
-                        self.stopped = True
-                    raise AdapterError('chat provider refused the request', diagnostic=diagnostic) from None
+                    raise self.stop('chat provider refused the request', diagnostic=diagnostic) from None
                 delay = min(10, float(retry)) if re.fullmatch(r'\d{1,9}', retry) else min(10, 2 ** attempt)
             except news.InvalidBatch as error:
                 # Generation resamples after every rejected response. Replay
