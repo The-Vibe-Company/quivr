@@ -143,7 +143,7 @@ contributions:
 				return set
 			}
 			original := makePins("1", 12, false, false)
-			if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(original)); err != nil {
+			if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(original)); err != nil {
 				t.Fatal(err)
 			}
 			pluginStore := postgres.PluginStore{Pool: pool}
@@ -307,7 +307,7 @@ contributions:
 			if err = live.Store(nextPlan.Plan, next); err != nil {
 				t.Fatal(err)
 			}
-			if err = store.RegisterSpaces(ctx, app.DeploymentSpaces(next)); err != nil {
+			if err = store.RegisterSpaces(ctx, app.Config{}.DeploymentSpaces(next)); err != nil {
 				t.Fatal(err)
 			}
 			if _, err = store.AlignDefaultGeneration(ctx); err != nil {
