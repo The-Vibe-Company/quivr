@@ -328,8 +328,9 @@ test("a version is replaced once a newer one took its place, not while it is sti
     // desired meanwhile.
     version("v_finished", "r2", 50_000, "retrieval_ready", false),
     version("v_newer", "r2", 40_000, "received", false),
-    // Overtaken while it waited.
+    // Overtaken while it waited; a quarantine is shown as an error instead.
     version("v_overtaken", "r3", 30_000, "received", false),
+    version("v_failed", "r3", 35_000, "quarantined", false),
     version("v_latest", "r3", 20_000, "retrieval_ready", true),
   ];
   const upstream = async (path) => {
@@ -359,6 +360,7 @@ test("a version is replaced once a newer one took its place, not while it is sti
       v_finished: true,
       v_newer: false,
       v_overtaken: true,
+      v_failed: false,
       v_latest: false,
     },
   );
