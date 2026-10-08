@@ -179,12 +179,14 @@ func (s Service) Confirm(ctx context.Context, org, id string) (Session, error) {
 		return Session{}, err
 	}
 	meta.State = "verifying"
+	err = s.Transfer.Verify(ctx, meta.ObjectKey, meta.SizeBytes, meta.SHA256)
 	// Reading storage follows the caller; settling the state does not. A
 	// caller cancelled mid-verification (a stopping worker) must not leave the
-	// session verifying, whose replay carries no upload URL.
+	// session verifying, whose replay carries no upload URL. The bound starts
+	// after the read, however long a large object took.
 	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
 	defer cancel()
-	if err = s.Transfer.Verify(ctx, meta.ObjectKey, meta.SizeBytes, meta.SHA256); err != nil {
+	if err != nil {
 		if !errors.Is(err, ErrVerificationMismatch) {
 			// A temporary transfer-verification failure must stay confirmable, so
 			// the client can retry once storage recovers.

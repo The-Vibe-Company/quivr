@@ -36,7 +36,7 @@ func (m *memoryStore) Get(_ context.Context, org, id string) (uploads.Meta, erro
 	return uploads.Meta{}, uploads.ErrNotFound
 }
 
-// SetState refuses a cancelled context, as a PostgreSQL write does.
+// Writes refuse a cancelled context, as PostgreSQL writes do.
 func (m *memoryStore) SetState(ctx context.Context, org, id, state, blobID, code string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -50,7 +50,10 @@ func (m *memoryStore) SetState(ctx context.Context, org, id, state, blobID, code
 	return nil
 }
 
-func (m *memoryStore) SaveBlob(_ context.Context, org, id, objectKey, sha256 string, size int64, mediaType string) error {
+func (m *memoryStore) SaveBlob(ctx context.Context, org, id, objectKey, sha256 string, size int64, mediaType string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.blobs[org+"/"+id] = uploads.Meta{ID: id, State: "verified", ObjectKey: objectKey, SHA256: sha256, SizeBytes: size, MediaType: mediaType, BlobID: id}
 	return nil
 }
@@ -63,9 +66,10 @@ func (m *memoryStore) Blob(_ context.Context, org, id string) (uploads.Meta, err
 }
 
 type fakeTransfer struct {
-	err      error
-	signed   int
-	onVerify func()
+	err    error
+	signed int
+	// onVerify runs while storage is read; afterVerify once it answered.
+	onVerify, afterVerify func()
 }
 
 func (f *fakeTransfer) PresignPut(context.Context, string, int64, string, string, time.Duration) (string, map[string]string, error) {
@@ -79,6 +83,9 @@ func (f *fakeTransfer) Verify(ctx context.Context, _ string, _ int64, _ string) 
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if f.afterVerify != nil {
+		defer f.afterVerify()
 	}
 	return f.err
 }
@@ -196,20 +203,37 @@ func TestConfirmRejectsAlteredBytesButRetriesTransientFailure(t *testing.T) {
 	}
 }
 
-// A worker stopping mid-verification cancels Confirm. The session must still
-// leave verifying: its replay would carry no upload URL (THE-1314).
-func TestACancelledConfirmLeavesTheSessionUploadable(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	service := uploads.Service{Store: newMemoryStore(), Transfer: &fakeTransfer{onVerify: cancel}}
-	req := uploads.Request{Key: digest + ":5:text/plain", SizeBytes: 5, SHA256: digest, MediaType: "text/plain"}
-	session, err := service.Create(ctx, "org_a", req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = service.Confirm(ctx, "org_a", session.ID)
-	replayed, err := service.Create(context.Background(), "org_a", req)
-	if err != nil || replayed.State != "awaiting_upload" || replayed.UploadURL == "" {
-		t.Fatalf("replay after a cancelled Confirm: state %q url set %v err %v", replayed.State, replayed.UploadURL != "", err)
+// A worker stopping during or right after verification cancels Confirm. The
+// session must still leave verifying: its replay would carry no upload URL
+// (THE-1314).
+func TestACancelledConfirmStillSettlesTheSession(t *testing.T) {
+	for name, tc := range map[string]struct {
+		during bool
+		want   string
+	}{
+		"during verification": {during: true, want: "awaiting_upload"},
+		"after verification":  {during: false, want: "verified"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			transfer := &fakeTransfer{afterVerify: cancel}
+			if tc.during {
+				transfer = &fakeTransfer{onVerify: cancel}
+			}
+			service := uploads.Service{Store: newMemoryStore(), Transfer: transfer}
+			req := uploads.Request{Key: digest + ":5:text/plain", SizeBytes: 5, SHA256: digest, MediaType: "text/plain"}
+			session, err := service.Create(ctx, "org_a", req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Confirm(ctx, "org_a", session.ID); err != nil {
+				t.Fatalf("cancelled Confirm: %v", err)
+			}
+			replayed, err := service.Create(context.Background(), "org_a", req)
+			if err != nil || replayed.State != tc.want || (tc.want == "awaiting_upload") != (replayed.UploadURL != "") {
+				t.Fatalf("replay: state %q url set %v err %v; want %s", replayed.State, replayed.UploadURL != "", err, tc.want)
+			}
+		})
 	}
 }
 
