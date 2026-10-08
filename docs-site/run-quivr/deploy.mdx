@@ -161,6 +161,10 @@ Each `api` and `worker` serves three probes on its `probe_listen` address, `127.
 | `GET /readyz` | `204` once the process can serve, `503` otherwise |
 | `GET /metrics` | Counters and gauges in Prometheus text format |
 
+Both processes expose HTTP request counts by registered route, method and status class, request durations in seconds, and requests in flight. Templates replace path identifiers; unknown paths use `unmatched` and unknown methods use `OTHER`. Streams remain in flight until they close. The private probes are included, so a scrape itself occupies one in-flight request.
+
+The API also exposes its search admission capacity, occupied and available slots, and capacity refusals. Each process exposes its PostgreSQL pool's maximum, total, acquired (currently borrowed by work) and idle connections and saturation ratio (acquired divided by maximum). These are local to the process, reset when it restarts, and remain readable without new dependency calls even when backlog reads fail. Scrape every replica to see its own pressure. Prometheus metrics are available with OpenTelemetry export disabled; enabling export sends the same measurements to the collector.
+
 `GET /v0/version` accepts any valid bearer API key and reports the running release, commit, API version and plugin engine compatibility version. Both process startup logs include these fields; `/metrics` includes `quivr_build_info{version="…",revision="…"} 1`. The distribution release is independent of the API (`v0`) and plugin engine compatibility (`0.2.0`) versions.
 
 The `api` becomes ready once its schema check passes and its ingestion plugin has answered a first query, or after 5 seconds; the first searches are then only slower. The `worker` also checks that Temporal, object storage and the search index answer. A plugin that is down does not stop either process. Background work that needs it waits and retries; a search that needs it fails with `503 search_unavailable`.

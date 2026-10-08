@@ -14,6 +14,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
+	"github.com/The-Vibe-Company/quivr/internal/telemetry"
 	"github.com/The-Vibe-Company/quivr/internal/transport/httpapi"
 	"github.com/The-Vibe-Company/quivr/internal/uploads"
 )
@@ -51,7 +52,8 @@ func TestSearchCapacityRejectsExcessAndReleasesCanceledRequests(t *testing.T) {
 		"caller-a": {Organization: "org_a", Actions: []string{"search:query", "content:read"}, Corpora: []string{"*"}},
 		"caller-b": {Organization: "org_b", Actions: []string{"search:query", "content:read"}, Corpora: []string{"*"}},
 	}
-	handler, err := httpapi.New(knownCorpora{}, content.Service{}, service, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"))
+	metrics := telemetry.NewLoadMetrics()
+	handler, err := httpapi.New(knownCorpora{}, content.Service{}, service, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"), httpapi.WithLoadMetrics(metrics))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +86,17 @@ func TestSearchCapacityRejectsExcessAndReleasesCanceledRequests(t *testing.T) {
 	for i := 0; i < 64; i++ {
 		<-route.arrived
 	}
+	checkPressure := func(inUse, available string, refused string) {
+		t.Helper()
+		var b strings.Builder
+		metrics.Write(&b)
+		for _, want := range []string{"quivr_search_admission_capacity 64", "quivr_search_admission_in_use " + inUse, "quivr_search_admission_available " + available, "quivr_search_admission_refused_total " + refused} {
+			if !strings.Contains(b.String(), want+"\n") {
+				t.Fatalf("missing %q in\n%s", want, b.String())
+			}
+		}
+	}
+	checkPressure("64", "0", "0")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, request(context.Background(), "caller-a"))
 	var body map[string]any
@@ -93,11 +106,14 @@ func TestSearchCapacityRejectsExcessAndReleasesCanceledRequests(t *testing.T) {
 	if w.Code != 503 || body["code"] != "search_unavailable" || body["retryable"] != true || w.Header().Get("Retry-After") != "1" || route.calls.Load() != 64 {
 		t.Fatalf("capacity: status=%d body=%v Retry-After=%q dependency calls=%d; want retryable 503, Retry-After 1, 64 calls", w.Code, body, w.Header().Get("Retry-After"), route.calls.Load())
 	}
+	checkPressure("64", "0", "1")
 	cancels[0]()
 	<-done
 	cancels = cancels[1:]
+	checkPressure("63", "1", "1")
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, request(context.Background(), "caller-b"))
+	checkPressure("63", "1", "1")
 	if route.calls.Load() != 65 || w.Header().Get("Retry-After") != "" {
 		t.Fatalf("canceled search did not release capacity: calls=%d Retry-After=%q", route.calls.Load(), w.Header().Get("Retry-After"))
 	}

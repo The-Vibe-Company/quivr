@@ -226,9 +226,12 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   source ([guide](quivr-search/README.md#fil)).
 - **Operational metrics and correlated logs** on each process's private probe
   listener (`/metrics`, Prometheus text, bounded labels):
-  - API: accepted commands and the pending-ingestion backlog;
+  - API: accepted commands, pending-ingestion backlog, and search admission capacity,
+    occupancy and refusals;
   - worker: processing outcomes, time from acceptance to searchable, and delivery
     attempts and durations.
+  - both: HTTP request counts, durations and requests in flight by registered route
+    and method, plus local PostgreSQL pool occupancy and saturation.
 
   Live/bulk backlog observations refresh every 15 seconds by default, with a
   configurable interval and rebuild/backfill estimates from progress counters
