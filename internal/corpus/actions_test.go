@@ -21,6 +21,8 @@ func TestActionPermissions(t *testing.T) {
 		{ActionConnectorsRead, []string{"connectors:read"}, false},
 		{ActionConnectorsList, []string{"connectors:read"}, false},
 		{ActionConnectorsDisable, []string{"connectors:write"}, false},
+		{ActionConnectorsPause, []string{"connectors:write"}, false},
+		{ActionConnectorsResume, []string{"connectors:write"}, false},
 		{ActionConnectorsReplaceCredential, []string{"connectors:write"}, false},
 		{ActionConnectorsKinds, []string{"connectors:read"}, false},
 		{ActionConnectorsChangeSchedule, []string{"connectors:write"}, false},

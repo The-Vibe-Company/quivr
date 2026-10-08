@@ -120,6 +120,111 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if again := claim(); len(again) != 0 {
 		t.Fatalf("stale continuation released or duplicated the current lease: %+v", again)
 	}
+	// Pause fences a continuing import while keeping its last accepted page.
+	pausing, ok := any(store).(interface {
+		PauseConnector(context.Context, string, string) (connectors.Instance, error)
+		ResumeConnector(context.Context, string, string) (connectors.Instance, error)
+	})
+	if !ok {
+		t.Fatal("store cannot pause and resume a continuing import")
+	}
+	pausedRun := run[0]
+	pauseFeed := changes.Service{Journal: postgres.ChangeStore{Pool: pool}, Key: []byte("adapter-pause-cursor-0123456789abcdef")}
+	pauseCursor, err := pauseFeed.Start(ctx, scope, c.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	paused, err := pausing.PauseConnector(ctx, scope.Organization, created.ID)
+	if err != nil || !paused.Enabled || paused.PausedAt == nil {
+		t.Fatalf("pause must expose timestamp and preserve enabled: %+v %v", paused, err)
+	}
+	var indefinitelyDeferred bool
+	if err := pool.QueryRow(ctx, "SELECT next_run_at='infinity'::timestamptz FROM connector_instances WHERE organization=$1 AND id=$2", scope.Organization, created.ID).Scan(&indefinitelyDeferred); err != nil || !indefinitelyDeferred {
+		t.Fatalf("pause must defer acquisition indefinitely: %v %v", indefinitelyDeferred, err)
+	}
+	if repeated, err := pausing.PauseConnector(ctx, scope.Organization, created.ID); err != nil || repeated.PausedAt == nil || !repeated.PausedAt.Equal(*paused.PausedAt) {
+		t.Fatalf("repeat pause changed timestamp: %+v %v", repeated, err)
+	}
+	if _, err := service.RequestRun(ctx, scope, created.ID, "while-paused"); !errors.Is(err, connectors.ErrPaused) {
+		t.Fatalf("manual run bypassed pause: %v", err)
+	}
+	if _, err := service.ChangeSchedule(ctx, scope, created.ID, 1800); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT next_run_at='infinity'::timestamptz FROM connector_instances WHERE organization=$1 AND id=$2", scope.Organization, created.ID).Scan(&indefinitelyDeferred); err != nil || !indefinitelyDeferred {
+		t.Fatalf("schedule change must preserve pause deferral: %v %v", indefinitelyDeferred, err)
+	}
+	// A fresh store represents another worker after a restart.
+	store = postgres.ConnectorStore{Pool: pool}
+	held, err := store.LoadRun(ctx, scope.Organization, created.ID)
+	if err != nil || held.RunSequence != pausedRun.Run+1 || string(held.Checkpoint) != `{"step": -1}` {
+		t.Fatalf("pause lost checkpoint or fenced twice: %+v %s %v", held, held.Checkpoint, err)
+	}
+	assertFenced := func(sequence int64) {
+		t.Helper()
+		if release, active, err := store.BeginPoll(ctx, scope.Organization, created.ID, sequence); err != nil || active {
+			if release != nil {
+				release()
+			}
+			t.Fatalf("paused/stale run admitted poll: %v %v", active, err)
+		}
+		if committed, err := store.CommitCheckpoint(ctx, scope.Organization, created.ID, sequence, connectors.Progress{Checkpoint: json.RawMessage(`{"step":99}`), Reads: 100}); err != nil || committed {
+			t.Fatalf("paused/stale run advanced checkpoint: %v %v", committed, err)
+		}
+		if err := store.FinishRun(ctx, scope.Organization, created.ID, sequence, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ContinueRun(ctx, scope.Organization, created.ID, sequence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertFenced(pausedRun.Run)
+	assertFenced(held.RunSequence)
+	if again := claim(); len(again) != 0 {
+		t.Fatalf("paused continuation reacquired after worker restart: %+v", again)
+	}
+	if _, err := pausing.ResumeConnector(ctx, scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	run = claim()
+	if len(run) != 1 || run[0].Run != held.RunSequence {
+		t.Fatalf("resume did not reacquire fenced run: %+v", run)
+	}
+	if resumed, err := store.LoadRun(ctx, scope.Organization, created.ID); err != nil || string(resumed.Checkpoint) != `{"step": -1}` {
+		t.Fatalf("resume lost accepted checkpoint: %s %v", resumed.Checkpoint, err)
+	}
+	assertFenced(pausedRun.Run)
+	if _, err := pausing.ResumeConnector(ctx, scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if again := claim(); len(again) != 0 {
+		t.Fatalf("repeat resume or stale finish released the current lease: %+v", again)
+	}
+	// A second pause/resume cycle emits new transition events, without duplicate
+	// events for the repeated commands above.
+	if _, err := pausing.PauseConnector(ctx, scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pausing.ResumeConnector(ctx, scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	run = claim()
+	if len(run) != 1 || run[0].Run != held.RunSequence+1 {
+		t.Fatalf("second resume did not continue acquisition: %+v", run)
+	}
+	pauseEvents, err := pauseFeed.Read(ctx, scope, c.ID, pauseCursor, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var transitions []string
+	for _, event := range pauseEvents.Items {
+		if event.Type == "connector.paused" || event.Type == "connector.resumed" {
+			transitions = append(transitions, event.Type)
+		}
+	}
+	if want := []string{"connector.paused", "connector.resumed", "connector.paused", "connector.resumed"}; fmt.Sprint(transitions) != fmt.Sprint(want) {
+		t.Fatalf("pause/resume events %v want %v", transitions, want)
+	}
 	// Archive fences both scheduling and a run leased before the transition,
 	// without rewriting the enabled flag needed when the Corpus is restored.
 	corpora := postgres.Store{Pool: pool}
@@ -284,6 +389,30 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if err = store.FinishRun(ctx, scope.Organization, created.ID, next[0].Run, &connectors.RunError{Class: connectors.ClassTransient, Code: "source_unavailable", RetryAfter: 10 * time.Minute}); err != nil {
 		t.Fatal(err)
 	}
+	// Resuming cannot bypass a source Retry-After, and repeat resume cannot
+	// keep shifting the schedule. Read the persisted schedule without waiting.
+	if _, err := pausing.PauseConnector(ctx, scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pausing.ResumeConnector(ctx, scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	var resumedAt, retryUntil time.Time
+	if err := pool.QueryRow(ctx, "SELECT next_run_at,retry_until FROM connector_instances WHERE organization=$1 AND id=$2", scope.Organization, created.ID).Scan(&resumedAt, &retryUntil); err != nil || !resumedAt.Equal(retryUntil) {
+		t.Fatalf("resume bypassed source backoff: scheduled=%v retry=%v %v", resumedAt, retryUntil, err)
+	}
+	if _, err := pausing.ResumeConnector(ctx, scope.Organization, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	var repeatedAt time.Time
+	if err := pool.QueryRow(ctx, "SELECT next_run_at FROM connector_instances WHERE organization=$1 AND id=$2", scope.Organization, created.ID).Scan(&repeatedAt); err != nil || !repeatedAt.Equal(resumedAt) {
+		t.Fatalf("repeat resume changed schedule: %v want %v %v", repeatedAt, resumedAt, err)
+	}
+	if again := claim(); len(again) != 0 {
+		t.Fatalf("resume acquired source during Retry-After: %+v", again)
+	}
+	// Pause advanced the fenced identity once; the skipped finish below targets it.
+	next[0].Run++
 	// RetryAfter longer than the interval defers the next run past the source's reset.
 	var deferredFor float64
 	if err = pool.QueryRow(ctx, "SELECT EXTRACT(EPOCH FROM next_run_at-now()) FROM connector_instances WHERE organization=$1 AND id=$2", scope.Organization, created.ID).Scan(&deferredFor); err != nil || deferredFor < 590 {
@@ -307,6 +436,11 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	if err != nil || disabled.Enabled || disabled.Health.State != connectors.HealthDisabled {
 		t.Fatalf("disable %v %+v", err, disabled)
 	}
+	for _, command := range []func(context.Context, string, string) (connectors.Instance, error){pausing.PauseConnector, pausing.ResumeConnector} {
+		if _, err := command(ctx, scope.Organization, created.ID); !errors.Is(err, connectors.ErrDisabled) {
+			t.Fatalf("disabled connector accepted pause/resume: %v", err)
+		}
+	}
 	beforeDisabled, err := store.LoadRun(ctx, scope.Organization, created.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -326,7 +460,7 @@ func TestConnectorInstancesPersistSecretsSealedAndScheduleOneRunAtATime(t *testi
 	for _, e := range page.Items {
 		kinds = append(kinds, e.Type)
 	}
-	want := []string{"connector.health_changed", "connector.disabled", "connector.health_changed"}
+	want := []string{"connector.health_changed", "connector.paused", "connector.resumed", "connector.disabled", "connector.health_changed"}
 	if fmt.Sprint(kinds) != fmt.Sprint(want) {
 		t.Fatalf("events %v want %v", kinds, want)
 	}

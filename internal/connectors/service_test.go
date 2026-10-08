@@ -42,6 +42,14 @@ func (s *recordingStore) DisableConnector(ctx context.Context, org, id string) (
 	return s.ReadConnector(ctx, org, id)
 }
 
+func (s *recordingStore) PauseConnector(ctx context.Context, org, id string) (Instance, error) {
+	return s.ReadConnector(ctx, org, id)
+}
+
+func (s *recordingStore) ResumeConnector(ctx context.Context, org, id string) (Instance, error) {
+	return s.ReadConnector(ctx, org, id)
+}
+
 func (s *recordingStore) ReplaceCredential(ctx context.Context, org, id string, d CredentialDeposit) (Instance, error) {
 	s.calls++
 	s.deposited = append(s.deposited, d)

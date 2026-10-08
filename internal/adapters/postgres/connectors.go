@@ -25,7 +25,7 @@ import (
 // commit their change events in the same transaction.
 type ConnectorStore struct{ Pool *pgxpool.Pool }
 
-const connectorColumns = `c.organization,c.id,c.corpus_id,c.source_namespace,c.kind,c.config,c.interval_seconds,c.silent_after_seconds,c.credential_warning_seconds,c.enabled,c.created_at,c.disabled_at,
+const connectorColumns = `c.organization,c.id,c.corpus_id,c.source_namespace,c.kind,c.config,c.interval_seconds,c.silent_after_seconds,c.credential_warning_seconds,c.enabled,c.created_at,c.disabled_at,c.paused_at,
 c.health_state,c.health_evaluated_at,c.last_success_at,c.last_item_at,c.last_error_code,c.last_error_class,c.last_error_at,c.access_error_at,
 k.version,k.deposited_at,k.expires_at,
 CASE WHEN c.usage_day IS NULL THEN NULL ELSE ` + utcToday + ` END,
@@ -53,7 +53,7 @@ func scanConnector(row pgx.Row) (connectors.Instance, error) {
 	var pushState, setupClass, setupCode, pushClass, pushCode *string
 	var setupAt, pushAt, lastDelivery *time.Time
 	var pollInterval *int64
-	err := row.Scan(&in.Organization, &in.ID, &in.CorpusID, &in.Namespace, &in.Kind, &in.Config, &interval, &silent, &warning, &in.Enabled, &in.CreatedAt, &in.DisabledAt,
+	err := row.Scan(&in.Organization, &in.ID, &in.CorpusID, &in.Namespace, &in.Kind, &in.Config, &interval, &silent, &warning, &in.Enabled, &in.CreatedAt, &in.DisabledAt, &in.PausedAt,
 		&in.Health.State, &in.Health.EvaluatedAt, &in.Health.LastSuccessAt, &in.Health.LastItemAt, &code, &class, &errorAt, &in.Health.AccessErrorAt, &version, &deposited, &expires,
 		&usageDay, &usageToday, &usagePrevious, &diagnostics,
 		&pushState, &setupClass, &setupCode, &setupAt, &pollInterval, &pushClass, &pushCode, &pushAt, &lastDelivery, &pushPolicy, &in.WorkQueue)
@@ -300,6 +300,67 @@ func (s ConnectorStore) disableConnectorAttempt(ctx context.Context, org, id str
 	return in, tx.Commit(ctx)
 }
 
+// PauseConnector fences the active run once and retains its committed checkpoint.
+func (s ConnectorStore) PauseConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
+	return s.setConnectorPaused(ctx, org, id, true)
+}
+
+// ResumeConnector makes a paused instance due, respecting source backoff.
+func (s ConnectorStore) ResumeConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
+	return s.setConnectorPaused(ctx, org, id, false)
+}
+
+func (s ConnectorStore) setConnectorPaused(ctx context.Context, org, id string, paused bool) (connectors.Instance, error) {
+	var result connectors.Instance
+	err := retryJournalWrite(ctx, "SetConnectorPaused", func(ctx context.Context) error {
+		var err error
+		result, err = s.setConnectorPausedAttempt(ctx, org, id, paused)
+		return err
+	})
+	return result, err
+}
+
+func (s ConnectorStore) setConnectorPausedAttempt(ctx context.Context, org, id string, paused bool) (connectors.Instance, error) {
+	tx, err := database(ctx, s.Pool).Begin(ctx)
+	if err != nil {
+		return connectors.Instance{}, err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockJournal(ctx, tx, org); err != nil {
+		return connectors.Instance{}, err
+	}
+	in, err := readConnector(ctx, tx, org, id, true)
+	if err != nil {
+		return in, err
+	}
+	if !in.Enabled {
+		return connectors.Instance{}, connectors.ErrDisabled
+	}
+	if (in.PausedAt != nil) == paused {
+		return in, nil
+	}
+	kind := "connector.resumed"
+	query := "UPDATE connector_instances SET paused_at=NULL,next_run_at=GREATEST(now(),COALESCE(retry_until,now())) WHERE organization=$1 AND id=$2"
+	if paused {
+		kind = "connector.paused"
+		query = "UPDATE connector_instances SET paused_at=now(),run_sequence=run_sequence+1,lease_until=NULL,next_run_at='infinity'::timestamptz WHERE organization=$1 AND id=$2"
+	}
+	if _, err = tx.Exec(ctx, query, org, id); err != nil {
+		return in, err
+	}
+	var nonce [16]byte
+	if _, err = rand.Read(nonce[:]); err != nil {
+		return in, err
+	}
+	if err = appendEvent(ctx, tx, eventInput{Organization: org, CorpusID: in.CorpusID, Kind: kind, Resource: "connector", ResourceID: id, MutationID: hex.EncodeToString(nonce[:])}); err != nil {
+		return in, err
+	}
+	if in, err = readConnector(ctx, tx, org, id, false); err != nil {
+		return in, err
+	}
+	return in, tx.Commit(ctx)
+}
+
 // ChangeSchedule sets the polling interval of an enabled instance. An
 // unchanged value commits nothing. A shorter interval pulls the next run in; a
 // longer one applies after the run already scheduled.
@@ -333,7 +394,7 @@ func (s ConnectorStore) changeScheduleAttempt(ctx context.Context, org, id strin
 		return in, nil
 	}
 	seconds := int64(interval / time.Second)
-	if _, err = tx.Exec(ctx, "UPDATE connector_instances SET interval_seconds=$3,next_run_at=LEAST(next_run_at,now()+make_interval(secs => $4)) WHERE organization=$1 AND id=$2", org, id, seconds, float64(seconds)); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE connector_instances SET interval_seconds=$3,next_run_at=CASE WHEN paused_at IS NULL THEN LEAST(next_run_at,now()+make_interval(secs => $4)) ELSE next_run_at END WHERE organization=$1 AND id=$2", org, id, seconds, float64(seconds)); err != nil {
 		return in, err
 	}
 	var nonce [16]byte
@@ -358,16 +419,19 @@ func (s ConnectorStore) RequestRun(ctx context.Context, org, id string, floor ti
 	if archived {
 		return time.Time{}, corpus.ErrArchived
 	}
-	var enabled bool
+	var enabled, paused bool
 	var at time.Time
-	err := database(ctx, s.Pool).QueryRow(ctx, `UPDATE connector_instances SET next_run_at=CASE WHEN enabled THEN LEAST(next_run_at,GREATEST(now(),
+	err := database(ctx, s.Pool).QueryRow(ctx, `UPDATE connector_instances SET next_run_at=CASE WHEN enabled AND paused_at IS NULL THEN LEAST(next_run_at,GREATEST(now(),
   COALESCE(last_run_at+make_interval(secs => $3::double precision),now()),COALESCE(retry_until,now()))) ELSE next_run_at END
-WHERE organization=$1 AND id=$2 RETURNING enabled,GREATEST(next_run_at,now())`, org, id, floor.Seconds()).Scan(&enabled, &at)
+WHERE organization=$1 AND id=$2 RETURNING enabled,paused_at IS NOT NULL,CASE WHEN paused_at IS NOT NULL THEN now() ELSE GREATEST(next_run_at,now()) END`, org, id, floor.Seconds()).Scan(&enabled, &paused, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return at, corpus.ErrNotFound
 	}
 	if err == nil && !enabled {
 		err = connectors.ErrDisabled
+	}
+	if err == nil && paused {
+		err = connectors.ErrPaused
 	}
 	return at, err
 }
@@ -433,7 +497,7 @@ func (s ConnectorStore) replaceCredentialAttempt(ctx context.Context, org, id st
 func (s ConnectorStore) ClaimConnectorRuns(ctx context.Context, lease time.Duration, limit int) ([]connectors.ConnectorRun, error) {
 	q, _ := workqueue.Selected(ctx)
 	rows, err := database(ctx, s.Pool).Query(ctx, `UPDATE connector_instances c SET lease_until=now()+make_interval(secs => $1::double precision)
-FROM (SELECT organization,id FROM connector_instances ci WHERE ($3='' OR work_queue=$3) AND enabled AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=ci.organization AND cp.id=ci.corpus_id AND cp.archived) AND next_run_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at LIMIT $2 FOR UPDATE SKIP LOCKED) d
+FROM (SELECT organization,id FROM connector_instances ci WHERE ($3='' OR work_queue=$3) AND enabled AND paused_at IS NULL AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=ci.organization AND cp.id=ci.corpus_id AND cp.archived) AND next_run_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_run_at LIMIT $2 FOR UPDATE SKIP LOCKED) d
 WHERE c.organization=d.organization AND c.id=d.id RETURNING c.organization,c.id,c.run_sequence,c.work_queue`, lease.Seconds(), limit, q)
 	if err != nil {
 		return nil, err
@@ -470,7 +534,7 @@ func (s ConnectorStore) BeginPoll(ctx context.Context, org, id string, run int64
 		_ = tx.Rollback(cleanup)
 	}
 	var active bool
-	err = tx.QueryRow(ctx, `SELECT ci.enabled AND ci.run_sequence=$3 AND NOT cp.archived
+	err = tx.QueryRow(ctx, `SELECT ci.enabled AND ci.paused_at IS NULL AND ci.run_sequence=$3 AND NOT cp.archived
  FROM connector_instances ci JOIN corpora cp ON (cp.organization,cp.id)=(ci.organization,ci.corpus_id)
  WHERE ci.organization=$1 AND ci.id=$2 FOR SHARE OF cp`, org, id, run).Scan(&active)
 	if err != nil || !active {
@@ -582,7 +646,7 @@ func (s ConnectorStore) CommitCheckpoint(ctx context.Context, org, id string, ru
  push_error_class=CASE WHEN $12 THEN 'transient' ELSE push_error_class END,
  push_error_code=CASE WHEN $12 THEN '`+connectors.CodeMissedDeliveries+`' ELSE push_error_code END,
  push_error_at=CASE WHEN $12 THEN now() ELSE push_error_at END
-WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=connector_instances.organization AND cp.id=connector_instances.corpus_id AND cp.archived)`, org, id, run, []byte(p.Checkpoint), p.Items, p.Reads, diagnostics, pushState, pushClass, pushCode, pushInterval, p.Missed)
+WHERE organization=$1 AND id=$2 AND run_sequence=$3 AND enabled AND paused_at IS NULL AND NOT EXISTS(SELECT 1 FROM corpora cp WHERE cp.organization=connector_instances.organization AND cp.id=connector_instances.corpus_id AND cp.archived)`, org, id, run, []byte(p.Checkpoint), p.Items, p.Reads, diagnostics, pushState, pushClass, pushCode, pushInterval, p.Missed)
 	return tag.RowsAffected() == 1, err
 }
 
@@ -616,7 +680,7 @@ func (s ConnectorStore) recordDeliveryAttempt(ctx context.Context, org, id strin
 		class, code = string(o.Failure.Class), o.Failure.Code
 	}
 	_, err = tx.Exec(ctx, `UPDATE connector_instances SET
- next_run_at=CASE WHEN $5::text IS NOT NULL THEN LEAST(next_run_at,now()+make_interval(secs => interval_seconds::double precision)) ELSE next_run_at END,
+ next_run_at=CASE WHEN $5::text IS NOT NULL AND paused_at IS NULL THEN LEAST(next_run_at,now()+make_interval(secs => interval_seconds::double precision)) ELSE next_run_at END,
  push_error_class=CASE WHEN $5::text IS NOT NULL THEN $5 WHEN $3 AND (push_error_code IS DISTINCT FROM '`+connectors.CodeMissedDeliveries+`' OR $4) THEN NULL ELSE push_error_class END,
  push_error_code=CASE WHEN $5::text IS NOT NULL THEN $6 WHEN $3 AND (push_error_code IS DISTINCT FROM '`+connectors.CodeMissedDeliveries+`' OR $4) THEN NULL ELSE push_error_code END,
  push_error_at=CASE WHEN $5::text IS NOT NULL THEN now() WHEN $3 AND (push_error_code IS DISTINCT FROM '`+connectors.CodeMissedDeliveries+`' OR $4) THEN NULL ELSE push_error_at END,
@@ -669,9 +733,9 @@ func (s ConnectorStore) finishRunAttempt(ctx context.Context, org, id string, ru
 		return err
 	}
 	var current int64
-	var enabled bool
-	err = tx.QueryRow(ctx, "SELECT run_sequence,enabled FROM connector_instances WHERE organization=$1 AND id=$2 FOR UPDATE", org, id).Scan(&current, &enabled)
-	if err != nil || current != run || !enabled {
+	var enabled, paused bool
+	err = tx.QueryRow(ctx, "SELECT run_sequence,enabled,paused_at IS NOT NULL FROM connector_instances WHERE organization=$1 AND id=$2 FOR UPDATE", org, id).Scan(&current, &enabled, &paused)
+	if err != nil || current != run || !enabled || paused {
 		return err
 	}
 	// A successful poll (including one that only reported a rejected item)

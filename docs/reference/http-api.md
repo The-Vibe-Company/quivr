@@ -81,6 +81,8 @@ Every endpoint requires `ApiKey` unless it says otherwise.
 | [`GET /v0/connectors/{connector_id}/api/{path}`](#get-v0connectorsconnector_idapipath) | `challengeConnectorAPI` | `connector:push` |
 | [`GET /v0/connectors/{connector_id}`](#get-v0connectorsconnector_id) | `getConnector` | `connectors:read` |
 | [`POST /v0/connectors/{connector_id}/disable`](#post-v0connectorsconnector_iddisable) | `disableConnector` | `connectors:write` |
+| [`POST /v0/connectors/{connector_id}/pause`](#post-v0connectorsconnector_idpause) | `pauseConnector` | `connectors:write` |
+| [`POST /v0/connectors/{connector_id}/resume`](#post-v0connectorsconnector_idresume) | `resumeConnector` | `connectors:write` |
 | [`PUT /v0/connectors/{connector_id}/credential`](#put-v0connectorsconnector_idcredential) | `replaceConnectorCredential` | `connectors:write` |
 | [`PUT /v0/connectors/{connector_id}/schedule`](#put-v0connectorsconnector_idschedule) | `changeConnectorSchedule` | `connectors:write` |
 | [`POST /v0/connectors/{connector_id}/runs`](#post-v0connectorsconnector_idruns) | `requestConnectorRun` | `connectors:write` |
@@ -1334,6 +1336,48 @@ Commit disable. No new acquisition run is scheduled; an in-flight run cannot adv
 | `200` | `application/json` [`Connector`](#connector) | Successful response |
 | `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
 
+#### `POST /v0/connectors/{connector_id}/pause`
+
+Operation `pauseConnector`. Requires `connectors:write`.
+
+Pause scheduled acquisition, including continuation of a long import. Fences the in-flight run and retains its last committed checkpoint. An already admitted source request may finish; stale progress cannot commit. Inbound push routes remain available. Returns paused_at; repeat pause preserves the timestamp and emits no event. Disabled instances return 409 connector_disabled. Commits connector.paused only on a transition.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `connector_id` | path | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`ActionRequest`](#actionrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Connector`](#connector) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
+#### `POST /v0/connectors/{connector_id}/resume`
+
+Operation `resumeConnector`. Requires `connectors:write`.
+
+Resume scheduled acquisition from the last committed checkpoint, immediately unless the source Retry-After defers it. Clears paused_at. Repeat resume does not change scheduling or a live lease. Disabled instances return 409 connector_disabled and cannot be re-enabled. Commits connector.resumed only on a transition.
+
+**Parameters**
+
+| Name | In | Type | Required | Description |
+| --- | --- | --- | --- | --- |
+| `connector_id` | path | string | yes | Minimum length `1`. |
+
+**Request body** (required): `application/json` [`ActionRequest`](#actionrequest)
+
+**Responses**
+
+| Status | Body | Description |
+| --- | --- | --- |
+| `200` | `application/json` [`Connector`](#connector) | Successful response |
+| `default` | `application/json` [`Error`](#error) | Structured error; see contract HTTP mapping. |
+
 #### `PUT /v0/connectors/{connector_id}/credential`
 
 Operation `replaceConnectorCredential`. Requires `connectors:write`.
@@ -1380,7 +1424,7 @@ Set the polling interval of an enabled instance. Setting the current value commi
 
 Operation `requestConnectorRun`. Requires `connectors:write`.
 
-Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled; a paused instance is 409 connector_paused.
 
 **Parameters**
 
@@ -7438,6 +7482,7 @@ required:
 | `enabled` | boolean | yes |  |
 | `created_at` | string (date-time) | yes |  |
 | `disabled_at` | string (date-time) |  |  |
+| `paused_at` | string (date-time) |  | Present while scheduled acquisition is paused. Inbound push routes remain available. |
 | `credential` | [`CredentialMetadata`](#credentialmetadata) |  |  |
 | `health` | [`ConnectorHealth`](#connectorhealth) | yes |  |
 | `webhook_url` | string (uri) |  | Public address of the instance's webhook route, present when its kind declares the push mode and the deployment sets public_url. The kind's plugin registers it with the source. |
@@ -7594,6 +7639,10 @@ properties:
   disabled_at:
     type: string
     format: date-time
+  paused_at:
+    type: string
+    format: date-time
+    description: Present while scheduled acquisition is paused. Inbound push routes remain available.
   credential:
     $ref: '#/components/schemas/CredentialMetadata'
   health:

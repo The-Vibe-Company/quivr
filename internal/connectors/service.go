@@ -23,6 +23,7 @@ var (
 	ErrInvalidInterval   = publicerr.InvalidInterval
 	ErrInvalid           = publicerr.InvalidInput
 	ErrDisabled          = publicerr.ConnectorDisabled
+	ErrPaused            = publicerr.ConnectorPaused
 	// ErrCredentialsUnavailable refuses a credential deposit or rotation on a
 	// deployment without credential_key, before the secret is digested or stored.
 	ErrCredentialsUnavailable = publicerr.CredentialsUnavailable
@@ -48,6 +49,7 @@ type Instance struct {
 	Enabled           bool
 	CreatedAt         time.Time
 	DisabledAt        *time.Time
+	PausedAt          *time.Time
 	Credential        *CredentialInfo
 	Health            Health
 }
@@ -105,6 +107,8 @@ type Store interface {
 	ReadConnector(ctx context.Context, org, id string) (Instance, error)
 	ListConnectors(ctx context.Context, scope corpus.Scope, corpusID, after string, limit int) ([]Instance, error)
 	DisableConnector(ctx context.Context, org, id string) (Instance, error)
+	PauseConnector(ctx context.Context, org, id string) (Instance, error)
+	ResumeConnector(ctx context.Context, org, id string) (Instance, error)
 	ReplaceCredential(ctx context.Context, org, id string, deposit CredentialDeposit) (Instance, error)
 	// ChangeSchedule sets the interval of an enabled instance (ErrDisabled
 	// otherwise), committing connector.schedule_changed only on a change.
@@ -298,6 +302,40 @@ func (s Service) Disable(ctx context.Context, scope corpus.Scope, id string, pre
 		return Instance{}, err
 	}
 	return s.Store.DisableConnector(ctx, scope.Organization, id)
+}
+
+// Pause stops acquisition and fences an in-flight run without losing its checkpoint.
+func (s Service) Pause(ctx context.Context, scope corpus.Scope, id string, prepare ...func() (string, error)) (Instance, error) {
+	return s.setPaused(ctx, scope, id, true, prepare...)
+}
+
+// Resume continues acquisition from the last committed checkpoint.
+func (s Service) Resume(ctx context.Context, scope corpus.Scope, id string, prepare ...func() (string, error)) (Instance, error) {
+	return s.setPaused(ctx, scope, id, false, prepare...)
+}
+
+func (s Service) setPaused(ctx context.Context, scope corpus.Scope, id string, paused bool, prepare ...func() (string, error)) (Instance, error) {
+	action := corpus.ActionConnectorsResume
+	if paused {
+		action = corpus.ActionConnectorsPause
+	}
+	if err := scope.Require(action); err != nil {
+		return Instance{}, err
+	}
+	for _, load := range prepare {
+		var err error
+		id, err = load()
+		if err != nil {
+			return Instance{}, err
+		}
+	}
+	if _, err := s.authorized(ctx, scope, id); err != nil {
+		return Instance{}, err
+	}
+	if paused {
+		return s.Store.PauseConnector(ctx, scope.Organization, id)
+	}
+	return s.Store.ResumeConnector(ctx, scope.Organization, id)
 }
 
 // ReplaceCredential deposits a new credential version.

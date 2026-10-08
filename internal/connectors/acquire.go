@@ -194,7 +194,7 @@ func (a Acquirer) Run(ctx context.Context, org, id string, run int64) error {
 	if err != nil {
 		return err
 	}
-	if !target.Enabled || target.RunSequence != run {
+	if !target.Enabled || target.PausedAt != nil || target.RunSequence != run {
 		return nil
 	}
 	failure := func(class ErrorClass, code string) error {

@@ -1625,6 +1625,9 @@ type Connector struct {
 	// Kind Connector kind, provided by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 	Kind ConnectorKind `json:"kind"`
 
+	// PausedAt Present while scheduled acquisition is paused. Inbound push routes remain available.
+	PausedAt *time.Time `json:"paused_at,omitempty"`
+
 	// PushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
 	PushPolicy *ConnectorPushPolicy `json:"push_policy,omitempty"`
 	Schedule   struct {
@@ -3887,6 +3890,12 @@ type ReplaceConnectorCredentialJSONRequestBody = CredentialReplace
 // DisableConnectorJSONRequestBody defines body for DisableConnector for application/json ContentType.
 type DisableConnectorJSONRequestBody = ActionRequest
 
+// PauseConnectorJSONRequestBody defines body for PauseConnector for application/json ContentType.
+type PauseConnectorJSONRequestBody = ActionRequest
+
+// ResumeConnectorJSONRequestBody defines body for ResumeConnector for application/json ContentType.
+type ResumeConnectorJSONRequestBody = ActionRequest
+
 // RequestConnectorRunJSONRequestBody defines body for RequestConnectorRun for application/json ContentType.
 type RequestConnectorRunJSONRequestBody = ActionRequest
 
@@ -4709,16 +4718,40 @@ type ClientInterface interface {
 	// Commit disable. No new acquisition run is scheduled; an in-flight run cannot advance the Acquisition Checkpoint afterwards. Repeat is idempotent and disable is absorbing (no re-enable). Commits connector.disabled and connector.health_changed.
 	DisableConnector(ctx context.Context, connectorId string, body DisableConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// PauseConnectorWithBody performs a POST /v0/connectors/{connector_id}/pause (the `PauseConnector` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Pause scheduled acquisition, including continuation of a long import. Fences the in-flight run and retains its last committed checkpoint. An already admitted source request may finish; stale progress cannot commit. Inbound push routes remain available. Returns paused_at; repeat pause preserves the timestamp and emits no event. Disabled instances return 409 connector_disabled. Commits connector.paused only on a transition.
+	PauseConnectorWithBody(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PauseConnector performs a POST /v0/connectors/{connector_id}/pause (the `PauseConnector` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Pause scheduled acquisition, including continuation of a long import. Fences the in-flight run and retains its last committed checkpoint. An already admitted source request may finish; stale progress cannot commit. Inbound push routes remain available. Returns paused_at; repeat pause preserves the timestamp and emits no event. Disabled instances return 409 connector_disabled. Commits connector.paused only on a transition.
+	PauseConnector(ctx context.Context, connectorId string, body PauseConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResumeConnectorWithBody performs a POST /v0/connectors/{connector_id}/resume (the `ResumeConnector` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Resume scheduled acquisition from the last committed checkpoint, immediately unless the source Retry-After defers it. Clears paused_at. Repeat resume does not change scheduling or a live lease. Disabled instances return 409 connector_disabled and cannot be re-enabled. Commits connector.resumed only on a transition.
+	ResumeConnectorWithBody(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResumeConnector performs a POST /v0/connectors/{connector_id}/resume (the `ResumeConnector` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// Resume scheduled acquisition from the last committed checkpoint, immediately unless the source Retry-After defers it. Clears paused_at. Repeat resume does not change scheduling or a live lease. Disabled instances return 409 connector_disabled and cannot be re-enabled. Commits connector.resumed only on a transition.
+	ResumeConnector(ctx context.Context, connectorId string, body ResumeConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RequestConnectorRunWithBody performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled; a paused instance is 409 connector_paused.
 	RequestConnectorRunWithBody(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RequestConnectorRun performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled; a paused instance is 409 connector_paused.
 	RequestConnectorRun(ctx context.Context, connectorId string, body RequestConnectorRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ChangeConnectorScheduleWithBody performs a PUT /v0/connectors/{connector_id}/schedule (the `ChangeConnectorSchedule` operationId) request,
@@ -5996,10 +6029,74 @@ func (c *Client) DisableConnector(ctx context.Context, connectorId string, body 
 	return c.Client.Do(req)
 }
 
+// PauseConnectorWithBody performs a POST /v0/connectors/{connector_id}/pause (the `PauseConnector` operationId) request,
+// with any type of body and a specified content type.
+//
+// Pause scheduled acquisition, including continuation of a long import. Fences the in-flight run and retains its last committed checkpoint. An already admitted source request may finish; stale progress cannot commit. Inbound push routes remain available. Returns paused_at; repeat pause preserves the timestamp and emits no event. Disabled instances return 409 connector_disabled. Commits connector.paused only on a transition.
+func (c *Client) PauseConnectorWithBody(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPauseConnectorRequestWithBody(c.Server, connectorId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PauseConnector performs a POST /v0/connectors/{connector_id}/pause (the `PauseConnector` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Pause scheduled acquisition, including continuation of a long import. Fences the in-flight run and retains its last committed checkpoint. An already admitted source request may finish; stale progress cannot commit. Inbound push routes remain available. Returns paused_at; repeat pause preserves the timestamp and emits no event. Disabled instances return 409 connector_disabled. Commits connector.paused only on a transition.
+func (c *Client) PauseConnector(ctx context.Context, connectorId string, body PauseConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPauseConnectorRequest(c.Server, connectorId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ResumeConnectorWithBody performs a POST /v0/connectors/{connector_id}/resume (the `ResumeConnector` operationId) request,
+// with any type of body and a specified content type.
+//
+// Resume scheduled acquisition from the last committed checkpoint, immediately unless the source Retry-After defers it. Clears paused_at. Repeat resume does not change scheduling or a live lease. Disabled instances return 409 connector_disabled and cannot be re-enabled. Commits connector.resumed only on a transition.
+func (c *Client) ResumeConnectorWithBody(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResumeConnectorRequestWithBody(c.Server, connectorId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ResumeConnector performs a POST /v0/connectors/{connector_id}/resume (the `ResumeConnector` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// Resume scheduled acquisition from the last committed checkpoint, immediately unless the source Retry-After defers it. Clears paused_at. Repeat resume does not change scheduling or a live lease. Disabled instances return 409 connector_disabled and cannot be re-enabled. Commits connector.resumed only on a transition.
+func (c *Client) ResumeConnector(ctx context.Context, connectorId string, body ResumeConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResumeConnectorRequest(c.Server, connectorId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // RequestConnectorRunWithBody performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request,
 // with any type of body and a specified content type.
 //
-// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled; a paused instance is 409 connector_paused.
 func (c *Client) RequestConnectorRunWithBody(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRequestConnectorRunRequestWithBody(c.Server, connectorId, contentType, body)
 	if err != nil {
@@ -6015,7 +6112,7 @@ func (c *Client) RequestConnectorRunWithBody(ctx context.Context, connectorId st
 // RequestConnectorRun performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled; a paused instance is 409 connector_paused.
 func (c *Client) RequestConnectorRun(ctx context.Context, connectorId string, body RequestConnectorRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRequestConnectorRunRequest(c.Server, connectorId, body)
 	if err != nil {
@@ -9382,6 +9479,100 @@ func NewDisableConnectorRequestWithBody(server string, connectorId string, conte
 	return req, nil
 }
 
+// NewPauseConnectorRequest calls the generic PauseConnector builder with application/json body
+func NewPauseConnectorRequest(server string, connectorId string, body PauseConnectorJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPauseConnectorRequestWithBody(server, connectorId, "application/json", bodyReader)
+}
+
+// NewPauseConnectorRequestWithBody constructs an http.Request for the PauseConnector method, with any body, and a specified content type
+func NewPauseConnectorRequestWithBody(server string, connectorId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connectors/%s/pause", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewResumeConnectorRequest calls the generic ResumeConnector builder with application/json body
+func NewResumeConnectorRequest(server string, connectorId string, body ResumeConnectorJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewResumeConnectorRequestWithBody(server, connectorId, "application/json", bodyReader)
+}
+
+// NewResumeConnectorRequestWithBody constructs an http.Request for the ResumeConnector method, with any body, and a specified content type
+func NewResumeConnectorRequestWithBody(server string, connectorId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connector_id", connectorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v0/connectors/%s/resume", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRequestConnectorRunRequest calls the generic RequestConnectorRun builder with application/json body
 func NewRequestConnectorRunRequest(server string, connectorId string, body RequestConnectorRunJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -12316,10 +12507,38 @@ type ClientWithResponsesInterface interface {
 	// Commit disable. No new acquisition run is scheduled; an in-flight run cannot advance the Acquisition Checkpoint afterwards. Repeat is idempotent and disable is absorbing (no re-enable). Commits connector.disabled and connector.health_changed.
 	DisableConnectorWithResponse(ctx context.Context, connectorId string, body DisableConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*DisableConnectorResponse, error)
 
+	// PauseConnectorWithBodyWithResponse performs a POST /v0/connectors/{connector_id}/pause (the `PauseConnector` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Pause scheduled acquisition, including continuation of a long import. Fences the in-flight run and retains its last committed checkpoint. An already admitted source request may finish; stale progress cannot commit. Inbound push routes remain available. Returns paused_at; repeat pause preserves the timestamp and emits no event. Disabled instances return 409 connector_disabled. Commits connector.paused only on a transition.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	PauseConnectorWithBodyWithResponse(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PauseConnectorResponse, error)
+
+	// PauseConnectorWithResponse performs a POST /v0/connectors/{connector_id}/pause (the `PauseConnector` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Pause scheduled acquisition, including continuation of a long import. Fences the in-flight run and retains its last committed checkpoint. An already admitted source request may finish; stale progress cannot commit. Inbound push routes remain available. Returns paused_at; repeat pause preserves the timestamp and emits no event. Disabled instances return 409 connector_disabled. Commits connector.paused only on a transition.
+	PauseConnectorWithResponse(ctx context.Context, connectorId string, body PauseConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*PauseConnectorResponse, error)
+
+	// ResumeConnectorWithBodyWithResponse performs a POST /v0/connectors/{connector_id}/resume (the `ResumeConnector` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Resume scheduled acquisition from the last committed checkpoint, immediately unless the source Retry-After defers it. Clears paused_at. Repeat resume does not change scheduling or a live lease. Disabled instances return 409 connector_disabled and cannot be re-enabled. Commits connector.resumed only on a transition.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ResumeConnectorWithBodyWithResponse(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResumeConnectorResponse, error)
+
+	// ResumeConnectorWithResponse performs a POST /v0/connectors/{connector_id}/resume (the `ResumeConnector` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Resume scheduled acquisition from the last committed checkpoint, immediately unless the source Retry-After defers it. Clears paused_at. Repeat resume does not change scheduling or a live lease. Disabled instances return 409 connector_disabled and cannot be re-enabled. Commits connector.resumed only on a transition.
+	ResumeConnectorWithResponse(ctx context.Context, connectorId string, body ResumeConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*ResumeConnectorResponse, error)
+
 	// RequestConnectorRunWithBodyWithResponse performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled; a paused instance is 409 connector_paused.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	RequestConnectorRunWithBodyWithResponse(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestConnectorRunResponse, error)
@@ -12327,7 +12546,7 @@ type ClientWithResponsesInterface interface {
 	// RequestConnectorRunWithResponse performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+	// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled; a paused instance is 409 connector_paused.
 	RequestConnectorRunWithResponse(ctx context.Context, connectorId string, body RequestConnectorRunJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestConnectorRunResponse, error)
 
 	// ChangeConnectorScheduleWithBodyWithResponse performs a PUT /v0/connectors/{connector_id}/schedule (the `ChangeConnectorSchedule` operationId) request,
@@ -14898,6 +15117,102 @@ func (r DisableConnectorResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r DisableConnectorResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PauseConnectorResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Connector
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PauseConnectorResponse) GetJSON200() *Connector {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PauseConnectorResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PauseConnectorResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PauseConnectorResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PauseConnectorResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PauseConnectorResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ResumeConnectorResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Connector
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ResumeConnectorResponse) GetJSON200() *Connector {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ResumeConnectorResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ResumeConnectorResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ResumeConnectorResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ResumeConnectorResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ResumeConnectorResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -18256,10 +18571,62 @@ func (c *ClientWithResponses) DisableConnectorWithResponse(ctx context.Context, 
 	return ParseDisableConnectorResponse(rsp)
 }
 
+// PauseConnectorWithBodyWithResponse performs a POST /v0/connectors/{connector_id}/pause (the `PauseConnector` operationId) request,
+// with any type of body and a specified content type.
+//
+// Pause scheduled acquisition, including continuation of a long import. Fences the in-flight run and retains its last committed checkpoint. An already admitted source request may finish; stale progress cannot commit. Inbound push routes remain available. Returns paused_at; repeat pause preserves the timestamp and emits no event. Disabled instances return 409 connector_disabled. Commits connector.paused only on a transition.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) PauseConnectorWithBodyWithResponse(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PauseConnectorResponse, error) {
+	rsp, err := c.PauseConnectorWithBody(ctx, connectorId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePauseConnectorResponse(rsp)
+}
+
+// PauseConnectorWithResponse performs a POST /v0/connectors/{connector_id}/pause (the `PauseConnector` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Pause scheduled acquisition, including continuation of a long import. Fences the in-flight run and retains its last committed checkpoint. An already admitted source request may finish; stale progress cannot commit. Inbound push routes remain available. Returns paused_at; repeat pause preserves the timestamp and emits no event. Disabled instances return 409 connector_disabled. Commits connector.paused only on a transition.
+func (c *ClientWithResponses) PauseConnectorWithResponse(ctx context.Context, connectorId string, body PauseConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*PauseConnectorResponse, error) {
+	rsp, err := c.PauseConnector(ctx, connectorId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePauseConnectorResponse(rsp)
+}
+
+// ResumeConnectorWithBodyWithResponse performs a POST /v0/connectors/{connector_id}/resume (the `ResumeConnector` operationId) request,
+// with any type of body and a specified content type.
+//
+// Resume scheduled acquisition from the last committed checkpoint, immediately unless the source Retry-After defers it. Clears paused_at. Repeat resume does not change scheduling or a live lease. Disabled instances return 409 connector_disabled and cannot be re-enabled. Commits connector.resumed only on a transition.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ResumeConnectorWithBodyWithResponse(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResumeConnectorResponse, error) {
+	rsp, err := c.ResumeConnectorWithBody(ctx, connectorId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResumeConnectorResponse(rsp)
+}
+
+// ResumeConnectorWithResponse performs a POST /v0/connectors/{connector_id}/resume (the `ResumeConnector` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Resume scheduled acquisition from the last committed checkpoint, immediately unless the source Retry-After defers it. Clears paused_at. Repeat resume does not change scheduling or a live lease. Disabled instances return 409 connector_disabled and cannot be re-enabled. Commits connector.resumed only on a transition.
+func (c *ClientWithResponses) ResumeConnectorWithResponse(ctx context.Context, connectorId string, body ResumeConnectorJSONRequestBody, reqEditors ...RequestEditorFn) (*ResumeConnectorResponse, error) {
+	rsp, err := c.ResumeConnector(ctx, connectorId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResumeConnectorResponse(rsp)
+}
+
 // RequestConnectorRunWithBodyWithResponse performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request,
 // with any type of body and a specified content type.
 //
-// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled; a paused instance is 409 connector_paused.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) RequestConnectorRunWithBodyWithResponse(ctx context.Context, connectorId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RequestConnectorRunResponse, error) {
@@ -18273,7 +18640,7 @@ func (c *ClientWithResponses) RequestConnectorRunWithBodyWithResponse(ctx contex
 // RequestConnectorRunWithResponse performs a POST /v0/connectors/{connector_id}/runs (the `RequestConnectorRun` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled.
+// Ask for an acquisition run now instead of at the next scheduled time, for example to check again a source that failed. The next run is pulled in, never pushed out, so repeating the request changes nothing and a run already in flight answers it. Rate limits still hold -- the run starts no sooner than the deployment interval floor (30 s by default) after the previous run ended, nor before the Retry-After the source asked for. The run then goes through the usual scheduler lease and records its outcome in health, committing connector.health_changed when the state changes; the request itself commits no event. run_at is when the run is due; the scheduler starts it within seconds after. A disabled instance is 409 connector_disabled; a paused instance is 409 connector_paused.
 func (c *ClientWithResponses) RequestConnectorRunWithResponse(ctx context.Context, connectorId string, body RequestConnectorRunJSONRequestBody, reqEditors ...RequestEditorFn) (*RequestConnectorRunResponse, error) {
 	rsp, err := c.RequestConnectorRun(ctx, connectorId, body, reqEditors...)
 	if err != nil {
@@ -20735,6 +21102,72 @@ func ParseDisableConnectorResponse(rsp *http.Response) (*DisableConnectorRespons
 	}
 
 	response := &DisableConnectorResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Connector
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePauseConnectorResponse parses an HTTP response from a PauseConnectorWithResponse call
+func ParsePauseConnectorResponse(rsp *http.Response) (*PauseConnectorResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PauseConnectorResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Connector
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseResumeConnectorResponse parses an HTTP response from a ResumeConnectorWithResponse call
+func ParseResumeConnectorResponse(rsp *http.Response) (*ResumeConnectorResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ResumeConnectorResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

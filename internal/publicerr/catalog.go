@@ -53,6 +53,7 @@ var (
 	IPNotAllowed                     = declare("ip_not_allowed", ForbiddenClass, false)
 	RateLimited                      = declare("rate_limited", ThrottledClass, true)
 	ConnectorDisabled                = declare("connector_disabled", ConflictClass, false)
+	ConnectorPaused                  = declare("connector_paused", ConflictClass, false)
 	ConnectorsUnavailable            = declare("connectors_unavailable", UnavailableClass, true)
 	ContentUnavailable               = declare("content_unavailable", UnavailableClass, true)
 	CostConfirmationRequired         = declare("cost_confirmation_required", ConflictClass, false)

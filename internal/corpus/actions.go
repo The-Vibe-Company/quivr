@@ -16,6 +16,8 @@ const (
 	ActionConnectorsRead                      Action = "connectors.read"
 	ActionConnectorsList                      Action = "connectors.list"
 	ActionConnectorsDisable                   Action = "connectors.disable"
+	ActionConnectorsPause                     Action = "connectors.pause"
+	ActionConnectorsResume                    Action = "connectors.resume"
 	ActionConnectorsReplaceCredential         Action = "connectors.replace.credential"
 	ActionConnectorsKinds                     Action = "connectors.kinds"
 	ActionConnectorsChangeSchedule            Action = "connectors.change.schedule"
@@ -118,6 +120,8 @@ var actionRequirements = map[Action]requirement{
 	ActionConnectorsRead:                      {permissions: []string{"connectors:read"}, allCorpora: false},
 	ActionConnectorsList:                      {permissions: []string{"connectors:read"}, allCorpora: false},
 	ActionConnectorsDisable:                   {permissions: []string{"connectors:write"}, allCorpora: false},
+	ActionConnectorsPause:                     {permissions: []string{"connectors:write"}, allCorpora: false},
+	ActionConnectorsResume:                    {permissions: []string{"connectors:write"}, allCorpora: false},
 	ActionConnectorsReplaceCredential:         {permissions: []string{"connectors:write"}, allCorpora: false},
 	ActionConnectorsKinds:                     {permissions: []string{"connectors:read"}, allCorpora: false},
 	ActionConnectorsChangeSchedule:            {permissions: []string{"connectors:write"}, allCorpora: false},

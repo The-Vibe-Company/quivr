@@ -102,6 +102,25 @@ func (m *memoryConnectors) DisableConnector(ctx context.Context, org, id string)
 	m.items[id] = in
 	return in, err
 }
+func (m *memoryConnectors) PauseConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
+	in, err := m.ReadConnector(ctx, org, id)
+	if err != nil {
+		return in, err
+	}
+	at := time.Date(2026, 9, 28, 11, 0, 0, 0, time.UTC)
+	in.PausedAt = &at
+	m.items[id] = in
+	return in, nil
+}
+func (m *memoryConnectors) ResumeConnector(ctx context.Context, org, id string) (connectors.Instance, error) {
+	in, err := m.ReadConnector(ctx, org, id)
+	if err != nil {
+		return in, err
+	}
+	in.PausedAt = nil
+	m.items[id] = in
+	return in, nil
+}
 func (m *memoryConnectors) ReplaceCredential(ctx context.Context, org, id string, d connectors.CredentialDeposit) (connectors.Instance, error) {
 	return m.ReadConnector(ctx, org, id)
 }
@@ -119,11 +138,15 @@ func (m *memoryConnectors) RequestRun(ctx context.Context, org, id string, _ tim
 	if err == nil && !in.Enabled {
 		err = connectors.ErrDisabled
 	}
+	if err == nil && in.PausedAt != nil {
+		err = connectors.ErrPaused
+	}
 	return time.Date(2026, 9, 28, 10, 0, 30, 0, time.UTC), err
 }
 
 const (
-	connectorKey = "connector-key-0123456789abcdef0123456"
+	connectorKey         = "connector-key-0123456789abcdef0123456"
+	otherConnectorOrgKey = "other-org-connector-0123456789abcdef"
 	// otherCorpusKey may write connectors, but only in another Corpus.
 	otherCorpusKey = "other-corpus-key-0123456789abcdef0123"
 	contentKey     = "content-only-key-0123456789abcdef01234"
@@ -151,10 +174,11 @@ func connectorAPISealed(t *testing.T, store *memoryConnectors, sealer connectors
 		t.Fatal(err)
 	}
 	keys := map[string]corpus.Scope{
-		connectorKey:   {Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_news"}},
-		otherCorpusKey: {Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_other"}},
-		readerKey:      {Organization: "org_a", Actions: []string{"connectors:read"}, Corpora: []string{"*"}},
-		contentKey:     {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}},
+		otherConnectorOrgKey: {Organization: "org_b", Actions: []string{"connectors:write"}, Corpora: []string{"*"}},
+		connectorKey:         {Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_news"}},
+		otherCorpusKey:       {Organization: "org_a", Actions: []string{"connectors:read", "connectors:write"}, Corpora: []string{"corpus_other"}},
+		readerKey:            {Organization: "org_a", Actions: []string{"connectors:read"}, Corpora: []string{"*"}},
+		contentKey:           {Organization: "org_a", Actions: []string{"content:read"}, Corpora: []string{"*"}},
 	}
 	handler, err := httpapi.New(nil, content.Service{}, retrieval.Service{}, uploads.Service{}, keys, []byte("cursor-key-0123456789abcdef0123456789"),
 		httpapi.WithConnectors(connectors.Service{Store: store, Registry: registry, Sealer: sealer}))
@@ -242,6 +266,41 @@ func TestConnectorCreationValidatesAndNeverEchoesTheSecret(t *testing.T) {
 	}
 	if status, _ := readJSON(t, handler, "/v0/connectors/connector_missing", readerKey); status != 404 {
 		t.Fatalf("missing: %d", status)
+	}
+	for _, action := range []string{"pause", "resume"} {
+		path := "/v0/connectors/" + id + "/" + action
+		for _, c := range []struct {
+			key    string
+			body   any
+			status int
+			code   string
+		}{
+			{readerKey, map[string]any{"idempotency_key": "state"}, 403, "forbidden"},
+			{otherCorpusKey, map[string]any{"idempotency_key": "state"}, 404, "not_found"},
+			{otherConnectorOrgKey, map[string]any{"idempotency_key": "state"}, 404, "not_found"},
+			{connectorKey, map[string]any{}, 422, "invalid_schema"},
+		} {
+			if status, body := postJSON(t, handler, path, c.key, c.body); status != c.status || body["code"] != c.code {
+				t.Fatalf("%s refusal: %d %v, want %d %s", action, status, body, c.status, c.code)
+			}
+		}
+		status, body := postJSON(t, handler, path, connectorKey, map[string]any{"idempotency_key": "state"})
+		if status != 200 || body["connector_id"] != id || body["enabled"] != true {
+			t.Fatalf("%s: %d %v", action, status, body)
+		}
+		conforms(t, "Connector", body)
+		if action == "pause" && body["paused_at"] != "2026-09-28T11:00:00Z" {
+			t.Fatalf("pause timestamp not rendered: %v", body)
+		}
+		if action == "resume" && body["paused_at"] != nil {
+			t.Fatalf("resumed resource still paused: %v", body)
+		}
+		_, read := readJSON(t, handler, "/v0/connectors/"+id, readerKey)
+		_, page := readJSON(t, handler, "/v0/connectors", connectorKey)
+		listed := page["items"].([]any)[0].(map[string]any)
+		if read["paused_at"] != body["paused_at"] || listed["paused_at"] != body["paused_at"] {
+			t.Fatalf("%s state missing from read/list: %v %v", action, read, listed)
+		}
 	}
 	if status, body := postJSON(t, handler, "/v0/connectors/"+id+"/disable", connectorKey, map[string]any{"idempotency_key": "d1"}); status != 200 || body["connector_id"] != id || body["enabled"] != false {
 		t.Fatalf("disable: %d %v", status, body)
