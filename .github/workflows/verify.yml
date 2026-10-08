@@ -47,7 +47,6 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-          cache: ${{ !startsWith(matrix.group, 'eval-') }}
           cache-dependency-path: '**/go.sum'
       - uses: actions/setup-python@v7
         id: python
