@@ -2432,12 +2432,14 @@ invocation a normalization diagnostic concerns. Codes of external normalization:
 On an optional route every quarantining code above that comes from the normalizer is instead
 listed on a searchable Version published through the built-in text path. A plugin that is
 unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-Plan names it; the Receipt shows plugin_unavailable while it retries.
+pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+shows plugin_unavailable while it retries.
 
 - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
-  during an Operation, or its ingestion owner could no longer serve the work. Historical
-  Versions may also carry this reason after a live-import reachability outage. Live imports
+  during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+  longer serve the work. Historical Versions may also carry this reason after a live-import
+  reachability outage. Live imports
   and normalization now retain their pin and retry reachability outages until the exact build
   returns; they never silently move to its replacement. A Version with this diagnostic is
   quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
@@ -2495,12 +2497,14 @@ description: |-
   On an optional route every quarantining code above that comes from the normalizer is instead
   listed on a searchable Version published through the built-in text path. A plugin that is
   unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-  pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-  Plan names it; the Receipt shows plugin_unavailable while it retries.
+  pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+  diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+  shows plugin_unavailable while it retries.
 
   - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
-    during an Operation, or its ingestion owner could no longer serve the work. Historical
-    Versions may also carry this reason after a live-import reachability outage. Live imports
+    during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+    longer serve the work. Historical Versions may also carry this reason after a live-import
+    reachability outage. Live imports
     and normalization now retain their pin and retry reachability outages until the exact build
     returns; they never silently move to its replacement. A Version with this diagnostic is
     quarantined, or keeps its searchable text while enrichment stops. plan, plugin and

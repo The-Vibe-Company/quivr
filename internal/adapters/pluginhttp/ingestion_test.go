@@ -256,10 +256,6 @@ func TestObserverSeesEveryInvocationOutcome(t *testing.T) {
 	}
 }
 
-// Work a rollback stopped (pinned_work=stop), even during an attempt already
-// running, never calls its ingestion owner again. An outgoing source owner
-// can remain an active evaluation member: the call still fails without reaching
-// it, and the diagnostic names the stopped plan without spending the budget.
 // An upgraded sidecar may replace the manifest at the old endpoint. Live
 // imports retain the exact pin through that outage, beyond the operation budget.
 func TestPinnedImportRecoversWhenItsBuildReturns(t *testing.T) {
@@ -319,15 +315,20 @@ func TestPinnedImportRecoversWhenItsBuildReturns(t *testing.T) {
 		t.Fatalf("restoring the exact old build did not resume the import: %+v (%v)", segments, err)
 	}
 	// An incompatible owner is still bounded, even for live imports.
-	var reason *content.Diagnostic
-	for range 2 {
-		reason, err = ingestor.(processing.Pinned).Gone(work, processing.ErrSpaceUnowned)
+	reason, err := ingestor.(processing.Pinned).Gone(work, processing.ErrSpaceUnowned)
+	if err != nil || reason != nil {
+		t.Fatalf("first incompatible-owner failure must retry: %+v (%v)", reason, err)
 	}
+	reason, err = ingestor.(processing.Pinned).Gone(work, processing.ErrSpaceUnowned)
 	if err != nil || reason == nil || reason.Code != plugins.CodePinnedPluginUnavailable {
 		t.Fatalf("incompatible owner must retain its budget: %+v (%v)", reason, err)
 	}
 }
 
+// Work a rollback stopped (pinned_work=stop), even during an attempt already
+// running, never calls its ingestion owner again. An outgoing source owner
+// can remain an active evaluation member: the call still fails without reaching
+// it, and the diagnostic names the stopped plan without spending the budget.
 func TestStoppedWorkNeverCallsTheAbandonedVersion(t *testing.T) {
 	calls := 0
 	var pin *plugins.Pin
@@ -404,24 +405,71 @@ func TestSegmentAndEmbedReportsItsDeadline(t *testing.T) {
 	defer hang.Close()
 	down := httptest.NewServer(http.NotFoundHandler())
 	down.Close()
-	path := filepath.Join(t.TempDir(), plugins.ManifestFile)
-	if err := os.WriteFile(path, []byte(embedderManifest), 0o600); err != nil {
+	raw, err := os.ReadFile("../../../contracts/plugins/v0/fixtures/manifests/valid/ingestion-paged.yaml")
+	if err != nil {
 		t.Fatal(err)
 	}
+	ring, err := plugins.NewSigningKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signing, _ := json.Marshal(map[string]plugins.SigningKeys{"example.paged": ring})
+	t.Setenv(plugins.EnvSigningKeys, string(signing))
 	version := content.Version{ID: "version", Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: "text"}}}}}
 	for _, c := range []struct {
-		name, endpoint string
-		deadline       bool
-	}{{"hanging plugin", hang.URL, true}, {"plugin down", down.URL, false}} {
+		name, endpoint  string
+		deadline, paged bool
+	}{{"hanging plugin", hang.URL, true, false}, {"plugin down", down.URL, false, false}, {"hanging paged plugin", hang.URL, true, true}, {"paged plugin down", down.URL, false, true}} {
 		var err error
-		pin, err = plugins.LoadPin(plugins.PinConfig{Manifest: path, Endpoint: c.endpoint})
+		manifest := []byte(embedderManifest)
+		if c.paged {
+			manifest = raw
+		}
+		pin, err = plugins.LoadPinManifest(manifest, "embedder", plugins.PinConfig{Endpoint: c.endpoint})
 		if err != nil {
 			t.Fatal(err)
 		}
 		pin.Manifest.Contributions.Ingestion.TimeoutMS = 50
-		_, err = pluginhttp.Ingestor{Pin: pin}.SegmentAndEmbed(context.Background(), "org", "corpus", version, []string{plugins.SpaceKey("acme.embedder.small", "1")})
-		if !errors.Is(err, pluginhttp.ErrUnavailable) || errors.Is(err, processing.ErrPluginDeadline) != c.deadline {
-			t.Errorf("%s: %v; want unavailability, a deadline: %v", c.name, err, c.deadline)
+		pin.Registration = "registration_a"
+		set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		live, err := plugins.NewLive("plan_a", set)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attempts := 0
+		work, err := live.Pin(t.Context(), plugins.Work{Kind: plugins.WorkIngestion, Plan: "plan_a"}, func(context.Context) (int, error) { attempts++; return attempts, nil }, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = live.Store("plan_b", nil); err != nil {
+			t.Fatal(err)
+		}
+		ingestor := pluginhttp.Ingestor{Pin: pin}
+		for attempt := range 2 {
+			if c.paged {
+				_, err = ingestor.SegmentAndEmbedPage(work, "org", "corpus", version, nil, nil)
+			} else {
+				_, err = ingestor.SegmentAndEmbed(work, "org", "corpus", version, []string{plugins.SpaceKey("acme.embedder.small", "1")})
+			}
+			// Bounded pages preserve completed work and do not consume the
+			// legacy per-item deadline budget, but retain the pin budget.
+			if !errors.Is(err, pluginhttp.ErrUnavailable) || errors.Is(err, processing.ErrPluginDeadline) != (c.deadline && !c.paged) {
+				t.Fatalf("%s: %v; want unavailability, a deadline: %v", c.name, err, c.deadline && !c.paged)
+			}
+			reason, goneErr := ingestor.Gone(work, err)
+			if goneErr != nil {
+				t.Fatal(goneErr)
+			}
+			if c.deadline && attempt == 1 {
+				if reason == nil || reason.Code != plugins.CodePinnedPluginUnavailable {
+					t.Fatalf("%s: deadline must retain the pinned budget: %+v", c.name, reason)
+				}
+			} else if reason != nil {
+				t.Fatalf("%s: attempt %d must retry: %+v", c.name, attempt+1, reason)
+			}
 		}
 	}
 }

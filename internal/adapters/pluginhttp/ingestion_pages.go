@@ -16,6 +16,10 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 )
 
+// A bounded page skips the legacy per-item deadline budget, but still spends
+// the pinned-plugin budget after its owner leaves the active plan.
+var errPageInterrupted = errors.New("ingestion page interrupted")
+
 // Byte and code-point positions keep window selection linear in source size.
 // The cursor is host-owned; plugins only advance inside the bounded window.
 type sourceCursor struct {
@@ -108,7 +112,7 @@ func (i Ingestor) SegmentAndEmbedPage(ctx context.Context, org, corpusID string,
 			if errors.Is(err, plugins.ErrCallDeadline) {
 				// An interrupted bounded page retries without consuming the legacy
 				// per-item deadline budget. Completed pages remain committed.
-				return processing.PluginPage{}, fmt.Errorf("%w: ingestion page interrupted", plugins.ErrUnavailable)
+				return processing.PluginPage{}, fmt.Errorf("%w: %w", plugins.ErrUnavailable, errPageInterrupted)
 			}
 			return processing.PluginPage{}, err
 		}

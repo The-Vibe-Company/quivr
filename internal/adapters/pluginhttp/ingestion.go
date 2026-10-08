@@ -180,7 +180,7 @@ func wholeResponseTooLarge(result *devhost.Result) bool {
 }
 
 // Gone keeps live imports retrying through reachability outages, but preserves
-// explicit stops and the budget for an owner that can no longer serve the work.
+// explicit stops and the budget for invocation deadlines or incompatible owners.
 func (i Ingestor) Gone(ctx context.Context, cause error) (*content.Diagnostic, error) {
 	if !errors.Is(cause, ErrUnavailable) && !errors.Is(cause, processing.ErrSpaceUnowned) {
 		return nil, nil
@@ -188,7 +188,7 @@ func (i Ingestor) Gone(ctx context.Context, cause error) (*content.Diagnostic, e
 	if err := plugins.BindIngestion(ctx, i.Pin); err != nil {
 		return nil, err
 	}
-	if errors.Is(cause, ErrUnavailable) && !errors.Is(cause, processing.ErrSpaceUnowned) {
+	if errors.Is(cause, ErrUnavailable) && !errors.Is(cause, processing.ErrSpaceUnowned) && !errors.Is(cause, processing.ErrPluginDeadline) && !errors.Is(cause, errPageInterrupted) {
 		return plugins.Unavailable(ctx, i.Pin, "ingestion")
 	}
 	return plugins.Unreachable(ctx, i.Pin, "ingestion")

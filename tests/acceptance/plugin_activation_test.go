@@ -278,21 +278,21 @@ func TestPinnedWorkRetries(t *testing.T) {
 func TestPinnedWorkDrains(t *testing.T) {
 	operator, a, _, record := pinnedSetup(t)
 	admin := os.Getenv("QUIVR_TEST_ADMIN")
-	corpusID, _ := ingestionPluginCorpus(t)
 	original := request(t, "POST", "/v0/records", admin, record, 202)
 	receipt := awaitRetrievalReady(t, original["receipt_id"].(string))
 	if receipt["version_id"] != original["version_id"] || receipt["record_id"] != original["record_id"] {
 		t.Fatalf("the resumed import changed identity: original %v, resumed %v", original, receipt)
 	}
-	awaitEnriched(t, admin, corpusID, "", receipt["record_id"].(string))
-	version := request(t, "GET", "/v0/records/"+receipt["record_id"].(string)+"/versions/"+receipt["version_id"].(string), admin, nil, 200)
-	if diagnostics, _ := version["diagnostics"].([]any); len(diagnostics) != 0 {
-		t.Fatalf("restored A left the import blocked: %v", version)
-	}
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		drained := registrationAt(t, operator, "0.2.0", a)
-		if drained["state"] == "inactive" && drained["pinned_work"].(float64) == 0 {
+		// The feed starts at its head without a cursor. Inspect durable
+		// completion so an event emitted before this test cannot be missed.
+		version := request(t, "GET", "/v0/records/"+receipt["record_id"].(string)+"/versions/"+receipt["version_id"].(string), admin, nil, 200)
+		if diagnostics, _ := version["diagnostics"].([]any); len(diagnostics) != 0 {
+			t.Fatalf("restored A left the import blocked: %v", version)
+		}
+		if drained["state"] == "inactive" && drained["pinned_work"].(float64) == 0 && version["steps"].(map[string]any)["enriched_at"] != nil {
 			break
 		}
 		if time.Now().After(deadline) {
