@@ -14,11 +14,12 @@ write successfully. Keep later expansions independent of any deferred contract.
 `make check` parses PostgreSQL SQL with the pinned `pglast` dependency in
 `contracts/http/v0/checks/requirements.txt`. Its conservative allowlist accepts
 permanent tables without foreign keys into existing tables, sequences, enum types,
-non-concurrent indexes on tables created in the same file,
-and added columns without new checks, uniqueness or references. Mixed ALTER
-commands are checked separately. Renames, type changes, constraints and indexes
-on existing tables require a separate contract release. Backfills use resumable
-application work. The lint is a guard, not a proof of every application's semantics.
+non-concurrent indexes on tables created in the same file, table reloption SETs,
+schema-qualified RESTRICT drops of declared nonunique performance indexes from
+earlier SQL, and added columns without new checks, uniqueness or references. Unknown or
+unique index drops remain rejected. Mixed ALTER commands are checked separately.
+Renames, type changes, constraints and index creation on existing tables need a contract.
+Backfills use resumable work. The lint is a guard, not a semantic proof.
 
 For a rename, add the new field in release N, keep reading the old field and
 write both forms while older binaries run. Backfill with resumable application
