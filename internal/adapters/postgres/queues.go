@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/workqueue"
@@ -23,10 +24,10 @@ type QueueTracker struct {
 	Lease time.Duration
 }
 
-var (
-	_ workqueue.Tracker = QueueTracker{}
-	_ workqueue.Tracker = Store{}
-)
+var _ workqueue.Tracker = QueueTracker{}
+
+// errLeaseLost reports that another attempt took the row's fencing token.
+var errLeaseLost = errors.New("workqueue: lease lost")
 
 func (t QueueTracker) leaseDuration() time.Duration {
 	lease := t.Lease
@@ -57,8 +58,11 @@ func (t QueueTracker) validate(org, kind, workID, documentID string) error {
 }
 
 // Track claims one document attempt, renews its lease while run executes and
-// releases it with the latest fencing token. If another worker takes the row,
-// run's context is canceled and ErrLeaseLost is returned alongside its error.
+// releases it with the latest fencing token. The row is an observation only:
+// run receives ctx unchanged and Track returns run's result. A failed lookup,
+// claim, renewal or release is logged and leaves the row to expire. A retry
+// takes the row over; Temporal and the batch and operation leases, not this
+// row, keep two workers off the same document.
 func (t QueueTracker) Track(ctx context.Context, org, kind, workID, documentID string, run func(context.Context) error) error {
 	if run == nil {
 		return errors.New("workqueue: nil tracked function")
@@ -66,62 +70,62 @@ func (t QueueTracker) Track(ctx context.Context, org, kind, workID, documentID s
 	if err := t.validate(org, kind, workID, documentID); err != nil {
 		return err
 	}
-	canonicalDocumentID, err := t.canonicalDocumentID(ctx, kind, org, workID, documentID)
+	failed := func(step string, err error) {
+		slog.WarnContext(ctx, "work tracking failed; the work continues", "event", "quivr.workqueue.tracking_failed",
+			"step", step, "kind", kind, "work_id", workID, "error", err.Error())
+	}
+	documentID, err := t.canonicalDocumentID(ctx, kind, org, workID, documentID)
 	if err != nil {
-		return err
+		failed("lookup", err)
+		return run(ctx)
 	}
 	lease := t.leaseDuration()
-	token, err := t.claim(ctx, org, kind, workID, canonicalDocumentID, lease)
+	token, err := t.claim(ctx, org, kind, workID, documentID, lease)
 	if err != nil {
-		return err
+		failed("claim", err)
+		return run(ctx)
 	}
 
-	workCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	renewed := make(chan error, 1)
+	renewal, stopRenewal := context.WithCancel(ctx)
+	renewed := make(chan struct{})
 	go func() {
-		interval := lease / 3
-		if interval < 10*time.Millisecond {
-			interval = 10 * time.Millisecond
-		}
-		ticker := time.NewTicker(interval)
+		defer close(renewed)
+		ticker := time.NewTicker(max(lease/3, 10*time.Millisecond))
 		defer ticker.Stop()
 		for {
 			select {
-			case <-workCtx.Done():
-				renewed <- nil
+			case <-renewal.Done():
 				return
 			case <-ticker.C:
-				token, err = t.renew(workCtx, org, kind, workID, canonicalDocumentID, token, lease)
-				if err != nil {
-					if workCtx.Err() != nil {
-						renewed <- nil
-					} else {
-						cancel()
-						renewed <- err
-					}
+			}
+			next, err := t.renew(renewal, org, kind, workID, documentID, token, lease)
+			switch {
+			case renewal.Err() != nil:
+				return
+			case err != nil:
+				failed("renew", err)
+				if errors.Is(err, errLeaseLost) {
 					return
 				}
+			default:
+				token = next
 			}
 		}
 	}()
-
-	runErr := run(workCtx)
-	cancel()
-	renewErr := <-renewed
-
-	cleanup := context.Background()
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) > 0 {
-		var releaseCancel context.CancelFunc
-		cleanup, releaseCancel = context.WithTimeout(context.Background(), min(time.Until(deadline), lease))
-		defer releaseCancel()
-	} else {
-		var releaseCancel context.CancelFunc
-		cleanup, releaseCancel = context.WithTimeout(context.Background(), lease)
-		defer releaseCancel()
-	}
-	releaseErr := t.release(cleanup, org, kind, workID, canonicalDocumentID, token)
-	return errors.Join(runErr, renewErr, releaseErr)
+	defer func() {
+		stopRenewal()
+		<-renewed
+		timeout := lease
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) > 0 {
+			timeout = min(timeout, time.Until(deadline))
+		}
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+		defer cancel()
+		if err := t.release(cleanup, org, kind, workID, documentID, token); err != nil {
+			failed("release", err)
+		}
+	}()
+	return run(ctx)
 }
 
 // canonicalDocumentID maps an ingestion receipt attempt to the Version it
@@ -154,11 +158,7 @@ VALUES($1,$2,$3,$4,nextval('queue_document_attempt_tokens'),clock_timestamp()+ma
 ON CONFLICT (organization,kind,work_id,document_id) DO UPDATE
 SET token=EXCLUDED.token,
     lease_until=clock_timestamp()+make_interval(secs => $5::double precision)
-WHERE queue_document_attempts.lease_until<=clock_timestamp()
 RETURNING token`, org, kind, workID, documentID, lease.Seconds()).Scan(&token)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, workqueue.ErrLeaseHeld
-	}
 	return token, err
 }
 
@@ -166,10 +166,10 @@ func (t QueueTracker) renew(ctx context.Context, org, kind, workID, documentID s
 	var next int64
 	err := t.Pool.QueryRow(ctx, `UPDATE queue_document_attempts
 SET lease_until=clock_timestamp()+make_interval(secs => $6::double precision)
-WHERE organization=$1 AND kind=$2 AND work_id=$3 AND document_id=$4 AND token=$5 AND lease_until>clock_timestamp()
+WHERE organization=$1 AND kind=$2 AND work_id=$3 AND document_id=$4 AND token=$5
 RETURNING token`, org, kind, workID, documentID, token, lease.Seconds()).Scan(&next)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return token, workqueue.ErrLeaseLost
+		return token, errLeaseLost
 	}
 	return next, err
 }
@@ -181,15 +181,9 @@ WHERE organization=$1 AND kind=$2 AND work_id=$3 AND document_id=$4 AND token=$5
 		return err
 	}
 	if tag.RowsAffected() != 1 {
-		return workqueue.ErrLeaseLost
+		return errLeaseLost
 	}
 	return nil
-}
-
-// Track lets a Store be attached directly with workqueue.WithTracker. This is
-// useful for applications that already share one PostgreSQL Store value.
-func (s Store) Track(ctx context.Context, org, kind, workID, documentID string, run func(context.Context) error) error {
-	return (QueueTracker{Pool: s.Pool}).Track(ctx, org, kind, workID, documentID, run)
 }
 
 func queueBacklogSQL() string {
