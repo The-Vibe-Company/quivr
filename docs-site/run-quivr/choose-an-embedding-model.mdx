@@ -1,0 +1,79 @@
+---
+title: "Choose an embedding model"
+description: "Choose local inference, your own model server or a hosted API, and know which changes need a rebuild."
+keywords: ["embedding model", "E5", "EmbeddingGemma", "hosted embeddings", "rebuild"]
+---
+
+Choose an embedding model by measuring search quality on your documents, query latency and the capacity you can operate. Quivr uses ingestion plugins to turn text into numeric vectors; the plugin and its configuration select the model.
+
+## Choose where inference runs
+
+You need an ingestion plugin, its matching tokenizer and a reachable model server. A tokenizer counts the model's input tokens so passages and queries fit its input window.
+
+| Deployment | When it fits |
+| --- | --- |
+| Local E5 with `core.ingest` | You want the local stack's CPU example and keep text within your installation. |
+| Your own OpenAI-compatible server with `hosted.embed` | You want control over weights, hardware, privacy and inference capacity. |
+| A hosted API with `hosted.embed` | You want a provider to operate inference and accept its data handling and usage charges. |
+
+The local [Quickstart](/quickstart) runs `intfloat/multilingual-e5-small` through Text Embeddings Inference (TEI). The [core.ingest catalog entry](/run-quivr/catalog#core-ingest) describes its endpoint and tokenizer pin. This is a deployment example; the engine has no built-in model default.
+
+`hosted.embed` supports OpenAI-compatible `/embeddings` servers and Cohere v2 `/embed` servers. Its [example configurations](https://github.com/The-Vibe-Company/quivr/tree/main/plugins/hosted-embed/examples) cover local TEI and hosted APIs. Match the model name, dimensions, authentication and input templates to your server. OpenAI-compatible servers with fixed dimensions can require `send_dimensions: false`; the plugin still checks the returned vector size.
+
+For self-hosted EmbeddingGemma 2, start from [embeddinggemma-2.json](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/examples/embeddinggemma-2.json). It declares 768 dimensions, a pinned model revision, document and query templates, a 512-token body budget and a 2,048-token full input window. Supply your endpoint and matching local tokenizer before generating the manifest. The [Modal recipe](https://github.com/The-Vibe-Company/quivr/blob/main/deploy/modal/README.md) is one serving example; provision its account, model access and bearer secret separately. Its GPU capacity and cold starts still need measurement for your workload.
+
+Authenticated `hosted.embed` deployments read `EMBED_API_KEY` from the plugin process environment. Keep it out of the configuration and generated manifest. Package generation is offline; certification, ingestion, rebuilds and search queries can call the configured server.
+
+<Warning>
+Document text and search queries go to the configured embedding server. Check where it runs, its data policy and any charges before certification or import.
+</Warning>
+
+## Compare models on the same workload
+
+Use the same documents, queries and relevance judgements for each candidate. Include the languages, document lengths and query styles your application needs. [Record search measurements](/run-quivr/record-search-measurements) to compare results, then [try a second model](/run-quivr/switch-a-vector-model) beside the served one.
+
+Measure query latency under concurrent import load as well as at idle. Measure completed documents per second, provider throttling and serving cost, including warm capacity, startup time and retries. An encoder benchmark alone does not measure end-to-end Quivr search latency.
+
+The repository's [public-sample comparison workflow](https://github.com/The-Vibe-Company/quivr/blob/main/docs/agents/oss-embeddings.md) compares pinned E5, Qwen3, Granite and Arctic configurations on matched samples. It explains sample lineage and the limits of direct encoder measurements. A model's score on those samples does not establish a winner for your collection; use your own measured quality, latency and operating cost to decide.
+
+## Know which changes need a rebuild
+
+A vector space is the coordinate system for one model's vectors. A segmentation recipe defines how the plugin cuts and prepares text. Existing collections of documents (Corpora) keep their served search generation until a rebuild prepares and activates its replacement.
+
+When replacing the served `hosted.embed` configuration, changes fall into these groups:
+
+| Change | Effect on existing Corpora |
+| --- | --- |
+| Model, dimensions, metric, wire format, model revision or input templates | Changes vector-space identity; rebuild before serving the new vectors. |
+| Tokenizer, packing, title context, tail options or tokens per chunk | Changes the segmentation recipe; rebuild existing documents. |
+| Plugin version | Changes the recipe, even if only execution settings differ. |
+| Declared execution settings, with the same plugin id and version | Preserves the recipe and space; no rebuild for these settings alone. |
+| Search index compression | Applies to new Corpora; rebuild existing Corpora to change their index. |
+
+Set `model_revision` when a server begins serving new weights behind the same model name. The plugin cannot detect that replacement. A backfill fills missing vectors for compatible cuts; it cannot convert an old segmentation recipe into new packed passages.
+
+After replacing that served configuration with a different vector-space identity, new documents can become searchable by keywords while vector enrichment reports `rebuild_required`. Their vectors cannot serve the old generation's space. Rebuild the Corpus, wait for successful activation and check coverage and semantic search before starting a large import. Keep the old model reachable while old generations or pinned work still need it.
+
+Some ingestion plugins can add a new model as an evaluation space while retaining their served space and stored cuts. For that compatible path, [backfill and promote the new space](/run-quivr/backfill-a-vector-space) instead. It prepares additional vectors before switching search; it does not repair a replaced configuration that reports `rebuild_required`.
+
+Use [Try and switch a vector model](/run-quivr/switch-a-vector-model) for installation, evaluation, cutover and rollback. Alerts that match by meaning also need the [meaning-alert migration](/run-quivr/move-meaning-alerts).
+
+## Tune execution without changing the model
+
+The `hosted.embed` manifest declares these execution-only settings:
+
+- `max_concurrent_requests`, `batch_size` and `max_batch_tokens`;
+- `request_timeout_ms`, `call_budget_ms` and `batch_wait_ms`;
+- `max_retries`.
+
+Keep the plugin id and version unchanged when changing only those settings. Regenerate the manifest from the exact configuration, certify it and install a new immutable registration. Run it at a separate endpoint and keep the old process and exact manifest reachable until its registration is `inactive`. Replacing a manifest at an old endpoint breaks discovery for work pinned to that registration.
+
+Endpoint and authentication changes are not in this execution-only list: they change the recipe and need a rebuild for existing Corpora, even if the vector-space id stays the same. Follow the [plugin configuration and upgrade procedure](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding).
+
+Worker replicas, engine worker slots and provider concurrency are separate controls. Plan them together with the server's throughput; [Run a large import](/run-quivr/run-a-large-import) explains their combined load.
+
+## Next
+
+- [Try and switch a vector model](/run-quivr/switch-a-vector-model).
+- [Run a large import](/run-quivr/run-a-large-import).
+- [Search index compression](/reference/configuration#search-index-compression).

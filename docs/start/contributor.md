@@ -22,7 +22,7 @@ How this repository is organised, tested and changed, for people and coding agen
 - [Issue tracker: Linear](../agents/issue-tracker.md): how specs and tickets are written and tracked
 - [Add a migration that preserves application rollback](../agents/migrations.md): add compatible expansions and defer destructive contracts
 - [Build a private French news search set](../agents/news-set.md): build an encrypted French news search set and validate its human review
-- [Measure open-source embeddings](../agents/oss-embeddings.md): preview and measure open-source embedding models on ephemeral CPU and GPU jobs
+- [Measure open-source embeddings](../agents/oss-embeddings.md): measure public-sample embeddings; links the operator model-choice overview
 - [Testing standard](../agents/testing.md): what a good test looks like here
 - [Triage labels](../agents/triage-labels.md): the five triage labels
 - [Confirm a search finalist on the full engine](../eval-engine-confirmation.md): confirm finalists with aggregate held-out measurements on the full engine
