@@ -109,7 +109,9 @@ func Init(ctx context.Context, cfg Config) (*Runtime, error) {
 		return nil, errors.New("telemetry exporter initialization failed")
 	}
 	r.traces = sdktrace.NewTracerProvider(sdktrace.WithResource(res), sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio))), sdktrace.WithBatcher(exp))
-	r.metrics = sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metrics)))
+	// Instrument families enforce their registered label budgets. The SDK
+	// default of 2,000 would silently collapse valid HTTP route tuples.
+	r.metrics = sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithCardinalityLimit(0), sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metrics)))
 	otel.SetTracerProvider(r.traces)
 	otel.SetMeterProvider(r.metrics)
 	// SDK errors can contain collector URLs and authorization headers. Preserve

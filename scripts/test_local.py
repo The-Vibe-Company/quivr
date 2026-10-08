@@ -4,7 +4,7 @@ These run without Docker: they exercise the pieces `make verify` relies on to
 stay isolated and to explain a failed run. The live proof of stop/migrate/reset
 is scripts/lifecycle.py inside `make verify`.
 """
-import json, os, pathlib, shutil, signal, socket, stat, subprocess, sys, tempfile, time, unittest, uuid
+import http.server, json, os, pathlib, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, unittest, uuid
 from unittest import mock
 
 import local
@@ -145,6 +145,38 @@ class Readiness(unittest.TestCase):
         recorded = json.loads((stack.directory / 'readiness.json').read_text())
         self.assertFalse(recorded['worker']['ready'])
         self.assertIn('last', recorded['worker'])
+
+    def test_exited_process_fails_the_wait_at_once_with_its_last_log_lines(self):
+        # THE-1138: a worker that could not bind its probe, still held by the draining one, exited in 0.5 s
+        # and the wait polled for 20 s. The previous process answering 204 must not stand in for it, nor
+        # may a second worker launched behind another probe.
+        name = 'quivr-test-' + uuid.uuid4().hex[:10]
+        self.addCleanup(shutil.rmtree, local.ROOT / '.scratch' / name, True)
+        stack = local.Stack(name)
+        previous = http.server.HTTPServer(('127.0.0.1', 0), type('Ready', (http.server.BaseHTTPRequestHandler,), {
+            'do_GET': lambda self: (self.send_response(204), self.end_headers()), 'log_message': lambda *_: None}))
+        self.addCleanup(previous.server_close)
+        threading.Thread(target=previous.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True).start()
+        self.addCleanup(previous.shutdown)
+        stack.state['worker_probe_port'] = previous.server_address[1]
+        for config, port in [('worker.json', stack.state['worker_probe_port']), ('queue-bulk.json', local.port())]:
+            (stack.directory / config).write_text(json.dumps({'probe_listen': f'127.0.0.1:{port}'}))
+        with (stack.directory / 'worker-startup.log').open('a') as log:
+            failed = subprocess.Popen([sys.executable, '-c', 'import sys; print("process failed: listen failed"); sys.exit(1)'], stdout=log)
+        failed.wait(timeout=5)
+        running = subprocess.Popen([sys.executable, '-c', 'import sys; sys.stdin.read()'], stdin=subprocess.PIPE)
+        self.addCleanup(running.wait, timeout=5)
+        self.addCleanup(running.stdin.close)
+        for child, config in [(failed, 'worker.json'), (running, 'queue-bulk.json')]:
+            with mock.patch('local.subprocess.Popen', return_value=child):
+                stack.spawn('worker', config)
+        # Synthetic time: the 20 s budget passes on the third reading, so only an exit check fails sooner.
+        clock = iter([0, 0])
+        with mock.patch('local.time.monotonic', side_effect=lambda: next(clock, 21)), mock.patch('local.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError, r'(?s)worker exited with status 1 before it was ready .*worker-startup\.log.*process failed: listen failed'):
+                stack.await_ready('worker_probe_port')
+        recorded = json.loads((stack.directory / 'readiness.json').read_text())
+        self.assertEqual(recorded['worker'], {'ready': False, 'exited': 1, 'waited_seconds': 0})
 
     def test_verification_refuses_a_disk_near_weaviates_read_only_threshold(self):
         # THE-758: past 90% Weaviate turns read-only and Records stop becoming searchable.

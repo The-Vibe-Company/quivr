@@ -398,7 +398,8 @@ var issueCodes = map[string]string{
 // outageAnswer answers like an unavailable plugin: 502 without an envelope.
 func outageAnswer(int) (int, any) { return 502, "bad gateway" }
 
-// Unavailability retries without limit and never records an outcome.
+// Pinned imports retry normalizer outages beyond the old plan budget, then
+// normalize on their original build when it returns.
 func TestUnavailablePluginNeverQuarantines(t *testing.T) {
 	for name, edit := range map[string]func(*fixture){
 		"discovery digest mismatch": func(f *fixture) { f.plugin.digest = "sha256:" + strings.Repeat("0", 64) },
@@ -409,9 +410,28 @@ func TestUnavailablePluginNeverQuarantines(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := setup(t, func(int) (int, any) { return 200, textParts("x") })
+			endpoint := f.pin.Endpoint
+			f.pin.Registration = "registration_a"
+			set, err := plugins.NewPinSet([]*plugins.Pin{f.pin})
+			if err != nil {
+				t.Fatal(err)
+			}
+			live, err := plugins.NewLive("plan_a", set)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attempts := 0
+			ctx, err := live.Pin(context.Background(), plugins.Work{Kind: plugins.WorkIngestion, Plan: "plan_a"}, func(context.Context) (int, error) { attempts++; return attempts, nil }, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.service.Pin = live
+			if err = live.Store("plan_b", nil); err != nil {
+				t.Fatal(err)
+			}
 			edit(f)
 			for i := 0; i < normalization.MaxAttemptsCap+2; i++ {
-				if err := f.service.Normalize(context.Background(), "org_a", "receipt_1"); err == nil {
+				if err := f.service.Normalize(ctx, "org_a", "receipt_1"); err == nil {
 					t.Fatal("unavailability reported success")
 				}
 			}
@@ -420,6 +440,12 @@ func TestUnavailablePluginNeverQuarantines(t *testing.T) {
 			}
 			if last := f.repo.progress[len(f.repo.progress)-1]; last != "retrying:plugin_unavailable" {
 				t.Fatalf("progress %v", f.repo.progress)
+			}
+			f.pin.Endpoint = endpoint
+			f.plugin.digest = f.pin.ManifestDigest
+			f.plugin.answer = func(int) (int, any) { return 200, textParts("x") }
+			if err = f.service.Normalize(ctx, "org_a", "receipt_1"); err != nil || len(f.store.saved) != 1 || f.store.saved["version_1"].Outcome != content.OutcomeNormalized {
+				t.Fatalf("restored normalizer did not finish the original import: %+v (%v)", f.store.saved, err)
 			}
 		})
 	}

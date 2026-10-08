@@ -29,7 +29,7 @@ func (a *API) serveAccess(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	r.Pattern = a.router.Pattern(r)
-	logRequest(w, r, keyID, a.pushClientIP(r).String(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	logRequest(w, r, keyID, a.pushClientIP(r).String(), a.loadMetrics, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.draining != nil && a.draining() {
 			writeError(w, publicerr.ContentUnavailable, nil)
 			return
@@ -51,14 +51,37 @@ func WithLifecycle(group *lifecycle.Group) Option {
 
 // AccessLog adds the same event envelope to private probe HTTP requests.
 // The handler must use registered route patterns rather than raw request paths.
-func AccessLog(next http.Handler) http.Handler {
+func AccessLog(next http.Handler, metrics ...*telemetry.LoadMetrics) http.Handler {
+	var load *telemetry.LoadMetrics
+	if len(metrics) > 0 {
+		load = metrics[0]
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if mux, ok := next.(*http.ServeMux); ok {
+			_, pattern := mux.Handler(r)
+			if pattern == "" {
+				// A method rejection still belongs to its registered path. Ask
+				// the mux using fixed methods without dispatching a handler.
+				probe := *r
+				for _, method := range telemetry.HTTPMethods() {
+					probe.Method = method
+					_, pattern = mux.Handler(&probe)
+					if pattern != "" {
+						break
+					}
+				}
+			}
+			if _, path, found := strings.Cut(pattern, " "); found {
+				pattern = path
+			}
+			r.Pattern = pattern
+		}
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-		logRequest(w, r, "", ip, next)
+		logRequest(w, r, "", ip, load, next)
 	})
 }
 
-func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, next http.Handler) {
+func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, metrics *telemetry.LoadMetrics, next http.Handler) {
 	start := time.Now()
 	var requestID [16]byte
 	_, _ = rand.Read(requestID[:])
@@ -72,7 +95,16 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, next h
 	if route == "" {
 		route = "unmatched"
 	}
-	ctx, span := telemetry.Start(ctx, safeMethod(r.Method)+" "+route, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("http.route", route), attribute.String("http.request.method", safeMethod(r.Method))))
+	finish := metrics.Begin(route, telemetry.HTTPMethod(r.Method))
+	observed := &responseWriter{ResponseWriter: w}
+	metricStatus := http.StatusInternalServerError
+	defer func() {
+		if observed.status != 0 {
+			metricStatus = observed.status
+		}
+		finish(metricStatus, time.Since(start))
+	}()
+	ctx, span := telemetry.Start(ctx, telemetry.HTTPMethod(r.Method)+" "+route, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String("http.route", route), attribute.String("http.request.method", telemetry.HTTPMethod(r.Method))))
 	defer span.End()
 	sc := span.SpanContext()
 	if sc.IsValid() {
@@ -80,18 +112,8 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, next h
 		w.Header().Set("X-Span-ID", sc.SpanID().String())
 	}
 	r = r.WithContext(ctx)
-	observed := &responseWriter{ResponseWriter: w}
 	defer func() {
-		route := r.Pattern
-		if route == "" {
-			route = "unmatched"
-		}
-		method := r.Method
-		switch method {
-		case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE":
-		default:
-			method = "OTHER"
-		}
+		method := telemetry.HTTPMethod(r.Method)
 		status := observed.status
 		if status == 0 {
 			status = http.StatusOK
@@ -106,6 +128,7 @@ func logRequest(w http.ResponseWriter, r *http.Request, keyID, ip string, next h
 			"response_size", observed.size, "client_ip", ip, "api_key_id", keyID, "error_code", observed.errorCode)
 	}()
 	next.ServeHTTP(observed, r)
+	metricStatus = http.StatusOK
 }
 
 type responseWriter struct {
@@ -151,11 +174,4 @@ func validRequestID(id string) bool {
 		}
 	}
 	return true
-}
-func safeMethod(method string) string {
-	switch method {
-	case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE":
-		return method
-	}
-	return "OTHER"
 }

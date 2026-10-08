@@ -2033,15 +2033,17 @@ type DeliveryAttemptPage struct {
 // On an optional route every quarantining code above that comes from the normalizer is instead
 // listed on a searchable Version published through the built-in text path. A plugin that is
 // unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-// pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-// Plan names it; the Receipt shows plugin_unavailable while it retries.
+// pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+// diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+// shows plugin_unavailable while it retries.
 //
-//   - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-//     normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-//     reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-//     moved to the plugin that
-//     replaced it: the Version is quarantined, or, when its text was already searchable, its
-//     enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+//   - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+//     during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+//     longer serve the work. Live imports
+//     and normalization now retain their pin and retry reachability outages until the exact build
+//     returns; they never silently move to its replacement. A Version with this diagnostic is
+//     quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+//     plugin_version name the original plan and plugin.
 //   - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
 //     rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
 //     work stopped instead of calling it, with the same outcome and fields as
@@ -2773,15 +2775,17 @@ type QuarantinedVersion struct {
 	// On an optional route every quarantining code above that comes from the normalizer is instead
 	// listed on a searchable Version published through the built-in text path. A plugin that is
 	// unavailable (connection failure, 5xx without an error envelope, discovery that does not match the
-	// pinned manifest) is retried with backoff and produces no diagnostic while the active Pipeline
-	// Plan names it; the Receipt shows plugin_unavailable while it retries.
+	// pinned manifest) is retried with backoff. Live imports, including normalization, produce no
+	// diagnostic for these outages even after the plugin leaves the active Pipeline Plan; the Receipt
+	// shows plugin_unavailable while it retries.
 	//
-	// - pinned_plugin_unavailable: the processing of this Version started on a Pipeline Plan whose
-	//   normalizer or ingestion plugin an operator has since replaced, and that plugin could not be
-	//   reached, or could no longer serve it, for the deployment's attempt budget. The work is never
-	//   moved to the plugin that
-	//   replaced it: the Version is quarantined, or, when its text was already searchable, its
-	//   enrichment stops. plan, plugin and plugin_version name the plan and the plugin version.
+	// - pinned_plugin_unavailable: an older plan's plugin exhausted the deployment's attempt budget
+	//   during an Operation or after ingestion invocation deadlines, or its ingestion owner could no
+	//   longer serve the work. Live imports
+	//   and normalization now retain their pin and retry reachability outages until the exact build
+	//   returns; they never silently move to its replacement. A Version with this diagnostic is
+	//   quarantined, or keeps its searchable text while enrichment stops. plan, plugin and
+	//   plugin_version name the original plan and plugin.
 	// - pinned_plan_stopped: the processing of this Version started on a Pipeline Plan that an operator
 	//   rolled back with pinned_work=stop. At its next call to a plugin that left the active plan, the
 	//   work stopped instead of calling it, with the same outcome and fields as
@@ -5098,13 +5102,13 @@ type ClientInterface interface {
 	// SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSearchProfiles performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
@@ -7019,7 +7023,7 @@ func (c *Client) GetSavedQueryVersion(ctx context.Context, savedQueryId string, 
 // SearchRecordsWithBody performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -7035,7 +7039,7 @@ func (c *Client) SearchRecordsWithBody(ctx context.Context, contentType string, 
 // SearchRecords performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *Client) SearchRecords(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchRecordsRequest(c.Server, body)
 	if err != nil {
@@ -12969,7 +12973,7 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
@@ -12977,7 +12981,7 @@ type ClientWithResponsesInterface interface {
 	// SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+	// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 	SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error)
 
 	// ListSearchProfilesWithResponse performs a GET /v0/search/profiles (the `ListSearchProfiles` operationId) request.
@@ -19399,7 +19403,7 @@ func (c *ClientWithResponses) GetSavedQueryVersionWithResponse(ctx context.Conte
 // SearchRecordsWithBodyWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request,
 // with any type of body and a specified content type.
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
@@ -19413,7 +19417,7 @@ func (c *ClientWithResponses) SearchRecordsWithBodyWithResponse(ctx context.Cont
 // SearchRecordsWithResponse performs a POST /v0/search (the `SearchRecords` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+// Resolve the requested profile, compile mandatory Corpus/Organization prefilters and any requested filter, obtain candidates, then canonically hydrate and reauthorize every returned segment. Lexical-first records remain eligible without embeddings; semantic-only queries require vector coverage. Profile selection does not change access/currentness rules. When a retrieval plugin is pinned, it ranks. It asks the engine for candidates in up to three rounds and returns its ranking, which may hold only candidates the engine served in this search, each already authorized and hydrated. Each API process admits at most 64 active searches across callers. At capacity it immediately returns retryable 503 search_unavailable with Retry-After before storage or plugin work. A query encoding model that cannot answer returns retryable 503 model_unavailable, including the legacy inference service and the ingestion plugin that owns the requested vector space.
 func (c *ClientWithResponses) SearchRecordsWithResponse(ctx context.Context, body SearchRecordsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchRecordsResponse, error) {
 	rsp, err := c.SearchRecords(ctx, body, reqEditors...)
 	if err != nil {

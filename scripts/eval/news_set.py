@@ -849,11 +849,6 @@ def build(corpus, providers, count=1500, seed=992, salt=None):
     return Build(working, held_out, review, report, version)
 
 
-def write_trec(directory, data):
-    import trec
-    trec.write(directory, data['corpus'], data['queries'], data['qrels'])
-
-
 def archive(data):
     """TREC files and private provenance, assembled without plaintext disk writes."""
     encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True)
