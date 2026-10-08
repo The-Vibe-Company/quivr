@@ -181,7 +181,7 @@ func (p provider) requestWithCost(ctx context.Context, inputs []string, mode str
 		if v, ok := retryAfter(res.Header.Get("Retry-After"), time.Now()); ok {
 			delay = v
 		}
-		if res.StatusCode == 429 {
+		if res.StatusCode == http.StatusTooManyRequests || res.StatusCode == http.StatusServiceUnavailable {
 			p.gate.throttle(delay)
 		}
 		p.gate.release()

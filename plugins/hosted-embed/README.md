@@ -220,7 +220,7 @@ these logs. Batching preserves vector-space identity and resume-cache keys.
 Document authentication, endpoint and model configuration failures retry; they
 affect the provider connection and do not quarantine individual items.
 
-A 429 response shares its `Retry-After` delay across subsequent calls in the
+A 429 or 503 response shares its `Retry-After` delay across subsequent calls in the
 plugin process, including calls from other documents and query encoding.
 Already outstanding requests may finish. Without `Retry-After`, the bounded
 retry backoff supplies the shared delay. This cap and the engine's evaluation
