@@ -344,7 +344,7 @@ export async function fakeEngine(page: Page, ws = workspace()): Promise<Engine> 
   const exploreItem = (a: Article) => ({
     ...feedItem(a),
     metadata: Object.fromEntries([
-      ...Object.entries(a.metadata || {}).map(([name, value]) => [`metadata.${name}`, [value].flat()]),
+      ...Object.entries({ language: "fr", ...a.metadata }).map(([name, value]) => [`metadata.${name}`, [value].flat()]),
       ...Object.entries(a.own || {}).map(([name, value]) => [name, [value].flat()]),
     ]),
     version: a.previous ? 2 : 1,

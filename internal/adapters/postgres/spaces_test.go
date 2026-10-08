@@ -390,6 +390,11 @@ func TestVectorSpaceCoverageSearchMeasurement(t *testing.T) {
 			t.Fatalf("completed coverage: %v", err)
 		}
 		if len(completed) > 0 && !completed[0].CoverageUnknown {
+			for _, sp := range completed {
+				if sp.ID == f.space.ID && sp.CoverageAgeMS == nil {
+					t.Fatalf("completed coverage without its age: %+v", sp)
+				}
+			}
 			f.checkCounts(t, completed, total, cuts, copies)
 			return
 		}
