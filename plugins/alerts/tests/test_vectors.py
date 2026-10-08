@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from quivr_plugin import TerminalError
 from quivr_plugin.testing import invoke_subscription_fixture
 
 from alerts.rule import plugin
@@ -42,6 +43,7 @@ class Vectors(unittest.TestCase):
                     self.assertEqual(evidence.details["segment_id"], "body-1")
 
     def ask(self, evaluations=None, *, parts=None, query_vectors=None, record=None, **kwargs):
+        kwargs.setdefault("configuration", {"vectors": {"thresholds": {SPACE: 0.8}}})
         return handler_decisions(
             evaluations or [(expression(), {})],
             parts=parts if parts is not None else [
@@ -101,13 +103,16 @@ class Vectors(unittest.TestCase):
         decisions = self.ask([(expression(), {"threshold": 0.6}), (expression(), {"threshold": 0.600001})],
                              parts=parts, query_vectors=[{"vector_space_id": SPACE, "vector": [1, 0]}] * 2)
         self.assertEqual([item["decision"] for item in decisions], ["match", "no_match"])
-        self.assertEqual(self.ask(parts=parts, configuration={"vectors": {"threshold": 0.6}})[0]["decision"], "match")
-        for similarity, expected in ((0.79, "no_match"), (0.81, "match")):
-            with self.subTest(default_similarity=similarity):
-                query = {"vector_space_id": SPACE, "vector": [similarity, math.sqrt(1 - similarity ** 2)]}
-                self.assertEqual(self.ask(query_vectors=[query])[0]["decision"], expected)
-        self.assertEqual(self.ask(configuration={"described": {"threshold": 0.2}})[0]["evidence"]["details"]["threshold"],
-                         self.ask()[0]["evidence"]["details"]["threshold"])
+        self.assertEqual(self.ask(parts=parts, configuration={"vectors": {"thresholds": {SPACE: 0.6}}})[0]["decision"], "match")
+        self.assertEqual(self.ask([(expression(), {"threshold": 0.7})], parts=parts,
+                                 configuration={"vectors": {"thresholds": {SPACE: 0.6}}})[0]["decision"], "no_match")
+        for configuration in ({}, {"vectors": {"thresholds": {"another-space": 0.6}}}, {"described": {"threshold": 0.2}}):
+            with self.subTest(configuration=configuration):
+                with self.assertRaises(TerminalError) as caught:
+                    self.ask(configuration=configuration)
+                self.assertEqual(caught.exception.code, "vector_threshold_required")
+                self.assertIn(SPACE, str(caught.exception))
+                self.assertEqual(self.ask([(expression(), {"threshold": 0.6})], configuration=configuration)[0]["decision"], "match")
 
     def test_mixed_modes_short_circuit_before_readiness_otherwise_use_meaning(self):
         cases = [
