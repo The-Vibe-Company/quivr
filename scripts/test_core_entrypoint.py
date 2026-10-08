@@ -245,7 +245,7 @@ class CoreEntrypointTest(unittest.TestCase):
                           'model': '/app/.scratch/tokenizer/embeddinggemma-2.json',
                           'sha256': '4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4'},
             'max_tokens_per_segment': 2048, 'overlap': 0,
-            'batch_size': 32, 'max_batch_tokens': 65536, 'max_concurrent_requests': 4,
+            'batch_size': 32, 'max_batch_tokens': 65536, 'max_concurrent_requests': 16,
             'request_timeout_ms': 10000, 'call_budget_ms': 90000, 'usd_per_million_tokens': 0,
         })
         self.assertNotIn('fixture-modal-token', json.dumps(config))
