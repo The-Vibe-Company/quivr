@@ -65,7 +65,8 @@ const MAX_ZONES = 8;
  * missing `settle` ms after the document became searchable are shown as not
  * recorded: a Corpus without vectors, or no alert to decide. `optional` names
  * the document field the core sets to "not_applicable" when the step will
- * never come; the cell then says so at once.
+ * never come; the cell then says so at once, unless a quarantine or a
+ * withdrawal already stopped the document.
  */
 export const STEPS = [
   {
@@ -186,7 +187,12 @@ export function flow(doc, limit, now) {
         ms !== undefined && cell.limit !== null && ms > cell.limit
           ? "slow"
           : "done";
-    } else if (step.optional && doc[step.optional.field] === "not_applicable") {
+    } else if (
+      step.optional &&
+      !quarantined &&
+      !withdrawn &&
+      doc[step.optional.field] === "not_applicable"
+    ) {
       cell.state = "none";
       cell.reason = step.optional.reason;
     } else if (index < lastDone && !step.settle) {

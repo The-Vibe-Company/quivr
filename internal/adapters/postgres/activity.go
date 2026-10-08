@@ -30,11 +30,11 @@ LEFT JOIN ingestion_receipts rc ON (rc.organization,rc.record_id,rc.acceptance_o
 
 // evaluationAppliesSQL is whether alert evaluation applies to the Version:
 // it was evaluated, an evaluation of it is pending, or an enabled
-// Subscription's current saved query covers its Corpus now. Each test reads
-// indexes only; the last one is bounded by the Subscriptions ever scoped to
-// the Corpus.
+// Subscription's current saved query covers its Corpus now. Each test is an
+// index-backed lookup; the last one is bounded by the Subscriptions ever
+// scoped to the Corpus.
 const evaluationAppliesSQL = `(v.evaluated_at IS NOT NULL
- OR EXISTS(SELECT 1 FROM evaluation_intents i WHERE i.organization=a.organization AND i.record_version_id=a.version_id AND i.state='pending')
+ OR EXISTS(SELECT 1 FROM evaluation_intents i WHERE i.organization=a.organization AND i.record_version_id=a.version_id AND i.state='pending' AND i.kind='evaluation')
  OR EXISTS(SELECT 1 FROM subscription_corpora sc
   JOIN subscriptions s ON (s.organization,s.id)=(sc.organization,sc.subscription_id)
   JOIN subscription_versions sv ON (sv.organization,sv.id)=(s.organization,s.current_version_id)

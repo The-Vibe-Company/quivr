@@ -110,6 +110,11 @@ test("each step is done, slow, running, to do, not recorded or stopped by a quar
     "run todo todo todo none",
   );
   assert.equal(states({ ...quiet, evaluation: "applicable" }), "done done done done run");
+  // A quarantine or a withdrawal stops the document first, as in its timeline.
+  assert.equal(
+    states({ ...cases[4].doc, evaluation: "not_applicable" }),
+    "done error todo todo todo",
+  );
   assert.equal(
     states({ ...cases[0].doc, evaluation: "not_applicable" }),
     "done slow done done slow",
