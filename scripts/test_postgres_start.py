@@ -78,17 +78,24 @@ class PostgresStart(unittest.TestCase):
             self.assertIn('min_wal_size=' + minimum, argv)
 
     def test_invalid_budget_and_limits_refuse_startup(self):
-        for settings in [{'QUIVR_POSTGRES_MEMORY_MB': value} for value in ['0', '-1', 'bad', '32']] + [
-                {'QUIVR_POSTGRES_MEMORY_MB': '1024', 'QUIVR_POSTGRES_MAX_CONNECTIONS': '0'},
-                {'QUIVR_POSTGRES_MEMORY_MB': '1024', 'QUIVR_POSTGRES_WORK_MEM': 'bad'}] + [
-                {'QUIVR_POSTGRES_MEMORY_MB': '1024', **settings} for settings in [
-                    {'QUIVR_POSTGRES_VOLUME_MB': '0'}, {'QUIVR_POSTGRES_VOLUME_MB': '1GB'},
-                    {'QUIVR_POSTGRES_MAX_WAL_SIZE': 'bad'}, {'QUIVR_POSTGRES_MAX_WAL_SIZE': '16MB'},
-                    {'QUIVR_POSTGRES_MAX_WAL_SIZE': '1GB', 'QUIVR_POSTGRES_MIN_WAL_SIZE': '2GB'}]]:
+        cases = [({'QUIVR_POSTGRES_MEMORY_MB': value}, 'QUIVR_POSTGRES_MEMORY_MB')
+                 for value in ['0', '-1', 'bad', '32']]
+        cases += [({'QUIVR_POSTGRES_MEMORY_MB': '1024', **settings}, field)
+                  for settings, field in [
+                      ({'QUIVR_POSTGRES_MAX_CONNECTIONS': '0'}, 'QUIVR_POSTGRES_MAX_CONNECTIONS'),
+                      ({'QUIVR_POSTGRES_WORK_MEM': 'bad'}, 'memory-settings'),
+                      ({'QUIVR_POSTGRES_VOLUME_MB': '0'}, 'QUIVR_POSTGRES_VOLUME_MB'),
+                      ({'QUIVR_POSTGRES_VOLUME_MB': '1GB'}, 'QUIVR_POSTGRES_VOLUME_MB'),
+                      ({'QUIVR_POSTGRES_MAX_WAL_SIZE': 'bad'}, 'QUIVR_POSTGRES_MAX_WAL_SIZE'),
+                      ({'QUIVR_POSTGRES_MAX_WAL_SIZE': '16MB'}, 'QUIVR_POSTGRES_MAX_WAL_SIZE'),
+                      ({'QUIVR_POSTGRES_MAX_WAL_SIZE': '1GB', 'QUIVR_POSTGRES_MIN_WAL_SIZE': '2GB'},
+                       'QUIVR_POSTGRES_MIN_WAL_SIZE')]]
+        for settings, field in cases:
             with self.subTest(settings=settings):
                 result = self.run_start(settings)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, '')
+                self.assertIn('Invalid PostgreSQL startup setting: ' + field, result.stderr)
 
     def test_other_image_commands_are_forwarded(self):
         result = self.run_start({}, ('postgres', '--version'))

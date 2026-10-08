@@ -34,7 +34,7 @@ The template builds `postgres.Dockerfile` and applies the [shared startup settin
 256 server connections, memory-based buffers/cache, bounded maintenance memory,
 `dynamic_shared_memory_type=mmap`, `pg_stat_statements` and I/O timing.
 WAL budgets scale with the data volume up to 32 GiB/4 GiB, with 15-minute checkpoints
-and LZ4 compression. Set `QUIVR_POSTGRES_VOLUME_MB` on postgres if the mount reports
+and LZ4 compression. Set `QUIVR_POSTGRES_VOLUME_MB` (integer MiB) on postgres if the mount reports
 host capacity instead of its quota; the shared guide covers overrides and trade-offs.
 `synchronous_commit`, `fsync` and `full_page_writes` stay on for durable acknowledged writes.
 `jit=on` is retained: a local A/B run of the updated backlog query did not trigger JIT at default thresholds.
