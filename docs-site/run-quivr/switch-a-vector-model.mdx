@@ -74,6 +74,15 @@ Queries bypass the collection window. See the plugin's
 [limits and defaults](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#limits-and-defaults)
 for cancellation, refusal isolation and batch usage logs.
 
+With a matching local tokenizer configured, document cutting uses a pool of
+persistent helpers. `tokenizer_processes: 0` (the default) uses up to four
+helpers, limited by the CPUs available to the plugin's Go runtime. Set it to
+1–32 to override the pool size. Each loaded helper holds its own runtime and
+tokenizer vocabulary; use a smaller pool when memory is limited. Pool tuning is
+an execution setting and preserves the ingestion recipe. Follow the plugin's
+[throughput registration steps](https://github.com/The-Vibe-Company/quivr/blob/main/plugins/hosted-embed/README.md#tune-throughput-without-rebuilding)
+to change it while earlier work drains.
+
 
 The generated manifest binds the model and settings to a distinct vector space, the coordinate system for its numeric vectors. Use that exact configuration when pinning or registering it. Copy the space name from `contributions.ingestion.spaces`; its API id is that name followed by `@` and the declared space `version`.
 

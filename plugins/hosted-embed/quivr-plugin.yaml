@@ -5,6 +5,7 @@
   },
   "configuration": {
     "execution_keys": [
+      "tokenizer_processes",
       "max_concurrent_requests",
       "batch_size",
       "max_batch_tokens",
@@ -105,6 +106,9 @@
         },
         "tokenizer": {
           "const": null
+        },
+        "tokenizer_processes": {
+          "const": 0
         },
         "usd_per_million_tokens": {
           "const": null

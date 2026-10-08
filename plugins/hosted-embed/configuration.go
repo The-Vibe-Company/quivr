@@ -15,28 +15,29 @@ import (
 const pluginID = "hosted.embed"
 
 type configuration struct {
-	PluginID          string                  `json:"plugin_id"`
-	Format            string                  `json:"format"`
-	BaseURL           string                  `json:"base_url"`
-	Auth              string                  `json:"auth"`
-	Model             string                  `json:"model"`
-	Dimensions        int                     `json:"dimensions"`
-	SendDimensions    bool                    `json:"send_dimensions"`
-	Metric            string                  `json:"metric"`
-	Revision          string                  `json:"model_revision"`
-	PluginVersion     string                  `json:"plugin_version"`
-	QueryPrefix       string                  `json:"query_prefix"`
-	DocumentPrefix    string                  `json:"document_prefix"`
-	MaxTokens         int                     `json:"max_tokens_per_segment"`
-	BodyTokens        int                     `json:"body_tokens"`
-	MaxChunks         int                     `json:"max_chunks"`
-	RebalanceTail     bool                    `json:"rebalance_tail"`
-	TailMinFraction   float64                 `json:"tail_min_fraction"`
-	TitleSource       string                  `json:"title_source"`
-	TitleContextParts []string                `json:"title_context_parts,omitempty"`
-	DocumentTemplate  string                  `json:"document_template"`
-	QueryTemplate     string                  `json:"query_template"`
-	Tokenizer         *tokenizerConfiguration `json:"tokenizer,omitempty"`
+	PluginID           string                  `json:"plugin_id"`
+	Format             string                  `json:"format"`
+	BaseURL            string                  `json:"base_url"`
+	Auth               string                  `json:"auth"`
+	Model              string                  `json:"model"`
+	Dimensions         int                     `json:"dimensions"`
+	SendDimensions     bool                    `json:"send_dimensions"`
+	Metric             string                  `json:"metric"`
+	Revision           string                  `json:"model_revision"`
+	PluginVersion      string                  `json:"plugin_version"`
+	QueryPrefix        string                  `json:"query_prefix"`
+	DocumentPrefix     string                  `json:"document_prefix"`
+	MaxTokens          int                     `json:"max_tokens_per_segment"`
+	BodyTokens         int                     `json:"body_tokens"`
+	MaxChunks          int                     `json:"max_chunks"`
+	RebalanceTail      bool                    `json:"rebalance_tail"`
+	TailMinFraction    float64                 `json:"tail_min_fraction"`
+	TitleSource        string                  `json:"title_source"`
+	TitleContextParts  []string                `json:"title_context_parts,omitempty"`
+	DocumentTemplate   string                  `json:"document_template"`
+	QueryTemplate      string                  `json:"query_template"`
+	Tokenizer          *tokenizerConfiguration `json:"tokenizer,omitempty"`
+	TokenizerProcesses int                     `json:"tokenizer_processes"`
 	// BatchWaitMS collects concurrent document inputs; zero disables collection.
 	BatchWaitMS           int      `json:"batch_wait_ms"`
 	BatchSize             int      `json:"batch_size"`
@@ -86,6 +87,9 @@ func parseConfiguration(raw []byte) (configuration, error) {
 	}
 	if c.Tokenizer != nil && (c.Tokenizer.Python == "" || c.Tokenizer.Model == "" || strings.ContainsRune(c.Tokenizer.Python, 0) || strings.ContainsRune(c.Tokenizer.Model, 0) || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(c.Tokenizer.SHA256)) {
 		return c, fmt.Errorf("tokenizer requires python, model and sha256")
+	}
+	if c.TokenizerProcesses < 0 || c.TokenizerProcesses > 32 {
+		return c, fmt.Errorf("tokenizer_processes must be between 0 and 32")
 	}
 	u, err := url.Parse(c.BaseURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -189,7 +193,7 @@ func (c configuration) manifest(command []string) ([]byte, error) {
 	if c.InputPrice != nil {
 		space["input_price"] = map[string]any{"usd_per_million_tokens": *c.InputPrice}
 	}
-	m := map[string]any{"id": c.PluginID, "version": c.PluginVersion, "description": "Text passages embedded with a configured hosted or OpenAI-compatible model.", "compatibility": map[string]string{"engine": ">=0.1.0 <0.3.0", "plugin_api": ">=0.18.0 <0.19.0"}, "contributions": map[string]any{"ingestion": map[string]any{"paging": true, "spaces": map[string]any{c.spaceID(): space}, "timeout_ms": 120000, "query_timeout_ms": 10000, "limits": map[string]int{"max_segments": 256}}}, "configuration": map[string]any{"schema": schema, "execution_keys": []string{"max_concurrent_requests", "batch_size", "max_batch_tokens", "request_timeout_ms", "call_budget_ms", "batch_wait_ms", "max_retries"}}, "secrets": []any{map[string]any{"name": "EMBED_API_KEY", "required": c.Auth != "none", "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration."}}, "run": map[string]any{"command": command}}
+	m := map[string]any{"id": c.PluginID, "version": c.PluginVersion, "description": "Text passages embedded with a configured hosted or OpenAI-compatible model.", "compatibility": map[string]string{"engine": ">=0.1.0 <0.3.0", "plugin_api": ">=0.18.0 <0.19.0"}, "contributions": map[string]any{"ingestion": map[string]any{"paging": true, "spaces": map[string]any{c.spaceID(): space}, "timeout_ms": 120000, "query_timeout_ms": 10000, "limits": map[string]int{"max_segments": 256}}}, "configuration": map[string]any{"schema": schema, "execution_keys": []string{"tokenizer_processes", "max_concurrent_requests", "batch_size", "max_batch_tokens", "request_timeout_ms", "call_budget_ms", "batch_wait_ms", "max_retries"}}, "secrets": []any{map[string]any{"name": "EMBED_API_KEY", "required": c.Auth != "none", "description": "Provider key from the plugin environment; required by bearer and api-key authentication. Never put it in configuration."}}, "run": map[string]any{"command": command}}
 	return json.MarshalIndent(m, "", "  ")
 }
 

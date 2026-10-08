@@ -402,6 +402,11 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 	}
 	c := testConfig("openai", "http://127.0.0.1:9")
 	original := c.spaceID()
+	tuned := c
+	tuned.TokenizerProcesses = 2
+	if tuned.spaceID() != original {
+		t.Fatal("tokenizer process tuning changed the vector space")
+	}
 	for _, change := range []func(*configuration){func(c *configuration) { c.Model = "other" }, func(c *configuration) { c.Dimensions = 16 }, func(c *configuration) { c.QueryPrefix = "query: " }, func(c *configuration) { c.Revision = "2" }, func(c *configuration) { c.Metric = "dot" }, func(c *configuration) { c.DocumentTemplate = "document: {text}" }, func(c *configuration) { c.QueryTemplate = "question: {query}" }} {
 		other := c
 		change(&other)
@@ -428,7 +433,7 @@ func TestSpaceIdentityAndConfigurationBinding(t *testing.T) {
 	if len(declared.Secrets) != 1 || declared.Secrets[0].Name != "EMBED_API_KEY" || !declared.Secrets[0].Required {
 		t.Fatalf("provider-neutral credential declaration: %+v", declared.Secrets)
 	}
-	want := []string{"max_concurrent_requests", "batch_size", "max_batch_tokens", "request_timeout_ms", "call_budget_ms", "batch_wait_ms", "max_retries"}
+	want := []string{"tokenizer_processes", "max_concurrent_requests", "batch_size", "max_batch_tokens", "request_timeout_ms", "call_budget_ms", "batch_wait_ms", "max_retries"}
 	slices.Sort(want)
 	slices.Sort(declared.Configuration.ExecutionKeys)
 	if !slices.Equal(declared.Configuration.ExecutionKeys, want) {
@@ -625,15 +630,18 @@ func TestResumeCacheIsolatesOrganizationsAndQueryMode(t *testing.T) {
 func TestConfigAndContentRefusals(t *testing.T) {
 	// Literal external keys and omission protect the configuration contract.
 	for _, tc := range []struct {
-		raw  string
-		wait int
+		raw       string
+		wait      int
+		processes int
 	}{
-		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8}`, 25},
-		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":0}`, 0},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8}`, 25, 0},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":0}`, 0, 0},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer_processes":0}`, 25, 0},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer_processes":2}`, 25, 2},
 	} {
 		c, err := parseConfiguration([]byte(tc.raw))
-		if err != nil || c.BatchWaitMS != tc.wait || c.DocumentTemplate != "{prefix}{text}" || c.QueryTemplate != "{prefix}{query}" {
-			t.Fatalf("batch collection default: %d %v", c.BatchWaitMS, err)
+		if err != nil || c.BatchWaitMS != tc.wait || c.TokenizerProcesses != tc.processes || c.DocumentTemplate != "{prefix}{text}" || c.QueryTemplate != "{prefix}{query}" {
+			t.Fatalf("configuration defaults: %+v %v", c, err)
 		}
 	}
 	for _, tc := range []struct{ raw, reason string }{
@@ -650,6 +658,8 @@ func TestConfigAndContentRefusals(t *testing.T) {
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer":{"python":"bad\u0000path","model":"local.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`, "tokenizer requires"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer":{"python":"python3","model":"bad\u0000path","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`, "tokenizer requires"},
 
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer_processes":-1}`, "tokenizer_processes must be between 0 and 32"},
+		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"tokenizer_processes":33}`, "tokenizer_processes must be between 0 and 32"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":-1}`, "batch_wait_ms must be between 0 and 100"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":101}`, "batch_wait_ms must be between 0 and 100"},
 		{`{"format":"openai","base_url":"http://example.org","auth":"none","model":"m","dimensions":8,"batch_wait_ms":100,"call_budget_ms":100}`, "batch_wait_ms must be less than call_budget_ms"},
