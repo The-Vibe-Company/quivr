@@ -110,6 +110,9 @@ func (s RebuildStore) beginRebuildAttempt(ctx context.Context, org, id string) (
 		return out, err
 	}
 	out.Operation = op
+	if err = tx.QueryRow(ctx, `SELECT rebuild_cursor FROM operations WHERE organization=$1 AND id=$2`, org, id).Scan(&out.Cursor); err != nil {
+		return out, err
+	}
 	return out, tx.Commit(ctx)
 }
 
@@ -125,6 +128,28 @@ func (s RebuildStore) RebuildCandidates(ctx context.Context, org, id string, lim
 	// A final full gap sweep catches promotions and enrichment behind the cursor.
 	// Activation independently checks again under its canonical cutover fence.
 	return s.rebuildCandidatesAfter(ctx, org, corpusID, generationID, "", limit)
+}
+
+// RebuildCandidatesAfter advances only the dispatch scan. Persisted progress
+// and the final gap sweep remain owned by RebuildCandidates/CheckpointRebuild.
+func (s RebuildStore) RebuildCandidatesAfter(ctx context.Context, org, id, after string, limit int) ([]retrieval.RebuildCandidate, error) {
+	var corpusID, generationID string
+	if err := s.Pool.QueryRow(ctx, `SELECT corpus_id,target_generation_id FROM operations WHERE organization=$1 AND id=$2`, org, id).Scan(&corpusID, &generationID); err != nil {
+		return nil, notFound(err)
+	}
+	return s.rebuildCandidatesAfter(ctx, org, corpusID, generationID, after, limit)
+}
+
+// RebuildCandidatePending distinguishes withdrawn content from a still-eligible
+// unreadable Version without depending on page size or dispatch progress.
+func (s RebuildStore) RebuildCandidatePending(ctx context.Context, org, id, version string) (bool, error) {
+	var corpusID, generationID string
+	if err := s.Pool.QueryRow(ctx, `SELECT corpus_id,target_generation_id FROM operations WHERE organization=$1 AND id=$2`, org, id).Scan(&corpusID, &generationID); err != nil {
+		return false, notFound(err)
+	}
+	var pending bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+` AND v.id=$4)`, org, corpusID, generationID, version).Scan(&pending)
+	return pending, err
 }
 
 var rebuildCandidatesSQL = `SELECT r.id,v.id,r.namespace,EXISTS(SELECT 1 FROM segments sg JOIN LATERAL ` + embeddingCoverageForSegmentSQL("sg.organization", "sg.id") + ` ec ON true JOIN projection_generations rg ON rg.id=ec.generation_id JOIN projection_generations tg ON tg.id=$3 WHERE sg.organization=v.organization AND sg.version_id=v.id AND ec.space_id=tg.space_id AND rg.space_id=tg.space_id AND ec.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + `)
@@ -444,8 +469,8 @@ var _ retrieval.RebuildStore = RebuildStore{}
 // RebuildStore persists rebuild state.
 type RebuildStore struct{ Pool *pgxpool.Pool }
 
-// CheckpointRebuild persists a joined successful page, never an individual
-// concurrent completion. A reconciliation page may restart below the old cursor.
+// CheckpointRebuild persists an exclusive position below unfinished work.
+// A reconciliation scan may restart below the old cursor.
 func (s RebuildStore) CheckpointRebuild(ctx context.Context, org, id, after string) error {
 	tag, err := s.Pool.Exec(ctx, `UPDATE operations SET rebuild_cursor=$3,updated_at=now() WHERE organization=$1 AND id=$2 AND state='running'`, org, id, after)
 	if err != nil {

@@ -329,10 +329,45 @@ func TestRebuildCursorResumesAndSweepsNewVersions(t *testing.T) {
 	if err != nil || len(page) != 2 || page[0].VersionID != versions[1].VersionID || page[1].VersionID != versions[2].VersionID {
 		t.Fatalf("first page=%+v err=%v", page, err)
 	}
+	// Dispatch can move beyond an unfinished low Version without committing
+	// that scan position. Forward exhaustion must not wrap into active work.
+	forward, err := checkpoint.RebuildCandidatesAfter(f.ctx, f.org, op.ID, page[1].VersionID, 2)
+	if err != nil || len(forward) != 1 || forward[0].VersionID != versions[3].VersionID {
+		t.Fatalf("forward scan=%+v err=%v; want only highest Version", forward, err)
+	}
+	if exhausted, err := checkpoint.RebuildCandidatesAfter(f.ctx, f.org, op.ID, versions[3].VersionID, 2); err != nil || len(exhausted) != 0 {
+		t.Fatalf("forward exhaustion wrapped into unfinished work: %+v %v", exhausted, err)
+	}
+	if _, err := checkpoint.CoverRebuild(f.ctx, f.org, op.ID, versions[2], nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		version string
+		pending bool
+	}{
+		{versions[1].VersionID, true}, {versions[2].VersionID, false}, {"missing-version", false},
+	} {
+		if pending, err := checkpoint.RebuildCandidatePending(f.ctx, f.org, op.ID, tc.version); err != nil || pending != tc.pending {
+			t.Fatalf("Version %s pending=%v err=%v, want %v", tc.version, pending, err, tc.pending)
+		}
+	}
+	interrupted := postgres.RebuildStore{Pool: f.pool}
+	target, err := interrupted.BeginRebuild(f.ctx, f.org, op.ID)
+	if err != nil || target.Cursor != "" {
+		t.Fatalf("dispatch changed durable cursor: %q %v", target.Cursor, err)
+	}
+	unfinished, err := interrupted.RebuildCandidates(f.ctx, f.org, op.ID, 2)
+	if err != nil || len(unfinished) != 2 || unfinished[0].VersionID != versions[1].VersionID || unfinished[1].VersionID != versions[3].VersionID {
+		t.Fatalf("resume skipped unfinished low Version: %+v %v", unfinished, err)
+	}
 	for _, seg := range versions[1:3] {
-		if _, err := f.store.CoverRebuild(f.ctx, f.org, op.ID, seg, nil); err != nil {
+		if _, err := interrupted.CoverRebuild(f.ctx, f.org, op.ID, seg, nil); err != nil {
 			t.Fatal(err)
 		}
+	}
+	progress, err := f.store.Operation(f.ctx, f.org, op.ID)
+	if err != nil || progress.Counters["versions_covered"] != 2 {
+		t.Fatalf("out-of-order coverage replay counted twice: %+v %v", progress.Counters, err)
 	}
 	if err := checkpoint.CheckpointRebuild(f.ctx, f.org, op.ID, page[1].VersionID); err != nil {
 		t.Fatal(err)
