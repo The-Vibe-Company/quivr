@@ -31,9 +31,13 @@ def validate(s):
     keys(s['corpus'], ('records', 'words_per_record'))
     number(s['corpus']['records'], 'records', 1, 1000000, True)
     number(s['corpus']['words_per_record'], 'words_per_record', 10, 1000, True)
+    keys(s['ingestion'], ('per_second', 'concurrency', 'burst'), ('anchor_records',))
+    anchored = 'anchor_records' in s['ingestion']
     keys(s['search'], ('concurrency', 'users', 'mix'))
-    number(s['search']['concurrency'], 'concurrency', 1, 1000, True)
-    number(s['search']['users'], 'users', s['search']['concurrency'], 100000, True)
+    # An anchored burst measures ingestion alone: concurrent search would load
+    # the same API and database, so it may run without search workers.
+    number(s['search']['concurrency'], 'concurrency', 0 if anchored else 1, 1000, True)
+    number(s['search']['users'], 'users', max(1, s['search']['concurrency']), 100000, True)
     mix = s['search']['mix']
     if not isinstance(mix, dict) or not mix or set(mix) - {'lexical', 'semantic', 'hybrid', 'deep'}:
         raise ValueError('search mix supports lexical, semantic, hybrid and deep')
@@ -41,8 +45,12 @@ def validate(s):
         number(weight, f'mix {mode}', 0, 10000, True)
     if sum(mix.values()) == 0:
         raise ValueError('search mix needs a positive weight')
-    keys(s['ingestion'], ('per_second', 'concurrency', 'burst'))
     number(s['ingestion']['per_second'], 'per_second', 0, 10000)
+    if anchored:
+        # Every anchored document arrives at one instant after warmup.
+        number(s['ingestion']['anchor_records'], 'anchor_records', 1, 100000, True)
+        if s['ingestion']['per_second'] != 0:
+            raise ValueError('anchor_records replaces timed arrivals: set per_second to 0')
     number(s['ingestion']['concurrency'], 'ingestion concurrency', 1, 1000, True)
     burst = s['ingestion']['burst']
     keys(burst, ('at_seconds', 'duration_seconds', 'multiplier'))
@@ -62,6 +70,8 @@ def validate(s):
     for role in ('api', 'worker'):
         number(replicas[role], f'{role} replicas', 1, 2, True)
     if 'kill_at_seconds' in replicas:
+        if anchored:
+            raise ValueError('anchor_records runs without a replica kill')
         if replicas['api'] != 2 or replicas['worker'] != 2:
             raise ValueError('kill needs two API and worker replicas')
         number(replicas['kill_at_seconds'], 'kill_at_seconds', .1, s['duration_seconds'] - .1)
