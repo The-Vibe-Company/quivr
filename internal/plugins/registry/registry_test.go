@@ -678,3 +678,120 @@ func dependencyRegistration(t *testing.T, raw string) registry.Registration {
 	settings := registry.SettingsOf(p)
 	return registry.Registration{ID: registry.RegistrationID(p.Manifest.ID, p.Manifest.Version, p.ManifestDigest, p.Endpoint, settings.Digest()), PluginID: p.Manifest.ID, Version: p.Manifest.Version, Endpoint: p.Endpoint, ManifestDigest: p.ManifestDigest, Manifest: p.Source, Settings: settings, State: registry.StateValidated}
 }
+
+// The registry owns serving equivalence: tuning may change the installed build,
+// while semantic settings, schema constraints and enabled spaces fail closed.
+func TestIngestionReplacementKeepsSemanticIdentity(t *testing.T) {
+	raw, err := os.ReadFile("../../../sdks/go/examples/hash-embedder/quivr-plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw) + `
+configuration:
+  execution_keys: [max_concurrent_requests]
+  schema:
+    type: object
+    properties:
+      max_concurrent_requests: {const: 4}
+      body_tokens: {type: integer, default: 512}
+`
+	config := `{"max_concurrent_requests":4,"body_tokens":512}`
+	added := strings.Replace(source, "[max_concurrent_requests]", "[max_concurrent_requests, tokenizer_processes]", 1) + "      tokenizer_processes: {const: 2}\n"
+	added = strings.Replace(added, "const: 4", "const: 16", 1)
+	composed := source + "    allOf: [{properties: {model_variant: {type: string, default: one}}}]\n"
+	referenced := source + "    $defs: {model: {properties: {model_variant: {type: string, default: one}}}}\n    $ref: '#/$defs/model'\n"
+	patterned := source + "    patternProperties: {'^model_': {type: string, default: one}}\n"
+	direct := source + "      model_variant: {type: string, default: one}\n"
+	legacy := func(manifest string) string {
+		return strings.Replace(manifest, "[max_concurrent_requests]", "[]", 1)
+	}
+	reclassify := func(manifest string) string {
+		if strings.Contains(manifest, "execution_keys: []") {
+			return strings.Replace(manifest, "execution_keys: []", "execution_keys: [model_variant]", 1)
+		}
+		return strings.Replace(manifest, "[max_concurrent_requests]", "[max_concurrent_requests, model_variant]", 1)
+	}
+	for _, tc := range []struct {
+		name, before, manifest, configuration string
+		enabled                               map[string]string
+		same                                  bool
+	}{
+		{name: "new execution key", manifest: added, configuration: `{"max_concurrent_requests":16,"body_tokens":512,"tokenizer_processes":2}`, same: true},
+		{name: "semantic setting", manifest: source, configuration: `{"max_concurrent_requests":4,"body_tokens":256}`},
+		{name: "reclassified semantic setting", manifest: strings.Replace(source, "[max_concurrent_requests]", "[max_concurrent_requests, body_tokens]", 1), configuration: `{"max_concurrent_requests":4,"body_tokens":256}`},
+		{name: "reclassified schema default", manifest: strings.Replace(strings.Replace(source, "[max_concurrent_requests]", "[max_concurrent_requests, body_tokens]", 1), "default: 512", "default: 256", 1), configuration: config},
+		{name: "removed declaration", manifest: strings.Replace(strings.Replace(source, "execution_keys: [max_concurrent_requests]", "execution_keys: []", 1), "const: 4", "const: 16", 1), configuration: `{"max_concurrent_requests":16,"body_tokens":512}`},
+		{name: "new space identity", manifest: strings.Replace(source, "hashed-words-16", "other-model-16", 1), configuration: config},
+		{name: "changed enabled spaces", manifest: added, configuration: `{"max_concurrent_requests":16,"body_tokens":512,"tokenizer_processes":2}`, enabled: map[string]string{"example.hash_embedder.small": plugins.SpaceEvaluation, "example.hash_embedder.large": plugins.SpaceServed}},
+		{name: "reclassified composed schema", before: composed, manifest: reclassify(composed), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "reclassified referenced schema", before: referenced, manifest: reclassify(referenced), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "reclassified wildcard schema", before: patterned, manifest: reclassify(patterned), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "legacy implicit direct setting", before: legacy(direct), manifest: reclassify(legacy(direct)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "legacy implicit composed setting", before: legacy(composed), manifest: reclassify(legacy(composed)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "legacy implicit referenced setting", before: legacy(referenced), manifest: reclassify(legacy(referenced)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+		{name: "legacy implicit wildcard setting", before: legacy(patterned), manifest: reclassify(legacy(patterned)), configuration: `{"max_concurrent_requests":4,"body_tokens":512,"model_variant":"two"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			load := func(manifest, configuration, registration string, spaces map[string]string) *plugins.Pin {
+				t.Helper()
+				if spaces == nil {
+					spaces = map[string]string{"example.hash_embedder.small": plugins.SpaceServed, "example.hash_embedder.large": plugins.SpaceEvaluation}
+				}
+				pin, err := plugins.LoadPinManifest([]byte(manifest), "embedder", plugins.PinConfig{Endpoint: "http://127.0.0.1:9900", Configuration: json.RawMessage(configuration), Spaces: spaces})
+				if err != nil {
+					t.Fatal(err)
+				}
+				pin.Registration = registration
+				return pin
+			}
+			beforeManifest := tc.before
+			if beforeManifest == "" {
+				beforeManifest = source
+			}
+			before := load(beforeManifest, config, "before", nil)
+			next := load(tc.manifest, tc.configuration, "next", tc.enabled)
+			replacement := registry.IngestionReplacement(before, next)
+			if (replacement.ManifestDigest == next.ManifestDigest && string(replacement.Configuration) == string(next.Configuration) && reflect.DeepEqual(replacement.Spaces, next.Spaces)) != tc.same {
+				t.Fatalf("serving replacement accepted=%v, want=%v", replacement != before, tc.same)
+			}
+			if tc.same && (replacement.Registration != before.Registration || replacement.Generation() != before.Generation() || registry.IngestionRecipe(replacement) != registry.IngestionRecipe(before) || string(registry.IngestionProvenance(replacement)) != string(registry.IngestionProvenance(before))) {
+				t.Fatal("serving replacement changed historical work identity")
+			}
+			if tc.before != "" {
+				seed := func(pin *plugins.Pin) registry.Seed {
+					t.Helper()
+					set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+					if err != nil {
+						t.Fatal(err)
+					}
+					return registry.FromPins(set)
+				}
+				old, current := seed(before), seed(next)
+				members := map[string]registry.Registration{}
+				for _, r := range append(old.Registrations, current.Registrations...) {
+					members[r.ID] = r
+				}
+				bound, err := registry.BindIngestionRecipes(registry.Plan{Roles: old.Roles}, registry.Plan{Roles: current.Roles}, members)
+				if err != nil {
+					t.Fatal(err)
+				}
+				anchored := false
+				for _, assignment := range bound {
+					if assignment.IngestionDerivation != nil {
+						anchored = true
+						if assignment.IngestionDerivation.Recipe == registry.IngestionRecipe(before) {
+							t.Fatalf("reclassified schema kept the old recipe: %+v", assignment)
+						}
+					}
+				}
+				if !anchored {
+					t.Fatal("plan had no ingestion recipe anchor")
+				}
+				rebound, err := registry.BindIngestionRecipes(registry.Plan{Roles: bound}, registry.Plan{Roles: current.Roles}, members)
+				if err != nil || !reflect.DeepEqual(bound, rebound) {
+					t.Fatalf("reload changed the fenced recipe: %+v %v", rebound, err)
+				}
+			}
+		})
+	}
+}

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -546,4 +548,226 @@ func rebuildArtifacts(data []content.EmbeddingData) []content.Embedding {
 		out[i] = d.Artifact
 	}
 	return out
+}
+
+// Real rebuild, registry and page storage prove that an in-place sidecar update
+// can finish the original plan without replaying already committed passages.
+func TestRebuildSurvivesExecutionManifestUpdate(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile("../../../contracts/plugins/v0/fixtures/manifests/valid/ingestion-paged.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ring, err := plugins.NewSigningKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, _ := json.Marshal(map[string]plugins.SigningKeys{"example.paged": ring})
+	t.Setenv(plugins.EnvSigningKeys, string(keys))
+	var serving atomic.Pointer[plugins.Pin]
+	var firstPages, queries atomic.Int32
+	var interruptedKey atomic.Value
+	var resumed atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pin := serving.Load()
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v0/discovery" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"plugin_api": pin.PluginAPI(), "plugin": map[string]string{"id": pin.Manifest.ID, "version": pin.Manifest.Version}, "manifest_digest": pin.ManifestDigest, "contributions": pin.Manifest.Contributions.Names()})
+			return
+		}
+		if r.URL.Path == plugins.EmbedQueryRoute {
+			queries.Add(1)
+			_, _ = w.Write([]byte(`{"vector":[1,0,0,0]}`))
+			return
+		}
+		var request plugins.SegmentAndEmbedRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Page == nil {
+			http.Error(w, "expected paged input", 400)
+			return
+		}
+		var config struct {
+			Concurrency int `json:"max_concurrent_requests"`
+			Processes   int `json:"tokenizer_processes"`
+		}
+		_ = json.Unmarshal(request.Configuration, &config)
+		if resumed.Load() && (config.Concurrency != 16 || config.Processes != 2) {
+			http.Error(w, "replacement must use its installed execution settings", 400)
+			return
+		}
+		start := request.Page.Start
+		if start == 0 {
+			firstPages.Add(1)
+		}
+		if start == 2 {
+			if !resumed.Load() {
+				interruptedKey.Store(request.IdempotencyKey)
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			if request.IdempotencyKey != interruptedKey.Load().(string) {
+				http.Error(w, "retry changed invocation identity", 400)
+				return
+			}
+		}
+		end := min(start+2, len([]rune(request.Parts[0].Text)))
+		answer := map[string]any{"segments": []any{map[string]any{"part_key": request.Parts[0].Key, "start": start, "end": end, "vectors": map[string][]float32{"example.paged.text": {1, 0, 0, 0}}}}}
+		if end < len([]rune(request.Parts[0].Text)) {
+			answer["next_start"] = end
+		}
+		_ = json.NewEncoder(w).Encode(answer)
+	}))
+	defer server.Close()
+	load := func(next bool) registry.Seed {
+		t.Helper()
+		keys, props, config := "max_concurrent_requests", "      max_concurrent_requests: {const: 4}\n", `{"max_concurrent_requests":4}`
+		if next {
+			keys, props, config = "max_concurrent_requests, tokenizer_processes", "      max_concurrent_requests: {const: 16}\n      tokenizer_processes: {const: 2}\n", `{"max_concurrent_requests":16,"tokenizer_processes":2}`
+		}
+		manifest := string(raw) + "\nconfiguration:\n  execution_keys: [" + keys + "]\n  schema:\n    type: object\n    properties:\n" + props
+		pin, err := plugins.LoadPinManifest([]byte(manifest), "paged", plugins.PinConfig{Endpoint: server.URL, Configuration: json.RawMessage(config)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		set, err := plugins.NewPinSet([]*plugins.Pin{pin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return registry.FromPins(set)
+	}
+	pluginStore := postgres.PluginStore{Pool: pool}
+	before, err := pluginStore.ApplyConfiguration(ctx, load(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolve := func(plan string) *plugins.PinSet {
+		t.Helper()
+		p, members, err := pluginStore.PlanMembers(ctx, plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		set, _, err := registry.Resolve(p.Roles, members)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return set
+	}
+	old := resolve(before.Plan)
+	serving.Store(old.Ingestion())
+	if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(old)); err != nil {
+		t.Fatal(err)
+	}
+	live, err := plugins.NewLive(before.Plan, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := contentStores(pool)
+	if err := store.RegisterSpaces(ctx, app.Config{}.DeploymentSpaces(old)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AlignDefaultGeneration(ctx); err != nil {
+		t.Fatal(err)
+	}
+	contents := content.Service{Submissions: store, Receipts: store, RecordStore: store, Versions: store, Materialization: store, Baseline: store, Embeddings: store, Blobs: &objectMemory{objects: map[string][]byte{}}}
+	scope := corpus.Scope{Organization: "execution-redeploy", Actions: []string{"corpora:write", "content:write", "content:read", "search:query"}, Corpora: []string{"*"}}
+	c, _, err := (corpus.Service{Store: postgres.Store{Pool: pool}}).Create(ctx, scope, corpus.CreateInput{Key: "one", Name: "Rebuild"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := contents.Accept(ctx, scope, content.Command{Key: "one", Source: content.Source{CorpusID: c.ID, Namespace: "docs", RecordKey: "one"}, Content: content.Text{Kind: "text", Text: "abcdefghij"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = contents.Materialize(ctx, scope.Organization, receipt.ID); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err = store.Receipt(ctx, scope.Organization, receipt.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := contents.Version(ctx, scope, receipt.RecordID, receipt.VersionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := store.Generation(ctx, scope.Organization, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := content.PluginSegmentation(scope.Organization, v, "fixture", json.RawMessage(`{}`), []content.SegmentInput{{PartKey: "body", Start: 0, End: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = contents.SaveSegmentation(ctx, scope.Organization, v, baseline); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Promote(ctx, scope.Organization, baseline, prior); err != nil {
+		t.Fatal(err)
+	}
+	op, err := store.AcceptRebuild(ctx, scope.Organization, c.ID, "rebuild", []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = pluginStore.PinWork(ctx, plugins.WorkOperation, scope.Organization, op.ID, before.Plan); err != nil {
+		t.Fatal(err)
+	}
+	work, err := live.Pin(ctx, plugins.Work{Kind: plugins.WorkOperation, Organization: scope.Organization, ID: op.ID, Plan: before.Plan,
+		BindIngestion: func(ctx context.Context, registration string) error {
+			return pluginStore.BindIngestionWork(ctx, plugins.WorkOperation, scope.Organization, op.ID, registration)
+		},
+	}, func(ctx context.Context) (int, error) {
+		return pluginStore.CountUnavailable(ctx, plugins.WorkOperation, scope.Organization, op.ID)
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners := pluginhttp.LiveIngestor{Live: live}
+	runner := retrieval.Rebuilder{Concurrency: 1, Store: store, Cancellation: store, Content: contents, Projection: &rebuildPublication{}, Plugin: processing.PluginDeriver{Content: contents, Plugin: owners}, Routing: store}
+	if done, err := runner.Step(work, scope.Organization, op.ID); done || err == nil || firstPages.Load() != 1 {
+		t.Fatalf("first page must commit before outage: done=%v err=%v pages=%d", done, err, firstPages.Load())
+	}
+	after, err := pluginStore.ApplyConfiguration(ctx, load(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := resolve(after.Plan)
+	if old.Ingestion().ManifestDigest == next.Ingestion().ManifestDigest {
+		t.Fatal("test did not replace the manifest")
+	}
+	if registry.IngestionRecipe(old.Ingestion()) != registry.IngestionRecipe(next.Ingestion()) {
+		t.Fatal("execution-only update changed the recipe")
+	}
+	serving.Store(next.Ingestion())
+	resumed.Store(true)
+	if err = live.Store(after.Plan, next); err != nil {
+		t.Fatal(err)
+	}
+	done := false
+	for step := 0; step < 4 && !done; step++ {
+		done, err = runner.Step(work, scope.Organization, op.ID)
+		if err != nil {
+			t.Fatalf("pinned rebuild stranded after manifest update: %v", err)
+		}
+	}
+	outcome, err := store.Operation(ctx, scope.Organization, op.ID)
+	if err != nil || !done || outcome.State != operations.StateSucceeded || firstPages.Load() != 1 {
+		t.Fatalf("rebuild must finish without replaying pages: done=%v operation=%+v first_pages=%d err=%v", done, outcome, firstPages.Load(), err)
+	}
+	if pinned, _, err := pluginStore.PinWork(ctx, plugins.WorkOperation, scope.Organization, op.ID, after.Plan); err != nil || pinned != before.Plan {
+		t.Fatalf("historical work plan changed: %s %v", pinned, err)
+	}
+	ready, err := contents.Version(ctx, scope, receipt.RecordID, receipt.VersionID)
+	if err != nil || !ready.Availability.Searchable || len(ready.Diagnostics) != 0 {
+		t.Fatalf("rebuilt version quarantined: %+v %v", ready, err)
+	}
+	segments, err := contents.PluginSegmentationOf(ctx, scope.Organization, ready, registry.IngestionRecipe(old.Ingestion()))
+	if err != nil || len(segments.Segments) != 5 {
+		t.Fatalf("original recipe did not finish: %+v %v", segments, err)
+	}
+	if _, err = owners.EncodeQuery(work, scope.Organization, "example.paged.text@1", "hello"); err != nil || queries.Load() != 1 {
+		t.Fatalf("query from historical plan could not use replacement: %v", err)
+	}
 }

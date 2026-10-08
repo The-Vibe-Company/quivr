@@ -3,6 +3,7 @@ package registry
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"sort"
 
@@ -50,12 +51,27 @@ func BindIngestionRecipes(previous, next Plan, registrations map[string]Registra
 		if err != nil {
 			return nil, err
 		}
-		if before := old[r.PluginID]; before != nil && sameIngestionInputs(before, pin) {
+		before := old[r.PluginID]
+		if before != nil && (sameIngestionInputs(before, pin) ||
+			// Legacy rollback targets predate execution declarations. Preserve
+			// their established tuning lineage, without allowing a forward
+			// deployment to remove declarations and hide semantic changes.
+			next.Source == SourceRollback && len(executionKeys(pin)) == 0 && sameIngestionInputs(pin, before)) {
 			pin = before
 		} else if next.Source == SourceRollback {
 			// A semantic rollback restores the target's historical derivation.
 			// Equivalent tuning above instead keeps the currently served lineage.
 			pin.IngestionDerivation = a.IngestionDerivation
+		}
+		if before != nil && pin != before && next.Source != SourceRollback && nativeIngestionRecipe(pin) == nativeIngestionRecipe(before) {
+			// A rejected declaration change can hide a semantic field in a
+			// composed schema without changing the native hash. Fence that
+			// unproven transition with its full build identity; normal proven
+			// execution tuning never enters this recipe branch.
+			pin.IngestionDerivation = &plugins.IngestionDerivation{
+				Recipe:     "plugin:" + pin.Manifest.ID + "@" + pin.Manifest.Version + "#" + content.StableID("ingestion", IngestionRecipe(before), pin.ManifestDigest, string(SettingsOf(pin).Configuration)),
+				Provenance: IngestionProvenance(pin),
+			}
 		}
 		out[i].IngestionDerivation = &plugins.IngestionDerivation{Recipe: IngestionRecipe(pin), Provenance: IngestionProvenance(pin)}
 	}
@@ -63,21 +79,108 @@ func BindIngestionRecipes(previous, next Plan, registrations map[string]Registra
 }
 
 func sameIngestionInputs(before, next *plugins.Pin) bool {
+	if before == nil || next == nil {
+		return false
+	}
 	if before.Manifest.ID != next.Manifest.ID || before.Manifest.Version != next.Manifest.Version {
 		return false
 	}
 	a, b := executionKeys(before), executionKeys(next)
-	if len(a) > 0 && len(b) > 0 && !slices.Equal(a, b) {
-		return false
+	if len(a) > 0 {
+		for _, key := range a {
+			if !slices.Contains(b, key) {
+				return false
+			}
+		}
 	}
-	keys := a
+	for _, key := range b {
+		// The first declaration may adopt explicitly supplied legacy tuning
+		// settings. It cannot introduce an omitted historical semantic field.
+		if !slices.Contains(a, key) && hasSemanticSetting(before, key) && (len(a) > 0 || !configuredSetting(before, key)) {
+			return false
+		}
+	}
+	keys := b
 	if len(keys) == 0 {
-		keys = b
+		keys = a
 	}
 	if len(keys) == 0 {
 		return before.ManifestDigest == next.ManifestDigest && bytes.Equal(SettingsOf(before).Configuration, SettingsOf(next).Configuration)
 	}
 	return bytes.Equal(semanticInputs(before, keys), semanticInputs(next, keys))
+}
+
+func configuredSetting(pin *plugins.Pin, key string) bool {
+	var configuration map[string]json.RawMessage
+	_ = json.Unmarshal(pin.Configuration, &configuration)
+	_, exists := configuration[key]
+	return exists
+}
+
+func hasSemanticSetting(pin *plugins.Pin, key string) bool {
+	if configuredSetting(pin, key) {
+		return true
+	}
+	if pin.Manifest.Configuration != nil {
+		var keywords map[string]json.RawMessage
+		if err := json.Unmarshal(pin.Manifest.Configuration.Schema, &keywords); err != nil {
+			return true
+		}
+		// Only a simple object schema proves that an absent setting was not
+		// already semantic. References, composition, wildcard constraints and
+		// unknown keywords may describe it elsewhere; refuse reclassification.
+		for keyword, value := range keywords {
+			switch keyword {
+			case "$schema", "$id", "$anchor", "$comment", "$defs", "definitions",
+				"title", "description", "type", "properties", "required", "minProperties", "maxProperties":
+			case "additionalProperties":
+				if v := string(bytes.TrimSpace(value)); v != "true" && v != "false" {
+					return true
+				}
+			default:
+				return true
+			}
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		}
+		_ = json.Unmarshal(pin.Manifest.Configuration.Schema, &schema)
+		_, exists := schema.Properties[key]
+		return exists || slices.Contains(schema.Required, key)
+	}
+	return false
+}
+
+// IngestionReplacement uses an active build only when its declared execution
+// changes cannot affect the historical pin's results. Its serving manifest and
+// settings change together; work ownership, stop checks and invocation identity
+// remain attached to the original registration.
+func IngestionReplacement(before, next *plugins.Pin) *plugins.Pin {
+	if before == next {
+		return before
+	}
+	if before == nil || next == nil || before.Manifest.Contributions.Ingestion == nil || next.Manifest.Contributions.Ingestion == nil ||
+		!reflect.DeepEqual(before.Spaces, next.Spaces) || !sameIngestionInputs(before, next) {
+		return before
+	}
+	a, b := executionKeys(before), executionKeys(next)
+	for _, key := range a {
+		if !slices.Contains(b, key) {
+			return before
+		}
+	}
+	for _, key := range b {
+		if !slices.Contains(a, key) && hasSemanticSetting(before, key) {
+			return before
+		}
+	}
+	return &plugins.Pin{
+		Manifest: next.Manifest, ManifestDigest: next.ManifestDigest, Source: next.Source,
+		Path: next.Path, Endpoint: next.Endpoint, Configuration: next.Configuration,
+		Kinds: next.Kinds, Spaces: next.Spaces, Registration: before.Registration, KeyIdentity: before.Generation(),
+		IngestionDerivation: &plugins.IngestionDerivation{Recipe: IngestionRecipe(before), Provenance: IngestionProvenance(before)},
+	}
 }
 
 func executionKeys(pin *plugins.Pin) []string {

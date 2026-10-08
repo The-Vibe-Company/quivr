@@ -63,11 +63,11 @@ func WorkOf(ctx context.Context) (*Work, bool) {
 	return w, ok
 }
 
-// Unavailable handles a reachability failure. Live imports keep their original
-// pin and retry until its exact build returns; only an explicit stop ends them.
-// Other work retains the bounded Unreachable policy.
+// Unavailable handles a reachability failure. Pinned work retries until its
+// build returns or a compatible ingestion registration can serve it. Temporary
+// unavailability cannot justify discarding accepted work; only a stop ends it.
 func Unavailable(ctx context.Context, pin *Pin, contribution string) (*content.Diagnostic, error) {
-	if w, ok := WorkOf(ctx); ok && w.Kind == WorkIngestion && !Stopped(ctx, pin) {
+	if !Stopped(ctx, pin) {
 		return nil, nil
 	}
 	return Unreachable(ctx, pin, contribution)
