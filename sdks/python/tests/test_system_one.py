@@ -10,10 +10,9 @@ from quivr_plugin.system_one import SystemOne
 class Transport(unittest.TestCase):
     def test_dns_timeout_retains_no_paid_work_or_concurrency_slot(self):
         client = SystemOne('fixture-key', 'https://example.invalid/v1/systemone')
+        lookups = []
         def timeout(*args, **kwargs):
-            self.assertGreater(kwargs['timeout'], 0)
-            self.assertLessEqual(kwargs['timeout'], 1)
-            self.assertNotIn('fixture-key', repr((args, kwargs)))
+            lookups.append((args, kwargs))
             raise subprocess.TimeoutExpired(args[0], kwargs['timeout'])
         with patch('subprocess.run', side_effect=timeout), \
              patch('quivr_plugin.system_one.socket.getaddrinfo', side_effect=AssertionError('DNS must be cancellable')):
@@ -22,6 +21,11 @@ class Transport(unittest.TestCase):
                 self.assertEqual(result.reason, 'deadline')
                 self.assertTrue(result.retryable)
                 self.assertEqual((result.scores, result.paid_calls, result.cost_cents), ({}, 0, 0))
+        self.assertEqual(len(lookups), 9)
+        for args, kwargs in lookups:
+            self.assertGreater(kwargs['timeout'], 0)
+            self.assertLessEqual(kwargs['timeout'], 1)
+            self.assertNotIn('fixture-key', repr((args, kwargs)))
         # A subsequent request must still be admitted after timed-out hostname lookups.
         with patch('quivr_plugin.system_one.http.client.HTTPConnection.connect', side_effect=OSError):
             result = SystemOne('fixture-key', 'http://127.0.0.1').judge({}, {'q': {}}, time.monotonic() + 1)

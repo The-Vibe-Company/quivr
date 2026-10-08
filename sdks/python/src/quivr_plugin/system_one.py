@@ -197,7 +197,6 @@ class SystemOne:
             connection._create_connection = lambda address, timeout, source_address=None: connect_socket(
                 address, deadline, connected_socket, source_address)
 
-
             def expire(current=connection, connected=connected_socket) -> None:
                 transport = connected[0] if connected else current.sock
                 if transport is not None:

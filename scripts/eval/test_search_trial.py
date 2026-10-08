@@ -101,7 +101,7 @@ class PreparedSearch(unittest.TestCase):
                     self.assertEqual(index.rank(q, dense=scores), ranking)
 
 class Reranker(unittest.TestCase):
-    def test_admission_precedes_transport_and_only_valid_usage_and_scores_are_accepted(self):
+    def test_rerank_admission_batching_deadlines_and_usage(self):
         budget = embeddings.Budget(100000, 1)
         response = {'model': 'jev-1.13.0', 'usage': {'input_tokens': 20},
                     'answers': {'a': {'noul': .1}, 'b': {'noul': .9}}}
