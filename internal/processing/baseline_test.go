@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"testing"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 )
@@ -18,19 +21,25 @@ import (
 // Baseline owns the operator diagnostic and retry contract across routing,
 // plugin derivation and indexing; dependency errors must survive its boundary.
 func TestBaselineRetryPreservesFailureCause(t *testing.T) {
-	provider := &plugins.PluginError{Status: 503, Code: "embedding_incomplete", Message: "embedding provider unavailable (HTTP 503)", Retryable: true}
+	provider := &plugins.PluginError{Status: 503, Code: "embedding_incomplete", Message: "private submitted error marker", Retryable: true}
 	for _, tc := range []struct {
-		step  string
-		cause error
+		step, kind string
+		cause      error
 	}{
-		{"route", errors.New("routing database unavailable")},
-		{"derive", provider},
-		{"index", errors.New("projection unavailable")},
+		{"route", "database_error", baselineDatabaseError{}},
+		{"derive", "plugin_error", provider},
+		{"index", "network_error", &net.DNSError{Err: "private submitted error marker", IsTimeout: true}},
+		{"route", "context_deadline", context.DeadlineExceeded},
+		{"index", "dependency_error", errors.New("private submitted error marker")},
 	} {
 		t.Run(tc.step, func(t *testing.T) {
 			var logs bytes.Buffer
 			previous := slog.Default()
-			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+			logger, err := logging.New(&logs, logging.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			slog.SetDefault(logger)
 			t.Cleanup(func() { slog.SetDefault(previous) })
 			store := &baselineVersion{}
 			contents := content.Service{Materialization: store, Receipts: store, RecordStore: store, Versions: store, Blobs: store, Baseline: store}
@@ -47,7 +56,7 @@ func TestBaselineRetryPreservesFailureCause(t *testing.T) {
 				index.err = dependencyErr
 			}
 			service := processing.Service{Content: contents, Routing: router, Retrieval: index, Plugin: &processing.PluginDeriver{Content: contents, Plugin: owner}}
-			err := service.Run(t.Context(), "org", "receipt")
+			err = service.Run(t.Context(), "org", "receipt")
 			if !errors.Is(err, tc.cause) || !strings.Contains(err.Error(), tc.step) {
 				t.Fatalf("baseline lost %s cause: got %v, want wrapped %v", tc.step, err, tc.cause)
 			}
@@ -55,15 +64,36 @@ func TestBaselineRetryPreservesFailureCause(t *testing.T) {
 				t.Fatalf("baseline progress = %q; want retrying baseline_unavailable", got)
 			}
 			var outcome map[string]any
-			if err := json.Unmarshal(logs.Bytes(), &outcome); err != nil {
-				t.Fatalf("invalid correlated outcome %q: %v", logs.String(), err)
+			decoder := json.NewDecoder(&logs)
+			for {
+				var record map[string]any
+				if err := decoder.Decode(&record); err == io.EOF {
+					break
+				} else if err != nil {
+					t.Fatalf("invalid log record: %v", err)
+				}
+				if strings.Contains(fmt.Sprint(record), "private submitted error marker") {
+					t.Fatalf("dependency message leaked into log: %v", record)
+				}
+				if record["msg"] == "processing outcome" && record["code"] == "baseline_unavailable" {
+					if outcome != nil {
+						t.Fatal("duplicate baseline retry outcome")
+					}
+					outcome = record
+				}
 			}
-			if outcome["code"] != "baseline_unavailable" || outcome["stage"] != "baseline" || outcome["outcome"] != "retrying" || outcome["failure_step"] != tc.step || outcome["cause"] != dependencyErr.Error() || outcome["receipt_id"] != "receipt" || outcome["version_id"] != "version" {
+			if outcome["code"] != "baseline_unavailable" || outcome["stage"] != "baseline" || outcome["outcome"] != "retrying" || outcome["failure_step"] != tc.step || outcome["failure_kind"] != tc.kind || outcome["receipt_id"] != "receipt" || outcome["version_id"] != "version" {
 				t.Fatalf("missing correlated failure diagnostic: %v", outcome)
+			}
+			if tc.kind == "database_error" && outcome["sqlstate"] != "08006" {
+				t.Fatalf("missing database connection failure: %v", outcome)
+			}
+			if tc.kind == "network_error" && outcome["network_timeout"] != true {
+				t.Fatalf("missing network timeout: %v", outcome)
 			}
 			if tc.step == "derive" {
 				var got *plugins.PluginError
-				if !errors.As(err, &got) || got != provider || outcome["plugin_code"] != "embedding_incomplete" || outcome["plugin_http_status"] != float64(503) {
+				if !errors.As(err, &got) || got != provider || outcome["plugin_code"] != "embedding_incomplete" || outcome["plugin_http_status"] != float64(503) || outcome["plugin_retryable"] != true {
 					t.Fatalf("missing plugin error diagnostic: err=%v log=%v", err, outcome)
 				}
 			}
@@ -107,3 +137,10 @@ type baselineIndex struct{ err error }
 func (i baselineIndex) Index(context.Context, string, content.Version, content.Segmentation) error {
 	return i.err
 }
+
+// A SQLSTATE-bearing dependency exercises the database diagnostic without
+// coupling this processing contract to an adapter or live database.
+type baselineDatabaseError struct{}
+
+func (baselineDatabaseError) Error() string    { return "private submitted error marker" }
+func (baselineDatabaseError) SQLState() string { return "08006" }

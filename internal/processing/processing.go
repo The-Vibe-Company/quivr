@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"regexp"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
 )
 
@@ -147,6 +150,49 @@ func (s Service) outcome(ctx context.Context, org, stage, outcome, receiptID str
 	slog.Log(ctx, level, "processing outcome", append(attrs, details...)...)
 }
 
+// Baseline diagnostics expose operational metadata, never dependency messages:
+// plugin responses and database errors may contain submitted content or secrets.
+var baselinePluginCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,99}$`)
+var baselineSQLState = regexp.MustCompile(`^[0-9A-Z]{5}$`)
+
+func baselineFailure(err error) []any {
+	kind := logging.Diagnostic("dependency_error")
+	var details []any
+	var pluginErr *plugins.PluginError
+	var databaseErr interface{ SQLState() string }
+	var networkErr net.Error
+	switch {
+	case errors.As(err, &pluginErr):
+		kind = "plugin_error"
+		if baselinePluginCode.MatchString(pluginErr.Code) {
+			details = append(details, "plugin_code", pluginErr.Code)
+		}
+		if pluginErr.Status >= 100 && pluginErr.Status <= 599 {
+			details = append(details, "plugin_http_status", pluginErr.Status)
+		}
+		details = append(details, "plugin_retryable", pluginErr.Retryable)
+	case errors.Is(err, plugins.ErrCallDeadline):
+		kind = "plugin_deadline"
+	case errors.Is(err, plugins.ErrUnavailable):
+		kind = "plugin_unavailable"
+	case errors.Is(err, context.DeadlineExceeded):
+		kind = "context_deadline"
+	case errors.Is(err, context.Canceled):
+		kind = "context_canceled"
+	case errors.Is(err, ErrSpaceUnowned):
+		kind = "space_unowned"
+	case errors.As(err, &databaseErr):
+		kind = "database_error"
+		if state := databaseErr.SQLState(); baselineSQLState.MatchString(state) {
+			details = append(details, "sqlstate", state)
+		}
+	case errors.As(err, &networkErr):
+		kind = "network_error"
+		details = append(details, "network_timeout", networkErr.Timeout())
+	}
+	return append(details, "failure_kind", kind)
+}
+
 // Normalizer runs external normalization for one accepted receipt.
 type Normalizer interface {
 	Normalize(ctx context.Context, org, receiptID string) error
@@ -196,11 +242,7 @@ func (s Service) Run(ctx context.Context, org, receiptID string) error {
 		err = s.Retrieval.Index(ctx, org, v, result)
 	}
 	if err != nil {
-		details := []any{"failure_step", step, "cause", plugins.BoundedDiagnostic(err.Error(), 1000)}
-		var pluginErr *plugins.PluginError
-		if errors.As(err, &pluginErr) {
-			details = append(details, "plugin_code", plugins.BoundedDiagnostic(pluginErr.Code, 100), "plugin_http_status", pluginErr.Status)
-		}
+		details := append([]any{"failure_step", logging.Diagnostic(step)}, baselineFailure(err)...)
 		s.outcome(ctx, org, "baseline", "retrying", receiptID, v, started, "baseline_unavailable", details...)
 		_ = s.Content.BaselineProgress(ctx, org, v.ID, "retrying", "baseline_unavailable", false)
 		return fmt.Errorf("baseline processing unavailable (%s): %w", step, err)
