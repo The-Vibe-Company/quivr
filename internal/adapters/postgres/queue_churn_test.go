@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -19,24 +18,7 @@ func TestHotSmallTablesUpgrade(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool := queueWorkPool(t, ctx)
-	names, err := migrations.Names()
-	if err != nil {
-		t.Fatal(err)
-	}
-	previous := fstest.MapFS{}
-	for _, name := range names {
-		if strings.HasSuffix(name, "_hot_small_tables.sql") {
-			continue
-		}
-		data, err := migrations.Files.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		previous[name] = &fstest.MapFile{Data: data}
-	}
-	if err := MigrateFS(ctx, pool, previous); err != nil {
-		t.Fatal(err)
-	}
+	migrateThrough(t, ctx, pool, "20261008T0622Z_vector_index.sql")
 	if _, err := pool.Exec(ctx, `INSERT INTO queue_document_attempts VALUES
 ('upgrade','test','work','document',nextval('queue_document_attempt_tokens'),'infinity')`); err != nil {
 		t.Fatal(err)
@@ -226,5 +208,34 @@ FROM pg_stat_all_tables WHERE relid='queue_document_attempts'::regclass`).Scan(&
 	t.Logf("writers=%d updates=%d HOT=%d retained=%d index_bytes=%d BufferContent_peak=%d samples=%d", writers, updates, hot, retained, indexBytes, peakWaits, samples)
 	if updates != writers*(renewals+cycles) || hot*10 < updates*9 || retained != 0 {
 		t.Fatalf("want all %d renewals observed, at least 90%% HOT updates and no retained attempts; got updates=%d HOT=%d retained=%d", writers*(renewals+cycles), updates, hot, retained)
+	}
+}
+
+// migrateThrough applies the actual schema prefix, never a selection with
+// migrations omitted from the middle of its history.
+func migrateThrough(t *testing.T, ctx context.Context, pool *pgxpool.Pool, through string) {
+	t.Helper()
+	names, err := migrations.Names()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := fstest.MapFS{}
+	found := false
+	for _, name := range names {
+		data, err := migrations.Files.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prefix[name] = &fstest.MapFile{Data: data}
+		if name == through {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("migration %q not found", through)
+	}
+	if err := MigrateFS(ctx, pool, prefix); err != nil {
+		t.Fatal(err)
 	}
 }

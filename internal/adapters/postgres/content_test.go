@@ -143,11 +143,6 @@ func TestPublicationRollbackAndCommitOrderedJournal(t *testing.T) {
 	if got := durable(); got != wantConcurrent {
 		t.Fatalf("concurrent acceptance duplicated/lost facts: got %v, want %v", got, wantConcurrent)
 	}
-	var routed bool
-	if err = pool.QueryRow(ctx, `SELECT NOT legacy_workflow AND lease_until='infinity'::timestamptz
- FROM ingestion_outbox WHERE organization=$1 AND receipt_id=$2`, scope.Organization, left.receipt.ID).Scan(&routed); err != nil || !routed {
-		t.Fatalf("new acceptance lost batch/API dispatch fence: %v, %v", routed, err)
-	}
 	work, _, err := repository.Work(ctx, scope.Organization, receipt.ID)
 	if err != nil {
 		t.Fatal(err)

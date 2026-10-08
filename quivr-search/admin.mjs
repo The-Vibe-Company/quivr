@@ -674,12 +674,20 @@ export function createAdmin({
       unfollow ||= follow?.((event, data) => {
         if (event === "status") setLive(data);
         else if (event === "change" || event === "reset") schedule();
+        else if (event === "stopped") close();
       });
     })().catch((error) => {
       started = null;
       throw error;
     });
     return started;
+  }
+  // The corpus is no longer read: its browsers reconnect to the view of the
+  // corpus read now.
+  function close() {
+    for (const res of clients) res.end();
+    clients.clear();
+    watching();
   }
   function watching() {
     if (clients.size && !tick) {

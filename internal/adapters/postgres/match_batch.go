@@ -236,9 +236,6 @@ WHERE x.delivery_id<>'' ORDER BY x.ordinal`, org, deliveryIDs, telemetry.Encode(
 	if writes.Len() == 0 {
 		return nil
 	}
-	if count > 0 {
-		writes.Queue(acknowledgeQueueJournalSQL, org, count)
-	}
 	return tx.SendBatch(ctx, writes).Close()
 }
 

@@ -124,6 +124,17 @@ func TestQueueBacklogCountsDistinctDocumentsAndActiveAttempts(t *testing.T) {
 	}
 	// Current enrichment waits, but superseded enrichment that the indexer
 	// skips must not remain in the backlog after its replacement finishes.
+	// These fixtures write state directly, so they run the writers' observation.
+	observe := func(version string) {
+		t.Helper()
+		var record string
+		if err := pool.QueryRow(ctx, `SELECT record_id FROM record_versions WHERE organization=$1 AND id=$2`, org, version).Scan(&record); err != nil {
+			t.Fatal(err)
+		}
+		if err := postgres.ObserveQueueRecords(ctx, pool, org, record); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err = pool.Exec(ctx, `UPDATE ingestion_receipts SET state='resolved',outcome='created' WHERE organization=$1 AND id=$2`, org, bulk.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +144,7 @@ func TestQueueBacklogCountsDistinctDocumentsAndActiveAttempts(t *testing.T) {
 	if _, err = pool.Exec(ctx, `UPDATE records SET current_version_id=$2 WHERE organization=$1 AND id=(SELECT record_id FROM record_versions WHERE organization=$1 AND id=$2)`, org, versionID); err != nil {
 		t.Fatal(err)
 	}
+	observe(versionID)
 	status = readQueueStatus(t, reader, ctx)
 	if status[workqueue.Bulk].Waiting != before[workqueue.Bulk].Waiting+1 {
 		t.Fatalf("current enrichment backlog = %+v, want one waiting document over %+v", status[workqueue.Bulk], before[workqueue.Bulk])
@@ -154,6 +166,7 @@ func TestQueueBacklogCountsDistinctDocumentsAndActiveAttempts(t *testing.T) {
 	if _, err = pool.Exec(ctx, `UPDATE records SET current_version_id=$2 WHERE organization=$1 AND id=(SELECT record_id FROM record_versions WHERE organization=$1 AND id=$2)`, org, corrected.VersionID); err != nil {
 		t.Fatal(err)
 	}
+	observe(corrected.VersionID)
 	status = readQueueStatus(t, reader, ctx)
 	if status[workqueue.Bulk].Waiting != before[workqueue.Bulk].Waiting || status[workqueue.Bulk].InProgress != before[workqueue.Bulk].InProgress {
 		t.Fatalf("superseded enrichment backlog = %+v, want baseline %+v", status[workqueue.Bulk], before[workqueue.Bulk])

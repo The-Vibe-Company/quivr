@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
@@ -24,12 +25,10 @@ func notice(t *testing.T, ctx context.Context, store fixtureContentStores) {
 			t.Fatal(err)
 		}
 		if n == 0 {
-			// Zero notices can mean a live repair batch. Finish the durable
-			// keyset cycle so older-writer fences behind its cursor are seen.
+			// Zero notices can mean a batch of live candidates; stop once
+			// every candidate is consumed.
 			var drained bool
-			if err := store.Pool.QueryRow(ctx, `SELECT initialized AND organization='' AND segmentation_id=''
- AND NOT EXISTS(SELECT FROM projection_purge_candidates)
-FROM projection_purge_bootstrap WHERE singleton`).Scan(&drained); err != nil {
+			if err := store.Pool.QueryRow(ctx, `SELECT NOT EXISTS(SELECT FROM projection_purge_candidates)`).Scan(&drained); err != nil {
 				t.Fatal(err)
 			}
 			if drained {
@@ -289,8 +288,8 @@ func TestPurgeSelectsOnlyDeadVersionsAndSurvivesRevert(t *testing.T) {
 	}
 
 	// Discovery can consume an obsolete Version before its first segmentation
-	// lands. A later segmentation must enqueue it again, even behind the
-	// bootstrap cursor, and tombstone-only fences must also create candidates.
+	// lands. A later segmentation must enqueue it again, and tombstone-only
+	// fences must also create candidates.
 	lateCommand := correctionCommand(f.corpusID, "late", "late-1", "Late text")
 	lateReceipt, err := f.contents.Accept(ctx, f.scope, lateCommand)
 	if err != nil {
@@ -315,6 +314,9 @@ func TestPurgeSelectsOnlyDeadVersionsAndSurvivesRevert(t *testing.T) {
 	tombstoneRecord, tombstoneVersion := f.publish("tombstone", "tombstone-1", "Tombstone text")
 	notice(t, ctx, f.store) // Consume the live candidate before its fence changes.
 	if _, err = f.pool.Exec(ctx, `INSERT INTO tombstones(organization,record_id) VALUES($1,$2)`, f.org, tombstoneRecord); err != nil {
+		t.Fatal(err)
+	}
+	if err = postgres.ObserveQueueRecords(ctx, f.pool, f.org, tombstoneRecord); err != nil {
 		t.Fatal(err)
 	}
 	notice(t, ctx, f.store)

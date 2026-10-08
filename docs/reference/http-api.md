@@ -4315,7 +4315,8 @@ Example `rebuild_succeeded`:
   "corpus_id": "corpus_news",
   "state": "succeeded",
   "counters": {
-    "indexed": 24
+    "versions_covered": 24,
+    "passages_covered": 96
   },
   "errors": [],
   "result": {

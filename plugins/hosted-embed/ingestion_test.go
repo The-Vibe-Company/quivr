@@ -15,10 +15,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -833,25 +835,34 @@ func TestProviderCapsConcurrentCalls(t *testing.T) {
 // A Retry-After discovered by one call also fences subsequent calls. A
 // cancelled waiter makes no provider attempt; no wall-clock sleep is needed.
 func TestProviderSharesThrottleAcrossCalls(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.Header().Set("Retry-After", "3600")
-		w.WriteHeader(429)
-	}))
-	defer server.Close()
-	c := testConfig("openai", server.URL)
-	c.MaxRetries = 0
-	i := newIngester(c, "fake-key", slog.New(slog.DiscardHandler))
-	_, err := i.EmbedQuery(t.Context(), queryRequest(c, "first"))
-	if err == nil {
-		t.Fatal("429 succeeded")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
-	defer cancel()
-	_, err = i.EmbedQuery(ctx, queryRequest(c, "second"))
-	if err == nil || calls.Load() != 1 {
-		t.Fatalf("throttled waiter made a provider call: calls=%d error=%v", calls.Load(), err)
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Retry-After", "3600")
+				w.Header().Set("Connection", "close")
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+			c := testConfig("openai", server.URL)
+			c.MaxRetries = 0
+			i := newIngester(c, "fake-key", slog.New(slog.DiscardHandler))
+			_, err := i.EmbedQuery(t.Context(), queryRequest(c, "first"))
+			if err == nil {
+				t.Fatalf("HTTP %d succeeded", status)
+			}
+			// Keep real socket I/O outside the virtual-time bubble. Only the
+			// subsequent admission wait needs the virtual deadline.
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				_, err := i.EmbedQuery(ctx, queryRequest(c, "second"))
+				if err == nil || ctx.Err() != context.DeadlineExceeded || calls.Load() != 1 {
+					t.Fatalf("throttled waiter made a provider call: calls=%d error=%v", calls.Load(), err)
+				}
+			})
+		})
 	}
 }
 

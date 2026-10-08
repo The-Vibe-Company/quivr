@@ -36,7 +36,7 @@ func TestRuntimeShutdownStopsWorkersConcurrentlyWithinTheProcessBudget(t *testin
 	w := blockedStopWorker{started: started, finish: finish}
 	dispatchDone := make(chan struct{})
 	defer close(dispatchDone)
-	runtime := Runtime{Worker: w, EvaluationWorker: w, ConnectorWorker: w, BackfillWorker: w,
+	runtime := Runtime{QueueWorkers: []worker.Worker{w, w, w, w},
 		Client: shutdownClient{closed: closed}, dispatchDone: dispatchDone}
 	ctx, expire := context.WithCancel(context.Background())
 	defer expire()

@@ -225,8 +225,12 @@ def build_config(env):
     # Opt-in: the read-only Admin tab follows documents through their steps.
     if env.get('QUIVR_DEMO_ADMIN') == '1':
         actions += ['observability:read']
+    pool_limit = env.get('QUIVR_POSTGRES_MAX_CONNECTIONS', '16').strip()
+    if not pool_limit.isdecimal() or not 1 <= int(pool_limit) <= 2147483647:
+        raise ValueError('QUIVR_POSTGRES_MAX_CONNECTIONS must be a positive int32')
     config = {
         'database_url': env['DATABASE_URL'],
+        'postgres': {'max_connections': int(pool_limit)},
         'cursor_key': env['QUIVR_CURSOR_KEY'],
         'listen': '0.0.0.0:8080',
         'probe_listen': '0.0.0.0:' + env.get('PORT', '8081'),
@@ -258,7 +262,7 @@ def build_config(env):
             raise ValueError('QUIVR_QUEUE_KEY must differ from API and operator keys')
         config['keys'][queue_key] = {'organization': 'quivr-demo', 'corpora': ['*'],
                                      'actions': ['queues:read']}
-    # Omitted queue variables retain the mixed worker needed for old histories.
+    # Omitted queue variables keep one worker serving both queues.
     worker = {}
     if 'QUIVR_WORKER_QUEUES' in env:
         queues = [queue.strip() for queue in env['QUIVR_WORKER_QUEUES'].split(',')]

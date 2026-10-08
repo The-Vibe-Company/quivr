@@ -172,6 +172,12 @@ func New(endpoint string) *Store {
 	return &Store{Endpoint: strings.TrimRight(endpoint, "/"), Client: &http.Client{Timeout: 4 * time.Second, Transport: telemetry.Transport(nil, "weaviate.request")}, vectors: &sync.Map{}}
 }
 func (s *Store) call(ctx context.Context, method, path string, in, out any) (int, error) {
+	return s.callLimit(ctx, method, path, in, out, 2<<20)
+}
+
+var errResponseLimit = errors.New("projection response exceeds byte limit")
+
+func (s *Store) callLimit(ctx context.Context, method, path string, in, out any, responseLimit int64) (int, error) {
 	var body []byte
 	var err error
 	if in != nil {
@@ -194,7 +200,11 @@ func (s *Store) call(ctx context.Context, method, path string, in, out any) (int
 		return res.StatusCode, errors.New("projection request failed")
 	}
 	if out != nil {
-		err = json.NewDecoder(io.LimitReader(res.Body, 2<<20)).Decode(out)
+		limited := &io.LimitedReader{R: res.Body, N: responseLimit}
+		err = json.NewDecoder(limited).Decode(out)
+		if err != nil && limited.N == 0 {
+			err = errResponseLimit
+		}
 	}
 	return res.StatusCode, err
 }
