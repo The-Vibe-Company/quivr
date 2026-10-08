@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/plugins"
@@ -23,6 +24,25 @@ type searchChain struct {
 	paidCalls int
 	costCents float64
 	enforce   bool
+	degraded  map[string]bool
+	vectors   map[string]bool
+}
+
+func (c *searchChain) degradations() []Degradation {
+	if len(c.degraded) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(c.degraded))
+	for id := range c.degraded {
+		if !c.vectors[id] {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	slices.Sort(ids)
+	return []Degradation{{Reason: "vectors_unavailable", CorpusIDs: ids}}
 }
 
 func remainingCost(frames []*profileSpend) float64 {

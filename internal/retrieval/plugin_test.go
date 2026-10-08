@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -41,11 +42,12 @@ func answer(v any) ([]byte, error) { return json.Marshal(v) }
 func passthrough(_ context.Context, q plugins.SearchRequest) ([]byte, error) {
 	if q.Round == 1 {
 		request := map[string]any{"primitive": "bm25", "query_text": q.Query.Text, "k": q.Limit}
+		served := slices.IndexFunc(q.Spaces, func(sp plugins.SearchSpace) bool { return sp.Role == content.SpaceServed })
 		switch q.Query.Mode {
 		case "semantic":
-			request = map[string]any{"primitive": "near_vector", "space": q.Spaces[0].ID, "query_text": q.Query.Text, "k": q.Limit}
+			request = map[string]any{"primitive": "near_vector", "space": q.Spaces[served].ID, "query_text": q.Query.Text, "k": q.Limit}
 		case "hybrid":
-			request = map[string]any{"primitive": "hybrid", "space": q.Spaces[0].ID, "query_text": q.Query.Text, "alpha": 0.5, "fusion": "relative_score", "k": q.Limit}
+			request = map[string]any{"primitive": "hybrid", "space": q.Spaces[served].ID, "query_text": q.Query.Text, "alpha": 0.5, "fusion": "relative_score", "k": q.Limit}
 		}
 		return answer(map[string]any{"requests": []any{request}})
 	}

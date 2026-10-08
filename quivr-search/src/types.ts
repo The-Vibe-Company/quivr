@@ -41,10 +41,14 @@ export interface SearchUsage {
 }
 export interface SearchResponse {
   items: SearchResult[];
-  retrieval_profile: { name: string; version: string };
+  retrieval_profile: { name: string; version: string; degraded?: SearchDegradation[] };
   usage?: SearchUsage;
   /** Corpora a filter on a field they lack left out of the search. */
   excluded_corpora?: Exclusion[];
+}
+export interface SearchDegradation {
+  reason: "vectors_unavailable";
+  corpus_ids: string[];
 }
 /** A corpus a filter left out, and the fields it lacks, as the engine says. */
 export interface Exclusion {
