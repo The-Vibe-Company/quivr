@@ -124,6 +124,7 @@ Modal L4 and selects it with `QUIVR_DEMO_EMBEDDING=gemma` on api and worker.
 Follow the [Modal rollout guide](../modal/README.md) to create the secret,
 run `modal deploy`, rebuild every Corpus, check coverage/search and roll back
 with `QUIVR_DEMO_EMBEDDING=cohere` and retained Foundry endpoint/key variables.
+The hosted sidecar sends up to 16 concurrent provider requests of at most 32 inputs; on the demo deployment, throughput saturated near 140 passages per second from 16 requests. Provider concurrency is execution tuning, so changing it keeps the ingestion recipe and needs no rebuild.
 Model changes need a maintenance window while old generations rebuild. Real GPU latency/throughput remain for coordinator
 validation; this change's measurements use fake inference only.
 
