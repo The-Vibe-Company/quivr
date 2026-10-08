@@ -12,6 +12,7 @@ import (
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/logging"
 	"github.com/The-Vibe-Company/quivr/internal/telemetry"
+	"github.com/The-Vibe-Company/quivr/internal/workqueue"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/converter"
 	sdktemporal "go.temporal.io/sdk/temporal"
@@ -28,7 +29,7 @@ func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) 
 	steps := &batchSteps{started: make(chan struct{}, 32), release: make(chan struct{}), runs: map[string]int{}, enriched: map[string]int{}, parents: map[string]string{}}
 	pins := &batchPins{steps: steps, held: map[string]bool{}, released: map[string]int{}}
 	registerIngestionBatches(env, steps, pins)
-	in := content.DispatchBatch{ID: "batch"}
+	in := content.DispatchBatch{ID: "batch", WorkQueue: workqueue.Bulk}
 	for i := 0; i < 32; i++ {
 		parent := telemetry.Extract(logging.WithRequestID(context.Background(), fmt.Sprint(i)), http.Header{"Traceparent": {fmt.Sprintf("00-%032x-2222222222222222-01", i+1)}})
 		in.Receipts = append(in.Receipts, content.Dispatch{Organization: "org_a", ReceiptID: fmt.Sprint(i), TraceContext: telemetry.Encode(parent)})
@@ -64,6 +65,9 @@ func TestIngestionBatchBoundsWorkAndRetriesOnlyUnfinishedReceipts(t *testing.T) 
 	for i := 0; i < 32; i++ {
 		if got := steps.parents[fmt.Sprint(i)]; got != fmt.Sprint(i) {
 			t.Fatalf("receipt %d lost its caller context: %q", i, got)
+		}
+		if !steps.scoped[fmt.Sprint(i)] {
+			t.Fatalf("receipt %d lost the bulk commit scope while restoring its trace and pin", i)
 		}
 		want := 1
 		if i == 0 || i == 1 {
@@ -138,6 +142,13 @@ type batchSteps struct {
 	normalized   bool
 	failed       bool
 	poison       bool
+	scoped       map[string]bool
+}
+
+type batchScopeKey struct{}
+
+func (s *batchSteps) BeginIngestionBatch(ctx context.Context) (context.Context, func()) {
+	return context.WithValue(ctx, batchScopeKey{}, s), func() {}
 }
 
 func (s *batchSteps) Run(ctx context.Context, _, id string) error {
@@ -158,6 +169,10 @@ func (s *batchSteps) Run(ctx context.Context, _, id string) error {
 	defer s.mu.Unlock()
 	s.runs[id]++
 	s.parents[id] = logging.RequestID(ctx)
+	if s.scoped == nil {
+		s.scoped = map[string]bool{}
+	}
+	s.scoped[id] = ctx.Value(batchScopeKey{}) == s
 	if id == "0" && (s.poison || !s.normalized) {
 		return content.ErrNormalizationPending
 	}

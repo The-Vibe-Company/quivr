@@ -229,6 +229,32 @@ func (d PluginDeriver) Segment(ctx context.Context, org, corpusID string, v cont
 	return d.save(ctx, org, v, segments)
 }
 
+// PrepareSegments invokes a segments-only owner without persisting facts for
+// a Version which has not been published yet. Paged and combined providers
+// retain their existing materialize-first path.
+func (d PluginDeriver) PrepareSegments(ctx context.Context, org, corpusID string, v content.Version) (seg content.Segmentation, supported bool, err error) {
+	d = d.forVersion(ctx, v)
+	if d.Plugin == nil || !d.descriptor.SegmentsOnly || d.descriptor.Paged {
+		return seg, false, nil
+	}
+	if err = d.bind(ctx); err != nil {
+		return seg, true, d.failure(err)
+	}
+	segments, err := d.segmentAndEmbed(ctx, org, corpusID, v, nil)
+	if err != nil {
+		return seg, true, d.failure(err)
+	}
+	inputs := make([]content.SegmentInput, len(segments))
+	for i, s := range segments {
+		inputs[i] = s.SegmentInput
+	}
+	seg, err = content.PluginSegmentation(org, v, d.descriptor.Recipe, d.descriptor.Provenance, inputs)
+	if err != nil {
+		return seg, true, content.Refused("the ingestion plugin answered segments outside the Version's text Parts")
+	}
+	return seg, true, nil
+}
+
 // owned lists the generation's spaces the pinned plugin owns.
 func (d PluginDeriver) owned(g content.Generation) []string {
 	var spaces []string
