@@ -324,9 +324,10 @@ test("a version is replaced once a newer one took its place, not while it is sti
     // The core reports a Version still building as not current.
     version("v_building", "r1", 1_000, "received", false),
     version("v_shown", "r1", 60_000, "retrieval_ready", true),
-    // Searchable, but a newer Version of its Record was desired meanwhile.
+    // Searchable, but a newer Version of its Record, still building, was
+    // desired meanwhile.
     version("v_finished", "r2", 50_000, "retrieval_ready", false),
-    version("v_newer", "r2", 40_000, "retrieval_ready", true),
+    version("v_newer", "r2", 40_000, "received", false),
     // Overtaken while it waited.
     version("v_overtaken", "r3", 30_000, "received", false),
     version("v_latest", "r3", 20_000, "retrieval_ready", true),
@@ -344,6 +345,11 @@ test("a version is replaced once a newer one took its place, not while it is sti
     return { status: 404, data: { code: "not_found" } };
   };
   const admin = createAdmin({ upstream, corpus: "demo", clock: () => now });
+  // A timeline opened first waits for the list it is judged against.
+  assert.equal(
+    (await admin.timeline("v_overtaken")).data.document.replaced,
+    true,
+  );
   const { documents, stats } = await admin.snapshot();
   assert.deepEqual(
     Object.fromEntries(documents.map((d) => [d.version_id, d.replaced])),
@@ -356,7 +362,7 @@ test("a version is replaced once a newer one took its place, not while it is sti
       v_latest: false,
     },
   );
-  assert.equal(stats.waiting, 2, "the counts do not look at the label");
+  assert.equal(stats.waiting, 3, "the counts do not look at the label");
   for (const [id, replaced] of [
     ["v_building", false],
     ["v_finished", true],

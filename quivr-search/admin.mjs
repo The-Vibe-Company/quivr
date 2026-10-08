@@ -851,6 +851,10 @@ export function createAdmin({
     // One document's steps in time order; a Version outside the demo corpus
     // is reported missing.
     async timeline(versionID) {
+      // Replacement is judged against the scanned list; a timeline opened
+      // before the first scan waits for it, and one the scan cannot read is
+      // judged by the Version alone.
+      await start().catch(() => {});
       const response = await upstream(
         `/v0/admin/documents/${encodeURIComponent(versionID)}/timeline`,
       );

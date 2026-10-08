@@ -99,8 +99,14 @@ export function TimelinePanel({
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const heading = useRef<HTMLHeadingElement>(null);
-  // Steps and alert applicability both change what the timeline shows.
-  const revision = JSON.stringify([row?.steps, row?.evaluation]);
+  // Steps, alert applicability and whether the Version is current or
+  // replaced all change what the timeline shows.
+  const revision = JSON.stringify([
+    row?.steps,
+    row?.evaluation,
+    row?.is_current,
+    row?.replaced,
+  ]);
 
   useEffect(() => {
     const controller = new AbortController();
