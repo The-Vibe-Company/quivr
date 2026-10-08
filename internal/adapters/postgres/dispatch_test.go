@@ -158,7 +158,7 @@ func TestIngestionQueueMigrationPreservesWaitingReceipts(t *testing.T) {
 	pool := scratchDatabase(t, ctx)
 	prior := embedded(t, regexp.MustCompile(".*"))
 	for name := range prior {
-		if strings.HasSuffix(name, "_ingestion_dispatch_batches.sql") || strings.HasSuffix(name, "_ingestion_workflow_batches.sql") || strings.HasSuffix(name, "_work_queues.sql") || strings.HasSuffix(name, "_queue_backlog_counters.sql") {
+		if strings.HasSuffix(name, "_ingestion_dispatch_batches.sql") || strings.HasSuffix(name, "_ingestion_workflow_batches.sql") || strings.HasSuffix(name, "_work_queues.sql") || strings.HasSuffix(name, "_queue_backlog_counters.sql") || strings.HasSuffix(name, "_hot_small_tables.sql") {
 			delete(prior, name)
 		}
 	}
