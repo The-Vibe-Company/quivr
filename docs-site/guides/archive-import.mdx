@@ -158,7 +158,7 @@ size limit.
 
 `acquisition.continuation_reason` explains a false continuation: `run_in_progress`,
 `source_drained`, `checkpoint_stalled`, `checkpoint_cycled`, `source_notice`,
-`item_rejected` or `store_unsupported`. An empty value accompanies a requested
+`item_rejected`, `store_unsupported` or `incomplete`. An empty value accompanies a requested
 continuation. A deferral before the next fetch logs `connector run deferred`
 with `continuation_reason: ingestion_backpressure` or `queue_unavailable`;
 it keeps the last committed page diagnostic and checkpoint. A run that defers
