@@ -27,7 +27,9 @@ a finite cgroup limit the script uses host memory, which other services also sha
 | `QUIVR_POSTGRES_WORK_MEM` | `4MB` per sort/hash operation; a hash can use more |
 | `QUIVR_POSTGRES_MAINTENANCE_WORK_MEM` | 1/16 of memory, bounded to 16–512 MiB |
 
-Memory overrides require positive integers with `kB`, `MB`, `GB` or `TB` units.
+The four memory tuning overrides in the table require positive integers with
+`kB`, `MB`, `GB` or `TB` units. `QUIVR_POSTGRES_MEMORY_MB` takes an integer MiB
+value, such as `1024`.
 Leave room for concurrent operations, connection overhead, autovacuum workers
 (each can use maintenance memory) and the OS cache. These are starting ratios,
 not a guarantee that all 256 sessions fit a small allocation. Change budgets and
