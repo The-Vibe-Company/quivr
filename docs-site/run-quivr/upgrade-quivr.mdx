@@ -45,6 +45,8 @@ Pause also fences the active run and defers its next run indefinitely; resume ma
 
 Compact storage keeps each Version's vectors in one current float32 file per segmentation and vector space. Each uploaded object is immutable; a partial group can replace its descriptor with a new immutable object as more canonical vectors arrive. A segmentation is the saved set of passages; a vector space identifies the embedding model. Compact PostgreSQL rows retain vector and public artifact digests, file ordinals and generation coverage. Rebuilds reuse these files without calling the embedding provider. Each file is bounded to 256 MiB; ordinary canonical objects retain their 2 MiB bound.
 
+Rebuild Operation counters distinguish `versions_covered` (document revisions added to the rebuilt search index) from `passages_covered` (passage/vector-space coverage entries added to that index). A passage covered in two spaces counts twice. The compatibility keys `indexed` and `vectors_reused` keep those respective counts. Replays count only newly added coverage, including individual passages within a compact file. Running operations initialize the new keys from their existing compatibility totals when coverage next commits.
+
 New installations start in compact mode. Existing installations retain legacy writes after the additive migration so previous binaries can still read new work. Use the new binary and `QUIVR_CONFIG` for these commands:
 
 ```sh
@@ -59,6 +61,8 @@ quivr storage status --id prepare-storage
 ```
 
 Repeat the same command to resume its saved checkpoint. `phase: "done"` means that operation finished its scan. Each batch processes at most the requested number of units; a vector unit packs one whole segmentation/space group. Object verification finishes before database locks. No search service, tokenizer or embedding credentials are needed. The compaction configuration needs [PostgreSQL and S3 settings](/reference/configuration). Compaction never calls an embedding provider. Each unit has a 30-second deadline; a timed-out unit keeps the previous checkpoint.
+
+Before retiring legacy vectors, let an API or worker finish background index setup. It manages `embedding_coverage_by_artifact` on `embedding_coverage (organization, artifact_id)`, which PostgreSQL needs to check references when an artifact is deleted. The build is concurrent and does not delay readiness. A matching index already created by an operator is reused. Check the index state as described below; the storage command itself does not run index maintenance.
 
 After all previous API, live-worker and bulk-worker processes have drained and stopped, explicitly activate compact writes:
 
@@ -99,23 +103,30 @@ Inspect the `X-Quivr-Index-Setup` header on `/readyz` for that process's last in
 | Migration times out | SQL migrations bound locks to two seconds and statements to five seconds; a failure rolls back their transaction. Let conflicting transactions finish, then rerun. Index maintenance uses a separate advisory lock. An index build started by an older binary can still hold the migration lock until it finishes or is stopped. |
 | `index_setup_failed` or `index_setup_busy` in background events | Live processes retry with backoff from one second to one minute. Each attempt has a 30-minute budget and no separate lock timeout. Interrupted builds can leave invalid indexes; the next attempt repairs them. Required migrations and readiness proceed independently. |
 | `index_definition_conflict` | A performance index name belongs to an object with a different definition. Inspect the database catalog and rename the conflicting object. Quivr leaves it untouched and detects your repair on a later attempt. |
+| `compaction_unit_deadline` | A unit exceeded its 30-second budget. Check index setup and storage access, then rerun the same operation identifier; its previous checkpoint remains. |
+| `compaction_unit_canceled` | The unit was interrupted. Rerun the same operation identifier to resume. |
+| `compaction_vectors_failed`, `compaction_receipts_failed`, `compaction_normalizations_failed` | Inspect durable artifacts and storage access for the named phase, repair the cause, then resume. |
+| `compaction_start_failed`, `compaction_status_failed` | Check activation, the operation identifier, options and database access before retrying. |
 | Worker never becomes ready | An expansion is pending or a dependency is unavailable. Run the new migrator and inspect startup logs. |
 | Previous binary fails after cleanup | The contract step closed the rollback window. Deploy a forward fix or follow your data recovery procedure. |
 
 Database writes can wait briefly for additive DDL locks. Compatibility requires both application versions to support the expanded representation; rollout and data backfills still need deployment-specific review.
 
+Storage failure codes omit raw database and object-storage errors.
+
 An interrupted index build restarts from scratch on the next attempt. If index setup consistently exceeds 30 minutes, stop automatic index maintenance by draining the API and worker instances, then build the indexes concurrently in an operator database session with a longer timeout. Use the same index names, columns and predicates; remove a matching invalid index before rebuilding it. Restart the instances afterward to verify and reuse the indexes.
 
-Inspect both existing definitions first:
+Inspect the existing definitions first:
 
 ```sql
 SELECT indisvalid, pg_get_indexdef(indexrelid) AS definition
 FROM pg_index
 WHERE indexrelid IN (to_regclass('segments_by_segmentation'),
-                     to_regclass('records_by_current_version'));
+                     to_regclass('records_by_current_version'),
+                     to_regclass('embedding_coverage_by_artifact'));
 ```
 
-In a separate database session outside a transaction, drop each invalid index only if it matches its definition below, using `DROP INDEX CONCURRENTLY segments_by_segmentation` or `DROP INDEX CONCURRENTLY records_by_current_version`. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours per build; the builds run sequentially:
+In a separate database session outside a transaction, drop each invalid index only if it matches its definition below, using `DROP INDEX CONCURRENTLY` with that index's name. Preserve any incompatible object and follow the conflict guidance above. In that same session, outside a transaction, allow up to two hours per build; the builds run sequentially:
 
 ```sql
 SET lock_timeout = '0';
@@ -124,6 +135,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS segments_by_segmentation
   ON segments (organization, segmentation_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS records_by_current_version
   ON records (organization, corpus_id, current_version_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS embedding_coverage_by_artifact
+  ON embedding_coverage (organization, artifact_id);
 ```
 
 A valid matching index is reused; close this session afterward and restart the API and worker to finish index setup.

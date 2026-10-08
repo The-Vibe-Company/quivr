@@ -184,6 +184,8 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
   (default 8), while new rebuild activities have separate worker capacity. Imports
   remain lexically searchable through embedding recipe changes; incompatible
   enrichment settles with `rebuild_required` until rebuilt vectors are served.
+  Progress reports covered Versions and passage/vector-space entries separately
+  as `versions_covered` and `passages_covered`.
 - **Document step times**: each Version reports when it was accepted, materialized, cut
   into segments, made searchable, given vectors, evaluated by alerts, quarantined or
   withdrawn (`steps`). A key with `observability:read` lists the latest documents with
