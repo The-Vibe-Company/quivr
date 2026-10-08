@@ -105,6 +105,9 @@ async function spawnDemo(t, upstreamPort, env = {}) {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  // What the demo logs as errors, line by line.
+  const errors = [];
+  demo.stderr.on("data", (chunk) => errors.push(...String(chunk).split("\n").filter(Boolean)));
   t.after(async () => {
     if (demo.exitCode === null) {
       demo.kill();
@@ -119,9 +122,6 @@ async function spawnDemo(t, upstreamPort, env = {}) {
   ]);
   const port = String(ready[0]).match(/127\.0\.0\.1:(\d+)/)?.[1];
   assert.ok(port);
-  // What the demo logs as errors, line by line.
-  const errors = [];
-  demo.stderr.on("data", (chunk) => errors.push(...String(chunk).split("\n").filter(Boolean)));
   return { base: `http://127.0.0.1:${port}`, errors };
 }
 
@@ -1661,7 +1661,8 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
 
   assert.equal((await get("/demo/session")).corpus_id, "demo-1");
   assert.deepEqual((await get("/demo/corpora")).items.map((c) => c.corpus_id), ["demo-1", "archive-1"]);
-  await get("/demo/feed");
+  // A browser follows the demo corpus's feed.
+  const followed = (await fetch(base + "/demo/feed/stream")).body.getReader();
   await until("the demo corpus's change stream", () => streams.has("demo-1"));
 
   // The databases are wiped while the demo runs; the page reloads. The demo
@@ -1670,6 +1671,14 @@ test("after the engine's databases are reset, the demo forgets its corpora and f
   generation = 2;
   assert.equal((await get("/demo/session")).corpus_id, "demo-2");
   await until("the old change stream to close", () => !streams.has("demo-1"));
+  // The browser's stream of the old corpus ends, so it reconnects to the new one.
+  const ended = (async () => {
+    for (let read; !(read = await followed.read()).done; );
+  })();
+  await Promise.race([
+    ended,
+    delay(3000, undefined, { ref: false }).then(() => assert.fail("the browser's stream of the old corpus stayed open")),
+  ]);
   assert.deepEqual((await get("/demo/corpora")).items.map((c) => c.corpus_id), ["demo-2", "archive-2"]);
   assert.equal((await addSource("demo-2")).status, 201);
   // A tab opened before the reset writes to its old corpus: it reloads.

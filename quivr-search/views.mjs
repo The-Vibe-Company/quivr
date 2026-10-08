@@ -79,6 +79,12 @@ export function createViews({ feedFor, indexFor, upstream }) {
       // waits here, and is written once the stream is open.
       let waiting = [];
       const frame = (event, data) => {
+        // A corpus no longer read ends the stream: the browser reconnects and
+        // rereads the feed of the corpora read now.
+        if (event === "stopped") {
+          stop();
+          return res.headersSent ? res.end() : res.destroy();
+        }
         const text = `event: ${event}\ndata: ${JSON.stringify(event === "status" ? { live: live() } : data)}\n\n`;
         if (waiting) waiting.push(text);
         else res.write(text);
