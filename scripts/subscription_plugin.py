@@ -29,7 +29,7 @@ MODULE = NAME.replace('-', '_')
 VERSION = '0.1.0'
 EVALUATOR = f'{NAME}@{VERSION}'
 ALERTS = normalizer_plugin.ROOT / 'plugins' / 'alerts'
-KEYWORD_EVALUATOR = 'alerts@0.3.0'
+KEYWORD_EVALUATOR = 'alerts@0.4.0'
 # Installer configuration of the alerts pin: the built-in field names only. A
 # deployment maps its own names here, e.g. {"fields": {"author": "/extensions/<namespace>/data/author"}}.
 ALERTS_CONFIGURATION = {}
@@ -242,7 +242,7 @@ def vectors(stack):
     version = query['current_version']['version_id']
     subscription = call('POST', '/v0/subscriptions', {'idempotency_key': key, 'name': 'Local port strikes',
         'saved_query_id': query['saved_query_id'], 'saved_query_version_id': version,
-        'evaluator': {'plugin_id': 'alerts', 'version': '0.3.0', 'configuration': {'wait_for_enrichment': False}},
+        'evaluator': {'plugin_id': 'alerts', 'version': '0.4.0', 'configuration': {'wait_for_enrichment': False, 'threshold': 0.8}},
         'destination_id': 'local-receiver-org-a'})
     env = {**environment(stack), 'QUIVR_TEST_VECTOR_CORPUS': corpus, 'QUIVR_TEST_VECTOR_QUERY': query['saved_query_id'],
            'QUIVR_TEST_VECTOR_VERSION': version, 'QUIVR_TEST_VECTOR_SUBSCRIPTION': subscription['subscription_id'],

@@ -422,7 +422,7 @@ class ChatAdapters(unittest.TestCase):
                 replay.response_cache.close()
 
     def test_cache_keeps_embedding_batches_and_jev_refusals_private(self):
-        from jev_rerank.client import MAX_TOKENS, Result
+        from quivr_plugin.system_one import MAX_TOKENS, Result
         with tempfile.TemporaryDirectory() as directory:
             cache = live.ResponseCache(directory)
             self.addCleanup(cache.close)
@@ -1018,7 +1018,7 @@ class ChatAdapters(unittest.TestCase):
         self.assertEqual(news.JevJudge(transport).grade(q, [large, small]), {'large': None, 'small': 3})
 
     def test_failed_jev_attempts_consume_budget_and_block_next_call(self):
-        from jev_rerank.client import MAX_TOKENS, Result
+        from quivr_plugin.system_one import MAX_TOKENS, Result
         budget = live.embeddings.Budget(3 * MAX_TOKENS, 1)
         transport = mock.Mock()
         transport.judge.return_value = Result(input_tokens=3 * MAX_TOKENS, estimated_tokens=3 * MAX_TOKENS,
@@ -1029,6 +1029,12 @@ class ChatAdapters(unittest.TestCase):
             client.judge('q', {'a': 'text'}, 100, 1)
         self.assertEqual(transport.judge.call_count, 1)
         self.assertAlmostEqual(budget.summary()['cost_upper_bound_usd'], 3 * MAX_TOKENS * .042 / 1000000)
+        # Two legal request bodies require reserving retries for both before any call.
+        transport.reset_mock()
+        client = live.CappedJev(transport, live.embeddings.Budget(3 * MAX_TOKENS, 1))
+        with self.assertRaises(live.AdapterError):
+            client.judge('q', {'a': 'é' * 40000, 'b': 'é' * 40000}, 100, 1)
+        transport.judge.assert_not_called()
 
     def test_offline_config_rejects_unsafe_caps_and_unknown_fields_without_http(self):
         for change in [{'max_filtered_candidate_share': v} for v in (0, 1.1, float('nan'), True, '0.1')] + [

@@ -1,12 +1,18 @@
 package weaviate_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/The-Vibe-Company/quivr/internal/adapters/weaviate"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/retrieval"
@@ -225,6 +231,10 @@ func TestItemHybridKeepsBestPassage(t *testing.T) {
 	if err != nil || len(hits) != 1 || hits[0].SegmentID != "zz-best" {
 		t.Fatalf("lexical highlight %+v %v", hits, err)
 	}
+	// A partial match must still choose the best highlight within a bounded
+	// dependency budget. Exhausting that budget fails immediately, without
+	// sleeping or asserting machine-dependent latency.
+	f.store.Client.Transport = &searchRequestBudget{next: f.store.Client.Transport, remaining: 4}
 	hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: f.corpusID, Generation: g}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: "harbour harbour harbour ferries boat water", Mode: "lexical", GroupBy: "record", K: 1})
 	if err != nil || len(hits) != 1 || hits[0].SegmentID != "zz-coverage" {
 		t.Fatalf("distinct query-term highlight %+v %v", hits, err)
@@ -337,4 +347,78 @@ func TestItemIndexedMetadataAndIdentityFilters(t *testing.T) {
 			t.Fatalf("%s owner-eligible item refill: %+v %v", mode, hits, err)
 		}
 	}
+}
+
+// Enforce the search's dependency budget while leaving real Weaviate ranking,
+// filtering and passage selection in the owner test.
+type searchRequestBudget struct {
+	next      http.RoundTripper
+	remaining int
+}
+
+func (b *searchRequestBudget) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path == "/v1/graphql" {
+		b.remaining--
+		if b.remaining < 0 {
+			return nil, errors.New("search dependency request budget exhausted")
+		}
+	}
+	return b.next.RoundTrip(r)
+}
+
+// Owns bounded recovery when individually valid passages exceed a response's
+// byte budget. The transport models GraphQL limits, not passage selection.
+func TestItemPassageResponseBudget(t *testing.T) {
+	transport := &largePassageHTTP{text: strings.Repeat("harbour ", 1<<17)}
+	store := weaviate.New("http://index.invalid")
+	store.Client.Transport = transport
+	g := content.Generation{ID: "generation", Collection: "PassageBudget", ItemKeywordsProjected: true, Fields: []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}}}}
+	hits, err := store.Search(context.Background(), []retrieval.Route{{CorpusID: "corpus", Generation: g}}, corpus.Scope{Organization: "organization"}, retrieval.Request{Query: "harbour", Mode: "lexical", GroupBy: "record", K: 10})
+	if err != nil || len(hits) == 0 || hits[0].SegmentID != "passage-000" {
+		t.Fatalf("bounded large-passage search: %+v %v", hits, err)
+	}
+}
+
+type largePassageHTTP struct {
+	requests int
+	text     string
+}
+
+func (h *largePassageHTTP) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasPrefix(r.URL.Path, "/v1/schema/") {
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+	}
+	if r.URL.Path != "/v1/graphql" {
+		return nil, errors.New("unexpected projection endpoint")
+	}
+	h.requests++
+	if h.requests > 3 {
+		return nil, errors.New("large-passage dependency budget exhausted")
+	}
+	var request struct{ Query string }
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		return nil, err
+	}
+	match := regexp.MustCompile(`limit:(\d+)`).FindStringSubmatch(request.Query)
+	if len(match) != 2 {
+		return nil, errors.New("missing GraphQL limit")
+	}
+	limit, _ := strconv.Atoi(match[1])
+	count := limit
+	if strings.Contains(request.Query, "passageText") {
+		count = min(limit, 17)
+	}
+	rows := make([]map[string]any, 0, count)
+	for i := 0; i < count; i++ {
+		row := map[string]any{"segmentId": fmt.Sprintf("passage-%03d", i), "generationId": "generation", "versionId": fmt.Sprintf("version-%03d", i), "_additional": map[string]any{"score": "1"}}
+		if strings.Contains(request.Query, "passageText") {
+			row["passageText"] = h.text
+		}
+		rows = append(rows, row)
+	}
+	body, err := json.Marshal(map[string]any{"data": map[string]any{"Get": map[string]any{"PassageBudget": rows}}})
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
 }

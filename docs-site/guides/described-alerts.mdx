@@ -6,7 +6,7 @@ keywords: ["meaning alerts", "described alerts", "vectors", "classifier", "jev",
 
 A meaning alert fires when a new article is about a subject you describe in plain words, such as "Labour strikes at ports and harbours". It can find related articles that use different wording or languages; results depend on the model and the threshold. The first-party `alerts` plugin checks it in one of two ways: by comparing the article's stored vectors with your description, or with TypeSafe's Jev classifier, an external service.
 
-[Choose a check](/guides/alerts#choose-a-check) compares them with keyword alerts. You create the alert the same way as a [keyword alert](/guides/keyword-alerts#save-the-alert): a Saved Query holds the expression, and a Subscription names the `alerts` rule, version `0.3.0`, and your destination. Only the expression and the rule configuration change.
+[Choose a check](/guides/alerts#choose-a-check) compares them with keyword alerts. You create the alert the same way as a [keyword alert](/guides/keyword-alerts#save-the-alert): a Saved Query holds the expression, and a Subscription names the `alerts` rule, version `0.4.0`, and your destination. Only the expression and the rule configuration change.
 
 ## Prerequisites
 
@@ -53,9 +53,9 @@ To combine it with a keyword tree, use `keywords_or_meaning` or `keywords_and_me
 }
 ```
 
-The plugin compares your description with each passage of the article and keeps the highest similarity score. The Match's evidence names that passage (its Part and segment), the vector space, the score and the threshold. The article matches when the similarity reaches the threshold, **0.80** by default; set `threshold` in the Subscription's `evaluator.configuration` to change it, between 0.2 and 0.95.
+The plugin compares your description with each passage of the article and keeps the highest similarity score. The Match's evidence names that passage (its Part and segment), the vector space, the score and the threshold. The article matches when the similarity reaches its configured threshold, between 0.2 and 0.95. Set `threshold` in the Subscription's `evaluator.configuration`, or use the operator's `vectors.thresholds[<vector-space-id>]` setting. The Subscription setting takes precedence. There is no implicit default; a ready comparison without either setting fails with `vector_threshold_required`.
 
-The similarity is closeness, not a probability, and the default has known limits. It was measured on 156 pairs of neutral French and English articles and descriptions, translations included: 16 related pairs and 140 unrelated ones. At 0.80 it matched all 16 related pairs, and also 11 of the 140 unrelated ones. An English paraphrase scored 0.89, a French translation 0.82 and an unrelated football article 0.77. Related and unrelated scores overlap, and these examples cover only French and English, so tune the threshold on your own examples. The [calibration notes](https://github.com/The-Vibe-Company/quivr/tree/main/plugins/alerts/calibration) list every pair, the model revision and the command that reproduces the measurement.
+The similarity is closeness, not a probability. On 156 neutral French/English pairs, a threshold of 0.80 retained all 16 related pairs for E5 and matched 11 unrelated pairs. For 768-dimensional EmbeddingGemma 2, 0.65 retained all 16 related pairs and matched 6 unrelated pairs; 0.80 missed 12 related pairs. These suggestions apply only to the measured revisions and templates. Tune the threshold on your own examples. The [calibration notes](https://github.com/The-Vibe-Company/quivr/tree/main/plugins/alerts/calibration) list every pair, model revision and reproduction command.
 
 The check needs the article's vectors. Until they are attached, the rule answers not ready, and Quivr asks again when they arrive ([Not ready](/guides/alerts#not-ready)); this happens even with `wait_for_enrichment: false`.
 
@@ -85,7 +85,7 @@ The classifier returns a score from 0 to 1, the probability that the article fit
 {
   "evaluator": {
     "plugin_id": "alerts",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "configuration": {"threshold": 0.6}
   }
 }

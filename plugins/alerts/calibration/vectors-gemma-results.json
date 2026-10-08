@@ -1,0 +1,1601 @@
+{
+  "measured_at": "2026-10-08T10:41:26.391134+00:00",
+  "model": "google/embeddinggemma-2",
+  "revision": "914f7f89142e33e77833254d9c9b90c3cef7303b",
+  "dimensions": 768,
+  "threads": 2,
+  "method": "CPU float32, eval, official SentenceTransformers text encoder, mean pooling/projection, L2 normalization, cosine",
+  "versions": {
+    "torch": "2.8.0+cpu",
+    "transformers": "5.19.0",
+    "tokenizers": "0.23.2",
+    "sentence-transformers": "6.1.0"
+  },
+  "max_tokens": {
+    "title": 14,
+    "body": 61,
+    "query": 13,
+    "input": 82
+  },
+  "query_inputs": [
+    "task: search result | query: Labour strikes at ports and harbours",
+    "task: search result | query: Diplomatic tensions between two countries over visa rules",
+    "task: search result | query: Floods caused by heavy rain",
+    "task: search result | query: Football transfer news",
+    "task: search result | query: Central bank interest rate decisions",
+    "task: search result | query: New rules on electric scooters in cities",
+    "task: search result | query: Grèves des travailleurs dans les ports",
+    "task: search result | query: Tensions diplomatiques entre deux pays à propos des règles de visa",
+    "task: search result | query: Inondations causées par de fortes pluies",
+    "task: search result | query: Actualités des transferts de joueurs de football",
+    "task: search result | query: Décisions des banques centrales sur les taux d'intérêt",
+    "task: search result | query: Nouvelles règles sur les trottinettes électriques en ville"
+  ],
+  "passage_inputs": [
+    "title: Harbour staff walk out over pay | text: Dockers at the northern harbour of Porthaven stopped work on Tuesday after talks on wages broke down. Unloading has halted and ships are waiting offshore. The union says the walkout will last until management makes a new offer.",
+    "title: Les dockers de Portval votent la grève | text: Réunis en assemblée générale, les dockers du port de Portval ont voté une grève de 48 heures contre la réforme de leur statut. Les navires sont déroutés vers d'autres ports. La direction appelle à reprendre le dialogue.",
+    "title: Container traffic hits a record at Porthaven | text: The port of Porthaven handled more containers this quarter than ever before. New cranes and a deeper channel explain most of the growth. Last year's brief strike is now a distant memory, the port authority said.",
+    "title: Grève dans les trains régionaux | text: Les conducteurs de trains régionaux de la région Sud sont en grève depuis lundi. Un train sur trois circule. Les syndicats réclament des embauches et une revalorisation des salaires.",
+    "title: Norland réduit les visas accordés aux ressortissants d'Estavia | text: Le gouvernement de Norland a annoncé une réduction de moitié des visas délivrés aux citoyens d'Estavia. Estavia a convoqué l'ambassadeur de Norland et dénonce une mesure de rétorsion. Les deux capitales s'accusent mutuellement de bloquer les expulsions.",
+    "title: Estavia summons envoy as visa row deepens | text: Estavia's foreign ministry summoned Norland's ambassador on Friday after Norland's consulates stopped processing student visas. Officials on both sides traded accusations of bad faith. Analysts expect the dispute to weigh on trade talks.",
+    "title: Visa-free travel boosts tourism | text: Since visitors no longer need a visa, hotel bookings on the coast have risen by a fifth. Airlines are adding routes for the summer season. Local restaurants report their best spring in a decade.",
+    "title: Inondations après des pluies torrentielles | text: Des pluies d'une intensité exceptionnelle ont fait déborder la rivière dans la nuit. Plusieurs quartiers sont sous l'eau et des centaines d'habitants ont été évacués. Les secours restent mobilisés.",
+    "title: Heatwave and drought strain farms | text: Weeks without rain and record temperatures have dried out fields across the plain. Farmers are asking for emergency aid. Water use is restricted in forty towns.",
+    "title: Rovers sign striker for club-record fee | text: Rovers have completed the signing of forward Alex Moreau from City on a five-year contract. The fee is a club record. Moreau scored twenty goals last season.",
+    "title: Victoire de Rovers en championnat | text: Rovers ont battu City deux buts à un samedi soir. Le match a été serré jusqu'aux dernières minutes. L'équipe remonte à la troisième place du classement.",
+    "title: La banque centrale relève ses taux | text: La banque centrale a relevé son taux directeur d'un quart de point pour freiner l'inflation. C'est la troisième hausse de l'année. Les crédits immobiliers devraient encore renchérir.",
+    "title: City bans rental e-scooters from its centre | text: The city council voted to ban rental electric scooters from the historic centre from next month. Private scooters must now keep to cycle lanes and a speed limit of 20 km/h. Operators say they will appeal."
+  ],
+  "pairs": [
+    {
+      "article": 0,
+      "language": "en",
+      "description": "ports",
+      "fits": true,
+      "similarity": 0.8314842581748962
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.5760517120361328
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.6061537861824036
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5961312651634216
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5498032569885254
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.5200203657150269
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "ports_fr",
+      "fits": true,
+      "similarity": 0.8024011850357056
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.5569596886634827
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.5795081853866577
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5702425837516785
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5341880917549133
+    },
+    {
+      "article": 0,
+      "language": "en",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5084429383277893
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "ports",
+      "fits": true,
+      "similarity": 0.7217323780059814
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.5580070614814758
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.5532519817352295
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5341148376464844
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5208146572113037
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.5150822401046753
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "ports_fr",
+      "fits": true,
+      "similarity": 0.8074697256088257
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.6155931949615479
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.5981242060661316
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5853909254074097
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5802067518234253
+    },
+    {
+      "article": 1,
+      "language": "fr",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5710228681564331
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.7165065407752991
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.571660041809082
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.6030012965202332
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.589364230632782
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.572486162185669
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.553546667098999
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.6756862998008728
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.5381523370742798
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.5677042007446289
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5564219951629639
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5498282313346863
+    },
+    {
+      "article": 2,
+      "language": "en",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5298393964767456
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.6449041366577148
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.5290787220001221
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.5441628694534302
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5157767534255981
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5215321779251099
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.49831268191337585
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.7282735109329224
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.5807673931121826
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.6133487224578857
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5856184959411621
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5834013819694519
+    },
+    {
+      "article": 3,
+      "language": "fr",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5485188364982605
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.5655862092971802
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "visas",
+      "fits": true,
+      "similarity": 0.7278742790222168
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.5420040488243103
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5445202589035034
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5714701414108276
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.5591039657592773
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.624315619468689
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "visas_fr",
+      "fits": true,
+      "similarity": 0.7728466987609863
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.5854594707489014
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5941520929336548
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.619769811630249
+    },
+    {
+      "article": 4,
+      "language": "fr",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.596615731716156
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.5952914953231812
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "visas",
+      "fits": true,
+      "similarity": 0.766534149646759
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.5674794316291809
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5540715456008911
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5716937780380249
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.5468255877494812
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.6015547513961792
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "visas_fr",
+      "fits": true,
+      "similarity": 0.7274155020713806
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.5287197232246399
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5250723958015442
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5282109975814819
+    },
+    {
+      "article": 5,
+      "language": "en",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5045616030693054
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.5890248417854309
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.670124351978302
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.580397367477417
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5829370021820068
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5706813335418701
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.5798944234848022
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.5848470330238342
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.6371477842330933
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.5743707418441772
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5607683658599854
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5583495497703552
+    },
+    {
+      "article": 6,
+      "language": "en",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5441967844963074
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.5269036293029785
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.475411981344223
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "floods",
+      "fits": true,
+      "similarity": 0.7262768149375916
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.515622615814209
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5248292684555054
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.47258102893829346
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.5897613763809204
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.514517605304718
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "floods_fr",
+      "fits": true,
+      "similarity": 0.7926909327507019
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5751374363899231
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5807853937149048
+    },
+    {
+      "article": 7,
+      "language": "fr",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5281102657318115
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.5835958123207092
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.5927717685699463
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.6624084711074829
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5629297494888306
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5967495441436768
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.5570424795150757
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.5773602724075317
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.5709607601165771
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.6547554731369019
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5632686614990234
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5705438852310181
+    },
+    {
+      "article": 8,
+      "language": "en",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.536888837814331
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.5418150424957275
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.5112901926040649
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.5589141845703125
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "transfers",
+      "fits": true,
+      "similarity": 0.6760114431381226
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5093613862991333
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.5777968764305115
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.5393430590629578
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.49660345911979675
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.5489435791969299
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "transfers_fr",
+      "fits": true,
+      "similarity": 0.6599683165550232
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.4982052147388458
+    },
+    {
+      "article": 9,
+      "language": "en",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5605901479721069
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.5364223718643188
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.4888564944267273
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.5502603054046631
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5817101001739502
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.4962919354438782
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.5221924185752869
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.5964080095291138
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.5357944965362549
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.6063512563705444
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.6209354400634766
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5583553314208984
+    },
+    {
+      "article": 10,
+      "language": "fr",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5801350474357605
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.5327091217041016
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.5175888538360596
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.5545034408569336
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5297724604606628
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "rates",
+      "fits": true,
+      "similarity": 0.7051049470901489
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "scooters",
+      "fits": false,
+      "similarity": 0.5161383152008057
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.5875118970870972
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.573025107383728
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.6168480515480042
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5807654857635498
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "rates_fr",
+      "fits": true,
+      "similarity": 0.7825354933738708
+    },
+    {
+      "article": 11,
+      "language": "fr",
+      "description": "scooters_fr",
+      "fits": false,
+      "similarity": 0.5719904899597168
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "ports",
+      "fits": false,
+      "similarity": 0.5890272855758667
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "visas",
+      "fits": false,
+      "similarity": 0.5918562412261963
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "floods",
+      "fits": false,
+      "similarity": 0.5689560174942017
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "transfers",
+      "fits": false,
+      "similarity": 0.5270793437957764
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "rates",
+      "fits": false,
+      "similarity": 0.5816962122917175
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "scooters",
+      "fits": true,
+      "similarity": 0.8041523694992065
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "ports_fr",
+      "fits": false,
+      "similarity": 0.5599145293235779
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "visas_fr",
+      "fits": false,
+      "similarity": 0.5664546489715576
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "floods_fr",
+      "fits": false,
+      "similarity": 0.5420932769775391
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "transfers_fr",
+      "fits": false,
+      "similarity": 0.5018566250801086
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "rates_fr",
+      "fits": false,
+      "similarity": 0.5642049908638
+    },
+    {
+      "article": 12,
+      "language": "en",
+      "description": "scooters_fr",
+      "fits": true,
+      "similarity": 0.7551230192184448
+    }
+  ],
+  "threshold_sweep": [
+    {
+      "threshold": 0.2,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.21,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.22,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.23,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.24,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.25,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.26,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.27,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.28,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.29,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.3,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.31,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.32,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.33,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.34,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.35,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.36,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.37,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.38,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.39,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.4,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.41,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.42,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.43,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.44,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.45,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.46,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.47,
+      "true_positive": 16,
+      "false_positive": 140,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.48,
+      "true_positive": 16,
+      "false_positive": 138,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.49,
+      "true_positive": 16,
+      "false_positive": 137,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.5,
+      "true_positive": 16,
+      "false_positive": 133,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.51,
+      "true_positive": 16,
+      "false_positive": 129,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.52,
+      "true_positive": 16,
+      "false_positive": 122,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.53,
+      "true_positive": 16,
+      "false_positive": 108,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.54,
+      "true_positive": 16,
+      "false_positive": 100,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.55,
+      "true_positive": 16,
+      "false_positive": 89,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.56,
+      "true_positive": 16,
+      "false_positive": 75,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.57,
+      "true_positive": 16,
+      "false_positive": 65,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.58,
+      "true_positive": 16,
+      "false_positive": 47,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.59,
+      "true_positive": 16,
+      "false_positive": 27,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.6,
+      "true_positive": 16,
+      "false_positive": 18,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.61,
+      "true_positive": 16,
+      "false_positive": 14,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.62,
+      "true_positive": 16,
+      "false_positive": 10,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.63,
+      "true_positive": 16,
+      "false_positive": 8,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.64,
+      "true_positive": 16,
+      "false_positive": 7,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.65,
+      "true_positive": 16,
+      "false_positive": 6,
+      "false_negative": 0
+    },
+    {
+      "threshold": 0.66,
+      "true_positive": 15,
+      "false_positive": 5,
+      "false_negative": 1
+    },
+    {
+      "threshold": 0.67,
+      "true_positive": 15,
+      "false_positive": 4,
+      "false_negative": 1
+    },
+    {
+      "threshold": 0.68,
+      "true_positive": 14,
+      "false_positive": 2,
+      "false_negative": 2
+    },
+    {
+      "threshold": 0.69,
+      "true_positive": 14,
+      "false_positive": 2,
+      "false_negative": 2
+    },
+    {
+      "threshold": 0.7,
+      "true_positive": 14,
+      "false_positive": 2,
+      "false_negative": 2
+    },
+    {
+      "threshold": 0.71,
+      "true_positive": 13,
+      "false_positive": 2,
+      "false_negative": 3
+    },
+    {
+      "threshold": 0.72,
+      "true_positive": 13,
+      "false_positive": 1,
+      "false_negative": 3
+    },
+    {
+      "threshold": 0.73,
+      "true_positive": 9,
+      "false_positive": 0,
+      "false_negative": 7
+    },
+    {
+      "threshold": 0.74,
+      "true_positive": 9,
+      "false_positive": 0,
+      "false_negative": 7
+    },
+    {
+      "threshold": 0.75,
+      "true_positive": 9,
+      "false_positive": 0,
+      "false_negative": 7
+    },
+    {
+      "threshold": 0.76,
+      "true_positive": 8,
+      "false_positive": 0,
+      "false_negative": 8
+    },
+    {
+      "threshold": 0.77,
+      "true_positive": 7,
+      "false_positive": 0,
+      "false_negative": 9
+    },
+    {
+      "threshold": 0.78,
+      "true_positive": 6,
+      "false_positive": 0,
+      "false_negative": 10
+    },
+    {
+      "threshold": 0.79,
+      "true_positive": 5,
+      "false_positive": 0,
+      "false_negative": 11
+    },
+    {
+      "threshold": 0.8,
+      "true_positive": 4,
+      "false_positive": 0,
+      "false_negative": 12
+    },
+    {
+      "threshold": 0.81,
+      "true_positive": 1,
+      "false_positive": 0,
+      "false_negative": 15
+    },
+    {
+      "threshold": 0.82,
+      "true_positive": 1,
+      "false_positive": 0,
+      "false_negative": 15
+    },
+    {
+      "threshold": 0.83,
+      "true_positive": 1,
+      "false_positive": 0,
+      "false_negative": 15
+    },
+    {
+      "threshold": 0.84,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.85,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.86,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.87,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.88,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.89,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.9,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.91,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.92,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.93,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.94,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    },
+    {
+      "threshold": 0.95,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 16
+    }
+  ]
+}
