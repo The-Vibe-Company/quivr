@@ -273,7 +273,7 @@ function Content({
       <p className="timeline-meta">
         <span className="flow-source">{sourceName(doc.source_namespace)}</span>
         {time.accepted !== undefined && <span>Reçu à {at(time.accepted)}</span>}
-        {!doc.is_current && <span>Version remplacée depuis</span>}
+        {doc.replaced && <span>Version remplacée depuis</span>}
       </p>
       <p
         className="timeline-key"

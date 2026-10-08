@@ -123,6 +123,25 @@ const accepted = (doc) => time(doc.steps?.accepted_at) ?? 0;
 const newestFirst = (a, b) =>
   accepted(b) - accepted(a) || b.version_id.localeCompare(a.version_id);
 
+/**
+ * Whether a newer Version of its Record took a Version's place. The core
+ * reports a Version not current while it still builds as well as once it is
+ * replaced: it is replaced when it finished without becoming current (a newer
+ * Version was desired meanwhile) or a later Version of its Record is current
+ * among `docs`. A withdrawal or a quarantine is shown as such instead.
+ */
+function replacement(docs) {
+  const current = new Map();
+  for (const doc of docs)
+    if (doc.is_current) current.set(doc.record_id, accepted(doc));
+  return (doc) =>
+    !doc.is_current &&
+    doc.state !== "withdrawn" &&
+    doc.state !== "quarantined" &&
+    (doc.state === "retrieval_ready" ||
+      current.get(doc.record_id) > accepted(doc));
+}
+
 /** How long a finished step took, from the first known time it follows. */
 function took(steps, step) {
   const at = time(steps[step.at]);
@@ -436,6 +455,7 @@ export function createAdmin({
   const clients = new Set();
   let countedFrom;
   let limit = limits([]);
+  let replaced = replacement([]);
   let started = null;
   let scannedAt = 0;
   let readAt = 0;
@@ -461,7 +481,11 @@ export function createAdmin({
   let inFlight = 0;
   const queued = [];
 
-  const view = (doc, now) => ({ ...doc, flow: flow(doc, limit, now) });
+  const view = (doc, now) => ({
+    ...doc,
+    replaced: replaced(doc),
+    flow: flow(doc, limit, now),
+  });
   const shown = () => [...day.values()].sort(newestFirst).slice(0, LIVE);
   const stats = (now) =>
     withRollups(
@@ -608,6 +632,7 @@ export function createAdmin({
     scannedAt = readAt = now;
     prune(now);
     limit = limits([...day.values()]);
+    replaced = replacement([...day.values()]);
   }
 
   // Rereads the latest page and sends browsers what changed.
@@ -626,6 +651,7 @@ export function createAdmin({
         await readRollups(now);
         prune(now);
         limit = limits([...day.values()]);
+        replaced = replacement([...day.values()]);
         publish(now);
       } while (again);
     })().finally(() => {
@@ -835,7 +861,14 @@ export function createAdmin({
         response.data.document?.corpus_id !== corpus
       )
         throw failure(404, "Document introuvable.");
-      return response;
+      const { document } = response.data;
+      return {
+        ...response,
+        data: {
+          ...response.data,
+          document: { ...document, replaced: replaced(document) },
+        },
+      };
     },
   };
 }
