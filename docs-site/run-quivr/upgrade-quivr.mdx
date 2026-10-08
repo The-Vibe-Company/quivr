@@ -94,6 +94,8 @@ All physical S3 objects remain after compaction. Old payload/manifest objects re
 
 Paged ingestion keeps provider cuts and vectors in `ingestion_pages` until its canonical segmentation and every requested vector space are durable. New workers delete that exact organization/version/recipe/input namespace after saving vectors; a retry also repairs a crash between the vector commit and deletion. Interrupted derivations keep their pages.
 
+A concurrent provider request can save pages after another derivation deletes that namespace. If the late writer then stops, an outer retry may skip derivation because the Version is already searchable or enriched, leaving those pages behind. Cleanup does not persist a completion marker. Reclaim these retained pages with the bounded operation below after draining writers.
+
 For pages left by earlier workers, drain all ingestion, enrichment and rebuild writers before this one-off operation. Keep them stopped until cleanup finishes. Work on one exact namespace at a time; list candidates with a read-only, primary-key ordered query:
 
 ```sql
@@ -156,6 +158,8 @@ WHERE (p.organization,p.version_id,p.recipe,p.spaces_key,p.page_number)=
  (c.organization,c.version_id,c.recipe,c.spaces_key,c.page_number)
  AND p.organization=r.organization;
 ```
+
+The last-page check conservatively retains an interrupted late writer's namespace if its final checkpoint is missing. To reclaim a **verified completed namespace** in that case, use a retained record of the successful derivation that identifies its exact `input_key` and every requested space. Quivr does not retain this completion record; it must come from your operational records. A searchable Version or the remaining pages' vector keys alone do not establish that the source Manifest and requested spaces match the completed derivation. Run the same bounded statement with only the `AND EXISTS (...)` check on `last_page` removed. Keep the canonical segmentation, all-vector checks and row limit. If you cannot verify the exact input namespace, retain its pages.
 
 Keep the session's five-second statement timeout; a timeout rolls back only its current batch. Reduce `LIMIT 1000` for a smaller batch if necessary. Resume writers afterward. Autovacuum makes the deleted heap and TOAST space reusable; database files may stay the same size. Avoid `VACUUM FULL` during live imports.
 
