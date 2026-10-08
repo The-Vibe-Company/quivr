@@ -1,4 +1,4 @@
-# Select go-plugin, python-plugin or core-ingest, using the release inventory.
+# Select a runtime using the release inventory.
 FROM golang:1.27.1-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195 AS go-build
 WORKDIR /src
 COPY sdks/go ./sdks/go
@@ -46,6 +46,13 @@ COPY plugins/core-ingest/profile.json ./plugins/core-ingest/profile.json
 RUN python scripts/prepare_tokenizer.py \
  && .scratch/tokenizer/venv/bin/pip uninstall -y pip setuptools wheel
 
+# Hosted models supply their own tokenizer.json through a read-only mount.
+FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS hosted-tokenizer
+COPY third_party/tokenizer/requirements-linux-x86_64.txt /tmp/tokenizer-requirements.txt
+RUN python -m venv /opt/tokenizer \
+ && /opt/tokenizer/bin/pip install --no-cache-dir --only-binary=:all: --no-deps --require-hashes -r /tmp/tokenizer-requirements.txt \
+ && /opt/tokenizer/bin/pip uninstall -y pip setuptools wheel
+
 # The interpreter is required at runtime; package installers and headers are not.
 FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python-runtime
 # Apply Debian security fixes newer than the pinned interpreter image before
@@ -78,6 +85,12 @@ FROM python-runtime AS core-ingest
 COPY --from=go-build /out/plugin /usr/local/bin/plugin
 COPY --from=go-build /out/quivr-plugin.yaml /app/quivr-plugin.yaml
 COPY --from=tokenizer /app/.scratch/tokenizer /app/.scratch/tokenizer
+ENTRYPOINT ["/usr/local/bin/plugin"]
+
+FROM python-runtime AS hosted-embed
+COPY --from=go-build /out/plugin /usr/local/bin/plugin
+COPY --from=go-build /out/quivr-plugin.yaml /app/quivr-plugin.yaml
+COPY --from=hosted-tokenizer /opt/tokenizer /opt/tokenizer
 ENTRYPOINT ["/usr/local/bin/plugin"]
 
 FROM python-runtime AS python-plugin

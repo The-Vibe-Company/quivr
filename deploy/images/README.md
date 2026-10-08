@@ -60,8 +60,10 @@ public in its package settings after the first publication; GHCR initially
 creates private packages. The image source label links them to this repository.
 
 The engine uses `quivr.Dockerfile`; plugin targets are `go-plugin`,
-`python-plugin` and `core-ingest` in `plugin.Dockerfile`. The latter includes
-the hash-pinned tokenizer. Linux arm64 is not published: its tokenizer wheel
+`python-plugin`, `core-ingest` and `hosted-embed` in `plugin.Dockerfile`.
+`core-ingest` includes its pinned model tokenizer; `hosted-embed` includes the
+hash-pinned Python tokenizer runtime and accepts a read-only model-file mount.
+Linux arm64 is not published: its tokenizer wheel
 lock is not defined yet. Runtime images contain no compiler or package installer.
 The runtime smoke script also serves as a local check for a built image.
 

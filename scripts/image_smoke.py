@@ -27,20 +27,22 @@ def docker(*args, env=None):
     return subprocess.check_output(['docker', *args], text=True, env=env).strip()
 
 
-def discovery_request(port, plugin_id, secret):
-    """Exercise the packaged SDK's signed discovery with a fresh runtime key."""
+def signed_request(port, plugin_id, secret, target='/v0/discovery', payload=None):
+    """Exercise a packaged SDK boundary with the actual signed body bytes."""
     def encode(value):
         return base64.urlsafe_b64encode(value).decode().rstrip('=')
 
     now = int(time.time())
     header = {'alg': 'HS256', 'typ': 'quivr-engine+jwt', 'kid': 'image-smoke'}
-    claims = {'aud': plugin_id, 'plugin_id': plugin_id, 'contribution': 'discovery',
-              'method': 'GET', 'target': '/v0/discovery', 'iat': now, 'exp': now + 60,
-              'body_sha256': hashlib.sha256(b'').hexdigest()}
+    body = json.dumps(payload).encode() if payload is not None else b''
+    claims = {'aud': plugin_id, 'plugin_id': plugin_id,
+              'contribution': 'ingestion' if payload is not None else 'discovery',
+              'method': 'POST' if payload is not None else 'GET', 'target': target, 'iat': now, 'exp': now + 60,
+              'body_sha256': hashlib.sha256(body).hexdigest()}
     message = encode(json.dumps(header).encode()) + '.' + encode(json.dumps(claims).encode())
     token = message + '.' + encode(hmac.digest(secret, message.encode(), 'sha256'))
-    return urllib.request.Request(f'http://{port}/v0/discovery',
-                                  headers={'Authorization': 'Bearer ' + token})
+    return urllib.request.Request(f'http://{port}{target}', data=body if payload is not None else None,
+                                  headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
 
 
 def container_logs(container):
@@ -96,7 +98,7 @@ def check(args):
         deadline = time.monotonic() + 20
         while True:
             try:
-                request = discovery_request(port, args.plugin_id, secret)
+                request = signed_request(port, args.plugin_id, secret)
                 with urllib.request.urlopen(request, timeout=1) as response:
                     discovery = json.load(response)
                 break
@@ -118,6 +120,22 @@ def check(args):
         print(f'{args.plugin}: read-only signed discovery and health passed ({digest})')
     finally:
         docker('rm', '--force', container)
+    if args.plugin == 'hosted-embed':
+        profile = json.loads((ROOT / 'plugins/core-ingest/profile.json').read_text())
+        model = ROOT / '.scratch/tokenizer/tokenizer.json'
+        if not model.is_file() or hashlib.sha256(model.read_bytes()).hexdigest() != profile['tokenizer_sha256']:
+            raise RuntimeError('prepare the pinned E5 tokenizer before hosted image smoke: python3 scripts/prepare_tokenizer.py')
+        mounts = [(model, '/smoke/tokenizer.json'),
+                  (ROOT / 'plugins/hosted-embed/examples/tei.json', '/smoke/tei.json'),
+                  (ROOT / 'scripts/hosted_tokenizer_smoke.py', '/smoke/hosted_tokenizer_smoke.py'),
+                  (ROOT / 'scripts/image_smoke.py', '/smoke/image_smoke.py')]
+        output = docker('run', '--rm', '--network', 'none', '--read-only',
+                        '--tmpfs', '/tmp:rw,nosuid,nodev,size=64m',
+                        *[arg for source, target in mounts for arg in
+                          ('--mount', f'type=bind,src={source},dst={target},readonly')],
+                        '--entrypoint', '/opt/tokenizer/bin/python', args.image,
+                        '/smoke/hosted_tokenizer_smoke.py', '/smoke/tokenizer.json', profile['tokenizer_sha256'])
+        print(output)
 
 
 if __name__ == '__main__':

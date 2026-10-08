@@ -33,7 +33,12 @@ WORKDIR /app
 COPY scripts/prepare_tokenizer.py ./scripts/
 COPY third_party/tokenizer ./third_party/tokenizer
 COPY plugins/core-ingest/profile.json ./plugins/core-ingest/profile.json
-RUN python scripts/prepare_tokenizer.py --hosted
+RUN python scripts/prepare_tokenizer.py \
+ && python scripts/prepare_tokenizer.py --hosted \
+      --repository google/embeddinggemma-2 \
+      --revision 914f7f89142e33e77833254d9c9b90c3cef7303b \
+      --sha256 4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4 \
+      --output .scratch/tokenizer/embeddinggemma-2.json
 
 # Optional offline text runtime. The default image contains neither CPU wheels
 # nor model weights; deployment builders opt in before enabling query routing.

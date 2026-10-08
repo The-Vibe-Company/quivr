@@ -159,21 +159,20 @@ are declared in `configuration.execution_keys`; Quivr keeps the active plan's
 exact ingestion recipe and derivation provenance. Existing documents keep serving,
 and new documents do not require a rebuild for these changes. Defaults are unchanged.
 
-A package whose manifest already declares `tokenizer_processes` preserves its
-recipe when you tune that setting. For an earlier package, deploying the updated
-executable with the existing exact manifest enables the auto pool without a new
-recipe. Generating and installing a manifest that first adds the execution key
-changes the recipe: use the usual rebuild or evaluation cutover for that first
-registration. Subsequent pool tuning preserves that recipe.
-
-Run the new manifest at a separate address while earlier pinned work drains.
-Keep the previous process and exact manifest reachable at its recorded address
-until the registration becomes `inactive`. Discovery still checks exact manifest
-bytes; replacing an endpoint in place makes old pinned calls fail.
+Adding a new execution-only key, such as `tokenizer_processes`, to an existing
+execution declaration list also preserves the active recipe when the remaining manifest and semantic settings are
+unchanged. Quivr can serve pinned imports, rebuilds and queries through the
+active equivalent registration, including an update at the same address.
+Requests use its exact manifest and installed execution settings, while the
+original work plan, recipe, provenance and invocation keys remain unchanged.
+Temporary discovery or transport failures retry with backoff rather than
+quarantining documents. An explicit rollback stop still stops that work.
 
 Changes to model, templates, packing, tokenizer or tokens per chunk still create
 a new recipe and need the usual rebuild or evaluation cutover. A plugin version
 change also creates a new recipe, even when only execution settings differ.
+For those changes, keep the previous process reachable at its registered address
+until its pinned work drains; Quivr cannot substitute a different output identity.
 
 ## Limits and defaults
 
@@ -283,14 +282,86 @@ Paged inputs embed titles and context independently, with `{title}` set to `none
 a large headline cannot crowd body text out of every input. Paged provenance
 records `context_mode: separate_passages`.
 
+### Prepare a matching tokenizer
+
+From the repository root, prepare any model's Hugging Face `tokenizer.json`
+using its repository, full immutable commit revision and expected SHA-256.
+Obtain the checksum from a trusted model release or verify the file separately
+before pinning it. Preparation installs hash-pinned tokenizers 0.23.2 and
+downloads only the requested tokenizer, never weights or model code. It reuses
+checksum-valid files under `.scratch/tokenizer/`; no download occurs at startup.
+
+For the TEI E5 example:
+
+```sh
+mkdir -p .scratch/hosted-embed
+python3 scripts/prepare_tokenizer.py --hosted \
+  --repository intfloat/multilingual-e5-small \
+  --revision 614241f622f53c4eeff9890bdc4f31cfecc418b3 \
+  --sha256 0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39 \
+  > .scratch/hosted-embed/tokenizer-settings.json
+```
+
+The output is the `{python, model, sha256}` object to paste as the `tokenizer`
+value in your configuration **before** generating its manifest. Both paths
+must be accessible to the plugin process. `--output PATH` selects a different
+tokenizer file destination. Without arguments, preparation still emits the
+original core.ingest settings and prepares its pinned E5 tokenizer.
+
+### Run the tokenizer in the published image
+
+The `quivr-plugin-hosted.embed` image includes Python and tokenizers 0.23.2.
+Mount your prepared model file read-only, use `/opt/tokenizer/bin/python`,
+and set `tokenizer.model` to its path inside the container. The image contains
+no model tokenizer and does not install packages or download files at runtime.
+
+For example, after adding the prepared `tokenizer` object to
+`.scratch/hosted-embed/configuration.json`, set a `base_url` reachable from the
+container, then generate the exact container configuration and manifest:
+
+```sh
+HOSTED_IMAGE='ghcr.io/the-vibe-company/quivr-plugin-hosted.embed:<release-tag>'
+HOSTED_TOKENIZER_FILE=$(jq -r .model .scratch/hosted-embed/tokenizer-settings.json)
+jq '.tokenizer.python = "/opt/tokenizer/bin/python" |
+    .tokenizer.model = "/tokenizer/tokenizer.json"' \
+  .scratch/hosted-embed/configuration.json > .scratch/hosted-embed/image-configuration.json
+docker run --rm --network none --read-only \
+  --mount "type=bind,src=$PWD/.scratch/hosted-embed,dst=/config,readonly" \
+  "$HOSTED_IMAGE" configure /config/image-configuration.json \
+  > .scratch/hosted-embed/quivr-plugin.yaml
+docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+  --mount "type=bind,src=$HOSTED_TOKENIZER_FILE,dst=/tokenizer/tokenizer.json,readonly" \
+  --mount "type=bind,src=$PWD/.scratch/hosted-embed,dst=/config,readonly" \
+  -e QUIVR_PLUGIN_MANIFEST=/config/quivr-plugin.yaml \
+  -e QUIVR_PLUGIN_SIGNING_KEYS \
+  -p 8081:8080 "$HOSTED_IMAGE"
+```
+
+Replace `<release-tag>` with a pinned release containing this runtime. For
+authenticated providers also pass `-e EMBED_API_KEY` from the secret manager's
+environment. Supply `QUIVR_PLUGIN_SIGNING_KEYS` from that environment for all
+providers: the plugin's signing ring must match its entry in the engine's
+`QUIVR_ENGINE_PLUGIN_KEYS`. Discovery and ingestion refuse unsigned requests;
+health alone does not establish a working engine connection. Keep key values
+out of configuration files. Use `image-configuration.json` in the engine pin too: its settings
+must match the generated manifest. The image runs as UID/GID 10001, so mounted
+files must be readable by that user.
+
 For EmbeddingGemma 2, choose `examples/embeddinggemma-2.json`. It specifies
 `title: {title} | text: {text}` and `task: search result | query: {query}`,
 768 dimensions, a pinned revision, a 512-token body budget and a 2048-token full
 window. Replace its example endpoint with your OpenAI-compatible server and
 inject `EMBED_API_KEY` for its bearer authentication. Add `tokenizer` with the
 local `python`, `model` path and SHA-256 returned by
-`python3 scripts/prepare_tokenizer.py --hosted`. The `--hosted` flag selects
-the pinned EmbeddingGemma 2 tokenizer revision used by this example.
+this explicit preparation command:
+
+```sh
+python3 scripts/prepare_tokenizer.py --hosted \
+  --repository google/embeddinggemma-2 \
+  --revision 914f7f89142e33e77833254d9c9b90c3cef7303b \
+  --sha256 4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4
+```
+
 Run preparation before startup; it downloads tokenizer files, never model weights. The example omits machine-specific paths and makes
 no provider call during configuration. Set `usd_per_million_tokens` when you
 know the provider’s rate; the example leaves it unknown.

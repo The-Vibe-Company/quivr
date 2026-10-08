@@ -76,6 +76,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
+      - name: Prepare the pinned E5 tokenizer fixture
+        if: matrix.plugin == 'hosted-embed'
+        run: python3 scripts/prepare_tokenizer.py
       - name: Check the published runtime before signing
         env:
           IMAGE: ${{ matrix.image }}@${{ steps.image.outputs.digest }}
