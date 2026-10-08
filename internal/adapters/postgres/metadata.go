@@ -14,10 +14,33 @@ func (s RecordStore) SaveProjectionMetadata(ctx context.Context, org, versionID,
 	if err != nil {
 		return err
 	}
+	tx, err := database(ctx, s.Pool).Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	// Cancellation, version retirement and route cutover share this fence.
+	// A publish delayed in the external projection cannot revive SQL metadata
+	// for an abandoned generation after its purge has become terminal.
+	var writable bool
+	if err = readJournal(ctx, tx, org, `SELECT EXISTS(
+ SELECT 1 FROM record_versions v JOIN records r ON(r.organization,r.id)=(v.organization,v.record_id)
+ WHERE v.organization=$1 AND v.id=$2 AND NOT `+deadVersionSQL+`
+ AND ($3=`+routedGenerationSQL("r.organization", "r.corpus_id")+` OR EXISTS(
+  SELECT 1 FROM operations o WHERE o.organization=r.organization AND o.corpus_id=r.corpus_id
+   AND o.target_generation_id=$3 AND o.state NOT IN ('succeeded','failed','canceled'))))`, []any{org, versionID, generationID}, &writable); err != nil {
+		return err
+	}
+	if !writable {
+		return tx.Commit(ctx)
+	}
 	// Each generation pins immutable mappings and Version input. Repeating a
 	// publish repeats exactly these values, including when a plugin adds vectors.
-	_, err = database(ctx, s.Pool).Exec(ctx, `INSERT INTO projection_metadata(organization,version_id,generation_id,data) VALUES($1,$2,$3,$4) ON CONFLICT(organization,version_id,generation_id) DO UPDATE SET data=EXCLUDED.data`, org, versionID, generationID, raw)
-	return err
+	_, err = tx.Exec(ctx, `INSERT INTO projection_metadata(organization,version_id,generation_id,data) VALUES($1,$2,$3,$4) ON CONFLICT(organization,version_id,generation_id) DO UPDATE SET data=EXCLUDED.data`, org, versionID, generationID, raw)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // catalogMetadata applies predicates before ORDER BY/LIMIT and uses the same

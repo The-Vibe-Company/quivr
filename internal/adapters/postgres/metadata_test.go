@@ -115,14 +115,14 @@ func TestMetadataCatalogFiltersBeforePagination(t *testing.T) {
 	if _, err = pool.Exec(ctx, `INSERT INTO projection_purges (organization,kind,corpus_id,generation_id,version_id) VALUES ($1,$2,$3,$4,'')`, scope.Organization, item.Kind, a.ID, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err = purger.RecordPurge(ctx, item, 0, false); err != nil {
+	if _, err = purger.RecordPurge(ctx, item, 0, false, 1000); err != nil {
 		t.Fatal(err)
 	}
 	var count int
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM projection_metadata WHERE organization=$1`, scope.Organization).Scan(&count); err != nil || count != 6 {
 		t.Fatalf("incomplete purge removed metadata: %d %v", count, err)
 	}
-	if err = purger.RecordPurge(ctx, item, 0, true); err != nil {
+	if _, err = purger.RecordPurge(ctx, item, 0, true, 1000); err != nil {
 		t.Fatal(err)
 	}
 	var survivingVersion string
@@ -140,7 +140,7 @@ func TestMetadataCatalogFiltersBeforePagination(t *testing.T) {
 	if _, err = pool.Exec(ctx, `INSERT INTO projection_purges (organization,kind,corpus_id,generation_id,version_id) VALUES ($1,$2,'','',$3)`, scope.Organization, retrieval.PurgeVersion, survivingVersion); err != nil {
 		t.Fatal(err)
 	}
-	if err = purger.RecordPurge(ctx, retrieval.PurgeItem{Kind: retrieval.PurgeVersion, Organization: scope.Organization, VersionID: survivingVersion}, 0, true); err != nil {
+	if _, err = purger.RecordPurge(ctx, retrieval.PurgeItem{Kind: retrieval.PurgeVersion, Organization: scope.Organization, VersionID: survivingVersion}, 0, true, 1000); err != nil {
 		t.Fatal(err)
 	}
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM projection_metadata WHERE organization=$1`, scope.Organization).Scan(&count); err != nil || count != 0 {
@@ -149,7 +149,7 @@ func TestMetadataCatalogFiltersBeforePagination(t *testing.T) {
 	if err = recordStore.SaveProjectionMetadata(ctx, scope.Organization, survivingVersion, g.ID, map[string]any{"metadata.language": "en"}); err != nil {
 		t.Fatal(err)
 	}
-	if err = purger.RecordPurge(ctx, retrieval.PurgeItem{Kind: retrieval.PurgeVersion, Organization: scope.Organization, VersionID: survivingVersion}, 0, true); err != nil {
+	if _, err = purger.RecordPurge(ctx, retrieval.PurgeItem{Kind: retrieval.PurgeVersion, Organization: scope.Organization, VersionID: survivingVersion}, 0, true, 1000); err != nil {
 		t.Fatal(err)
 	}
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM projection_metadata WHERE organization=$1`, scope.Organization).Scan(&count); err != nil || count != 1 {

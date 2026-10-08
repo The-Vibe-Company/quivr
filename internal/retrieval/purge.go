@@ -50,7 +50,7 @@ type PurgeStore interface {
 	ClaimPurges(ctx context.Context, grace, lease time.Duration, limit int) ([]PurgeItem, error)
 	// RecordPurge adds deleted objects to the item's record and releases its
 	// lease; complete marks it purged so it is never claimed again.
-	RecordPurge(ctx context.Context, item PurgeItem, deleted int, complete bool) error
+	RecordPurge(ctx context.Context, item PurgeItem, deleted int, complete bool, limit int) (bool, error)
 }
 
 // PurgeProjection deletes projection objects by filter, never by object ID.
@@ -173,7 +173,7 @@ func (p Purger) Sweep(ctx context.Context) (int, error) {
 		}
 		// An incomplete item (more objects than one delete may match) is
 		// released and continues next run.
-		if err = p.Store.RecordPurge(ctx, item, deleted, complete); err != nil {
+		if complete, err = p.Store.RecordPurge(ctx, item, deleted, complete, batch); err != nil {
 			return completed, err
 		}
 		if p.Metrics != nil {

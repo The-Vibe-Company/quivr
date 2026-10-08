@@ -3,12 +3,14 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/adapters/postgres"
+	"github.com/The-Vibe-Company/quivr/internal/app"
 	"github.com/The-Vibe-Company/quivr/internal/content"
 	"github.com/The-Vibe-Company/quivr/internal/corpus"
 	"github.com/The-Vibe-Company/quivr/internal/operations"
@@ -147,11 +149,11 @@ func TestPurgeSelectsOnlyAbandonedGenerations(t *testing.T) {
 		t.Fatalf("leased items claimed twice: %+v", again)
 	}
 	// An incomplete purge releases its item; a complete one is stamped once.
-	if err := f.store.RecordPurge(f.ctx, items[0], 7, false); err != nil {
+	if _, err := f.store.RecordPurge(f.ctx, items[0], 7, false, 1000); err != nil {
 		t.Fatal(err)
 	}
 	for _, it := range items[1:] {
-		if err := f.store.RecordPurge(f.ctx, it, 2, true); err != nil {
+		if _, err := f.store.RecordPurge(f.ctx, it, 2, true, 1000); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -159,10 +161,10 @@ func TestPurgeSelectsOnlyAbandonedGenerations(t *testing.T) {
 	if len(retry) != 1 || retry[0].GenerationID != items[0].GenerationID {
 		t.Fatalf("released item not reclaimed: %+v", retry)
 	}
-	if err := f.store.RecordPurge(f.ctx, retry[0], 3, true); err != nil {
+	if _, err := f.store.RecordPurge(f.ctx, retry[0], 3, true, 1000); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.RecordPurge(f.ctx, retry[0], 99, true); err != nil { // replay
+	if _, err := f.store.RecordPurge(f.ctx, retry[0], 99, true, 1000); err != nil { // replay
 		t.Fatal(err)
 	}
 	var purged, deleted int
@@ -229,7 +231,7 @@ func TestPurgeSelectsOnlyDeadVersionsAndSurvivesRevert(t *testing.T) {
 		if len(it.Collections) == 0 {
 			t.Fatalf("version item without collections %+v", it)
 		}
-		if err = f.store.RecordPurge(ctx, it, 2, true); err != nil {
+		if _, err = f.store.RecordPurge(ctx, it, 2, true, 1000); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -366,5 +368,128 @@ func TestStaleRevertKeepsNewerDesiredVersion(t *testing.T) {
 	}
 	if _, desired := f.pointers(a.RecordID); desired != fresh.VersionID {
 		t.Fatalf("revert left desired at %s, want %s", desired, fresh.VersionID)
+	}
+}
+
+// Routing is real; packed file rows represent retained coverage from an old
+// worker. Deleting one corpus must preserve its neighbor and current generation.
+func TestPurgeRetiresAbandonedCompactCoverage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	pool := scratchDatabase(t, ctx)
+	if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
+		t.Fatal(err)
+	}
+	f := controlFixture{t: t, ctx: ctx, pool: pool, org: "purge-compact", store: contentStores(pool)}
+	a, b := f.corpus("rebuilt"), f.corpus("neighbor")
+	scope := corpus.Scope{Organization: f.org, Actions: []string{"content:write"}, Corpora: []string{"*"}}
+	old, err := f.store.Generation(ctx, f.org, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var segments []content.Segmentation
+	for i := range 3 {
+		seg := rebuildSegmentation(t, ctx, f.store, scope, a, fmt.Sprint(i))
+		if err := f.store.Promote(ctx, f.org, seg, old); err != nil {
+			t.Fatal(err)
+		}
+		segments = append(segments, seg)
+	}
+	neighbor := rebuildSegmentation(t, ctx, f.store, scope, b, "neighbor")
+	if err := f.store.Promote(ctx, f.org, neighbor, old); err != nil {
+		t.Fatal(err)
+	}
+	op := f.rebuild(a, "replace")
+	if _, err := f.store.BeginRebuild(ctx, f.org, op.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, seg := range segments {
+		if _, err := f.store.CoverRebuild(ctx, f.org, op.ID, seg, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if done, err := f.store.ActivateRebuild(ctx, f.org, op.ID); err != nil || !done {
+		t.Fatalf("cutover: %v %v", done, err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO storage_organizations(organization) VALUES($1);`, f.org); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO storage_spaces(space_id) VALUES($1) ON CONFLICT DO NOTHING`, old.SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	for _, seg := range append(segments, neighbor) {
+		corpusID := a
+		if seg.VersionID == neighbor.VersionID {
+			corpusID = b
+		}
+		var file int64
+		err := pool.QueryRow(ctx, `INSERT INTO embedding_files(organization_id,version_id,segmentation_id,space_id,corpus_id,recipe,producer,object_key,sha256,byte_length,dimensions,row_count,presence)
+ SELECT o.id,$2,$3,sp.id,$4,'fixture','fixture','fixture',decode(repeat('00',32),'hex'),4,1,1,decode('01','hex') FROM storage_organizations o,storage_spaces sp WHERE o.organization=$1 AND sp.space_id=$5 RETURNING id`, f.org, seg.VersionID, seg.ID, corpusID, old.SpaceID).Scan(&file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gens := []string{old.ID}
+		if corpusID == a {
+			gens = append(gens, op.TargetGenerationID)
+		}
+		for _, gen := range gens {
+			if _, err := pool.Exec(ctx, `INSERT INTO compact_embedding_coverage(organization_id,file_id,generation_id,covered) SELECT id,$2,$3,decode('01','hex') FROM storage_organizations WHERE organization=$1`, f.org, file, gen); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	notice(t, ctx, f.store)
+	backdate(t, ctx, pool, f.org)
+	// Completed external purges from an earlier binary still need SQL cleanup.
+	if _, err := pool.Exec(ctx, `UPDATE projection_purges SET purged_at=now() WHERE organization=$1`, f.org); err != nil {
+		t.Fatal(err)
+	}
+	items := claimOwn(t, ctx, f.store, f.org, time.Hour)
+	if len(items) == 0 {
+		t.Fatal("completed external purge was not claimed for coverage cleanup")
+	}
+
+	for _, it := range items {
+		done := false
+		for attempt := 0; attempt < 20 && !done; attempt++ {
+			remaining := func() int {
+				var n int
+				err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM compact_embedding_coverage cc JOIN storage_organizations o ON o.id=cc.organization_id WHERE o.organization=$1)+(SELECT count(*) FROM projection_coverage WHERE organization=$1)`, f.org).Scan(&n)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return n
+			}
+			before := remaining()
+			// A fresh adapter instance resumes the durable cursor every time.
+			done, err = (postgres.PurgeStore{Pool: pool}).RecordPurge(ctx, it, 0, true, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if removed := before - remaining(); removed > 2 {
+				t.Fatalf("one batch removed %d coverage rows; limit=2", removed)
+			}
+		}
+		if !done {
+			t.Fatal("bounded coverage purge never finished")
+		}
+	}
+
+	var oldRows, liveRows, neighborRows int
+	err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE c.generation_id=$2 AND ef.corpus_id=$4),count(*) FILTER(WHERE c.generation_id=$3),count(*) FILTER(WHERE ef.corpus_id=$5) FROM compact_embedding_coverage c JOIN embedding_files ef ON ef.id=c.file_id JOIN storage_organizations o ON o.id=c.organization_id WHERE o.organization=$1`, f.org, old.ID, op.TargetGenerationID, a, b).Scan(&oldRows, &liveRows, &neighborRows)
+	if err != nil || oldRows != 0 || liveRows != 3 || neighborRows != 1 {
+		t.Fatalf("coverage old=%d live=%d neighbor=%d err=%v", oldRows, liveRows, neighborRows, err)
+	}
+	// A delayed publisher must not recreate metadata after terminal cleanup.
+	if err := (postgres.RecordStore{Pool: pool}).SaveProjectionMetadata(ctx, f.org, segments[0].VersionID, old.ID, map[string]any{"metadata.language": "en"}); err != nil {
+		t.Fatal(err)
+	}
+	var lateMetadata int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM projection_metadata WHERE organization=$1 AND version_id=$2 AND generation_id=$3`, f.org, segments[0].VersionID, old.ID).Scan(&lateMetadata); err != nil || lateMetadata != 0 {
+		t.Fatalf("late abandoned-generation metadata=%d err=%v", lateMetadata, err)
+	}
+	var oldProjection int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM projection_coverage pc JOIN record_versions v ON(v.organization,v.id)=(pc.organization,pc.version_id) JOIN records r ON(r.organization,r.id)=(v.organization,v.record_id) WHERE pc.organization=$1 AND pc.generation_id=$2 AND r.corpus_id=$3`, f.org, old.ID, a).Scan(&oldProjection); err != nil || oldProjection != 0 {
+		t.Fatalf("old lexical coverage=%d err=%v", oldProjection, err)
 	}
 }

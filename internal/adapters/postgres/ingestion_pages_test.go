@@ -74,6 +74,7 @@ func TestPagedIngestionResumesCommittedPassages(t *testing.T) {
 	if err = app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
+
 	descriptor := (pluginhttp.Ingestor{Pin: pin}).Descriptor()
 	descriptor.Paged = true
 	descriptor.SegmentsOnly = false
@@ -116,6 +117,16 @@ func TestPagedIngestionResumesCommittedPassages(t *testing.T) {
 		}
 	}
 	pages(inputKey, 1)
+
+	sweeper := processing.IngestionPageSweeper{Store: store, Content: contents, Batch: 2}
+	sweep := func() {
+		t.Helper()
+		n, err := sweeper.Sweep(ctx)
+		if err != nil || n > 2 {
+			t.Fatalf("bounded page sweep: deleted=%d err=%v", n, err)
+		}
+	}
+
 	// Normalization can replace the source Manifest before complete segments
 	// exist while retaining the accepted Version ID. A new source must negotiate
 	// its own page zero; identical text with a different Part key is also new.
@@ -148,6 +159,8 @@ CREATE TRIGGER refuse_page_vectors BEFORE INSERT ON embedding_files FOR EACH ROW
 		t.Fatalf("segmentation was not durable before vector interruption: %v", err)
 	}
 	pages(inputKey, 5)
+	sweep()
+	pages(inputKey, 5)
 	if len(vectorInterrupted.calls) != 4 || vectorInterrupted.calls[0] != 2 {
 		t.Fatalf("committed provider cut was called again: %v", vectorInterrupted.calls)
 	}
@@ -166,6 +179,9 @@ CREATE TRIGGER refuse_page_cleanup BEFORE DELETE ON ingestion_pages FOR EACH ROW
 		t.Fatal("cleanup interruption unexpectedly succeeded")
 	}
 	pages(inputKey, 5)
+	if _, err = pool.Exec(ctx, `CREATE TABLE orphan_pages AS SELECT * FROM ingestion_pages WHERE organization=$1 AND version_id=$2 AND spaces_key=$3`, scope.Organization, v.ID, inputKey); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = pool.Exec(ctx, `DROP TRIGGER refuse_page_cleanup ON ingestion_pages; DROP FUNCTION refuse_page_cleanup()`); err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +195,12 @@ CREATE TRIGGER refuse_page_cleanup BEFORE DELETE ON ingestion_pages FOR EACH ROW
 		t.Fatalf("committed provider cut was called again: %v", restarted.calls)
 	}
 	pages(inputKey, 0)
+	// A provider already in flight may finish after cleanup. Its response is
+	// usable by its caller, but must not resurrect completed durable pages.
+	if _, err = store.SaveIngestionPage(ctx, scope.Organization, v.ID, descriptor.Recipe, inputKey, 0, content.IngestionPage{Segments: json.RawMessage(`[]`)}); err != nil {
+		t.Fatal(err)
+	}
+	pages(inputKey, 0)
 	var unrelated int
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM ingestion_pages WHERE organization=$1 AND version_id=$2 AND spaces_key!=$3`, scope.Organization, v.ID, inputKey).Scan(&unrelated); err != nil || unrelated != 2 {
 		t.Fatalf("cleanup touched interrupted replacement sources: pages=%d err=%v", unrelated, err)
@@ -187,6 +209,40 @@ CREATE TRIGGER refuse_page_cleanup BEFORE DELETE ON ingestion_pages FOR EACH ROW
 	if _, again, err := (processing.PluginDeriver{Content: contents, Plugin: third}).Derive(ctx, scope.Organization, c.ID, v, g); err != nil || len(again) != 5 || len(third.calls) != 0 {
 		t.Fatalf("stored derivation not reused: vectors=%d calls=%v err=%v", len(again), third.calls, err)
 	}
+
+	// Simulate pages left by a previous worker that did not persist completion,
+	// including a namespace missing its final page. The exact input hash and
+	// every requested vector still prove this source finished durably.
+	for _, missingFinal := range []bool{false, true} {
+		if _, err = pool.Exec(ctx, `DELETE FROM ingestion_page_completions WHERE organization=$1 AND version_id=$2 AND recipe=$3 AND spaces_key=$4`, scope.Organization, v.ID, descriptor.Recipe, inputKey); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, `INSERT INTO ingestion_pages SELECT * FROM orphan_pages WHERE NOT $1 OR page_number<>4`, missingFinal); err != nil {
+			t.Fatal(err)
+		}
+		drained := false
+		for attempt := 0; attempt < 20; attempt++ {
+			sweep()
+			var remaining int
+			if err = pool.QueryRow(ctx, `SELECT count(*) FROM ingestion_pages WHERE organization=$1 AND version_id=$2 AND spaces_key=$3`, scope.Organization, v.ID, inputKey).Scan(&remaining); err != nil {
+				t.Fatal(err)
+			}
+			if remaining == 0 {
+				drained = true
+				break
+			}
+		}
+		if !drained {
+			t.Fatal("orphan pages did not drain through bounded sweeps")
+		}
+	}
+	var replacementKey string
+	if err = pool.QueryRow(ctx, `SELECT spaces_key FROM ingestion_pages WHERE organization=$1 AND version_id=$2 ORDER BY spaces_key LIMIT 1`, scope.Organization, v.ID).Scan(&replacementKey); err != nil {
+		t.Fatal(err)
+	}
+	sweep()
+	pages(replacementKey, 1)
+
 	// Publish through the real processing/retrieval lifecycle, then hold this
 	// formerly searchable and enriched Version during a generation rebuild.
 	projection := &rebuildPublication{}
@@ -259,6 +315,20 @@ CREATE TRIGGER refuse_page_cleanup BEFORE DELETE ON ingestion_pages FOR EACH ROW
 
 	if covered != 5 || projection.vectors != 5 || projection.segmentation.Segments[4].End != 10 || len(third.calls) != 0 {
 		t.Fatalf("recovery lost active coverage: covered=%d projected=%d calls=%v", covered, projection.vectors, third.calls)
+	}
+
+	if _, err = contents.Withdraw(ctx, scope, content.Withdrawal{Key: "withdraw", Source: content.Source{CorpusID: c.ID, Namespace: "docs", RecordKey: "one"}}); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 20; attempt++ {
+		sweep()
+	}
+	if _, err = store.SaveIngestionPage(ctx, scope.Organization, v.ID, descriptor.Recipe, inputKey, 0, content.IngestionPage{Segments: json.RawMessage(`[]`)}); err != nil {
+		t.Fatal(err)
+	}
+	var retained int
+	if err = pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM ingestion_pages WHERE organization=$1 AND version_id=$2)+(SELECT count(*) FROM ingestion_page_completions WHERE organization=$1 AND version_id=$2)`, scope.Organization, v.ID).Scan(&retained); err != nil || retained != 0 {
+		t.Fatalf("dead Version retained pages/completions=%d err=%v", retained, err)
 	}
 
 }
