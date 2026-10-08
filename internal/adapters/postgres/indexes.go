@@ -20,6 +20,7 @@ var concurrentIndexes = []struct {
 	Predicate   string
 }{
 	{Name: "segments_by_segmentation", Table: "segments", Columns: []string{"organization", "segmentation_id"}},
+	{Name: "embedding_coverage_by_artifact", Table: "embedding_coverage", Columns: []string{"organization", "artifact_id"}},
 	{Name: "queue_enrichment_pending", Table: "queue_enrichment_records", Columns: []string{"organization", "version_id"}, Predicate: "pending"},
 	{Name: "queue_versions_baseline", Table: "record_versions", Columns: []string{"organization", "id"}, Predicate: "((NOT baseline_ready) AND (NOT quarantined) AND (processing = ANY (ARRAY['queued'::text, 'running'::text, 'retrying'::text])))"},
 	{Name: "queue_receipts_pending", Table: "ingestion_receipts", Columns: []string{"organization", "id"}, Predicate: "((route_family = 'ingestion'::text) AND (state = 'pending'::text))"},
