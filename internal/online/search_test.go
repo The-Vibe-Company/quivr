@@ -124,7 +124,7 @@ func TestSearchExitCodes(t *testing.T) {
 		{"malformed", 400, `{"code":"malformed_json","message":"bad","retryable":false}`, online.ExitInvalid, []string{"quivr: malformed_json: bad"}},
 		{"invalid", 422, `{"code":"invalid_schema","message":"limit too small","retryable":false,"field":"/limit"}`, online.ExitInvalid, []string{"quivr: invalid_schema: limit too small (/limit)"}},
 		{"unavailable", 503, `{"code":"search_unavailable","message":"down","retryable":true}`, online.ExitUnavailable, []string{"search_unavailable", "retry later"}},
-		{"model unavailable", 503, `{"code":"model_unavailable","message":"model unavailable","retryable":true}`, online.ExitUnavailable, []string{"model_unavailable", "query model", "retry later"}},
+		{"model unavailable", 503, `{"code":"model_unavailable","message":"model unavailable","retryable":true}`, online.ExitUnavailable, []string{"model_unavailable", "query model", "retry later", "lexical search"}},
 		{"proxy error", 502, `<html>bad gateway</html>`, online.ExitUnavailable, []string{"quivr: HTTP 502"}},
 		{"unexpected", 302, ``, online.ExitFailed, []string{"quivr: HTTP 302"}},
 	} {

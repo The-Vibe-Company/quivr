@@ -63,7 +63,7 @@ run:
   command: [go, run, .]
 ```
 
-`max_latency_ms` is the profile's latency objective, a p95 target: a search that takes longer still answers, the API logs a warning that names the slowest phase, and `GET /v0/admin/stats/searches` counts it in the profile's `over_objective`. Quivr stops a search only at the profile's hard limit, four times `max_latency_ms`, at least 2 seconds and at most 9 seconds. Past it, Quivr answers `504 search_deadline_exceeded`, or a retryable `503` when a dependency could not serve candidates: `model_unavailable` for query encoding, `search_unavailable` for other dependencies. `max_cost_cents` is what one search may report spending on paid calls, such as a re-ranking model. Change the `id` to your own before you pin it.
+`max_latency_ms` is the profile's latency objective, a p95 target: a search that takes longer still answers, the API logs a warning that names the slowest phase, and `GET /v0/admin/stats/searches` counts it in the profile's `over_objective`. Quivr cancels a slow search at the profile's hard limit, four times `max_latency_ms`, at least 2 seconds and at most 9 seconds. Past it, Quivr answers `504 search_deadline_exceeded`, or a retryable `503` when a dependency could not serve candidates: `model_unavailable` for query encoding, `search_unavailable` for other dependencies. Dependency failures can return these `503` codes before the hard limit. `max_cost_cents` is what one search may report spending on paid calls, such as a re-ranking model. Change the `id` to your own before you pin it.
 
 </Step>
 <Step title="Rank">
@@ -124,7 +124,7 @@ The response lists your profiles. A search response names the profile that answe
 | `502 retrieval_plugin_invalid` | The plugin ranked a candidate it was never served, asked for too much, or sent an answer the checks refuse. |
 | `504 search_deadline_exceeded` | The plugin's rounds outran the profile's hard limit, four times `max_latency_ms` (2 to 9 seconds). |
 | `503 model_unavailable` | The query encoding model is down or slow, including when it reaches the search's hard limit. |
-| `503 search_unavailable` after the hard limit | Another dependency could not serve candidates in time, such as the search index or canonical storage. |
+| `503 search_unavailable` | Another search dependency failed or timed out, such as the search index or canonical storage. At the limit of 64 active searches per API process, capacity also returns this code with `Retry-After`; wait at least that many seconds before retrying. |
 | `422 unsupported_profile` | The client named a profile the plugin does not declare. |
 
 ## Start from another plugin's ranking
