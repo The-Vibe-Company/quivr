@@ -526,8 +526,10 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
   return {
     /** GET /demo/corpora: the corpora the demo reads and their fields. */
     async corpora() {
-      // A corpus the engine cannot describe now is listed by its id with
-      // the common fields; it is read again on the next call.
+      // The configured names are looked up again: a corpus recreated under
+      // its name shows after a reload. A corpus the engine cannot describe
+      // now is listed by its id with the common fields; it is read again on
+      // the next call.
       const fallback = (id) => ({
         corpus_id: id,
         name: id === demo() ? "Espace démo" : id,
@@ -538,12 +540,9 @@ export function createExplorer({ upstream, readable, picked, demo, history }) {
       return {
         items: (
           await Promise.all(
-            (await readable()).map(async (id) => {
-              const described = await corpus(id).catch((error) => {
-                if (error.status !== 404) return fallback(id);
-                console.warn(`Explorer: corpus ${id} is not readable with the demo's key.`);
-                return null;
-              });
+            (await readable({ fresh: true })).map(async (id) => {
+              // One gone since it was looked up is left out.
+              const described = await corpus(id).catch((error) => (error.status === 404 ? null : fallback(id)));
               if (!described) return null;
               const count = await documents(id);
               return count === undefined ? described : { ...described, documents: count };

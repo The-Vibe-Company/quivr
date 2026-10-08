@@ -27,16 +27,15 @@ test("la façade protège la session et borne les routes au corpus de démo", as
       })
     ).status(),
   ).toBe(403);
-  expect(
-    (
-      await request.post("/v0/records", {
-        headers: origin,
-        data: {
-          source: { corpus_id: "another-corpus", namespace: "web-demo" },
-        },
-      })
-    ).status(),
-  ).toBe(403);
+  // A write to another corpus is one the session no longer knows: the page reloads.
+  const write = await request.post("/v0/records", {
+    headers: origin,
+    data: {
+      source: { corpus_id: "another-corpus", namespace: "web-demo" },
+    },
+  });
+  expect(write.status()).toBe(409);
+  expect((await write.json()).code).toBe("demo_corpus_changed");
   expect((await request.get("/v0/corpora")).status()).toBe(404);
   expect(
     (await request.get("/v0/records/unknown/versions/unknown")).status(),

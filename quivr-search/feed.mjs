@@ -173,6 +173,9 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
   let cursor = null;
   let started = null;
   let live = false;
+  // Set once the corpus is no longer read: the change stream is left.
+  let stopped = false;
+  let following;
   const query = (extra = {}) =>
     new URLSearchParams({ corpus_id: corpus, ...extra }).toString();
 
@@ -268,8 +271,9 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
   }
 
   async function follow() {
-    for (let delay = 1000; ;) {
+    for (let delay = 1000; !stopped; ) {
       const controller = new AbortController();
+      following = controller;
       let idle;
       const watch = () => {
         clearTimeout(idle);
@@ -339,6 +343,7 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
         controller.abort();
         if (expired) await resync();
       } catch (error) {
+        if (stopped) break;
         // Reconnect below from the last cursor.
         const reason = error.status ? `HTTP ${error.status}` : error.message;
         console.warn(`Veille: change stream interrupted (${reason})`);
@@ -453,6 +458,18 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
     start() {
       start().catch(() => {});
     },
+    /**
+     * Leaves the change stream for good: the corpus is no longer read. Its
+     * listeners and watchers are told ("stopped") so the browsers following
+     * it reconnect.
+     */
+    stop() {
+      stopped = true;
+      following?.abort();
+      setLive(false);
+      broadcast("stopped");
+      notify("stopped");
+    },
     /** Settles once the first catalog scan is done (or failed). */
     ready() {
       return start().catch(() => {});
@@ -461,7 +478,7 @@ export function createFeed({ core, key, corpus, upstream, index, onVersion }) {
     opened() {
       return start();
     },
-    /** Follows the change stream: watcher("change", event), ("status", live), ("reset"). */
+    /** Follows the change stream: watcher("change", event), ("status", live), ("reset"), ("stopped"). */
     watch(watcher) {
       watchers.add(watcher);
       watcher("status", live);
