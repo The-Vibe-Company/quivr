@@ -125,7 +125,7 @@ excluded = [
 
 # Maximum number of lines per page, in path order.
 [budgets]
-"deploy/compose/README.md" = 60
+"deploy/compose/README.md" = 85
 "deploy/modal/README.md" = 100
 "conformance/README.md" = 125
 "docs/eval-private-working.md" = 90
@@ -140,7 +140,7 @@ excluded = [
 "CONTEXT.md" = 327
 "deploy/images/README.md" = 76
 "deploy/railway/autoscaler/README.md" = 75
-"deploy/railway/README.md" = 419
+"deploy/railway/README.md" = 425
 "deploy/railway/hosted-embeddings.md" = 107
 "docs/agents/documentation.md" = 55
 "docs/agents/domain.md" = 45

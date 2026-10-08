@@ -33,7 +33,8 @@ class Project:
         # so the roots the other services mount point at this run's directory.
         env = {k: v for k, v in os.environ.items() if not k.startswith('QUIVR_POSTGRES_')}
         env.update(QUIVR_DB_PASSWORD=self.password, QUIVR_LOCAL_ROOT=str(self.directory),
-                   QUIVR_MODEL_ROOT=str(self.directory), QUIVR_POSTGRES_MEMORY_MB='1024')
+                   QUIVR_MODEL_ROOT=str(self.directory), QUIVR_POSTGRES_MEMORY_MB='1024',
+                   QUIVR_POSTGRES_VOLUME_MB='327680')
         return subprocess.run(['docker', 'compose', '-p', self.name, '-f', COMPOSE, *args], check=True, cwd=ROOT, env=env, **kwargs)
 
     def start(self):
@@ -46,6 +47,8 @@ class Project:
             if reboot:
                 self.compose('exec', '-T', 'postgres', 'psql', '-U', 'quivr', '-d', 'quivr',
                              '-v', 'ON_ERROR_STOP=1', '-c', "ALTER SYSTEM SET shared_buffers='128MB'")
+                self.compose('exec', '-T', 'postgres', 'psql', '-U', 'quivr', '-d', 'quivr',
+                             '-v', 'ON_ERROR_STOP=1', '-c', "ALTER SYSTEM SET max_wal_size='1GB'")
                 self.compose('restart', 'postgres')
                 self.compose('up', '-d', '--wait', '--wait-timeout', '120', 'postgres')
             self.compose('exec', '-T', 'postgres', 'psql', '-U', 'quivr', '-d', 'quivr',
