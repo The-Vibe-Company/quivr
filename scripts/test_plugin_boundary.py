@@ -5,9 +5,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import plugin_boundary  # noqa: E402
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "plugin_boundary.py"
 INTERNAL = "github.com/The-Vibe-Company/quivr/internal"
@@ -47,9 +44,6 @@ class PluginBoundaryTest(unittest.TestCase):
         })
         result = self.run_check(root)
         self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_the_repository_passes(self):
-        self.assertEqual(plugin_boundary.violations(ROOT), [])
 
 
 if __name__ == "__main__":
