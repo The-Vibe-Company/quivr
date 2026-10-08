@@ -185,7 +185,7 @@ class Runner(unittest.TestCase):
                     self.assertEqual(sum(len(c['texts']) for c in documents), 513)
                     self.assertLessEqual(len(documents), 9)
                 self.assertEqual(counts['search_query'], 2 if field else 1)
-                # Statistics count all 61 quality queries. An identical
+                # Statistics count every quality query (20 or 61). An identical
                 # candidate reuses everything; baseline owns the document/query fill.
                 baseline_tokens, candidate_tokens = 22 if field else 574, 22 if field else 0
                 self.assertEqual(sum(len(c['texts']) for c in self.calls), baseline_tokens + candidate_tokens)
