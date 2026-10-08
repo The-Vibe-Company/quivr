@@ -295,7 +295,7 @@ func (s EvaluationStore) Target(ctx context.Context, in monitoring.Intent) (moni
 	v := &t.Subscription
 	var evaluator, definition, vectors []byte
 	err := s.Pool.QueryRow(ctx, `SELECT s.enabled,`+supersededSQL("v", "$5")+`,v.subscription_id,v.id,v.saved_query_id,v.saved_query_version_id,v.evaluator,v.destination_id,v.activation_position,q.corpus_ids,q.definition,coalesce(s.owner,''),
-  EXISTS(SELECT 1 FROM segments sg JOIN `+embeddingCoverageRelation+` ec ON (ec.organization,ec.segment_id)=(sg.organization,sg.id) WHERE sg.organization=$1 AND sg.version_id=$3 AND ec.generation_id=`+routedGenerationSQL("$1", "$4")+`),
+  EXISTS(SELECT 1 FROM segments sg JOIN LATERAL `+embeddingCoverageForSegmentSQL("sg.organization", "sg.id")+` ec ON true WHERE sg.organization=$1 AND sg.version_id=$3 AND ec.generation_id=`+routedGenerationSQL("$1", "$4")+`),
   EXISTS(SELECT 1 FROM evaluation_intents d WHERE d.organization=$1 AND d.subscription_version_id=$2 AND d.record_version_id=$3 AND d.sequence<>$5 AND d.kind='evaluation' AND d.state='done' AND d.outcome IN `+decidedOutcomes+`),q.query_vectors
 FROM subscription_versions v
 JOIN subscriptions s ON (s.organization,s.id)=(v.organization,v.subscription_id)

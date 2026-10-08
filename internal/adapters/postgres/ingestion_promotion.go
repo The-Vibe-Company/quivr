@@ -136,7 +136,7 @@ func applyIngestionRouting(ctx context.Context, tx pgx.Tx, previous registry.Pla
  LEFT JOIN projection_coverage target ON (target.organization,target.version_id,target.generation_id,target.plugin_id)=(v.organization,v.id,g.id,`+selected+`)
  LEFT JOIN vector_spaces vs ON vs.owner_plugin_id=`+selected+` AND vs.id=ANY($2::text[])
  WHERE `+eligibleVersionSQL+` AND `+selected+`<>`+prior+` AND (target.segmentation_id IS NULL OR vs.id IS NULL OR EXISTS(
- SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.segmentation_id=target.segmentation_id AND (NOT g.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id)) OR NOT EXISTS(SELECT 1 FROM `+embeddingCoverageRelation+` ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=g.id AND ec.space_id=vs.id))))
+ SELECT 1 FROM segments sg WHERE sg.organization=v.organization AND sg.segmentation_id=target.segmentation_id AND (NOT g.spaces @> jsonb_build_array(jsonb_build_object('id',vs.id)) OR NOT EXISTS(SELECT 1 FROM `+embeddingCoverageForSegmentSQL("sg.organization", "sg.id")+` ec WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=g.id AND ec.space_id=vs.id))))
  GROUP BY `+selected+`,vs.id ORDER BY `+selected+`,vs.id`, raw, servingSpaceIDs(next.Spaces))
 	if err != nil {
 		return false, err
