@@ -183,7 +183,7 @@ Run separate `quivr worker` processes with `worker.queues: ["live"]` and `["bulk
 
 During an upgrade, keep at least one worker serving both classes until queued legacy receipts and every unfinished history on `quivr-content-v0` have drained. Inspect that queue's running workflows in Temporal and confirm no pending `legacy_workflow` rows remain in `ingestion_outbox` or `ingestion_batches` before removing the mixed worker. Queue-specific workers do not drain that old mixed queue.
 
-`GET /v0/admin/queues` accepts a bearer API key granted `queues:read` with all-corpus scope (`corpora: ["*"]`); configure it under [API keys](/reference/configuration#api-keys). Its numeric paths stay stable, including `queues.bulk.waiting` and `queues.live.waiting`. For example, not run:
+`GET /v0/admin/queues` accepts a bearer API key granted `queues:read` with all-corpus scope (`corpora: ["*"]`); configure it under [API keys](/reference/configuration#api-keys). Its numeric paths stay stable, including `queues.bulk.waiting` and `queues.live.waiting`. Observations refresh every 15 seconds by default; configure `queue_observation.refresh_interval` in all processes for an interval from 1 to 60 seconds. Rebuild/backfill waiting counts use scope and progress counters and may count overlapping bulk work more than once; use them as a scaling signal. See [Worker queues](/reference/configuration#worker-queues) for freshness and estimation details. For example, not run:
 
 ```json
 {"queues":{"live":{"waiting":0,"in_progress":1,"oldest_waiting_age_seconds":0},"bulk":{"waiting":123,"in_progress":2,"oldest_waiting_age_seconds":45}}}
@@ -247,7 +247,7 @@ triggers:
       ignoreNullValues: "false"
 ```
 
-The same gauges expose `in_progress` and `oldest_waiting_age_seconds` for dashboards and saturation alerts. A shared PostgreSQL snapshot keeps scrapes independent of operation size. Processes refresh it in the background at most once per second, with a 30-second refresh budget; counts describe the last completed observation. The queue API returns 503 for a missing snapshot or one older than a minute. Metrics instead omit unavailable queue series and continue serving other families. Set `ignoreNullValues: "false"` so the Prometheus scaler treats an empty result as an error instead of zero backlog. The API and metrics need no Railway-specific service and can drive any orchestrator that replicates stateless worker processes.
+The same gauges expose `in_progress` and `oldest_waiting_age_seconds` for dashboards and saturation alerts. A shared PostgreSQL snapshot keeps scrapes independent of operation size. Processes refresh it in the background at most once per configured interval (15 seconds by default), with a 30-second refresh budget; counts describe the last completed observation. The queue API returns 503 for a missing snapshot or one older than the larger of one minute and twice the configured interval. Metrics instead omit unavailable queue series and continue serving other families. Set `ignoreNullValues: "false"` so the Prometheus scaler treats an empty result as an error instead of zero backlog. The API and metrics need no Railway-specific service and can drive any orchestrator that replicates stateless worker processes.
 
 ## Example deployments
 

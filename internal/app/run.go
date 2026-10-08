@@ -49,9 +49,10 @@ import (
 )
 
 type Config struct {
-	Worker    workqueue.Config `json:"worker"`
-	TLS       TLSConfig        `json:"tls"`
-	Telemetry telemetry.Config `json:"telemetry"`
+	Worker           workqueue.Config            `json:"worker"`
+	QueueObservation workqueue.ObservationConfig `json:"queue_observation"`
+	TLS              TLSConfig                   `json:"tls"`
+	Telemetry        telemetry.Config            `json:"telemetry"`
 	// TEIURL encodes queries for generations built before the core.ingest
 	// plugin (THE-777), which serve the legacy E5 space until rebuilt.
 	TEIURL               string                  `json:"tei_url"`
@@ -276,6 +277,10 @@ func Run(command string, args ...string) error {
 	workerSettings, err := cfg.Worker.Resolve()
 	if err != nil {
 		return invalidConfig("worker", "invalid worker queues or slots", err)
+	}
+	queueRefreshInterval, err := cfg.QueueObservation.Resolve()
+	if err != nil {
+		return invalidConfig("queue_observation", "invalid queue refresh interval", err)
 	}
 	tlsSettings, err := cfg.validateTLS()
 	if err != nil {
@@ -607,9 +612,9 @@ func Run(command string, args ...string) error {
 	}
 	indexes := &IndexMaintenance{Pool: pool}
 	loops.Go(indexes.Run)
-	queueSnapshots := postgres.QueueSnapshots{Pool: pool}
+	queueSnapshots := postgres.QueueSnapshots{Pool: pool, RefreshInterval: queueRefreshInterval}
 	loops.Go(func(ctx context.Context) {
-		delay := time.Second
+		delay := queueRefreshInterval
 		failed := false
 		for {
 			refresh, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -620,10 +625,10 @@ func Run(command string, args ...string) error {
 					slog.Warn("queue backlog refresh unavailable")
 				}
 				failed = true
-				delay = min(delay*2, 15*time.Second)
+				delay = min(delay*2, max(queueRefreshInterval, 15*time.Second))
 			} else {
 				failed = false
-				delay = time.Second
+				delay = queueRefreshInterval
 			}
 			timer := time.NewTimer(delay)
 			select {

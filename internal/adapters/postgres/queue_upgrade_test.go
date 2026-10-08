@@ -205,7 +205,7 @@ FROM generate_series(1,$2::int) AS s(i)`, organization, count); err != nil {
 
 func refreshQueueWork(t *testing.T, ctx context.Context, snapshots QueueSnapshots) map[string]workqueue.Status {
 	t.Helper()
-	if _, err := snapshots.Pool.Exec(ctx, `UPDATE queue_backlog_snapshots SET observed_at='-infinity'`); err != nil {
+	if _, err := snapshots.Pool.Exec(ctx, `UPDATE queue_backlog_snapshots SET observed_at='-infinity',published_at='-infinity'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := snapshots.Refresh(ctx); err != nil {
