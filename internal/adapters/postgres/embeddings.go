@@ -242,6 +242,15 @@ func (s EmbeddingStore) EnrichmentEligible(ctx context.Context, org, id string) 
 	return eligible, err
 }
 func (s EmbeddingStore) CommitEnrichment(ctx context.Context, org string, seg content.Segmentation, g content.Generation, artifacts []content.Embedding) error {
+	if content.IngestionBatchActive(ctx) {
+		var record string
+		if err := s.Pool.QueryRow(ctx, `SELECT record_id FROM record_versions WHERE organization=$1 AND id=$2`, org, seg.VersionID).Scan(&record); err != nil {
+			return err
+		}
+		if handled, err := content.EnqueueIngestion(ctx, content.IngestionCommit{Kind: content.CommitVectors, Organization: org, RecordID: record, Segmentation: seg, Generation: g, Artifacts: artifacts}); handled {
+			return err
+		}
+	}
 	err := retryJournalWrite(ctx, "CommitEnrichment", func(ctx context.Context) error {
 		return s.commitEnrichmentAttempt(ctx, org, seg, g, artifacts)
 	})
@@ -254,6 +263,25 @@ func (s EmbeddingStore) commitEnrichmentAttempt(ctx context.Context, org string,
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	finish, err := prepareEnrichment(ctx, tx, org, seg, g, artifacts)
+	if err != nil {
+		return err
+	}
+	if finish == nil {
+		return nil
+	}
+	if err = finish(); err != nil {
+		if errors.Is(err, errJournalReplay) {
+			return nil
+		}
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func prepareEnrichment(ctx context.Context, tx pgx.Tx, org string, seg content.Segmentation, g content.Generation, artifacts []content.Embedding) (journalFinish, error) {
+	var err error
 
 	var recordID, corpusID string
 	var eligible bool
@@ -272,14 +300,14 @@ func (s EmbeddingStore) commitEnrichmentAttempt(ctx context.Context, org string,
 		return tx.QueryRow(ctx, guard, args...).Scan(&recordID, &corpusID, &eligible, &routing, &sourceMediaType)
 	}
 	if err = lockProjectionRouting(ctx, tx); err != nil {
-		return err
+		return nil, err
 	}
 	if err = read(false); err != nil {
-		return err
+		return nil, err
 	}
 	if len(routing) > 0 {
 		if err = json.Unmarshal(routing, &g.IngestionRouting); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	ownerPrepared := sourceMediaType != nil && g.IngestionRouting != nil && g.IngestionRouting.For(*sourceMediaType) != "" && g.IngestionRouting.For(*sourceMediaType) != content.PluginOfRecipe(seg.Recipe)
@@ -293,108 +321,142 @@ func (s EmbeddingStore) commitEnrichmentAttempt(ctx context.Context, org string,
 			return err
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	err = read(true)
-	if err != nil {
-		return err
-	}
-	if !eligible {
-		if stage != nil {
-			if err = stage.Rollback(ctx); err != nil {
+	// Queue every group evaluation after the journal fence, before any member
+	// takes the generation's shared row lock: snapshotting can update that row.
+	// This retains routing -> journal -> mutable-row lock ordering.
+	guarded, evaluationsPrepared := false, false
+	if group := journalGroupOf(ctx); group != nil && eligible && !ownerPrepared && stage != nil {
+		group.beforeFinishes = append(group.beforeFinishes, func() error {
+			if err := read(true); err != nil {
 				return err
 			}
+			if !eligible {
+				return ErrGenerationChanged
+			}
+			plan := ""
+			if w, ok := plugins.WorkOf(ctx); ok {
+				plan = w.Plan
+			}
+			if err := queueIngestionEvaluations(ctx, tx, org, recordID, seg.VersionID, g.ID, plan, content.PluginOfRecipe(seg.Recipe)); err != nil {
+				return err
+			}
+			guarded, evaluationsPrepared = true, true
+			return nil
+		})
+	}
+	return func() error {
+		if !guarded {
 			if err = read(true); err != nil {
 				return err
 			}
 		}
-		if eligible {
-			return ErrGenerationChanged
+		if !eligible {
+			if stage != nil {
+				if journalGroupOf(ctx) != nil {
+					return ErrGenerationChanged
+				}
+				if err = stage.Rollback(ctx); err != nil {
+					return err
+				}
+				if err = read(true); err != nil {
+					return err
+				}
+			}
+			if eligible {
+				return ErrGenerationChanged
+			}
+			if _, err = tx.Exec(ctx, settleWithdrawnEnrichmentSQL, org, seg.VersionID); err != nil {
+				return err
+			}
+			return nil
 		}
-		if _, err = tx.Exec(ctx, settleWithdrawnEnrichmentSQL, org, seg.VersionID); err != nil {
+		if len(routing) > 0 {
+			if err = json.Unmarshal(routing, &g.IngestionRouting); err != nil {
+				return err
+			}
+		}
+		if sourceMediaType == nil {
+			return pgx.ErrNoRows
+		}
+		if g.IngestionRouting != nil && g.IngestionRouting.For(*sourceMediaType) != "" && g.IngestionRouting.For(*sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
+			var routed bool
+			if err = tx.QueryRow(ctx, `SELECT `+routedGenerationSQL("$1", "$2")+`=$3`, org, corpusID, g.ID).Scan(&routed); err != nil {
+				return err
+			}
+			if !routed {
+				return ErrGenerationChanged
+			}
+			if len(artifacts) == 0 {
+				return content.ErrInvalid
+			}
+			if !ownerPrepared || stage == nil {
+				return ErrGenerationChanged
+			}
+			return nil
+		}
+		// Queue and snapshot before taking the generation's shared row lock:
+		// the first evaluation snapshot may update that row. All effects still
+		// become visible only with the successful served commit below.
+		plan := ""
+		if w, ok := plugins.WorkOf(ctx); ok {
+			plan = w.Plan
+		}
+		if !evaluationsPrepared {
+			if err = queueIngestionEvaluations(ctx, tx, org, recordID, seg.VersionID, g.ID, plan, content.PluginOfRecipe(seg.Recipe)); err != nil {
+				return err
+			}
+		}
+		var active bool
+		var current content.Generation
+		var spaces []byte
+		if err = tx.QueryRow(ctx, `SELECT id=`+routedGenerationSQL("$2", "$3")+`,space_id,spaces FROM projection_generations WHERE id=$1 FOR SHARE`, g.ID, org, corpusID).Scan(&active, &current.SpaceID, &spaces); err != nil {
 			return err
 		}
-		return tx.Commit(ctx)
-	}
-	if len(routing) > 0 {
-		if err = json.Unmarshal(routing, &g.IngestionRouting); err != nil {
+		if current.Spaces, err = scanSpaces(spaces); err != nil {
 			return err
 		}
-	}
-	if sourceMediaType == nil {
-		return pgx.ErrNoRows
-	}
-	if g.IngestionRouting != nil && g.IngestionRouting.For(*sourceMediaType) != "" && g.IngestionRouting.For(*sourceMediaType) != content.PluginOfRecipe(seg.Recipe) {
-		var routed bool
-		if err = tx.QueryRow(ctx, `SELECT `+routedGenerationSQL("$1", "$2")+`=$3`, org, corpusID, g.ID).Scan(&routed); err != nil {
-			return err
-		}
-		if !routed {
+		owner := content.PluginOfRecipe(seg.Recipe)
+		if !active || current.ServedFor(owner) != g.ServedFor(owner) {
 			return ErrGenerationChanged
 		}
 		if len(artifacts) == 0 {
 			return content.ErrInvalid
 		}
-		if !ownerPrepared || stage == nil {
+		if stage == nil {
+			// Eligibility changed after the speculative read. Let the caller repeat
+			// preparation without doing hash inserts while holding the journal.
+			if journalGroupOf(ctx) != nil {
+				return ErrGenerationChanged
+			}
+			if err = tx.Rollback(ctx); err != nil {
+				return err
+			}
 			return ErrGenerationChanged
 		}
-		return tx.Commit(ctx)
-	}
-	// Queue and snapshot before taking the generation's shared row lock:
-	// the first evaluation snapshot may update that row. All effects still
-	// become visible only with the successful served commit below.
-	plan := ""
-	if w, ok := plugins.WorkOf(ctx); ok {
-		plan = w.Plan
-	}
-	if err = queueIngestionEvaluations(ctx, tx, org, recordID, seg.VersionID, g.ID, plan, content.PluginOfRecipe(seg.Recipe)); err != nil {
-		return err
-	}
-	var active bool
-	var current content.Generation
-	var spaces []byte
-	if err = tx.QueryRow(ctx, `SELECT id=`+routedGenerationSQL("$2", "$3")+`,space_id,spaces FROM projection_generations WHERE id=$1 FOR SHARE`, g.ID, org, corpusID).Scan(&active, &current.SpaceID, &spaces); err != nil {
-		return err
-	}
-	if current.Spaces, err = scanSpaces(spaces); err != nil {
-		return err
-	}
-	owner := content.PluginOfRecipe(seg.Recipe)
-	if !active || current.ServedFor(owner) != g.ServedFor(owner) {
-		return ErrGenerationChanged
-	}
-	if len(artifacts) == 0 {
-		return content.ErrInvalid
-	}
-	if stage == nil {
-		// Eligibility changed after the speculative read. Let the caller repeat
-		// preparation without doing hash inserts while holding the journal.
-		if err = tx.Rollback(ctx); err != nil {
+		writes := &pgx.Batch{}
+		writes.Queue(`UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL,enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID)
+		mutation := content.StableID("enrichment", seg.ID, g.ID)
+		var emitted bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM change_events WHERE organization=$1 AND event_id=$2)`, org, content.StableID("event", org, "record.enrichment_available", "record", mutation)).Scan(&emitted); err != nil {
 			return err
 		}
-		return ErrGenerationChanged
-	}
-	writes := &pgx.Batch{}
-	writes.Queue(`UPDATE record_versions SET enrichment_state='idle',enrichment_error='',enrichment_reason=NULL,enriched_at=`+firstStep("enriched_at")+` WHERE organization=$1 AND id=$2`, org, seg.VersionID)
-	mutation := content.StableID("enrichment", seg.ID, g.ID)
-	var emitted bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM change_events WHERE organization=$1 AND event_id=$2)`, org, content.StableID("event", org, "record.enrichment_available", "record", mutation)).Scan(&emitted); err != nil {
-		return err
-	}
-	if !emitted {
-		queueEvent(ctx, writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.enrichment_available", Resource: "record", ResourceID: recordID, MutationID: mutation, VersionID: seg.VersionID})
-	}
+		if !emitted {
+			queueEvent(ctx, writes, eventInput{Organization: org, CorpusID: corpusID, Kind: "record.enrichment_available", Resource: "record", ResourceID: recordID, MutationID: mutation, VersionID: seg.VersionID})
+		}
 
-	if err = tx.SendBatch(ctx, writes).Close(); err != nil {
-		return err
-	}
-	if emitted {
-		if err = observeQueueRecords(ctx, tx, []string{org}, []string{recordID}); err != nil {
+		if err = tx.SendBatch(ctx, writes).Close(); err != nil {
 			return err
 		}
-	}
-	return tx.Commit(ctx)
+		if emitted {
+			if err = observeQueueRecords(ctx, tx, []string{org}, []string{recordID}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
 }
 
 var _ content.EmbeddingRepository = EmbeddingStore{}
