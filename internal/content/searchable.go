@@ -156,13 +156,15 @@ func (r IngestionRouting) For(mediaType string) string {
 	return r.Default
 }
 
-// GenerationSpace is one vector space of a generation and the distance its
-// index uses.
+// GenerationSpace is one vector space of a generation, the distance its
+// index uses and, for a generation built since index settings, how the
+// index stores its vectors.
 type GenerationSpace struct {
-	ID            string `json:"id"`
-	Metric        string `json:"metric"`
-	Role          string `json:"role,omitempty"`
-	OwnerPluginID string `json:"owner_plugin_id,omitempty"`
+	ID            string       `json:"id"`
+	Metric        string       `json:"metric"`
+	Role          string       `json:"role,omitempty"`
+	OwnerPluginID string       `json:"owner_plugin_id,omitempty"`
+	Index         *VectorIndex `json:"index,omitempty"`
 }
 
 // ServedFor returns the served space owned by a plugin in this generation.

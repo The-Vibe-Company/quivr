@@ -546,24 +546,63 @@ func fuseItems(sparse, dense map[string]content.Candidate, alpha float64, fusion
 	return ordered(out)
 }
 
+// Search queries routes in partitions that one index request can rank
+// together: by recipe (item keywords or passages) and, for a vector search,
+// by the named vector that stores the space, which differs between
+// generations built with different index settings.
 func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corpus.Scope, q retrieval.Request) ([]content.Candidate, error) {
 	if len(routes) == 0 {
 		return nil, errors.New("projection route missing")
 	}
-	var current, legacy []retrieval.Route
-	for _, r := range routes {
-		if r.Generation.ItemKeywordsProjected && q.Field != retrieval.FieldLexical {
-			current = append(current, r)
-		} else {
-			legacy = append(legacy, r)
-		}
+	type partition struct {
+		item   bool
+		routes []retrieval.Route
 	}
+	partitions := map[string]*partition{}
+	var keys []string
+	for _, r := range routes {
+		item := r.Generation.ItemKeywordsProjected && q.Field != retrieval.FieldLexical
+		key := strconv.FormatBool(item)
+		if q.Mode != "lexical" {
+			space := q.Space
+			if space == "" {
+				space = r.Generation.SpaceID
+			}
+			key += "/" + s.VectorName(r.Generation, space)
+		}
+		if partitions[key] == nil {
+			partitions[key] = &partition{item: item}
+			keys = append(keys, key)
+		}
+		partitions[key].routes = append(partitions[key].routes, r)
+	}
+	sort.Strings(keys)
 	var out []content.Candidate
-	// Item and passage BM25 use different document populations; their hybrid
-	// scores are also normalized independently. During an upgrade, reciprocal
-	// ranks put both recipes on a common scale without reapplying hybrid alpha.
-	mixedRanks := len(current) > 0 && len(legacy) > 0 && q.Mode != "semantic"
-	appendRecipe := func(rows []content.Candidate) {
+	// Each partition's BM25 and hybrid scores are normalized over its own
+	// candidates (item and passage BM25 also score different populations).
+	// Reciprocal ranks put mixed partitions on a common scale without
+	// reapplying hybrid alpha. Semantic scores are 1 minus the distance in
+	// one space, comparable as they are.
+	mixedRanks := len(keys) > 1 && q.Mode != "semantic"
+	for _, key := range keys {
+		p := partitions[key]
+		var rows []content.Candidate
+		var err error
+		if p.item {
+			rows, err = s.itemSearch(ctx, p.routes, scope, q)
+		} else {
+			if len(q.RecordIDs) > 0 {
+				for _, r := range p.routes {
+					if !r.Generation.ItemKeywordsProjected {
+						return nil, retrieval.ErrMetadataFilterUnavailable
+					}
+				}
+			}
+			rows, err = s.searchLegacy(ctx, p.routes, scope, q)
+		}
+		if err != nil {
+			return nil, err
+		}
 		if mixedRanks {
 			pool := map[string]content.Candidate{}
 			for _, row := range rows {
@@ -575,27 +614,6 @@ func (s *Store) Search(ctx context.Context, routes []retrieval.Route, scope corp
 			}
 		}
 		out = append(out, rows...)
-	}
-	if len(current) > 0 {
-		rows, err := s.itemSearch(ctx, current, scope, q)
-		if err != nil {
-			return nil, err
-		}
-		appendRecipe(rows)
-	}
-	if len(legacy) > 0 {
-		if len(q.RecordIDs) > 0 {
-			for _, r := range legacy {
-				if !r.Generation.ItemKeywordsProjected {
-					return nil, retrieval.ErrMetadataFilterUnavailable
-				}
-			}
-		}
-		rows, err := s.searchLegacy(ctx, legacy, scope, q)
-		if err != nil {
-			return nil, err
-		}
-		appendRecipe(rows)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Score != out[j].Score {
