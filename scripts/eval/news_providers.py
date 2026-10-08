@@ -462,7 +462,8 @@ class CappedJev:
 
     @safe
     def judge(self, query, passages, deadline, cost_limit):
-        from jev_rerank.client import MAX_TOKENS, Result, payload
+        from jev_rerank.client import payload
+        from quivr_plugin.system_one import MAX_TOKENS, Result, batches
         key = digest(['jev-v1', self.client.url.geturl() if isinstance(getattr(self.client, 'url', None), urllib.parse.SplitResult) else '',
                       payload(query, passages)])
         cached = self.response_cache.get(key) if self.response_cache else None
@@ -471,7 +472,12 @@ class CappedJev:
             if 'rejection' in cached:
                 raise news.InvalidBatch('request_refused')
             return Result(**{**cached['value'], 'input_tokens': 0, 'paid_calls': 0, 'estimated_tokens': 0})
-        call = self.budget.reserve('jev', 'news', 'judge', 3 * MAX_TOKENS, .042)
+        body = payload(query, passages)
+        try:
+            groups = batches(body['state'], body['questions'])
+        except ValueError:
+            return Result(reason='request size bound')
+        call = self.budget.reserve('jev', 'news', 'judge', 3 * len(groups) * MAX_TOKENS, .042)
         result = self.client.judge(query, passages, deadline, cost_limit=cost_limit)
         if result.estimated_tokens == 0 or result.input_tokens > call['reserved']:
             self.budget.settle(call, result.input_tokens)

@@ -46,7 +46,7 @@ func vectorPreview(t *testing.T) map[string]any {
 	id, version := keywordEvaluator(t)
 	return request(t, "POST", "/v0/subscription-previews", os.Getenv("QUIVR_TEST_ADMIN"), map[string]any{
 		"saved_query_id": os.Getenv("QUIVR_TEST_VECTOR_QUERY"), "saved_query_version_id": os.Getenv("QUIVR_TEST_VECTOR_VERSION"),
-		"evaluator": map[string]any{"plugin_id": id, "version": version, "configuration": map[string]any{"wait_for_enrichment": false}},
+		"evaluator": map[string]any{"plugin_id": id, "version": version, "configuration": map[string]any{"wait_for_enrichment": false, "threshold": 0.8}},
 	}, 200)
 }
 

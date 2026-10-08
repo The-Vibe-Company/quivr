@@ -8,6 +8,7 @@ import concurrent.futures
 import contextlib
 import copy
 import hashlib
+import http.client
 import json
 import logging
 import math
@@ -16,6 +17,7 @@ import pathlib
 import re
 import socket
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -128,44 +130,103 @@ class SearchIndex:
 
 
 def rerank(query, passages, budget, key, price, timing=None):
-    """One bounded Jev attempt, no hidden retry/background transport."""
+    """Size-bounded batches with one measured attempt each and a shared deadline."""
     sys.path.insert(0, str(ROOT / 'plugins/jev-rerank'))
     from jev_rerank import client as jev
-    raw = json.dumps(jev.payload(query, passages), ensure_ascii=False, separators=(',', ':')).encode()
-    if len(raw) > jev.MAX_BYTES:
-        raise ValueError('reranker request exceeds its supported bound')
-    timing = {} if timing is None else timing
+    from quivr_plugin import system_one as provider
     started = time.monotonic()
-    call = budget.reserve(jev.MODEL, 'rerank', 'query', jev.MAX_TOKENS, price)
-    timing['blocked'] = time.monotonic() - started
-    timing['ledger'] = timing['blocked']
-    request = urllib.request.Request(jev.URL, data=raw, headers={'Content-Type': 'application/json',
-                                     'Authorization': 'Bearer ' + key}, method='POST')
-    try:
+    deadline = started + 60
+    body = jev.payload(query, passages)
+    groups = provider.batches(body['state'], body['questions'])
+    timing = {} if timing is None else timing
+    timing.update(blocked=0., ledger=0., provider=0.)
+    scores = {}
+    for questions in groups:
+        raw = provider.payload(body['state'], questions)
+        if time.monotonic() >= deadline:
+            raise RuntimeError('reranker deadline before transport')
         started = time.monotonic()
-        with urllib.request.build_opener(embeddings.NoRedirect()).open(request, timeout=60) as response:
-            answer = response.read(jev.MAX_RESPONSE_BYTES + 1)
-        timing['provider'] = time.monotonic() - started
-        timing['blocked'] += timing['provider']
-        if len(answer) > jev.MAX_RESPONSE_BYTES:
-            raise ValueError()
-        body = json.loads(answer)
-        tokens = body['usage']['input_tokens']
-        started = time.monotonic()
-        budget.settle(call, tokens)
+        call = budget.reserve(provider.MODEL, 'rerank', 'query', provider.MAX_TOKENS, price)
         ledger = time.monotonic() - started
-        timing['ledger'] += ledger
         timing['blocked'] += ledger
-        scores = {name: item['noul'] for name, item in body['answers'].items()}
-        if (type(tokens) is not int or not 0 <= tokens <= jev.MAX_TOKENS or body['model'] != jev.MODEL
-                or set(scores) != set(passages) or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in scores.values())):
-            raise ValueError()
-        return sorted(scores, key=lambda name: (-scores[name], name))
-    except (embeddings.BudgetExceeded, network_recovery.Outage, control_store.LeaseLost,
-            control_store.Unavailable, control_store.Contention):
-        raise
-    except Exception:
-        raise RuntimeError('reranker attempt failed; uncertain charge retained') from None
+        timing['ledger'] += ledger
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            budget.settle(call, 0)
+            raise RuntimeError('reranker deadline before transport')
+        request = urllib.request.Request(provider.URL, data=raw, headers={'Content-Type': 'application/json',
+                                         'Authorization': 'Bearer ' + key}, method='POST')
+        sockets, connections = [], []
+        class HTTPS(urllib.request.HTTPSHandler):
+            def https_open(self, request):
+                def connection(host, timeout, **kwargs):
+                    current = http.client.HTTPSConnection(host, timeout=timeout, **kwargs)
+                    current._create_connection = lambda address, timeout, source_address=None: provider.connect_socket(
+                        address, deadline, sockets, source_address)
+                    connections.append(current)
+                    return current
+                return self.do_open(connection, request, context=self._context)
+        def expire(active=sockets, opened=connections):
+            for transport in [c.sock for c in opened if c.sock is not None] + active:
+                try:
+                    transport.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            for current in opened:
+                current.close()
+        timer = threading.Timer(remaining, expire)
+        timer.daemon = True
+        timer.start()
+        try:
+            started = time.monotonic()
+            with urllib.request.build_opener(embeddings.NoRedirect(), HTTPS()).open(request, timeout=remaining) as response:
+                chunks, size = [], 0
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    transport = getattr(getattr(getattr(response, 'fp', None), 'raw', None), '_sock', None)
+                    if transport is not None:
+                        sockets[:] = [transport]
+                        transport.settimeout(remaining)
+                    chunk = response.read1(min(8192, provider.MAX_RESPONSE_BYTES + 1 - size))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    if size > provider.MAX_RESPONSE_BYTES:
+                        raise ValueError()
+                answer = b''.join(chunks)
+            elapsed = time.monotonic() - started
+            timing['provider'] += elapsed
+            timing['blocked'] += elapsed
+            if len(answer) > provider.MAX_RESPONSE_BYTES:
+                raise ValueError()
+            answer = json.loads(answer)
+            tokens = answer['usage']['input_tokens']
+            started = time.monotonic()
+            budget.settle(call, tokens)
+            ledger = time.monotonic() - started
+            timing['ledger'] += ledger
+            timing['blocked'] += ledger
+            batch_scores = {name: item['noul'] for name, item in answer['answers'].items()}
+            if (type(tokens) is not int or not 0 <= tokens <= provider.MAX_TOKENS or answer['model'] != provider.MODEL
+                    or set(batch_scores) != set(questions) or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in batch_scores.values())):
+                raise ValueError()
+            if time.monotonic() >= deadline:
+                raise TimeoutError
+            scores.update(batch_scores)
+        except (embeddings.BudgetExceeded, network_recovery.Outage, control_store.LeaseLost,
+                control_store.Unavailable, control_store.Contention):
+            raise
+        except Exception:
+            raise RuntimeError('reranker attempt failed; uncertain charge retained') from None
+        finally:
+            timer.cancel()
+            for current in connections:
+                current.close()
+    return sorted(scores, key=lambda name: (-scores[name], name))
+
 
 
 def _measure(cfg, data, dataset, cache, budget, hosted, prices, compute_rate,

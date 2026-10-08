@@ -2,7 +2,7 @@
 # Reference: contracts/plugins/v0/README.md in the Quivr repository, and
 # README.md here for the expression reference.
 id: alerts
-version: 0.3.0
+version: 0.4.0
 description: Keyword and meaning alerts, alone or combined. Meaning checks use local stored vectors or TypeSafe's Jev classifier.
 compatibility:
   engine: ">=0.1.0 <0.3.0"
@@ -267,7 +267,7 @@ contributions:
           type: number
           minimum: 0.2
           maximum: 0.95
-          description: Meaning threshold, inclusive. Jev uses the installer's described.threshold or 0.5; vectors uses vectors.threshold or 0.8. These scores are not interchangeable.
+          description: Meaning threshold, inclusive. Jev uses the installer's described.threshold or 0.5; vectors requires vectors.thresholds[vector_space_id] or a Subscription threshold. These scores are not interchangeable.
     max_batch_size: 64
     # A described batch makes one classifier call, split only past its request size limit.
     timeout_ms: 20000
@@ -312,11 +312,15 @@ configuration:
         type: object
         additionalProperties: false
         properties:
-          threshold:
-            type: number
-            minimum: 0.2
-            maximum: 0.95
-            description: Default local-vector cosine threshold (default 0.8). A Subscription may override it.
+          thresholds:
+            type: object
+            propertyNames:
+              minLength: 1
+            additionalProperties:
+              type: number
+              minimum: 0.2
+              maximum: 0.95
+            description: Calibrated cosine thresholds keyed by vector-space ID. No implicit default; a Subscription may override its space's threshold.
 secrets:
   - name: TYPESAFE_API_KEY
     description: TypeSafe API key for Jev meaning checks. Not required for keyword or local-vector decisions; an unresolved Jev check without it is unavailable.

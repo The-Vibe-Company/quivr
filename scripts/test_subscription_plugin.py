@@ -24,7 +24,7 @@ class Selection(unittest.TestCase):
             os.environ.pop('QUIVR_ALERTS', None)
             sp.select(self.stack, sp.from_environment())
         self.assertEqual(self.manifests(), [ALERTS_MANIFEST])
-        self.assertIn('alerts (alerts@0.3.0)', sp.describe(self.stack))
+        self.assertIn('alerts (alerts@0.4.0)', sp.describe(self.stack))
 
     def test_quivr_alerts_off_leaves_them_unpinned(self):
         with mock.patch.dict(os.environ, {'QUIVR_ALERTS': 'off'}):
