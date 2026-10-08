@@ -72,6 +72,13 @@ function fakeCore() {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks)) : undefined;
+    const send = (status, data) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+    };
+    // The demo creating and checking its corpus is not one of the calls these tests read.
+    if (req.method === "POST" && req.url === "/v0/corpora") return send(201, { corpus_id: "demo", name: body.name });
+    if (req.method === "GET" && req.url === "/v0/corpora/demo") return send(200, { corpus_id: "demo", name: "Espace démo" });
     seen.push({
       method: req.method,
       url: req.url,
@@ -79,10 +86,6 @@ function fakeCore() {
       auth: req.headers.authorization,
     });
     const url = new URL(req.url, "http://x");
-    const send = (status, data) => {
-      res.writeHead(status, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(data));
-    };
     const p = url.pathname;
     let m;
     if (p === "/v0/subscriptions" && req.method === "GET") {
@@ -220,7 +223,6 @@ async function start(t, env = {}) {
       DEMO_PASSWORD: "",
       QUIVR_API_URL: `http://127.0.0.1:${core.server.address().port}`,
       QUIVR_API_KEY: KEY,
-      QUIVR_DEMO_CORPUS_ID: "demo",
       QUIVR_DEMO_ALERTS_EVALUATOR: "alerts@9.9.9",
       DEMO_STATE_FILE: join(dir, "state.json"),
       ...env,

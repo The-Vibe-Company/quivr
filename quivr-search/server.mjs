@@ -14,6 +14,7 @@ import { alertRoutes } from "./alerts.mjs";
 import { createAdmin } from "./admin.mjs";
 import { activePlugins } from "./admin-plugins.mjs";
 import { corporaPicker, createViews } from "./views.mjs";
+import { demoCorpora } from "./corpora.mjs";
 import { createExplorer, createHistory } from "./explore.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "dist");
@@ -29,12 +30,21 @@ if (!core || !key || (!password && host !== "127.0.0.1"))
   throw new Error(
     "Configure QUIVR_API_URL, QUIVR_API_KEY and DEMO_PASSWORD for public serving",
   );
-let corpusID = process.env.QUIVR_DEMO_CORPUS_ID;
-// Other corpora the demo reads (THE-1171): searched, followed in the feed and
-// browsed in the Explorer, never written to.
-const otherCorpora = [
-  ...new Set((process.env.QUIVR_DEMO_CORPORA || "").split(",").map((id) => id.trim()).filter(Boolean)),
-];
+// The demo corpus, and the other corpora the demo reads (THE-1171): searched,
+// followed in the feed and browsed in the Explorer, never written to. A corpus
+// that stops being read takes its feed, index and Admin view with it.
+const corpora = demoCorpora({
+  upstream: (...args) => upstream(...args),
+  configured: process.env.QUIVR_DEMO_CORPORA,
+  onDropped: (ids) => {
+    for (const id of ids) {
+      liveFeeds.get(id)?.stop();
+      liveFeeds.delete(id);
+      catalogs.delete(id);
+      if (admin?.corpus === id) admin = undefined;
+    }
+  },
+});
 // Sources (THE-732): feed discovery under the private-address refusal,
 // deployment-provided suggestions, and removed sources hidden from lists.
 const feeds = feedGuard({
@@ -128,7 +138,7 @@ const catalogFor = (corpus) => {
       createCatalog({
         upstream,
         corpus,
-        caught: () => (corpus === corpusID ? alerts.matched(corpus) : {}),
+        caught: () => (corpus === corpora.demo() ? alerts.matched(corpus) : {}),
         ready: () => feedFor(corpus).ready(),
       }),
     );
@@ -154,29 +164,29 @@ const indexFor = (corpus) => {
   feedFor(corpus).start();
   return catalogFor(corpus);
 };
-const readable = async () => [
-  await readyCorpus(),
-  ...otherCorpora.filter((id) => id !== corpusID),
-];
-const picked = corporaPicker({ readable, demo: () => corpusID });
+const readable = (options) => corpora.readable(options);
+const picked = corporaPicker({ readable, demo: corpora.demo });
 const views = createViews({ feedFor, indexFor, upstream });
 const explorer = createExplorer({
   upstream: (...args) => upstream(...args),
   readable,
   picked,
-  demo: () => corpusID,
+  demo: corpora.demo,
   history,
 });
 // The plugins the engine runs, for the Admin tab's Plugins section (THE-797).
 const plugins = activePlugins({ upstream: (...args) => upstream(...args) });
 // The Admin tab (THE-796) follows the Fil's change stream of the demo corpus.
 const adminFor = (corpus) =>
-  (admin ||= createAdmin({
-    upstream,
+  (admin ||= {
     corpus,
-    follow: (watcher) => feedFor(corpus).watch(watcher),
-    statsMs: statsMs > 0 ? statsMs : undefined,
-  }));
+    view: createAdmin({
+      upstream,
+      corpus,
+      follow: (watcher) => feedFor(corpus).watch(watcher),
+      statsMs: statsMs > 0 ? statsMs : undefined,
+    }),
+  }).view;
 const alerts = alertRoutes({
   upstream: (...args) => upstream(...args),
   jsonBody: (req) => jsonBody(req),
@@ -212,6 +222,18 @@ const sign = (value) =>
     .update("quivr-demo-session:" + value)
     .digest("hex");
 const fail = (status, message) => Object.assign(new Error(message), { status });
+// A write for a demo corpus that is no longer the demo's (its databases were
+// reset): the page reloads its session on this code.
+const changed = () =>
+  Object.assign(fail(409, "La démo a été réinitialisée. La page se recharge."), {
+    code: "demo_corpus_changed",
+  });
+// The engine's answer to a write on the demo corpus; a 404 because the
+// corpus is gone forgets it.
+async function written(response) {
+  if (response.status === 404 && !(await corpora.confirm({ fresh: true }))) throw changed();
+  return response;
+}
 async function jsonBody(req) {
   if (!req.headers["content-type"]?.startsWith("application/json"))
     throw fail(415, "Requête JSON attendue.");
@@ -266,17 +288,6 @@ async function upstreamCall(path, method, body, timeout, signal) {
   }
   const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   return { status: response.status, data };
-}
-async function readyCorpus() {
-  if (corpusID) return corpusID;
-  const response = await upstream("/v0/corpora", "POST", {
-    name: "Espace démo",
-    idempotency_key: "quivr-web-demo.v1",
-  });
-  if (response.status !== 201)
-    throw fail(503, "La démo se prépare. Réessayez dans un instant.");
-  corpusID = response.data.corpus_id;
-  return corpusID;
 }
 function authenticated(req) {
   if (!password) return true;
@@ -430,11 +441,11 @@ async function connectorRoute(req, path, url, corpus) {
   }
   if (path === "/v0/connectors" && req.method === "POST") {
     const body = await jsonBody(req);
-    if (body.corpus_id !== corpus) throw fail(403, "Corpus non autorisé.");
+    if (body.corpus_id !== corpus) throw changed();
     if (body.source_namespace === "web-demo")
       throw fail(422, "Cet espace de noms est réservé aux textes ajoutés.");
     if (body.kind === "rss") await feeds.check(body.config?.url);
-    return withName(await upstream(path, "POST", body));
+    return withName(await written(await upstream(path, "POST", body)));
   }
   const match = path.match(
     /^\/v0\/connectors\/([\w-]+)(?:\/(disable|credential|schedule|runs))?$/,
@@ -592,7 +603,11 @@ async function handle(req, res) {
     ) {
       if (!authenticated(req))
         throw fail(401, "Ouvrez la démo pour continuer.");
-      const id = await readyCorpus();
+      // Every request checks the demo corpus is still there (its databases may
+      // have been reset), the reads of one page load with one call; the
+      // session always asks.
+      await corpora.confirm({ fresh: path === "/demo/session" });
+      const id = await corpora.ready();
       if (path === "/demo/session" && req.method === "GET") {
         await send(res, 200, { corpus_id: id, name: "Espace démo" });
         return;
@@ -738,12 +753,10 @@ async function handle(req, res) {
         response = await upstream(path);
       } else if (path === "/v0/records" && req.method === "POST") {
         const body = await jsonBody(req);
-        if (
-          body.source?.corpus_id !== id ||
-          body.source?.namespace !== "web-demo"
-        )
+        if (body.source?.namespace !== "web-demo")
           throw fail(403, "Corpus non autorisé.");
-        response = await upstream(path, "POST", body);
+        if (body.source.corpus_id !== id) throw changed();
+        response = await written(await upstream(path, "POST", body));
       } else if (path.startsWith("/v0/connector")) {
         response = await connectorRoute(req, path, url, id);
       } else if (path === "/v0/changes" && req.method === "GET") {
@@ -832,6 +845,7 @@ async function handle(req, res) {
 }
 server.requestTimeout = 15000;
 server.headersTimeout = 10000;
-server.listen(port, host, () =>
-  console.log(`Quivr demo listening on ${host}:${server.address().port}`),
-);
+server.listen(port, host, () => {
+  console.log(`Quivr demo listening on ${host}:${server.address().port}`);
+  corpora.check().then((problem) => problem && console.error(problem));
+});
