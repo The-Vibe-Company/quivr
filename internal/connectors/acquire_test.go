@@ -148,12 +148,18 @@ func TestAccessFailuresAreRecordedWithoutFetching(t *testing.T) {
 	}
 }
 
-func TestStaleOrDisabledRunsDoNothing(t *testing.T) {
+func TestStaleDisabledOrPausedRunsDoNothing(t *testing.T) {
 	a, runs, ingest := newAcquirer(t, `{"script":[{"items":[{"record_key":"a","text":"Alpha"}]}]}`, "")
 	if err := a.Run(context.Background(), "org_a", "connector_1", 2); err != nil {
 		t.Fatal(err)
 	}
 	runs.target.Enabled = false
+	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
+		t.Fatal(err)
+	}
+	runs.target.Enabled = true
+	pausedAt := time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC)
+	runs.target.PausedAt = &pausedAt
 	if err := a.Run(context.Background(), "org_a", "connector_1", 3); err != nil {
 		t.Fatal(err)
 	}

@@ -1625,6 +1625,9 @@ type Connector struct {
 	// Kind Connector kind, provided by a pinned connector plugin; listConnectorKinds lists the kinds this deployment accepts. First-party connector plugins provide rss (RSS 2.0, RSS 1.0, Atom and JSON Feed documents; config url, optional honor_ttl; optional credential username+password or token), x_list (an X list) and m365_mail (Microsoft 365 mailboxes). Another kind is refused with 422 unsupported_connector_kind.
 	Kind ConnectorKind `json:"kind"`
 
+	// PausedAt Present while scheduled acquisition is paused. Inbound push routes remain available.
+	PausedAt *time.Time `json:"paused_at,omitempty"`
+
 	// PushPolicy Engine-owned protection of declared source API routes, separate from plugin config. Missing fields inherit deployment defaults; configure at instance creation.
 	PushPolicy *ConnectorPushPolicy `json:"push_policy,omitempty"`
 	Schedule   struct {
@@ -3887,6 +3890,12 @@ type ReplaceConnectorCredentialJSONRequestBody = CredentialReplace
 // DisableConnectorJSONRequestBody defines body for DisableConnector for application/json ContentType.
 type DisableConnectorJSONRequestBody = ActionRequest
 
+// PauseConnectorJSONRequestBody defines body for PauseConnector for application/json ContentType.
+type PauseConnectorJSONRequestBody = ActionRequest
+
+// ResumeConnectorJSONRequestBody defines body for ResumeConnector for application/json ContentType.
+type ResumeConnectorJSONRequestBody = ActionRequest
+
 // RequestConnectorRunJSONRequestBody defines body for RequestConnectorRun for application/json ContentType.
 type RequestConnectorRunJSONRequestBody = ActionRequest
 
@@ -4468,6 +4477,12 @@ type ServerInterface interface {
 
 	// (POST /v0/connectors/{connector_id}/disable)
 	DisableConnector(w http.ResponseWriter, r *http.Request, connectorId string)
+
+	// (POST /v0/connectors/{connector_id}/pause)
+	PauseConnector(w http.ResponseWriter, r *http.Request, connectorId string)
+
+	// (POST /v0/connectors/{connector_id}/resume)
+	ResumeConnector(w http.ResponseWriter, r *http.Request, connectorId string)
 
 	// (POST /v0/connectors/{connector_id}/runs)
 	RequestConnectorRun(w http.ResponseWriter, r *http.Request, connectorId string)
@@ -5104,6 +5119,30 @@ func (siw *ServerInterfaceWrapper) DisableConnector(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DisableConnector(w, r, connectorId)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func (siw *ServerInterfaceWrapper) PauseConnector(w http.ResponseWriter, r *http.Request) {
+	connectorId := string(r.PathValue("connector_id"))
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PauseConnector(w, r, connectorId)
+	}))
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func (siw *ServerInterfaceWrapper) ResumeConnector(w http.ResponseWriter, r *http.Request) {
+	connectorId := string(r.PathValue("connector_id"))
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeConnector(w, r, connectorId)
 	}))
 	for _, middleware := range siw.HandlerMiddlewares {
 		handler = middleware(handler)
@@ -5870,6 +5909,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connector-webhooks/{connector_id}", wrapper.RelayConnectorDelivery)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v0/connectors/{connector_id}", wrapper.GetConnector)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/disable", wrapper.DisableConnector)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/pause", wrapper.PauseConnector)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/resume", wrapper.ResumeConnector)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/credential", wrapper.ReplaceConnectorCredential)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v0/connectors/{connector_id}/schedule", wrapper.ChangeConnectorSchedule)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v0/connectors/{connector_id}/runs", wrapper.RequestConnectorRun)
@@ -8081,6 +8122,106 @@ type DisableConnectordefaultJSONResponse struct {
 }
 
 func (response DisableConnectordefaultJSONResponse) VisitDisableConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PauseConnectorRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	ConnectorId string `json:"connector_id"`
+	Body        *PauseConnectorJSONRequestBody
+}
+
+type PauseConnectorResponseObject interface {
+	VisitPauseConnectorResponse(w http.ResponseWriter) error
+}
+
+// PauseConnectorResponseFunc writes a deferred response, including streams and plugin answers.
+type PauseConnectorResponseFunc func(http.ResponseWriter)
+
+func (response PauseConnectorResponseFunc) VisitPauseConnectorResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type PauseConnector200JSONResponse Connector
+
+func (response PauseConnector200JSONResponse) VisitPauseConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PauseConnectordefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PauseConnectordefaultJSONResponse) VisitPauseConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeConnectorRequestObject struct {
+	// HTTPRequest retains bounded, deferred input parsing after service authorization.
+	HTTPRequest *http.Request
+	ConnectorId string `json:"connector_id"`
+	Body        *ResumeConnectorJSONRequestBody
+}
+
+type ResumeConnectorResponseObject interface {
+	VisitResumeConnectorResponse(w http.ResponseWriter) error
+}
+
+// ResumeConnectorResponseFunc writes a deferred response, including streams and plugin answers.
+type ResumeConnectorResponseFunc func(http.ResponseWriter)
+
+func (response ResumeConnectorResponseFunc) VisitResumeConnectorResponse(w http.ResponseWriter) error {
+	response(w)
+	return nil
+}
+
+type ResumeConnector200JSONResponse Connector
+
+func (response ResumeConnector200JSONResponse) VisitResumeConnectorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeConnectordefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ResumeConnectordefaultJSONResponse) VisitResumeConnectorResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -10973,6 +11114,12 @@ type StrictServerInterface interface {
 	// (POST /v0/connectors/{connector_id}/disable)
 	DisableConnector(ctx context.Context, request DisableConnectorRequestObject) (DisableConnectorResponseObject, error)
 
+	// (POST /v0/connectors/{connector_id}/pause)
+	PauseConnector(ctx context.Context, request PauseConnectorRequestObject) (PauseConnectorResponseObject, error)
+
+	// (POST /v0/connectors/{connector_id}/resume)
+	ResumeConnector(ctx context.Context, request ResumeConnectorRequestObject) (ResumeConnectorResponseObject, error)
+
 	// (POST /v0/connectors/{connector_id}/runs)
 	RequestConnectorRun(ctx context.Context, request RequestConnectorRunRequestObject) (RequestConnectorRunResponseObject, error)
 
@@ -12311,6 +12458,62 @@ func (sh *strictHandler) DisableConnector(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DisableConnectorResponseObject); ok {
 		if err := validResponse.VisitDisableConnectorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PauseConnector operation middleware
+func (sh *strictHandler) PauseConnector(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request PauseConnectorRequestObject
+
+	request.ConnectorId = connectorId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PauseConnector(ctx, request.(PauseConnectorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PauseConnector")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PauseConnectorResponseObject); ok {
+		if err := validResponse.VisitPauseConnectorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResumeConnector operation middleware
+func (sh *strictHandler) ResumeConnector(w http.ResponseWriter, r *http.Request, connectorId string) {
+	var request ResumeConnectorRequestObject
+
+	request.ConnectorId = connectorId
+	// Input validation stays inside the service's authorized preparation callback.
+	request.HTTPRequest = r
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResumeConnector(ctx, request.(ResumeConnectorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResumeConnector")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResumeConnectorResponseObject); ok {
+		if err := validResponse.VisitResumeConnectorResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -42,6 +42,10 @@ func (a *API) connectorToTransport(in connectors.Instance) transport.Connector {
 	out.Schedule.IntervalSeconds = int(in.Interval.Seconds())
 	out.HealthPolicy.SilentAfterSeconds = int(in.SilentAfter.Seconds())
 	out.HealthPolicy.CredentialWarningSeconds = int(in.CredentialWarning.Seconds())
+	if in.PausedAt != nil {
+		v := in.PausedAt.UTC()
+		out.PausedAt = &v
+	}
 	if in.DisabledAt != nil {
 		v := in.DisabledAt.UTC()
 		out.DisabledAt = &v
@@ -215,6 +219,31 @@ func (a *API) handleDisableConnector(w http.ResponseWriter, r *http.Request, sco
 	}
 	var body transport.ActionRequest
 	inst, err := a.Connectors.Disable(r.Context(), scope, "", func() (string, error) {
+		if !decodeInto(w, r, a.schemas["ActionRequest"], &body) {
+			return "", errResponseWritten
+		}
+		return connectorID, nil
+	})
+	if errors.Is(err, errResponseWritten) {
+		return
+	}
+	if err != nil {
+		writeError(w, err, publicerr.ConnectorsUnavailable)
+		return
+	}
+	send(w, 200, a.connectorToTransport(inst))
+}
+
+func (a *API) handleConnectorPause(w http.ResponseWriter, r *http.Request, scope corpus.Scope, connectorID string, paused bool) {
+	if !a.connectorsAvailable(w) || !connectorIDRequired(w, connectorID) {
+		return
+	}
+	var body transport.ActionRequest
+	command := a.Connectors.Resume
+	if paused {
+		command = a.Connectors.Pause
+	}
+	inst, err := command(r.Context(), scope, "", func() (string, error) {
 		if !decodeInto(w, r, a.schemas["ActionRequest"], &body) {
 			return "", errResponseWritten
 		}

@@ -128,6 +128,8 @@ func TestAuditSensitiveRoutesOutcomesAndPrivacy(t *testing.T) {
 		{"POST", "/v0/admin/plugins/plan/rollback", "plugin.rollback", "pipeline_plan", ""},
 		{"POST", "/v0/connectors", "connector.create", "connector", ""},
 		{"POST", "/v0/connectors/connector_a/disable", "connector.disable", "connector", "connector_a"},
+		{"POST", "/v0/connectors/connector_a/pause", "connector.pause", "connector", "connector_a"},
+		{"POST", "/v0/connectors/connector_a/resume", "connector.resume", "connector", "connector_a"},
 		{"PUT", "/v0/connectors/connector_a/credential", "credential.replace", "connector", "connector_a"},
 		{"PUT", "/v0/connectors/connector_a/schedule", "connector.update", "connector", "connector_a"},
 		{"POST", "/v0/connectors/connector_a/runs", "connector.run", "connector", "connector_a"},

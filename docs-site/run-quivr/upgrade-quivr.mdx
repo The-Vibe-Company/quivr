@@ -14,8 +14,8 @@ Read the release notes for required backfills and contract migrations. Historica
 ## Steps
 
 1. Run the new binary's `quivr migrate` with `QUIVR_CONFIG` pointing to its deployment configuration. It applies pending expansions and required dependency setup, leaving tagged contracts untouched. Performance indexes are built concurrently by the API and worker after startup. They reuse matching valid indexes and retry interrupted builds in the background, allowing database writes to continue.
-2. Roll the API instances. Wait for each new instance's `/readyz` to return HTTP 204 before routing traffic to it, then drain the previous instance. Keep at least one ready API serving throughout.
-3. Roll the workers. Start a new worker and wait for its `/readyz`, then signal the previous worker to drain. Keep the compatible plugin versions available to both versions while work is in flight.
+2. Roll the workers first. Start a new worker and wait for its `/readyz`, then signal the previous worker to drain. Keep the compatible plugin versions available to both versions while work is in flight. Confirm every previous worker has drained and stopped before rolling the API.
+3. Roll the API instances. Wait for each new instance's `/readyz` to return HTTP 204 before routing traffic to it, then drain the previous instance. Keep at least one ready API serving throughout.
 4. Observe ingestion, search and worker processing before ending the rollback window. Until you apply contracts, restore the previous binary and configuration using the same rolling process if the application needs rollback. Leave the expanded database in place.
 5. Once all previous instances and their work have drained, and you accept closing the rollback window, run the new binary's `quivr migrate --contract`. This applies every pending contract as well as expansions; review all deferred steps before running it. The current application must already work with and without those contracts.
 
@@ -34,6 +34,12 @@ Use your platform's rollout status to confirm that every old API and worker
 process has stopped before enabling those writes.
 
 The ingestion path prepares blob and embedding coverage writes before locking the organization's change journal. Upgrade every API instance and every live and bulk worker that writes to the database as one deployment. Wait until all previous processes finish draining and stop before relying on the improved import throughput. Previous writers acquire these locks in a different order and lack the bounded deadlock retries. New writers make at most three transaction attempts, including the first attempt, for a PostgreSQL deadlock. The third failed attempt returns the storage error to the caller; the `quivr.postgres.journal_deadlock` log event records `operation`, `attempt`, `retry_count` and `retry_exhausted`.
+
+## Connector pause and resume
+
+The pause API requires workers that understand the durable paused state. Complete the worker-first rollout above before exposing or using pause and resume. Confirm that all previous live and bulk workers have drained and stopped using your platform's rollout status. Previous workers do not check the new `paused_at` field.
+
+Pause also fences the active run and defers its next run indefinitely; resume makes it due immediately, honouring any source `Retry-After`. This schedule guard prevents a previous worker's due-run query from acquiring a newly paused connector, but does not replace the worker-first rollout requirement. Before rolling workers back to a version without pause support, resume paused connectors and stop relying on pause. See [Pause and resume collection](/guides/connectors#pause-and-resume-collection) for the API calls and checkpoint behaviour.
 
 ## Compact import storage
 
