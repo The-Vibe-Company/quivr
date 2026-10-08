@@ -139,28 +139,39 @@ func (s ProjectionStore) SaveSegmentation(ctx context.Context, org string, resul
 	if err = lockProcessingVersion(ctx, tx, org, result.VersionID); err != nil {
 		return err
 	}
+	if err = insertSegmentation(ctx, tx, org, result); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func insertSegmentation(ctx context.Context, tx pgx.Tx, org string, result content.Segmentation) error {
+	finish, err := prepareSegmentation(ctx, tx, org, result)
+	if err != nil || finish == nil {
+		return err
+	}
+	return finish()
+}
+
+func prepareSegmentation(ctx context.Context, tx pgx.Tx, org string, result content.Segmentation) (journalFinish, error) {
 	compact, err := compactWrites(ctx, tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	digest := content.SegmentationDigest(result)
 	var existing string
 	err = tx.QueryRow(ctx, `SELECT digest FROM segmentations WHERE organization=$1 AND id=$2`, org, result.ID).Scan(&existing)
 	if err == nil {
 		if existing != digest {
-			return content.ErrConflict
+			return nil, content.ErrConflict
 		}
-		return tx.Commit(ctx)
+		return nil, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return err
+		return nil, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO segmentations VALUES($1,$2,$3,$4,$5,$6)`, org, result.ID, result.VersionID, result.Recipe, digest, result.Provenance); err != nil {
-		return err
-	}
-	// The first segmentation of a Version finishes its segmented step.
-	if _, err = tx.Exec(ctx, `UPDATE record_versions SET segmented_at=clock_timestamp() WHERE organization=$1 AND id=$2 AND segmented_at IS NULL AND materialized_at IS NOT NULL`, org, result.VersionID); err != nil {
-		return err
+		return nil, err
 	}
 	for _, p := range result.Segments {
 		metadata, err := json.Marshal(p.Derivation)
@@ -168,16 +179,19 @@ func (s ProjectionStore) SaveSegmentation(ctx context.Context, org string, resul
 			metadata, err = compactSegmentDerivation(p.Derivation)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO segments VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, org, p.ID, result.ID, result.VersionID, p.PartKey, p.Start, p.End, content.Hash([]byte(p.Text)), metadata); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	if err = enqueueProjectionPurge(ctx, tx, org, result.VersionID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return func() error {
+		// Mutable progress follows the journal fence in prepared groups.
+		if _, err := tx.Exec(ctx, `UPDATE record_versions SET segmented_at=clock_timestamp() WHERE organization=$1 AND id=$2 AND segmented_at IS NULL AND materialized_at IS NOT NULL`, org, result.VersionID); err != nil {
+			return err
+		}
+		return enqueueProjectionPurge(ctx, tx, org, result.VersionID)
+	}, nil
 }
 
 // StoredSegmentation reads a Version's segmentation of one recipe, its
@@ -287,6 +301,15 @@ func quarantinedEvent(ctx context.Context, tx pgx.Tx, org, corpusID, recordID, v
 	return appendEvent(ctx, tx, event)
 }
 func (s ProjectionStore) Promote(ctx context.Context, org string, seg content.Segmentation, g content.Generation) error {
+	if content.IngestionBatchActive(ctx) {
+		var record string
+		if err := s.Pool.QueryRow(ctx, `SELECT record_id FROM record_versions WHERE organization=$1 AND id=$2`, org, seg.VersionID).Scan(&record); err != nil {
+			return err
+		}
+		if handled, err := content.EnqueueIngestion(ctx, content.IngestionCommit{Kind: content.CommitBaseline, Organization: org, RecordID: record, Segmentation: seg, Generation: g}); handled {
+			return err
+		}
+	}
 	err := retryJournalWrite(ctx, "Promote", func(ctx context.Context) error {
 		return s.promoteAttempt(ctx, org, seg, g)
 	})
@@ -300,11 +323,18 @@ func (s ProjectionStore) promoteAttempt(ctx context.Context, org string, seg con
 	}
 	defer tx.Rollback(ctx)
 
+	if err = promoteCanonical(ctx, tx, org, seg, g); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func promoteCanonical(ctx context.Context, tx pgx.Tx, org string, seg content.Segmentation, g content.Generation) error {
 	var recordID, corpusID, desired string
 	var withdrawn, quarantined, ready, active bool
 	var digest, sourceMediaType *string
 	var routing []byte
-	err = readJournal(ctx, tx, org, `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),`+recordGoneSQL+`,v.quarantined,v.baseline_ready,
+	err := readJournal(ctx, tx, org, `SELECT r.id,r.corpus_id,coalesce(r.desired_version_id,''),`+recordGoneSQL+`,v.quarantined,v.baseline_ready,
  $3=`+routedGenerationSQL("r.organization", "r.corpus_id")+`,
  (SELECT digest FROM segmentations WHERE organization=$1 AND id=$4 AND version_id=$2),
  (SELECT ingestion_routing FROM projection_generations WHERE id=$3),
@@ -315,14 +345,14 @@ func (s ProjectionStore) promoteAttempt(ctx context.Context, org string, seg con
 		return err
 	}
 	if quarantined {
-		return tx.Commit(ctx)
+		return nil
 	}
 	if withdrawn {
 		// Indexing has finished, but withdrawal prevents publishing its baseline.
 		if _, err = tx.Exec(ctx, `UPDATE record_versions SET processing='idle',error_code='' WHERE organization=$1 AND id=$2`, org, seg.VersionID); err != nil {
 			return err
 		}
-		return tx.Commit(ctx)
+		return nil
 	}
 	if !active {
 		return ErrGenerationChanged
@@ -356,7 +386,7 @@ func (s ProjectionStore) promoteAttempt(ctx context.Context, org string, seg con
 		if err = queueServingProjection(ctx, tx, org, seg.VersionID); err != nil {
 			return err
 		}
-		return tx.Commit(ctx)
+		return nil
 	}
 	writes := &pgx.Batch{}
 	writes.Queue(`INSERT INTO projection_coverage(organization,version_id,generation_id,segmentation_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, org, seg.VersionID, g.ID, seg.ID)
@@ -374,7 +404,7 @@ func (s ProjectionStore) promoteAttempt(ctx context.Context, org string, seg con
 	if err = observeQueueRecords(ctx, tx, []string{org}, []string{recordID}); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // hydrateSQL looks up a batch of candidates, given as parallel arrays of
