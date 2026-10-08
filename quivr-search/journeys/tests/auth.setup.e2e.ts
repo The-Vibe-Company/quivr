@@ -20,13 +20,11 @@ test.setup('sign in to the demo', { sessions: ['demo'] }, async ({ app, browser,
       body: JSON.stringify({ password }),
     });
     if (!response.ok) throw new Error(`POST ${login} answered ${response.status}: check the demo password`);
-    const value = response.headers
-      .getSetCookie()
-      .map((cookie) => cookie.split(';')[0])
-      .find((cookie) => cookie.startsWith('quivr_demo='))
-      ?.slice('quivr_demo='.length);
-    if (!value) throw new Error(`POST ${login} set no quivr_demo cookie`);
-    await browser.setCookies([{ url: base, name: 'quivr_demo', value, httpOnly: true, sameSite: 'Strict' }]);
+    const cookie = response.headers.getSetCookie().find((header) => header.startsWith('quivr_demo='));
+    if (!cookie) throw new Error(`POST ${login} set no quivr_demo cookie`);
+    const value = cookie.split(';')[0].slice('quivr_demo='.length);
+    const secure = /;\s*Secure(;|$)/i.test(cookie);
+    await browser.setCookies([{ url: base, name: 'quivr_demo', value, httpOnly: true, secure, sameSite: 'Strict' }]);
     await app.open('/');
   }
   const fil = screen.getByRole('navigation', 'Sections').getByRole('link', 'Fil');

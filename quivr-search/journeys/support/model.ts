@@ -23,7 +23,7 @@ export function agentModel(): Pick<AgentOptions, 'model'> {
   if (!choice) return {};
   const [provider, ...rest] = choice.split(':');
   const id = rest.join(':');
-  if (!(provider in PROVIDERS) || !id)
+  if (!Object.hasOwn(PROVIDERS, provider) || !id)
     throw new Error(
       `QUIVR_JOURNEYS_MODEL=${choice}: write <provider>:<model id> with a provider among ${Object.keys(PROVIDERS).join(', ')}`,
     );
