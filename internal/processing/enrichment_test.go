@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/The-Vibe-Company/quivr/internal/content"
+	"github.com/The-Vibe-Company/quivr/internal/plugins"
 	"github.com/The-Vibe-Company/quivr/internal/processing"
 )
 
@@ -63,7 +64,13 @@ func (s *oneVersion) BlockEnrichment(_ context.Context, _, _ string, reason cont
 // plugin is an ingestion plugin whose next calls fail with the given errors.
 type plugin struct {
 	processing.IngestionPlugin
-	errs []error
+	errs    []error
+	gone    *content.Diagnostic
+	goneErr error
+}
+
+func (p *plugin) Gone(context.Context, error) (*content.Diagnostic, error) {
+	return p.gone, p.goneErr
 }
 
 func (p *plugin) Descriptor() processing.IngestionDescriptor {
@@ -135,23 +142,97 @@ func TestEnrichmentAlreadySucceededEndsTheRetry(t *testing.T) {
 	}
 }
 
-// Missing ownership metadata cannot authorize lexical fallback or claim a
-// same-owner recipe change. The generation must first identify its owner.
-func TestUnownedGenerationIsNotARecipeSwitch(t *testing.T) {
-	store := &oneVersion{}
-	p := &plugin{errs: []error{errors.New("must not call a different owner")}}
-	service := processing.Service{Content: content.Service{Receipts: store, RecordStore: store, Versions: store, Blobs: store, Embeddings: store},
-		Plugin: &processing.PluginDeriver{Plugin: p}, Routing: unknownOwner{}}
-	if err := service.Enrich(context.Background(), "org", "receipt"); err == nil {
-		t.Fatalf("unverified owner was treated as a recipe switch: %v", store.progress)
-	}
-	if len(p.errs) != 1 {
-		t.Fatal("unowned generation called the plugin")
+// A routed space without a pinned owner needs a rebuild, not another attempt.
+// A failed route lookup still retries when it reports a database outage.
+func TestEnrichmentRequiresRebuildForUnownedRoutedSpace(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		route     generationRoute
+		legacy    string
+		noPlugin  bool
+		wantRetry bool
+		gone      *content.Diagnostic
+		goneErr   error
+	}{
+		{name: "unowned space", route: generationRoute{generation: content.Generation{ID: "generation", SpaceID: "retired.space@1"}}},
+		{name: "same owner retired recipe", route: generationRoute{generation: content.Generation{ID: "generation", Spaces: []content.GenerationSpace{{ID: "retired.space@1", OwnerPluginID: "acme", Role: content.SpaceServed}}}}},
+		{name: "legacy space", route: generationRoute{generation: content.Generation{ID: "generation", SpaceID: "retired.space@1"}}, legacy: "retired.space@1"},
+		{name: "wrapped ownership lookup error", route: generationRoute{err: fmt.Errorf("route: %w", processing.ErrSpaceUnowned)}},
+		{name: "no installed owner", noPlugin: true},
+		{name: "database outage", route: generationRoute{err: errors.New("database unavailable")}, wantRetry: true},
+		{name: "owner status database outage", route: generationRoute{err: processing.ErrSpaceUnowned}, goneErr: errors.New("database unavailable"), wantRetry: true},
+		{name: "stopped pinned owner", route: generationRoute{generation: content.Generation{ID: "generation", SpaceID: "retired.space@1"}}, gone: &content.Diagnostic{Code: plugins.CodePinnedPlanStopped, Message: "The pinned plan was stopped.", Plan: "plan", Plugin: "acme", PluginVersion: "1", Contribution: "ingestion"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &oneVersion{}
+			p := &plugin{errs: []error{errors.New("must not call a different owner")}, gone: tc.gone, goneErr: tc.goneErr}
+			service := processing.Service{Content: content.Service{Receipts: store, RecordStore: store, Versions: store, Blobs: store, Embeddings: store},
+				Plugin: &processing.PluginDeriver{Plugin: p}, Routing: tc.route, LegacySpace: tc.legacy}
+			if tc.noPlugin {
+				service.Plugin = nil
+			}
+			err := service.Enrich(t.Context(), "org", "receipt")
+			if (err != nil) != tc.wantRetry {
+				t.Fatalf("Enrich returned %v, want retry=%t; progress %q", err, tc.wantRetry, store.progress)
+			}
+			want := "blocked rebuild_required"
+			if tc.wantRetry {
+				want = "retrying enrichment_unavailable"
+			} else if tc.gone != nil {
+				want = "blocked " + tc.gone.Code
+			}
+			if got := store.progress[len(store.progress)-1]; got != want {
+				t.Fatalf("enrichment ended %q, want %q; progress %q", got, want, store.progress)
+			}
+			if len(p.errs) != 1 {
+				t.Fatal("unowned generation called the plugin")
+			}
+		})
 	}
 }
 
-type unknownOwner struct{}
+type generationRoute struct {
+	generation content.Generation
+	err        error
+}
 
-func (unknownOwner) Generation(context.Context, string, string) (content.Generation, error) {
-	return content.Generation{ID: "generation", SpaceID: "retired.space@1"}, nil
+func (r generationRoute) Generation(context.Context, string, string) (content.Generation, error) {
+	return r.generation, r.err
+}
+
+// The projection can fail after vectors are durably derived. That outage must
+// remain retryable rather than diagnosing a missing owner or requiring a rebuild.
+func TestEnrichmentRetriesIndexOutage(t *testing.T) {
+	store := &oneVersion{}
+	artifacts := &memoryArtifacts{byDerivation: map[string]content.Embedding{}, blobs: map[string][]byte{}}
+	calls := 0
+	p := fillPlugin{segments: []content.SegmentInput{{PartKey: "body", End: 14}}, calls: &calls}
+	index := &unavailableEnrichmentIndex{}
+	service := processing.Service{
+		Content: content.Service{Receipts: store, RecordStore: store, Versions: store, Blobs: store, Embeddings: store},
+		Plugin:  &processing.PluginDeriver{Plugin: p, Content: content.Service{Baseline: segmentationSink{}, Embeddings: artifacts, Blobs: artifacts}},
+		Routing: generationRoute{generation: content.Generation{ID: "generation", SpaceID: "p.large@1"}}, Enrichment: index,
+	}
+	if err := service.Enrich(t.Context(), "org", "receipt"); err == nil {
+		t.Fatal("projection outage ended enrichment; want a retry")
+	}
+	if !index.called || len(artifacts.byDerivation) != 1 {
+		t.Fatal("outage did not reach the projection after deriving vectors")
+	}
+	if got := store.progress[len(store.progress)-1]; got != "retrying enrichment_unavailable" {
+		t.Fatalf("enrichment ended %q, want retrying enrichment_unavailable", got)
+	}
+}
+
+type segmentationSink struct{ content.BaselineRepository }
+
+func (segmentationSink) SaveSegmentation(context.Context, string, content.Segmentation) error {
+	return nil
+}
+
+type unavailableEnrichmentIndex struct{ called bool }
+
+func (i *unavailableEnrichmentIndex) IndexEmbeddings(context.Context, string, content.Version, content.Segmentation, []content.EmbeddingData) error {
+	i.called = true
+	return errors.New("Weaviate unavailable")
 }

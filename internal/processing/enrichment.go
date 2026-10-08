@@ -72,29 +72,41 @@ func (s Service) Enrich(ctx context.Context, org, receiptID string) error {
 }
 func (s Service) enrich(ctx context.Context, org string, v content.Version) DerivationResult {
 	rt, err := s.route(ctx, org, v)
-	if err == nil && rt.recipeMismatch {
+	if err == nil && (rt.recipeMismatch || rt.legacy) {
+		err = ErrSpaceUnowned
+	}
+	out := DerivationResult{Retry: err, Cause: err}
+	if err == nil {
+		out = Derive(ctx, org, s.Plugin, s.Content, DerivationRequest{CorpusID: rt.corpusID, Version: v, Target: rt.generation, Kind: Vectors})
+	}
+	if errors.Is(out.Retry, ErrSpaceUnowned) {
 		// This plan cannot produce the old route's model. Finish the receipt
 		// instead of occupying an activity slot until a rebuild switches it.
-		driver := s.Plugin.forVersion(ctx, v)
-		reason, goneErr := driver.Gone(ctx, ErrSpaceUnowned)
-		if goneErr != nil {
-			return DerivationResult{Retry: goneErr}
+		var driver PluginDeriver
+		if s.Plugin != nil {
+			driver = s.Plugin.forVersion(ctx, v)
+		}
+		var reason *content.Diagnostic
+		if err != nil {
+			// Derive already checked Gone for derivation failures. Only route
+			// failures need that check here, so its attempt budget is spent once.
+			var goneErr error
+			reason, goneErr = driver.Gone(ctx, err)
+			if goneErr != nil {
+				return DerivationResult{Retry: goneErr}
+			}
 		}
 		if reason == nil {
-			reason = &content.Diagnostic{Code: content.CodeRebuildRequired, Message: "The routed generation serves an earlier embedding recipe; rebuild the Corpus to serve this Version's vectors.", Plugin: driver.descriptor.PluginID, PluginVersion: driver.descriptor.PluginVersion, Contribution: "ingestion"}
+			reason = &content.Diagnostic{Code: content.CodeRebuildRequired, Message: "The pinned ingestion plugin cannot serve the routed generation's embedding space; rebuild the Corpus to serve this Version's vectors.", Contribution: "ingestion"}
+			if driver.descriptor != nil {
+				reason.Plugin, reason.PluginVersion = driver.descriptor.PluginID, driver.descriptor.PluginVersion
+			}
 		}
 		if work, ok := plugins.WorkOf(ctx); ok {
 			reason.Plan = work.Plan
 		}
-		return DerivationResult{Terminal: reason, Cause: ErrSpaceUnowned}
+		return DerivationResult{Terminal: reason, Cause: out.Cause}
 	}
-	if err == nil && rt.legacy {
-		err = ErrSpaceUnowned
-	}
-	if err != nil {
-		return DerivationResult{Retry: err}
-	}
-	out := Derive(ctx, org, s.Plugin, s.Content, DerivationRequest{CorpusID: rt.corpusID, Version: v, Target: rt.generation, Kind: Vectors})
 	if out.Terminal == nil && out.Retry == nil {
 		out.Retry = s.Enrichment.IndexEmbeddings(ctx, org, v, out.Segmentation, out.Data)
 	}
