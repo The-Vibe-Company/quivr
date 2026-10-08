@@ -330,7 +330,7 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := postgres.PluginStore{Pool: pool}
-	service := registry.Service{Store: store, Spaces: app.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return nil }}
+	service := registry.Service{Store: store, Spaces: app.Config{}.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return nil }}
 	applied, err := store.ApplyConfiguration(ctx, configured(t, plugins.PinConfig{Manifest: hashEmbedder, Endpoint: "http://127.0.0.1:9960", Spaces: hashSpaces}))
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +341,7 @@ func TestPluginActivationCommitsWithTheSpaceRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = (contentStores(pool)).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
+	if err = (contentStores(pool)).RegisterSpaces(ctx, app.Config{}.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -478,7 +478,7 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = (contentStores(pool)).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
+	if err = (contentStores(pool)).RegisterSpaces(ctx, app.Config{}.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
 	registration := func(pluginID string) registry.Registration {
@@ -513,7 +513,7 @@ func TestPinnedWorkDrainsTheRegistrationItNames(t *testing.T) {
 	if err = store.RecordCheck(ctx, next.ID, registry.CheckReport{Certified: true, Checks: []registry.CheckResult{}}); err != nil {
 		t.Fatal(err)
 	}
-	second, err := registry.Service{Store: store, Spaces: app.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return nil }}.Activate(ctx, operatorScope, next.ID)
+	second, err := registry.Service{Store: store, Spaces: app.Config{}.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return nil }}.Activate(ctx, operatorScope, next.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +589,7 @@ func TestRollbackRestoresThePreviousPlan(t *testing.T) {
 	}
 	store := postgres.PluginStore{Pool: pool}
 	var unreachable error
-	service := registry.Service{Store: store, Spaces: app.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return unreachable }}
+	service := registry.Service{Store: store, Spaces: app.Config{}.DeploymentSpaces, Reach: func(context.Context, registry.Registration) error { return unreachable }}
 	seed := configured(t, plugins.PinConfig{Manifest: hashEmbedder, Endpoint: "http://127.0.0.1:9960", Spaces: hashSpaces})
 	first, err := store.ApplyConfiguration(ctx, seed)
 	if err != nil {
@@ -600,7 +600,7 @@ func TestRollbackRestoresThePreviousPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = (contentStores(pool)).RegisterSpaces(ctx, app.DeploymentSpaces(set)); err != nil {
+	if err = (contentStores(pool)).RegisterSpaces(ctx, app.Config{}.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.Rollback(ctx, operatorScope, registry.RollbackRequest{Key: "too-early"}); !errors.Is(err, registry.ErrNoPreviousPlan) {

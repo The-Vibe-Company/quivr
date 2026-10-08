@@ -470,7 +470,7 @@ func carrySpaces(ctx context.Context, tx pgx.Tx, g content.Generation, spaces []
 	if len(missing) == 0 {
 		return g, nil
 	}
-	err = tx.QueryRow(ctx, `UPDATE projection_generations SET spaces=spaces||(SELECT jsonb_agg(jsonb_build_object('id',vs.id,'metric',vs.metric,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id) ORDER BY vs.id) FROM vector_spaces vs WHERE vs.id=ANY($2))
+	err = tx.QueryRow(ctx, `UPDATE projection_generations SET spaces=spaces||(SELECT jsonb_agg(`+spaceEntrySQL+` ORDER BY vs.id) FROM vector_spaces vs WHERE vs.id=ANY($2))
 WHERE id=$1 RETURNING spaces`, g.ID, missing).Scan(&raw)
 	if err != nil {
 		return g, err

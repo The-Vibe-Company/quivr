@@ -32,7 +32,7 @@ func newRetirementFixture(t *testing.T) retirementFixture {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	pool := scratchDatabase(t, ctx)
-	if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+	if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 		t.Fatal(err)
 	}
 	store := contentStores(pool)
@@ -285,7 +285,7 @@ func TestEmptyRetirementBeforeOrganizationInitialization(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
-	if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+	if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 		t.Fatal(err)
 	}
 	scope := corpus.Scope{Organization: "new-org", Corpora: []string{"*"}, Actions: []string{"plugins:admin", "corpora:write"}}

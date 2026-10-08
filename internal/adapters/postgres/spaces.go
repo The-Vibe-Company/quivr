@@ -46,13 +46,21 @@ func registerSpaces(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredS
 	ids := make([]string, 0, len(spaces))
 	for _, sp := range spaces {
 		ids = append(ids, sp.ID)
+		// The index setting is deployment configuration, not part of the
+		// space: it changes in place and applies to generations built later.
+		var index []byte
+		if sp.Index != nil {
+			if index, err = json.Marshal(sp.Index); err != nil {
+				return err
+			}
+		}
 		var owner, model, metric string
 		var dimensions int
 		err := tx.QueryRow(ctx, `SELECT owner_plugin_id,model,dimensions,metric FROM vector_spaces WHERE id=$1 FOR UPDATE`, sp.ID).Scan(&owner, &model, &dimensions, &metric)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			if _, err = tx.Exec(ctx, `INSERT INTO vector_spaces(id,manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-				sp.ID, sp.Manifest, sp.Name, sp.Version, sp.OwnerPluginID, sp.OwnerPluginVersion, sp.Model, sp.Dimensions, sp.Metric, sp.Indexes, sp.QueryModalities, sp.Role); err != nil {
+			if _, err = tx.Exec(ctx, `INSERT INTO vector_spaces(id,manifest,name,version,owner_plugin_id,owner_plugin_version,model,dimensions,metric,indexes,query_modalities,role,vector_index) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+				sp.ID, sp.Manifest, sp.Name, sp.Version, sp.OwnerPluginID, sp.OwnerPluginVersion, sp.Model, sp.Dimensions, sp.Metric, sp.Indexes, sp.QueryModalities, sp.Role, index); err != nil {
 				return err
 			}
 			continue
@@ -75,8 +83,8 @@ func registerSpaces(ctx context.Context, tx pgx.Tx, spaces []content.RegisteredS
 		if !same {
 			return &content.SpaceError{Kind: content.ErrSpaceChanged, Space: sp.ID, Detail: "its description differs from the registered one; bump the space version"}
 		}
-		if _, err = tx.Exec(ctx, `UPDATE vector_spaces SET name=$2,version=$3,owner_plugin_id=$4,owner_plugin_version=$5,model=$6,dimensions=$7,metric=$8,indexes=$9,query_modalities=$10,role=$11 WHERE id=$1`,
-			sp.ID, sp.Name, sp.Version, sp.OwnerPluginID, sp.OwnerPluginVersion, sp.Model, sp.Dimensions, sp.Metric, sp.Indexes, sp.QueryModalities, sp.Role); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE vector_spaces SET name=$2,version=$3,owner_plugin_id=$4,owner_plugin_version=$5,model=$6,dimensions=$7,metric=$8,indexes=$9,query_modalities=$10,role=$11,vector_index=$12 WHERE id=$1`,
+			sp.ID, sp.Name, sp.Version, sp.OwnerPluginID, sp.OwnerPluginVersion, sp.Model, sp.Dimensions, sp.Metric, sp.Indexes, sp.QueryModalities, sp.Role, index); err != nil {
 			return err
 		}
 	}
@@ -94,7 +102,11 @@ func ownerName(owner string) string {
 // deploymentSpacesSQL is the jsonb list of the registry's served and
 // evaluation spaces, served first, that a new generation is built with; NULL
 // when nothing is registered.
-const deploymentSpacesSQL = `(SELECT jsonb_agg(jsonb_build_object('id',vs.id,'metric',vs.metric,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id) ORDER BY vs.role<>'served',vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation'))`
+const deploymentSpacesSQL = `(SELECT jsonb_agg(` + spaceEntrySQL + ` ORDER BY vs.role<>'served',vs.id) FROM vector_spaces vs WHERE vs.role IN ('served','evaluation'))`
+
+// spaceEntrySQL is the generation spaces entry of registry row vs, with its
+// index setting when it has one.
+const spaceEntrySQL = `(jsonb_build_object('id',vs.id,'metric',vs.metric,'role',vs.role,'owner_plugin_id',vs.owner_plugin_id)||CASE WHEN vs.vector_index IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('index',vs.vector_index) END)`
 
 // servedSpaceSQL is the registry's served space; NULL when none is registered.
 const servedSpaceSQL = `(SELECT vs.id FROM vector_spaces vs WHERE vs.role='served' ORDER BY vs.owner_plugin_id IS DISTINCT FROM (SELECT pr.plugin_id FROM active_pipeline_plan ap JOIN pipeline_plan_roles r ON r.plan_id=ap.plan_id AND r.role IN('ingestion','ingestion-default') JOIN plugin_registrations pr ON pr.id=r.registration_id),vs.id LIMIT 1)`
