@@ -164,7 +164,7 @@ WHERE $10::bool OR (
       WHERE sg.organization=$1 AND sg.version_id=selected.version_id AND sg.segmentation_id=selected.owner_segmentation_id
         AND NOT EXISTS(
           SELECT 1
-          FROM ` + embeddingCoverageRelation + ` ec
+          FROM ` + embeddingCoverageForSegmentSQL("sg.organization", "sg.id") + ` ec
           JOIN vector_spaces vs ON vs.id=ec.space_id
           WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3
             AND vs.owner_plugin_id=selected.plugin_id
@@ -181,7 +181,7 @@ WHERE $10::bool OR (
       WHERE sg.organization=$1 AND sg.version_id=selected.version_id AND sg.segmentation_id=selected.owner_segmentation_id
         AND NOT EXISTS(
           SELECT 1
-          FROM ` + embeddingCoverageRelation + ` ec
+          FROM ` + embeddingCoverageForSegmentSQL("sg.organization", "sg.id") + ` ec
           WHERE ec.organization=sg.organization AND ec.segment_id=sg.id AND ec.generation_id=$3 AND ec.space_id=target.space
         )
     )
@@ -527,7 +527,7 @@ func (s BackfillStore) CoveredEmbeddings(ctx context.Context, org, generationID 
 	for i, p := range seg.Segments {
 		ids[i] = p.ID
 	}
-	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT a.metadata FROM `+embeddingCoverageRelation+` ec JOIN `+embeddingArtifactsRelation+` a ON (a.organization,a.segment_id,a.space_id,a.id)=(ec.organization,ec.segment_id,ec.space_id,ec.artifact_id)
+	rows, err := database(ctx, s.Pool).Query(ctx, `SELECT a.metadata FROM (SELECT DISTINCT unnest($3::text[]) AS segment_id) requested CROSS JOIN LATERAL `+embeddingCoverageForSegmentSQL("$1", "requested.segment_id")+` ec JOIN `+embeddingArtifactsRelation+` a ON (a.organization,a.segment_id,a.space_id,a.id)=(ec.organization,ec.segment_id,ec.space_id,ec.artifact_id)
 WHERE ec.organization=$1 AND ec.generation_id=$2 AND ec.segment_id=ANY($3) ORDER BY ec.segment_id,ec.space_id`, org, generationID, ids)
 	if err != nil {
 		return nil, err

@@ -24,11 +24,11 @@ import (
 // lookup from hashing every covered Version into an EXISTS subplan.
 var rebuildGapSQL = `r.organization=$1 AND r.corpus_id=$2 AND ` + eligibleVersionSQL + ` AND (
  NOT COALESCE((SELECT true FROM projection_coverage t WHERE t.organization=v.organization AND t.version_id=v.id AND t.generation_id=$3 AND t.role='served'),false)
- OR EXISTS(SELECT 1 FROM ` + embeddingCoverageRelation + ` ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id)
+ OR EXISTS(SELECT 1 FROM segments sg JOIN LATERAL ` + embeddingCoverageForSegmentSQL("sg.organization", "sg.id") + ` ec ON true
   JOIN projection_coverage tc ON (tc.organization,tc.version_id,tc.segmentation_id,tc.generation_id)=(sg.organization,sg.version_id,sg.segmentation_id,$3) AND tc.role='served'
-  WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.generation_id<>$3
+  WHERE sg.organization=v.organization AND sg.version_id=v.id AND ec.generation_id<>$3
    AND ec.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + `
-   AND NOT EXISTS(SELECT 1 FROM ` + embeddingCoverageRelation + ` te WHERE te.organization=ec.organization AND te.segment_id=ec.segment_id AND te.generation_id=$3)))`
+   AND NOT EXISTS(SELECT 1 FROM ` + embeddingCoverageForSegmentSQL("ec.organization", "ec.segment_id") + ` te WHERE te.organization=ec.organization AND te.segment_id=ec.segment_id AND te.generation_id=$3)))`
 
 const currentVersionsSQL = `records r JOIN record_versions v ON (v.organization,v.id)=(r.organization,r.current_version_id)`
 
@@ -127,10 +127,12 @@ func (s RebuildStore) RebuildCandidates(ctx context.Context, org, id string, lim
 	return s.rebuildCandidatesAfter(ctx, org, corpusID, generationID, "", limit)
 }
 
+var rebuildCandidatesSQL = `SELECT r.id,v.id,r.namespace,EXISTS(SELECT 1 FROM segments sg JOIN LATERAL ` + embeddingCoverageForSegmentSQL("sg.organization", "sg.id") + ` ec ON true JOIN projection_generations rg ON rg.id=ec.generation_id JOIN projection_generations tg ON tg.id=$3 WHERE sg.organization=v.organization AND sg.version_id=v.id AND ec.space_id=tg.space_id AND rg.space_id=tg.space_id AND ec.generation_id=` + routedGenerationSQL("r.organization", "r.corpus_id") + `)
+FROM ` + currentVersionsSQL + ` WHERE ` + rebuildGapSQL + ` AND r.current_version_id > $5 AND v.id > $5 ORDER BY r.current_version_id LIMIT $4`
+
 func (s RebuildStore) rebuildCandidatesAfter(ctx context.Context, org, corpusID, generationID, after string, limit int) ([]retrieval.RebuildCandidate, error) {
 	// The current-version key gives the corpus index both the range and ordering.
-	rows, err := s.Pool.Query(ctx, `SELECT r.id,v.id,r.namespace,EXISTS(SELECT 1 FROM `+embeddingCoverageRelation+` ec JOIN segments sg ON (sg.organization,sg.id)=(ec.organization,ec.segment_id) JOIN projection_generations rg ON rg.id=ec.generation_id JOIN projection_generations tg ON tg.id=$3 WHERE ec.organization=v.organization AND sg.version_id=v.id AND ec.space_id=tg.space_id AND rg.space_id=tg.space_id AND ec.generation_id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`)
-FROM `+currentVersionsSQL+` WHERE `+rebuildGapSQL+` AND r.current_version_id > $5 AND v.id > $5 ORDER BY r.current_version_id LIMIT $4`, org, corpusID, generationID, limit, after)
+	rows, err := s.Pool.Query(ctx, rebuildCandidatesSQL, org, corpusID, generationID, limit, after)
 	if err != nil {
 		return nil, err
 	}

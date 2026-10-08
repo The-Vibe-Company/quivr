@@ -33,12 +33,21 @@ const embeddingArtifactsRelation = `(SELECT a.organization,a.id,a.derivation_id,
  JOIN storage_spaces sp ON sp.space_id=a.space_id JOIN compact_embeddings e ON (e.organization_id,e.segment_id,e.space_id)=(o.id,k.id,sp.id) WHERE o.organization=a.organization AND encode(e.artifact_sha256,'hex')=a.id)
  UNION ALL ` + compactArtifactRowsSQL + `)`
 
-const embeddingCoverageRelation = `(SELECT organization,segment_id,generation_id,artifact_id,space_id FROM embedding_coverage
- UNION ALL SELECT o.organization,k.segment_id,c.generation_id,encode(e.artifact_sha256,'hex'),sp.space_id
- FROM compact_embedding_coverage c
- JOIN compact_embeddings e ON e.organization_id=c.organization_id AND e.file_id=c.file_id
- JOIN storage_organizations o ON o.id=e.organization_id
- JOIN storage_segments k ON (k.organization_id,k.id)=(e.organization_id,e.segment_id)
+// embeddingCoverageForSegmentSQL bounds both storage branches before their
+// joins. Outer join predicates cannot parameterize the joined UNION child,
+// which otherwise scans compact coverage for every candidate segment. Arguments
+// are trusted SQL expressions, never input values; callers supply LATERAL when
+// referencing another FROM item. Legacy coverage remains authoritative.
+func embeddingCoverageForSegmentSQL(organization, segment string) string {
+	return `(SELECT organization,segment_id,generation_id,artifact_id,space_id FROM embedding_coverage
+ WHERE organization=` + organization + ` AND segment_id=` + segment + `
+ UNION ALL SELECT o.organization,k.segment_id,cc.generation_id,encode(e.artifact_sha256,'hex'),sp.space_id
+ FROM storage_organizations o
+ JOIN storage_segments k ON k.organization_id=o.id
+ JOIN compact_embeddings e ON (e.organization_id,e.segment_id)=(k.organization_id,k.id)
+ JOIN compact_embedding_coverage cc ON (cc.organization_id,cc.file_id)=(e.organization_id,e.file_id)
  JOIN storage_spaces sp ON sp.id=e.space_id
- WHERE get_bit(c.covered,e.ordinal)=1 AND NOT EXISTS(SELECT 1 FROM embedding_coverage old
- WHERE old.organization=o.organization AND old.segment_id=k.segment_id AND old.generation_id=c.generation_id AND old.space_id=sp.space_id))`
+ WHERE o.organization=` + organization + ` AND k.segment_id=` + segment + `
+ AND get_bit(cc.covered,e.ordinal)=1 AND NOT EXISTS(SELECT 1 FROM embedding_coverage old
+ WHERE old.organization=o.organization AND old.segment_id=k.segment_id AND old.generation_id=cc.generation_id AND old.space_id=sp.space_id))`
+}
