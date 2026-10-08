@@ -2,8 +2,8 @@
 // corpora picked, newest first or as a search ranks them, narrowed by
 // metadata; the values each field offers and the timeline; and one document
 // with all it holds. The view's state lives in the address (THE-1204).
-import { request } from "./search";
-import { diffWords } from "./diff";
+import { request } from "./search.ts";
+import { diffWords } from "./diff.ts";
 import type { FeedItem } from "./feed";
 import type { Corpus, Exclusion, Field } from "./corpora";
 import type { Availability } from "../types";
