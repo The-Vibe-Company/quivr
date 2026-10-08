@@ -64,21 +64,38 @@ func TestItemKeywordRanking(t *testing.T) {
 	english.ID = "english-generation"
 	english.ItemKeywordsProjected = true
 	english.Fields = []corpus.Field{{Name: "body", PartRole: "body", Type: "string", Roles: []string{"search"}, Analyzer: "folded"}}
-	for id, passages := range map[string][]string{"organ": {"The organisation met", "An organ donor"}, "society": {"The organisation met"}, "cafe": {"Café opening"}} {
+	publishEnglish := func(gen content.Generation, id, title string, passages ...string) {
 		seg := f.segmentation(id, "")
 		seg.Segments = nil
 		for i, text := range passages {
 			seg.Segments = append(seg.Segments, content.Segment{ID: id + string(rune('a'+i)), PartKey: "body", Text: text})
 		}
-		v := content.Version{ID: seg.VersionID, RecordID: "record-" + id, Manifest: content.Manifest{Parts: []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: strings.Join(passages, "\n")}}}}}
-		if err := f.store.Publish(f.ctx, english, f.org, "english-corpus", "feed", v, seg); err != nil {
+		parts := []content.Part{{Key: "body", Role: "body", Content: content.Text{Kind: "text", Text: strings.Join(passages, "\n")}}}
+		if title != "" {
+			parts = append(parts, content.Part{Key: "title", Role: "title", Content: content.Text{Kind: "text", Text: title}})
+		}
+		v := content.Version{ID: seg.VersionID, RecordID: "record-" + id, Manifest: content.Manifest{Parts: parts}}
+		if err := f.store.Publish(f.ctx, gen, f.org, gen.ID, "feed", v, seg); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for query, want := range map[string]string{"organ": "organb", "cafe": "cafea"} {
-		hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: "english-corpus", Generation: english}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: query, Mode: "lexical", GroupBy: "record", K: 10})
-		if err != nil || len(hits) != 1 || hits[0].SegmentID != want {
-			t.Fatalf("English %q: %+v %v, want only %s", query, hits, err, want)
+	publishEnglish(english, "organ", "", "The organisation met", "An organ donor")
+	publishEnglish(english, "society", "", "The organisation met")
+	publishEnglish(english, "cafe", "", "Café opening")
+	// With two analyzers, each copy is queried only with its own analysis:
+	// French "nations" stems to the title's "nation", folded keeps the plural.
+	mixed := english
+	mixed.ID = "mixed-generation"
+	mixed.Fields = append(english.Fields, corpus.Field{Name: "title", PartRole: "title", Type: "string", Roles: []string{"search"}, Analyzer: "french_light"})
+	publishEnglish(mixed, "nation", "", "Nation building")
+	publishEnglish(mixed, "report", "Nation report", "Annual figures")
+	for _, tc := range []struct {
+		gen         content.Generation
+		query, want string
+	}{{english, "organ", "organb"}, {english, "cafe", "cafea"}, {mixed, "nations", "reporta"}} {
+		hits, err = f.store.Search(f.ctx, []retrieval.Route{{CorpusID: tc.gen.ID, Generation: tc.gen}}, corpus.Scope{Organization: f.org}, retrieval.Request{Query: tc.query, Mode: "lexical", GroupBy: "record", K: 10})
+		if err != nil || len(hits) != 1 || hits[0].SegmentID != tc.want {
+			t.Fatalf("%s %q: %+v %v, want only %s", tc.gen.ID, tc.query, hits, err, tc.want)
 		}
 	}
 	q.Query = "election"
