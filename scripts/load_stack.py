@@ -156,6 +156,27 @@ class LoadStack(Stack):
                 target.append({'process': child, 'url': f'http://127.0.0.1:{address}'})
                 self.ready(child, f'http://127.0.0.1:{probe}/readyz')
 
+    def psql(self, query):
+        return self.compose('exec', '-T', 'postgres', 'psql', '-U', 'quivr', '-d', 'quivr', '-At', '-F', '\t',
+                            '-c', query, capture_output=True, text=True).stdout
+
+    def clock_offset(self):
+        """Database clock minus ours, and the reading's round trip, in seconds.
+
+        The database read its clock at some point during the round trip. Assuming
+        the end gives the earliest possible anchor, so step times derived from it
+        can only be overstated, by at most the round trip. The shortest of three
+        readings bounds that error most tightly.
+        """
+        readings = []
+        for _ in range(3):
+            before = time.time()
+            database = float(self.psql('SELECT extract(epoch FROM clock_timestamp())'))
+            after = time.time()
+            readings.append((after - before, database - after))
+        trip, offset = min(readings)
+        return offset, trip
+
     def step_times(self, versions):
         """Durable step times of our own Versions, as epoch seconds by step."""
         if not versions:
@@ -165,8 +186,7 @@ class LoadStack(Stack):
         query = ('SELECT v.id,' + ','.join(f"extract(epoch FROM {'a' if step == 'accepted' else 'v'}.{step}_at)" for step in STEPS)
             + " FROM record_versions v JOIN accepted_revisions a ON (a.organization,a.version_id)=(v.organization,v.id)"
             + " WHERE v.id=ANY(string_to_array('" + ','.join(versions) + "',','))")
-        rows = self.compose('exec', '-T', 'postgres', 'psql', '-U', 'quivr', '-d', 'quivr', '-At', '-F', '\t',
-                            '-c', query, capture_output=True, text=True).stdout.splitlines()
+        rows = self.psql(query).splitlines()
         return {row[0]: {step: float(value) for step, value in zip(STEPS, row[1:]) if value}
                 for row in (line.split('\t') for line in rows if line)}
 

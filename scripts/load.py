@@ -378,9 +378,10 @@ class Workload:
         """All anchor_records documents arrive at one instant after warmup.
 
         Stage times come from the durable Version step columns, written by the
-        transaction that commits each step. Public hybrid search verifies every
-        document after the burst: probing during it would load the measured API
-        and database. Alerts are first arrivals at the local receiver.
+        transaction that commits each step, on PostgreSQL's clock. Search probes
+        stop for the burst; every 0.5 s the drain reads receipts until each
+        Version is known, and the step columns. Public hybrid search verifies
+        every document afterwards. Alerts are first arrivals at the local receiver.
         """
         from load_stack import STEPS
         self.setup()
@@ -391,7 +392,10 @@ class Workload:
         for index in range(first, first + count):
             pending.put(index)
         posts = self.receiver.posts
-        anchor = time.time()
+        # Step columns use the database clock, which a Docker VM may skew from ours.
+        # The bound only ever overstates step times, by at most overstated_by.
+        offset, overstated_by = self.stack.clock_offset()
+        anchor = time.time() + offset
         self.started = started = time.monotonic()
         def client():
             while not self.stop.is_set():
@@ -440,6 +444,8 @@ class Workload:
         return {'status': 'complete' if complete else 'failed', 'elapsed_seconds': round(elapsed, 3),
                 'requests': {'ingestion': summary}, 'driver_errors': self.driver_errors,
                 'anchored': {'documents': count, 'accepted': len(accepted), 'verified_hybrid': verified,
+                             'database_clock_offset_seconds': round(offset, 3),
+                             'steps_overstated_by_at_most_seconds': round(overstated_by, 3),
                              'stages_from_anchor': stages,
                              'all_alerts_from_anchor': distribution([(at - started)*1000 for at in alerted]),
                              'expected_alerts': expected, 'received_alerts': received,
