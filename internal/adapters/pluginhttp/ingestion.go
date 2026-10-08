@@ -161,8 +161,10 @@ func (i Ingestor) SegmentAndEmbed(ctx context.Context, org, corpusID string, v c
 }
 
 // SDK error envelopes predate typed work-limit codes. Accept their size-only
-// messages exactly; a combined size/vector/offset failure remains invalid.
-var sdkResponseLimit = regexp.MustCompile(`^(?:[0-9]+ segments exceed max_segments [0-9]+|the response is [0-9]+ bytes; max_response_bytes is [0-9]+|the response exceeds max_(?:segments|response_bytes))$`)
+// clauses exactly; a combined size/vector/offset failure remains invalid.
+const sdkResponseLimitClause = `(?:[0-9]+ segments exceed max_segments [0-9]+|the response is [0-9]+ bytes; max_response_bytes is [0-9]+|the response exceeds max_(?:segments|response_bytes))`
+
+var sdkResponseLimit = regexp.MustCompile(`^` + sdkResponseLimitClause + `(?:; ` + sdkResponseLimitClause + `)*$`)
 
 func wholeResponseTooLarge(result *devhost.Result) bool {
 	if result == nil || result.Error != nil && result.Error.Retryable {

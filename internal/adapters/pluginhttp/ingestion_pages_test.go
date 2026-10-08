@@ -167,7 +167,7 @@ func TestWholeItemResponseLimitsRemainPageable(t *testing.T) {
 	}
 	signing, _ := json.Marshal(map[string]plugins.SigningKeys{"example.paged": ring})
 	t.Setenv(plugins.EnvSigningKeys, string(signing))
-	for _, message := range []string{"257 segments exceed max_segments 256", "the response exceeds max_segments", "the response is 65537 bytes; max_response_bytes is 65536", "the response exceeds max_response_bytes", "invalid vector dimensions", "the response exceeds max_segments; invalid vector dimensions", "engine segment limit", "mixed engine errors"} {
+	for _, message := range []string{"257 segments exceed max_segments 256", "the response exceeds max_segments", "the response is 65537 bytes; max_response_bytes is 65536", "the response exceeds max_response_bytes", "the response exceeds max_response_bytes; the response exceeds max_segments", "invalid vector dimensions", "the response exceeds max_segments; invalid vector dimensions", "engine segment limit", "mixed engine errors"} {
 		t.Run(message, func(t *testing.T) {
 			var pin *plugins.Pin
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

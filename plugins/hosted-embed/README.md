@@ -229,11 +229,13 @@ retry backoff supplies the shared delay. This cap and the engine's evaluation
 and backfill concurrency limits apply per process; tune all of them to your
 provider's allowance.
 
-For items with several text Parts, at most 64 Parts and at most 256 KiB of text,
-the engine first asks for whole-item segmentation and embedding. Paragraph
-packing combines consecutive body Parts within `body_tokens`; the headline
-supplies the configured title context rather than its own passage. Oversized
-items and whole-item size refusals use durable paged ingestion without truncation.
+For items with several text Parts using the `body`, `title` and `context` roles,
+at most 64 Parts and at most 256 KiB of text, the engine first asks for whole-item
+segmentation and embedding. Paragraph packing combines consecutive body Parts
+within `body_tokens`; when body text is present, the headline supplies the
+configured title context. Without body text, a title can become a passage.
+Oversized items, custom text roles and whole-item size refusals use durable
+paged ingestion without truncation.
 Single-text-Part items retain paged segmentation. Pages preserve every text Part,
 including titles and context, using windows of at most 4096 Unicode code points.
 Larger paragraphs split at model or window boundaries. Paged Parts have separate

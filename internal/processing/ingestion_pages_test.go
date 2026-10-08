@@ -97,12 +97,16 @@ func TestDerivePacksBoundedItemsAndPagesSizeRefusals(t *testing.T) {
 		name         string
 		parts        int
 		extraBytes   int
+		customRole   bool
 		refusal      error
 		whole, pages int
 		want         error
 	}{
 		{name: "packed item", whole: 1},
+		{name: "exact Part bound", parts: 64, whole: 1},
 		{name: "too many Parts", parts: 65, pages: 65},
+		{name: "exact text bound", extraBytes: (256 << 10) - 8019, whole: 1},
+		{name: "custom text role", customRole: true, pages: 22},
 		{name: "too much text", extraBytes: 256 << 10, pages: 22},
 		{name: "segmentation limit", refusal: sizeRefusal("segmentation_limit", false), whole: 1, pages: 22},
 		{name: "provider input size", refusal: sizeRefusal("input_size", false), whole: 1, pages: 22},
@@ -122,7 +126,10 @@ func TestDerivePacksBoundedItemsAndPagesSizeRefusals(t *testing.T) {
 				n := len(item.Manifest.Parts)
 				item.Manifest.Parts = append(item.Manifest.Parts, content.Part{Key: fmt.Sprint(n), Role: "body", Content: content.Text{Kind: "text", Text: "tail"}})
 			}
-			item.Manifest.Parts[len(item.Manifest.Parts)-1].Content.Text += strings.Repeat("x", tc.extraBytes)
+			item.Manifest.Parts[0].Content.Text += strings.Repeat("x", tc.extraBytes)
+			if tc.customRole {
+				item.Manifest.Parts[2].Role = "caption"
+			}
 			owner := &boundedItemOwner{wholeError: tc.refusal}
 			owner.failPage = tc.name == "resume committed pages"
 			baseline := &itemDerivationStore{pages: map[int]content.IngestionPage{}}
@@ -152,14 +159,28 @@ func TestDerivePacksBoundedItemsAndPagesSizeRefusals(t *testing.T) {
 				t.Fatalf("segments=%d vectors=%d", len(seg.Segments), len(data))
 			}
 			if tc.pages == 0 {
-				if len(seg.Segments) != 4 {
-					t.Fatalf("got %d passages; want four", len(seg.Segments))
+				passages := 4
+				if tc.parts == 64 {
+					passages = 13
 				}
-				for n, s := range seg.Segments {
-					ranges := s.Derivation.SourceRanges
-					if len(ranges) != 5 || ranges[0].PartKey != fmt.Sprintf("paragraph-%02d", n*5) || ranges[4].PartKey != fmt.Sprintf("paragraph-%02d", n*5+4) {
-						t.Fatalf("passage %d sources=%+v", n, ranges)
+				if len(seg.Segments) != passages {
+					t.Fatalf("got %d passages; want %d", len(seg.Segments), passages)
+				}
+				source := 2
+				for _, s := range seg.Segments {
+					if len(s.Derivation.SourceRanges) < 2 {
+						t.Fatalf("passage does not span Parts: %+v", s)
 					}
+					for _, r := range s.Derivation.SourceRanges {
+						part := item.Manifest.Parts[source]
+						if r.PartKey != part.Key || r.Start != 0 || r.End != len([]rune(part.Content.Text)) {
+							t.Fatalf("lost whole-item source: %+v", r)
+						}
+						source++
+					}
+				}
+				if source != len(item.Manifest.Parts) {
+					t.Fatalf("covered %d of %d Parts", source, len(item.Manifest.Parts))
 				}
 			} else {
 				if len(seg.Segments) != len(item.Manifest.Parts) {

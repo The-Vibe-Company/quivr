@@ -108,6 +108,13 @@ func wholeItemFits(v content.Version) bool {
 	textParts, bytes := 0, 0
 	for _, part := range v.Manifest.Parts {
 		if part.Content.Kind == "text" {
+			switch part.Role {
+			case "body", "title", "context":
+			default:
+				// Preserve full-text paging for roles outside the normal body
+				// packing recipe, rather than silently dropping their text.
+				return false
+			}
 			textParts++
 			bytes += len(part.Content.Text)
 			if bytes > 256<<10 {
