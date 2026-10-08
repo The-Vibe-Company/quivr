@@ -30,6 +30,16 @@ func TestPagedRecipeChangesWithWholeItemPackingPolicy(t *testing.T) {
 		if pin.Manifest.Contributions.Ingestion.Paging == (got == legacy) {
 			t.Fatalf("%s: recipe=%s legacy=%s", fixture, got, legacy)
 		}
+		// Existing immutable plans may hold a recipe anchor from the older
+		// engine. Apply the new host policy once, then keep it across tuning.
+		pin.IngestionDerivation = &plugins.IngestionDerivation{Recipe: legacy}
+		if anchored := registry.IngestionRecipe(pin); anchored != got {
+			t.Fatalf("%s: anchored recipe %s, want %s", fixture, anchored, got)
+		}
+		pin.IngestionDerivation.Recipe = got
+		if rebound := registry.IngestionRecipe(pin); rebound != got {
+			t.Fatalf("%s: rebinding changed recipe %s to %s", fixture, got, rebound)
+		}
 	}
 }
 

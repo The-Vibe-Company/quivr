@@ -134,6 +134,7 @@ Every field of `quivr-plugin.yaml`, the manifest a plugin ships. It is written i
 | --- | --- | --- | --- |
 | `configuration` | object | no | — |
 | `configuration.schema` | object or boolean | yes | JSON Schema 2020-12 for the plugin configuration the installer supplies. |
+| `configuration.execution_keys` | array of string | no | Top-level installer configuration keys that affect execution pacing only, never segmentation or vector meaning. Changing their values preserves the ingestion recipe when all other manifest and configuration content is unchanged. At most 64 items. |
 | `secrets` | array of object | no | At most 32 items. |
 | `extensions` | map of map of object or boolean | no | Extension namespaces the plugin owns, each mapping schema versions to JSON Schema 2020-12. Every namespace must equal the plugin id or start with the plugin id followed by a dot. At most 32 entries. |
 

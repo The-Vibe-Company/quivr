@@ -20,13 +20,14 @@ import (
 // dispatching a current-plan job into that old space would recreate retries.
 func currentServingRecipe(ctx context.Context, q querier, org, versionID string, g content.Generation) (string, error) {
 	var r registry.Registration
-	var settings []byte
-	err := q.QueryRow(ctx, `SELECT pr.id,pr.plugin_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings
+	var settings, provenance []byte
+	var recipe string
+	err := q.QueryRow(ctx, `SELECT pr.id,pr.plugin_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings,COALESCE(rr.ingestion_recipe,''),rr.ingestion_provenance
  FROM record_versions v JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
  JOIN projection_generations g ON g.id=$3 JOIN active_pipeline_plan a ON true
  JOIN plugin_registrations pr ON pr.plugin_id=COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')
- AND EXISTS(SELECT 1 FROM pipeline_plan_roles rr WHERE rr.plan_id=a.plan_id AND rr.registration_id=pr.id AND rr.role='ingestion:'||pr.plugin_id)
- WHERE v.organization=$1 AND v.id=$2`, org, versionID, g.ID).Scan(&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.Manifest, &settings)
+ JOIN pipeline_plan_roles rr ON rr.plan_id=a.plan_id AND rr.registration_id=pr.id AND rr.role='ingestion:'||pr.plugin_id
+ WHERE v.organization=$1 AND v.id=$2`, org, versionID, g.ID).Scan(&r.ID, &r.PluginID, &r.Version, &r.Endpoint, &r.ManifestDigest, &r.Manifest, &settings, &recipe, &provenance)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -39,6 +40,9 @@ func currentServingRecipe(ctx context.Context, q querier, org, versionID string,
 	pin, err := r.Pin()
 	if err != nil {
 		return "", err
+	}
+	if recipe != "" {
+		pin.IngestionDerivation = &plugins.IngestionDerivation{Recipe: recipe, Provenance: provenance}
 	}
 	// Serving jobs require recorded owner/space metadata for eligibility.
 	// A legacy primary alone cannot authorize a historical handoff.
@@ -65,15 +69,16 @@ func currentServingRecipe(ctx context.Context, q querier, org, versionID string,
 func queueServingProjection(ctx context.Context, tx pgx.Tx, org, versionID string, supersededID ...string) error {
 	var job content.IngestionEvaluation
 	var registration registry.Registration
-	var settings, generationSpaces []byte
+	var settings, generationSpaces, provenance []byte
+	var recipe string
 	var modelSelection string
-	err := tx.QueryRow(ctx, `SELECT v.record_id,g.id,pr.plugin_id,pr.id,a.plan_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings,g.spaces,COALESCE((SELECT promoted_at::text FROM vector_space_promotions WHERE owner_plugin_id=pr.plugin_id),'')
+	err := tx.QueryRow(ctx, `SELECT v.record_id,g.id,pr.plugin_id,pr.id,a.plan_id,pr.version,pr.endpoint,pr.manifest_digest,pr.manifest,pr.settings,COALESCE(rr.ingestion_recipe,''),rr.ingestion_provenance,g.spaces,COALESCE((SELECT promoted_at::text FROM vector_space_promotions WHERE owner_plugin_id=pr.plugin_id),'')
  FROM record_versions v JOIN records r ON (r.organization,r.id)=(v.organization,v.record_id)
  JOIN accepted_revisions ar ON (ar.organization,ar.record_id,ar.slot)=(v.organization,v.record_id,v.slot)
  JOIN projection_generations g ON g.id=`+routedGenerationSQL("r.organization", "r.corpus_id")+`
  JOIN active_pipeline_plan a ON true JOIN plugin_registrations pr ON pr.plugin_id=COALESCE(g.ingestion_routing->'routes'->>COALESCE(NULLIF(ar.source_media_type,''),'text/plain'),g.ingestion_routing->>'default','')
- AND EXISTS(SELECT 1 FROM pipeline_plan_roles rr WHERE rr.plan_id=a.plan_id AND rr.registration_id=pr.id AND rr.role='ingestion:'||pr.plugin_id)
- WHERE v.organization=$1 AND v.id=$2 AND r.desired_version_id=v.id AND (NOT v.baseline_ready OR v.enrichment_error=$3) AND NOT v.quarantined AND NOT r.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)`, org, versionID, content.CodeRebuildRequired).Scan(&job.RecordID, &job.GenerationID, &job.PluginID, &job.RegistrationID, &job.PlanID, &registration.Version, &registration.Endpoint, &registration.ManifestDigest, &registration.Manifest, &settings, &generationSpaces, &modelSelection)
+ JOIN pipeline_plan_roles rr ON rr.plan_id=a.plan_id AND rr.registration_id=pr.id AND rr.role='ingestion:'||pr.plugin_id
+ WHERE v.organization=$1 AND v.id=$2 AND r.desired_version_id=v.id AND (NOT v.baseline_ready OR v.enrichment_error=$3) AND NOT v.quarantined AND NOT r.withdrawn AND NOT EXISTS(SELECT 1 FROM tombstones t WHERE t.organization=r.organization AND t.record_id=r.id)`, org, versionID, content.CodeRebuildRequired).Scan(&job.RecordID, &job.GenerationID, &job.PluginID, &job.RegistrationID, &job.PlanID, &registration.Version, &registration.Endpoint, &registration.ManifestDigest, &registration.Manifest, &settings, &recipe, &provenance, &generationSpaces, &modelSelection)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -87,6 +92,9 @@ func queueServingProjection(ctx context.Context, tx pgx.Tx, org, versionID strin
 	pin, err := registration.Pin()
 	if err != nil {
 		return err
+	}
+	if recipe != "" {
+		pin.IngestionDerivation = &plugins.IngestionDerivation{Recipe: recipe, Provenance: provenance}
 	}
 	var spaces []string
 	// The accepted registration's primary keys survive later model upgrades.

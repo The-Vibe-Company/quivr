@@ -30,17 +30,19 @@ func TestRebuildAfterIngestionSettingsChange(t *testing.T) {
 		name, nextSpace string
 		legacy          bool
 		packed          bool
+		tuning          bool
 	}{
-		{"legacy segmentation and new model", "2", true, false},
-		{"new model", "2", false, false},
-		{"segment settings only", "1", false, false},
-		{"pack canonical Parts", "1", false, true},
+		{"legacy segmentation and new model", "2", true, false, false},
+		{"new model", "2", false, false, false},
+		{"segment settings only", "1", false, false, false},
+		{"pack canonical Parts", "1", false, true, false},
+		{"adopt execution tuning without rebuild", "1", false, false, true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			pool := scratchDatabase(t, ctx)
-			makePins := func(spaceVersion string, limit int, packed bool) *plugins.PinSet {
+			makePins := func(spaceVersion string, limit int, packed, declared bool) *plugins.PinSet {
 				t.Helper()
 				manifest := []byte(fmt.Sprintf(`id: example.rebuild_embedder
 version: 0.1.0
@@ -58,6 +60,17 @@ contributions:
         indexes: [text]
         query_modalities: [text]
 `, spaceVersion, spaceVersion))
+				concurrency := 4
+				if declared {
+					concurrency = 16
+				}
+				if scenario.tuning {
+					declaration := ""
+					if declared {
+						declaration = "  execution_keys: [max_concurrent_requests]\n"
+					}
+					manifest = append(manifest, []byte(fmt.Sprintf("configuration:\n%s  schema:\n    type: object\n    properties:\n      max_concurrent_requests: {const: %d}\n", declaration, concurrency))...)
+				}
 				ring, err := plugins.NewSigningKeys()
 				if err != nil {
 					t.Fatal(err)
@@ -115,7 +128,11 @@ contributions:
 					_ = json.NewEncoder(w).Encode(map[string]any{"segments": segments})
 				}))
 				t.Cleanup(server.Close)
-				pin, err = plugins.LoadPinManifest(manifest, "rebuild embedder", plugins.PinConfig{Endpoint: server.URL, Configuration: json.RawMessage(fmt.Sprintf(`{"segment_limit":%d,"packed":%t}`, limit, packed))})
+				configuration := json.RawMessage(fmt.Sprintf(`{"segment_limit":%d,"packed":%t}`, limit, packed))
+				if scenario.tuning {
+					configuration = json.RawMessage(fmt.Sprintf(`{"segment_limit":%d,"packed":%t,"max_concurrent_requests":%d}`, limit, packed, concurrency))
+				}
+				pin, err = plugins.LoadPinManifest(manifest, "rebuild embedder", plugins.PinConfig{Endpoint: server.URL, Configuration: configuration})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -125,7 +142,7 @@ contributions:
 				}
 				return set
 			}
-			original := makePins("1", 12, false)
+			original := makePins("1", 12, false, false)
 			if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(original)); err != nil {
 				t.Fatal(err)
 			}
@@ -170,6 +187,13 @@ contributions:
 				t.Fatal(err)
 			}
 			var oldPlugin processing.IngestionPlugin = pluginhttp.Ingestor{Pin: original.IngestionFor("text/plain")}
+			if scenario.tuning {
+				// Captured before the fix: neither the upgrade nor adoption may change it.
+				const releasedRecipe = "plugin:example.rebuild_embedder@0.1.0#ingestion_34d702c4f0d0ffe347e9bfb5f478897ef556f44f6a61094c2915dc036bf7ad4e"
+				if got := oldPlugin.Descriptor().Recipe; got != releasedRecipe {
+					t.Fatalf("legacy recipe changed: got %s, want %s", got, releasedRecipe)
+				}
+			}
 			if scenario.legacy {
 				oldPlugin = legacyRebuildIngestor{oldPlugin.(pluginhttp.Ingestor)}
 			}
@@ -214,10 +238,71 @@ contributions:
 			}
 			delayedBaseline := accept("old-baseline")
 			baselineCtx := pinWork(delayedBaseline, originalPlan.Plan)
-			next := makePins(scenario.nextSpace, 6, scenario.packed)
+			nextLimit := 6
+			if scenario.tuning {
+				nextLimit = 12
+			}
+			next := makePins(scenario.nextSpace, nextLimit, scenario.packed, scenario.tuning)
 			nextPlan, err := pluginStore.ApplyConfiguration(ctx, registry.FromPins(next))
 			if err != nil {
 				t.Fatal(err)
+			}
+			if scenario.tuning {
+				plan, members, err := pluginStore.ActiveMembers(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				next, _, err = registry.Resolve(plan.Roles, members)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tuned := pluginhttp.Ingestor{Pin: next.IngestionFor("text/plain")}
+				if tuned.Descriptor().Recipe != oldPlugin.Descriptor().Recipe || string(tuned.Descriptor().Provenance) != string(oldPlugin.Descriptor().Provenance) {
+					t.Fatalf("tuning changed immutable recipe/provenance: %+v -> %+v", oldPlugin.Descriptor(), tuned.Descriptor())
+				}
+				if err := live.Store(nextPlan.Plan, next); err != nil {
+					t.Fatal(err)
+				}
+				index := retrieval.Service{Routing: store, Content: contents, Projection: &rebuildPublication{}}
+				pipeline := processing.Service{Content: contents, Retrieval: index, Enrichment: index, Routing: store, Plugin: &processing.PluginDeriver{Content: contents, Plugin: tuned}}
+				arrival := accept("retuned")
+				arrivalCtx := pinWork(arrival, nextPlan.Plan)
+				if err := pipeline.Run(arrivalCtx, scope.Organization, arrival.ID); err != nil {
+					t.Fatal(err)
+				}
+				if err := pipeline.Enrich(arrivalCtx, scope.Organization, arrival.ID); err != nil {
+					t.Fatal(err)
+				}
+				if err := oldPipeline.Enrich(delayedCtx, scope.Organization, delayedEnrichment.ID); err != nil {
+					t.Fatal(err)
+				}
+				if err := oldPipeline.Run(baselineCtx, scope.Organization, delayedBaseline.ID); err != nil {
+					t.Fatal(err)
+				}
+				if err := oldPipeline.Enrich(baselineCtx, scope.Organization, delayedBaseline.ID); err != nil {
+					t.Fatal(err)
+				}
+				for _, r := range []content.Receipt{receipt, arrival, delayedEnrichment, delayedBaseline} {
+					r, err = store.Receipt(ctx, scope.Organization, r.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					v, err := contents.Version(ctx, scope, r.RecordID, r.VersionID)
+					if err != nil || !v.Availability.Searchable || v.Processing.State != "idle" || len(v.Diagnostics) != 0 {
+						t.Fatalf("tuning must keep documents served without rebuild_required: %+v %v", v, err)
+					}
+					seg, err := contents.PluginSegmentationOf(ctx, scope.Organization, v, tuned.Descriptor().Recipe)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if h, err := hydrateOne(ctx, store, scope, content.Candidate{SegmentID: seg.Segments[0].ID, GenerationID: prior.ID}); err != nil || h.EmbeddingID == "" {
+						t.Fatalf("served vectors after tuning: %+v %v", h, err)
+					}
+				}
+				if seg, err := contents.PluginSegmentationOf(ctx, scope.Organization, v, oldSeg.Recipe); err != nil || content.SegmentationDigest(seg) != content.SegmentationDigest(oldSeg) {
+					t.Fatalf("stored artifact changed: %+v %v", seg, err)
+				}
+				return
 			}
 			if err = live.Store(nextPlan.Plan, next); err != nil {
 				t.Fatal(err)

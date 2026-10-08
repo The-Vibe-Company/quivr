@@ -136,9 +136,9 @@ The generated space belongs to that ID. See
 [ingestion routing](https://docs.quivr.thevibecompany.co/reference/configuration#ingestion-routing)
 and [backfill](https://docs.quivr.thevibecompany.co/plugins/backfill-a-vector-space).
 
-Each changed configuration is a new immutable registration: increment
-`plugin_version` (default `1.2.0`), regenerate and certify its package, then
-install it. The space id includes the model, dimensions and a hash of the wire
+Each changed configuration is a new immutable registration. For changes to
+vector or segmentation meaning, choose a new `plugin_version` (default `1.2.0`),
+regenerate and certify the package, then install it. The space id includes the model, dimensions and a hash of the wire
 format, metric, model revision, input templates and full-text context mode.
 Version `1.2.0` introduces separate title/context passages and declares a new
 space, so install it with a rebuild or evaluation cutover. Changing any of those
@@ -146,6 +146,27 @@ creates a new space. Set `model_revision` when a deployment name starts serving
 new weights; the plugin cannot detect a provider changing weights behind a
 stable name. Changing batching or timeouts preserves the vector space. Existing
 Corpora need a rebuild or backfill before they carry a newly configured space.
+
+
+## Tune throughput without rebuilding
+
+Keep `plugin_id` and `plugin_version` unchanged when changing only
+`max_concurrent_requests`, `batch_size`, `max_batch_tokens`, `request_timeout_ms`,
+`call_budget_ms`, `batch_wait_ms` or `max_retries`. Regenerate the manifest from
+the new configuration, certify it and install the new registration. These keys
+are declared in `configuration.execution_keys`; Quivr keeps the active plan's
+exact ingestion recipe and derivation provenance, including when adopting this
+declaration from an older generated manifest. Existing documents keep serving,
+and new documents do not require a rebuild for these changes. Defaults are unchanged.
+
+Run the new manifest at a separate address while earlier pinned work drains.
+Keep the previous process and exact manifest reachable at its recorded address
+until the registration becomes `inactive`. Discovery still checks exact manifest
+bytes; replacing an endpoint in place makes old pinned calls fail.
+
+Changes to model, templates, packing, tokenizer or tokens per chunk still create
+a new recipe and need the usual rebuild or evaluation cutover. A plugin version
+change also creates a new recipe, even when only execution settings differ.
 
 ## Limits and defaults
 

@@ -27,7 +27,8 @@ type Manifest struct {
 	Contributions map[string]json.RawMessage `json:"contributions"`
 	Requires      []Requirement              `json:"requires,omitempty"`
 	Configuration *struct {
-		Schema json.RawMessage `json:"schema"`
+		Schema        json.RawMessage `json:"schema"`
+		ExecutionKeys []string        `json:"execution_keys,omitempty"`
 	} `json:"configuration,omitempty"`
 
 	// Connector is the decoded connector Contribution, with defaults; nil
