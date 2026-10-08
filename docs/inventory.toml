@@ -77,7 +77,7 @@ excluded = [
 "docs/agents/documentation.md" = { audience = "contributor", kind = "guide", summary = "living and dated documents, the inventory, budgets and when docs may change" }
 "docs/agents/domain.md" = { audience = "contributor", kind = "guide", summary = "how the domain documentation is laid out" }
 "docs/agents/evaluation.md" = { audience = "contributor", kind = "guide", summary = "measure how well search ranks results on public and private evaluation sets" }
-"docs/agents/oss-embeddings.md" = { audience = "contributor", kind = "guide", summary = "preview and measure open-source embedding models on ephemeral CPU and GPU jobs" }
+"docs/agents/oss-embeddings.md" = { audience = "contributor", kind = "guide", summary = "measure public-sample embeddings; links the operator model-choice overview" }
 "docs/agents/fleet-workflow.md" = { audience = "contributor", kind = "guide", summary = "how parallel agents claim, plan and ship tickets" }
 "docs/agents/issue-tracker.md" = { audience = "contributor", kind = "guide", summary = "how specs and tickets are written and tracked" }
 "docs/agents/migrations.md" = { audience = "contributor", kind = "guide", summary = "add compatible expansions and defer destructive contracts" }
