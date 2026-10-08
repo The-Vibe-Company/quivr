@@ -98,6 +98,22 @@ test("each step is done, slow, running, to do, not recorded or stopped by a quar
   });
   assert.equal(states(quiet), "done done done done run");
   assert.equal(summarize([quiet], now, LIMIT).stuck, 0);
+  // With no alert covering its corpus (the core says not_applicable), no
+  // decision is coming: the step says so at once, not after a timer, and
+  // nothing waits on it. An evaluated step keeps its duration.
+  const unwatched = { ...quiet, evaluation: "not_applicable" };
+  assert.equal(states(unwatched), "done done done done none");
+  assert.equal(flow(unwatched, LIMIT, now)[4].reason, "no_alert");
+  assert.equal(summarize([unwatched], now, LIMIT).waiting_by_step.alerts.count, 0);
+  assert.equal(
+    states({ ...cases[1].doc, evaluation: "not_applicable" }),
+    "run todo todo todo none",
+  );
+  assert.equal(states({ ...quiet, evaluation: "applicable" }), "done done done done run");
+  assert.equal(
+    states({ ...cases[0].doc, evaluation: "not_applicable" }),
+    "done slow done done slow",
+  );
   const running = flow(cases[1].doc, LIMIT, now)[0];
   assert.equal(running.since, at(-300), "a running step waits from its cause");
   assert.equal(flow(cases[0].doc, LIMIT, now)[1].ms, 900);

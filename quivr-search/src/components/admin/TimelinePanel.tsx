@@ -69,7 +69,7 @@ function ticks(span: number) {
 interface Bar {
   key: string;
   label: string;
-  state: "done" | "slow" | "run" | "todo" | "error" | "mark";
+  state: "done" | "slow" | "run" | "todo" | "error" | "mark" | "none";
   from?: number;
   to?: number;
   ms?: number;
@@ -243,6 +243,14 @@ function Content({
           : undefined,
     });
   }
+  // No alert covers the corpus: no decision is coming, and the panel says so
+  // instead of a step running or left out.
+  if (
+    !stopped &&
+    doc.evaluation === "not_applicable" &&
+    time.evaluated === undefined
+  )
+    bars.push({ key: "alerts", label: labelOf("evaluated"), state: "none" });
   bars.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
   const end = Math.max(origin + 1, ...bars.map((b) => b.to ?? origin));
   const span = end - origin;
@@ -305,28 +313,34 @@ function Content({
         <ol className="gantt-rows" aria-label="Étapes">
           {bars.map((bar) => {
             const exact =
-              bar.to === undefined
-                ? "à venir"
-                : bar.state === "run"
-                  ? `depuis ${at(bar.from ?? bar.to)}`
-                  : bar.from !== undefined
-                    ? `${at(bar.from)} → ${at(bar.to)}`
-                    : at(bar.to);
+              bar.state === "none"
+                ? "aucune alerte ne suit ce corpus"
+                : bar.to === undefined
+                  ? "à venir"
+                  : bar.state === "run"
+                    ? `depuis ${at(bar.from ?? bar.to)}`
+                    : bar.from !== undefined
+                      ? `${at(bar.from)} → ${at(bar.to)}`
+                      : at(bar.to);
             return (
               <li
                 key={bar.key}
                 className="gantt-row"
                 data-state={bar.state}
                 tabIndex={0}
-                aria-label={`${bar.label} : ${
-                  bar.state === "todo"
-                    ? "à venir"
-                    : bar.state === "run"
-                      ? `en cours depuis ${short(bar.ms ?? 0)}`
-                      : bar.ms !== undefined
-                        ? duration(bar.ms)
-                        : "terminé"
-                }${bar.state === "slow" ? ", plus lent que d’habitude" : ""}, ${exact}${bar.plugin ? `, par ${bar.plugin}` : ""}`}
+                aria-label={
+                  bar.state === "none"
+                    ? `${bar.label} : ${exact}`
+                    : `${bar.label} : ${
+                        bar.state === "todo"
+                          ? "à venir"
+                          : bar.state === "run"
+                            ? `en cours depuis ${short(bar.ms ?? 0)}`
+                            : bar.ms !== undefined
+                              ? duration(bar.ms)
+                              : "terminé"
+                      }${bar.state === "slow" ? ", plus lent que d’habitude" : ""}, ${exact}${bar.plugin ? `, par ${bar.plugin}` : ""}`
+                }
               >
                 <span className="gantt-label">
                   {bar.label}
@@ -337,6 +351,9 @@ function Content({
                   )}
                 </span>
                 <span className="gantt-track">
+                  {bar.state === "none" && (
+                    <span className="gantt-none">Aucune alerte</span>
+                  )}
                   {bar.to !== undefined &&
                     (bar.from !== undefined ? (
                       <span
@@ -357,13 +374,15 @@ function Content({
                   </span>
                 </span>
                 <span className="gantt-ms">
-                  {bar.state === "todo"
-                    ? "à venir"
-                    : bar.ms !== undefined
-                      ? bar.state === "run"
-                        ? `${short(bar.ms)}…`
-                        : duration(bar.ms)
-                      : "—"}
+                  {bar.state === "none"
+                    ? ""
+                    : bar.state === "todo"
+                      ? "à venir"
+                      : bar.ms !== undefined
+                        ? bar.state === "run"
+                          ? `${short(bar.ms)}…`
+                          : duration(bar.ms)
+                        : "—"}
                 </span>
               </li>
             );
