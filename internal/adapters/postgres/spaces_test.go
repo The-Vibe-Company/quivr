@@ -182,10 +182,26 @@ func TestVectorSpaceRegistryAndNamedSpaceCoverage(t *testing.T) {
 	}
 }
 
-// Independent evaluation cuts must coexist with the serving segmentation;
-// canonical hydration keeps them out of normal searches and fences withdrawal.
-func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
-	ctx := t.Context()
+// evaluationCoverage is one Version served by one segmentation and covered
+// by an independent two-cut evaluation segmentation in its own space.
+type evaluationCoverage struct {
+	pool       *pgxpool.Pool
+	store      fixtureContentStores
+	service    content.Service
+	org        string
+	scope      corpus.Scope
+	corpusID   string
+	version    content.Version
+	generation content.Generation
+	served     content.Segmentation
+	evaluation content.Segmentation
+	space      content.RegisteredSpace
+	artifacts  []content.Embedding
+	candidates []content.Candidate
+}
+
+func newEvaluationCoverage(t *testing.T, ctx context.Context) evaluationCoverage {
+	t.Helper()
 	pool := rebuildAdapterPool(t, ctx)
 	store := contentStores(pool)
 	org := fmt.Sprintf("adapter-evaluation-%d", time.Now().UnixNano())
@@ -257,7 +273,17 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	if err = store.CoverEvaluation(ctx, org, g, evaluation, artifacts); err != nil {
 		t.Fatal(err)
 	}
-	_, coverage, _, err := store.VectorSpaces(ctx, org, c.ID)
+	candidates := []content.Candidate{{SegmentID: served.Segments[0].ID, GenerationID: g.ID}, {SegmentID: evaluation.Segments[0].ID, GenerationID: g.ID}, {SegmentID: evaluation.Segments[1].ID, GenerationID: g.ID, EvaluationPlugin: "example.evaluation", EvaluationSpace: space.ID}}
+	return evaluationCoverage{pool: pool, store: store, service: service, org: org, scope: scope, corpusID: c.ID, version: v, generation: g,
+		served: served, evaluation: evaluation, space: space, artifacts: artifacts, candidates: candidates}
+}
+
+// Independent evaluation cuts must coexist with the serving segmentation;
+// canonical hydration keeps them out of normal searches and fences withdrawal.
+func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
+	ctx := t.Context()
+	f := newEvaluationCoverage(t, ctx)
+	_, coverage, _, err := f.store.VectorSpaces(ctx, f.org, f.corpusID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,42 +292,127 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 			t.Fatalf("evaluation-only owner coverage must expose two independent cuts and zero serving cuts: %+v", covered)
 		}
 	}
-	candidates := []content.Candidate{{SegmentID: served.Segments[0].ID, GenerationID: g.ID}, {SegmentID: evaluation.Segments[0].ID, GenerationID: g.ID}, {SegmentID: evaluation.Segments[1].ID, GenerationID: g.ID, EvaluationPlugin: "example.evaluation", EvaluationSpace: space.ID}}
-	got, err := store.Hydrate(ctx, scope, candidates)
+	got, err := f.store.Hydrate(ctx, f.scope, f.candidates)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].SegmentationID != served.ID || got[2].SegmentationID != evaluation.ID || got[2].EmbeddingID != artifacts[1].ID {
+	if len(got) != 2 || got[0].SegmentationID != f.served.ID || got[2].SegmentationID != f.evaluation.ID || got[2].EmbeddingID != f.artifacts[1].ID {
 		t.Fatalf("independent coverage/hydration: %+v", got)
 	}
-	status, processing, code, err := store.VersionStatus(ctx, org, v.ID)
+	status, processing, code, err := f.store.VersionStatus(ctx, f.org, f.version.ID)
 	if err != nil || !status.Searchable || processing.Phase != "enrichment" || code != "" {
 		t.Fatalf("evaluation changed served state: %+v %+v %s %v", status, processing, code, err)
 	}
+	if _, err = f.pool.Exec(ctx, `INSERT INTO tombstones(organization,record_id) VALUES($1,$2)`, f.org, f.version.RecordID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = f.store.Hydrate(ctx, f.scope, f.candidates)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("withdrawn evaluation hydrated: %+v %v", got, err)
+	}
+}
 
-	// Fresh bulk indexing can leave planner statistics far behind actual rows.
-	// The test never analyzes the clone below, though autovacuum may. PRs bound
-	// the pages the counting owner reads on 6,003 segments (THE-1137), and
-	// check cold search and completed counts.
-	// Nightly/manual QUIVR_MEASURE=1 seeds at least one million segments and
-	// runs the same assertions.
-	cuts := 1
-	copies := 2000
-	if os.Getenv("QUIVR_MEASURE") == "1" {
-		cuts = 8
-		copies = 100000
-	} else {
-		// Statistics taken now count this Organization as one Record. Only the
-		// PR clone starts from them: on a nearly empty database, foreign-key
-		// checks planned from them scan a referenced table per inserted row,
-		// which a million-row clone cannot afford.
-		if _, err = pool.Exec(ctx, `ANALYZE records, record_versions, version_parts, segmentations, segments, projection_coverage, embedding_artifacts, embedding_coverage`); err != nil {
-			t.Fatal(err)
+// Fresh bulk indexing can leave planner statistics far behind actual rows.
+// Counting runs off the request deadline, so its cost is bounded in pages,
+// whatever the CPU: point lookups read about 14 per segment, while a join
+// filtered after an Organization-wide scan read about 110 (THE-1137). The
+// clone is never analyzed, though autovacuum may analyze it.
+func TestVectorSpaceCoverageCountingIsBoundedBySegments(t *testing.T) {
+	ctx := t.Context()
+	f := newEvaluationCoverage(t, ctx)
+	// Statistics taken now count this Organization as one Record. Only this
+	// clone starts from them: on a nearly empty database, foreign-key checks
+	// planned from them scan a referenced table per inserted row, which the
+	// million-row measurement clone cannot afford.
+	if _, err := f.pool.Exec(ctx, `ANALYZE records, record_versions, version_parts, segmentations, segments, projection_coverage, embedding_artifacts, embedding_coverage`); err != nil {
+		t.Fatal(err)
+	}
+	const cuts, copies = 1, 2000
+	f.clone(t, ctx, cuts, copies)
+	f.boundedCounting(t, ctx, cuts, copies)
+	_, counted, total, err := f.store.VectorSpaces(ctx, f.org, f.corpusID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.checkCounts(t, counted, total, cuts, copies)
+}
+
+// Search p95 under one second on at least one million segments with cold
+// coverage, and the background count publishing real counts (THE-1231).
+// A measurement run on the owner's machine, never on a pull request:
+// QUIVR_MEASURE=1 make adapter-postgres args='-v -timeout 30m -run ^TestVectorSpaceCoverageSearchMeasurement$'
+func TestVectorSpaceCoverageSearchMeasurement(t *testing.T) {
+	if os.Getenv("QUIVR_MEASURE") != "1" {
+		t.Skip("measurement: set QUIVR_MEASURE=1")
+	}
+	ctx := t.Context()
+	f := newEvaluationCoverage(t, ctx)
+	const cuts, copies = 8, 100000
+	f.clone(t, ctx, cuts, copies)
+	f.boundedCounting(t, ctx, cuts, copies)
+	snapshots := retrieval.NewSpaceSnapshots(ctx, f.store, 10*time.Second)
+	budget, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	_, described, total, err := snapshots.VectorSpaces(budget, f.org, f.corpusID)
+	if err != nil || total != 0 || len(described) == 0 || !described[0].CoverageUnknown {
+		t.Fatalf("cold coverage must return unknown promptly: %+v, total %d, error %v", described, total, err)
+	}
+	// Exercise authorization, routing, cold coverage and canonical hydration.
+	// The external index and retrieval plugin are deterministic dependencies;
+	// this isolates the database bottleneck rather than index capacity.
+	search := retrieval.Service{Routing: postgres.ProjectionStore{Pool: f.pool}, Registry: snapshots,
+		Projection: coverageIndex{candidate: f.candidates[0]}, Ranker: coverageRanker{}, Content: f.service}
+	search.Content.Blobs = &objectMemory{objects: map[string][]byte{"fixture/evaluation-text": []byte("alpha beta gamma")}}
+	var latencies []time.Duration
+	for range 20 {
+		started := time.Now()
+		result, err := search.Search(ctx, f.scope, retrieval.Request{Query: "alpha", Mode: "lexical", CorpusIDs: []string{f.corpusID}})
+		if err != nil || len(result.Hits) != 1 || result.Hits[0].Segment.ID != f.served.Segments[0].ID {
+			t.Fatalf("search with large coverage: %+v, %v", result, err)
+		}
+		latencies = append(latencies, time.Since(started))
+	}
+	slices.Sort(latencies)
+	p95 := latencies[18]
+	t.Logf("%d segments, cold coverage enabled, lexical search p95 %s", (cuts+2)*(copies+1), p95)
+	if p95 >= time.Second {
+		t.Fatalf("search p95 %s, objective <1s", p95)
+	}
+	// The background count must publish real counts, not leave every
+	// request unknown because it always overruns its deadline.
+	refresh, stop := context.WithTimeout(ctx, 30*time.Second)
+	defer stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, completed, total, err := snapshots.VectorSpaces(refresh, f.org, f.corpusID)
+		if err != nil {
+			t.Fatalf("completed coverage: %v", err)
+		}
+		if len(completed) > 0 && !completed[0].CoverageUnknown {
+			for _, sp := range completed {
+				if sp.ID == f.space.ID && sp.CoverageAgeMS == nil {
+					t.Fatalf("completed coverage without its age: %+v", sp)
+				}
+			}
+			f.checkCounts(t, completed, total, cuts, copies)
+			return
+		}
+		select {
+		case <-refresh.Done():
+			t.Fatalf("background coverage did not complete: %v", refresh.Err())
+		case <-ticker.C:
 		}
 	}
-	if _, err = pool.Exec(ctx, `INSERT INTO segments
+}
+
+// clone copies the fixture's Version copies times, its served segment cuts
+// times, without the statistics a fresh bulk import would lack.
+func (f evaluationCoverage) clone(t *testing.T, ctx context.Context, cuts, copies int) {
+	t.Helper()
+	if _, err := f.pool.Exec(ctx, `INSERT INTO segments
  SELECT (jsonb_populate_record(NULL::segments,to_jsonb(s)||jsonb_build_object('id',s.id||'-cut-'||n))).*
- FROM segments s CROSS JOIN generate_series(1,$3::int) n WHERE s.organization=$1 AND s.id=$2`, org, served.Segments[0].ID, cuts-1); err != nil {
+ FROM segments s CROSS JOIN generate_series(1,$3::int) n WHERE s.organization=$1 AND s.id=$2`, f.org, f.served.Segments[0].ID, cuts-1); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []struct {
@@ -321,89 +432,40 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 		query := "INSERT INTO " + table.name + " SELECT (jsonb_populate_record(NULL::" + table.name + ",to_jsonb(r)||" + table.patch + ")).* FROM " + table.name + " r CROSS JOIN generate_series(1,$5::int) n WHERE r.organization=$1 AND " + table.filter
 		// Explicit casts keep all shared fixture parameters typed even when unused.
 		query += " AND $2::text IS NOT NULL AND $3::text IS NOT NULL AND $4::text[] IS NOT NULL"
-		if _, err = pool.Exec(ctx, query, org, v.RecordID, v.ID, []string{evaluation.Segments[0].ID, evaluation.Segments[1].ID}, copies); err != nil {
+		if _, err := f.pool.Exec(ctx, query, f.org, f.version.RecordID, f.version.ID, []string{f.evaluation.Segments[0].ID, f.evaluation.Segments[1].ID}, copies); err != nil {
 			t.Fatal(table.name, err)
 		}
 	}
-	// Counting runs off the request deadline, so its cost is bounded in pages,
-	// whatever the CPU: point lookups read about 14 per segment, while a join
-	// filtered after an Organization-wide scan read about 110 (THE-1137).
+}
+
+// boundedCounting fails when counting the clone's coverage reads more than
+// 40 pages per segment.
+func (f evaluationCoverage) boundedCounting(t *testing.T, ctx context.Context, cuts, copies int) {
+	t.Helper()
 	segments := (cuts + 2) * (copies + 1)
-	pages, plan := coveragePages(t, ctx, pool, org, c.ID)
+	pages, plan := coveragePages(t, ctx, f.pool, f.org, f.corpusID)
 	if pages > 40*segments {
 		t.Fatalf("counting coverage of %d fresh segments read %d pages, want at most %d; costliest plan: %s", segments, pages, 40*segments, plan)
 	}
 	t.Logf("counting coverage of %d fresh segments read %d pages", segments, pages)
-	snapshots := retrieval.NewSpaceSnapshots(ctx, store, 10*time.Second)
-	budget, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	_, described, total, err := snapshots.VectorSpaces(budget, org, c.ID)
-	if err != nil || total != 0 || len(described) == 0 || !described[0].CoverageUnknown {
-		t.Fatalf("cold coverage must return unknown promptly: %+v, total %d, error %v", described, total, err)
+}
+
+// checkCounts compares counted coverage with the clone: every copy served by
+// its cuts, and the evaluation space covering both cuts of every copy.
+func (f evaluationCoverage) checkCounts(t *testing.T, counted []content.SpaceCoverage, total int64, cuts, copies int) {
+	t.Helper()
+	if total != int64(cuts*(copies+1)) {
+		t.Fatalf("serving total %d, want %d", total, cuts*(copies+1))
 	}
-	// Exercise authorization, routing, cold coverage and canonical hydration.
-	// The external index and retrieval plugin are deterministic dependencies;
-	// this guard isolates the database bottleneck rather than index capacity.
-	search := retrieval.Service{Routing: postgres.ProjectionStore{Pool: pool}, Registry: snapshots,
-		Projection: coverageIndex{candidate: candidates[0]}, Ranker: coverageRanker{}, Content: service}
-	search.Content.Blobs = &objectMemory{objects: map[string][]byte{"fixture/evaluation-text": []byte("alpha beta gamma")}}
-	var latencies []time.Duration
-	for range 20 {
-		started := time.Now()
-		result, err := search.Search(ctx, scope, retrieval.Request{Query: "alpha", Mode: "lexical", CorpusIDs: []string{c.ID}})
-		if err != nil || len(result.Hits) != 1 || result.Hits[0].Segment.ID != served.Segments[0].ID {
-			t.Fatalf("search with large coverage: %+v, %v", result, err)
-		}
-		latencies = append(latencies, time.Since(started))
-	}
-	slices.Sort(latencies)
-	p95 := latencies[18]
-	t.Logf("%d segments, cold coverage enabled, lexical search p95 %s", segments, p95)
-	if p95 >= time.Second {
-		t.Fatalf("search p95 %s, objective <1s", p95)
-	}
-	// The same PostgreSQL source must eventually publish real counts, not
-	// leave every request unknown because the background query always fails.
-	refresh, stop := context.WithTimeout(ctx, 30*time.Second)
-	defer stop()
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		_, completed, total, err := snapshots.VectorSpaces(refresh, org, c.ID)
-		if err != nil {
-			t.Fatalf("completed coverage: %v", err)
-		}
-		if len(completed) > 0 && !completed[0].CoverageUnknown {
-			if total != int64(cuts*(copies+1)) {
-				t.Fatalf("snapshot serving total %d, want %d", total, cuts*(copies+1))
+	for _, sp := range counted {
+		if sp.ID == f.space.ID {
+			if sp.CoverageUnknown || sp.Segments != int64(2*(copies+1)) || sp.TotalSegments == nil || *sp.TotalSegments != int64(2*(copies+1)) || sp.VersionsCovered != int64(copies+1) {
+				t.Fatalf("counted independent coverage: %+v", sp)
 			}
-			found := false
-			for _, sp := range completed {
-				if sp.ID == space.ID {
-					found = true
-					if sp.CoverageUnknown || sp.CoverageAgeMS == nil || sp.Segments != int64(2*(copies+1)) || sp.TotalSegments == nil || *sp.TotalSegments != int64(2*(copies+1)) || sp.VersionsCovered != int64(copies+1) {
-						t.Fatalf("completed independent coverage: %+v", sp)
-					}
-				}
-			}
-			if !found {
-				t.Fatal("completed snapshot lost the evaluation space")
-			}
-			break
-		}
-		select {
-		case <-refresh.Done():
-			t.Fatalf("background coverage did not complete: %v", refresh.Err())
-		case <-ticker.C:
+			return
 		}
 	}
-	if _, err = pool.Exec(ctx, `INSERT INTO tombstones(organization,record_id) VALUES($1,$2)`, org, v.RecordID); err != nil {
-		t.Fatal(err)
-	}
-	got, err = store.Hydrate(ctx, scope, candidates)
-	if err != nil || len(got) != 0 {
-		t.Fatalf("withdrawn evaluation hydrated: %+v %v", got, err)
-	}
+	t.Fatalf("counted coverage lost the evaluation space: %+v", counted)
 }
 
 // coveragePages counts the pages SpaceStore.VectorSpaces reads, as

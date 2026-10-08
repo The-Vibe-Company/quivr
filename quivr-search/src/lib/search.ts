@@ -6,14 +6,16 @@ import type {
   SearchResponse,
 } from "../types";
 export class APIError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public retryable: boolean,
-    public code = "",
-    public field = "",
-  ) {
+  status: number;
+  retryable: boolean;
+  code: string;
+  field: string;
+  constructor(status: number, message: string, retryable: boolean, code = "", field = "") {
     super(message);
+    this.status = status;
+    this.retryable = retryable;
+    this.code = code;
+    this.field = field;
   }
 }
 // Reads started as the page's script runs (main.tsx), before React's first
