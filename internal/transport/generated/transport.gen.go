@@ -1419,7 +1419,7 @@ type ActivePluginList struct {
 type AdminDocument struct {
 	CorpusId string `json:"corpus_id"`
 
-	// Evaluation Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created since makes an older Version applicable although it never evaluates it.
+	// Evaluation Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it.
 	Evaluation      AdminDocumentEvaluation `json:"evaluation"`
 	IsCurrent       bool                    `json:"is_current"`
 	RecordId        string                  `json:"record_id"`
@@ -1437,7 +1437,7 @@ type AdminDocument struct {
 	VersionId string  `json:"version_id"`
 }
 
-// AdminDocumentEvaluation Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created since makes an older Version applicable although it never evaluates it.
+// AdminDocumentEvaluation Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it.
 type AdminDocumentEvaluation string
 
 // AdminDocumentState received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is.

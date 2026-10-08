@@ -99,7 +99,8 @@ export function TimelinePanel({
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const heading = useRef<HTMLHeadingElement>(null);
-  const revision = JSON.stringify(row?.steps);
+  // Steps and alert applicability both change what the timeline shows.
+  const revision = JSON.stringify([row?.steps, row?.evaluation]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -248,7 +249,8 @@ function Content({
   if (
     !stopped &&
     doc.evaluation === "not_applicable" &&
-    time.evaluated === undefined
+    time.evaluated === undefined &&
+    !bars.some((b) => b.key === "alerts")
   )
     bars.push({ key: "alerts", label: labelOf("evaluated"), state: "none" });
   bars.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));

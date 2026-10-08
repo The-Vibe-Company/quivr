@@ -550,7 +550,10 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	}
 
 	// Once no enabled Subscription covers the Corpus, a new Version has no
-	// evaluation coming; an evaluated one keeps its evaluated step.
+	// evaluation coming; an evaluated one keeps its evaluated step, and one
+	// whose evaluation is still pending still waits for it.
+	_, waiting := searchable(a.ID, "waiting")
+	drain()
 	for i, sub := range []monitoring.Subscription{subs[0], subs[2]} {
 		if _, err = service.DisableSubscription(ctx, scope, fmt.Sprint("disable-all-", i), sub.ID); err != nil {
 			t.Fatal(err)
@@ -563,6 +566,9 @@ INSERT INTO change_events(organization,sequence,event_id,corpus_id,event_type,re
 	}
 	if got := evaluationOf(groupVersion); got != content.EvaluationApplicable {
 		t.Fatalf("evaluated Version: evaluation %q", got)
+	}
+	if got := evaluationOf(waiting); got != content.EvaluationApplicable {
+		t.Fatalf("pending evaluation: evaluation %q", got)
 	}
 }
 

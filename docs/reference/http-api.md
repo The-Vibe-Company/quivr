@@ -3876,7 +3876,7 @@ properties:
 | `state` | string | yes | received until the Version is materialized, then its Version Availability state, and withdrawn once its Record is. One of `received`, `materialized`, `building_baseline`, `retrieval_ready`, `quarantined`, `withdrawn`. |
 | `is_current` | boolean | yes |  |
 | `steps` | [`VersionSteps`](#versionsteps) | yes |  |
-| `evaluation` | string | yes | Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created since makes an older Version applicable although it never evaluates it. One of `applicable`, `not_applicable`. |
+| `evaluation` | string | yes | Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it. One of `applicable`, `not_applicable`. |
 
 <details>
 <summary>Full schema</summary>
@@ -3920,7 +3920,7 @@ properties:
     enum:
       - applicable
       - not_applicable
-    description: Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created since makes an older Version applicable although it never evaluates it.
+    description: Whether alert evaluation applies to the Version. applicable when it was evaluated (steps.evaluated_at), an evaluation of it is pending, or an enabled Subscription covers its Corpus at the time of the read; not_applicable otherwise, so no evaluated step is coming. Judged at read time, not when the Version became searchable; a Subscription created, re-enabled or widened to the Corpus since makes an older Version applicable although it never evaluates it.
 required:
   - version_id
   - record_id
