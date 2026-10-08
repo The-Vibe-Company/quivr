@@ -88,7 +88,7 @@ For a browser UI over the same API, run `make demo` and open http://127.0.0.1:51
 
 - Searches report query-model outages as retryable `503 model_unavailable`, separately from overload and other search dependency failures. See [Search errors](https://docs.quivr.thevibecompany.co/guides/search#when-a-search-fails).
 
-- [Bulk worker autoscaling](deploy/railway/autoscaler/README.md) uses a standalone Go controller on Railway; Kubernetes can use KEDA. Live workers keep separate capacity.
+- [Worker autoscaling](https://docs.quivr.thevibecompany.co/run-quivr/deploy#scale-workers-on-backlog) follows the bulk or live queue backlog, with KEDA, the `quivr-autoscaler` binary (Kubernetes or Railway) or by hand. Live workers keep separate capacity.
 
 - Rolling application upgrades use additive schema expansions; destructive cleanup
   runs only with `quivr migrate --contract`. API and worker retry performance-index
