@@ -60,6 +60,9 @@ const (
 
 // Run dispatches and evaluates until ctx ends.
 func (e Engine) Run(ctx context.Context) {
+	var stop func()
+	e.Store, stop = startMatchCommitter(ctx, e.Store)
+	defer stop()
 	workers, poll := max(e.Workers, 1), e.Poll
 	if poll <= 0 {
 		poll = 200 * time.Millisecond
