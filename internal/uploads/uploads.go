@@ -14,6 +14,10 @@ import (
 // MaxUploadBytes bounds a single presigned transfer expectation.
 const MaxUploadBytes = 1 << 30
 
+// settleTimeout bounds the state writes that end a verification after its
+// caller is gone.
+const settleTimeout = 10 * time.Second
+
 var (
 	ErrConflict = publicerr.IdempotencyConflict
 	ErrNotFound = publicerr.NotFound
@@ -175,23 +179,34 @@ func (s Service) Confirm(ctx context.Context, org, id string) (Session, error) {
 		return Session{}, err
 	}
 	meta.State = "verifying"
-	if err = s.Transfer.Verify(ctx, meta.ObjectKey, meta.SizeBytes, meta.SHA256); err != nil {
+	err = s.Transfer.Verify(ctx, meta.ObjectKey, meta.SizeBytes, meta.SHA256)
+	// Reading storage follows the caller; settling the state does not. A
+	// caller cancelled mid-verification (a stopping worker) must not leave the
+	// session verifying, whose replay carries no upload URL. The bound starts
+	// after the read, however long a large object took.
+	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), settleTimeout)
+	defer cancel()
+	if err != nil {
 		if !errors.Is(err, ErrVerificationMismatch) {
 			// A temporary transfer-verification failure must stay confirmable, so
 			// the client can retry once storage recovers.
-			_ = s.Store.SetState(ctx, org, id, "awaiting_upload", "", "verification_unavailable")
+			if err = s.Store.SetState(settle, org, id, "awaiting_upload", "", "verification_unavailable"); err != nil {
+				return Session{}, err
+			}
 			meta.State, meta.ErrorCode = "awaiting_upload", "verification_unavailable"
-			return s.session(ctx, meta)
+			return s.session(settle, meta)
 		}
-		_ = s.Store.SetState(ctx, org, id, "rejected", "", "verification_failed")
+		if err = s.Store.SetState(settle, org, id, "rejected", "", "verification_failed"); err != nil {
+			return Session{}, err
+		}
 		meta.State, meta.ErrorCode = "rejected", "verification_failed"
-		return s.session(ctx, meta)
+		return s.session(settle, meta)
 	}
 	blobID := content.StableID("blob", org, meta.SHA256, meta.MediaType)
-	if err = s.Store.SaveBlob(ctx, org, blobID, meta.ObjectKey, meta.SHA256, meta.SizeBytes, meta.MediaType); err != nil {
+	if err = s.Store.SaveBlob(settle, org, blobID, meta.ObjectKey, meta.SHA256, meta.SizeBytes, meta.MediaType); err != nil {
 		return Session{}, err
 	}
-	if err = s.Store.SetState(ctx, org, id, "verified", blobID, ""); err != nil {
+	if err = s.Store.SetState(settle, org, id, "verified", blobID, ""); err != nil {
 		return Session{}, err
 	}
 	meta.State, meta.BlobID = "verified", blobID

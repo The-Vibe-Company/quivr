@@ -471,9 +471,12 @@ func CredentialSecrets(credential json.RawMessage) []string {
 }
 
 // ContainsSecret reports whether body holds one of the secrets, raw or JSON
-// escaped.
+// escaped. An empty string is in every body and holds no secret.
 func ContainsSecret(body []byte, secrets []string) bool {
 	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
 		if bytes.Contains(body, []byte(secret)) || bytes.Contains(body, jsonEscaped(secret)) {
 			return true
 		}
