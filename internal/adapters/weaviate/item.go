@@ -17,6 +17,7 @@ import (
 
 const itemKind = "itemKind"
 const passageText = "passageText"
+const maxItemPassages = 2400
 
 func itemProperty(f corpus.Field) string {
 	b, _ := json.Marshal(f)
@@ -179,7 +180,12 @@ func (s *Store) itemQuery(ctx context.Context, collection, branch, where string,
 		} `json:"data"`
 		Errors []any `json:"errors"`
 	}
-	if _, err := s.call(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &out); err != nil {
+	responseLimit := int64(2 << 20)
+	if text {
+		// The bounded window can carry more text than a 128-row page.
+		responseLimit = 16 << 20
+	}
+	if _, err := s.callLimit(ctx, "POST", "/v1/graphql", map[string]any{"query": query}, &out, responseLimit); err != nil {
 		return nil, err
 	}
 	if len(out.Errors) > 0 {
@@ -310,41 +316,18 @@ func termCoverage(text, query string, analyzers []keywords.Analyzer) int {
 	return best
 }
 
-// Refill in small, deterministically ordered pages instead of choosing a
-// highlight from one storage-order slice. A complete query-term match cannot
-// be improved by later passages. The ceiling bounds work for very long items.
-func (s *Store) itemPassages(ctx context.Context, collection, where, query string, analyzers []keywords.Analyzer, limit, items int, grouped bool) ([]itemRow, error) {
-	const ceiling = 2400
-	page := min(128, max(8, 8*limit))
-	terms := termCoverage(query, query, analyzers)
-	best := map[string]int{}
-	var rows []itemRow
-	for offset := 0; offset < ceiling; offset += page {
-		branch := fmt.Sprintf("offset:%d,sort:[{path:[\"segmentId\"],order:asc}],", offset)
-		batch, err := s.itemQuery(ctx, collection, branch, where, min(page, ceiling-offset), true)
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, batch...)
-		for _, r := range batch {
-			key := r.GenerationID + "/" + r.VersionID
-			coverage := termCoverage(r.Text, query, analyzers)
-			if old, ok := best[key]; !ok || coverage > old {
-				best[key] = coverage
-			}
-		}
-		complete := grouped && len(best) == items
-		for _, coverage := range best {
-			if coverage < terms {
-				complete = false
-				break
-			}
-		}
-		if complete || len(batch) < page {
-			break
-		}
+// Fetch one deterministic, bounded passage window. Repeated offset queries
+// re-sort the same allow-list and can consume the entire search deadline.
+func (s *Store) itemPassages(ctx context.Context, collection, where string) ([]itemRow, bool, error) {
+	branch := `sort:[{path:["segmentId"],order:asc}],`
+	rows, err := s.itemQuery(ctx, collection, branch, where, maxItemPassages, true)
+	if errors.Is(err, errResponseLimit) {
+		// One canonical passage is bounded by its 2 MiB source blob, even
+		// after JSON escaping. Recover once rather than retrying smaller pages.
+		rows, err = s.itemQuery(ctx, collection, branch, where, 1, true)
+		return rows, true, err
 	}
-	return rows, nil
+	return rows, len(rows) == maxItemPassages, err
 }
 
 // itemSearch consolidates sparse copies and max passage scores BEFORE fusion.
@@ -401,8 +384,9 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 			}
 			items := map[string]content.Candidate{}
 			// An ownerless item may not yet have passages from the selected
-			// ingestion owner. Refill before allowing it to consume the page.
-			for depth := limit; ; depth = min(2400, depth*2) {
+			// ingestion owner. Allow one refill at twice the candidate depth;
+			// passage retrieval has one window and bounded byte-limit recovery.
+			for round, depth := 0, limit; round < 2; round, depth = round+1, min(2400, depth*2) {
 				more := false
 				for _, analyzer := range requests {
 					var props []string
@@ -445,7 +429,7 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 				for _, c := range ordered(items) {
 					ids = append(ids, equal("versionId", c.VersionID))
 				}
-				rows, err := s.itemPassages(ctx, collection, and(passageWhere, or(ids...)), q.Query, passageAnalyzers, limit, len(items), grouped)
+				rows, exhausted, err := s.itemPassages(ctx, collection, and(passageWhere, or(ids...)))
 				if err != nil {
 					return nil, err
 				}
@@ -480,7 +464,9 @@ func (s *Store) itemSearch(ctx context.Context, routes []retrieval.Route, scope 
 						sparse[id] = c
 					}
 				}
-				if len(chosen) >= limit || !more || depth >= 2400 {
+				// A full window or byte limit exhausts the scan budget. A broader
+				// item allow-list would repeat another truncated passage scan.
+				if len(chosen) >= limit || !more || depth >= 2400 || exhausted {
 					break
 				}
 			}

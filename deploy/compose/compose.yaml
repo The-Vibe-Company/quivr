@@ -1,14 +1,26 @@
 services:
   postgres:
     image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    entrypoint: [sh, /usr/local/bin/quivr-postgres]
     environment:
       POSTGRES_USER: quivr
       POSTGRES_DB: quivr
       POSTGRES_PASSWORD: ${QUIVR_DB_PASSWORD:?}
+      QUIVR_POSTGRES_MEMORY_MB: ${QUIVR_POSTGRES_MEMORY_MB:-}
+      QUIVR_POSTGRES_VOLUME_MB: ${QUIVR_POSTGRES_VOLUME_MB:-}
+      QUIVR_POSTGRES_MAX_WAL_SIZE: ${QUIVR_POSTGRES_MAX_WAL_SIZE:-}
+      QUIVR_POSTGRES_MIN_WAL_SIZE: ${QUIVR_POSTGRES_MIN_WAL_SIZE:-}
+      QUIVR_POSTGRES_MAX_CONNECTIONS: ${QUIVR_POSTGRES_MAX_CONNECTIONS:-256}
+      QUIVR_POSTGRES_SHARED_BUFFERS: ${QUIVR_POSTGRES_SHARED_BUFFERS:-}
+      QUIVR_POSTGRES_EFFECTIVE_CACHE_SIZE: ${QUIVR_POSTGRES_EFFECTIVE_CACHE_SIZE:-}
+      QUIVR_POSTGRES_WORK_MEM: ${QUIVR_POSTGRES_WORK_MEM:-4MB}
+      QUIVR_POSTGRES_MAINTENANCE_WORK_MEM: ${QUIVR_POSTGRES_MAINTENANCE_WORK_MEM:-}
     ports:
       - "127.0.0.1::5432"
     volumes:
       - data:/var/lib/postgresql/data
+      - ../postgres/start.sh:/usr/local/bin/quivr-postgres:ro
+      - ../postgres/init.sql:/docker-entrypoint-initdb.d/quivr.sql:ro
     logging:
       driver: json-file
       options:

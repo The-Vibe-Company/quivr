@@ -181,6 +181,14 @@ Set `telemetry.endpoint` to your OpenTelemetry collector in the API and worker c
 
 Keep `/metrics` scraping as it is: metric names and buckets remain unchanged. Each plugin process needs its own exporter configuration to send its internal spans to the collector.
 
+### Diagnose slow searches during imports
+
+Run the same query in `lexical`, `semantic` and `hybrid` modes while content is being imported. Use a key with `search:query` permission; [Search](/guides/search) shows the request. Successful responses report `usage.phases.index_query_ms`, which includes index requests, response decoding and passage selection in the API.
+
+For a slow request, use its `X-Trace-ID` to inspect the `weaviate.request` spans in your collector. These spans end at response headers; body transfer and decoding still contribute to `index_query_ms`. Compare their durations and count with the whole search. Many fast index requests can still consume the search deadline. A later direct replay against Weaviate cannot attribute the original request's delay.
+
+Lexical search fetches one sorted window of at most 2,400 passage objects per candidate round. A full window ends the scan. For a smaller window, it allows one refill with twice as many candidate documents as the first round, capped at 2,400 candidates. Each window has a 16 MiB response limit. If it exceeds that limit, search makes one recovery request for a single passage and ends the scan. These bounds also apply to the lexical part of hybrid search; unusually long documents or many candidate documents without passages from the selected ingestion plugin can leave fewer candidates than requested. Hitting these bounds can omit matching documents and change hybrid result order. Compare latency and completed ingestion throughput before changing Weaviate indexing settings or adding shards.
+
 ## Scale workers on backlog
 
 Run separate `quivr worker` processes with `worker.queues: ["live"]` and `["bulk"]`; choose each process's slots using [Worker queues](/reference/configuration#worker-queues). Replicas keep no durable local work: PostgreSQL and Temporal own claims, progress and retries. Use the same database, Temporal namespace, storage, signing keys and active plugin plan. Give processes distinct probe addresses on a shared host, or separate network namespaces. Plugin endpoints may point to shared services or sidecars in each process's network namespace; each sidecar needs its own lifecycle and writable temporary directory. A shared embedding provider still needs enough capacity for both classes.
