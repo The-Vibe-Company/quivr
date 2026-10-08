@@ -114,7 +114,7 @@ def runtime_connectors(env):
     if selection:
         connectors = connectors + [{**HOSTED_EMBED, 'configuration': selected_hosted_configuration(env),
                                     'secrets': HOSTED_EMBED['secrets'] if selection == 'cohere' else ['EMBED_API_KEY'],
-                                    'secret_names': {} if selection == 'cohere' else {'EMBED_API_KEY': 'AZURE_FOUNDRY_KEY'}}]
+                                    'secret_names': {'AZURE_FOUNDRY_KEY': 'EMBED_API_KEY'} if selection == 'cohere' else {}}]
     if env.get('QUIVR_DEMO_JEV_RERANK') != '1':
         return connectors
     return connectors + [{
@@ -157,15 +157,15 @@ def gemma_configuration(env):
             'model': 'google/embeddinggemma-2', 'dimensions': 768,
             # The plugin revision field is bounded to 32 bytes; the image pins the full SHA.
             'model_revision': '914f7f89142e33e7',
-            'query_prefix': 'task: search result | query: ',
-             'document_template': 'gemma', 'title_source': 'title',
-            'packing': 'paragraphs', 'body_tokens': 512, 'max_chunks': 256,
+            'query_template': 'task: search result | query: {query}',
+            'document_template': 'title: {title} | text: {text}', 'title_source': 'title',
+            'body_tokens': 512, 'max_chunks': 256,
             'rebalance_tail': True, 'tail_min_fraction': 0.25,
             'tokenizer': {'python': TOKENIZER['python'],
                           'model': '/app/.scratch/tokenizer/embeddinggemma-2.json',
                           'sha256': '4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4'},
             # Exact model-tokenized body budget is separate from the full input window.
-            'max_tokens_per_segment': 2048, 'overlap': 0,
+            'max_tokens_per_segment': 2048,
             'batch_size': 32, 'max_batch_tokens': 65536, 'max_concurrent_requests': 16,
             'request_timeout_ms': 10000, 'call_budget_ms': 90000,
             'usd_per_million_tokens': 0}
@@ -178,9 +178,8 @@ def hosted_configuration(env):
     return {'format': 'cohere',
             'base_url': env['AZURE_FOUNDRY_ENDPOINT'].strip().rstrip('/') + '/providers/cohere/v2',
             'auth': 'api-key', 'model': 'Cohere-Embed-V5-Pro', 'dimensions': 1024,
-            'document_input_type': 'search_document', 'query_input_type': 'search_query',
             # Conservative UTF-8 byte/token bound, not an exact provider token window.
-            'max_tokens_per_segment': 6144, 'overlap': 192,
+            'max_tokens_per_segment': 6144,
             'batch_size': 32, 'max_batch_tokens': 196608, 'max_concurrent_requests': 16,
             'usd_per_million_tokens': 0.12}
 
@@ -359,7 +358,7 @@ def sidecar_commands(env, role='worker'):
     deliveries to, the ingestion plugin it encodes queries with, the retrieval plugin
     that ranks its searches, and the subscription plugins it calls for previews. Its
     environment carries only the secrets that plugin declares (alerts and Jev:
-    TYPESAFE_API_KEY, hosted.embed: AZURE_FOUNDRY_KEY), never the core's.
+    TYPESAFE_API_KEY, hosted.embed: EMBED_API_KEY), never the core's.
 
     The plugins are first-party code under the same user as the worker, not an isolation boundary.
     """

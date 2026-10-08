@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 )
 
+const specialTokens = 8
+
 type tokenizerConfiguration struct {
 	Python string `json:"python"`
 	Model  string `json:"model"`

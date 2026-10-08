@@ -77,7 +77,7 @@ def hosted(binary, directory, candidate, gate):
     owner = 'hosted.embed.c' + hashlib.sha256(candidate['label'].encode()).hexdigest()[:12]
     config = {'plugin_id': owner, 'format': gate.format, 'base_url': gate.url, 'auth': 'none', 'model': candidate['model'],
               'dimensions': candidate['dimensions'], 'max_tokens_per_segment': candidate['segment_tokens'],
-              'max_batch_tokens': 32768, 'batch_size': 16, 'overlap': 48,
+              'max_batch_tokens': 32768, 'batch_size': 16, 'body_tokens': candidate['segment_tokens'],
               'request_timeout_ms': 10000, 'call_budget_ms': 90000, 'max_retries': 2,
               'usd_per_million_tokens': candidate['price']['usd_per_million_tokens']}
     configuration = directory / 'configuration.json'
@@ -90,7 +90,7 @@ def hosted(binary, directory, candidate, gate):
     space = next(iter(spaces))
     gate.plugin = declared['id']
     port = ports.allocate()
-    env = {k: v for k, v in plugin_environment.inherited().items() if k not in ('AZURE_FOUNDRY_KEY', 'AZURE_FOUNDRY_ENDPOINT', 'TYPESAFE_API_KEY')}
+    env = {k: v for k, v in plugin_environment.inherited().items() if k not in ('EMBED_API_KEY', 'AZURE_FOUNDRY_KEY', 'AZURE_FOUNDRY_ENDPOINT', 'TYPESAFE_API_KEY')}
     env.update(QUIVR_PLUGIN_HOST='127.0.0.1', QUIVR_PLUGIN_PORT=str(port), QUIVR_PLUGIN_MANIFEST=str(manifest))
     log = directory / 'hosted-embedding.log'
     with log.open('ab') as output:

@@ -27,16 +27,7 @@ func (i *ingester) SegmentAndEmbedPage(ctx context.Context, req *quivrplugin.Ing
 	window := part
 	window.Role = "body"
 	window.Text = string(runes[req.Page.Start:])
-	var segments []quivrplugin.Segment
-	var inputs []string
-	var err error
-	if c.Packing == "paragraphs" {
-		segments, inputs, err = c.packedSegments(ctx, []quivrplugin.IngestPart{window}, i.tokenizer)
-	} else {
-		c.Overlap = 0
-		c.DocumentPrefix = c.documentInput("", "")
-		segments, inputs, err = c.segments([]quivrplugin.IngestPart{window})
-	}
+	segments, inputs, err := c.packedSegments(ctx, []quivrplugin.IngestPart{window}, i.tokenizer)
 	if err != nil {
 		var refusal *quivrplugin.IngestError
 		if !errors.As(err, &refusal) || (refusal.Code != "segmentation_limit" && refusal.Code != "no_indexable_text") {
