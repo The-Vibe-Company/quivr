@@ -71,7 +71,7 @@ func load() (settings, error) {
 	case "kubernetes":
 		required = append(required, "QUIVR_AUTOSCALER_KUBERNETES_DEPLOYMENT")
 	case "railway":
-		required = append(required, "RAILWAY_TOKEN", "RAILWAY_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID")
+		required = append(required, "RAILWAY_TOKEN", "QUIVR_AUTOSCALER_RAILWAY_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID")
 	default:
 		return s, errors.New("QUIVR_AUTOSCALER_BACKEND must be kubernetes or railway")
 	}
@@ -81,7 +81,7 @@ func load() (settings, error) {
 		}
 	}
 	s.deployment = os.Getenv("QUIVR_AUTOSCALER_KUBERNETES_DEPLOYMENT")
-	s.railwayToken, s.railwayService, s.railwayEnvironment = os.Getenv("RAILWAY_TOKEN"), os.Getenv("RAILWAY_SERVICE_ID"), os.Getenv("RAILWAY_ENVIRONMENT_ID")
+	s.railwayToken, s.railwayService, s.railwayEnvironment = os.Getenv("RAILWAY_TOKEN"), os.Getenv("QUIVR_AUTOSCALER_RAILWAY_SERVICE_ID"), os.Getenv("RAILWAY_ENVIRONMENT_ID")
 	if s.queue == "" {
 		s.queue = "bulk"
 	}
