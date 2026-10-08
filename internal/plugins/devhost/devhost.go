@@ -110,8 +110,8 @@ func (t *tail) String() string {
 	defer t.mu.Unlock()
 	out := t.buf
 	if t.cut {
-		// Start on a whole line.
-		if i := bytes.IndexByte(out, '\n'); i >= 0 {
+		// Start on a whole line, unless the last line alone fills the tail.
+		if i := bytes.IndexByte(out, '\n'); i >= 0 && len(bytes.TrimSpace(out[i+1:])) > 0 {
 			out = out[i+1:]
 		}
 	}

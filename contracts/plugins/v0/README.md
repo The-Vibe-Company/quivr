@@ -993,7 +993,7 @@ language and the Contract Runner, but not the engine.
 | `QUIVR_PLUGIN_MANIFEST` | Absolute path of the inspected `quivr-plugin.yaml` |
 
 The plugin must serve the routes above on that address. On Linux the assigned
-port stays reserved until the plugin binds it, so its listener must set
+port stays reserved for the plugin for 60 seconds, so its listener must set
 `SO_REUSEADDR`, as Go's `net.Listen` and Python's `http.server` do. `dev` stops
 it with SIGTERM, then SIGKILL after five seconds.
 
