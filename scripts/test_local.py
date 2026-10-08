@@ -146,6 +146,26 @@ class Readiness(unittest.TestCase):
         self.assertFalse(recorded['worker']['ready'])
         self.assertIn('last', recorded['worker'])
 
+    def test_exited_process_fails_the_wait_at_once_with_its_last_log_lines(self):
+        # THE-1138: a worker that could not bind its probe exited in 0.5 s; the wait polled it for 20 s.
+        name = 'quivr-test-' + uuid.uuid4().hex[:10]
+        self.addCleanup(shutil.rmtree, local.ROOT / '.scratch' / name, True)
+        stack = local.Stack(name)
+        stack.state['worker_probe_port'] = local.port()  # nothing listens there
+        (stack.directory / 'worker.json').write_text('{}')
+        with (stack.directory / 'worker-startup.log').open('a') as log:
+            child = subprocess.Popen([sys.executable, '-c', 'import sys; print("process failed: listen failed"); sys.exit(1)'], stdout=log)
+        child.wait(timeout=5)
+        with mock.patch('local.subprocess.Popen', return_value=child):
+            stack.spawn('worker', 'worker.json')
+        # Synthetic time: the 20 s budget passes on the third reading, so only an exit check fails sooner.
+        clock = iter([0, 0])
+        with mock.patch('local.time.monotonic', side_effect=lambda: next(clock, 21)), mock.patch('local.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError, r'(?s)worker exited with status 1 before it was ready .*worker-startup\.log.*process failed: listen failed'):
+                stack.await_ready('worker_probe_port')
+        recorded = json.loads((stack.directory / 'readiness.json').read_text())
+        self.assertEqual(recorded['worker'], {'ready': False, 'exited': 1, 'waited_seconds': 0})
+
     def test_verification_refuses_a_disk_near_weaviates_read_only_threshold(self):
         # THE-758: past 90% Weaviate turns read-only and Records stop becoming searchable.
         name = 'quivr-test-' + uuid.uuid4().hex[:10]
