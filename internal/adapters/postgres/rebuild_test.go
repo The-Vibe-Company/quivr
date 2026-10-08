@@ -299,7 +299,7 @@ func TestRebuildCursorResumesAndSweepsNewVersions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	pool := scratchDatabase(t, ctx)
-	if err := app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(nil)); err != nil {
+	if err := app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(nil)); err != nil {
 		t.Fatal(err)
 	}
 	// Fixed domain identities in a fresh database make ordering reproducible.

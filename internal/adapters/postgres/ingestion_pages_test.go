@@ -78,7 +78,7 @@ func testPagedIngestionResumesCommittedPassages(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = app.BootstrapDatabase(ctx, pool, app.DeploymentSpaces(set)); err != nil {
+	if err = app.BootstrapDatabase(ctx, pool, app.Config{}.DeploymentSpaces(set)); err != nil {
 		t.Fatal(err)
 	}
 	if mode == "legacy" {

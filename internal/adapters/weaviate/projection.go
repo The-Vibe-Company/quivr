@@ -49,13 +49,32 @@ const legacyVector = "semantic_text_v1"
 const lexicalProperty = "lexicalText"
 
 // VectorName is the named vector a generation stores a space's vectors
-// under: legacyVector for the built-in space and for a generation built
-// before named spaces, otherwise a name derived from the space key.
+// under: legacyVector for a generation built before named spaces; for a
+// space the generation records an index setting for, a name derived from
+// the space key and that setting, so a changed setting builds a new index;
+// otherwise legacyVector for the built-in space and a name derived from the
+// space key alone.
 func (s *Store) VectorName(g content.Generation, space string) string {
-	if !g.SpacesProjected || space == s.LegacySpace {
+	if !g.SpacesProjected {
+		return legacyVector
+	}
+	if index := spaceIndex(g, space); index != nil {
+		return "s_" + content.Hash([]byte("quivr/named-vector/v2\x00" + space + "\x00" + index.Quantization + "\x00" + strconv.Itoa(index.RescoreLimit)))[:24]
+	}
+	if space == s.LegacySpace {
 		return legacyVector
 	}
 	return "s_" + content.Hash([]byte("quivr/named-vector/v1\x00" + space))[:24]
+}
+
+// spaceIndex is the index setting g records for space, nil when none.
+func spaceIndex(g content.Generation, space string) *content.VectorIndex {
+	for _, sp := range g.Spaces {
+		if sp.ID == space {
+			return sp.Index
+		}
+	}
+	return nil
 }
 
 // distance maps a registry metric to the Weaviate distance.
@@ -69,8 +88,28 @@ func distance(metric string) string {
 	return "cosine"
 }
 
-func vectorConfig(metric string) map[string]any {
-	return map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw", "vectorIndexConfig": map[string]any{"distance": distance(metric)}}
+// vectorConfig declares an HNSW named vector stored as index says; a nil
+// index (a space recorded before index settings) gets the default. "none"
+// also opts out of a quantization the database applies by default.
+func vectorConfig(metric string, index *content.VectorIndex) map[string]any {
+	if index == nil {
+		index = &content.DefaultVectorIndex
+	}
+	config := map[string]any{"distance": distance(metric)}
+	switch index.Quantization {
+	case content.QuantizationRQ8, content.QuantizationRQ1:
+		rq := map[string]any{"enabled": true, "bits": 8}
+		if index.Quantization == content.QuantizationRQ1 {
+			rq["bits"] = 1
+		}
+		if index.RescoreLimit > 0 {
+			rq["rescoreLimit"] = index.RescoreLimit
+		}
+		config["rq"] = rq
+	case content.QuantizationNone:
+		config["skipDefaultQuantization"] = true
+	}
+	return map[string]any{"vectorizer": map[string]any{"none": nil}, "vectorIndexType": "hnsw", "vectorIndexConfig": config}
 }
 
 // ensureVectors adds the named vectors of a generation's spaces that its
@@ -105,7 +144,7 @@ func (s *Store) ensureVectors(ctx context.Context, g content.Generation) error {
 	for _, sp := range g.Spaces {
 		name := s.VectorName(g, sp.ID)
 		if _, ok := configs[name]; !ok {
-			configs[name] = vectorConfig(sp.Metric)
+			configs[name] = vectorConfig(sp.Metric, sp.Index)
 			added = true
 		}
 	}
@@ -210,7 +249,7 @@ func (s *Store) Bootstrap(ctx context.Context, collection string) error {
 	for _, name := range []string{"title", "body", lexicalProperty} {
 		properties = append(properties, searchable(name))
 	}
-	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{legacyVector: vectorConfig("cosine")}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
+	schema := map[string]any{"class": collection, "properties": properties, "vectorConfig": map[string]any{legacyVector: vectorConfig("cosine", nil)}, "invertedIndexConfig": map[string]any{"stopwords": map[string]any{"preset": "none"}}, "replicationConfig": map[string]any{"factor": 1}}
 	_, err = s.call(ctx, "POST", "/v1/schema", schema, nil)
 	return err
 }
@@ -572,10 +611,14 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 	}
 	operands = append(operands, identityConditions(q)...)
 	where := "{operator:And,operands:[" + strings.Join(operands, ",") + "]}"
-	// Every route names the space's vectors the same way, or the query
-	// cannot rank them together.
+	// For a vector search, every route names the space's vectors the same
+	// way, or the query cannot rank them together; a keyword search reads
+	// no vector.
 	target := ""
 	for _, r := range routes {
+		if q.Mode == "lexical" {
+			break
+		}
 		space := q.Space
 		if space == "" {
 			space = r.Generation.SpaceID
@@ -588,10 +631,8 @@ func (s *Store) searchLegacy(ctx context.Context, routes []retrieval.Route, scop
 		// A generation's named vectors exist from its first vector write; a
 		// semantic or hybrid search before any (a new install, a Corpus whose
 		// Versions still wait for their vectors) adds them, and finds nothing.
-		if q.Mode != "lexical" {
-			if err := s.ensureVectors(ctx, r.Generation); err != nil {
-				return nil, err
-			}
+		if err := s.ensureVectors(ctx, r.Generation); err != nil {
+			return nil, err
 		}
 	}
 	// The source field ranks the title and body as written; the lexical field
