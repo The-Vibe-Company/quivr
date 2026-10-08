@@ -21,9 +21,17 @@ func (f transport) RoundTrip(r *http.Request) (*http.Response, error) { return f
 const scaleURL = "https://203.0.113.1:443/apis/apps/v1/namespaces/quivr/deployments/quivr-bulk/scale"
 
 // This owner test exercises the scale subresource wire contract: bearer token
-// read per request, merge patch on spec.replicas, and sanitized failures.
+// read per request, merge patch on spec.replicas, and failed calls.
+// RequestJSON owns error redaction (queues_test.go).
 func TestKubernetesScaleAPI(t *testing.T) {
 	token := filepath.Join(t.TempDir(), "token")
+	var check func(*http.Request, []byte) (int, string)
+	// One backend serves every row, so a cached token would miss the rotations below.
+	backend := kubernetes.Backend{URL: scaleURL, TokenFile: token, Client: &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		status, response := check(r, body)
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(response))}, nil
+	})}}
 	for _, tc := range []struct {
 		name, method, response string
 		status, set, want      int
@@ -39,21 +47,19 @@ func TestKubernetesScaleAPI(t *testing.T) {
 		{name: "scale conflict", method: "PATCH", set: 5, status: 409, response: `conflict`, bad: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// A rotated token must be used by the next request.
+			// Each row rotates the token; the shared backend must send the new one.
 			if err := os.WriteFile(token, []byte(" token-"+tc.name+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			client := &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
-				body, _ := io.ReadAll(r.Body)
+			check = func(r *http.Request, body []byte) (int, string) {
 				if r.Method != tc.method || r.URL.String() != scaleURL || r.Header.Get("Authorization") != "Bearer token-"+tc.name || r.Header.Get("User-Agent") != "quivr-autoscaler" {
 					t.Fatalf("unexpected request %s %s", r.Method, r.URL)
 				}
 				if tc.method == "PATCH" && (r.Header.Get("Content-Type") != "application/merge-patch+json" || string(body) != `{"spec":{"replicas":5}}`) {
 					t.Fatalf("unexpected patch %q %s", r.Header.Get("Content-Type"), body)
 				}
-				return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.response))}, nil
-			})}
-			backend := kubernetes.Backend{URL: scaleURL, TokenFile: token, Client: client}
+				return tc.status, tc.response
+			}
 			var got int
 			var err error
 			if tc.method == "GET" {

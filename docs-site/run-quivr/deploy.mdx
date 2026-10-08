@@ -199,7 +199,7 @@ Every option below applies the same rule to one queue's waiting count:
 replicas = clamp(ceil(waiting / documents_per_replica), min, max)
 ```
 
-Scale-up needs no stabilization window; scale-down goes only to the highest recommendation of the last five minutes, which stops oscillation around a threshold. The examples use one to eight workers and 20,000 waiting documents per replica, so 20,001 waiting documents need two workers. Choose the target from measured document throughput and your provider's capacity. Keep at least one bulk worker so admitted work continues when waiting reaches zero. Counts are installation-wide, so a request to any healthy API replica is enough.
+Scale-up needs no stabilization window; scale-down goes only to the highest recommendation of the last five minutes, which reduces short-lived scale-downs around a threshold. The examples use one to eight workers and 20,000 waiting documents per replica, so 20,001 waiting documents need two workers. Choose the target from measured document throughput and your provider's capacity. Keep at least one bulk worker so admitted work continues when waiting reaches zero. Counts are installation-wide, so a request to any healthy API replica is enough.
 
 Create a dedicated key for the scaler with only `queues:read` and `corpora: ["*"]`, distinct from the API and operator keys, under [API keys](/reference/configuration#api-keys). Never give a scaler the operator key.
 
