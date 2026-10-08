@@ -196,7 +196,9 @@ func (s Service) Confirm(ctx context.Context, org, id string) (Session, error) {
 			meta.State, meta.ErrorCode = "awaiting_upload", "verification_unavailable"
 			return s.session(settle, meta)
 		}
-		_ = s.Store.SetState(settle, org, id, "rejected", "", "verification_failed")
+		if err = s.Store.SetState(settle, org, id, "rejected", "", "verification_failed"); err != nil {
+			return Session{}, err
+		}
 		meta.State, meta.ErrorCode = "rejected", "verification_failed"
 		return s.session(settle, meta)
 	}

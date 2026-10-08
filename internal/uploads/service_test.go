@@ -209,14 +209,16 @@ func TestConfirmRejectsAlteredBytesButRetriesTransientFailure(t *testing.T) {
 func TestACancelledConfirmStillSettlesTheSession(t *testing.T) {
 	for name, tc := range map[string]struct {
 		during bool
+		err    error
 		want   string
 	}{
 		"during verification": {during: true, want: "awaiting_upload"},
-		"after verification":  {during: false, want: "verified"},
+		"after verification":  {want: "verified"},
+		"after altered bytes": {err: uploads.ErrVerificationMismatch, want: "rejected"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
-			transfer := &fakeTransfer{afterVerify: cancel}
+			transfer := &fakeTransfer{err: tc.err, afterVerify: cancel}
 			if tc.during {
 				transfer = &fakeTransfer{onVerify: cancel}
 			}
