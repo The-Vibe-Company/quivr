@@ -301,6 +301,10 @@ x-public-errors:
     status_class: 503
     retryable: true
     operations: [searchRecords]
+  model_unavailable:
+    status_class: 503
+    retryable: true
+    operations: [searchRecords]
   metadata_filter_unavailable:
     status_class: 422
     retryable: false
@@ -3829,6 +3833,8 @@ paths:
         candidates the engine served in this search, each already authorized and hydrated.
         Each API process admits at most 64 active searches across callers. At capacity it immediately
         returns retryable 503 search_unavailable with Retry-After before storage or plugin work.
+        A query encoding model that cannot answer returns retryable 503 model_unavailable,
+        including the legacy inference service and the ingestion plugin that owns the requested vector space.
       requestBody:
         required: true
         content:
@@ -3847,7 +3853,8 @@ paths:
             404 absent/inaccessible, 409 idempotency conflict, 422 unsupported_profile, query_too_long
             (the query is over the profile's or the vector space owner's length limit; the message names
             it), unsupported_search or source_filter_unavailable, 502 retrieval_plugin_invalid (the retrieval plugin broke its
-            contract, for example ranked a segment the engine never served it), 503 dependency unavailable,
+            contract, for example ranked a segment the engine never served it), 503 model_unavailable
+            (the query encoding model could not answer) or search_unavailable (another search dependency is unavailable),
             504 search_deadline_exceeded (the retrieval plugin's rounds outran the profile's hard bound, four times max_latency_ms;
             a dependency that does not answer in time is 503). At search capacity, 503 search_unavailable
             includes Retry-After; retry only after that delay.

@@ -163,7 +163,7 @@ Each `api` and `worker` serves three probes on its `probe_listen` address, `127.
 
 `GET /v0/version` accepts any valid bearer API key and reports the running release, commit, API version and plugin engine compatibility version. Both process startup logs include these fields; `/metrics` includes `quivr_build_info{version="…",revision="…"} 1`. The distribution release is independent of the API (`v0`) and plugin engine compatibility (`0.2.0`) versions.
 
-The `api` becomes ready once its schema check passes and its ingestion plugin has answered a first query, or after 5 seconds; the first searches are then only slower. The `worker` also checks that Temporal, object storage and the search index answer. A plugin that is down does not stop either process. Background work that needs it waits and retries; a search that needs it fails with `503 search_unavailable`.
+The `api` becomes ready once its schema check passes and its ingestion plugin has answered a first query, or after 5 seconds; the first searches are then only slower. The `worker` also checks that Temporal, object storage and the search index answer. A plugin that is down does not stop either process. Background work that needs it waits and retries. A failed query encoder returns `503 model_unavailable`; another unavailable search dependency returns `503 search_unavailable`.
 
 ## Route logs and stop a process
 

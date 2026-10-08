@@ -135,7 +135,7 @@ Search and `GET /v0/corpora/{corpus_id}/vector-spaces` share background coverage
 
 A rebuild or a change to the generation's space or ingestion routing starts a new snapshot with unknown coverage. Counts from the previous route are not reused. Coverage is informational: it never controls whether a candidate is eligible. Plugin API 0.16 adds the same unknown state and age for retrieval plugins; older plugins receive numeric counts without those fields, including zero placeholders before the first snapshot and stale counts afterward. Plugins must not use these counts to gate candidate requests; use API 0.16 when distinguishing unknown from empty coverage matters.
 
-- **The objective is a target, not a cutoff.** A slower search still answers and is counted as over its objective. Quivr stops a search only at its hard limit, four times the objective, between 2 and 9 seconds. Past it, the search fails with `504 search_deadline_exceeded`, or `503 search_unavailable` when the time ran out while Quivr served candidates.
+- **The objective is a target, not a cutoff.** A slower search still answers and is counted as over its objective. Quivr stops a search only at its hard limit, four times the objective, between 2 and 9 seconds. Past it, the search fails with `504 search_deadline_exceeded`, or a retryable `503` when a dependency could not serve candidates: `model_unavailable` for query encoding, `search_unavailable` for other dependencies.
 - **The outer profile's limit covers the chain.** A `jev.rerank/deep` search, inner profile included, has 9 seconds: four times 3 seconds, capped at 9. The inner profile gets the time left or its own hard limit, whichever is shorter: 2 seconds for `core.retrieve/default`.
 - **Spending counts at every level.** Each plugin reports only its own paid calls. Quivr adds them up in `usage.paid_calls` and `usage.cost_cents`, and lists each profile's own share in `usage.profiles`, outer first. Inner spending counts against the inner profile's allowance and the outer one's. A plugin on Plugin API 0.12 or later receives the time and cost left each round, and a reported spend over an allowance fails the search with `502 retrieval_plugin_invalid`.
 
@@ -145,7 +145,7 @@ Within that time, Jev gives its call to the Jev model at most 2 seconds, and les
 
 If hybrid retrieval succeeds and the Jev plugin can respond, the Jev plugin handles errors from the Jev model itself and returns `core.retrieve/default`'s hybrid order instead of failing the search. This covers a missing TypeSafe key, provider errors, invalid answers, and a deadline or cost left too small for a call. Each hit's `explanation` field then reads `re-ranker unavailable: <reason>` instead of Jev's probability; without a key, the reason is `API key not configured`.
 
-Retrieval or plugin outages can still fail the search: a Jev plugin that is down or unreachable, or an ingestion plugin that cannot encode the query, returns `503 search_unavailable`.
+Retrieval or plugin outages can still fail the search. A Jev plugin that is down or unreachable returns `503 search_unavailable`. If the ingestion plugin that encodes the query, or the legacy inference service, cannot answer, Quivr returns `503 model_unavailable`. Both errors are retryable; query validation and length refusals keep their `422` codes.
 
 Without a key, there is no paid call and no reported cost. With a key, a failed paid attempt can still report cost: an attempt that fails without usage from the provider reports a reserved upper-bound cost, not an invoice.
 

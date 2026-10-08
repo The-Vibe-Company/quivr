@@ -194,6 +194,7 @@ var hints = map[string]string{
 	"retrieval_plugin_invalid":  "the deployment's retrieval plugin answered something the engine refuses; an operator checks the plugin",
 	"search_deadline_exceeded":  "the search outran its profile's hard time limit; retry, or use a faster profile",
 	"search_unavailable":        "the search backend is unavailable; retry later",
+	"model_unavailable":         "the query model is unavailable; retry later, or use lexical search if the profile supports it",
 	"source_filter_unavailable": "a requested Corpus predates source filtering; an operator rebuilds it once (POST /v0/corpora/{id}/rebuilds)",
 }
 

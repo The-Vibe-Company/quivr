@@ -172,6 +172,7 @@ func TestSearchFailureCodesIgnoreDetail(t *testing.T) {
 		retrieval.ErrPluginInvalid:      {502, "retrieval_plugin_invalid", "retrieval plugin invalid", false},
 		retrieval.ErrDeadline:           {504, "search_deadline_exceeded", "search deadline exceeded", false},
 		retrieval.ErrUnavailable:        {503, "search_unavailable", "search unavailable", true},
+		retrieval.ErrModelUnavailable:   {503, "model_unavailable", "model unavailable", true},
 	} {
 		const detail = "query exceeds 256 tokens, the limit of profile default"
 		for style, err := range map[string]error{
