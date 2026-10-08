@@ -594,3 +594,13 @@ VALUES('purge-race','seg-late','version-one','fixture','digest-late','{}')`)
 		t.Fatalf("late segmented Version purges = %d, want 1", purges)
 	}
 }
+
+func refreshQueueWork(t *testing.T, ctx context.Context, snapshots QueueSnapshots) {
+	t.Helper()
+	if _, err := snapshots.Pool.Exec(ctx, `UPDATE queue_backlog_snapshots SET observed_at='-infinity',published_at='-infinity'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshots.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
