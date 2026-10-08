@@ -107,12 +107,21 @@ func TestOTLPConfigurationExportsAndFlushes(t *testing.T) {
 			unsampled.End()
 			counter := NewCounter("quivr_test_requests_total", "Test requests.", nil, nil)
 			counter.Add(7)
-			RegisterGauges([]GaugeDefinition{{"quivr_test_backlog", "Test backlog."}}, func(context.Context) ([]float64, error) { return []float64{40}, nil })
+			load := NewLoadMetrics()
+			load.RegisterRoutes("/items/{id}")
+			load.Begin("/items/{id}", "GET")(503, 2*time.Second)
+			finishActive := load.Begin("/items/{id}", "GET")
+			slots := make(chan struct{}, 3)
+			slots <- struct{}{}
+			load.BindSearch(slots)
+			load.SearchRefused()
+			RegisterGauges([]GaugeDefinition{{Name: "quivr_test_backlog", Help: "Test backlog."}}, func(context.Context) ([]float64, error) { return []float64{40}, nil })
 			shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := runtime.Shutdown(shutdown); err != nil {
 				t.Fatal(err)
 			}
+			finishActive(200, time.Second)
 			collector.mu.Lock()
 			defer collector.mu.Unlock()
 			count := 0
@@ -141,10 +150,33 @@ func TestOTLPConfigurationExportsAndFlushes(t *testing.T) {
 				t.Fatalf("exported %d spans, want sampled child only", count)
 			}
 			metricFound, gaugeFound := false, false
+			loadCount, loadDuration, activeGauge, admissionGauge, refusalCount := false, false, false, false, false
 			for _, request := range collector.metrics {
 				for _, resource := range request.ResourceMetrics {
 					for _, scope := range resource.ScopeMetrics {
 						for _, m := range scope.Metrics {
+							switch m.Name {
+							case "quivr_http_requests_total":
+								for _, p := range m.GetSum().DataPoints {
+									loadCount = loadCount || p.GetAsInt() == 1 && m.Unit == "{request}"
+								}
+							case "quivr_http_request_duration_seconds":
+								for _, p := range m.GetHistogram().DataPoints {
+									loadDuration = loadDuration || p.Count == 1 && p.GetSum() == 2 && m.Unit == "s"
+								}
+							case "quivr_http_requests_in_flight":
+								for _, p := range m.GetGauge().DataPoints {
+									activeGauge = activeGauge || p.GetAsInt() == 1 && m.Unit == "{request}"
+								}
+							case "quivr_search_admission_refused_total":
+								for _, p := range m.GetSum().DataPoints {
+									refusalCount = refusalCount || p.GetAsInt() == 1 && m.Unit == "{request}"
+								}
+							case "quivr_search_admission_available":
+								for _, p := range m.GetGauge().DataPoints {
+									admissionGauge = admissionGauge || p.GetAsDouble() == 2 && m.Unit == "{request}"
+								}
+							}
 							if m.Name == "quivr_test_backlog" {
 								for _, p := range m.GetGauge().DataPoints {
 									gaugeFound = gaugeFound || p.GetAsDouble() == 40
@@ -158,6 +190,9 @@ func TestOTLPConfigurationExportsAndFlushes(t *testing.T) {
 						}
 					}
 				}
+			}
+			if !loadCount || !loadDuration || !activeGauge || !admissionGauge || !refusalCount {
+				t.Fatalf("OTLP load metrics: count=%t duration=%t active=%t admission=%t refusals=%t", loadCount, loadDuration, activeGauge, admissionGauge, refusalCount)
 			}
 			if !gaugeFound {
 				t.Fatal("OTLP omitted gauge without Prometheus scrape")

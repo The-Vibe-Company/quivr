@@ -33,18 +33,22 @@ type Family struct {
 }
 
 func NewFamily(name, help string, labels []string, bounds []float64, limit int) *Family {
+	return newFamily(name, help, labels, bounds, limit, "")
+}
+
+func newFamily(name, help string, labels []string, bounds []float64, limit int, unit string) *Family {
 	f := &Family{name: name, help: help, labels: append([]string(nil), labels...), bounds: append([]float64(nil), bounds...), series: map[string][]string{}, limit: limit, reader: sdkmetric.NewManualReader()}
 	if bounds != nil {
 		f.bounds = append([]float64{}, bounds...)
 	}
 	sort.Float64s(f.bounds)
-	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(f.reader)).Meter("quivr")
+	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(f.reader), sdkmetric.WithCardinalityLimit(0)).Meter("quivr")
 	exported := otel.Meter("quivr")
 	if bounds == nil {
-		f.counter, _ = meter.Int64Counter(name, metric.WithDescription(help))
-		f.exportCounter, _ = exported.Int64Counter(name, metric.WithDescription(help))
+		f.counter, _ = meter.Int64Counter(name, metric.WithDescription(help), metric.WithUnit(unit))
+		f.exportCounter, _ = exported.Int64Counter(name, metric.WithDescription(help), metric.WithUnit(unit))
 	} else {
-		options := []metric.Float64HistogramOption{metric.WithDescription(help), metric.WithExplicitBucketBoundaries(f.bounds...)}
+		options := []metric.Float64HistogramOption{metric.WithDescription(help), metric.WithUnit(unit), metric.WithExplicitBucketBoundaries(f.bounds...)}
 		f.histogram, _ = meter.Float64Histogram(name, options...)
 		f.exportHistogram, _ = exported.Float64Histogram(name, options...)
 	}
