@@ -992,10 +992,12 @@ language and the Contract Runner, but not the engine.
 | `QUIVR_PLUGIN_PORT` | Port assigned for the session |
 | `QUIVR_PLUGIN_MANIFEST` | Absolute path of the inspected `quivr-plugin.yaml` |
 
-The plugin must serve the routes above on that address. On Linux the assigned
-port stays reserved for the plugin for 60 seconds, so its listener must set
-`SO_REUSEADDR`, as Go's `net.Listen` and Python's `http.server` do. `dev` stops
-it with SIGTERM, then SIGKILL after five seconds.
+The plugin must serve the routes above on that address. On Linux, for 60
+seconds, the kernel gives the assigned port to no socket that asks for any free
+port, so the plugin's listener must set `SO_REUSEADDR`, as Go's `net.Listen`
+and Python's `http.server` do. A process that binds that exact port with
+`SO_REUSEADDR` can still take it. `dev` stops the plugin with SIGTERM, then
+SIGKILL after five seconds.
 
 **Invocation fixtures** (`plugin-fixture.schema.json`) name an input file,
 relative to the fixture, with its media type and optional `configuration`,

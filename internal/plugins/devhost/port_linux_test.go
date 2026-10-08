@@ -20,8 +20,10 @@ import (
 // concurrent process causes: another socket binds the assigned port before the
 // plugin starts. The kernel's own port choices (listen on port 0, outgoing
 // connections) skip every port such a plain bind is refused, so the refusal
-// shows no concurrent process can be handed the port. The plugin binds with
-// SO_REUSEADDR, like the SDKs, and must still become healthy.
+// shows no concurrent process can be handed the port. A process that binds
+// this exact port with SO_REUSEADDR is out of reach: only handing the socket
+// to the plugin would stop it. The plugin binds with SO_REUSEADDR, like the
+// SDKs, and must still become healthy.
 func TestAssignedPortStaysReservedForThePlugin(t *testing.T) {
 	dir, _ := writePlugin(t)
 	port, err := devhost.FreePort("127.0.0.1")
