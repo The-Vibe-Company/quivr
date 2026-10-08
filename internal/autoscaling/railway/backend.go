@@ -1,5 +1,5 @@
 // Package railway implements the autoscaler's replica backend using Railway's
-// environment-scoped project token. It is deployment code, outside the engine.
+// environment-scoped project token.
 package railway
 
 import (

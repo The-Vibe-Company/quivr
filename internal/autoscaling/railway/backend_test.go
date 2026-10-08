@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	railway "github.com/The-Vibe-Company/quivr/deploy/railway/autoscaler"
+	"github.com/The-Vibe-Company/quivr/internal/autoscaling/railway"
 )
 
 type transport func(*http.Request) (*http.Response, error)
