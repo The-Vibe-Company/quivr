@@ -16,7 +16,7 @@ from unittest.mock import patch
 from quivr_plugin import Plugin
 from quivr_plugin.server import RETRIEVAL_PATH
 
-from jev_rerank.client import CENTS_PER_TOKEN, MODEL, MAX_TOKENS
+from quivr_plugin.system_one import CENTS_PER_TOKEN, MODEL, MAX_TOKENS
 from jev_rerank.retriever import Retriever
 
 MANIFEST = Path(__file__).resolve().parents[1] / "quivr-plugin.yaml"
@@ -128,6 +128,44 @@ class RetrievalContract(unittest.TestCase):
             call(plugin, document)
             self.assertEqual(len(requests), 3)
 
+    def test_oversized_batches_split_with_shared_budget_and_atomic_scores(self):
+        document = invocation()
+        for candidate in document["served"][0]["candidates"]:
+            candidate["text"] = "é" * 40000
+        for failure in (None, "refused", "budget", "single"):
+            with self.subTest(failure=failure):
+                plugin = self.plugin()
+                replies = [response({"p0": 0.1}), response({"p1": 0.9}), response({"p2": 0.8})]
+                request = copy.deepcopy(document)
+                if failure == "refused":
+                    replies[1] = (400, {"private": "fixture-key private passage"}, {})
+                if failure == "budget":
+                    request["budget"] = {"remaining_time_ms": 3000, "remaining_cost_cents": MAX_TOKENS * CENTS_PER_TOKEN}
+                    replies[0] = (503, {}, {"Retry-After": "0"})
+                if failure == "single":
+                    request["served"][0]["candidates"][2]["text"] = "é" * 60000
+                with provider(replies) as requests:
+                    answer = call(plugin, request)
+                    expected_calls = {None: 3, "refused": 2, "budget": 1, "single": 0}[failure]
+                    self.assertEqual(len(requests), expected_calls)
+                    self.assertEqual(answer["usage"]["paid_calls"], expected_calls)
+                    for body in requests:
+                        self.assertLessEqual(len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()), 120000)
+                    if failure is None:
+                        self.assertEqual([list(body["questions"]) for body in requests], [["p0"], ["p1"], ["p2"]])
+                        self.assertEqual([hit["segment_id"] for hit in answer["ranking"]["hits"]], ["second", "third", "first"])
+                        self.assertAlmostEqual(answer["usage"]["cost_cents"], 3000 * CENTS_PER_TOKEN)
+                        self.assertEqual(call(plugin, request)["usage"]["paid_calls"], 0)
+                    else:
+                        self.assertEqual([hit["segment_id"] for hit in answer["ranking"]["hits"]], ["first", "second", "third"])
+                        self.assertTrue(all("noul=" not in hit["explanation"] for hit in answer["ranking"]["hits"]))
+                        self.assertNotIn("fixture-key", json.dumps(answer))
+                        # A successful first batch must not warm the cache after a later failure.
+                        requests.clear()
+                        replies[:] = [response({"p0": 0.1}), response({"p1": 0.9}), response({"p2": 0.8})]
+                        call(plugin, document)
+                        self.assertEqual([list(body["questions"]) for body in requests], [["p0"], ["p1"], ["p2"]])
+
     def test_failed_batch_does_not_admit_partial_or_cached_scores(self):
         plugin = self.plugin()
         first = invocation()
@@ -164,8 +202,8 @@ class RetrievalContract(unittest.TestCase):
                     self.assertTrue(all("provider refused (payment)" in hit["explanation"] for hit in hits))
 
     def test_retry_budget_and_deadline_are_bounded(self):
-        for failures in [1, 3]:
-            replies = [(503, {}, {"Retry-After": "0"})] * failures
+        for status, failures in [(408, 1), (429, 1), (503, 1), (503, 3)]:
+            replies = [(status, {}, {"Retry-After": "0"})] * failures
             if failures == 1:
                 replies.append(response({"p0": 0.1, "p1": 0.9, "p2": 0.2}))
             plugin = self.plugin()
@@ -180,12 +218,12 @@ class RetrievalContract(unittest.TestCase):
                     self.assertEqual(call(plugin, invocation())["usage"]["paid_calls"], 0)
                 else:
                     self.assertIn("re-ranker unavailable", answer["ranking"]["hits"][0]["explanation"])
-        with patch("jev_rerank.client.http.client.HTTPConnection.connect", side_effect=OSError), provider([]) as requests:
+        with patch("quivr_plugin.system_one.http.client.HTTPConnection.connect", side_effect=OSError), provider([]) as requests:
             answer = call(self.plugin(), invocation())
             self.assertEqual(len(requests), 0)
             self.assertEqual(answer["usage"], {"paid_calls": 0, "cost_cents": 0})
             self.assertIn("transport failure", answer["ranking"]["hits"][0]["explanation"])
-        with patch("jev_rerank.client.time.monotonic", side_effect=[0, 3]), provider([]) as requests:
+        with patch("quivr_plugin.system_one.time.monotonic", side_effect=[0, 3]), provider([]) as requests:
             answer = call(self.plugin(), invocation())
             self.assertEqual(len(requests), 0)
             self.assertEqual(answer["usage"]["paid_calls"], 0)

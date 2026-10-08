@@ -230,7 +230,7 @@ def providers():
             fail = False
             def judge(self, query, passages, deadline, cost_limit):
                 raw = json.dumps(client.payload(query, passages), ensure_ascii=False, separators=(',', ':')).encode()
-                reason = 'transport failure' if self.fail else 'request size bound' if len(raw) > client.MAX_BYTES else ''
+                reason = 'transport failure' if self.fail else 'request size bound' if len(raw) > 120_000 else ''
                 return types.SimpleNamespace(reason=reason, cost_cents=.01,
                     scores={key: (int(key) % 4) / 4 for key in passages} if not reason else {})
         corpus = [news.Article(str(i), 'Un départ', 'Un événement. ' * 500, '2026-01-02') for i in range(80)]

@@ -4,9 +4,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from quivr_plugin import Decision, Evaluation, match, no_match, not_ready
-
-DEFAULT_THRESHOLD = 0.8
+from quivr_plugin import Decision, Evaluation, TerminalError, match, no_match, not_ready
 
 
 def _unit(vector: Any) -> list[float] | None:
@@ -49,7 +47,11 @@ def decide(record: dict[str, Any], evaluation: Evaluation, configuration: dict[s
     if best is None:
         return not_ready(evaluation, "Waiting for valid article vectors with the query's dimensions.")
     similarity, part_key, segment_id = best
-    threshold = float(evaluation.configuration.get("threshold", configuration.get("vectors", {}).get("threshold", DEFAULT_THRESHOLD)))
+    threshold = evaluation.configuration.get("threshold", configuration.get("vectors", {}).get("thresholds", {}).get(space))
+    if threshold is None:
+        raise TerminalError("vector_threshold_required", f"Set vectors.thresholds[{space!r}] on the alerts plugin "
+                            "or threshold on this Subscription; cosine thresholds must be calibrated for the vector space.")
+    threshold = float(threshold)
     if similarity < threshold:
         return no_match(evaluation, f"Best vector similarity {similarity:.4f} is below the threshold {threshold:.4f}.")
     details = {"kind": evaluation.expression["kind"], "meaning_check": "vectors", "similarity": round(similarity, 6),
