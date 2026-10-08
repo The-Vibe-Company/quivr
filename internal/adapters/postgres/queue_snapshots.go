@@ -32,25 +32,27 @@ func (s QueueSnapshots) Refresh(ctx context.Context) error {
 	if s.Pool == nil {
 		return errors.New("workqueue: nil postgres pool")
 	}
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
+	tx, err := s.beginRefresh(ctx)
+	if err != nil || tx == nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var locked bool
-	if err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('quivr.queue-backlog-snapshot.v1',0))`).Scan(&locked); err != nil || !locked {
+	if err = initializeQueueOperationScopes(ctx, tx); err != nil {
 		return err
 	}
-	var fresh bool
-	if err = tx.QueryRow(ctx, `SELECT count(*)=2 AND min(published_at)>clock_timestamp()-make_interval(secs => $1::double precision) FROM queue_backlog_snapshots WHERE queue IN ('live','bulk')`, s.refreshInterval().Seconds()).Scan(&fresh); err != nil || fresh {
+	// Release operation row locks before aggregating the backlog. Re-elect a
+	// refresher afterward: another process may publish in this short gap.
+	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
+	tx, err = s.beginRefresh(ctx)
+	if err != nil || tx == nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
 	// Existing installations retain the legacy branch during initialization.
 	// Bounded repair also discovers writes made by a preceding binary.
 	if err = advanceQueueObservations(ctx, tx, 1000); err != nil {
-		return err
-	}
-	if err = initializeQueueOperationScopes(ctx, tx); err != nil {
 		return err
 	}
 	// Unique fencing tokens allow bounded cleanup even while an old process
@@ -74,6 +76,25 @@ func (s QueueSnapshots) Refresh(ctx context.Context) error {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// beginRefresh elects a refresher only when publication is due.
+func (s QueueSnapshots) beginRefresh(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var locked bool
+	if err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('quivr.queue-backlog-snapshot.v1',0))`).Scan(&locked); err != nil || !locked {
+		tx.Rollback(ctx)
+		return nil, err
+	}
+	var fresh bool
+	if err = tx.QueryRow(ctx, `SELECT count(*)=2 AND min(published_at)>clock_timestamp()-make_interval(secs => $1::double precision) FROM queue_backlog_snapshots WHERE queue IN ('live','bulk')`, s.refreshInterval().Seconds()).Scan(&fresh); err != nil || fresh {
+		tx.Rollback(ctx)
+		return nil, err
+	}
+	return tx, nil
 }
 
 // QueueBacklog reads two rows, irrespective of corpus or operation size. Data

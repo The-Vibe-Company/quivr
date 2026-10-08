@@ -99,12 +99,24 @@ func TestQueueSnapshotRefreshReusesDefaultInterval(t *testing.T) {
 	}
 	// Missing refresh storage produces an immediate SQL failure. Existing
 	// observations and publication timestamps survive its transaction rollback.
+	// Scope assignments commit before aggregation, releasing worker row locks.
+	// A failed snapshot must therefore retain newly captured scopes as well as
+	// the previous publication, even for operations sharing the same corpus.
+	seedQueueCorpus(t, ctx, pool, "example")
+	exec(`INSERT INTO projection_generations(id,collection,profile_version) VALUES('target','target','example');
+INSERT INTO operations(organization,id,kind,corpus_id,request_key,canonical_request,target_generation_id)
+VALUES('example','first','projection_rebuild','corpus','first','','target'),
+('example','second','retrieval_configuration','corpus','second','','target')`)
 	exec(`ALTER TABLE queue_enrichment_bootstrap RENAME TO queue_refresh_unavailable`)
 	defer exec(`ALTER TABLE queue_refresh_unavailable RENAME TO queue_enrichment_bootstrap`)
 	if err = snapshots.Refresh(ctx); err == nil {
 		t.Fatal("refresh succeeded with missing observation storage")
 	}
 	assertWaiting(9)
+	var captured bool
+	if err = pool.QueryRow(ctx, `SELECT count(*)=2 AND bool_and(counters->>'versions_in_scope'='0') FROM operations WHERE organization='example'`).Scan(&captured); err != nil || !captured {
+		t.Fatalf("failed aggregation rolled back scope assignments: captured=%v error=%v", captured, err)
+	}
 	var unpublished bool
 	if err = pool.QueryRow(ctx, `SELECT bool_and(published_at='-infinity') FROM queue_backlog_snapshots`).Scan(&unpublished); err != nil || !unpublished {
 		t.Fatalf("failed refresh changed publication time: unpublished=%v error=%v", unpublished, err)
