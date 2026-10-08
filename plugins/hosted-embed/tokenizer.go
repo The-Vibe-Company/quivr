@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -52,14 +53,40 @@ func (byteCounter) Encode(_ context.Context, inputs []tokenInput) ([]tokenEncodi
 	return out, nil
 }
 
-// A single checksum-pinned local tokenizer stays loaded across documents.
-// Source strings travel on pipes only; errors never expose them.
+// A bounded pool keeps checksum-pinned helpers loaded across documents.
+// A slot has exclusive ownership of its process until an exchange is reaped.
 type localTokenizer struct {
+	slots     chan *tokenizerProcess
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+type tokenizerProcess struct {
 	config tokenizerConfiguration
-	mu     sync.Mutex
 	cmd    *exec.Cmd
 	writer *bufio.Writer
 	reader *bufio.Reader
+}
+
+func newLocalTokenizer(config tokenizerConfiguration, processes int) *localTokenizer {
+	if processes == 0 {
+		processes = min(runtime.GOMAXPROCS(0), 4)
+	}
+	t := &localTokenizer{slots: make(chan *tokenizerProcess, processes), closed: make(chan struct{})}
+	for range processes {
+		t.slots <- &tokenizerProcess{config: config}
+	}
+	return t
+}
+
+// Close stops admission and reaps every helper after its current exchange ends.
+func (t *localTokenizer) Close() {
+	t.closeOnce.Do(func() {
+		close(t.closed)
+		for range cap(t.slots) {
+			(<-t.slots).stop()
+		}
+	})
 }
 
 const tokenizerSource = `
@@ -86,61 +113,72 @@ for line in sys.stdin.buffer:
 
 var errTokenizer = errors.New("local model tokenizer unavailable")
 
-func (t *localTokenizer) stop() {
-	if t.cmd != nil {
-		_ = t.cmd.Process.Kill()
-		_ = t.cmd.Wait()
-		t.cmd = nil
+func (p *tokenizerProcess) stop() {
+	if p.cmd != nil {
+		_ = p.cmd.Process.Kill()
+		_ = p.cmd.Wait()
+		p.cmd = nil
+		p.writer, p.reader = nil, nil
 	}
 }
-func (t *localTokenizer) exchange(inputs []tokenInput) ([]tokenEncoding, error) {
-	if t.cmd != nil {
-		cmd := t.cmd
-		timer := time.AfterFunc(10*time.Second, func() { _ = cmd.Process.Kill() })
-		defer timer.Stop()
-	}
-	if t.cmd == nil {
-		cmd := exec.Command(t.config.Python, "-u", "-c", tokenizerSource, t.config.Model, t.config.SHA256)
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
+
+func (p *tokenizerProcess) exchange(ctx context.Context, raw []byte, count int) (out []tokenEncoding, err error) {
+	fresh := p.cmd == nil
+	if fresh {
+		cmd := exec.Command(p.config.Python, "-u", "-c", tokenizerSource, p.config.Model, p.config.SHA256)
+		stdin, pipeErr := cmd.StdinPipe()
+		if pipeErr != nil {
 			return nil, errTokenizer
 		}
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
+		stdout, pipeErr := cmd.StdoutPipe()
+		if pipeErr != nil {
+			_ = stdin.Close()
 			return nil, errTokenizer
 		}
 		if cmd.Start() != nil {
+			_ = stdin.Close()
+			_ = stdout.Close()
 			return nil, errTokenizer
 		}
-		timer := time.AfterFunc(10*time.Second, func() { _ = cmd.Process.Kill() })
-		defer timer.Stop()
-		t.cmd = cmd
-		t.writer = bufio.NewWriter(stdin)
-		t.reader = bufio.NewReader(stdout)
-		ready, err := t.reader.ReadString('\n')
-		if err != nil || ready != "ready\n" {
-			t.stop()
+		p.cmd = cmd
+		p.writer = bufio.NewWriter(stdin)
+		p.reader = bufio.NewReader(stdout)
+	}
+	// The context has a hard ten-second deadline, including queueing and load.
+	// Capture this process only: cancellation cannot kill another slot or a
+	// replacement. Join an already-running callback before returning the lease.
+	cmd := p.cmd
+	killed := make(chan struct{})
+	stopKill := context.AfterFunc(ctx, func() { _ = cmd.Process.Kill(); close(killed) })
+	defer func() {
+		if !stopKill() {
+			<-killed
+		}
+		if ctx.Err() != nil {
+			out, err = nil, errTokenizer
+		}
+		if err != nil {
+			p.stop()
+		}
+	}()
+	if fresh {
+		// ReadSlice limits the readiness line to the reader's fixed buffer.
+		ready, readErr := p.reader.ReadSlice('\n')
+		if readErr != nil || string(ready) != "ready\n" {
 			return nil, errTokenizer
 		}
 	}
-	raw, err := json.Marshal(inputs)
-	if err != nil || len(raw) > 4<<20 {
+	if _, writeErr := p.writer.Write(append(raw, '\n')); writeErr != nil {
 		return nil, errTokenizer
 	}
-	if _, err = t.writer.Write(append(raw, '\n')); err != nil {
-		t.stop()
-		return nil, errTokenizer
-	}
-	if t.writer.Flush() != nil {
-		t.stop()
+	if p.writer.Flush() != nil {
 		return nil, errTokenizer
 	}
 	// Bounded response, including offsets for the maximum source size.
 	var rawResponse []byte
 	for {
-		piece, more, err := t.reader.ReadLine()
-		if err != nil || len(rawResponse)+len(piece) > 16<<20 {
-			t.stop()
+		piece, more, readErr := p.reader.ReadLine()
+		if readErr != nil || len(rawResponse)+len(piece) > 16<<20 {
 			return nil, errTokenizer
 		}
 		rawResponse = append(rawResponse, piece...)
@@ -148,44 +186,45 @@ func (t *localTokenizer) exchange(inputs []tokenInput) ([]tokenEncoding, error) 
 			break
 		}
 	}
-	var out []tokenEncoding
-	if json.Unmarshal(rawResponse, &out) != nil || len(out) != len(inputs) {
-		t.stop()
+	if json.Unmarshal(rawResponse, &out) != nil || len(out) != count {
 		return nil, errTokenizer
 	}
 	return out, nil
 }
+
 func (t *localTokenizer) Encode(ctx context.Context, inputs []tokenInput) ([]tokenEncoding, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	// Each exchange has a hard deadline that kills a stuck helper. A cancelled
-	// caller returns early; the bounded exchange completes before the next one.
-	done := make(chan struct {
-		out []tokenEncoding
-		err error
-	}, 1)
-	go func() {
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		if ctx.Err() != nil {
-			done <- struct {
-				out []tokenEncoding
-				err error
-			}{nil, errTokenizer}
-			return
-		}
-		out, err := t.exchange(inputs)
-		done <- struct {
-			out []tokenEncoding
-			err error
-		}{out, err}
-	}()
-	select {
-	case result := <-done:
-		return result.out, result.err
-	case <-ctx.Done():
+	// Keep the caller's cancellation channel at admission. Waiting calls hold no
+	// serialized copy or helper goroutine; the same deadline bounds the lease.
+	deadline := time.Now().Add(10 * time.Second)
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	if ctx.Err() != nil || len(inputs) > 512 {
+		return nil, errTokenizer
 	}
-	// exchange owns the process; its hard timer unblocks it without racing on
-	// process state. No source/error payload escapes on cancellation.
-	return nil, errTokenizer
+	var p *tokenizerProcess
+	select {
+	case <-ctx.Done():
+		return nil, errTokenizer
+	case <-timer.C:
+		return nil, errTokenizer
+	case <-t.closed:
+		return nil, errTokenizer
+	case p = <-t.slots:
+	}
+	defer func() { t.slots <- p }()
+	select {
+	case <-t.closed:
+		return nil, errTokenizer
+	default:
+	}
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	if ctx.Err() != nil {
+		return nil, errTokenizer
+	}
+	raw, err := json.Marshal(inputs)
+	if err != nil || len(raw) > 4<<20 || ctx.Err() != nil {
+		return nil, errTokenizer
+	}
+	return p.exchange(ctx, raw, len(inputs))
 }
