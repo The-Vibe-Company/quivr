@@ -280,20 +280,24 @@ func TestIndependentEvaluationProjectionCoverage(t *testing.T) {
 	}
 
 	// Fresh bulk indexing can leave planner statistics far behind actual rows.
-	// Statistics taken now count this Organization as one Record; the test
-	// never analyzes the clone below, though autovacuum may. PRs bound the
-	// pages the counting owner reads on 6,003 segments (THE-1137), and check
-	// cold search and completed counts.
-	// Nightly/manual QUIVR_MEASURE=1 seeds at least one million segments;
-	// both modes run the same assertions.
+	// The test never analyzes the clone below, though autovacuum may. PRs bound
+	// the pages the counting owner reads on 6,003 segments (THE-1137), and
+	// check cold search and completed counts.
+	// Nightly/manual QUIVR_MEASURE=1 seeds at least one million segments and
+	// runs the same assertions.
 	cuts := 1
 	copies := 2000
 	if os.Getenv("QUIVR_MEASURE") == "1" {
 		cuts = 8
 		copies = 100000
-	}
-	if _, err = pool.Exec(ctx, `ANALYZE records, record_versions, version_parts, segmentations, segments, projection_coverage, embedding_artifacts, embedding_coverage`); err != nil {
-		t.Fatal(err)
+	} else {
+		// Statistics taken now count this Organization as one Record. Only the
+		// PR clone starts from them: on a nearly empty database, foreign-key
+		// checks planned from them scan a referenced table per inserted row,
+		// which a million-row clone cannot afford.
+		if _, err = pool.Exec(ctx, `ANALYZE records, record_versions, version_parts, segmentations, segments, projection_coverage, embedding_artifacts, embedding_coverage`); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err = pool.Exec(ctx, `INSERT INTO segments
  SELECT (jsonb_populate_record(NULL::segments,to_jsonb(s)||jsonb_build_object('id',s.id||'-cut-'||n))).*
