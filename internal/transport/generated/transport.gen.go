@@ -443,12 +443,15 @@ func (e FacetFieldInterval) Valid() bool {
 
 // Defines values for FieldMappingAnalyzer.
 const (
+	Folded      FieldMappingAnalyzer = "folded"
 	FrenchLight FieldMappingAnalyzer = "french_light"
 )
 
 // Valid indicates whether the value is a known member of the FieldMappingAnalyzer enum.
 func (e FieldMappingAnalyzer) Valid() bool {
 	switch e {
+	case Folded:
+		return true
 	case FrenchLight:
 		return true
 	default:
@@ -2234,7 +2237,7 @@ type FacetResponse struct {
 
 // FieldMapping v0 logical field mapping. name is a logical name matching ^[a-z][a-z0-9_]{0,63}$, never a search-engine field name. source_pointer is an RFC 6901 JSON Pointer into the canonical source view of a Version, rooted at /manifest, /provenance or /extensions/{namespace} with a declared namespace (built in, or owned by the startup-pinned plugin); other roots are rejected as invalid_mapping. Exactly one of source_pointer and part_role is required; Core validates this as invalid_mapping, along with role/type compatibility (search requires string or string_array). A search field named title replaces the projected title; other search fields add text once per Record Version. Filter roles are consumed by SearchFilter.metadata. New generations index each search field once per item with its boost; older generations retain passage scoring until rebuilt.
 type FieldMapping struct {
-	// Analyzer Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged.
+	// Analyzer Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents and ligatures in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged.
 	Analyzer *FieldMappingAnalyzer `json:"analyzer,omitempty"`
 
 	// Boost Positive integer BM25F weight, allowed only with the search role. For ratios 3/2/2/1.5/1 use 6/4/4/3/2.
@@ -2254,7 +2257,7 @@ type FieldMapping struct {
 	ValuePointer *string `json:"value_pointer,omitempty"`
 }
 
-// FieldMappingAnalyzer Separate lowercase, accent-folded, lightly stemmed French keyword copy; canonical text and vectors are unchanged.
+// FieldMappingAnalyzer Keyword analyzer for a separate copy of the field, also applied to queries. folded lowercases and folds accents and ligatures in any language; french_light also removes French stopwords and lightly stems. Omit for no copy; canonical text and vectors are unchanged.
 type FieldMappingAnalyzer string
 
 // FieldMappingPartRole Collect canonical text Parts of this role instead of source_pointer. Requires the search role.

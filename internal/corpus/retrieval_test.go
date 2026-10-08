@@ -108,6 +108,7 @@ func TestItemFieldConfiguration(t *testing.T) {
 	}{
 		{`{"fields":[{"name":"headline","part_role":"title","type":"string","roles":["search"],"boost":6}]}`, true},
 		{`{"fields":[{"name":"slugline","part_role":"body","part_key_prefix":"slugline-","type":"string","roles":["search"],"boost":4,"analyzer":"french_light"}]}`, true},
+		{`{"fields":[{"name":"body","part_role":"body","type":"string","roles":["search"],"analyzer":"folded"}]}`, true},
 		{`{"fields":[{"name":"labels","source_pointer":"/provenance/subjects","value_pointer":"/names","type":"string_array","roles":["search"],"boost":3}]}`, true},
 		{`{"fields":[{"name":"body","source_pointer":"/provenance/body","type":"string","roles":["search"]}]}`, true},
 		{`{"fields":[{"name":"body","part_role":"body","type":"string","roles":["search"],"boost":1.5}]}`, false},
